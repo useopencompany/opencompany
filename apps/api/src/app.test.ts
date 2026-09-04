@@ -266,7 +266,11 @@ describe("canonical Hono API", () => {
     const commented = await app.request("/v1/tasks/task_1/comments", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: "task_activity_comment_1", body: commentBody }),
+      body: JSON.stringify({
+        id: "task_activity_comment_1",
+        body: commentBody,
+        attachmentIds: ["attachment_1"],
+      }),
     });
     expect(commented.status).toBe(202);
     await expect(commented.json()).resolves.toMatchObject({
@@ -286,7 +290,11 @@ describe("canonical Hono API", () => {
         replayed: false,
       },
     });
-    expect(tasks.lastComment).toEqual({ id: "task_activity_comment_1", body: commentBody });
+    expect(tasks.lastComment).toEqual({
+      id: "task_activity_comment_1",
+      body: commentBody,
+      attachmentIds: ["attachment_1"],
+    });
 
     tasks.createTaskCommentAndRun = vi.fn(async () => {
       throw new CoreError("conflict", "Wait for the active Task run to finish before commenting.");

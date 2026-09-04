@@ -786,6 +786,22 @@ export class PostgresTaskRepository implements TaskRepository {
     taskId: string;
     command: CreateTaskCommentCommand;
   }): Promise<CreateTaskCommentResult | null> {
+    const [preflight] = await this.rows<{ idExists: boolean }>(sql`
+      SELECT EXISTS (
+        SELECT 1 FROM goat.task_activities WHERE id = ${input.command.id}
+      ) AS "idExists"
+    `);
+    const attachmentIds = input.command.attachmentIds ?? [];
+    const resolvedAttachments = preflight?.idExists
+      ? { attachments: [], attachmentTexts: null }
+      : await this.resolveAttachments(input.actor, attachmentIds);
+    const attachmentsRequireClaim = !preflight?.idExists;
+    const attachmentIdList = attachmentIds.length
+      ? sql.join(
+          attachmentIds.map((id) => sql`${id}`),
+          sql`, `,
+        )
+      : sql`NULL`;
     const ids = this.options.ids ?? defaultIds;
     const messageId = ids.message();
     const assistantMessageId = ids.message();
@@ -795,7 +811,9 @@ export class PostgresTaskRepository implements TaskRepository {
     const now = this.options.now?.() ?? new Date();
     const assistantCreatedAt = new Date(now.getTime() + 1);
     const statusChangedAt = new Date(now.getTime() + 2);
-    const [row] = await this.rows<TaskCommentCreateRow>(sql`
+    let rows: TaskCommentCreateRow[];
+    try {
+      rows = await this.rows<TaskCommentCreateRow>(sql`
       WITH existing_activity AS MATERIALIZED (
         SELECT
           activity.id,
@@ -835,6 +853,18 @@ export class PostgresTaskRepository implements TaskRepository {
           AND ${taskAccessPredicate(input.actor)}
         FOR UPDATE OF task, runtime
       ),
+      eligible_attachments AS MATERIALIZED (
+        SELECT upload.id
+        FROM goat.chat_attachment_uploads AS upload
+        WHERE ${attachmentsRequireClaim}::boolean
+          AND upload.user_workos_id = ${input.actor.userId}
+          AND upload.workspace_id = ${input.actor.workspaceId}
+          AND upload.claimed_at IS NULL
+          AND upload.expires_at > ${now}
+          AND upload.id IN (${attachmentIdList})
+          AND EXISTS (SELECT 1 FROM authorized)
+        FOR UPDATE
+      ),
       matching_replay AS MATERIALIZED (
         SELECT activity.*
         FROM existing_activity AS activity
@@ -843,6 +873,8 @@ export class PostgresTaskRepository implements TaskRepository {
           AND activity.author_workos_id = ${input.actor.userId}
           AND activity.kind = 'comment'
           AND activity.body = ${input.command.body}
+          AND COALESCE(activity.metadata->'attachmentIds', '[]'::jsonb)
+            = ${stringifyPostgresJson(attachmentIds)}::jsonb
           AND NULLIF(activity.metadata->>'messageId', '') IS NOT NULL
           AND NULLIF(activity.metadata->>'assistantMessageId', '') IS NOT NULL
           AND NULLIF(activity.metadata->>'runId', '') IS NOT NULL
@@ -885,7 +917,8 @@ export class PostgresTaskRepository implements TaskRepository {
           jsonb_build_object(
             'messageId', ${messageId}::text,
             'assistantMessageId', ${assistantMessageId}::text,
-            'runId', ${runId}::text
+            'runId', ${runId}::text,
+            'attachmentIds', ${stringifyPostgresJson(attachmentIds)}::jsonb
           ),
           ${now}
         FROM reopened_task AS task
@@ -923,16 +956,32 @@ export class PostgresTaskRepository implements TaskRepository {
           )
         RETURNING runtime.id, runtime.chat_session_id
       ),
+      claimed_attachments AS MATERIALIZED (
+        UPDATE goat.chat_attachment_uploads AS upload
+        SET claimed_message_id = ${messageId},
+            claimed_at = ${now}
+        WHERE upload.id IN (SELECT id FROM eligible_attachments)
+          AND upload.claimed_at IS NULL
+        RETURNING upload.id
+      ),
       inserted_user_message AS MATERIALIZED (
         INSERT INTO goat.chat_messages (
-          id, session_id, role, content, task_id, created_at, updated_at
+          id, session_id, role, content, task_id, attachments, attachment_texts,
+          created_at, updated_at
         )
         SELECT
-          ${messageId}, task.session_id, 'user', ${input.command.body}, task.id, ${now}, ${now}
+          ${messageId}, task.session_id, 'user', ${input.command.body}, task.id,
+          ${attachmentsJson(resolvedAttachments.attachments)}::jsonb,
+          ${attachmentTextsJson(resolvedAttachments.attachmentTexts)}::jsonb,
+          ${now}, ${now}
         FROM eligible AS task
         JOIN reopened_task AS reopened ON reopened.id = task.id
         JOIN queued_runtime AS runtime ON runtime.id = task.runtime_id
         JOIN created_comment AS comment ON comment.task_id = task.id
+        WHERE (
+          NOT ${attachmentsRequireClaim}::boolean
+          OR (SELECT COUNT(*) FROM claimed_attachments) = ${attachmentIds.length}
+        )
         RETURNING id
       ),
       inserted_assistant_message AS MATERIALIZED (
@@ -1094,7 +1143,14 @@ export class PostgresTaskRepository implements TaskRepository {
       JOIN goat.chat_sessions AS conversation ON conversation.id = task.session_id
       LEFT JOIN selected_comment ON selected_comment.task_id = task.id
       LIMIT 1
-    `);
+      `);
+    } catch (error) {
+      if (attachmentIds.length > 0 && isUnmaterializedGuardError(error)) {
+        throw new CoreError("invalid_argument", "An attachment is unavailable or has expired.");
+      }
+      throw error;
+    }
+    const [row] = rows;
     if (!row) return null;
     if (row.idExists && !row.replayed) {
       throw new CoreError(

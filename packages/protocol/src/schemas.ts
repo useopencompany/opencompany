@@ -2756,9 +2756,15 @@ export const CreateTaskEnvelopeSchema = z
 export const CreateTaskCommentBodySchema = z
   .object({
     id: ResourceIdSchema,
-    body: z.string().min(1).max(10_000),
+    body: z.string().max(10_000),
+    attachmentIds: z.array(ResourceIdSchema).max(5).optional(),
   })
   .strict()
+  .refine(
+    (body: { body: string; attachmentIds?: string[] }) =>
+      Boolean(body.body.trim()) || Boolean(body.attachmentIds?.length),
+    { message: "body or an attachment is required" },
+  )
   .openapi("CreateTaskCommentBody");
 
 export const TaskCommentSchema = z
@@ -2767,7 +2773,7 @@ export const TaskCommentSchema = z
     taskId: ResourceIdSchema,
     author: z.literal("user"),
     kind: z.literal("comment"),
-    body: z.string().min(1).max(10_000),
+    body: z.string().max(10_000),
     createdAt: TimestampSchema,
   })
   .strict()

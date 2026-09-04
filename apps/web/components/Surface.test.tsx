@@ -1318,6 +1318,53 @@ describe("Surface chat streaming UI", () => {
     expect(screen.getByText("Comments are sent verbatim to this task.")).toBeVisible();
   });
 
+  it("attaches a dropped screenshot when continuing a session-backed task", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "chat_task_1",
+          title: "Investigate task",
+          model: DEFAULT_MODEL,
+          engine: "opencompany",
+          messages: [],
+        }}
+        taskConversation={{
+          taskId: "task_1",
+          status: "succeeded",
+          startedAtMs: Date.now(),
+        }}
+        userWorkosId="user_1"
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Attach files" })).toBeInTheDocument();
+
+    const screenshot = new File(["image"], "screenshot.png", { type: "image/png" });
+    fireEvent.drop(window, {
+      dataTransfer: { types: ["Files"], files: [screenshot] },
+    });
+
+    await waitFor(() => expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledTimes(1));
+    expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledWith({ file: screenshot });
+    expect(await screen.findByText("screenshot.png")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Post comment" }));
+
+    expect(taskCommandMocks.comment).toHaveBeenCalledWith(
+      "task_1",
+      {
+        id: "task_activity_comment_test",
+        body: "",
+        attachmentIds: ["attachment_1"],
+      },
+      { scopeKey: "" },
+    );
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
+  });
+
   it("keeps pre-cutover Task history explicitly read-only", () => {
     render(
       <Surface
@@ -1341,6 +1388,7 @@ describe("Surface chat streaming UI", () => {
           status: "succeeded",
           startedAtMs: Date.now(),
         }}
+        userWorkosId="user_1"
         readOnlyNotice="This pre-cutover task is available as read-only history. Start a new task to continue the work."
       />,
     );
