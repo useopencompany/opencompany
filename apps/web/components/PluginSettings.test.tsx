@@ -218,15 +218,25 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/linear",
     );
-    expect(screen.getByText(/1 skill · updated/i)).toBeInTheDocument();
+    expect(screen.getByText("Enabled")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Manage" })).toHaveAttribute(
+      "href",
+      "/settings/plugins/linear",
+    );
   });
 
   it("offers one-click installation for every uninstalled official package", () => {
     render(<PluginsSettings plugins={[]} canEdit />);
 
     const linearLink = screen.getByRole("link", { name: /linear/i });
-    const linearCard = linearLink.closest("div.border");
+    const linearCard = linearLink.closest("li");
     expect(linearLink).toHaveAttribute("href", "/settings/plugins/linear");
+    expect(screen.getByRole("searchbox", { name: "Search plugins" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Featured" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Communication" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Productivity" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Engineering" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Business" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /neon/i })).toHaveAttribute(
       "href",
       "/settings/plugins/neon",
@@ -279,9 +289,6 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/yc-advise",
     );
-    expect(screen.getAllByText("Not installed")).toHaveLength(14);
-    expect(screen.getAllByText("Official package")).toHaveLength(13);
-    expect(screen.getByText("Official skill package")).toBeInTheDocument();
     expect(GITHUB_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/github$/u,
     );
@@ -333,6 +340,53 @@ describe("Plugin settings", () => {
     expect(importHeadlessPlugin).not.toHaveBeenCalled();
   });
 
+  it("searches the catalog and narrows it by category", async () => {
+    const user = userEvent.setup();
+    render(<PluginsSettings plugins={[]} canEdit />);
+
+    const search = screen.getByRole("searchbox", { name: "Search plugins" });
+    await user.type(search, "database");
+
+    const searchResults = screen.getByRole("region", { name: "Search results" });
+    expect(within(searchResults).getByRole("link", { name: /neon/i })).toBeInTheDocument();
+    expect(within(searchResults).queryByRole("link", { name: /gmail/i })).not.toBeInTheDocument();
+
+    await user.clear(search);
+    await user.click(screen.getByRole("button", { name: "Business" }));
+
+    const business = screen.getByRole("region", { name: "Business" });
+    expect(within(business).getByRole("link", { name: /posthog/i })).toBeInTheDocument();
+    expect(within(business).getByRole("link", { name: /stripe/i })).toBeInTheDocument();
+    expect(within(business).getByRole("link", { name: /yc advise/i })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /gmail/i })).not.toBeInTheDocument();
+  });
+
+  it("opens a full category from its overview section", async () => {
+    const user = userEvent.setup();
+    render(<PluginsSettings plugins={[]} canEdit />);
+
+    await user.click(screen.getByRole("button", { name: "View all engineering plugins" }));
+
+    const engineering = screen.getByRole("region", { name: "Engineering" });
+    expect(within(engineering).getAllByRole("link")).toHaveLength(5);
+    expect(within(engineering).getByRole("link", { name: /github/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Engineering" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
+  it("recovers from an empty search", async () => {
+    const user = userEvent.setup();
+    render(<PluginsSettings plugins={[]} canEdit />);
+
+    await user.type(screen.getByRole("searchbox", { name: "Search plugins" }), "no-such-plugin");
+    expect(screen.getByText("No plugins found")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Clear search" }));
+    expect(screen.getByRole("region", { name: "Featured" })).toBeInTheDocument();
+  });
+
   it("installs from the overview and opens the installed plugin page", async () => {
     const user = userEvent.setup();
     let finishPreview: ((preview: PluginImportPreviewDto) => void) | undefined;
@@ -345,7 +399,7 @@ describe("Plugin settings", () => {
 
     render(<PluginsSettings plugins={[]} canEdit />);
 
-    const linearCard = screen.getByRole("link", { name: /linear/i }).closest("div.border");
+    const linearCard = screen.getByRole("link", { name: /linear/i }).closest("li");
     expect(linearCard).not.toBeNull();
     await user.click(within(linearCard as HTMLElement).getByRole("button", { name: "Install" }));
 
@@ -374,7 +428,7 @@ describe("Plugin settings", () => {
 
     render(<PluginsSettings plugins={[]} canEdit />);
 
-    const linearCard = screen.getByRole("link", { name: /linear/i }).closest("div.border");
+    const linearCard = screen.getByRole("link", { name: /linear/i }).closest("li");
     expect(linearCard).not.toBeNull();
     const installButton = within(linearCard as HTMLElement).getByRole("button", {
       name: "Install",
