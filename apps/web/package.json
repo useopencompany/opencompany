@@ -18,7 +18,7 @@
     "@ai-sdk/mcp": "^2.0.39",
     "@ai-sdk/react": "4.0.86",
     "@browserbasehq/sdk": "^2.19.0",
-    "@floating-ui/dom": "1.7.6",
+    "@floating-ui/dom": "1.8.0",
     "@modelcontextprotocol/sdk": "1.30.0",
     "@opencompany/agent": "workspace:*",
     "@opencompany/agent-runtime": "workspace:*",
