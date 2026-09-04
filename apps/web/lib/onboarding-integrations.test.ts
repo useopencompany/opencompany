@@ -39,6 +39,9 @@ describe("opencompany onboarding integrations", () => {
     expect(onboardingConnectionError("hubspot", "hubspot_mcp_denied")).toBe(
       "HubSpot authorization was cancelled.",
     );
+    expect(onboardingConnectionError("attio", "attio_mcp_denied")).toBe(
+      "Attio authorization was cancelled.",
+    );
     expect(onboardingConnectionError("neon", "neon_denied")).toBe(
       "Neon authorization was cancelled.",
     );
@@ -70,6 +73,7 @@ describe("opencompany onboarding integrations", () => {
 
   it("turns provider success into concise connection copy", () => {
     expect(integrationConnectionSuccess("hubspot")).toBe("HubSpot connected.");
+    expect(integrationConnectionSuccess("attio")).toBe("Attio connected.");
     expect(integrationConnectionSuccess("google_drive")).toBe("Google Drive connected.");
     expect(integrationConnectionSuccess("posthog")).toBe("PostHog connected.");
     expect(integrationConnectionSuccess("neon")).toBe("Neon connected.");

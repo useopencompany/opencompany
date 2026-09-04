@@ -139,6 +139,25 @@ export type PluginAccountsState =
 
 export type LinearAccountsState = PluginAccountsState;
 
+export function AttioPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.attio}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
 export function BetterStackPluginDetail({
   pluginState,
   canEdit,
@@ -1393,6 +1412,7 @@ function pluginAccountsFromState(
   permissionConnection: IntegrationAccountView<PluginConnectionProvider> | null;
 } {
   if (
+    config.connectionProvider === "attio" ||
     config.connectionProvider === "betterstack" ||
     config.connectionProvider === "github_user" ||
     config.connectionProvider === "gmail" ||
@@ -1434,7 +1454,11 @@ function pluginAccountsFromState(
         accounts: permissionConnection ? [{ account: permissionConnection }] : [],
       };
     }
-    if (config.connectionProvider === "posthog" || config.connectionProvider === "hubspot") {
+    if (
+      config.connectionProvider === "attio" ||
+      config.connectionProvider === "posthog" ||
+      config.connectionProvider === "hubspot"
+    ) {
       const provider = config.connectionProvider;
       const connection = state[provider];
       const permissionConnection: IntegrationAccountView<typeof provider> | null =
@@ -1448,7 +1472,7 @@ function pluginAccountsFromState(
               accountName: connection.accountName,
               connectionLabel:
                 connection.accountName ||
-                `${provider === "hubspot" ? "HubSpot" : "PostHog"} tool access`,
+                `${provider === "attio" ? "Attio" : provider === "hubspot" ? "HubSpot" : "PostHog"} tool access`,
               statusReason: connection.statusReason,
               scopes: [],
               capabilityModes: connection.capabilityModes,
@@ -1515,6 +1539,10 @@ function pluginAccountsFromState(
 
 export function defaultLinearToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("linear");
+}
+
+export function defaultAttioToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("attio");
 }
 
 export function defaultGitHubToolsState(): PluginToolsState {
@@ -1587,6 +1615,10 @@ function defaultOfficialPluginToolsState(provider: OfficialMcpPluginName): Plugi
 
 export function linearToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
   return officialPluginToolsStateFromPlugin(plugin, "linear");
+}
+
+export function attioToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
+  return officialPluginToolsStateFromPlugin(plugin, "attio");
 }
 
 export function githubToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
@@ -1721,6 +1753,10 @@ function officialPluginToolsStateFromPlugin(
 
 export function linearToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
   return officialPluginToolsStateFromPreview(preview, "linear");
+}
+
+export function attioToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
+  return officialPluginToolsStateFromPreview(preview, "attio");
 }
 
 export function githubToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {

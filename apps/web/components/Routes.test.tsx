@@ -144,10 +144,6 @@ vi.mock("@/components/FathomIntegrationSetup", () => ({
   FathomIntegrationSetup: () => null,
 }));
 
-vi.mock("@/components/AttioIntegrationSetup", () => ({
-  AttioIntegrationSetup: () => null,
-}));
-
 vi.mock("@/components/McpSetupGuide", () => ({
   McpSetupGuide: () => <div data-testid="mcp-setup-guide" />,
 }));

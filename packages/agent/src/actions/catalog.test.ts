@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  attio: vi.fn(),
   calendar: vi.fn(),
   github: vi.fn(),
   gmail: vi.fn(),
@@ -16,7 +17,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../plugin-gateway", () => ({
   resolvePluginGatewayRegistrations: mocks.registrations,
 }));
-vi.mock("./attio", () => ({ resolveAttioActions: mocks.noop }));
+vi.mock("./attio", () => ({ resolveAttioActions: mocks.attio }));
 vi.mock("./github", () => ({ resolveGitHubActions: mocks.github }));
 vi.mock("./gmail", () => ({ resolveGmailActions: mocks.gmail }));
 vi.mock("./google-calendar", () => ({ resolveGoogleCalendarActions: mocks.calendar }));
@@ -43,6 +44,12 @@ describe("resolveActionCatalog plugin reconciliation", () => {
       label: "Google Calendar",
       description: "Legacy Calendar actions.",
       actions: [{ id: "google_calendar.list_events" }],
+    });
+    mocks.attio.mockResolvedValue({
+      id: "attio",
+      label: "Attio",
+      description: "Legacy Attio actions.",
+      actions: [{ id: "attio.search-records" }],
     });
     mocks.remote.mockResolvedValue(null);
     mocks.registrations.mockResolvedValue([]);
@@ -384,6 +391,40 @@ describe("resolveActionCatalog plugin reconciliation", () => {
     expect(mocks.remote).toHaveBeenCalledWith(
       { userWorkosId: "user_1", workspaceId: "workspace_1" },
       googleDrivePluginRegistration,
+    );
+  });
+
+  it("keeps legacy Attio actions as fallback and suppresses them after plugin install", async () => {
+    const withoutPlugin = await resolveActionCatalog(
+      { userWorkosId: "user_1", workspaceId: "workspace_1" },
+      { remoteMcpRegistrations: [] },
+    );
+    expect(mocks.attio).toHaveBeenCalledWith("user_1");
+    expect(withoutPlugin.actions).toContainEqual(
+      expect.objectContaining({ id: "attio.search-records" }),
+    );
+
+    mocks.attio.mockClear();
+    const attioPluginRegistration = {
+      source: "plugin:attio:attio",
+    } as unknown as RemoteMcpGatewayRegistration;
+    mocks.remote.mockResolvedValueOnce({
+      id: "plugin:attio:attio",
+      label: "Attio",
+      description: "Official Attio plugin tools.",
+      actions: [{ id: "plugin:attio:attio.search-records" }],
+    });
+    const withPlugin = await resolveActionCatalog(
+      { userWorkosId: "user_1", workspaceId: "workspace_1" },
+      { remoteMcpRegistrations: [attioPluginRegistration] },
+    );
+
+    expect(mocks.attio).not.toHaveBeenCalled();
+    expect(withPlugin.actions).not.toContainEqual(
+      expect.objectContaining({ id: "attio.search-records" }),
+    );
+    expect(withPlugin.actions).toContainEqual(
+      expect.objectContaining({ id: "plugin:attio:attio.search-records" }),
     );
   });
 });

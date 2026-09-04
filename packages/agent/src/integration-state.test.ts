@@ -221,3 +221,38 @@ describe("HubSpot integration state", () => {
     ]);
   });
 });
+
+describe("Attio integration state", () => {
+  it("keeps MCP tool authorization separate from Wiki ingestion accounts", () => {
+    const state = integrationStateFromRows([
+      {
+        id: "gint_attio_ingest",
+        provider: "attio",
+        externalId: "workspace_123",
+        connectionLabel: "Acme CRM",
+        status: "connected",
+        scopes: ["record_permission:read-write"],
+      },
+      {
+        id: "gint_attio_mcp",
+        provider: "attio",
+        externalId: "attio_mcp",
+        accountName: "Attio",
+        status: "connected",
+        capabilityModes: { read: "on", query: "ask", write: "ask" },
+      },
+    ]);
+
+    expect(state.attio).toMatchObject({
+      integrationId: "gint_attio_mcp",
+      connected: true,
+      capabilityModes: { read: "on", query: "ask", write: "ask" },
+    });
+    expect(state.personalAccounts.attio).toEqual([
+      expect.objectContaining({
+        integrationId: "gint_attio_ingest",
+        connectionLabel: "Acme CRM",
+      }),
+    ]);
+  });
+});

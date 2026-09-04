@@ -1,4 +1,5 @@
 import {
+  AttioPluginDetail,
   BetterStackPluginDetail,
   GitHubPluginDetail,
   GmailPluginDetail,
@@ -35,6 +36,7 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
       loadOfficialPlugin(normalizedName),
     ]);
     const Detail = {
+      attio: AttioPluginDetail,
       betterstack: BetterStackPluginDetail,
       github: GitHubPluginDetail,
       gmail: GmailPluginDetail,

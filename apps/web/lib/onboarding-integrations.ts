@@ -33,6 +33,7 @@ export function integrationConnectionError(provider: string | null, reason: stri
     case "linear_denied":
     case "hubspot_denied":
     case "hubspot_mcp_denied":
+    case "attio_mcp_denied":
     case "latitude_denied":
     case "posthog_denied":
     case "neon_denied":

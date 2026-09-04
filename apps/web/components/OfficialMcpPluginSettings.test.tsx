@@ -10,8 +10,10 @@ import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { IntegrationAccountView } from "@/lib/integration-state";
 import {
+  AttioPluginDetail,
   BetterStackPluginDetailView,
   betterStackToolsStateFromPlugin,
+  defaultAttioToolsState,
   defaultHubSpotToolsState,
   defaultPostHogToolsState,
   defaultSigNozToolsState,
@@ -43,6 +45,7 @@ import {
   XPluginDetail,
 } from "./OfficialMcpPluginSettings";
 import {
+  ATTIO_PLUGIN_SOURCE,
   BETTERSTACK_PLUGIN_SOURCE,
   GITHUB_PLUGIN_SOURCE,
   GMAIL_PLUGIN_SOURCE,
@@ -103,6 +106,14 @@ const appData = vi.hoisted(() => ({
       statusReason: null,
       accountName: "Acme CRM",
       integrationId: "gint_hubspot_mcp",
+      capabilityModes: { read: "on", query: "ask", write: "ask" },
+    },
+    attio: {
+      connected: true,
+      status: "connected",
+      statusReason: null,
+      accountName: "Acme Attio",
+      integrationId: "gint_attio_mcp",
       capabilityModes: { read: "on", query: "ask", write: "ask" },
     },
     posthog: {
@@ -1222,6 +1233,33 @@ describe("Linear plugin settings", () => {
     expect(html).toContain("Configure HubSpot ingestion in Wiki sources");
     expect(HUBSPOT_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/6b4e00b71f7d1b388fe5aa225aa86c8d35ba2578/hubspot",
+    );
+    expect(useLiveQuery).not.toHaveBeenCalled();
+  });
+
+  it("maps the dedicated Attio MCP connection onto the official plugin surface", () => {
+    const attioPlugin = {
+      ...plugin,
+      id: "plugin_attio",
+      name: "attio",
+      manifest: { name: "attio", description: "Work with Attio CRM." },
+      source: { ...plugin.source, path: "attio" },
+    } satisfies PluginInstallationDto;
+    const html = renderToString(
+      <AttioPluginDetail
+        pluginState={{ status: "ready", plugin: attioPlugin }}
+        toolsState={defaultAttioToolsState()}
+        canEdit
+      />,
+    );
+
+    expect(html).toContain("Acme Attio");
+    expect(html).toContain("Inspect Attio structure");
+    expect(html).toContain("Read CRM data");
+    expect(html).toContain("Change Attio");
+    expect(html).toContain("Configure Attio ingestion in Wiki sources");
+    expect(ATTIO_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/0daeec4cff5d5f9925af2901410e1aa6c8baf0d8/attio",
     );
     expect(useLiveQuery).not.toHaveBeenCalled();
   });

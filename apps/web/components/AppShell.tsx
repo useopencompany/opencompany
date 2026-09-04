@@ -16,7 +16,7 @@ import {
   type IntegrationState,
   integrationStateFromRows,
 } from "@/lib/integration-state";
-import { getAttioIntegrationState } from "@/lib/integrations/attio";
+import { getAttioMcpIntegrationState } from "@/lib/integrations/attio-mcp";
 import { getFathomIntegrationState } from "@/lib/integrations/fathom";
 import { getGitHubIntegrationState } from "@/lib/integrations/github";
 import { getGoogleIntegrationState } from "@/lib/integrations/google-data";
@@ -111,8 +111,8 @@ export async function AppShell({ children }: { children: ReactNode }) {
       emptyIntegrations.fathom,
     ),
     loadOptionalAppShellData(
-      "attio_integration",
-      () => getAttioIntegrationState(user.workosUserId),
+      "attio_mcp_integration",
+      () => getAttioMcpIntegrationState(user.workosUserId),
       emptyIntegrations.attio,
     ),
     loadOptionalAppShellData(

@@ -563,6 +563,69 @@ describe("resolvePlugin", () => {
     });
   });
 
+  it("loads the official Attio package with every documented tool classified", async () => {
+    const fixtureRoot = fileURLToPath(new URL("./test-fixtures/plugins/attio", import.meta.url));
+    const files = await fixtureFiles(fixtureRoot, "attio");
+    const plugin = await resolvePlugin({
+      url: "useopencompany/plugins",
+      selectedPath: "attio",
+      fetcher: fetcher(files),
+      trustedCapabilitySources: ["useopencompany/plugins"],
+    });
+
+    expect(plugin.manifest).toMatchObject({ name: "attio", version: "1.0.0" });
+    expect(plugin.skills).toEqual([]);
+    expect(plugin.stdioServers).toEqual([]);
+    expect(plugin.remoteServers).toEqual([
+      {
+        name: "attio",
+        type: "streamable-http",
+        url: "https://mcp.attio.com/mcp",
+        headers: {},
+      },
+    ]);
+    expect(plugin.capabilities).toEqual([
+      expect.objectContaining({
+        id: "read",
+        label: "Inspect Attio structure",
+        defaultMode: "on",
+        tools: expect.arrayContaining(["list-objects", "list-attribute-definitions", "whoami"]),
+      }),
+      expect.objectContaining({
+        id: "query",
+        label: "Read CRM data",
+        defaultMode: "ask",
+        tools: expect.arrayContaining([
+          "search-records",
+          "get-call-recording",
+          "get-email-content",
+          "query-particle-sql",
+        ]),
+      }),
+      expect.objectContaining({
+        id: "write",
+        label: "Change Attio",
+        defaultMode: "ask",
+        tools: expect.arrayContaining([
+          "create-record",
+          "merge-records",
+          "delete-comment",
+          "update-task",
+        ]),
+      }),
+    ]);
+    expect(plugin.capabilities.flatMap((capability) => capability.tools)).toHaveLength(41);
+    expect(plugin.report.mcp).toMatchObject({
+      status: "parsed",
+      reports: [{ name: "attio", status: "gateway-registered" }],
+    });
+    expect(plugin.report.capabilities).toEqual({
+      present: true,
+      status: "parsed",
+      issues: [],
+    });
+  });
+
   it("loads the official Stripe package with every documented tool classified", async () => {
     const fixtureRoot = fileURLToPath(new URL("./test-fixtures/plugins/stripe", import.meta.url));
     const files = await fixtureFiles(fixtureRoot, "stripe");

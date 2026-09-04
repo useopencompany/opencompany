@@ -471,7 +471,7 @@ describe("SettingsIntegrationsPanel", () => {
     expect(screen.queryByText("louis@example.com")).toBeNull();
   });
 
-  it("shows Attio read and write permission controls on the connected workspace", () => {
+  it("keeps Attio ingestion accounts off the legacy integrations surface", () => {
     const integrations = integrationStateFromRows([
       {
         id: "gint_attio",
@@ -485,24 +485,8 @@ describe("SettingsIntegrationsPanel", () => {
 
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
 
-    const attioCard = screen
-      .getByText("Sync CRM records and notes from Attio.")
-      .closest("div.rounded-2xl");
-    expect(attioCard).not.toBeNull();
-    const readPermission = within(attioCard as HTMLElement).getByRole("group", {
-      name: "Read Attio permission",
-    });
-    const writePermission = within(attioCard as HTMLElement).getByRole("group", {
-      name: "Update Attio permission",
-    });
-    expect(within(readPermission).getByRole("button", { name: "On" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(within(writePermission).getByRole("button", { name: "Ask" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(screen.queryByText("Acme CRM")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Workspace" })).not.toHaveTextContent("1");
   });
 
   it("keeps Google Drive out of legacy integrations now that its account lives under Plugins", () => {

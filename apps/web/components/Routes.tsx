@@ -44,7 +44,6 @@ import {
   useTransition,
 } from "react";
 import { type BrainSummaryView, useAppData } from "@/components/AppDataProvider";
-import { AttioIntegrationSetup } from "@/components/AttioIntegrationSetup";
 import { BrainSettings } from "@/components/BrainSettings";
 import { BrainView } from "@/components/BrainView";
 import { FathomIntegrationSetup } from "@/components/FathomIntegrationSetup";
@@ -467,27 +466,6 @@ export function FathomSettingsRoute() {
     >
       <FathomIntegrationSetup
         initialState={integrations.fathom}
-        brainSourcesHref={brainSourcesHref}
-      />
-    </SettingsContent>
-  );
-}
-
-export function AttioSettingsRoute() {
-  const { activeBrain, featureFlags, integrations } = useAppData();
-  const brainSourcesHref =
-    featureFlags.legacyBrain && activeBrain
-      ? `/brain/${encodeURIComponent(activeBrain.id)}/settings`
-      : null;
-
-  return (
-    <SettingsContent
-      title="Attio"
-      description="CRM activity for opencompany Brain"
-      backLink={{ href: "/settings/integrations", label: "Integrations" }}
-    >
-      <AttioIntegrationSetup
-        initialState={integrations.attio}
         brainSourcesHref={brainSourcesHref}
       />
     </SettingsContent>

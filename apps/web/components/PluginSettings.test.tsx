@@ -9,6 +9,7 @@ import {
   previewHeadlessPluginImport,
 } from "@/lib/headless-knowledge-commands";
 import {
+  ATTIO_PLUGIN_SOURCE,
   BETTERSTACK_PLUGIN_SOURCE,
   GITHUB_PLUGIN_SOURCE,
   GMAIL_PLUGIN_SOURCE,
@@ -231,7 +232,8 @@ describe("Plugin settings", () => {
     );
   });
 
-  it("offers one-click installation for every uninstalled official package", () => {
+  it("offers one-click installation for every uninstalled official package", async () => {
+    const user = userEvent.setup();
     render(<PluginsSettings plugins={[]} canEdit workspaceId="workspace_1" />);
 
     expect(captureProductEvent).toHaveBeenCalledWith("plugin_catalog_viewed", {
@@ -295,6 +297,8 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/x",
     );
+    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(15);
+    await user.click(screen.getByRole("button", { name: "View all business plugins" }));
     expect(screen.getByRole("link", { name: /yc advise/i })).toHaveAttribute(
       "href",
       "/settings/plugins/yc-advise",
@@ -302,6 +306,10 @@ describe("Plugin settings", () => {
     expect(screen.getByRole("link", { name: /hubspot/i })).toHaveAttribute(
       "href",
       "/settings/plugins/hubspot",
+    );
+    expect(screen.getByRole("link", { name: /attio/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/attio",
     );
     expect(GITHUB_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/github$/u,
@@ -326,6 +334,9 @@ describe("Plugin settings", () => {
     );
     expect(HUBSPOT_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/6b4e00b71f7d1b388fe5aa225aa86c8d35ba2578/hubspot",
+    );
+    expect(ATTIO_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/0daeec4cff5d5f9925af2901410e1aa6c8baf0d8/attio",
     );
     expect(SIGNOZ_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/053e9e9207f320651f1cb9b4e8feb84ab2af6bba/signoz",
@@ -352,7 +363,6 @@ describe("Plugin settings", () => {
     expect(
       within(linearCard as HTMLElement).getByRole("button", { name: "Install" }),
     ).toBeEnabled();
-    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(15);
     expect(previewHeadlessPluginImport).not.toHaveBeenCalled();
     expect(importHeadlessPlugin).not.toHaveBeenCalled();
   });

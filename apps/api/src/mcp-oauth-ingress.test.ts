@@ -1,5 +1,9 @@
 import { createHmac } from "node:crypto";
 import {
+  completeAttioMcpOAuth,
+  startAttioMcpOAuth,
+} from "@opencompany/agent/integrations/attio-mcp";
+import {
   completeBetterStackMcpOAuth,
   startBetterStackMcpOAuth,
 } from "@opencompany/agent/integrations/betterstack-mcp";
@@ -32,6 +36,11 @@ import { createMcpOAuthIngress, type McpOAuthProvider } from "./mcp-oauth-ingres
 vi.mock("@opencompany/db/workspaces", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   listWorkspacesForUser: vi.fn(),
+}));
+vi.mock("@opencompany/agent/integrations/attio-mcp", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  startAttioMcpOAuth: vi.fn(),
+  completeAttioMcpOAuth: vi.fn(),
 }));
 vi.mock("@opencompany/agent/integrations/betterstack-mcp", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -72,6 +81,7 @@ vi.mock("@opencompany/agent/integrations/latitude-mcp", async (importOriginal) =
 const STATE_SECRET = "mcp-state-secret-mcp-state-secret";
 const sentinelDb = { sentinel: "db" };
 const PROVIDERS: McpOAuthProvider[] = [
+  "attio",
   "linear",
   "hubspot",
   "posthog",
@@ -83,6 +93,7 @@ const PROVIDERS: McpOAuthProvider[] = [
 
 // The mocked module-level start/complete wrappers, keyed like the ingress.
 const flowMocks = {
+  attio: { start: startAttioMcpOAuth, complete: completeAttioMcpOAuth },
   linear: { start: startLinearMcpOAuth, complete: completeLinearMcpOAuth },
   hubspot: { start: startHubSpotMcpOAuth, complete: completeHubSpotMcpOAuth },
   posthog: { start: startPostHogMcpOAuth, complete: completePostHogMcpOAuth },
@@ -224,7 +235,10 @@ describe("remote MCP OAuth ingress", () => {
       const expectedPath =
         provider === "linear"
           ? "/settings"
-          : provider === "betterstack" || provider === "signoz" || provider === "hubspot"
+          : provider === "attio" ||
+              provider === "betterstack" ||
+              provider === "signoz" ||
+              provider === "hubspot"
             ? `/settings/plugins/${provider}`
             : "/settings/integrations";
       expect(response.headers.get("location"), provider).toBe(

@@ -2,7 +2,6 @@
 
 import { toast } from "@opencompany/ui/components/sonner";
 import {
-  AttioIcon,
   BetterStackIcon,
   FathomIcon,
   GitHubIcon,
@@ -75,7 +74,7 @@ import {
 // monogram fallback where no square vector mark exists), the colored logo tile,
 // and a short connection-focused description. Keyed by provider so the card
 // components derive everything from the provider string.
-type SettingsPersonalAccountProvider = Exclude<PersonalAccountProvider, "slack">;
+type SettingsPersonalAccountProvider = Exclude<PersonalAccountProvider, "slack" | "attio">;
 
 type IntegrationMetaKey =
   | SettingsPersonalAccountProvider
@@ -154,12 +153,6 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     description: "Sync CRM activity on contacts, companies, and deals.",
     Icon: HubSpotIcon,
     tileClass: "bg-[#FF7A59] text-white",
-  },
-  attio: {
-    label: "Attio",
-    description: "Sync CRM records and notes from Attio.",
-    Icon: AttioIcon,
-    tileClass: "bg-[#111111] text-white",
   },
   betterstack: {
     label: "Better Stack",
@@ -341,10 +334,9 @@ const INFISICAL_REGIONS = [
 // Group-card providers surfaced under each scope. These are all user-owned in the
 // data model (each member connects their own account), but the CRM / meeting /
 // issue-tracking tools read as shared workspace tooling, so we present them under
-// the Workspace scope. Official Gmail, Calendar, Drive, and HubSpot tool accounts live under
-// Plugins.
+// the Workspace scope. Official Gmail, Calendar, Drive, HubSpot, and Attio tool accounts live
+// under Plugins; their separate ingestion connections are managed from Wiki sources.
 const WORKSPACE_ACCOUNT_PROVIDERS = [
-  "attio",
   "granola",
   "fathom",
 ] as const satisfies readonly SettingsPersonalAccountProvider[];
@@ -415,10 +407,6 @@ function IntegrationCards({
             />
             <IntegrationCardRow integration={integrations.github} canConnect={isWorkspaceAdmin} />
             <IntegrationCardRow integration={integrations.jamie} canConnect={isWorkspaceAdmin} />
-            <IntegrationProviderGroupCard
-              provider="attio"
-              accounts={integrations.personalAccounts.attio}
-            />
             <IntegrationProviderGroupCard
               provider="granola"
               accounts={integrations.personalAccounts.granola}
@@ -1463,7 +1451,7 @@ function integrationStatusReason(
 }
 
 function integrationConnectHref(
-  provider: Exclude<IntegrationMetaKey, "codex" | "claude_code" | "infisical"> | "slack",
+  provider: Exclude<IntegrationMetaKey, "codex" | "claude_code" | "infisical"> | "attio" | "slack",
 ) {
   if (provider === "gmail") return "/api/integrations/gmail/start?returnTo=/settings/integrations";
   if (provider === "google_calendar") {
@@ -1480,7 +1468,7 @@ function integrationConnectHref(
   if (provider === "imessage") return "/settings/imessage";
   if (provider === "granola") return "/settings/granola";
   if (provider === "fathom") return "/settings/fathom";
-  if (provider === "attio") return "/settings/attio";
+  if (provider === "attio") return "/settings/plugins/attio";
   if (provider === "slack") return "/settings/plugins/slack";
   if (provider === "hubspot")
     return "/api/integrations/hubspot/start?returnTo=/settings/integrations";
