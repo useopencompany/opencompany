@@ -28,6 +28,8 @@ const mocks = vi.hoisted(() => ({
   loadSlackConnection: vi.fn(),
   getSigNozState: vi.fn(),
   loadSigNozConnection: vi.fn(),
+  getXState: vi.fn(),
+  loadXConnection: vi.fn(),
 }));
 
 vi.mock("@opencompany/db/client", () => ({ getDb: () => ({ sentinel: "db" }) }));
@@ -106,6 +108,11 @@ vi.mock("./integrations/signoz-mcp", () => ({
   SIGNOZ_MCP_ENDPOINT_URL: "https://mcp.us.signoz.cloud/mcp",
   getSigNozIntegrationState: mocks.getSigNozState,
   loadSigNozMcpWorkerConnection: mocks.loadSigNozConnection,
+}));
+vi.mock("./integrations/x-mcp", () => ({
+  X_MCP_ENDPOINT_URL: "https://api.x.com/mcp",
+  getXMcpIntegrationState: mocks.getXState,
+  loadXMcpWorkerConnection: mocks.loadXConnection,
 }));
 
 import { createPluginGatewayLifecycle, resolvePluginGatewayRegistrations } from "./plugin-gateway";
@@ -257,6 +264,39 @@ describe("plugin gateway registration cache", () => {
       {
         ...githubRecord,
         server: { ...githubRecord.server, url: "https://evil.example/mcp" },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
+  it("binds X credentials only to X's exact hosted MCP endpoint", async () => {
+    const xRecord = record({
+      pluginName: "x",
+      pluginLabel: "x",
+      pluginDescription: "Official X plugin tools.",
+      connectionProvider: "x",
+      server: {
+        name: "x",
+        type: "streamable-http",
+        url: "https://api.x.com/mcp",
+        headers: {},
+      },
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([xRecord]);
+
+    const [registration] = await resolvePluginGatewayRegistrations(identity, { db, now });
+    expect(registration).toMatchObject({
+      source: "plugin:x:x",
+      connectionProvider: "x_account",
+    });
+    expect(registration?.getState).toBe(mocks.getXState);
+    expect(registration?.loadConnection).toBe(mocks.loadXConnection);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...xRecord,
+        server: { ...xRecord.server, url: "https://api.x.com.evil.example/mcp" },
       },
     ]);
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);

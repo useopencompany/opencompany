@@ -37,6 +37,10 @@ export type XAccountIngressService = {
 export function createXAccountIngress(input: {
   db: DbLike;
   identify: ApiIdentityVerifier;
+  refreshPluginRegistrations?: (input: {
+    userWorkosId: string;
+    workspaceIds: string[];
+  }) => Promise<void>;
 }): XAccountIngressService {
   return {
     start: (request) => handleStart(input, request),
@@ -44,13 +48,20 @@ export function createXAccountIngress(input: {
   };
 }
 
-type IngressInput = { db: DbLike; identify: ApiIdentityVerifier };
+type IngressInput = {
+  db: DbLike;
+  identify: ApiIdentityVerifier;
+  refreshPluginRegistrations?: (input: {
+    userWorkosId: string;
+    workspaceIds: string[];
+  }) => Promise<void>;
+};
 
 async function handleStart(input: IngressInput, request: Request): Promise<Response> {
   const session = await resolveIngressSession(input, request);
   if (session.kind === "redirect") return session.response;
   const url = new URL(request.url);
-  const returnTo = url.searchParams.get("returnTo") ?? "/settings";
+  const returnTo = url.searchParams.get("returnTo") ?? "/settings/plugins/x";
 
   if (!isXAccountIntegrationConfigured()) {
     return statusRedirect(session, returnTo, "error", "not_configured");
@@ -123,6 +134,19 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
       workspaceId: session.workspaceId,
       provider: "x_account",
     });
+    if (input.refreshPluginRegistrations) {
+      try {
+        await input.refreshPluginRegistrations({
+          userWorkosId: session.userId,
+          workspaceIds: session.workspaces.map((entry) => entry.workspace.id),
+        });
+      } catch (error) {
+        logger.warn("X plugin discovery refresh after connection failed", {
+          event: "goat.x_plugin_reconnect_refresh_failed",
+          error_message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
 
     return consumed(statusRedirect(session, state.returnTo, "connected"));
   } catch (error) {

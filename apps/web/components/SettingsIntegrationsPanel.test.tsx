@@ -595,7 +595,7 @@ describe("SettingsIntegrationsPanel", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("shows two connected X identities and keeps the add-account path available", () => {
+  it("keeps X accounts out of legacy settings now that they live under Plugins", () => {
     const integrations = integrationStateFromRows([
       {
         id: "gint_x_founder",
@@ -620,17 +620,11 @@ describe("SettingsIntegrationsPanel", () => {
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
     fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
 
-    const xCard = screen
-      .getByText("Connect X accounts and publish account-specific posts from chat.")
-      .closest("div.rounded-2xl");
-    expect(xCard).not.toBeNull();
-    expect(within(xCard as HTMLElement).getByText("@founder · Founder")).toBeVisible();
-    expect(within(xCard as HTMLElement).getByText("@acme · Acme")).toBeVisible();
-    expect(within(xCard as HTMLElement).getAllByText("Connected")).toHaveLength(2);
-    expect(within(xCard as HTMLElement).getByRole("link", { name: "Add account" })).toHaveAttribute(
-      "href",
-      "/api/integrations/x-account/start?returnTo=/settings/integrations",
-    );
+    expect(
+      screen.queryByText("Connect X accounts and publish account-specific posts from chat."),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("@founder · Founder")).not.toBeInTheDocument();
+    expect(screen.queryByText("@acme · Acme")).not.toBeInTheDocument();
   });
 
   it("shows a workspace-owned Stripe connection and test-mode label", () => {

@@ -77,6 +77,11 @@ import {
   loadSlackMcpWorkerConnection,
   SLACK_MCP_ENDPOINT_URL,
 } from "./integrations/slack-mcp";
+import {
+  getXMcpIntegrationState,
+  loadXMcpWorkerConnection,
+  X_MCP_ENDPOINT_URL,
+} from "./integrations/x-mcp";
 
 const DISCOVERY_TTL_MS = 60 * 60 * 1_000;
 const DISCOVERY_RETRY_MS = 5 * 60 * 1_000;
@@ -158,6 +163,12 @@ const providerBindings = {
     endpointUrl: SIGNOZ_MCP_ENDPOINT_URL,
     getState: getSigNozIntegrationState,
     loadConnection: loadSigNozMcpWorkerConnection,
+  },
+  x: {
+    provider: "x_account",
+    endpointUrl: X_MCP_ENDPOINT_URL,
+    getState: getXMcpIntegrationState,
+    loadConnection: loadXMcpWorkerConnection,
   },
 } as const;
 
