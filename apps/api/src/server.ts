@@ -345,7 +345,17 @@ const app = createApiApp({
         connectionProvider: provider,
       }),
   }),
-  xAccountIngress: createXAccountIngress({ db: database.db, identify: identityVerifier }),
+  xAccountIngress: createXAccountIngress({
+    db: database.db,
+    identify: identityVerifier,
+    refreshPluginRegistrations: ({ userWorkosId, workspaceIds }) =>
+      refreshPluginGatewayRegistrationsForWorkspaces({
+        db: database.db,
+        userWorkosId,
+        workspaceIds,
+        connectionProvider: "x",
+      }),
+  }),
   slackBotIngress: createSlackBotIngress({
     db: database.db,
     identify: identityVerifier,

@@ -323,6 +323,25 @@ export function SigNozPluginDetail({
   );
 }
 
+export function XPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.x}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
 function OfficialMcpPluginDetail({
   config,
   pluginState,
@@ -788,7 +807,7 @@ function AccountsSection({
   const displayedAccounts =
     state.status !== "ready"
       ? []
-      : config.connectionProvider === "slack"
+      : config.connectionProvider === "slack" || config.connectionProvider === "x_account"
         ? state.accounts
         : permissionConnection
           ? [{ account: permissionConnection }]
@@ -821,7 +840,11 @@ function AccountsSection({
                   ? account.integrationId === permissionConnection?.integrationId
                     ? "Slack tools"
                     : "Not active"
-                  : accountLabel
+                  : config.connectionProvider === "x_account"
+                    ? account.integrationId === permissionConnection?.integrationId
+                      ? "X tools"
+                      : "Legacy fallback"
+                    : accountLabel
               }
               reconnectHref={config.connectHref}
               showCapabilityModes={false}
@@ -1295,7 +1318,8 @@ function pluginAccountsFromState(
     config.connectionProvider === "neon" ||
     config.connectionProvider === "render" ||
     config.connectionProvider === "signoz" ||
-    config.connectionProvider === "slack"
+    config.connectionProvider === "slack" ||
+    config.connectionProvider === "x_account"
   ) {
     const accounts = state.personalAccounts[config.connectionProvider].map((account) => ({
       account:
@@ -1319,7 +1343,9 @@ function pluginAccountsFromState(
             ? state.google_calendar.integrationId
             : config.connectionProvider === "google_drive"
               ? state.google_drive.integrationId
-              : null;
+              : config.connectionProvider === "x_account"
+                ? state.x_account.integrationId
+                : null;
     return {
       accounts,
       permissionConnection:

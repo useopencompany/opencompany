@@ -493,10 +493,6 @@ function IntegrationCards({
               provider="latitude"
               accounts={integrations.personalAccounts.latitude}
             />
-            <IntegrationProviderGroupCard
-              provider="x_account"
-              accounts={integrations.personalAccounts.x_account}
-            />
             <CodexIntegrationCard integration={integrations.codex} />
             <ClaudeCodeIntegrationCard integration={integrations.claude_code} />
             {imessageEnabled ? (

@@ -500,6 +500,58 @@ describe("resolvePlugin", () => {
     });
   });
 
+  it("loads the official X package with every current non-streaming tool classified", async () => {
+    const fixtureRoot = fileURLToPath(new URL("./test-fixtures/plugins/x", import.meta.url));
+    const files = await fixtureFiles(fixtureRoot, "x");
+    const plugin = await resolvePlugin({
+      url: "useopencompany/plugins",
+      selectedPath: "x",
+      fetcher: fetcher(files),
+      trustedCapabilitySources: ["useopencompany/plugins"],
+    });
+
+    expect(plugin.manifest).toMatchObject({ name: "x", version: "1.0.0" });
+    expect(plugin.skills).toEqual([]);
+    expect(plugin.remoteServers).toEqual([
+      {
+        name: "x",
+        type: "streamable-http",
+        url: "https://api.x.com/mcp",
+        headers: {},
+      },
+    ]);
+    expect(plugin.capabilities).toEqual([
+      expect.objectContaining({
+        id: "read",
+        label: "Research public X data",
+        defaultMode: "on",
+        tools: expect.arrayContaining(["getPostsById", "searchPostsRecent", "searchUsers"]),
+      }),
+      expect.objectContaining({
+        id: "query",
+        label: "Read account & private X data",
+        defaultMode: "ask",
+        tools: expect.arrayContaining(["getUsersBookmarks", "getDirectMessagesEvents"]),
+      }),
+      expect.objectContaining({
+        id: "write",
+        label: "Manage X",
+        defaultMode: "ask",
+        tools: expect.arrayContaining(["createPosts", "deletePosts", "sendChatMessage"]),
+      }),
+    ]);
+    expect(plugin.capabilities.flatMap((capability) => capability.tools)).toHaveLength(160);
+    expect(plugin.report.mcp).toMatchObject({
+      status: "parsed",
+      reports: [{ name: "x", status: "gateway-registered" }],
+    });
+    expect(plugin.report.capabilities).toEqual({
+      present: true,
+      status: "parsed",
+      issues: [],
+    });
+  });
+
   it("loads the official Google Drive package with every reviewed tool classified", async () => {
     const fixtureRoot = fileURLToPath(
       new URL("./test-fixtures/plugins/google-drive", import.meta.url),

@@ -34,6 +34,7 @@ import {
   SlackPluginDetail,
   slackToolsStateFromPlugin,
   uncuratedPluginToolGroups,
+  XPluginDetail,
 } from "./OfficialMcpPluginSettings";
 import {
   BETTERSTACK_PLUGIN_SOURCE,
@@ -44,6 +45,7 @@ import {
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
   SLACK_PLUGIN_SOURCE,
+  X_PLUGIN_SOURCE,
 } from "./PluginSettings";
 
 const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
@@ -107,6 +109,14 @@ const appData = vi.hoisted(() => ({
       integrationId: "gint_google_drive_latest",
       accountEmail: "founder@example.com",
       accountName: "Founder",
+    },
+    x_account: {
+      connected: true,
+      status: "connected",
+      statusReason: null,
+      accountName: "Founder",
+      handle: "@founder",
+      integrationId: "gint_x_latest",
     },
     personalAccounts: {
       betterstack: [],
@@ -221,6 +231,32 @@ const appData = vi.hoisted(() => ({
           statusReason: null,
           scopes: ["channels:history"],
           capabilityModes: {},
+        },
+      ],
+      x_account: [
+        {
+          integrationId: "gint_x_older",
+          provider: "x_account",
+          status: "connected",
+          connected: true,
+          accountEmail: null,
+          accountName: "Acme",
+          connectionLabel: "@acme",
+          statusReason: null,
+          scopes: ["tweet.read", "tweet.write", "users.read", "offline.access"],
+          capabilityModes: {},
+        },
+        {
+          integrationId: "gint_x_latest",
+          provider: "x_account",
+          status: "connected",
+          connected: true,
+          accountEmail: null,
+          accountName: "Founder",
+          connectionLabel: "@founder",
+          statusReason: null,
+          scopes: ["tweet.read", "tweet.write", "users.read", "offline.access"],
+          capabilityModes: { read: "on", query: "ask", write: "ask" },
         },
       ],
     },
@@ -1684,6 +1720,81 @@ describe("Linear plugin settings", () => {
         { id: "write", defaultMode: "ask" },
       ],
     });
+  });
+
+  it("maps the active X account onto the official plugin surface", () => {
+    const xPlugin = {
+      ...plugin,
+      id: "plugin_x",
+      name: "x",
+      manifest: { name: "x", description: "Official X plugin tools." },
+      source: { ...plugin.source, path: "x" },
+    } satisfies PluginInstallationDto;
+    const toolsState: PluginToolsState = {
+      status: "ready",
+      groups: [
+        {
+          id: "read",
+          label: "Research public X data",
+          description: "Public X research tools.",
+          modeKey: "read",
+          defaultMode: "on",
+          curated: true,
+          tools: [],
+        },
+        {
+          id: "query",
+          label: "Read account & private X data",
+          description: "Private X data tools.",
+          modeKey: "query",
+          defaultMode: "ask",
+          curated: true,
+          tools: [],
+        },
+        {
+          id: "write",
+          label: "Manage X",
+          description: "X mutation tools.",
+          modeKey: "write",
+          defaultMode: "ask",
+          curated: true,
+          tools: [],
+        },
+      ],
+      discovery: {
+        status: "pending",
+        toolCount: 0,
+        discoveredAt: null,
+        refreshAfter: null,
+        lastDiscoveryError: null,
+      },
+    };
+
+    render(
+      <XPluginDetail
+        pluginState={{ status: "ready", plugin: xPlugin }}
+        toolsState={toolsState}
+        canEdit
+      />,
+    );
+
+    expect(screen.getByRole("heading", { level: 1, name: "X" })).toBeInTheDocument();
+    expect(screen.getByText("@founder · Founder")).toBeInTheDocument();
+    expect(screen.getByText("@acme · Acme")).toBeInTheDocument();
+    expect(screen.getByText("X tools")).toBeInTheDocument();
+    expect(screen.getByText("Legacy fallback")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Connect X account" })).toHaveAttribute(
+      "href",
+      "/api/integrations/x-account/start?returnTo=/settings/plugins/x",
+    );
+    expect(
+      screen.getByRole("group", { name: "Research public X data permission" }),
+    ).toHaveTextContent("On");
+    expect(
+      screen.getByRole("group", { name: "Read account & private X data permission" }),
+    ).toHaveTextContent("Ask");
+    expect(screen.getByRole("group", { name: "Manage X permission" })).toHaveTextContent("Ask");
+    expect(X_PLUGIN_SOURCE).toContain("/tree/21060c09d1bbe70df85519cc3ad74cd5d097fbb6/x");
   });
 
   it("presents Google Calendar with every capability gated on Ask", () => {
