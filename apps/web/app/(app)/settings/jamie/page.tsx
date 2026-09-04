@@ -1,5 +1,5 @@
-import { JamieSettingsRoute } from "@/components/Routes";
+import { redirect } from "next/navigation";
 
 export default function JamieSettingsPage() {
-  return <JamieSettingsRoute />;
+  redirect("/settings/plugins/jamie");
 }

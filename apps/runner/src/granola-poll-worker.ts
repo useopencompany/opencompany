@@ -73,6 +73,7 @@ export async function listGranolaPollCandidates(
       i.user_workos_id AS "userWorkosId"
     FROM goat.integrations i
     WHERE i.provider = 'granola'
+      AND i.external_id <> 'granola_mcp'
       AND i.status = 'connected'
       AND (
         EXISTS (

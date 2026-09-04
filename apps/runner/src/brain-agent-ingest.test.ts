@@ -3,11 +3,9 @@ import path from "node:path";
 import {
   normalizeAttioObjectWindow,
   normalizeChatCapture,
-  normalizeGitHubActivityWebhook,
   normalizeGmailThreadWindow,
   normalizeGoogleDriveDocument,
   normalizeHubspotObjectWindow,
-  normalizeJamieMeetingCompletedWebhook,
   normalizeUploadAsset,
 } from "@opencompany/brain";
 import type { BrainIngestTrace, BrainIngestTriageTrace } from "@opencompany/brain/ingest-trace";
@@ -95,49 +93,22 @@ import {
   BrainIngestBudgetError,
   buildAttioObjectAgentIngestPrompt,
   buildChatCaptureAgentIngestPrompt,
-  buildGitHubActivityAgentIngestPrompt,
   buildGmailThreadAgentIngestPrompt,
   buildGoogleDriveDocumentAgentIngestPrompt,
   buildHubspotObjectAgentIngestPrompt,
-  buildJamieMeetingAgentIngestPrompt,
   CHAT_CAPTURE_INGEST_PROFILE,
   CHAT_CAPTURE_INGEST_SYSTEM_PROMPT,
   formatBrainFolderInventoryPrompt,
-  GITHUB_ACTIVITY_INGEST_SYSTEM_PROMPT,
   HUBSPOT_OBJECT_INGEST_SYSTEM_PROMPT,
   LINEAR_ISSUE_INGEST_SYSTEM_PROMPT,
   placeMovingAnthropicCacheBreakpoint,
   runAttioObjectAgentIngest,
   runChatCaptureAgentIngest,
-  runGitHubActivityAgentIngest,
   runGmailThreadAgentIngest,
-  runJamieMeetingAgentIngest,
   UPLOAD_ASSET_INGEST_PROFILE,
   validateBrainAgentInvocation,
 } from "./brain-agent-ingest";
 import { buildGmailThreadEvidenceWrite } from "./brain-gmail-writes";
-import { buildJamieMeetingIds } from "./brain-jamie-writes";
-
-function jamieItem() {
-  return normalizeJamieMeetingCompletedWebhook(
-    {
-      metadata: { event: "meeting.completed", created: "2026-01-01T11:00:00.000Z" },
-      data: {
-        user: { id: "user_123" },
-        event: {
-          externalId: "calendar_event_123",
-          title: "Roadmap Review",
-          startTime: "2026-01-01T10:00:00.000Z",
-          summary: "Discussed priorities for the next product cycle.",
-          participants: [{ name: "Ada", email: "ada@example.com" }],
-          actionItems: ["Share the revised roadmap"],
-          transcript: [{ speakerName: "Ada", startTime: "00:00:00", text: "Transcript segment 0" }],
-        },
-      },
-    },
-    { capturedAt: "2026-01-01T11:01:00.000Z" },
-  );
-}
 
 function captureItem() {
   return normalizeChatCapture({
@@ -164,29 +135,6 @@ function uploadAssetItem(contentSha256 = "a".repeat(64)) {
     contentSha256,
     uploadedAt: "2026-08-12T10:00:00.000Z",
   });
-}
-
-function githubActivityItem() {
-  const item = normalizeGitHubActivityWebhook(
-    "pull_request",
-    {
-      action: "closed",
-      repository: { id: 4242, full_name: "acme/api", private: true },
-      pull_request: {
-        number: 123,
-        merged: true,
-        title: "Add usage-based billing",
-        body: "Implements metered billing per workspace.",
-        html_url: "https://github.com/acme/api/pull/123",
-        user: { login: "ada" },
-        merged_by: { login: "grace" },
-        merged_at: "2026-07-01T11:58:00Z",
-      },
-    },
-    { capturedAt: "2026-07-01T12:00:00.000Z" },
-  );
-  if (!item) throw new Error("Expected a normalized GitHub activity item.");
-  return item;
 }
 
 function gmailItem() {
@@ -274,56 +222,6 @@ function attioItem() {
     ],
     flushedAt: "2026-07-16T10:30:00.000Z",
   });
-}
-
-function githubCommentItem() {
-  const item = normalizeGitHubActivityWebhook(
-    "issue_comment",
-    {
-      action: "created",
-      repository: { id: 4242, full_name: "acme/api", private: false },
-      issue: {
-        number: 45,
-        title: "Billing webhook drops retries",
-        html_url: "https://github.com/acme/api/issues/45",
-        labels: [{ name: "bug" }],
-      },
-      comment: {
-        id: 987654321,
-        body: "We decided to drop retries older than 24h and alert on the rest.",
-        html_url: "https://github.com/acme/api/issues/45#issuecomment-987654321",
-        user: { login: "grace" },
-        created_at: "2026-07-02T08:15:00Z",
-      },
-      installation: { id: 777 },
-    },
-    { capturedAt: "2026-07-02T08:16:00.000Z" },
-  );
-  if (!item) throw new Error("Expected GitHub comment fixture to normalize.");
-  return item;
-}
-
-function githubOpenedIssueItem() {
-  const item = normalizeGitHubActivityWebhook(
-    "issues",
-    {
-      action: "opened",
-      repository: { id: 4242, full_name: "acme/api", private: false },
-      issue: {
-        number: 45,
-        title: "Billing webhook drops retries",
-        body: "Stripe retries are acknowledged before processing.",
-        html_url: "https://github.com/acme/api/issues/45",
-        user: { login: "ada" },
-        created_at: "2026-07-01T10:00:00Z",
-        labels: [{ name: "bug" }],
-      },
-      installation: { id: 777 },
-    },
-    { capturedAt: "2026-07-01T10:01:00.000Z" },
-  );
-  if (!item) throw new Error("Expected GitHub issue fixture to normalize.");
-  return item;
 }
 
 function triageResult(
@@ -475,16 +373,6 @@ describe("validateBrainAgentInvocation", () => {
   });
 });
 
-describe("buildGitHubActivityAgentIngestPrompt", () => {
-  it("maps product surfaces to the valid project entity type", () => {
-    const prompt = buildGitHubActivityAgentIngestPrompt(githubActivityItem());
-
-    expect(prompt).toContain("project page with entity type `project`");
-    expect(prompt).toContain("Do not use `product` as an entity type; it is not valid.");
-    expect(prompt).not.toContain("project/product page");
-  });
-});
-
 describe("capture-first ingest profiles", () => {
   // Regression guard for the incident that motivated the profile refactor: both
   // capture-first sources persist their content (an inbox draft, an uploaded
@@ -533,29 +421,11 @@ describe("capture-first ingest profiles", () => {
 });
 
 describe("tracker ingest profiles", () => {
-  it.each([LINEAR_ISSUE_INGEST_SYSTEM_PROMPT, GITHUB_ACTIVITY_INGEST_SYSTEM_PROMPT])(
-    "allows pointer-backed pages to become active without evidence snapshots",
-    (prompt) => {
-      expect(prompt).toContain("cites provenance with [[evidence:...]] or [[source:...]]");
-      expect(prompt).toContain("compiled truth has neither citation");
-    },
-  );
-});
-
-describe("buildJamieMeetingAgentIngestPrompt", () => {
-  it("carries the evidence pointer, deterministic meeting id, and source content", () => {
-    const item = jamieItem();
-    const ids = buildJamieMeetingIds(item);
-    const prompt = buildJamieMeetingAgentIngestPrompt(item, {
-      ...ids,
-      truncatedTranscript: false,
-    });
-
-    expect(prompt).toContain(`[[evidence:${ids.evidenceBrainId}|`);
-    expect(prompt).toContain(`id "${ids.meetingBrainId}"`);
-    expect(prompt).toContain("Ada (ada@example.com)");
-    expect(prompt).toContain(item.sourceRef);
-    expect(prompt).toContain("Transcript segment 0");
+  it("allows pointer-backed pages to become active without evidence snapshots", () => {
+    expect(LINEAR_ISSUE_INGEST_SYSTEM_PROMPT).toContain(
+      "cites provenance with [[evidence:...]] or [[source:...]]",
+    );
+    expect(LINEAR_ISSUE_INGEST_SYSTEM_PROMPT).toContain("compiled truth has neither citation");
   });
 });
 
@@ -863,37 +733,6 @@ describe("cheap source triage", () => {
 
     expect(result).toMatchObject({ skipped: true, skipMode: "triage" });
     expect(brainFilesMock.materializeBrainFilesToRoot).not.toHaveBeenCalled();
-  });
-
-  it("triages GitHub comments but sends opened issues directly to the full agent", async () => {
-    const runTriage = vi.fn(async () => triageResult("skip"));
-    const commentResult = await runGitHubActivityAgentIngest(
-      {
-        userWorkosId: "user_123",
-        brainRef: "gbrain_123",
-        item: githubCommentItem(),
-        env: { vercelAiGatewayApiKey: "gw_test" },
-      },
-      { runCli: okCli, runTriage },
-    );
-    expect(commentResult).toMatchObject({ skipped: true, skipMode: "triage" });
-
-    mockAgentRun({
-      finalText: "Updated billing project.",
-      toolInvocations: [{ command: "timeline-add", args: ["billing", "--body", "Bug opened."] }],
-    });
-    const openedResult = await runGitHubActivityAgentIngest(
-      {
-        userWorkosId: "user_123",
-        brainRef: "gbrain_123",
-        item: githubOpenedIssueItem(),
-        env: { vercelAiGatewayApiKey: "gw_test" },
-      },
-      { runCli: okCli, runTriage },
-    );
-
-    expect(openedResult).toMatchObject({ skipped: false });
-    expect(runTriage).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -1954,270 +1793,6 @@ describe("runChatCaptureAgentIngest", () => {
       budget: { accountingComplete: false, exhausted: true },
     });
     expect(brainFilesMock.syncBrainFilesFromRoot).not.toHaveBeenCalled();
-  });
-});
-
-describe("runJamieMeetingAgentIngest", () => {
-  it("writes the evidence snapshot, runs the tool loop, and syncs the brain", async () => {
-    const item = jamieItem();
-    const ids = buildJamieMeetingIds(item);
-    mockAgentRun({
-      finalText: "Updated meeting and attendee pages.",
-      toolInvocations: [
-        { command: "query", args: ["Ada", "--limit", "5"] },
-        {
-          command: "create",
-          args: ["--type", "person", "--id", "ada", "--title", "Ada", "--truth-stdin"],
-          stdin: "Ada leads GTM.",
-        },
-      ],
-    });
-
-    const result = await runJamieMeetingAgentIngest(
-      {
-        userWorkosId: "user_123",
-        brainRef: "gbrain_123",
-        item,
-        env: { vercelAiGatewayApiKey: "gw_test" },
-      },
-      { runCli: okCli },
-    );
-
-    expect(result).toMatchObject({
-      brainRef: "gbrain_123",
-      skipped: false,
-      toolCalls: 2,
-      mutations: 1,
-      upserted: 3,
-      meetingBrainId: ids.meetingBrainId,
-      evidenceBrainId: ids.evidenceBrainId,
-      summary: "Updated meeting and attendee pages.",
-    });
-    expect(workspacesMock.getDefaultBrainForUser).not.toHaveBeenCalled();
-    expect(localBrainMock.writeLocalBrainFile).toHaveBeenCalledWith(
-      expect.any(String),
-      `evidence/document/${ids.evidenceBrainId}.md`,
-      expect.stringContaining("Transcript segment 0"),
-    );
-    expect(brainFilesMock.syncBrainFilesFromRoot).toHaveBeenCalledWith(
-      expect.objectContaining({ brainRef: "gbrain_123", userWorkosId: "user_123" }),
-    );
-    expect(okCli).toHaveBeenCalledTimes(2);
-    expect(okCli).toHaveBeenCalledWith(
-      expect.objectContaining({
-        argv: [
-          "create",
-          "--type",
-          "person",
-          "--id",
-          "ada",
-          "--title",
-          "Ada",
-          "--truth-stdin",
-          "--json",
-        ],
-        stdin: "Ada leads GTM.",
-      }),
-    );
-  });
-
-  it("falls back to the user's default brain when the job has no brain ref", async () => {
-    mockAgentRun({
-      finalText: "Updated pages.",
-      toolInvocations: [{ command: "timeline-add", args: ["ada", "--body", "Met."] }],
-    });
-
-    await runJamieMeetingAgentIngest(
-      {
-        userWorkosId: "user_123",
-        brainRef: null,
-        item: jamieItem(),
-        env: { vercelAiGatewayApiKey: "gw_test" },
-      },
-      { runCli: okCli },
-    );
-
-    expect(workspacesMock.getDefaultBrainForUser).toHaveBeenCalledWith(
-      "user_123",
-      expect.anything(),
-    );
-    expect(brainFilesMock.syncBrainFilesFromRoot).toHaveBeenCalledWith(
-      expect.objectContaining({ brainRef: "gbrain_default" }),
-    );
-  });
-
-  it("treats a SKIP reply without writes as a successful no-op that still syncs evidence", async () => {
-    mockAgentRun({ finalText: "SKIP" });
-
-    const result = await runJamieMeetingAgentIngest(
-      {
-        userWorkosId: "user_123",
-        brainRef: "gbrain_123",
-        item: jamieItem(),
-        env: { vercelAiGatewayApiKey: "gw_test" },
-      },
-      { runCli: okCli },
-    );
-
-    expect(result).toMatchObject({ skipped: true, mutations: 0 });
-    expect(brainFilesMock.syncBrainFilesFromRoot).toHaveBeenCalledTimes(1);
-  });
-
-  it("treats reasoning that ends with SKIP on its own line as an explicit skip", async () => {
-    mockAgentRun({
-      finalText: "This is a transactional receipt email with no durable company knowledge.\n\nSKIP",
-      toolInvocations: [{ command: "query", args: ["receipt"] }],
-    });
-
-    const result = await runJamieMeetingAgentIngest(
-      {
-        userWorkosId: "user_123",
-        brainRef: "gbrain_123",
-        item: jamieItem(),
-        env: { vercelAiGatewayApiKey: "gw_test" },
-      },
-      { runCli: okCli },
-    );
-
-    expect(result).toMatchObject({
-      skipped: true,
-      skipMode: "explicit",
-      reason: "This is a transactional receipt email with no durable company knowledge.",
-      mutations: 0,
-    });
-  });
-
-  it("keeps the reason that follows a leading SKIP sentinel", async () => {
-    mockAgentRun({ finalText: "SKIP — routine dependency bump, nothing durable." });
-
-    const result = await runJamieMeetingAgentIngest(
-      {
-        userWorkosId: "user_123",
-        brainRef: "gbrain_123",
-        item: jamieItem(),
-        env: { vercelAiGatewayApiKey: "gw_test" },
-      },
-      { runCli: okCli },
-    );
-
-    expect(result).toMatchObject({
-      skipped: true,
-      skipMode: "explicit",
-      reason: "routine dependency bump, nothing durable.",
-      mutations: 0,
-    });
-  });
-
-  it("does not mistake words starting with the sentinel for an explicit skip", async () => {
-    mockAgentRun({
-      finalText: "SKIPPED nothing; the meeting page was already current.",
-      toolInvocations: [{ command: "query", args: ["meeting"] }],
-    });
-
-    const result = await runJamieMeetingAgentIngest(
-      {
-        userWorkosId: "user_123",
-        brainRef: "gbrain_123",
-        item: jamieItem(),
-        env: { vercelAiGatewayApiKey: "gw_test" },
-      },
-      { runCli: okCli },
-    );
-
-    expect(result).toMatchObject({ skipped: true, skipMode: "inferred_no_mutations" });
-  });
-
-  it("infers a skip when the agent completes without brain mutations", async () => {
-    mockAgentRun({
-      finalText: "All done!",
-      toolInvocations: [{ command: "query", args: ["Ada"] }],
-    });
-
-    const result = await runJamieMeetingAgentIngest(
-      {
-        userWorkosId: "user_123",
-        brainRef: "gbrain_123",
-        item: jamieItem(),
-        env: { vercelAiGatewayApiKey: "gw_test" },
-      },
-      { runCli: okCli },
-    );
-
-    expect(result).toMatchObject({
-      skipped: true,
-      skipMode: "inferred_no_mutations",
-      reason: "No brain-worthy content identified; agent completed without brain mutations.",
-      mutations: 0,
-    });
-    expect(brainFilesMock.syncBrainFilesFromRoot).toHaveBeenCalled();
-  });
-
-  it("blocks disallowed tool invocations without running the CLI", async () => {
-    mockAgentRun({
-      finalText: "Updated pages.",
-      toolInvocations: [
-        { command: "delete", args: ["ada", "--force"] },
-        { command: "rewrite", args: ["ada", "--truth", "Ada leads GTM."] },
-      ],
-    });
-
-    const result = await runJamieMeetingAgentIngest(
-      {
-        userWorkosId: "user_123",
-        brainRef: "gbrain_123",
-        item: jamieItem(),
-        env: { vercelAiGatewayApiKey: "gw_test" },
-      },
-      { runCli: okCli },
-    );
-
-    expect(okCli).toHaveBeenCalledTimes(1);
-    expect(result).toMatchObject({
-      toolCalls: 2,
-      mutations: 1,
-      trace: {
-        toolCallCount: 2,
-        mutations: 1,
-        toolCalls: [
-          expect.objectContaining({
-            command: "delete",
-            args: ["ada", "--force"],
-            status: "blocked",
-            mutating: true,
-            errorPreview: expect.stringContaining("not available"),
-          }),
-          expect.objectContaining({
-            command: "rewrite",
-            status: "completed",
-            mutating: true,
-          }),
-        ],
-      },
-    });
-  });
-
-  it("fails on sync conflicts so the job retries against a fresh snapshot", async () => {
-    brainFilesMock.syncBrainFilesFromRoot.mockResolvedValueOnce({
-      upserted: 0,
-      deleted: 0,
-      conflicts: [{ path: "people/ada.md" }],
-    });
-    mockAgentRun({
-      finalText: "Updated pages.",
-      toolInvocations: [{ command: "rewrite", args: ["ada", "--truth", "Ada leads GTM."] }],
-    });
-
-    await expect(
-      runJamieMeetingAgentIngest(
-        {
-          userWorkosId: "user_123",
-          brainRef: "gbrain_123",
-          item: jamieItem(),
-          env: { vercelAiGatewayApiKey: "gw_test" },
-        },
-        { runCli: okCli },
-      ),
-    ).rejects.toThrow(/people\/ada\.md/);
   });
 });
 

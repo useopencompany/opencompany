@@ -2396,84 +2396,6 @@
             ],
             "additionalProperties": false
           },
-          "jamie": {
-            "type": "object",
-            "properties": {
-              "integration": {
-                "type": "object",
-                "properties": {
-                  "provider": {
-                    "type": "string",
-                    "enum": [
-                      "jamie"
-                    ]
-                  },
-                  "connected": {
-                    "type": "boolean"
-                  },
-                  "status": {
-                    "type": "string",
-                    "enum": [
-                      "connected",
-                      "needs_reauth",
-                      "sync_failed",
-                      "disconnected",
-                      "not_connected"
-                    ]
-                  },
-                  "integrationId": {
-                    "type": "string",
-                    "nullable": true,
-                    "minLength": 1,
-                    "maxLength": 256,
-                    "example": "run_019fed53"
-                  },
-                  "statusReason": {
-                    "type": "string",
-                    "nullable": true,
-                    "maxLength": 2000
-                  },
-                  "accountName": {
-                    "type": "string",
-                    "nullable": true,
-                    "maxLength": 512
-                  },
-                  "webhookUrl": {
-                    "type": "string",
-                    "nullable": true,
-                    "maxLength": 4096,
-                    "format": "uri"
-                  },
-                  "apiKeyConfigured": {
-                    "type": "boolean"
-                  }
-                },
-                "required": [
-                  "provider",
-                  "connected",
-                  "status",
-                  "integrationId",
-                  "statusReason",
-                  "accountName",
-                  "webhookUrl",
-                  "apiKeyConfigured"
-                ],
-                "additionalProperties": false
-              },
-              "legacyDefaultDelivery": {
-                "type": "boolean"
-              },
-              "isDefaultBrain": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "integration",
-              "legacyDefaultDelivery",
-              "isDefaultBrain"
-            ],
-            "additionalProperties": false
-          },
           "linear": {
             "type": "object",
             "properties": {
@@ -2530,65 +2452,6 @@
                   "statusReason",
                   "accountName",
                   "organizationName"
-                ],
-                "additionalProperties": false
-              }
-            },
-            "required": [
-              "integration"
-            ],
-            "additionalProperties": false
-          },
-          "github": {
-            "type": "object",
-            "properties": {
-              "integration": {
-                "type": "object",
-                "properties": {
-                  "provider": {
-                    "type": "string",
-                    "enum": [
-                      "github"
-                    ]
-                  },
-                  "connected": {
-                    "type": "boolean"
-                  },
-                  "status": {
-                    "type": "string",
-                    "enum": [
-                      "connected",
-                      "needs_reauth",
-                      "sync_failed",
-                      "disconnected",
-                      "not_connected"
-                    ]
-                  },
-                  "integrationId": {
-                    "type": "string",
-                    "nullable": true,
-                    "minLength": 1,
-                    "maxLength": 256,
-                    "example": "run_019fed53"
-                  },
-                  "statusReason": {
-                    "type": "string",
-                    "nullable": true,
-                    "maxLength": 2000
-                  },
-                  "accountName": {
-                    "type": "string",
-                    "nullable": true,
-                    "maxLength": 512
-                  }
-                },
-                "required": [
-                  "provider",
-                  "connected",
-                  "status",
-                  "integrationId",
-                  "statusReason",
-                  "accountName"
                 ],
                 "additionalProperties": false
               }
@@ -2975,9 +2838,7 @@
           "viewer",
           "sources",
           "ownAccounts",
-          "jamie",
           "linear",
-          "github",
           "gmail",
           "googleDrive",
           "hubspot",
@@ -2999,10 +2860,8 @@
           "provider": {
             "type": "string",
             "enum": [
-              "jamie",
               "gmail",
               "google_drive",
-              "github",
               "linear",
               "slack_bot",
               "hubspot",
@@ -3169,10 +3028,8 @@
               "provider": {
                 "type": "string",
                 "enum": [
-                  "jamie",
                   "gmail",
                   "google_drive",
-                  "github",
                   "linear",
                   "slack_bot",
                   "hubspot",
@@ -3217,10 +3074,8 @@
               "provider": {
                 "type": "string",
                 "enum": [
-                  "jamie",
                   "gmail",
                   "google_drive",
-                  "github",
                   "linear",
                   "slack_bot",
                   "hubspot",
@@ -3462,72 +3317,6 @@
               "provider",
               "enabled",
               "objectTypes",
-              "events"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "operation": {
-                "type": "string",
-                "enum": [
-                  "configure"
-                ]
-              },
-              "provider": {
-                "type": "string",
-                "enum": [
-                  "github"
-                ]
-              },
-              "enabled": {
-                "type": "boolean"
-              },
-              "repos": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    },
-                    "fullName": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "fullName"
-                  ],
-                  "additionalProperties": false
-                },
-                "maxItems": 500
-              },
-              "events": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "enum": [
-                    "pull_request_opened",
-                    "pull_request_merged",
-                    "pull_request_commented",
-                    "issue_opened",
-                    "issue_commented"
-                  ]
-                },
-                "maxItems": 50
-              }
-            },
-            "required": [
-              "operation",
-              "provider",
-              "enabled",
-              "repos",
               "events"
             ],
             "additionalProperties": false
@@ -5357,49 +5146,6 @@
               "provider": {
                 "type": "string",
                 "enum": [
-                  "github"
-                ]
-              },
-              "repos": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    },
-                    "fullName": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    },
-                    "private": {
-                      "type": "boolean"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "fullName",
-                    "private"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            },
-            "required": [
-              "provider",
-              "repos"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "provider": {
-                "type": "string",
-                "enum": [
                   "google_drive"
                 ]
               },
@@ -5539,32 +5285,6 @@
                   "minLength": 1,
                   "maxLength": 256,
                   "example": "run_019fed53"
-                },
-                "config": {
-                  "type": "object",
-                  "properties": {
-                    "repos": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 200
-                          },
-                          "fullName": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 200
-                          }
-                        },
-                        "additionalProperties": false
-                      },
-                      "maxItems": 20
-                    }
-                  },
-                  "additionalProperties": false
                 }
               },
               "required": [
@@ -5589,8 +5309,6 @@
               "type": "string",
               "enum": [
                 "public_web",
-                "github",
-                "jamie",
                 "granola",
                 "fathom",
                 "gmail",
@@ -6247,10 +5965,8 @@
             "type": "string",
             "enum": [
               "gmail",
-              "jamie",
               "granola",
-              "linear",
-              "github"
+              "linear"
             ]
           },
           "integrationId": {
@@ -6399,10 +6115,8 @@
             "type": "string",
             "enum": [
               "gmail",
-              "jamie",
               "granola",
-              "linear",
-              "github"
+              "linear"
             ]
           },
           "sourceType": {
@@ -6539,10 +6253,8 @@
             "type": "string",
             "enum": [
               "gmail",
-              "jamie",
               "granola",
-              "linear",
-              "github"
+              "linear"
             ]
           },
           "enabled": {
@@ -10885,61 +10597,6 @@
         "required": [
           "data",
           "meta"
-        ],
-        "additionalProperties": false
-      },
-      "JamieWebhookSetupEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "type": "object",
-            "properties": {
-              "setup": {
-                "$ref": "#/components/schemas/JamieWebhookSetup"
-              }
-            },
-            "required": [
-              "setup"
-            ],
-            "additionalProperties": false
-          },
-          "meta": {
-            "$ref": "#/components/schemas/ProtocolMetadata"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "JamieWebhookSetup": {
-        "type": "object",
-        "properties": {
-          "integrationId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128,
-            "example": "gint_0f8e7d6c5b4a",
-            "description": "Integration connection id."
-          },
-          "webhookUrl": {
-            "type": "string",
-            "minLength": 1
-          },
-          "headerName": {
-            "type": "string",
-            "minLength": 1
-          },
-          "apiKeyConfigured": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "integrationId",
-          "webhookUrl",
-          "headerName",
-          "apiKeyConfigured"
         ],
         "additionalProperties": false
       },
@@ -16925,21 +16582,6 @@
                       "provider": {
                         "type": "string",
                         "enum": [
-                          "github"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "provider"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "provider": {
-                        "type": "string",
-                        "enum": [
                           "google_drive"
                         ]
                       },
@@ -21637,90 +21279,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/StripeAccountDeleteEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/integration-accounts/jamie/webhook-endpoint": {
-      "post": {
-        "tags": [
-          "Integrations"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Jamie webhook endpoint created or reset for the workspace. Admin only. Any previously saved API key binding is cleared.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/JamieWebhookSetupEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/integration-accounts/jamie/api-key": {
-      "put": {
-        "tags": [
-          "Integrations"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IntegrationApiKeyBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Jamie webhook API key bound to the workspace endpoint. Admin only; only a hash is stored and the key never appears in the response.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/JamieWebhookSetupEnvelope"
                 }
               }
             }

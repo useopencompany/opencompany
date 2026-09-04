@@ -14,7 +14,6 @@ import {
   type NormalizedBrainSourceItem,
   type NormalizedChatCaptureSourceItem,
   type NormalizedFathomMeetingSourceItem,
-  type NormalizedGitHubActivitySourceItem,
   type NormalizedGmailThreadContent,
   type NormalizedGmailThreadSourceItem,
   type NormalizedGoogleDriveDocumentSourceItem,
@@ -22,7 +21,6 @@ import {
   type NormalizedHubspotObjectContent,
   type NormalizedHubspotObjectSourceItem,
   type NormalizedImportSourceItem,
-  type NormalizedJamieMeetingSourceItem,
   type NormalizedLinearIssueContent,
   type NormalizedLinearIssueSourceItem,
   type NormalizedUploadAssetSourceItem,
@@ -89,19 +87,10 @@ import {
 import {
   type BrainIngestTriageInput,
   buildAttioIngestTriagePrompt,
-  buildGitHubCommentIngestTriagePrompt,
   buildGmailIngestTriagePrompt,
   runBrainIngestTriage,
 } from "./brain-ingest-triage";
-import {
-  buildJamieMeetingEvidenceWrite,
-  formatActionItems,
-  formatParticipants,
-  formatTranscript,
-  formatTranscriptExcerpt,
-  JAMIE_MEETING_FOLDER,
-  truncateByBytes,
-} from "./brain-jamie-writes";
+import { truncateByBytes } from "./brain-write-utils";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 
@@ -147,7 +136,7 @@ const ENRICHMENT_RESULT_SUMMARY_LIMIT = 800;
 // Agent-driven captures snapshot into a provenance subfolder of the evidence
 // zone, so the raw pile is organized by source instead of dumped into the
 // "evidence/" root. Mirrors the deterministic connector evidence folders
-// (evidence/document for Jamie, evidence/email for Gmail).
+// (evidence/document for meeting notes, evidence/email for Gmail).
 export const CHAT_CAPTURE_EVIDENCE_FOLDER = "evidence/chat";
 const AGENT_CLI_TIMEOUT_MS = 60_000;
 const AGENT_CLI_STDOUT_LIMIT = 24_000;
@@ -158,7 +147,6 @@ const PROMPT_CAPTURE_BYTES = 64_000;
 const PROMPT_ASSET_TEXT_BYTES = 100_000;
 const PROMPT_LINEAR_DESCRIPTION_BYTES = 24_000;
 const PROMPT_LINEAR_ACTIVITY_BYTES = 80_000;
-const PROMPT_GITHUB_ACTIVITY_BYTES = 80_000;
 const PROMPT_HUBSPOT_ACTIVITY_BYTES = 60_000;
 const PROMPT_HUBSPOT_PROPERTIES_BYTES = 24_000;
 const PROMPT_ATTIO_ACTIVITY_BYTES = 60_000;
@@ -307,11 +295,6 @@ export const BRAIN_ENRICHMENT_SYSTEM_ADDENDUM = [
   "- No fabrication still governs: never fold an unattributed web claim into a page, and never let a search invent an entity the source did not establish.",
   `- Budget: at most ${BRAIN_ENRICHMENT_SEARCH_LIMIT} web searches for this whole ingest. When the budget is exhausted the tool refuses further calls; finish with what you have.`,
 ].join("\n");
-
-export const JAMIE_MEETING_INGEST_SYSTEM_PROMPT = buildBrainIngestSystemPrompt({
-  mission: "folds one source item into a single brain of Markdown knowledge documents.",
-  skipRule: `If the source content is not brain-worthy (spam, empty, pure noise), make no writes and reply with exactly ${BRAIN_AGENT_SKIP_SENTINEL}.`,
-});
 
 export const GRANOLA_MEETING_INGEST_SYSTEM_PROMPT = buildBrainIngestSystemPrompt({
   mission: "folds one source item into a single brain of Markdown knowledge documents.",
@@ -687,122 +670,6 @@ export function buildLinearIssueAgentIngestPrompt(item: NormalizedLinearIssueSou
     .join("\n");
 }
 
-export const GITHUB_ACTIVITY_INGEST_SYSTEM_PROMPT = buildBrainIngestSystemPrompt({
-  mission:
-    "folds one GitHub activity event or one buffered pull-request activity window into a single brain of Markdown knowledge documents.",
-  skipRule: `GitHub activity is often routine: dependency bumps, typo fixes, chores, housekeeping issues, and comments that are acknowledgements or status pings ("LGTM", "+1", "done") carry no durable knowledge. If the event is not brain-worthy, make no writes and reply with exactly ${BRAIN_AGENT_SKIP_SENTINEL}. Only work that changes a project's state of play belongs in the brain: shipped or in-flight features, meaningful fixes, newly surfaced problems, and decisions recorded in a description or comment.`,
-});
-
-export function buildGitHubActivityAgentIngestPrompt(item: NormalizedGitHubActivitySourceItem) {
-  const activity = item.content.activity;
-  if (activity.events && activity.events.length > 0) {
-    const fullActivityText = activity.events
-      .map((event, index) => {
-        const stats = [
-          event.author ? `- Author: ${event.author}` : null,
-          event.mergedBy ? `- Merged by: ${event.mergedBy}` : null,
-          event.baseRef && event.headRef
-            ? `- Branches: ${event.headRef} -> ${event.baseRef}`
-            : null,
-          event.additions !== undefined && event.deletions !== undefined
-            ? `- Size: +${event.additions} / -${event.deletions}${
-                event.changedFiles !== undefined ? ` across ${event.changedFiles} files` : ""
-              }`
-            : null,
-          event.labels?.length ? `- Labels: ${event.labels.join(", ")}` : null,
-        ].filter((line): line is string => line !== null);
-        return [
-          `### ${index + 1}. ${event.state} at ${event.occurredAt}`,
-          `- Source ref: ${event.sourceRef}`,
-          `- URL: ${event.url}`,
-          ...stats,
-          event.truncatedBody ? "- Body was truncated at normalization time." : null,
-          "",
-          event.body.trim() || "(no description or comment body)",
-        ]
-          .filter((line): line is string => line !== null)
-          .join("\n");
-      })
-      .join("\n\n");
-    const activityText = truncateByBytes(fullActivityText, PROMPT_GITHUB_ACTIVITY_BYTES);
-    const truncated =
-      Buffer.byteLength(activityText, "utf8") < Buffer.byteLength(fullActivityText, "utf8");
-    return [
-      `Ingest this batch of GitHub activity on pull request ${activity.repository.fullName}#${activity.number} into the brain. It is one activity window containing everything buffered since the last ingest.`,
-      "",
-      "Required outcome, all scoped to this brain:",
-      "1. Query the brain first for the project, product, or repository this work belongs to, and for the entities the window touches, so you update existing knowledge instead of duplicating it.",
-      "2. Judge the window as a whole: keep only durable changes to a project's state of play — substantial work started or shipped, meaningful fixes, newly surfaced problems, and decisions in discussion. Ignore routine review acknowledgements and status pings.",
-      `3. Fold each durable point into the page where it belongs: rewrite compiled truth when the state of play changes and add dated evidence with the event's listed source ref. The PR-level source ref is ${item.sourceRef}.`,
-      `4. Pointer discipline: this pull request has a canonical live home (${activity.url}). Cite it as a pointer plus a one-line current-state summary — [[source:${item.sourceRef}|${activity.repository.fullName}#${activity.number}]]. Never copy the full description or discussion into a page and never snapshot it into evidence/.`,
-      "5. Create a project/product page only when this work is substantial enough to seed one. Update person or company pages only when the window reveals durable knowledge about them; do not create person pages for authors or reviewers merely participating in the PR.",
-      "",
-      `Source ref: ${item.sourceRef}`,
-      `Window: ${activity.windowStart} to ${activity.windowEnd}`,
-      `Current title: ${activity.title}`,
-      `Current state: ${activity.state}`,
-      `URL: ${activity.url}`,
-      truncated ? "The activity below was truncated to fit the 80 KB prompt limit." : null,
-      "",
-      `## Activity window\n${activityText}`,
-    ]
-      .filter((line): line is string => line !== null)
-      .join("\n");
-  }
-
-  const artifact = activity.kind === "pull_request" ? "pull request" : "issue";
-  const ref = `${activity.repository.fullName}#${activity.number}`;
-  const label =
-    activity.state === "commented"
-      ? `comment on ${artifact} ${ref}`
-      : activity.state === "merged"
-        ? `merged pull request ${ref}`
-        : `newly opened ${artifact} ${ref}`;
-  const stats =
-    activity.state === "commented"
-      ? [activity.author ? `- Comment by: ${activity.author}` : null]
-      : activity.kind === "pull_request"
-        ? [
-            activity.author ? `- Author: ${activity.author}` : null,
-            activity.mergedBy ? `- Merged by: ${activity.mergedBy}` : null,
-            activity.baseRef && activity.headRef
-              ? `- Branches: ${activity.headRef} -> ${activity.baseRef}`
-              : null,
-            activity.additions !== undefined && activity.deletions !== undefined
-              ? `- Size: +${activity.additions} / -${activity.deletions}${
-                  activity.changedFiles !== undefined
-                    ? ` across ${activity.changedFiles} files`
-                    : ""
-                }`
-              : null,
-          ]
-        : [activity.author ? `- Author: ${activity.author}` : null];
-  const labels = activity.labels && activity.labels.length > 0 ? activity.labels.join(", ") : null;
-  return [
-    `Ingest this ${label} into the brain.`,
-    "",
-    "Required outcome, all scoped to this brain:",
-    "1. Query the brain first for the project or repository area this work belongs to (including any named product surface), and for the entities the event touches, so you update existing knowledge instead of duplicating it.",
-    `2. Judge brain-worthiness: does this event change what someone should believe about a project's state of play? Routine housekeeping does not. ${activity.state === "commented" ? "A comment records discussion on a tracked item — ingest it only when it carries a durable decision, a new fact, or a change in direction, not routine back-and-forth, acknowledgements, or status pings." : activity.state === "opened" ? "An opened item records work or a problem now in flight — ingest it only when what it starts or surfaces matters at the project level." : "A merged pull request records shipped work — ingest it only when what shipped matters at the project level."}`,
-    `3. Fold what it changes into the page where it belongs — usually a project page: rewrite compiled truth when the state of play changes, and record the event as dated evidence with timeline-add --source-ref ${item.sourceRef}.`,
-    `4. Pointer discipline: this is a tracked work item with a canonical live home (${activity.url}). Cite it as a pointer plus a one-line current-state summary — [[source:${item.sourceRef}|${activity.repository.fullName}${activity.number !== undefined ? `#${activity.number}` : ""}]]. Never copy the description into a page and never snapshot it into evidence/; the tracker copy goes stale immediately.`,
-    "5. Create a project page with entity type `project` when the repository area or product surface clearly has none yet and this event is substantial enough to seed one. If a matching custom folder such as product/ exists, use it for product-surface work. Do not use `product` as an entity type; it is not valid. Do not fold product implementation details into the top-level company page merely because no page exists yet. Update person or company pages only when the event reveals durable knowledge about them; do not create person pages for people who merely authored or merged the change.",
-    "",
-    `Source ref: ${item.sourceRef}`,
-    `Occurred at: ${item.occurredAt}`,
-    `URL: ${activity.url}`,
-    activity.truncatedBody
-      ? `The ${activity.state === "commented" ? "comment" : "description"} below was truncated to fit the size limit.`
-      : null,
-    "",
-    `## Event\n- Repository: ${activity.repository.fullName}${activity.repository.private ? " (private)" : ""}\n- Kind: ${activity.kind}\n- State: ${activity.state}\n- Title: ${activity.title}${labels ? `\n- Labels: ${labels}` : ""}`,
-    ...stats.filter((line): line is string => line !== null),
-    `## ${activity.state === "commented" ? "Comment" : "Description"}\n${activity.body.trim() || "(none)"}`,
-  ]
-    .filter((line): line is string => line !== null)
-    .join("\n");
-}
-
 function formatLinearIssueSnapshot(issue: NormalizedLinearIssueContent["issue"]) {
   const lines = [
     `- Issue: ${issue.identifier ?? issue.issueId} — ${issue.title}`,
@@ -853,54 +720,6 @@ function formatLinearIssueComments(issue: NormalizedLinearIssueContent["issue"])
       return `[${time}] ${author} (comment id ${comment.id}): ${body}`;
     })
     .join("\n");
-}
-
-export function buildJamieMeetingAgentIngestPrompt(
-  item: NormalizedJamieMeetingSourceItem,
-  context: {
-    meetingBrainId: string;
-    evidenceBrainId: string;
-    truncatedTranscript: boolean;
-  },
-) {
-  const meeting = item.content.meeting;
-  const transcript = boundedTranscriptMarkdown(item);
-  return [
-    "Ingest this completed meeting from Jamie (an AI meeting notetaker) into the brain.",
-    "",
-    "A raw evidence snapshot of these notes already exists in this brain:",
-    `- Evidence record: [[evidence:${context.evidenceBrainId}|Jamie meeting notes]] (id: ${context.evidenceBrainId})`,
-    context.truncatedTranscript
-      ? "- The evidence transcript was truncated to fit the file size limit."
-      : null,
-    "",
-    "Required outcome, all scoped to this brain:",
-    `1. A meeting page with id "${context.meetingBrainId}" in the "${JAMIE_MEETING_FOLDER}" folder (type: meeting) whose compiled truth synthesizes the meeting: what it was, decisions, action items, and [[page:...]] links to every attendee and company page. If the folder is missing, run folder create first. Link the evidence record. Do not paste the transcript.`,
-    "2. A person page per human attendee (skip notetaker bots), created or updated, with the meeting on their timeline (use --evidence-id and --source-ref). Update their compiled truth only when the meeting changes their state of play (role, company, plans).",
-    "3. Company pages for organizations that are clearly central to the meeting, with the meeting on their timelines. Do not create company pages from a bare email domain alone.",
-    "4. Backlinks between all of these pages per the iron law.",
-    "",
-    `Source ref: ${item.sourceRef}`,
-    `Occurred at: ${item.occurredAt}`,
-    `Captured at: ${item.capturedAt}`,
-    "",
-    `## Meeting title\n${meeting.title}`,
-    `## Meeting metadata\n- Started: ${meeting.startTime}${meeting.endTime ? `\n- Ended: ${meeting.endTime}` : ""}`,
-    `## Participants\n${formatParticipants(item)}`,
-    `## Action items\n${formatActionItems(item)}`,
-    `## Summary (from Jamie)\n${truncateByBytes(meeting.summaryMarkdown, PROMPT_SUMMARY_BYTES)}`,
-    `## Transcript\n${transcript}`,
-  ]
-    .filter((line): line is string => line !== null)
-    .join("\n");
-}
-
-function boundedTranscriptMarkdown(item: NormalizedJamieMeetingSourceItem) {
-  const segments = item.content.meeting.transcript;
-  if (segments.length === 0) return "No transcript provided by Jamie.";
-  const full = formatTranscript(segments);
-  if (Buffer.byteLength(full, "utf8") <= PROMPT_TRANSCRIPT_BYTES) return full;
-  return formatTranscriptExcerpt(segments, PROMPT_TRANSCRIPT_BYTES);
 }
 
 export function buildGranolaMeetingAgentIngestPrompt(
@@ -1693,7 +1512,7 @@ export function runImportAgentIngest(
   return runBrainIngestProfile(IMPORT_INGEST_PROFILE, input, deps);
 }
 
-// Jamie, Granola, and Fathom share one shape: snapshot the transcript to
+// Granola and Fathom share one shape: snapshot the transcript to
 // evidence/ deterministically before the agent runs (a 400KB transcript should
 // not round-trip through model tool calls), then curate from that pointer.
 function meetingEvidenceProfile<
@@ -1728,19 +1547,6 @@ function meetingEvidenceProfile<
       };
     },
   };
-}
-
-const JAMIE_MEETING_INGEST_PROFILE = meetingEvidenceProfile({
-  system: JAMIE_MEETING_INGEST_SYSTEM_PROMPT,
-  buildEvidence: buildJamieMeetingEvidenceWrite,
-  buildPrompt: buildJamieMeetingAgentIngestPrompt,
-});
-
-export function runJamieMeetingAgentIngest(
-  input: BrainIngestProfileInput<NormalizedJamieMeetingSourceItem>,
-  deps: BrainAgentIngestDeps = {},
-): Promise<Record<string, unknown>> {
-  return runBrainIngestProfile(JAMIE_MEETING_INGEST_PROFILE, input, deps);
 }
 
 const GRANOLA_MEETING_INGEST_PROFILE = meetingEvidenceProfile({
@@ -1803,7 +1609,7 @@ export function runChatCaptureAgentIngest(
   return runBrainIngestProfile(CHAT_CAPTURE_INGEST_PROFILE, input, deps);
 }
 
-// Linear, HubSpot, Attio, GitHub, and Drive share one shape: fold a
+// Linear, HubSpot, Attio, and Drive share one shape: fold a
 // window of externally-authored activity into the brain, skipping when nothing
 // is brain-worthy (the common, correct outcome for high-noise sources). They
 // differ only in prompt and returned metadata.
@@ -1976,29 +1782,6 @@ export function runGoogleDriveDocumentAgentIngest(
   deps: BrainAgentIngestDeps = {},
 ): Promise<Record<string, unknown>> {
   return runBrainIngestProfile(GOOGLE_DRIVE_DOCUMENT_INGEST_PROFILE, input, deps);
-}
-
-const GITHUB_ACTIVITY_INGEST_PROFILE = externalActivityProfile<NormalizedGitHubActivitySourceItem>({
-  system: GITHUB_ACTIVITY_INGEST_SYSTEM_PROMPT,
-  buildPrompt: buildGitHubActivityAgentIngestPrompt,
-  buildTriagePrompt: (item) =>
-    item.content.activity.state === "commented" ? buildGitHubCommentIngestTriagePrompt(item) : null,
-  metadata: (item) => {
-    const activity = item.content.activity;
-    return {
-      activityKind: activity.kind,
-      activityState: activity.state,
-      repository: activity.repository.fullName,
-      ...(activity.number !== undefined ? { number: activity.number } : {}),
-    };
-  },
-});
-
-export function runGitHubActivityAgentIngest(
-  input: BrainIngestProfileInput<NormalizedGitHubActivitySourceItem>,
-  deps: BrainAgentIngestDeps = {},
-): Promise<Record<string, unknown>> {
-  return runBrainIngestProfile(GITHUB_ACTIVITY_INGEST_PROFILE, input, deps);
 }
 
 export const UPLOAD_ASSET_INGEST_PROFILE: BrainIngestProfile<NormalizedUploadAssetSourceItem> = {
@@ -2330,7 +2113,7 @@ export async function runIngestAgentLoop(input: {
       description: [
         "Run one opencompany-brain CLI command against this brain.",
         `Commands: ${commands.join(", ")}.`,
-        'Pass everything after the command name as args tokens, e.g. {"command":"query","args":["hiring plan","--limit","5"]} or {"command":"timeline-add","args":["ada","--body","Met at roadmap review.","--source-ref","jamie:meeting:123"]}.',
+        'Pass everything after the command name as args tokens, e.g. {"command":"query","args":["hiring plan","--limit","5"]} or {"command":"timeline-add","args":["ada","--body","Met at roadmap review.","--source-ref","granola:meeting:123"]}.',
         'For long bodies use stdin with the matching flag, e.g. {"command":"create","args":["--type","person","--id","ada","--title","Ada","--truth-stdin"],"stdin":"..."}.',
         'For syntax not covered by the system prompt, call {"command":"help","args":["<command>"]}.',
         "A successful write returns an authoritative structured receipt with the resulting page status and timeline entry count. Continue from it; do not call get or timeline on an affected page to verify the write.",

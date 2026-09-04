@@ -33,9 +33,9 @@ carry source content, create jobs, or bypass polling and leases.
 
 ## Current source families
 
-The registered handlers cover meeting sources (Jamie, Granola, and Fathom), explicit Chat/MCP
+The registered handlers cover meeting sources (Granola and Fathom), explicit Chat/MCP
 captures, uploaded assets, Google Drive documents, provider pointers (Gmail and Linear),
-provider activity or content (Gmail, Linear, GitHub, HubSpot, and Attio), and whole-Brain
+provider activity or content (Gmail, Linear, HubSpot, and Attio), and whole-Brain
 imports. The exact `(kind, sourceProvider, sourceType)` registry in the runner is the source of truth;
 update that registry, payload validation, and this overview together.
 

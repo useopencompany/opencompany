@@ -68,6 +68,34 @@ function harnessInput(
 }
 
 describe("AcpHarness", () => {
+  it("retries an initialize timeout because no engine execution has started", async () => {
+    vi.useFakeTimers();
+    try {
+      const transport = fakeAcpSandbox(async () => {});
+      const run = new AcpHarness().runTurn(
+        harnessInput(transport.sandbox, {
+          adapter: CODEX_ACP_ENGINE_ADAPTER,
+        }),
+      );
+      const rejected = expect(run).rejects.toMatchObject({
+        name: CodexChatRetryableInfrastructureError.name,
+        message: 'Codex ACP request "initialize" failed before execution started.',
+        cause: expect.objectContaining({
+          message: 'ACP request "initialize" timed out.',
+        }),
+        diagnosticMessage: '[acp_initialize] Error: ACP request "initialize" timed out.',
+      });
+
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      await rejected;
+      expect(transport.requests).toContainEqual(expect.objectContaining({ method: "initialize" }));
+      expect(transport.kill).toHaveBeenCalledWith(41);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("starts Claude with core MCP tools ready while plugin MCP tools stay deferred", async () => {
     let resolvePermission: (() => void) | null = null;
     const permissionAnswered = new Promise<void>((resolve) => {
@@ -561,7 +589,11 @@ describe("AcpHarness", () => {
       onExistingSessionInvalidated,
     });
 
-    await expect(new AcpHarness().runTurn(input)).rejects.toThrow(/exited unexpectedly/);
+    await expect(new AcpHarness().runTurn(input)).rejects.toMatchObject({
+      name: CodexChatRetryableInfrastructureError.name,
+      message: 'Claude Code ACP request "session/load" failed before execution started.',
+      cause: expect.objectContaining({ message: expect.stringMatching(/exited unexpectedly/) }),
+    });
     expect(onExistingSessionInvalidated).not.toHaveBeenCalled();
     expect(requests.find((request) => request.method === "session/new")).toBeUndefined();
   });

@@ -56,9 +56,6 @@ const wikiAdmin: Actor = {
   permissions: ["wiki:read", "wiki:write"],
 };
 
-const connectedGitHub = {
-  integration: { integrationId: "integration_gh" },
-};
 const disconnected = { integration: { integrationId: null } };
 
 function sourcesDetails(overrides: Record<string, unknown> = {}) {
@@ -66,7 +63,6 @@ function sourcesDetails(overrides: Record<string, unknown> = {}) {
     viewer: { actorId: "user_1", isAdmin: true },
     sources: [] as Array<Record<string, unknown>>,
     ownAccounts: {},
-    github: connectedGitHub,
     jamie: disconnected,
     granola: disconnected,
     fathom: disconnected,
@@ -88,11 +84,9 @@ function service(input?: {
     input?.listOptions ??
       (async () =>
         ({
-          provider: "github",
-          repos: [
-            { id: "repo_1", fullName: "acme/api", private: true },
-            { id: "repo_2", fullName: "acme/web", private: false },
-          ],
+          provider: "linear",
+          teams: [{ id: "team_1", name: "Engineering", key: "ENG" }],
+          partial: false,
         }) as never),
   );
   return {
@@ -139,39 +133,6 @@ describe("BrainImportApplicationService", () => {
     expect(mocks.startRun).not.toHaveBeenCalled();
   });
 
-  it("normalizes the selection server-side and binds GitHub scope to listed repositories", async () => {
-    const { service: imports, listOptions } = service();
-
-    const result = await imports.start(admin, "brain_1", {
-      idempotencyKey: "key-1",
-      companyUrl: "acme.com",
-      sourceSelection: {
-        public_web: { enabled: true },
-        github: {
-          enabled: true,
-          integrationId: "integration_gh",
-          config: {
-            repos: [{ fullName: "acme/api" }, { fullName: "not-listed/repo" }],
-          },
-        },
-        slack: { enabled: true, integrationId: "integration_slack" },
-      },
-    });
-
-    expect(result).toMatchObject({ importRunId: "gbimp_1", status: "discovering" });
-    expect(listOptions).toHaveBeenCalledWith(admin, "integration_gh", { provider: "github" });
-    const persisted = mocks.startRun.mock.calls[0]?.[0] as {
-      sourceSelection: Record<string, { enabled: boolean; config?: Record<string, unknown> }>;
-    };
-    expect(persisted.sourceSelection.public_web).toEqual({ enabled: true });
-    expect(persisted.sourceSelection.github?.config?.repos).toEqual([
-      { id: "repo_1", fullName: "acme/api" },
-    ]);
-    expect(Array.isArray(persisted.sourceSelection.github?.config?.events)).toBe(true);
-    expect(persisted.sourceSelection.slack).toBeUndefined();
-    expect(persisted.sourceSelection.jamie).toEqual({ enabled: false });
-  });
-
   it("requires a connected integration for an enabled provider", async () => {
     const { service: imports } = service();
 
@@ -188,27 +149,6 @@ describe("BrainImportApplicationService", () => {
       message: "Connect Gmail in your settings first.",
     } satisfies Partial<CoreError>);
     expect(mocks.startRun).not.toHaveBeenCalled();
-  });
-
-  it("requires configured scope for GitHub sources", async () => {
-    const { service: imports } = service();
-
-    await expect(
-      imports.start(admin, "brain_1", {
-        idempotencyKey: "key-1",
-        companyUrl: "acme.com",
-        sourceSelection: {
-          github: {
-            enabled: true,
-            integrationId: "integration_gh",
-            config: { repos: [{ fullName: "not-listed/repo" }] },
-          },
-        },
-      }),
-    ).rejects.toMatchObject({
-      code: "invalid_argument",
-      message: "Select at least one GitHub repository.",
-    } satisfies Partial<CoreError>);
   });
 
   it("reuses the stored source configuration and defaults Gmail events", async () => {
@@ -249,13 +189,13 @@ describe("BrainImportApplicationService", () => {
     const { service: imports } = service();
 
     await expect(
-      imports.confirm(admin, "brain_1", "gbimp_1", ["public_web", "github", "github"]),
+      imports.confirm(admin, "brain_1", "gbimp_1", ["public_web", "github", "public_web"]),
     ).resolves.toEqual({ importRunId: "gbimp_1", status: "ingesting", replayed: false });
     expect(mocks.confirmRun).toHaveBeenCalledWith(
       expect.objectContaining({
         importRunId: "gbimp_1",
         brainRef: "brain_1",
-        enabledProviders: ["public_web", "github"],
+        enabledProviders: ["public_web"],
         actingUserWorkosId: "user_1",
       }),
     );
@@ -280,12 +220,12 @@ describe("WikiImportApplicationService", () => {
       async () =>
         [
           {
-            provider: "github",
-            integrationId: "integration_gh",
+            provider: "linear",
+            integrationId: "integration_linear",
             integrationStatus: "connected",
             canConfigure: true,
             enabled: true,
-            config: { repos: [{ id: "repo_1", fullName: "acme/api" }] },
+            config: { teams: [{ id: "team_1", name: "Engineering" }] },
           },
         ] as never,
     );
@@ -297,7 +237,7 @@ describe("WikiImportApplicationService", () => {
         companyUrl: "acme.com",
         sourceSelection: {
           public_web: { enabled: true },
-          github: { enabled: true, integrationId: "integration_gh" },
+          linear: { enabled: true, integrationId: "integration_linear" },
           fathom: { enabled: true, integrationId: "integration_fathom" },
         },
       }),
@@ -308,7 +248,7 @@ describe("WikiImportApplicationService", () => {
         companyUrl: "https://acme.com",
         sourceSelection: expect.objectContaining({
           public_web: { enabled: true },
-          github: expect.objectContaining({ integrationId: "integration_gh" }),
+          linear: expect.objectContaining({ integrationId: "integration_linear" }),
         }),
       }),
     );

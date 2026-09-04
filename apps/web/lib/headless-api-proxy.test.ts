@@ -22,20 +22,20 @@ describe("web /v1 API adapter", () => {
   it("targets top-level ingress paths when the /v1 base path is disabled", () => {
     expect(
       headlessApiTarget(
-        "https://app.example.test/api/webhooks/github/events",
-        ["webhooks", "github", "events"],
+        "https://app.example.test/api/webhooks/linear/events",
+        ["webhooks", "linear", "events"],
         "https://api.example.test",
         "",
       )?.toString(),
-    ).toBe("https://api.example.test/webhooks/github/events");
+    ).toBe("https://api.example.test/webhooks/linear/events");
     expect(
       headlessApiTarget(
-        "https://app.example.test/api/integrations/github/start?returnTo=%2Fsettings",
-        ["integrations", "github", "start"],
+        "https://app.example.test/api/integrations/github-user/start?returnTo=%2Fsettings",
+        ["integrations", "github-user", "start"],
         "https://api.example.test",
         "",
       )?.toString(),
-    ).toBe("https://api.example.test/integrations/github/start?returnTo=%2Fsettings");
+    ).toBe("https://api.example.test/integrations/github-user/start?returnTo=%2Fsettings");
   });
 
   it("forwards authentication/idempotency headers and streams the upstream response", async () => {

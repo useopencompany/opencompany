@@ -9,7 +9,7 @@ import {
   createBrainMarkdownContent,
   MAX_BRAIN_FILE_BYTES,
 } from "@opencompany/db/brain-files";
-import { truncateByBytes } from "./brain-jamie-writes";
+import { truncateByBytes } from "./brain-write-utils";
 
 export const GMAIL_EVIDENCE_FOLDER = "evidence/email";
 

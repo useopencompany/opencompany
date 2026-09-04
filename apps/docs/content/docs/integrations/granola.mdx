@@ -1,39 +1,52 @@
 ---
 title: Granola
-description: Connect Granola meeting notes to opencompany Brain ingestion with a personal API key.
+description: Search and read Granola meeting history through the official MCP plugin.
 ---
 
-## What the connection does
+## Install and connect
 
-Granola has no webhooks, so opencompany polls its API every few minutes for notes updated since the
-last poll. A note becomes visible once Granola finishes its summary and transcript. opencompany then
-normalizes it into a Brain source item and enqueues durable ingestion, which writes a meeting page
-and a raw evidence snapshot of the summary and transcript.
+1. Open **Settings → Plugins → Granola**.
+2. Select **Install** and review the integrity-pinned package.
+3. Select **Connect Granola account** and finish Granola's browser OAuth flow.
 
-The connection is personal: only you can manage the key or wire it into Brains. Live polling does
-not automatically import notes from before you connected. To seed recent history, run **Import
-company context** and select Granola; the scan uses a bounded 30-day window and imports only after
-you confirm the workload.
+Granola uses Dynamic Client Registration, so you do not need to create an API key, client ID, or
+client secret for MCP. The OAuth credential stays encrypted and server-side. The plugin gateway
+sends it only to Granola's reviewed `https://mcp.granola.ai/mcp` endpoint.
 
-## Setup steps
+Granola MCP follows the account's active workspace and the access allowed by your Granola plan and
+workspace settings. Basic accounts can query only recent notes and do not receive every paid tool.
+Enterprise workspaces may require an admin to enable personal or public note access before the
+connection returns meeting data.
 
-1. In Granola, open **Settings → Connectors → API keys**.
-2. Create a key with access to the notes you want to ingest.
-3. Copy the `grn_...` key Granola shows once.
-4. In opencompany, open **Settings → Granola** or choose **Set up** on the source card.
-5. Paste the key and save it. opencompany validates the key before storing it.
+## Tools and permissions
 
-## Brain routing
+The reviewed tools use two controls:
 
-Enable Granola under **Sources** in a Brain's settings. Each new meeting note fans out to every
-Brain where your Granola source is enabled. If two members of the same Brain can access a shared
-note, it is ingested once for that Brain.
+- **Check Granola account — On:** confirm the connected email and active Granola workspace.
+- **Read meeting content — Ask:** search meetings or read folders, attendees, private notes,
+  summaries, and paid-plan transcripts only after approval.
 
-## Troubleshooting
+Any newly discovered or unclassified tool fails safe at **Ask**, even when the server marks it
+read-only. Persistent coding sessions receive only tools set to **On**. You can change these modes
+for your connection on the Granola plugin page.
 
-- Confirm the Granola source is enabled on the target Brain.
-- Confirm **Settings → Granola** shows **Connected**. Replace a revoked or expired key.
-- Wait for Granola to finish the summary and transcript, then allow a few minutes for polling.
-- Use **Import company context** for meetings that happened before live polling began.
+Meeting titles, attendee identities, private notes, and verbatim transcripts can contain sensitive
+customer or company information. Review the requested scope before approving a tool call. Granola
+returns only notes available to the connected user in their active workspace; switch the active
+workspace in Granola before querying a different one. Transcript and folder tools may require a
+paid plan.
 
-The Granola API is documented at [docs.granola.ai](https://docs.granola.ai).
+## Legacy Wiki ingestion
+
+The official MCP plugin serves interactive searches and does not replace continuous Wiki polling.
+Existing personal API-key connections remain available as a legacy ingestion fallback from
+**Wiki → Sources → Granola**. The old Granola card and standalone setup page no longer appear in
+Settings, and MCP OAuth connections are never offered as Wiki sources.
+
+To keep feeding completed meetings into the Wiki, open the Granola source card, save a personal
+`grn_...` API key, and enable the source. opencompany polls for newly completed summaries and
+transcripts every few minutes. Use **Import company context** to scan a bounded window of older
+notes. Removing or reinstalling the MCP plugin does not delete this separate ingestion connection.
+
+See [Granola's MCP guide](https://docs.granola.ai/help-center/sharing/integrations/mcp) for current
+plan limits, workspace access controls, and provider troubleshooting.

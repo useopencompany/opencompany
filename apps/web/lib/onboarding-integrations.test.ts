@@ -9,7 +9,7 @@ import {
 describe("opencompany onboarding integrations", () => {
   it("replaces an integration's settings return path with the popup completion route", () => {
     const href = onboardingConnectHref(
-      "/api/integrations/github/start?returnTo=/settings/integrations",
+      "/api/integrations/github-user/start?returnTo=/settings/plugins/github",
     );
 
     expect(new URL(href, "https://opencompany.test").searchParams.get("returnTo")).toBe(
@@ -18,8 +18,8 @@ describe("opencompany onboarding integrations", () => {
   });
 
   it("turns provider failures into actionable onboarding copy", () => {
-    expect(onboardingConnectionError("github", "admin_required")).toBe(
-      "Only a workspace admin can connect GitHub.",
+    expect(onboardingConnectionError("slack", "admin_required")).toBe(
+      "Only a workspace admin can connect Slack.",
     );
     expect(onboardingConnectionError("slack", "slack_denied")).toBe(
       "Slack authorization was cancelled.",
@@ -39,6 +39,9 @@ describe("opencompany onboarding integrations", () => {
     expect(onboardingConnectionError("hubspot", "hubspot_mcp_denied")).toBe(
       "HubSpot authorization was cancelled.",
     );
+    expect(onboardingConnectionError("attio", "attio_mcp_denied")).toBe(
+      "Attio authorization was cancelled.",
+    );
     expect(onboardingConnectionError("neon", "neon_denied")).toBe(
       "Neon authorization was cancelled.",
     );
@@ -48,10 +51,13 @@ describe("opencompany onboarding integrations", () => {
     expect(onboardingConnectionError("signoz", "signoz_denied")).toBe(
       "SigNoz authorization was cancelled.",
     );
-    expect(onboardingConnectionError("github", "missing_code")).toContain(
+    expect(onboardingConnectionError("fathom", "fathom_denied")).toBe(
+      "Fathom authorization was cancelled.",
+    );
+    expect(onboardingConnectionError("github_user", "missing_code")).toContain(
       "did not return a valid authorization",
     );
-    expect(onboardingConnectionError("github", "invalid_state")).toContain(
+    expect(onboardingConnectionError("github_user", "invalid_state")).toContain(
       "did not return a valid authorization",
     );
     expect(onboardingConnectionError("github_user", "github_user_denied")).toBe(
@@ -70,6 +76,7 @@ describe("opencompany onboarding integrations", () => {
 
   it("turns provider success into concise connection copy", () => {
     expect(integrationConnectionSuccess("hubspot")).toBe("HubSpot connected.");
+    expect(integrationConnectionSuccess("attio")).toBe("Attio connected.");
     expect(integrationConnectionSuccess("google_drive")).toBe("Google Drive connected.");
     expect(integrationConnectionSuccess("posthog")).toBe("PostHog connected.");
     expect(integrationConnectionSuccess("neon")).toBe("Neon connected.");

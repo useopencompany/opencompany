@@ -142,9 +142,7 @@ describe("SettingsIntegrationsPanel", () => {
 
     // Workspace scope is shown first and personal connections are hidden.
     expect(
-      screen.getByText(
-        "Ingest pull requests and issues from selected repositories through webhooks.",
-      ),
+      screen.getByText("Give workspace coding agents access to the real Infisical CLI."),
     ).toBeInTheDocument();
     expect(
       screen.queryByText("Let opencompany view and update your schedule and events."),
@@ -166,9 +164,7 @@ describe("SettingsIntegrationsPanel", () => {
       screen.queryByText("Let opencompany view and update your schedule and events."),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByText(
-        "Ingest pull requests and issues from selected repositories through webhooks.",
-      ),
+      screen.queryByText("Give workspace coding agents access to the real Infisical CLI."),
     ).not.toBeInTheDocument();
   });
 
@@ -326,25 +322,6 @@ describe("SettingsIntegrationsPanel", () => {
     expect(within(card as HTMLElement).queryByRole("button", { name: "Connect" })).toBeNull();
   });
 
-  it("links a connected GitHub workspace to repository configuration", () => {
-    const integrations = integrationStateFromRows([]) as IntegrationState;
-    integrations.github = {
-      provider: "github",
-      connected: true,
-      status: "connected",
-      accountName: "opencompany",
-      statusReason: null,
-    };
-
-    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
-
-    expect(screen.getByText("GitHub workspace ingestion")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Configure repositories" })).toHaveAttribute(
-      "href",
-      "/settings/repositories",
-    );
-  });
-
   it("keeps Linear out of the legacy Integrations panel", () => {
     const integrations = integrationStateFromRows([
       {
@@ -471,7 +448,56 @@ describe("SettingsIntegrationsPanel", () => {
     expect(screen.queryByText("louis@example.com")).toBeNull();
   });
 
-  it("shows Attio read and write permission controls on the connected workspace", () => {
+  it("removes the legacy Granola settings card after the plugin cutover", () => {
+    const integrations = integrationStateFromRows([
+      {
+        id: "gint_granola_ingest",
+        provider: "granola",
+        externalId: "granola:user_1",
+        accountEmail: "founder@example.com",
+        accountType: "granola_api_key",
+        status: "connected",
+      },
+      {
+        id: "gint_granola_mcp",
+        provider: "granola",
+        externalId: "granola_mcp",
+        accountName: "Granola",
+        accountType: "mcp_server",
+        status: "connected",
+      },
+    ]) as IntegrationState;
+
+    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
+
+    expect(
+      screen.queryByText("Meeting notes flow in once Granola finishes each summary."),
+    ).toBeNull();
+    expect(screen.queryByText("founder@example.com")).toBeNull();
+    expect(screen.getByRole("button", { name: "Workspace" })).not.toHaveTextContent("1");
+  });
+
+  it("removes the legacy Fathom card after the plugin cutover", () => {
+    const integrations = integrationStateFromRows([
+      {
+        id: "gint_fathom_ingest",
+        provider: "fathom",
+        externalId: "fathom:user_1",
+        accountName: "Fathom",
+        status: "connected",
+        capabilityModes: {},
+      },
+    ]) as IntegrationState;
+
+    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
+
+    expect(
+      screen.queryByText("Meeting recordings flow in after Fathom finishes each summary."),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Workspace" })).not.toHaveTextContent("1");
+  });
+
+  it("keeps Attio ingestion accounts off the legacy integrations surface", () => {
     const integrations = integrationStateFromRows([
       {
         id: "gint_attio",
@@ -485,24 +511,8 @@ describe("SettingsIntegrationsPanel", () => {
 
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
 
-    const attioCard = screen
-      .getByText("Sync CRM records and notes from Attio.")
-      .closest("div.rounded-2xl");
-    expect(attioCard).not.toBeNull();
-    const readPermission = within(attioCard as HTMLElement).getByRole("group", {
-      name: "Read Attio permission",
-    });
-    const writePermission = within(attioCard as HTMLElement).getByRole("group", {
-      name: "Update Attio permission",
-    });
-    expect(within(readPermission).getByRole("button", { name: "On" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(within(writePermission).getByRole("button", { name: "Ask" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(screen.queryByText("Acme CRM")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Workspace" })).not.toHaveTextContent("1");
   });
 
   it("keeps Google Drive out of legacy integrations now that its account lives under Plugins", () => {

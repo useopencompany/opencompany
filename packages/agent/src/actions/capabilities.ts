@@ -91,6 +91,21 @@ export const PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
+  granola: [
+    {
+      id: "read",
+      label: "Check Granola account",
+      description: "Confirm which Granola account and active workspace are connected.",
+      defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Read meeting content",
+      description:
+        "Search and read meeting titles, attendees, notes, folders, summaries, and transcripts.",
+      defaultMode: "ask",
+    },
+  ],
   github_user: [
     {
       id: "read",
@@ -119,6 +134,32 @@ export const PROVIDER_CAPABILITIES: Partial<
       label: "Manage issues",
       description: "Create and update issues, and add comments in your Linear workspace.",
       defaultMode: "ask",
+    },
+  ],
+  jamie: [
+    {
+      id: "read",
+      label: "Browse Jamie organization",
+      description: "List the meeting templates and tags available in your Jamie account.",
+      defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Read meeting data",
+      description: "Search and read meetings, transcripts, people, and action items.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Manage Jamie content",
+      description: "Create tasks and manage meeting templates, tags, and tag sharing.",
+      defaultMode: "ask",
+    },
+    {
+      id: "draft",
+      label: "Permanently delete tags",
+      description: "Delete a Jamie tag and remove it from every meeting that uses it.",
+      defaultMode: "off",
     },
   ],
   hubspot: [
@@ -203,15 +244,22 @@ export const PROVIDER_CAPABILITIES: Partial<
   attio: [
     {
       id: "read",
-      label: "Read Attio",
-      description: "Look up CRM records, lists, fields, and pipeline entries.",
+      label: "Inspect Attio structure",
+      description: "Inspect CRM objects, fields, lists, teams, and your Attio identity.",
       defaultMode: "on",
     },
     {
-      id: "write",
-      label: "Update Attio",
+      id: "query",
+      label: "Read CRM data",
       description:
-        "Update CRM records, add them to lists, change list-entry fields, and add comments.",
+        "Read records, list entries, comments, notes, tasks, meetings, call transcripts, emails, members, and reports.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Change Attio",
+      description:
+        "Create, update, merge, or delete CRM records, lists, comments, notes, and tasks.",
       defaultMode: "ask",
     },
   ],
@@ -314,6 +362,15 @@ export const PROVIDER_CAPABILITIES: Partial<
       label: "Manage SigNoz",
       description:
         "Create, update, import, or delete alerts, dashboards, views, and notification channels.",
+      defaultMode: "ask",
+    },
+  ],
+  fathom: [
+    {
+      id: "query",
+      label: "Read Fathom meetings",
+      description:
+        "Search meetings and read summaries, transcripts, action items, teams, and account identity.",
       defaultMode: "ask",
     },
   ],

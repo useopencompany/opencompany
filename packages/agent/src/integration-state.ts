@@ -92,14 +92,6 @@ export type HubspotSourceProviderState = {
   statusReason: string | null;
 };
 
-export type GitHubProviderState = {
-  provider: "github";
-  connected: boolean;
-  status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
-  accountName: string | null;
-  statusReason: string | null;
-};
-
 export type JamieProviderState = {
   provider: "jamie";
   connected: boolean;
@@ -107,8 +99,7 @@ export type JamieProviderState = {
   accountName: string | null;
   statusReason: string | null;
   integrationId: string | null;
-  webhookUrl: string | null;
-  apiKeyConfigured: boolean;
+  capabilityModes: Record<string, unknown>;
 };
 
 // Granola connects with a personal API key minted in the Granola app; the
@@ -124,6 +115,15 @@ export type GranolaProviderState = {
   statusReason: string | null;
 };
 
+export type GranolaMcpProviderState = {
+  provider: "granola";
+  connected: boolean;
+  status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
+  integrationId: string | null;
+  accountName: string | null;
+  statusReason: string | null;
+  capabilityModes: Record<string, unknown>;
+};
 // Fathom connects with a personal API key minted in Fathom's user settings;
 // the integration id is what the brain-source picker and save action key
 // config rows on.
@@ -148,6 +148,16 @@ export type AttioProviderState = {
   integrationId: string | null;
   workspaceName: string | null;
   statusReason: string | null;
+};
+
+export type AttioMcpProviderState = {
+  provider: "attio";
+  connected: boolean;
+  status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
+  integrationId: string | null;
+  accountName: string | null;
+  statusReason: string | null;
+  capabilityModes: Record<string, unknown>;
 };
 
 export type StripeProviderState = {
@@ -243,6 +253,7 @@ export type PersonalAccountProvider =
   | "google_drive"
   | "linear"
   | "github_user"
+  | "jamie"
   | "slack"
   | "hubspot"
   | "granola"
@@ -262,12 +273,12 @@ export type IntegrationState = {
   linear: LinearProviderState;
   hubspot: HubSpotProviderState;
   posthog: PostHogProviderState;
-  github: GitHubProviderState;
   jamie: JamieProviderState;
   slack: SlackProviderState;
   granola: GranolaProviderState;
+  granola_mcp: GranolaMcpProviderState;
   fathom: FathomProviderState;
-  attio: AttioProviderState;
+  attio: AttioMcpProviderState;
   stripe: StripeProviderState;
   x_account: XAccountProviderState;
   codex: CodexProviderState;
@@ -304,11 +315,13 @@ type IntegrationStateRow = {
   tool_modes?: Record<string, unknown> | null;
 };
 
-const JAMIE_API_KEY_EXTERNAL_ID_PREFIX = "jamie_api_key_sha256:";
+const JAMIE_MCP_EXTERNAL_ID = "jamie_mcp";
+const FATHOM_MCP_EXTERNAL_ID = "fathom_mcp";
 
 // Collects every personal (non-workspace) account row per provider. The
-// Linear and HubSpot ingestion connections count as accounts; their dedicated
-// MCP connector rows (external_id "linear_mcp" / "hubspot_mcp") never do.
+// Linear, HubSpot, Attio, and Granola ingestion connections count as accounts;
+// their dedicated MCP connector rows do not. Fathom is the inverse: only its MCP
+// connector is shown in plugin account lists, while its API-key row stays in Wiki sources.
 export function personalAccountsFromRows(
   rows: readonly IntegrationStateRow[],
 ): Record<PersonalAccountProvider, IntegrationAccountView[]> {
@@ -318,6 +331,7 @@ export function personalAccountsFromRows(
     google_drive: [],
     linear: [],
     github_user: [],
+    jamie: [],
     slack: [],
     hubspot: [],
     granola: [],
@@ -345,15 +359,36 @@ export function personalAccountsFromRows(
       }
       continue;
     }
+    if (row.provider === "jamie") {
+      if ((row.externalId ?? row.external_id) === JAMIE_MCP_EXTERNAL_ID) {
+        personalAccounts.jamie.push(accountViewFromRow("jamie", row));
+      }
+      continue;
+    }
+    if (row.provider === "attio") {
+      if ((row.externalId ?? row.external_id) !== "attio_mcp") {
+        personalAccounts.attio.push(accountViewFromRow("attio", row));
+      }
+      continue;
+    }
+    if (row.provider === "granola") {
+      if ((row.externalId ?? row.external_id) !== "granola_mcp") {
+        personalAccounts.granola.push(accountViewFromRow("granola", row));
+      }
+      continue;
+    }
+    if (row.provider === "fathom") {
+      if ((row.externalId ?? row.external_id) === FATHOM_MCP_EXTERNAL_ID) {
+        personalAccounts.fathom.push(accountViewFromRow("fathom", row));
+      }
+      continue;
+    }
     if (
       row.provider === "gmail" ||
       row.provider === "google_calendar" ||
       row.provider === "google_drive" ||
       row.provider === "github_user" ||
       row.provider === "slack" ||
-      row.provider === "granola" ||
-      row.provider === "fathom" ||
-      row.provider === "attio" ||
       row.provider === "betterstack" ||
       row.provider === "render" ||
       row.provider === "signoz" ||
@@ -369,6 +404,7 @@ export function personalAccountsFromRows(
 
 export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): IntegrationState {
   const byProvider = new Map<IntegrationProvider, IntegrationStateRow>();
+  let granolaMcpRow: IntegrationStateRow | undefined;
   for (const row of rows) {
     if (row.status === "disconnected") continue;
     // Provider "linear" covers two kinds of rows; the MCP card must only ever
@@ -382,12 +418,34 @@ export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): 
     if (row.provider === "hubspot" && (row.externalId ?? row.external_id) !== "hubspot_mcp") {
       continue;
     }
-    // GitHub, Jamie, and Stripe are workspace-owned; personal rows for those
-    // providers are pre-ownership leftovers and must not shadow the workspace
-    // connection.
+    if (row.provider === "granola" && (row.externalId ?? row.external_id) === "granola_mcp") {
+      granolaMcpRow = row;
+      continue;
+    }
+    // Attio's API-key connection remains available for Wiki ingestion and as
+    // a legacy action fallback. Plugin settings reflect only the MCP OAuth row.
+    if (row.provider === "attio" && (row.externalId ?? row.external_id) !== "attio_mcp") {
+      continue;
+    }
+    // Fathom's API-key row remains the Wiki ingestion fallback. The dedicated
+    // OAuth connector is surfaced only through personalAccounts on the Plugin page.
     if (
-      (row.provider === "github" || row.provider === "jamie" || row.provider === "stripe") &&
-      !(row.workspaceId ?? row.workspace_id)
+      row.provider === "fathom" &&
+      (row.externalId ?? row.external_id) === FATHOM_MCP_EXTERNAL_ID
+    ) {
+      continue;
+    }
+    // Stripe is workspace-owned; personal rows are pre-ownership leftovers
+    // and must not shadow the workspace connection.
+    if (row.provider === "stripe" && !(row.workspaceId ?? row.workspace_id)) {
+      continue;
+    }
+    // Jamie's retired webhook integration used workspace-owned rows. Only the
+    // personal OAuth connector row belongs to the official plugin.
+    if (
+      row.provider === "jamie" &&
+      ((row.workspaceId ?? row.workspace_id) ||
+        (row.externalId ?? row.external_id) !== JAMIE_MCP_EXTERNAL_ID)
     ) {
       continue;
     }
@@ -402,12 +460,12 @@ export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): 
     linear: linearProviderState(byProvider.get("linear")),
     hubspot: hubspotProviderState(byProvider.get("hubspot")),
     posthog: posthogProviderState(byProvider.get("posthog")),
-    github: githubProviderState(byProvider.get("github")),
     jamie: jamieProviderState(byProvider.get("jamie")),
     slack: slackProviderState(byProvider.get("slack")),
     granola: granolaProviderState(byProvider.get("granola")),
+    granola_mcp: granolaMcpProviderState(granolaMcpRow),
     fathom: fathomProviderState(byProvider.get("fathom")),
-    attio: attioProviderState(byProvider.get("attio")),
+    attio: attioMcpProviderState(byProvider.get("attio")),
     stripe: stripeProviderState(byProvider.get("stripe")),
     x_account: xAccountProviderState(byProvider.get("x_account")),
     codex: {
@@ -577,26 +635,6 @@ function hubspotProviderState(row: IntegrationStateRow | undefined): HubSpotProv
   };
 }
 
-function githubProviderState(row: IntegrationStateRow | undefined): GitHubProviderState {
-  if (!row) {
-    return {
-      provider: "github",
-      connected: false,
-      status: "not_connected",
-      accountName: null,
-      statusReason: null,
-    };
-  }
-
-  return {
-    provider: "github",
-    connected: row.status === "connected",
-    status: row.status,
-    accountName: row.accountName ?? row.account_name ?? null,
-    statusReason: row.statusReason ?? row.status_reason ?? null,
-  };
-}
-
 function slackProviderState(row: IntegrationStateRow | undefined): SlackProviderState {
   if (!row || row.status === "disconnected") {
     return {
@@ -676,6 +714,29 @@ function granolaProviderState(row: IntegrationStateRow | undefined): GranolaProv
   };
 }
 
+function granolaMcpProviderState(row: IntegrationStateRow | undefined): GranolaMcpProviderState {
+  if (!row || row.status === "disconnected") {
+    return {
+      provider: "granola",
+      connected: false,
+      status: "not_connected",
+      integrationId: null,
+      accountName: null,
+      statusReason: null,
+      capabilityModes: {},
+    };
+  }
+
+  return {
+    provider: "granola",
+    connected: row.status === "connected",
+    status: row.status,
+    integrationId: row.id ?? null,
+    accountName: row.accountName ?? row.account_name ?? null,
+    statusReason: row.statusReason ?? row.status_reason ?? null,
+    capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
+  };
+}
 function fathomProviderState(row: IntegrationStateRow | undefined): FathomProviderState {
   if (!row || row.status === "disconnected") {
     return {
@@ -700,15 +761,16 @@ function fathomProviderState(row: IntegrationStateRow | undefined): FathomProvid
   };
 }
 
-function attioProviderState(row: IntegrationStateRow | undefined): AttioProviderState {
+function attioMcpProviderState(row: IntegrationStateRow | undefined): AttioMcpProviderState {
   if (!row || row.status === "disconnected") {
     return {
       provider: "attio",
       connected: false,
       status: "not_connected",
       integrationId: null,
-      workspaceName: null,
+      accountName: null,
       statusReason: null,
+      capabilityModes: {},
     };
   }
 
@@ -717,8 +779,9 @@ function attioProviderState(row: IntegrationStateRow | undefined): AttioProvider
     connected: row.status === "connected",
     status: row.status,
     integrationId: row.id ?? null,
-    workspaceName: row.connectionLabel ?? row.connection_label ?? null,
+    accountName: row.accountName ?? row.account_name ?? null,
     statusReason: row.statusReason ?? row.status_reason ?? null,
+    capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
   };
 }
 
@@ -765,8 +828,7 @@ function jamieProviderState(row: IntegrationStateRow | undefined): JamieProvider
       accountName: null,
       statusReason: null,
       integrationId: null,
-      webhookUrl: null,
-      apiKeyConfigured: false,
+      capabilityModes: {},
     };
   }
 
@@ -777,9 +839,6 @@ function jamieProviderState(row: IntegrationStateRow | undefined): JamieProvider
     accountName: row.accountName ?? row.account_name ?? null,
     statusReason: row.statusReason ?? row.status_reason ?? null,
     integrationId: row.id ?? null,
-    webhookUrl: null,
-    apiKeyConfigured:
-      row.status === "connected" ||
-      (row.externalId ?? row.external_id ?? "").startsWith(JAMIE_API_KEY_EXTERNAL_ID_PREFIX),
+    capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
   };
 }

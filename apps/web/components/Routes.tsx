@@ -43,13 +43,10 @@ import {
   useTransition,
 } from "react";
 import { type BrainSummaryView, useAppData } from "@/components/AppDataProvider";
-import { AttioIntegrationSetup } from "@/components/AttioIntegrationSetup";
 import { BrainSettings } from "@/components/BrainSettings";
 import { BrainView } from "@/components/BrainView";
 import { FathomIntegrationSetup } from "@/components/FathomIntegrationSetup";
-import { GranolaIntegrationSetup } from "@/components/GranolaIntegrationSetup";
 import { InferenceSettingsPanel } from "@/components/InferenceSettingsPanel";
-import { JamieIntegrationSetup } from "@/components/JamieIntegrationSetup";
 import { McpSetupGuide } from "@/components/McpSetupGuide";
 import { RepositorySettings } from "@/components/RepositorySettings";
 import { SettingsContent } from "@/components/SettingsChrome";
@@ -371,49 +368,6 @@ function AppearanceSection() {
   );
 }
 
-export function JamieSettingsRoute() {
-  const { activeBrain, featureFlags, integrations, workspace } = useAppData();
-  const brainSourcesHref =
-    featureFlags.legacyBrain && activeBrain
-      ? `/brain/${encodeURIComponent(activeBrain.id)}/settings`
-      : null;
-
-  return (
-    <SettingsContent
-      title="Jamie"
-      description="Meeting notes for opencompany Brain"
-      backLink={{ href: "/settings/integrations", label: "Integrations" }}
-    >
-      <JamieIntegrationSetup
-        initialState={integrations.jamie}
-        brainSourcesHref={brainSourcesHref}
-        canManage={workspace.role === "admin"}
-      />
-    </SettingsContent>
-  );
-}
-
-export function GranolaSettingsRoute() {
-  const { activeBrain, featureFlags, integrations } = useAppData();
-  const brainSourcesHref =
-    featureFlags.legacyBrain && activeBrain
-      ? `/brain/${encodeURIComponent(activeBrain.id)}/settings`
-      : null;
-
-  return (
-    <SettingsContent
-      title="Granola"
-      description="Meeting notes for opencompany Brain"
-      backLink={{ href: "/settings/integrations", label: "Integrations" }}
-    >
-      <GranolaIntegrationSetup
-        initialState={integrations.granola}
-        brainSourcesHref={brainSourcesHref}
-      />
-    </SettingsContent>
-  );
-}
-
 export function FathomSettingsRoute() {
   const { activeBrain, featureFlags, integrations } = useAppData();
   const brainSourcesHref =
@@ -423,33 +377,12 @@ export function FathomSettingsRoute() {
 
   return (
     <SettingsContent
-      title="Fathom"
-      description="Meeting recordings for opencompany Brain"
-      backLink={{ href: "/settings/integrations", label: "Integrations" }}
+      title="Fathom ingestion"
+      description="Legacy API-key ingestion for opencompany Wiki"
+      backLink={{ href: "/wiki/sources", label: "Wiki sources" }}
     >
       <FathomIntegrationSetup
         initialState={integrations.fathom}
-        brainSourcesHref={brainSourcesHref}
-      />
-    </SettingsContent>
-  );
-}
-
-export function AttioSettingsRoute() {
-  const { activeBrain, featureFlags, integrations } = useAppData();
-  const brainSourcesHref =
-    featureFlags.legacyBrain && activeBrain
-      ? `/brain/${encodeURIComponent(activeBrain.id)}/settings`
-      : null;
-
-  return (
-    <SettingsContent
-      title="Attio"
-      description="CRM activity for opencompany Brain"
-      backLink={{ href: "/settings/integrations", label: "Integrations" }}
-    >
-      <AttioIntegrationSetup
-        initialState={integrations.attio}
         brainSourcesHref={brainSourcesHref}
       />
     </SettingsContent>

@@ -26,17 +26,19 @@ export function integrationConnectionError(provider: string | null, reason: stri
       return `${name} isn't available right now. Please try again later.`;
     case "session_mismatch":
       return `Sign in with the same account that started the ${name} connection, then try again.`;
-    case "github_denied":
     case "github_user_denied":
     case "gmail_denied":
     case "slack_denied":
     case "linear_denied":
+    case "granola_denied":
     case "hubspot_denied":
     case "hubspot_mcp_denied":
+    case "attio_mcp_denied":
     case "latitude_denied":
     case "posthog_denied":
     case "neon_denied":
     case "betterstack_denied":
+    case "fathom_denied":
     case "signoz_denied":
     case "x_account_denied":
       return `${name} authorization was cancelled.`;
@@ -63,7 +65,6 @@ export function integrationConnectionSuccess(provider: string | null) {
 
 function providerName(provider: string | null) {
   switch (provider) {
-    case "github":
     case "github_user":
       return "GitHub";
     case "gmail":

@@ -1,55 +1,42 @@
 ---
 title: Jamie
-description: Connect Jamie completed-meeting webhooks to opencompany Brain ingestion.
+description: Connect Jamie's official MCP server to search meeting notes and manage meeting content.
 ---
 
-## What the connection does
+## What the plugin does
 
-Jamie sends opencompany a `meeting.completed` webhook whenever meeting notes are ready. opencompany
-validates Jamie's `x-jamie-api-key` header, normalizes the meeting payload into a Brain source item,
-and enqueues durable ingestion.
+The official Jamie plugin connects opencompany to Jamie's hosted MCP server. It can search and read
+meeting notes, transcripts, people, and action items. With approval, it can also create tasks and
+manage templates and tags.
 
-The public webhook URL is stable:
+Jamie webhook ingestion is currently unavailable. Installing the plugin gives the agent on-demand
+access to Jamie; it does not copy completed meetings into Brain or Wiki.
 
-```text
-/api/webhooks/jamie
-```
+## Connect Jamie
 
-The saved Jamie API key routes the delivery to the right integration. The web URL relays the raw
-delivery to API-owned verification and ingestion.
+1. Open **Settings → Plugins** and choose **Jamie**.
+2. Install the official plugin.
+3. Choose **Connect Jamie**.
+4. Sign in to Jamie in the browser and approve access.
 
-## Setup steps
+Jamie MCP requires a Jamie Pro, Team, or Enterprise plan. Authentication uses Jamie's OAuth flow;
+you do not need to create or paste an API key.
 
-1. From onboarding, choose **Set up** on Jamie. After onboarding, open **Settings → Jamie**.
-2. Click **Create endpoint** and copy the Endpoint URL.
-3. In Jamie, open **Settings → Integrations → Webhooks**.
-4. Create a webhook for completed meetings and paste the opencompany Endpoint URL.
-5. Set the event to `meeting.completed`.
-6. Choose **API Key** as the authentication method.
-7. Keep Jamie's default header name, `x-jamie-api-key`.
-8. Finish webhook creation and copy the generated `sk_...` API key Jamie shows once.
-9. Paste that API key back into opencompany's Jamie settings and save it.
+## Permission defaults
 
-Jamie also offers signature verification, but opencompany expects the API Key method for this
-setup.
+- Listing templates and tags is **On**.
+- Reading meetings, transcripts, people, and tasks is **Ask** because meeting data can be sensitive.
+- Creating tasks or changing templates and tags is **Ask**.
+- Permanently deleting a tag is **Off**. Turn it on explicitly only when needed.
 
-## Brain routing
+New or unrecognized Jamie tools require confirmation until they are reviewed and classified.
 
-After the key is saved, configure Jamie as a source from any Brain's settings page. If no per-Brain
-source routing has been configured yet, Jamie deliveries continue to use the user's default Brain.
-Once a Jamie source row exists on any Brain, routing is explicit: enabled sources receive the
-meeting, and disabled sources do not enqueue ingestion.
+## Limitations
 
-## Troubleshooting
+- The plugin can access only the Jamie account and meeting data authorized during OAuth.
+- Jamie's MCP integration is available only on supported paid plans.
+- Deleting a tag removes it from every meeting and cannot be undone.
+- Disconnect Jamie or uninstall the plugin to stop future agent access.
 
-If Jamie shows successful deliveries but opencompany does not ingest meetings, check:
-
-- the webhook URL is `/api/webhooks/jamie`;
-- the event is `meeting.completed`;
-- authentication is **API Key**, not signature verification;
-- the header is `x-jamie-api-key`;
-- the generated `sk_...` key is saved in opencompany; and
-- at least one target Brain source is enabled, or no explicit Jamie routing exists yet.
-
-Jamie documents webhook behavior in its
-[webhook guide](https://docs.meetjamie.ai/developers/webhooks/webhooks).
+See [Jamie's MCP documentation](https://docs.meetjamie.ai/integrations/mcp) for provider-specific
+availability and troubleshooting.

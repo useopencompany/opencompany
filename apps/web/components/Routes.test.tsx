@@ -130,20 +130,12 @@ vi.mock("@/components/Surface", () => ({
   },
 }));
 
-vi.mock("@/components/JamieIntegrationSetup", () => ({
-  JamieIntegrationSetup: () => null,
-}));
-
 vi.mock("@/components/GranolaIntegrationSetup", () => ({
   GranolaIntegrationSetup: () => null,
 }));
 
 vi.mock("@/components/FathomIntegrationSetup", () => ({
   FathomIntegrationSetup: () => null,
-}));
-
-vi.mock("@/components/AttioIntegrationSetup", () => ({
-  AttioIntegrationSetup: () => null,
 }));
 
 vi.mock("@/components/McpSetupGuide", () => ({

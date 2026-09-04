@@ -15,10 +15,20 @@ import {
   type RemoteMcpGatewayRegistration,
 } from "./actions/remote-mcp";
 import {
+  ATTIO_MCP_ENDPOINT_URL,
+  getAttioMcpIntegrationState,
+  loadAttioMcpWorkerConnection,
+} from "./integrations/attio-mcp";
+import {
   BETTERSTACK_MCP_ENDPOINT_URL,
   getBetterStackIntegrationState,
   loadBetterStackMcpWorkerConnection,
 } from "./integrations/betterstack-mcp";
+import {
+  FATHOM_MCP_ENDPOINT_URL,
+  getFathomMcpIntegrationState,
+  loadFathomMcpWorkerConnection,
+} from "./integrations/fathom-mcp";
 import {
   GITHUB_USER_MCP_ENDPOINT_URL,
   getGitHubUserMcpIntegrationState,
@@ -43,10 +53,20 @@ import {
   loadGoogleDriveMcpWorkerConnection,
 } from "./integrations/google-drive-mcp";
 import {
+  GRANOLA_MCP_ENDPOINT_URL,
+  getGranolaMcpIntegrationState,
+  loadGranolaMcpWorkerConnection,
+} from "./integrations/granola-mcp";
+import {
   getHubSpotMcpIntegrationState,
   HUBSPOT_MCP_ENDPOINT_URL,
   loadHubSpotMcpWorkerConnection,
 } from "./integrations/hubspot-mcp";
+import {
+  getJamieMcpIntegrationState,
+  JAMIE_MCP_ENDPOINT_URL,
+  loadJamieMcpWorkerConnection,
+} from "./integrations/jamie-mcp";
 import {
   getLatitudeIntegrationState,
   LATITUDE_MCP_ENDPOINT_URL,
@@ -102,6 +122,12 @@ type Identity = { userWorkosId: string; workspaceId: string };
 const logger = createLogger({ service: "opencompany-agent", runtime: "plugin-gateway" });
 
 const providerBindings = {
+  attio: {
+    provider: "attio",
+    endpointUrl: ATTIO_MCP_ENDPOINT_URL,
+    getState: getAttioMcpIntegrationState,
+    loadConnection: loadAttioMcpWorkerConnection,
+  },
   betterstack: {
     provider: "betterstack",
     endpointUrl: BETTERSTACK_MCP_ENDPOINT_URL,
@@ -114,11 +140,23 @@ const providerBindings = {
     getState: getGitHubUserMcpIntegrationState,
     loadConnection: loadGitHubUserMcpWorkerConnection,
   },
+  fathom: {
+    provider: "fathom",
+    endpointUrl: FATHOM_MCP_ENDPOINT_URL,
+    getState: getFathomMcpIntegrationState,
+    loadConnection: loadFathomMcpWorkerConnection,
+  },
   gmail: {
     provider: "gmail",
     endpointUrl: GMAIL_MCP_ENDPOINT_URL,
     getState: getGmailMcpIntegrationState,
     loadConnection: loadGmailMcpWorkerConnection,
+  },
+  granola: {
+    provider: "granola",
+    endpointUrl: GRANOLA_MCP_ENDPOINT_URL,
+    getState: getGranolaMcpIntegrationState,
+    loadConnection: loadGranolaMcpWorkerConnection,
   },
   "google-calendar": {
     provider: "google_calendar",
@@ -167,6 +205,12 @@ const providerBindings = {
     endpointUrl: LATITUDE_MCP_ENDPOINT_URL,
     getState: getLatitudeIntegrationState,
     loadConnection: loadLatitudeMcpWorkerConnection,
+  },
+  jamie: {
+    provider: "jamie",
+    endpointUrl: JAMIE_MCP_ENDPOINT_URL,
+    getState: getJamieMcpIntegrationState,
+    loadConnection: loadJamieMcpWorkerConnection,
   },
   slack: {
     provider: "slack",

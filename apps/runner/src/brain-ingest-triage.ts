@@ -2,7 +2,6 @@ import { GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS } from "@opencompany/agent-runtime"
 import { calculateModelUsageCost } from "@opencompany/billing";
 import {
   type NormalizedAttioObjectSourceItem,
-  type NormalizedGitHubActivitySourceItem,
   type NormalizedGmailThreadSourceItem,
 } from "@opencompany/brain";
 import {
@@ -228,19 +227,6 @@ export function buildAttioIngestTriagePrompt(item: NormalizedAttioObjectSourceIt
     properties: object.properties,
     activity: object.activity,
     notes: object.notes,
-  });
-}
-
-export function buildGitHubCommentIngestTriagePrompt(item: NormalizedGitHubActivitySourceItem) {
-  const activity = item.content.activity;
-  return buildTriagePrompt("GitHub issue or pull-request comment", {
-    repository: activity.repository.fullName,
-    artifact: activity.kind,
-    number: activity.number,
-    title: activity.title,
-    labels: activity.labels,
-    author: activity.author,
-    comment: activity.body,
   });
 }
 
