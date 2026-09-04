@@ -82,7 +82,7 @@ describe("Postgres Chat repositories", () => {
       );
     `);
     for (const migrationPath of migrationPaths) {
-      if (migrationPath.endsWith("0240_goat_chat_attachment_upload_idempotency.sql")) {
+      if (migrationPath.endsWith("0248_goat_chat_attachment_upload_idempotency.sql")) {
         await database.exec(`
           INSERT INTO goat.chat_attachment_uploads (
             id, user_workos_id, workspace_id, format, media_type, filename, size_bytes,
