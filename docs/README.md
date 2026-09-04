@@ -9,6 +9,7 @@ Start with:
 - [Database](./database.md) — Neon branches, Drizzle schemas, and migration rules.
 - [Runner](./runner.md) — durable workers and internal endpoints.
 - [Deployment](./deployment.md) — production release and rollback flow.
+- [CI security](./ci-security.md) — pull-request trust boundaries and GitHub Actions settings.
 - [Chat operations](./chat-operations.md) — `/v1` topology, release verification, and recovery.
 - [opencompany context compaction](./context-compaction.md) — long-chat checkpoint behavior,
   safety boundaries, and reviewed reference implementations.
