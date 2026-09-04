@@ -6,6 +6,7 @@ import type {
   PluginListItemDto,
 } from "@opencompany/protocol";
 import { Button, buttonVariants } from "@opencompany/ui/components/button";
+import { Input } from "@opencompany/ui/components/input";
 import { toast } from "@opencompany/ui/components/sonner";
 import {
   BetterStackIcon,
@@ -30,6 +31,7 @@ import {
   Link2,
   Loader2,
   PackageOpen,
+  Search,
   ServerCog,
   ShieldAlert,
   ShieldCheck,
@@ -52,9 +54,11 @@ import {
 } from "@/lib/headless-knowledge-commands";
 import {
   OFFICIAL_MCP_PLUGIN_METADATA,
+  OFFICIAL_PLUGIN_CATEGORIES,
   OFFICIAL_SKILL_PLUGIN_METADATA,
   type OfficialMcpPluginMetadata,
   type OfficialMcpPluginName,
+  type OfficialPluginCategory,
   type OfficialPluginMetadata,
   type OfficialPluginName,
   type OfficialSkillPluginMetadata,
@@ -294,6 +298,22 @@ export function installOfficialStripePlugin(preview?: PluginImportPreviewDto) {
   return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.stripe, preview);
 }
 
+type PluginCatalogFilter = "all" | "featured" | OfficialPluginCategory;
+
+const CATALOG_PREVIEW_SIZE = 4;
+const PLUGIN_CATEGORY_FILTERS = (
+  Object.entries(OFFICIAL_PLUGIN_CATEGORIES) as [OfficialPluginCategory, string][]
+).map(([id, label]) => ({ id, label }));
+const PLUGIN_CATALOG_FILTERS: { id: PluginCatalogFilter; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "featured", label: "Featured" },
+  ...PLUGIN_CATEGORY_FILTERS,
+];
+
+function pluginCatalogFilterLabel(filter: Exclude<PluginCatalogFilter, "all">) {
+  return filter === "featured" ? "Featured" : OFFICIAL_PLUGIN_CATEGORIES[filter];
+}
+
 export function PluginsSettings({
   plugins,
   canEdit,
@@ -302,8 +322,15 @@ export function PluginsSettings({
   canEdit: boolean;
 }) {
   const router = useRouter();
+  const [query, setQuery] = useState("");
+  const [activeFilter, setActiveFilter] = useState<PluginCatalogFilter>("all");
   const [installingPluginName, setInstallingPluginName] = useState<OfficialPluginName | null>(null);
   const [isInstalling, startInstall] = useTransition();
+  const configs: OfficialPluginConfig[] = Object.values(OFFICIAL_PLUGINS);
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const installedPlugins = new Map(
+    plugins.map((plugin) => [plugin.name.toLocaleLowerCase(), plugin] as const),
+  );
 
   const install = (config: OfficialPluginConfig) => {
     if (isInstalling) return;
@@ -320,63 +347,202 @@ export function PluginsSettings({
     });
   };
 
+  const matchesActiveFilter = (config: OfficialPluginConfig) =>
+    activeFilter === "all" ||
+    (activeFilter === "featured" ? config.featured === true : config.category === activeFilter);
+  const matchesQuery = (config: OfficialPluginConfig) =>
+    normalizedQuery.length === 0 ||
+    `${config.label} ${config.description} ${OFFICIAL_PLUGIN_CATEGORIES[config.category]}`
+      .toLocaleLowerCase()
+      .includes(normalizedQuery);
+  const filteredConfigs = configs.filter(
+    (config) => matchesActiveFilter(config) && matchesQuery(config),
+  );
+
+  const renderSection = (
+    title: string,
+    sectionConfigs: OfficialPluginConfig[],
+    options?: { filter?: Exclude<PluginCatalogFilter, "all">; preview?: boolean },
+  ) => {
+    const viewAllFilter = options?.filter;
+    return (
+      <PluginCatalogSection
+        key={title}
+        title={title}
+        configs={options?.preview ? sectionConfigs.slice(0, CATALOG_PREVIEW_SIZE) : sectionConfigs}
+        installedPlugins={installedPlugins}
+        canEdit={canEdit}
+        isInstalling={isInstalling}
+        installingPluginName={installingPluginName}
+        onInstall={install}
+        onViewAll={
+          viewAllFilter
+            ? () => {
+                setQuery("");
+                setActiveFilter(viewAllFilter);
+              }
+            : undefined
+        }
+      />
+    );
+  };
+
   return (
     <SettingsContent
       title="Plugins"
-      description="Immutable Agent Plugin packages installed from public GitHub sources."
+      description="Add trusted tools and expertise to your workspace."
+      contentClassName="max-w-[960px]"
     >
-      <div className="flex flex-col gap-3">
-        {Object.values(OFFICIAL_PLUGINS).map((config) => {
-          const plugin = plugins.find(
-            (candidate) => candidate.name.toLocaleLowerCase() === config.name,
-          );
+      <div className="flex flex-col gap-7">
+        <div className="flex flex-col gap-3">
+          <div className="relative">
+            <Search
+              aria-hidden="true"
+              size={16}
+              strokeWidth={1.8}
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-subtle"
+            />
+            <Input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search plugins"
+              aria-label="Search plugins"
+              className="h-11 rounded-lg bg-surface pl-9 text-[13px] shadow-none"
+            />
+          </div>
+          <div className="flex flex-wrap gap-2" aria-label="Plugin categories">
+            {PLUGIN_CATALOG_FILTERS.map((filter) => (
+              <Button
+                key={filter.id}
+                variant={activeFilter === filter.id ? "secondary" : "outline"}
+                size="sm"
+                aria-pressed={activeFilter === filter.id}
+                onClick={() => setActiveFilter(filter.id)}
+                className="h-8 rounded-full px-3 text-[12px] font-normal shadow-none"
+              >
+                {filter.label}
+              </Button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-8">
+          {normalizedQuery ? (
+            filteredConfigs.length > 0 ? (
+              renderSection("Search results", filteredConfigs)
+            ) : (
+              <PluginCatalogEmptyState onReset={() => setQuery("")} />
+            )
+          ) : activeFilter === "all" ? (
+            <>
+              {renderSection(
+                "Featured",
+                configs.filter((config) => config.featured),
+                { filter: "featured", preview: true },
+              )}
+              {PLUGIN_CATEGORY_FILTERS.map((category) =>
+                renderSection(
+                  category.label,
+                  configs.filter(
+                    (config) => config.category === category.id && config.featured !== true,
+                  ),
+                  { filter: category.id, preview: true },
+                ),
+              )}
+            </>
+          ) : filteredConfigs.length > 0 ? (
+            renderSection(pluginCatalogFilterLabel(activeFilter), filteredConfigs)
+          ) : (
+            <PluginCatalogEmptyState onReset={() => setActiveFilter("all")} />
+          )}
+        </div>
+      </div>
+    </SettingsContent>
+  );
+}
+
+function PluginCatalogSection({
+  title,
+  configs,
+  installedPlugins,
+  canEdit,
+  isInstalling,
+  installingPluginName,
+  onInstall,
+  onViewAll,
+}: {
+  title: string;
+  configs: OfficialPluginConfig[];
+  installedPlugins: ReadonlyMap<string, PluginListItemDto>;
+  canEdit: boolean;
+  isInstalling: boolean;
+  installingPluginName: OfficialPluginName | null;
+  onInstall: (config: OfficialPluginConfig) => void;
+  onViewAll: (() => void) | undefined;
+}) {
+  const headingId = `plugin-section-${title.toLocaleLowerCase().replaceAll(" ", "-")}`;
+
+  return (
+    <section aria-labelledby={headingId} className="flex flex-col gap-2.5">
+      <div className="flex min-h-8 items-center justify-between gap-3 px-2">
+        <h2 id={headingId} className="text-[13px] font-medium text-ink-subtle">
+          {title}
+        </h2>
+        {onViewAll ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onViewAll}
+            aria-label={`View all ${title.toLocaleLowerCase()} plugins`}
+            className="h-7 px-2 text-[12px] font-normal text-ink-subtle"
+          >
+            View all
+          </Button>
+        ) : null}
+      </div>
+      <ul className="grid grid-cols-1 gap-x-3 gap-y-1 sm:grid-cols-2">
+        {configs.map((config) => {
+          const plugin = installedPlugins.get(config.name);
+          const installingThisPlugin = isInstalling && installingPluginName === config.name;
+
           return (
-            <div
+            <li
               key={config.name}
-              className="flex items-center gap-3 rounded-lg border border-border bg-surface px-3.5 py-3"
+              className="group flex min-w-0 items-center gap-2.5 rounded-lg px-2 py-2.5 transition-colors duration-150 hover:bg-surface-hover"
             >
               <Link
                 href={`/settings/plugins/${config.name}`}
                 prefetch={Boolean(plugin)}
-                className="group flex min-w-0 flex-1 items-center gap-3 rounded-md focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+                className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
               >
                 <span
                   className={cn(
-                    "flex size-10 shrink-0 items-center justify-center rounded-lg",
+                    "flex size-10 shrink-0 items-center justify-center rounded-lg border border-border/70",
                     config.iconClassName,
                   )}
                 >
                   <config.Icon className="size-5" />
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-2">
-                    <span className="truncate text-[14px] font-medium leading-tight text-ink">
+                  <span className="flex items-center gap-1.5">
+                    <span className="truncate text-[13.5px] font-medium leading-5 text-ink">
                       {config.label}
                     </span>
-                    {plugin ? (
-                      <PluginStatus status={plugin.status} />
-                    ) : (
-                      <span className="inline-flex shrink-0 rounded-full bg-surface-muted px-1.5 py-px text-[10.5px] font-medium leading-4 text-ink-subtle">
-                        Not installed
-                      </span>
-                    )}
+                    {plugin ? <PluginStatus status={plugin.status} /> : null}
                   </span>
-                  <span className="mt-0.5 block truncate text-[12.5px] leading-5 text-ink-subtle">
+                  <span className="block truncate text-[12px] leading-5 text-ink-subtle">
                     {plugin?.manifest.description || config.description}
-                  </span>
-                  <span className="mt-1 block text-[11.5px] leading-4 text-ink-subtle">
-                    {plugin
-                      ? `${plugin.skillCount} ${plugin.skillCount === 1 ? "skill" : "skills"} · updated ${formatRelativeTime(plugin.updatedAt)}`
-                      : config.kind === "skills"
-                        ? "Official skill package"
-                        : "Official package"}
                   </span>
                 </span>
               </Link>
               {plugin ? (
                 <Link
                   href={`/settings/plugins/${config.name}`}
-                  className={cn(buttonVariants({ variant: "outline", size: "sm" }), "text-ink")}
+                  className={cn(
+                    buttonVariants({ variant: "outline", size: "sm" }),
+                    "h-8 rounded-full px-3 text-[12px] text-ink shadow-none",
+                  )}
                 >
                   Manage
                 </Link>
@@ -384,20 +550,36 @@ export function PluginsSettings({
                 <Button
                   size="sm"
                   disabled={isInstalling}
-                  aria-busy={isInstalling && installingPluginName === config.name}
-                  onClick={() => install(config)}
+                  aria-busy={installingThisPlugin}
+                  onClick={() => onInstall(config)}
+                  className="h-8 rounded-full px-3 text-[12px] shadow-none"
                 >
-                  {isInstalling && installingPluginName === config.name ? (
-                    <Loader2 className="animate-spin" />
-                  ) : null}
-                  {isInstalling && installingPluginName === config.name ? "Installing…" : "Install"}
+                  {installingThisPlugin ? <Loader2 className="animate-spin" /> : null}
+                  {installingThisPlugin ? "Installing…" : "Install"}
                 </Button>
               ) : null}
-            </div>
+            </li>
           );
         })}
+      </ul>
+    </section>
+  );
+}
+
+function PluginCatalogEmptyState({ onReset }: { onReset: () => void }) {
+  return (
+    <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border px-6 py-10 text-center">
+      <div className="flex size-9 items-center justify-center rounded-full bg-surface-muted text-ink-subtle">
+        <Search size={16} strokeWidth={1.8} />
       </div>
-    </SettingsContent>
+      <div>
+        <p className="text-[13px] font-medium text-ink">No plugins found</p>
+        <p className="mt-1 text-[12px] text-ink-subtle">Try another search or category.</p>
+      </div>
+      <Button variant="outline" size="sm" onClick={onReset}>
+        Clear search
+      </Button>
+    </div>
   );
 }
 
@@ -1209,19 +1391,6 @@ function formatBytes(value: number) {
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(value < 10 * 1024 ? 1 : 0)} KB`;
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatRelativeTime(value: Date | string) {
-  const timestamp = typeof value === "string" ? new Date(value).getTime() : value.getTime();
-  const elapsedMinutes = Math.floor((Date.now() - timestamp) / 60_000);
-  if (!Number.isFinite(timestamp) || elapsedMinutes < 1) return "just now";
-  if (elapsedMinutes < 60) return `${elapsedMinutes}m ago`;
-  const hours = Math.floor(elapsedMinutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return days < 7
-    ? `${days}d ago`
-    : new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(timestamp);
 }
 
 function errorMessage(value: unknown) {

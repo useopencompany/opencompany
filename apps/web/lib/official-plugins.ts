@@ -14,12 +14,22 @@ export type OfficialMcpPluginName =
   | "x";
 export type OfficialSkillPluginName = "yc-advise";
 export type OfficialPluginName = OfficialMcpPluginName | OfficialSkillPluginName;
+export type OfficialPluginCategory = "communication" | "productivity" | "engineering" | "business";
+
+export const OFFICIAL_PLUGIN_CATEGORIES = {
+  communication: "Communication",
+  productivity: "Productivity",
+  engineering: "Engineering",
+  business: "Business",
+} as const satisfies Record<OfficialPluginCategory, string>;
 
 type OfficialPluginMetadataBase = {
   name: OfficialPluginName;
   label: string;
   description: string;
   source: string;
+  category: OfficialPluginCategory;
+  featured?: boolean;
 };
 
 export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
@@ -61,6 +71,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     label: "Better Stack",
     description:
       "Investigate observability data and manage monitoring, incidents, dashboards, and team access.",
+    category: "engineering",
     source:
       "https://github.com/useopencompany/plugins/tree/cd2ab3510ce35031bb564fbd2d4d55b825a4a83b/betterstack",
     connectionProvider: "betterstack",
@@ -72,6 +83,8 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     kind: "mcp",
     label: "GitHub as you",
     description: "Work with repositories, issues, pull requests, and Actions as yourself.",
+    category: "engineering",
+    featured: true,
     source:
       "https://github.com/useopencompany/plugins/tree/232e380e8850c440c28e4588ef79143d41c000db/github",
     connectionProvider: "github_user",
@@ -84,6 +97,8 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     kind: "mcp",
     label: "Gmail",
     description: "Search and read Gmail, create drafts, and organize messages with approval.",
+    category: "communication",
+    featured: true,
     source:
       "https://github.com/useopencompany/plugins/tree/587fb06ae2a4e4bed7532e216f8712979ca35e7b/gmail",
     connectionProvider: "gmail",
@@ -97,6 +112,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     kind: "mcp",
     label: "Google Calendar",
     description: "List calendars, read your schedule, and create calendar events.",
+    category: "productivity",
     source:
       "https://github.com/useopencompany/plugins/tree/de04f0c11eeb4e4eb4ed1140818205e14b08401f/google-calendar",
     connectionProvider: "google_calendar",
@@ -109,6 +125,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     kind: "mcp",
     label: "Google Drive",
     description: "Browse, read, create, and copy files through opencompany's Google Drive MCP.",
+    category: "productivity",
     source:
       "https://github.com/useopencompany/plugins/tree/dc0c91221bcfa9b6088a19277f875c438b37e96e/google-drive",
     connectionProvider: "google_drive",
@@ -123,6 +140,8 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     kind: "mcp",
     label: "Linear",
     description: "Work with Linear issues, projects, comments, and team workflows.",
+    category: "productivity",
+    featured: true,
     source:
       "https://github.com/useopencompany/plugins/tree/775df7a9a37f5585b9b87a26533ba6ed1035f1dc/linear",
     connectionProvider: "linear",
@@ -137,6 +156,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     label: "Neon",
     description:
       "Inspect Neon projects and database structure, and run permission-gated read-only SQL.",
+    category: "engineering",
     source:
       "https://github.com/useopencompany/plugins/tree/bbec4c01a46b6d7bf1ffffda87af898060dd7916/neon",
     connectionProvider: "neon",
@@ -149,6 +169,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     label: "PostHog",
     description:
       "Explore dashboards, insights, schemas, and product analytics, with permission-gated insight creation.",
+    category: "business",
     source:
       "https://github.com/useopencompany/plugins/tree/4ba32cd5a7618d9be3714ec0efd3c8784209046c/posthog",
     connectionProvider: "posthog",
@@ -161,6 +182,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     label: "Render",
     description:
       "Inspect Render infrastructure, troubleshoot services, and deploy permission-gated applications and datastores.",
+    category: "engineering",
     source:
       "https://github.com/useopencompany/plugins/tree/569241125c96a07b9072d42aee404822a6950b26/render",
     connectionProvider: "render",
@@ -172,6 +194,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     kind: "mcp",
     label: "SigNoz",
     description: "Investigate logs, metrics, traces, alerts, and dashboards in SigNoz US Cloud.",
+    category: "engineering",
     source:
       "https://github.com/useopencompany/plugins/tree/053e9e9207f320651f1cb9b4e8feb84ab2af6bba/signoz",
     connectionProvider: "signoz",
@@ -183,6 +206,8 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     kind: "mcp",
     label: "Slack",
     description: "Search Slack and, with approval, read private content or make changes.",
+    category: "communication",
+    featured: true,
     source:
       "https://github.com/useopencompany/plugins/tree/1b912fe6c4f4497147887b2383f0181f763aa19b/slack",
     connectionProvider: "slack",
@@ -195,6 +220,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     label: "Stripe",
     description:
       "Learn about Stripe, inspect account and financial data, and manage Stripe resources with approval.",
+    category: "business",
     source:
       "https://github.com/useopencompany/plugins/tree/68c22e8a1ffe5eb8a83fb91c68f76f3f45705d3a/stripe",
     connectionProvider: "stripe",
@@ -207,6 +233,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     kind: "mcp",
     label: "X",
     description: "Research public conversations and manage your X account with approval.",
+    category: "communication",
     source:
       "https://github.com/useopencompany/plugins/tree/21060c09d1bbe70df85519cc3ad74cd5d097fbb6/x",
     connectionProvider: "x_account",
@@ -224,6 +251,7 @@ export const OFFICIAL_SKILL_PLUGIN_METADATA = {
     label: "YC Advise",
     description:
       "Independent YC-style startup advice and structured founder office hours, based on public principles and not affiliated with Y Combinator.",
+    category: "business",
     source:
       "https://github.com/useopencompany/plugins/tree/2e092c3bc518622f1dc4ac1a6777d87ae3695ec6/yc-advise",
   },
