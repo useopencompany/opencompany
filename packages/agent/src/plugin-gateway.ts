@@ -43,6 +43,11 @@ import {
   loadGoogleDriveMcpWorkerConnection,
 } from "./integrations/google-drive-mcp";
 import {
+  GRANOLA_MCP_ENDPOINT_URL,
+  getGranolaMcpIntegrationState,
+  loadGranolaMcpWorkerConnection,
+} from "./integrations/granola-mcp";
+import {
   getHubSpotMcpIntegrationState,
   HUBSPOT_MCP_ENDPOINT_URL,
   loadHubSpotMcpWorkerConnection,
@@ -119,6 +124,12 @@ const providerBindings = {
     endpointUrl: GMAIL_MCP_ENDPOINT_URL,
     getState: getGmailMcpIntegrationState,
     loadConnection: loadGmailMcpWorkerConnection,
+  },
+  granola: {
+    provider: "granola",
+    endpointUrl: GRANOLA_MCP_ENDPOINT_URL,
+    getState: getGranolaMcpIntegrationState,
+    loadConnection: loadGranolaMcpWorkerConnection,
   },
   "google-calendar": {
     provider: "google_calendar",

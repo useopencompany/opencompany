@@ -4,6 +4,10 @@ import {
   startBetterStackMcpOAuth,
 } from "@opencompany/agent/integrations/betterstack-mcp";
 import {
+  completeGranolaMcpOAuth,
+  startGranolaMcpOAuth,
+} from "@opencompany/agent/integrations/granola-mcp";
+import {
   completeHubSpotMcpOAuth,
   startHubSpotMcpOAuth,
 } from "@opencompany/agent/integrations/hubspot-mcp";
@@ -48,6 +52,11 @@ vi.mock("@opencompany/agent/integrations/hubspot-mcp", async (importOriginal) =>
   startHubSpotMcpOAuth: vi.fn(),
   completeHubSpotMcpOAuth: vi.fn(),
 }));
+vi.mock("@opencompany/agent/integrations/granola-mcp", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  startGranolaMcpOAuth: vi.fn(),
+  completeGranolaMcpOAuth: vi.fn(),
+}));
 vi.mock("@opencompany/agent/integrations/posthog-mcp", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   startPostHogMcpOAuth: vi.fn(),
@@ -74,6 +83,7 @@ const sentinelDb = { sentinel: "db" };
 const PROVIDERS: McpOAuthProvider[] = [
   "linear",
   "hubspot",
+  "granola",
   "posthog",
   "neon",
   "latitude",
@@ -85,6 +95,7 @@ const PROVIDERS: McpOAuthProvider[] = [
 const flowMocks = {
   linear: { start: startLinearMcpOAuth, complete: completeLinearMcpOAuth },
   hubspot: { start: startHubSpotMcpOAuth, complete: completeHubSpotMcpOAuth },
+  granola: { start: startGranolaMcpOAuth, complete: completeGranolaMcpOAuth },
   posthog: { start: startPostHogMcpOAuth, complete: completePostHogMcpOAuth },
   neon: { start: startNeonMcpOAuth, complete: completeNeonMcpOAuth },
   latitude: { start: startLatitudeMcpOAuth, complete: completeLatitudeMcpOAuth },
@@ -224,7 +235,10 @@ describe("remote MCP OAuth ingress", () => {
       const expectedPath =
         provider === "linear"
           ? "/settings"
-          : provider === "betterstack" || provider === "signoz" || provider === "hubspot"
+          : provider === "betterstack" ||
+              provider === "signoz" ||
+              provider === "hubspot" ||
+              provider === "granola"
             ? `/settings/plugins/${provider}`
             : "/settings/integrations";
       expect(response.headers.get("location"), provider).toBe(

@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   getGitHubState: vi.fn(),
   getGmailState: vi.fn(),
   loadGmailConnection: vi.fn(),
+  getGranolaState: vi.fn(),
+  loadGranolaConnection: vi.fn(),
   getGoogleCalendarState: vi.fn(),
   loadConnection: vi.fn(),
   loadGitHubConnection: vi.fn(),
@@ -72,6 +74,11 @@ vi.mock("./integrations/gmail-mcp", () => ({
   gmailMcpRuntimeEndpointUrl: () => "https://api.opencompany.chat/mcp/plugins/gmail",
   getGmailMcpIntegrationState: mocks.getGmailState,
   loadGmailMcpWorkerConnection: mocks.loadGmailConnection,
+}));
+vi.mock("./integrations/granola-mcp", () => ({
+  GRANOLA_MCP_ENDPOINT_URL: "https://mcp.granola.ai/mcp",
+  getGranolaMcpIntegrationState: mocks.getGranolaState,
+  loadGranolaMcpWorkerConnection: mocks.loadGranolaConnection,
 }));
 vi.mock("./integrations/google-calendar-mcp", () => ({
   GOOGLE_CALENDAR_MCP_ENDPOINT_URL: "https://api.opencompany.chat/mcp/plugins/google-calendar",
@@ -426,6 +433,40 @@ describe("plugin gateway registration cache", () => {
           ...calendarRecord.server,
           url: "https://api.opencompany.chat.evil.example/mcp/plugins/google-calendar",
         },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
+  it("binds Granola OAuth only to Granola's exact hosted MCP endpoint", async () => {
+    const granolaRecord = record({
+      pluginName: "granola",
+      pluginLabel: "granola",
+      pluginDescription: "Granola meeting tools.",
+      connectionProvider: "granola",
+      server: {
+        name: "granola",
+        type: "streamable-http",
+        url: "https://mcp.granola.ai/mcp",
+        headers: {},
+      },
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([granolaRecord]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:granola:granola",
+        connectionProvider: "granola",
+        getState: mocks.getGranolaState,
+        loadConnection: mocks.loadGranolaConnection,
+      }),
+    ]);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...granolaRecord,
+        server: { ...granolaRecord.server, url: "https://mcp.granola.ai.evil.example/mcp" },
       },
     ]);
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);

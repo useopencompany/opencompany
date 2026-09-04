@@ -15,6 +15,7 @@ import {
   GmailIcon,
   GoogleCalendarIcon,
   GoogleDriveIcon,
+  GranolaIcon,
   HubSpotIcon,
   LinearIcon,
   NeonIcon,
@@ -137,6 +138,11 @@ export const OFFICIAL_MCP_PLUGINS = {
     Icon: GmailIcon,
     iconClassName: "bg-white text-[#EA4335]",
   },
+  granola: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.granola,
+    Icon: GranolaIcon,
+    iconClassName: "bg-[#F0EBE1] text-[#1A1714]",
+  },
   "google-calendar": {
     ...OFFICIAL_MCP_PLUGIN_METADATA["google-calendar"],
     Icon: GoogleCalendarIcon,
@@ -216,6 +222,8 @@ export const GITHUB_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.github.name;
 export const GITHUB_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.github.source;
 export const GMAIL_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.gmail.name;
 export const GMAIL_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.gmail.source;
+export const GRANOLA_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.granola.name;
+export const GRANOLA_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.granola.source;
 export const GOOGLE_CALENDAR_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS["google-calendar"].name;
 export const GOOGLE_CALENDAR_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS["google-calendar"].source;
 export const GOOGLE_DRIVE_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS["google-drive"].name;

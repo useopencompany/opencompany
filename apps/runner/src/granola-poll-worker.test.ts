@@ -176,6 +176,7 @@ describe("Granola wiki meeting routing", () => {
     ]);
 
     const compiled = new PgDialect().sqlToQuery(query!);
+    expect(compiled.sql).toContain("i.external_id <> 'granola_mcp'");
     expect(compiled.sql).toContain("FROM goat.brain_sources bs");
     expect(compiled.sql).toContain("OR EXISTS");
     expect(compiled.sql).toContain("FROM goat.wiki_sources ws");

@@ -86,6 +86,7 @@ import {
   listGoogleSharedDrives,
   loadOwnGoogleDriveAccount,
 } from "./integrations/google-drive-source";
+import { GRANOLA_MCP_EXTERNAL_ID } from "./integrations/granola-mcp";
 
 type DbLike = any;
 
@@ -914,7 +915,11 @@ export class BrainSourceApplicationService {
         listPersonalIntegrationAccounts({
           userWorkosId: actorId,
           provider,
-          ...(provider === "linear" ? { excludeExternalId: LINEAR_MCP_EXTERNAL_ID } : {}),
+          ...(provider === "linear"
+            ? { excludeExternalId: LINEAR_MCP_EXTERNAL_ID }
+            : provider === "granola"
+              ? { excludeExternalId: GRANOLA_MCP_EXTERNAL_ID }
+              : {}),
           db: this.db,
         }),
       ),
@@ -951,6 +956,7 @@ function sourceProviderStates(rows: IntegrationRow[], actor: Actor) {
         row.userWorkosId === actor.userId &&
         !row.workspaceId &&
         (provider !== "linear" || row.externalId !== LINEAR_MCP_EXTERNAL_ID) &&
+        (provider !== "granola" || row.externalId !== GRANOLA_MCP_EXTERNAL_ID) &&
         (!usesLatestActiveRow || row.status !== "disconnected"),
     );
   };
