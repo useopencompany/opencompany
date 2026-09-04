@@ -160,6 +160,8 @@ export type StripeProviderState = {
   accountName: string | null;
   livemode: boolean | null;
   statusReason: string | null;
+  capabilityModes: Record<string, unknown>;
+  toolModes: Record<string, unknown>;
 };
 
 export type SlackProviderState = {
@@ -223,9 +225,9 @@ export type InfisicalProviderState = {
 // accounts per provider (two Gmails, two Slack workspaces) — uniqueness in the
 // DB is (user, provider, external_id), so a second OAuth pass creates a
 // second row rather than replacing the first.
-export type IntegrationAccountView = {
+export type IntegrationAccountView<Provider extends string = PersonalAccountProvider> = {
   integrationId: string;
-  provider: PersonalAccountProvider;
+  provider: Provider;
   status: IntegrationStatus;
   connected: boolean;
   accountEmail: string | null;
@@ -300,6 +302,8 @@ type IntegrationStateRow = {
   scopes?: string[] | null;
   capabilityModes?: Record<string, unknown> | null;
   capability_modes?: Record<string, unknown> | null;
+  toolModes?: Record<string, unknown> | null;
+  tool_modes?: Record<string, unknown> | null;
 };
 
 const JAMIE_API_KEY_EXTERNAL_ID_PREFIX = "jamie_api_key_sha256:";
@@ -718,6 +722,8 @@ function stripeProviderState(row: IntegrationStateRow | undefined): StripeProvid
       accountName: null,
       livemode: null,
       statusReason: null,
+      capabilityModes: {},
+      toolModes: {},
     };
   }
 
@@ -735,6 +741,8 @@ function stripeProviderState(row: IntegrationStateRow | undefined): StripeProvid
           ? false
           : null,
     statusReason: row.statusReason ?? row.status_reason ?? null,
+    capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
+    toolModes: row.toolModes ?? row.tool_modes ?? {},
   };
 }
 

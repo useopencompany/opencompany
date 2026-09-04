@@ -220,6 +220,13 @@ const app = createApiApp({
         workspaceIds: [workspaceId],
         connectionProvider: "render",
       }),
+    refreshStripePluginRegistrations: ({ userWorkosId, workspaceId }) =>
+      refreshPluginGatewayRegistrationsForWorkspaces({
+        db: database.db,
+        userWorkosId,
+        workspaceIds: [workspaceId],
+        connectionProvider: "stripe",
+      }),
   }),
   slackBotSettings: createSlackBotSettingsService({ db: database.db }),
   mcp: createMcpService({
@@ -345,7 +352,17 @@ const app = createApiApp({
         connectionProvider: provider,
       }),
   }),
-  xAccountIngress: createXAccountIngress({ db: database.db, identify: identityVerifier }),
+  xAccountIngress: createXAccountIngress({
+    db: database.db,
+    identify: identityVerifier,
+    refreshPluginRegistrations: ({ userWorkosId, workspaceIds }) =>
+      refreshPluginGatewayRegistrationsForWorkspaces({
+        db: database.db,
+        userWorkosId,
+        workspaceIds,
+        connectionProvider: "x",
+      }),
+  }),
   slackBotIngress: createSlackBotIngress({
     db: database.db,
     identify: identityVerifier,

@@ -24,10 +24,16 @@ const mocks = vi.hoisted(() => ({
   loadBetterStackConnection: vi.fn(),
   getRenderState: vi.fn(),
   loadRenderConnection: vi.fn(),
+  getPostHogState: vi.fn(),
+  loadPostHogConnection: vi.fn(),
   getSlackState: vi.fn(),
   loadSlackConnection: vi.fn(),
   getSigNozState: vi.fn(),
   loadSigNozConnection: vi.fn(),
+  getStripeState: vi.fn(),
+  loadStripeConnection: vi.fn(),
+  getXState: vi.fn(),
+  loadXConnection: vi.fn(),
 }));
 
 vi.mock("@opencompany/db/client", () => ({ getDb: () => ({ sentinel: "db" }) }));
@@ -77,9 +83,10 @@ vi.mock("./integrations/google-drive-mcp", () => ({
   loadGoogleDriveMcpWorkerConnection: mocks.loadGoogleDriveConnection,
 }));
 vi.mock("./integrations/posthog-mcp", () => ({
-  POSTHOG_MCP_ENDPOINT_URL: "https://mcp.posthog.com/mcp",
-  getPostHogIntegrationState: vi.fn(),
-  loadPostHogMcpWorkerConnection: vi.fn(),
+  POSTHOG_MCP_ENDPOINT_URL:
+    "https://mcp.posthog.com/mcp?mode=tools&tools=dashboards-get-all,dashboard-get,dashboard-insights-run,insights-list,insight-get,insight-query,read-data-schema,query-trends,query-funnel,query-retention,query-paths,query-stickiness,query-lifecycle,insight-create",
+  getPostHogIntegrationState: mocks.getPostHogState,
+  loadPostHogMcpWorkerConnection: mocks.loadPostHogConnection,
 }));
 vi.mock("./integrations/render-mcp", () => ({
   RENDER_MCP_ENDPOINT_URL: "https://mcp.render.com/mcp",
@@ -106,6 +113,16 @@ vi.mock("./integrations/signoz-mcp", () => ({
   SIGNOZ_MCP_ENDPOINT_URL: "https://mcp.us.signoz.cloud/mcp",
   getSigNozIntegrationState: mocks.getSigNozState,
   loadSigNozMcpWorkerConnection: mocks.loadSigNozConnection,
+}));
+vi.mock("./integrations/stripe", () => ({
+  STRIPE_MCP_ENDPOINT_URL: "https://mcp.stripe.com",
+  getStripeMcpIntegrationState: mocks.getStripeState,
+  loadStripeMcpWorkerConnection: mocks.loadStripeConnection,
+}));
+vi.mock("./integrations/x-mcp", () => ({
+  X_MCP_ENDPOINT_URL: "https://api.x.com/mcp",
+  getXMcpIntegrationState: mocks.getXState,
+  loadXMcpWorkerConnection: mocks.loadXConnection,
 }));
 
 import { createPluginGatewayLifecycle, resolvePluginGatewayRegistrations } from "./plugin-gateway";
@@ -257,6 +274,39 @@ describe("plugin gateway registration cache", () => {
       {
         ...githubRecord,
         server: { ...githubRecord.server, url: "https://evil.example/mcp" },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
+  it("binds X credentials only to X's exact hosted MCP endpoint", async () => {
+    const xRecord = record({
+      pluginName: "x",
+      pluginLabel: "x",
+      pluginDescription: "Official X plugin tools.",
+      connectionProvider: "x",
+      server: {
+        name: "x",
+        type: "streamable-http",
+        url: "https://api.x.com/mcp",
+        headers: {},
+      },
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([xRecord]);
+
+    const [registration] = await resolvePluginGatewayRegistrations(identity, { db, now });
+    expect(registration).toMatchObject({
+      source: "plugin:x:x",
+      connectionProvider: "x_account",
+    });
+    expect(registration?.getState).toBe(mocks.getXState);
+    expect(registration?.loadConnection).toBe(mocks.loadXConnection);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...xRecord,
+        server: { ...xRecord.server, url: "https://api.x.com.evil.example/mcp" },
       },
     ]);
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
@@ -492,6 +542,76 @@ describe("plugin gateway registration cache", () => {
           headers: {},
         },
       }),
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
+  it("binds PostHog credentials only to the reviewed tool-filtered endpoint", async () => {
+    const endpoint =
+      "https://mcp.posthog.com/mcp?mode=tools&tools=dashboards-get-all,dashboard-get,dashboard-insights-run,insights-list,insight-get,insight-query,read-data-schema,query-trends,query-funnel,query-retention,query-paths,query-stickiness,query-lifecycle,insight-create";
+    const posthogRecord = record({
+      pluginName: "posthog",
+      pluginLabel: "posthog",
+      pluginDescription: "PostHog analytics tools.",
+      connectionProvider: "posthog",
+      server: {
+        name: "posthog",
+        type: "streamable-http",
+        url: endpoint,
+        headers: {},
+      },
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([posthogRecord]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:posthog:posthog",
+        connectionProvider: "posthog",
+        getState: mocks.getPostHogState,
+        loadConnection: mocks.loadPostHogConnection,
+      }),
+    ]);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...posthogRecord,
+        server: { ...posthogRecord.server, url: "https://mcp.posthog.com/mcp" },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
+  it("binds Stripe credentials only to the reviewed hosted endpoint", async () => {
+    const stripeRecord = record({
+      pluginName: "stripe",
+      pluginLabel: "stripe",
+      pluginDescription: "Stripe account tools.",
+      connectionProvider: "stripe",
+      server: {
+        name: "stripe",
+        type: "streamable-http",
+        url: "https://mcp.stripe.com",
+        headers: {},
+      },
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([stripeRecord]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:stripe:stripe",
+        connectionProvider: "stripe",
+        getState: mocks.getStripeState,
+        loadConnection: mocks.loadStripeConnection,
+      }),
+    ]);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...stripeRecord,
+        server: { ...stripeRecord.server, url: "https://mcp.example.com" },
+      },
     ]);
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
   });

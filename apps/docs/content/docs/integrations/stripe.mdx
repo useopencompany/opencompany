@@ -1,12 +1,47 @@
 ---
 title: Stripe
-description: Give opencompany read-only access to founder metrics from a workspace Stripe account.
+description: Install the Stripe plugin to learn about Stripe and work with workspace billing data.
 ---
 
-## What the connection does
+## Connect Stripe
 
-Stripe is a workspace-owned, read-only connector for main Chat. It can answer bounded questions
-about:
+1. Open **Settings → Plugins → Stripe** and install the integrity-pinned package.
+2. In Stripe, open **Developers → API keys** and create a restricted key named **opencompany**.
+3. Grant read access to **Balance**, **Subscriptions**, and **Invoices**. Add only the other API
+   permissions your workspace needs and leave every unnecessary permission off.
+4. Paste the `rk_live_…` key, or an `rk_test_…` key while testing, into the plugin's Accounts
+   section.
+
+Only workspace admins can connect or disconnect Stripe. opencompany rejects unrestricted `sk_…`
+keys and encrypts the restricted key at rest. It validates the key against `https://api.stripe.com`
+and binds plugin credential injection to the reviewed `https://mcp.stripe.com` endpoint. The Stripe
+key remains the final authority: a tool cannot access or change a resource unless the key grants the
+corresponding Stripe API permission.
+
+## Tools and permissions
+
+The official plugin exposes Stripe's documentation, API reference, account-data, analytics, and
+resource-management tools.
+
+- **Learn about Stripe** defaults to **On** for public documentation and API-reference tools.
+- **Read Stripe data** defaults to **Ask** because results can include customer, payment, balance,
+  and other sensitive financial data.
+- **Manage Stripe** defaults to **Ask** for all write-capable tools, including the mixed read/create
+  report tool and feedback submission.
+- Any newly discovered or unclassified tool fails safe and requires confirmation.
+
+An approval in opencompany does not expand the restricted key's Stripe permissions. Some tools,
+including analytics previews, might not be available for every Stripe account. Stripe recommends
+human confirmation and caution around prompt injection when its MCP server is used alongside other
+servers.
+
+The existing founder-metrics actions remain available when the plugin is not installed. Installing
+the plugin suppresses those duplicate actions; uninstalling it restores the legacy read-only
+fallback without deleting the saved Stripe connection.
+
+## Founder metrics
+
+With the baseline read permissions, Stripe can answer bounded questions about:
 
 - captured payment volume, refunds, disputes, Stripe fees, and net payment activity by currency;
 - available and pending balances;
@@ -16,20 +51,6 @@ about:
 Payment activity is operational reporting, not GAAP revenue. Estimated MRR excludes metered,
 tiered, transformed-quantity, and unpriced items. Stripe is excluded from automatic Brain-fill
 surveys because these metrics are live operational state.
-
-## Connect Stripe
-
-Only a workspace admin can connect or disconnect Stripe.
-
-1. In Stripe, open **Developers → API keys**.
-2. Create a restricted key named **opencompany**.
-3. Grant read access to **Balance**, **Subscriptions**, and **Invoices**. Leave every write
-   permission off.
-4. Copy the `rk_live_…` key, or an `rk_test_…` key while testing.
-5. In opencompany, open **Settings → Integrations → Stripe**, paste the key, and connect.
-
-opencompany validates each required read endpoint before saving. Unrestricted `sk_…` keys are
-rejected. The restricted key stays encrypted and server-side.
 
 ## Example requests
 

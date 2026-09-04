@@ -135,6 +135,27 @@ export const PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
+  stripe: [
+    {
+      id: "read",
+      label: "Learn about Stripe",
+      description: "Search Stripe documentation and inspect API reference details.",
+      defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Read Stripe data",
+      description: "Read account, customer, payment, billing, balance, and analytics data.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Manage Stripe",
+      description:
+        "Create, update, or delete Stripe resources, including refunds and billing changes.",
+      defaultMode: "ask",
+    },
+  ],
   slack: [
     {
       id: "read",
@@ -267,9 +288,24 @@ export const PROVIDER_CAPABILITIES: Partial<
   ],
   x_account: [
     {
+      id: "read",
+      label: "Research public X data",
+      description:
+        "Search and inspect public posts, profiles, lists, communities, trends, and news.",
+      defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Read account & private X data",
+      description:
+        "Read account-specific data such as analytics, timelines, bookmarks, messages, and usage.",
+      defaultMode: "ask",
+    },
+    {
       id: "write",
-      label: "Post to X",
-      description: "Post new tweets from your connected X account.",
+      label: "Manage X",
+      description:
+        "Post and delete content or make other changes through your connected X account.",
       defaultMode: "ask",
     },
   ],

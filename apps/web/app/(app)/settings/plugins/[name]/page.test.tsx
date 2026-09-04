@@ -12,6 +12,7 @@ vi.mock("@/components/OfficialMcpPluginSettings", () => ({
   NeonPluginDetail: vi.fn(() => null),
   SigNozPluginDetail: vi.fn(() => null),
   SlackPluginDetail: vi.fn(() => null),
+  XPluginDetail: vi.fn(() => null),
 }));
 
 vi.mock("@/components/PluginSettings", () => ({

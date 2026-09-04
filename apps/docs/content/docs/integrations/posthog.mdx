@@ -1,18 +1,39 @@
 ---
 title: PostHog
-description: Explore product analytics and create focused insights from Chat.
+description: Install the PostHog plugin to explore product analytics and create focused insights.
 ---
 
-## What connecting does
+## Connect PostHog
 
-PostHog exposes a reviewed analytics tool catalog. opencompany can inspect dashboards and saved
-insights, run focused analytics queries, and create an insight on a selected dashboard when allowed.
+1. Open **Settings → Plugins → PostHog**.
+2. Select **Install** and review the integrity-pinned package.
+3. Select **Connect PostHog account**, then finish PostHog's OAuth flow.
+
+PostHog routes the connection to the correct US or EU data region for the account you choose. The
+OAuth credential stays server-side and is sent only to the reviewed
+`https://mcp.posthog.com/mcp` endpoint.
+
+The official plugin exposes a focused catalog for dashboards, saved insights, the event and
+property schema, trends, funnels, retention, paths, stickiness, and lifecycle queries. It can also
+create a saved insight.
 
 ## Scopes and permissions
 
-Analytics reads and insight creation have separate action modes; creating an insight defaults to a
-confirmation boundary in the current UI. Detailed OAuth scopes and result-size limits are coming
-soon. Analytics may contain sensitive customer data even when no mutation is performed.
+The connection requests PostHog's dashboard, insight, query, event-definition, and
+property-definition read scopes, plus insight write access.
+
+- **Read analytics** defaults to **On** for the 13 reviewed read-only tools.
+- **Create insights** defaults to **Ask**, so each saved insight requires confirmation.
+- Any newly discovered or unclassified tool fails safe and requires confirmation.
+
+Analytics results can contain sensitive customer, event, and property data even when no mutation
+is performed. Turn **Read analytics** to **Ask** or **Off** in the plugin's Tools section if your
+workspace needs a stricter boundary. PostHog warns that prompt injection can influence tool use, so
+review insight-creation requests before approving them.
+
+Uninstalling the plugin removes its tools but keeps the PostHog account connection available for a
+later reinstall. opencompany never sends the OAuth credential to a sandbox or model-visible tool
+result.
 
 ## Brain ingestion
 
