@@ -7,6 +7,7 @@ import {
   ChatReadModelSchema,
   CreateMessageBodySchema,
   CreateTaskBodySchema,
+  CreateTaskCommentBodySchema,
   InvokeWorkflowBodySchema,
   MessageReadModelSchema,
   MessageSummaryReadModelSchema,
@@ -17,6 +18,26 @@ import {
 } from "./schemas";
 
 describe("headless protocol", () => {
+  it("accepts Task comments with text, attachments, or both", () => {
+    expect(
+      CreateTaskCommentBodySchema.safeParse({
+        id: "comment_1",
+        body: "Review this",
+        attachmentIds: ["attachment_1"],
+      }).success,
+    ).toBe(true);
+    expect(
+      CreateTaskCommentBodySchema.safeParse({
+        id: "comment_2",
+        body: "",
+        attachmentIds: ["attachment_1"],
+      }).success,
+    ).toBe(true);
+    expect(CreateTaskCommentBodySchema.safeParse({ id: "comment_3", body: " " }).success).toBe(
+      false,
+    );
+  });
+
   it("keeps the browser request-header contract aligned with every OpenAPI operation", () => {
     type HeaderParameter = { in?: string; name?: string } | { $ref: string };
     type Operation = { parameters?: HeaderParameter[] };

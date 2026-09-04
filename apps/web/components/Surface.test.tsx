@@ -1326,20 +1326,21 @@ describe("Surface chat streaming UI", () => {
         tasks={[]}
         defaultModel={DEFAULT_MODEL}
         initialChat={{
-          id: "goat_chat_task_1",
+          id: "chat_task_1",
           title: "Investigate task",
           model: DEFAULT_MODEL,
           engine: "opencompany",
           messages: [],
         }}
         taskConversation={{
-          taskId: "goat_task_1",
+          taskId: "task_1",
           status: "succeeded",
           startedAtMs: Date.now(),
         }}
         userWorkosId="user_1"
       />,
     );
+    expect(screen.getByRole("button", { name: "Attach files" })).toBeInTheDocument();
 
     const screenshot = new File(["image"], "screenshot.png", { type: "image/png" });
     fireEvent.drop(window, {
@@ -1350,20 +1351,18 @@ describe("Surface chat streaming UI", () => {
     expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledWith({ file: screenshot });
     expect(await screen.findByText("screenshot.png")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await user.click(screen.getByRole("button", { name: "Post comment" }));
 
-    expect(chatMock.sendMessage).toHaveBeenCalledWith({
-      text: "",
-      metadata: {
-        attachments: [
-          expect.objectContaining({
-            id: "attachment_1",
-            kind: "image",
-            filename: "screenshot.png",
-          }),
-        ],
+    expect(taskCommandMocks.comment).toHaveBeenCalledWith(
+      "task_1",
+      {
+        id: "task_activity_comment_test",
+        body: "",
+        attachmentIds: ["attachment_1"],
       },
-    });
+      { scopeKey: "" },
+    );
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
   });
 
   it("keeps pre-cutover Task history explicitly read-only", () => {

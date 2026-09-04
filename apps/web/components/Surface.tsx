@@ -453,7 +453,11 @@ export function Surface({
   const pendingNewSessionIdRef = useRef<string | null>(null);
   const pendingInputCaretRef = useRef<number | null>(null);
   const pendingProgrammaticPromptRef = useRef<string | null>(null);
-  const pendingTaskCommentRef = useRef<{ id: string; body: string } | null>(null);
+  const pendingTaskCommentRef = useRef<{
+    id: string;
+    body: string;
+    attachmentIds?: string[];
+  } | null>(null);
   const backgroundTaskFocusOriginRef = useRef<Element | null>(null);
   const onboardingKickoffReadRef = useRef(false);
   const onboardingKickoffPromptRef = useRef<string | null>(null);
@@ -919,6 +923,7 @@ export function Surface({
       isActivePane &&
       attachmentsEnabled &&
       !engineSubmitting &&
+      !taskCommentSubmitting &&
       !(newChatCommandOpen && commandPaletteView === "compose"),
     ...(composerEngine === "codex" || composerEngine === "claude_code"
       ? { capabilities: CLOUD_CODEX_ATTACHMENT_CAPABILITIES }
@@ -1696,22 +1701,44 @@ export function Surface({
     const rawPrompt = pendingProgrammaticPromptRef.current ?? input;
     const prompt = rawPrompt.trim();
     pendingProgrammaticPromptRef.current = null;
+    const pendingAttachments = composerAttachments.attachments;
+    const readyAttachments = pendingAttachments.filter(
+      (attachment) => attachment.status === "ready",
+    );
+    if (composerAttachments.isUploading) {
+      toast.error("Wait for attachments to finish uploading.");
+      return;
+    }
+    if (composerAttachments.hasFailed) {
+      toast.error("Remove failed attachments before sending.");
+      return;
+    }
     if (activeTaskConversation) {
-      if (isTaskConversationWorking || taskCommentSubmitting || !prompt) return;
+      if (isTaskConversationWorking || taskCommentSubmitting) return;
+      if (!prompt && readyAttachments.length === 0) return;
+      const attachmentIds = readyAttachments.map((attachment) => attachment.id);
+      const pendingCommand = pendingTaskCommentRef.current;
       const command =
-        pendingTaskCommentRef.current?.body === rawPrompt
-          ? pendingTaskCommentRef.current
-          : { id: newHeadlessTaskCommentId(), body: rawPrompt };
+        pendingCommand?.body === rawPrompt &&
+        JSON.stringify(pendingCommand.attachmentIds ?? []) === JSON.stringify(attachmentIds)
+          ? pendingCommand
+          : {
+              id: newHeadlessTaskCommentId(),
+              body: rawPrompt,
+              ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
+            };
       pendingTaskCommentRef.current = command;
       clearError();
       setInput("");
       setMentionToken(null);
       setSelectedMentions([]);
+      composerAttachments.setAttachments([]);
       setTaskCommentSubmitting(true);
       void createHeadlessTaskComment(activeTaskConversation.taskId, command, {
         scopeKey: workspaceId,
       })
         .then(() => {
+          revokeAttachmentPreviews(pendingAttachments);
           if (!mountedRef.current) return;
           pendingTaskCommentRef.current = null;
           router.refresh();
@@ -1720,6 +1747,7 @@ export function Surface({
         .catch((error) => {
           if (!mountedRef.current) return;
           if (!inputRef.current?.value) setInput(rawPrompt);
+          composerAttachments.setAttachments(pendingAttachments);
           toast.error(error instanceof Error ? error.message : "Could not post the comment.");
         })
         .finally(() => {
@@ -1748,19 +1776,7 @@ export function Surface({
       return;
     }
 
-    const pendingAttachments = composerAttachments.attachments;
-    const readyAttachments = pendingAttachments.filter(
-      (attachment) => attachment.status === "ready",
-    );
     if (!prompt && readyAttachments.length === 0) return;
-    if (composerAttachments.isUploading) {
-      toast.error("Wait for attachments to finish uploading.");
-      return;
-    }
-    if (composerAttachments.hasFailed) {
-      toast.error("Remove failed attachments before sending.");
-      return;
-    }
 
     const messagePrompt = backgroundChat?.prompt ?? prompt;
     if (!messagePrompt && readyAttachments.length === 0) return;
@@ -3252,39 +3268,42 @@ export function Surface({
                   />
                 </div>
                 <div className="flex items-center gap-1 border-t border-border px-2.5 py-1.5">
+                  {attachmentsEnabled ? (
+                    <>
+                      <input
+                        ref={attachmentFileInputRef}
+                        type="file"
+                        multiple
+                        accept={CHAT_ATTACHMENT_ACCEPT}
+                        className="hidden"
+                        onChange={(event) => {
+                          const files = Array.from(event.currentTarget.files ?? []);
+                          event.currentTarget.value = "";
+                          if (files.length > 0) composerAttachments.acceptFiles(files);
+                        }}
+                      />
+                      <button
+                        type="button"
+                        aria-label="Attach files"
+                        disabled={
+                          isForegroundTurnWorking ||
+                          taskCommentSubmitting ||
+                          readOnly ||
+                          voiceDictation.isActive
+                        }
+                        onClick={() => attachmentFileInputRef.current?.click()}
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
+                      >
+                        <Plus size={16} strokeWidth={1.9} />
+                      </button>
+                    </>
+                  ) : null}
                   {activeTaskConversation ? (
                     <span className="min-h-7 px-1 text-[11.5px] leading-7 text-ink-subtle">
                       Comments are sent verbatim to this task.
                     </span>
                   ) : (
                     <>
-                      {attachmentsEnabled ? (
-                        <>
-                          <input
-                            ref={attachmentFileInputRef}
-                            type="file"
-                            multiple
-                            accept={CHAT_ATTACHMENT_ACCEPT}
-                            className="hidden"
-                            onChange={(event) => {
-                              const files = Array.from(event.currentTarget.files ?? []);
-                              event.currentTarget.value = "";
-                              if (files.length > 0) composerAttachments.acceptFiles(files);
-                            }}
-                          />
-                          <button
-                            type="button"
-                            aria-label="Attach files"
-                            disabled={
-                              isForegroundTurnWorking || readOnly || voiceDictation.isActive
-                            }
-                            onClick={() => attachmentFileInputRef.current?.click()}
-                            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
-                          >
-                            <Plus size={16} strokeWidth={1.9} />
-                          </button>
-                        </>
-                      ) : null}
                       <button
                         type="button"
                         aria-label="Start voice dictation"
