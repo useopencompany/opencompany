@@ -97,6 +97,11 @@ export type EngineAuthService = {
 export function createEngineAuthService(input: {
   db: DbLike;
   runner: RunnerClient;
+  refreshPluginRegistrations?: (input: {
+    provider: "infisical";
+    userWorkosId: string;
+    workspaceIds: string[];
+  }) => Promise<void>;
 }): EngineAuthService {
   const { db, runner } = input;
 
@@ -282,6 +287,9 @@ export function createEngineAuthService(input: {
           },
           { errorFormat: "error-message" },
         );
+        if (response.flow.status === "completed") {
+          await refreshInfisicalPluginRegistrations(input, actor);
+        }
         return response.flow;
       } catch (error) {
         throw runnerFailure(
@@ -301,6 +309,25 @@ export function createEngineAuthService(input: {
       }
     },
   };
+}
+
+async function refreshInfisicalPluginRegistrations(
+  input: Parameters<typeof createEngineAuthService>[0],
+  actor: Actor,
+) {
+  if (!input.refreshPluginRegistrations) return;
+  try {
+    await input.refreshPluginRegistrations({
+      provider: "infisical",
+      userWorkosId: actor.userId,
+      workspaceIds: [actor.workspaceId],
+    });
+  } catch (error) {
+    logger.warn("Plugin discovery refresh after Infisical connection failed", {
+      event: "opencompany.infisical_plugin_reconnect_refresh_failed",
+      error_message: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 function connectionStatusDto(

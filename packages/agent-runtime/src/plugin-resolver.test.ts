@@ -343,6 +343,62 @@ describe("resolvePlugin", () => {
     });
   });
 
+  it("loads the official Infisical package with docs-only MCP permissions", async () => {
+    const fixtureRoot = fileURLToPath(
+      new URL("./test-fixtures/plugins/infisical", import.meta.url),
+    );
+    const files = await fixtureFiles(fixtureRoot, "infisical");
+    const plugin = await resolvePlugin({
+      url: "useopencompany/plugins",
+      selectedPath: "infisical",
+      fetcher: fetcher(files),
+      trustedCapabilitySources: ["useopencompany/plugins"],
+    });
+
+    expect(plugin.manifest).toMatchObject({ name: "infisical", version: "1.0.0" });
+    expect(plugin.skills).toEqual([
+      expect.objectContaining({
+        name: "infisical-sandbox-secrets",
+        path: "skills/infisical-sandbox-secrets",
+      }),
+    ]);
+    expect(plugin.stdioServers).toEqual([]);
+    expect(plugin.remoteServers).toEqual([
+      {
+        name: "infisical",
+        type: "streamable-http",
+        url: "https://infisical.com/docs/mcp",
+        headers: {},
+      },
+    ]);
+    expect(plugin.capabilities).toEqual([
+      {
+        id: "read",
+        label: "Read Infisical docs",
+        defaultMode: "on",
+        tools: ["search_infisical", "query_docs_filesystem_infisical"],
+      },
+      {
+        id: "write",
+        label: "Send docs feedback",
+        defaultMode: "off",
+        tools: ["submit_feedback"],
+      },
+    ]);
+    expect(plugin.report.skills).toEqual([
+      expect.objectContaining({ name: "infisical-sandbox-secrets", status: "valid" }),
+    ]);
+    expect(plugin.report.mcp).toMatchObject({
+      status: "parsed",
+      reports: [{ name: "infisical", status: "gateway-registered" }],
+    });
+    expect(plugin.report.capabilities).toEqual({
+      present: true,
+      status: "parsed",
+      issues: [],
+    });
+  });
+
   it("loads the official Better Stack package with its reviewed permission boundary", async () => {
     const fixtureRoot = fileURLToPath(
       new URL("./test-fixtures/plugins/betterstack", import.meta.url),

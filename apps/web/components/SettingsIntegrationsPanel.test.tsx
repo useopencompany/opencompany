@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { type IntegrationState, integrationStateFromRows } from "@/lib/integration-state";
 import { SettingsIntegrationsPanel } from "./SettingsIntegrationsPanel";
@@ -141,9 +141,10 @@ describe("SettingsIntegrationsPanel", () => {
     );
 
     // Workspace scope is shown first and personal connections are hidden.
-    expect(
-      screen.getByText("Give workspace coding agents access to the real Infisical CLI."),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Plugins" })).toHaveAttribute(
+      "href",
+      "/settings/plugins",
+    );
     expect(
       screen.queryByText("Let opencompany view and update your schedule and events."),
     ).not.toBeInTheDocument();
@@ -187,101 +188,7 @@ describe("SettingsIntegrationsPanel", () => {
     expect(screen.queryByText("Subscription-backed models")).not.toBeInTheDocument();
   });
 
-  it("lets workspace admins complete the Infisical browser-token handoff", async () => {
-    startInfisicalAuth.mockResolvedValue({
-      ok: true,
-      flow: {
-        id: "ginff_123",
-        status: "link_ready",
-        loginUrl: "https://app.infisical.com/login?callback_port=12345",
-        statusReason: null,
-        expiresAt: "2026-08-05T17:00:00.000Z",
-      },
-    });
-    completeInfisicalAuth.mockResolvedValue({
-      ok: true,
-      flow: {
-        id: "ginff_123",
-        status: "completed",
-        loginUrl: "https://app.infisical.com/login?callback_port=12345",
-        statusReason: null,
-        expiresAt: "2026-08-05T17:00:00.000Z",
-      },
-    });
-
-    render(
-      <SettingsIntegrationsPanel
-        initialIntegrations={integrationStateFromRows([])}
-        isWorkspaceAdmin
-      />,
-    );
-    const card = screen
-      .getByText("Give workspace coding agents access to the real Infisical CLI.")
-      .closest("div.rounded-2xl");
-    expect(card).not.toBeNull();
-    fireEvent.click(within(card as HTMLElement).getByRole("button", { name: "Connect" }));
-
-    await waitFor(() => {
-      expect(startInfisicalAuth).toHaveBeenCalledWith({
-        host: "https://app.infisical.com",
-      });
-      expect(
-        within(card as HTMLElement).getByRole("link", { name: /Open Infisical sign-in/ }),
-      ).toHaveAttribute("href", "https://app.infisical.com/login?callback_port=12345");
-    });
-    fireEvent.change(within(card as HTMLElement).getByPlaceholderText("Paste browser token"), {
-      target: { value: "browser-token" },
-    });
-    fireEvent.click(within(card as HTMLElement).getByRole("button", { name: "Finish connection" }));
-
-    await waitFor(() => {
-      expect(completeInfisicalAuth).toHaveBeenCalledWith({
-        flowId: "ginff_123",
-        browserToken: "browser-token",
-      });
-    });
-  });
-
-  it("starts Infisical authentication in the selected EU region", async () => {
-    startInfisicalAuth.mockResolvedValue({
-      ok: true,
-      flow: {
-        id: "ginff_eu",
-        status: "link_ready",
-        loginUrl: "https://eu.infisical.com/login?callback_port=23456",
-        statusReason: null,
-        expiresAt: "2026-08-05T17:00:00.000Z",
-      },
-    });
-
-    render(
-      <SettingsIntegrationsPanel
-        initialIntegrations={integrationStateFromRows([])}
-        isWorkspaceAdmin
-      />,
-    );
-    const card = screen
-      .getByText("Give workspace coding agents access to the real Infisical CLI.")
-      .closest("div.rounded-2xl");
-    expect(card).not.toBeNull();
-
-    fireEvent.click(within(card as HTMLElement).getByRole("button", { name: "EU" }));
-    fireEvent.click(within(card as HTMLElement).getByRole("button", { name: "Connect" }));
-
-    await waitFor(() => {
-      expect(startInfisicalAuth).toHaveBeenCalledWith({
-        host: "https://eu.infisical.com",
-      });
-      expect(
-        within(card as HTMLElement).getByRole("link", { name: /Open Infisical sign-in/ }),
-      ).toHaveAttribute("href", "https://eu.infisical.com/login?callback_port=23456");
-    });
-    expect(
-      within(card as HTMLElement).getByText(/Open Infisical EU, finish signing in/),
-    ).toBeVisible();
-  });
-
-  it("restores the saved Infisical region for reconnects", () => {
+  it("removes the workspace Infisical card after the plugin cutover", () => {
     const integrations = integrationStateFromRows([]);
     integrations.infisical = {
       provider: "infisical",
@@ -294,32 +201,11 @@ describe("SettingsIntegrationsPanel", () => {
     };
 
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
-    const card = screen
-      .getByText("Give workspace coding agents access to the real Infisical CLI.")
-      .closest("div.rounded-2xl");
-    expect(card).not.toBeNull();
-    expect(
-      within(card as HTMLElement).getByText("Connected as founder@example.com · EU"),
-    ).toBeVisible();
-    expect(within(card as HTMLElement).getByRole("button", { name: "EU" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-  });
 
-  it("keeps workspace Infisical read-only for non-admin members", () => {
-    render(
-      <SettingsIntegrationsPanel
-        initialIntegrations={integrationStateFromRows([])}
-        isWorkspaceAdmin={false}
-      />,
-    );
-    const card = screen
-      .getByText("Give workspace coding agents access to the real Infisical CLI.")
-      .closest("div.rounded-2xl");
-    expect(card).not.toBeNull();
-    expect(within(card as HTMLElement).getByText("Managed by workspace admins.")).toBeVisible();
-    expect(within(card as HTMLElement).queryByRole("button", { name: "Connect" })).toBeNull();
+    expect(screen.queryByText("Infisical")).not.toBeInTheDocument();
+    expect(screen.queryByText("founder@example.com")).not.toBeInTheDocument();
+    expect(startInfisicalAuth).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Workspace" })).not.toHaveTextContent("1");
   });
 
   it("keeps Linear out of the legacy Integrations panel", () => {

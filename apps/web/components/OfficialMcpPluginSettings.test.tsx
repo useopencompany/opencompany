@@ -35,6 +35,7 @@ import {
   googleCalendarToolsStateFromPlugin,
   googleDriveToolsStateFromPlugin,
   HubSpotPluginDetail,
+  InfisicalPluginDetail,
   JamiePluginDetail,
   LatitudePluginDetail,
   type LinearAccountsState,
@@ -63,6 +64,7 @@ import {
   GOOGLE_DRIVE_PLUGIN_SOURCE,
   GRANOLA_PLUGIN_SOURCE,
   HUBSPOT_PLUGIN_SOURCE,
+  INFISICAL_PLUGIN_SOURCE,
   JAMIE_PLUGIN_SOURCE,
   LATITUDE_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
@@ -97,6 +99,15 @@ const accountActions = vi.hoisted(() => ({
 }));
 const appData = vi.hoisted(() => ({
   integrations: {
+    infisical: {
+      provider: "infisical",
+      connected: true,
+      status: "connected",
+      statusReason: null,
+      accountEmail: "developer@example.com",
+      host: "https://app.infisical.com",
+      lastValidatedAt: "2026-08-26T12:00:00.000Z",
+    },
     gmail: {
       connected: true,
       status: "connected",
@@ -405,6 +416,11 @@ vi.mock("@/components/AppDataProvider", () => ({
   useAppDataOptional: () => null,
 }));
 vi.mock("@/lib/headless-knowledge-commands", () => commands);
+vi.mock("@/lib/infisical-auth", () => ({
+  completeInfisicalAuth: vi.fn(),
+  disconnectInfisicalAuth: vi.fn(),
+  startInfisicalAuth: vi.fn(),
+}));
 vi.mock("@/lib/integration-account-actions", () => accountActions);
 
 const plugin = {
@@ -479,6 +495,75 @@ const plugin = {
   createdAt: "2026-08-26T12:00:00.000Z",
   updatedAt: "2026-08-26T12:00:00.000Z",
   archivedAt: null,
+} as const satisfies PluginInstallationDto;
+
+const infisicalPlugin = {
+  ...plugin,
+  id: "plugin_infisical",
+  name: "infisical",
+  manifest: {
+    name: "infisical",
+    description: "Search Infisical docs and safely use secrets from coding sandboxes.",
+  },
+  source: { ...plugin.source, path: "infisical" },
+  skills: [
+    {
+      name: "infisical-sandbox-secrets",
+      path: "skills/infisical-sandbox-secrets",
+      bundleId: "bundle_infisical_sandbox_secrets",
+      integrity: `sha256:${"e".repeat(64)}`,
+      description: "Use Infisical secrets without returning their values to the model.",
+    },
+  ],
+  remoteMcpServers: [
+    {
+      name: "infisical",
+      type: "streamable-http",
+      connectionProvider: "infisical",
+      capabilities: [
+        {
+          id: "read",
+          label: "Read Infisical docs",
+          defaultMode: "on",
+          tools: ["search_infisical", "query_docs_filesystem_infisical"],
+        },
+        {
+          id: "write",
+          label: "Send docs feedback",
+          defaultMode: "off",
+          tools: ["submit_feedback"],
+        },
+      ],
+      tools: [
+        {
+          name: "search_infisical",
+          description: "Search Infisical documentation.",
+          classification: {
+            capabilityId: "read",
+            capabilityLabel: "Read Infisical docs",
+            defaultMode: "on",
+            bucket: "read",
+            curated: true,
+          },
+        },
+        {
+          name: "submit_feedback",
+          description: "Send documentation feedback.",
+          classification: {
+            capabilityId: "write",
+            capabilityLabel: "Send docs feedback",
+            defaultMode: "off",
+            bucket: "write",
+            curated: true,
+          },
+        },
+      ],
+      discoveryStatus: "ready",
+      discoveredAt: "2026-08-26T12:00:00.000Z",
+      refreshAfter: "2026-08-26T13:00:00.000Z",
+      lastDiscoveryError: null,
+    },
+  ],
 } as const satisfies PluginInstallationDto;
 
 const officialPreview = {
@@ -1170,6 +1255,23 @@ describe("Linear plugin settings", () => {
 
     expect(html).toContain("Linear tool access");
     expect(useLiveQuery).not.toHaveBeenCalled();
+  });
+
+  it("moves the workspace Infisical connection and fixed permissions onto the plugin page", () => {
+    render(
+      <InfisicalPluginDetail pluginState={{ status: "ready", plugin: infisicalPlugin }} canEdit />,
+    );
+
+    expect(screen.getByRole("heading", { level: 1, name: "Infisical" })).toBeInTheDocument();
+    expect(screen.getByText("Connected as developer@example.com · US")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reconnect" })).toBeInTheDocument();
+    expect(screen.getByText("infisical-sandbox-secrets")).toBeInTheDocument();
+    expect(screen.getByText("Search infisical")).toBeInTheDocument();
+    expect(screen.getByText("Submit feedback")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Documentation reads stay On and documentation feedback stays Off/u),
+    ).toBeInTheDocument();
+    expect(INFISICAL_PLUGIN_SOURCE).toContain("f283f509c195464f90f5f78f7e30a9a472b6393b/infisical");
   });
 
   it("maps the personal github_user connection onto the GitHub plugin surface", () => {
