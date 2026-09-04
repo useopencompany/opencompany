@@ -223,9 +223,9 @@ export type InfisicalProviderState = {
 // accounts per provider (two Gmails, two Slack workspaces) — uniqueness in the
 // DB is (user, provider, external_id), so a second OAuth pass creates a
 // second row rather than replacing the first.
-export type IntegrationAccountView = {
+export type IntegrationAccountView<Provider extends string = PersonalAccountProvider> = {
   integrationId: string;
-  provider: PersonalAccountProvider;
+  provider: Provider;
   status: IntegrationStatus;
   connected: boolean;
   accountEmail: string | null;

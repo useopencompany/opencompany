@@ -449,6 +449,67 @@ describe("resolvePlugin", () => {
     });
   });
 
+  it("loads the official PostHog package with every reviewed analytics tool classified", async () => {
+    const fixtureRoot = fileURLToPath(new URL("./test-fixtures/plugins/posthog", import.meta.url));
+    const files = await fixtureFiles(fixtureRoot, "posthog");
+    const plugin = await resolvePlugin({
+      url: "useopencompany/plugins",
+      selectedPath: "posthog",
+      fetcher: fetcher(files),
+      trustedCapabilitySources: ["useopencompany/plugins"],
+    });
+
+    expect(plugin.manifest).toMatchObject({ name: "posthog", version: "1.0.0" });
+    expect(plugin.skills).toEqual([]);
+    expect(plugin.stdioServers).toEqual([]);
+    expect(plugin.remoteServers).toEqual([
+      {
+        name: "posthog",
+        type: "streamable-http",
+        url: "https://mcp.posthog.com/mcp?mode=tools&tools=dashboards-get-all,dashboard-get,dashboard-insights-run,insights-list,insight-get,insight-query,read-data-schema,query-trends,query-funnel,query-retention,query-paths,query-stickiness,query-lifecycle,insight-create",
+        headers: {},
+      },
+    ]);
+    expect(plugin.capabilities).toEqual([
+      {
+        id: "read",
+        label: "Read analytics",
+        defaultMode: "on",
+        tools: [
+          "dashboards-get-all",
+          "dashboard-get",
+          "dashboard-insights-run",
+          "insights-list",
+          "insight-get",
+          "insight-query",
+          "read-data-schema",
+          "query-trends",
+          "query-funnel",
+          "query-retention",
+          "query-paths",
+          "query-stickiness",
+          "query-lifecycle",
+        ],
+      },
+      {
+        id: "write",
+        label: "Create insights",
+        defaultMode: "ask",
+        tools: ["insight-create"],
+      },
+    ]);
+    expect(plugin.capabilities.flatMap((capability) => capability.tools)).toHaveLength(14);
+    expect(plugin.report.mcp).toMatchObject({
+      status: "parsed",
+      reports: [{ name: "posthog", status: "gateway-registered" }],
+    });
+    expect(plugin.report.capabilities).toEqual({
+      present: true,
+      status: "parsed",
+      issues: [],
+    });
+  });
+
   it("loads the official Slack package with least-privilege capability defaults", async () => {
     const fixtureRoot = fileURLToPath(new URL("./test-fixtures/plugins/slack", import.meta.url));
     const files = await fixtureFiles(fixtureRoot, "slack");

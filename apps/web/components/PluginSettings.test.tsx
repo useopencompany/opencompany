@@ -18,6 +18,7 @@ import {
   OfficialSkillPluginDetail,
   PluginDetail,
   PluginsSettings,
+  POSTHOG_PLUGIN_SOURCE,
   RENDER_PLUGIN_SOURCE,
   SIGNOZ_PLUGIN_SOURCE,
   SLACK_PLUGIN_SOURCE,
@@ -260,12 +261,16 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/render",
     );
+    expect(screen.getByRole("link", { name: /posthog/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/posthog",
+    );
     expect(screen.getByRole("link", { name: /yc advise/i })).toHaveAttribute(
       "href",
       "/settings/plugins/yc-advise",
     );
-    expect(screen.getAllByText("Not installed")).toHaveLength(11);
-    expect(screen.getAllByText("Official package")).toHaveLength(10);
+    expect(screen.getAllByText("Not installed")).toHaveLength(12);
+    expect(screen.getAllByText("Official package")).toHaveLength(11);
     expect(screen.getByText("Official skill package")).toBeInTheDocument();
     expect(GITHUB_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/github$/u,
@@ -284,6 +289,9 @@ describe("Plugin settings", () => {
     );
     expect(RENDER_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/569241125c96a07b9072d42aee404822a6950b26/render",
+    );
+    expect(POSTHOG_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/4ba32cd5a7618d9be3714ec0efd3c8784209046c/posthog",
     );
     expect(SIGNOZ_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/053e9e9207f320651f1cb9b4e8feb84ab2af6bba/signoz",
@@ -304,7 +312,7 @@ describe("Plugin settings", () => {
     expect(
       within(linearCard as HTMLElement).getByRole("button", { name: "Install" }),
     ).toBeEnabled();
-    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(11);
+    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(12);
     expect(previewHeadlessPluginImport).not.toHaveBeenCalled();
     expect(importHeadlessPlugin).not.toHaveBeenCalled();
   });

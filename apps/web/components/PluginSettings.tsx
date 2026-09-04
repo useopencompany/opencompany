@@ -15,6 +15,7 @@ import {
   GoogleDriveIcon,
   LinearIcon,
   NeonIcon,
+  PostHogIcon,
   SlackIcon,
 } from "@opencompany/ui/icons";
 import { cn } from "@opencompany/ui/lib/utils";
@@ -148,6 +149,11 @@ export const OFFICIAL_MCP_PLUGINS = {
     Icon: NeonIcon,
     iconClassName: "bg-[#00E599] text-[#0B0F14]",
   },
+  posthog: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.posthog,
+    Icon: PostHogIcon,
+    iconClassName: "bg-[#F54E00] text-white",
+  },
   render: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.render,
     Icon: ServerCog,
@@ -190,6 +196,8 @@ export const LINEAR_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.linear.name;
 export const LINEAR_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.linear.source;
 export const NEON_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.neon.name;
 export const NEON_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.neon.source;
+export const POSTHOG_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.posthog.name;
+export const POSTHOG_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.posthog.source;
 export const RENDER_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.render.name;
 export const RENDER_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.render.source;
 export const BETTERSTACK_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.betterstack.name;
@@ -252,6 +260,10 @@ export function installOfficialNeonPlugin(preview?: PluginImportPreviewDto) {
 
 export function installOfficialBetterStackPlugin(preview?: PluginImportPreviewDto) {
   return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.betterstack, preview);
+}
+
+export function installOfficialPostHogPlugin(preview?: PluginImportPreviewDto) {
+  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.posthog, preview);
 }
 
 export function installOfficialSigNozPlugin(preview?: PluginImportPreviewDto) {
