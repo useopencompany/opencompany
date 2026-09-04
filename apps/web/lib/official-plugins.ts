@@ -294,7 +294,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
       "Inspect Vercel projects and deployments, investigate operational data, and perform permission-gated deployment and account actions.",
     category: "engineering",
     source:
-      "https://github.com/useopencompany/plugins/tree/df6f6958cb34414d7bce9060c37978fef3388526/vercel",
+      "https://github.com/useopencompany/plugins/tree/14e7f6d3e978103c5427c725229ae93bc3e47f8c/vercel",
     connectionProvider: "vercel",
     connectHref: "/api/integrations/vercel/start?returnTo=/settings/plugins/vercel",
     accountDescription: "The account opencompany uses when you run Vercel tools.",
