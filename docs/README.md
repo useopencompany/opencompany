@@ -10,6 +10,8 @@ Start with:
 - [Runner](./runner.md) — durable workers and internal endpoints.
 - [Deployment](./deployment.md) — production release and rollback flow.
 - [Chat operations](./chat-operations.md) — `/v1` topology, release verification, and recovery.
+- [opencompany context compaction](./context-compaction.md) — long-chat checkpoint behavior,
+  safety boundaries, and reviewed reference implementations.
 - [Brain engineering documentation](./brain/README.md) — data model, ingestion, tools, and
   provenance rules.
 - [Electric read models](./electric-sync.md) — authorized live-read architecture and local setup.
