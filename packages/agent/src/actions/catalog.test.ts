@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   github: vi.fn(),
   gmail: vi.fn(),
   googleDrive: vi.fn(),
+  posthog: vi.fn(),
   noop: vi.fn(),
   remote: vi.fn(),
   registrations: vi.fn(),
@@ -22,7 +23,7 @@ vi.mock("./google-drive", () => ({ resolveGoogleDriveActions: mocks.googleDrive 
 vi.mock("./latitude", () => ({ resolveLatitudeActions: mocks.noop }));
 vi.mock("./linear", () => ({ resolveLinearActions: mocks.noop }));
 vi.mock("./neon", () => ({ resolveNeonActions: mocks.noop }));
-vi.mock("./posthog", () => ({ resolvePostHogActions: mocks.noop }));
+vi.mock("./posthog", () => ({ resolvePostHogActions: mocks.posthog }));
 vi.mock("./remote-mcp", () => ({ resolveRemoteMcpActions: mocks.remote }));
 vi.mock("./revolut", () => ({ resolveRevolutActions: mocks.noop }));
 vi.mock("./stripe", () => ({ resolveStripeActions: mocks.noop }));
@@ -61,6 +62,12 @@ describe("resolveActionCatalog plugin reconciliation", () => {
       label: "Google Drive",
       description: "Legacy Google Drive actions.",
       actions: [{ id: "google_drive.search_files" }],
+    });
+    mocks.posthog.mockResolvedValue({
+      id: "posthog",
+      label: "PostHog",
+      description: "Legacy PostHog actions.",
+      actions: [{ id: "posthog.query-trends" }],
     });
   });
 
@@ -105,6 +112,40 @@ describe("resolveActionCatalog plugin reconciliation", () => {
     );
     expect(withPlugin.actions).toContainEqual(
       expect.objectContaining({ id: "plugin:google-calendar:google-calendar.list_events" }),
+    );
+  });
+
+  it("keeps legacy PostHog actions as fallback and suppresses them after plugin install", async () => {
+    const withoutPlugin = await resolveActionCatalog(
+      { userWorkosId: "user_1", workspaceId: "workspace_1" },
+      { remoteMcpRegistrations: [] },
+    );
+    expect(mocks.posthog).toHaveBeenCalledWith("user_1");
+    expect(withoutPlugin.actions).toContainEqual(
+      expect.objectContaining({ id: "posthog.query-trends" }),
+    );
+
+    mocks.posthog.mockClear();
+    const posthogPluginRegistration = {
+      source: "plugin:posthog:posthog",
+    } as unknown as RemoteMcpGatewayRegistration;
+    mocks.remote.mockResolvedValueOnce({
+      id: "plugin:posthog:posthog",
+      label: "PostHog",
+      description: "Official PostHog plugin tools.",
+      actions: [{ id: "plugin:posthog:posthog.query-trends" }],
+    });
+    const withPlugin = await resolveActionCatalog(
+      { userWorkosId: "user_1", workspaceId: "workspace_1" },
+      { remoteMcpRegistrations: [posthogPluginRegistration] },
+    );
+
+    expect(mocks.posthog).not.toHaveBeenCalled();
+    expect(withPlugin.actions).not.toContainEqual(
+      expect.objectContaining({ id: "posthog.query-trends" }),
+    );
+    expect(withPlugin.actions).toContainEqual(
+      expect.objectContaining({ id: "plugin:posthog:posthog.query-trends" }),
     );
   });
 

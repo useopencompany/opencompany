@@ -62,7 +62,11 @@ import {
   refreshHeadlessPluginMcp,
 } from "@/lib/headless-knowledge-commands";
 import { setIntegrationCapabilityModeAction } from "@/lib/integration-account-actions";
-import { type IntegrationAccountView, type IntegrationState } from "@/lib/integration-state";
+import {
+  type IntegrationAccountView,
+  type IntegrationState,
+  type PersonalAccountProvider,
+} from "@/lib/integration-state";
 import {
   GOOGLE_DRIVE_MCP_RECONNECT_REASON,
   googleDriveMcpScopesSatisfied,
@@ -109,7 +113,8 @@ export type PluginToolsState =
       };
     };
 
-type PluginAccount = { account: IntegrationAccountView };
+type PluginConnectionProvider = PersonalAccountProvider | "posthog";
+type PluginAccount = { account: IntegrationAccountView<PluginConnectionProvider> };
 
 type PluginSkill = {
   id: string;
@@ -128,7 +133,7 @@ export type PluginAccountsState =
   | {
       status: "ready";
       accounts: PluginAccount[];
-      permissionConnection: IntegrationAccountView | null;
+      permissionConnection: IntegrationAccountView<PluginConnectionProvider> | null;
     };
 
 export type LinearAccountsState = PluginAccountsState;
@@ -278,6 +283,25 @@ export function RenderPluginDetail({
   return (
     <OfficialMcpPluginDetail
       config={OFFICIAL_MCP_PLUGINS.render}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
+export function PostHogPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.posthog}
       pluginState={pluginState}
       canEdit={canEdit}
       {...(toolsState ? { toolsState } : {})}
@@ -889,7 +913,7 @@ function ToolsSection({
   previewState: PluginPreviewState;
   state: PluginToolsState;
   canEdit: boolean;
-  permissionConnection: IntegrationAccountView | null;
+  permissionConnection: IntegrationAccountView<PluginConnectionProvider> | null;
 }) {
   const router = useRouter();
   const [refreshError, setRefreshError] = useState<string | null>(null);
@@ -1075,7 +1099,7 @@ function ToolGroupCard({
 }: {
   group: PluginToolGroupView;
   provider: string;
-  permissionConnection: IntegrationAccountView | null;
+  permissionConnection: IntegrationAccountView<PluginConnectionProvider> | null;
 }) {
   return (
     <Card className="gap-3 bg-surface py-3 shadow-none">
@@ -1116,7 +1140,7 @@ function PluginCapabilityModeRow({
 }: {
   group: PluginToolGroupView;
   provider: string;
-  connection: IntegrationAccountView | null;
+  connection: IntegrationAccountView<PluginConnectionProvider> | null;
 }) {
   const router = useRouter();
   const [pendingMode, setPendingMode] = useState<CapabilityMode | null>(null);
@@ -1307,7 +1331,7 @@ function pluginAccountsFromState(
   config: OfficialMcpPluginConfig,
 ): {
   accounts: PluginAccount[];
-  permissionConnection: IntegrationAccountView | null;
+  permissionConnection: IntegrationAccountView<PluginConnectionProvider> | null;
 } {
   if (
     config.connectionProvider === "betterstack" ||
@@ -1316,11 +1340,34 @@ function pluginAccountsFromState(
     config.connectionProvider === "google_calendar" ||
     config.connectionProvider === "google_drive" ||
     config.connectionProvider === "neon" ||
+    config.connectionProvider === "posthog" ||
     config.connectionProvider === "render" ||
     config.connectionProvider === "signoz" ||
     config.connectionProvider === "slack" ||
     config.connectionProvider === "x_account"
   ) {
+    if (config.connectionProvider === "posthog") {
+      const connection = state.posthog;
+      const permissionConnection: IntegrationAccountView<"posthog"> | null =
+        connection.integrationId
+          ? {
+              integrationId: connection.integrationId,
+              provider: "posthog",
+              status: connection.status === "not_connected" ? "disconnected" : connection.status,
+              connected: connection.connected,
+              accountEmail: null,
+              accountName: connection.accountName,
+              connectionLabel: connection.accountName || "PostHog tool access",
+              statusReason: connection.statusReason,
+              scopes: [],
+              capabilityModes: connection.capabilityModes,
+            }
+          : null;
+      return {
+        permissionConnection,
+        accounts: permissionConnection ? [{ account: permissionConnection }] : [],
+      };
+    }
     const accounts = state.personalAccounts[config.connectionProvider].map((account) => ({
       account:
         config.connectionProvider === "google_drive" &&
@@ -1355,7 +1402,7 @@ function pluginAccountsFromState(
         null,
     };
   }
-  const permissionConnection: IntegrationAccountView | null = state.linear.integrationId
+  const permissionConnection: IntegrationAccountView<"linear"> | null = state.linear.integrationId
     ? {
         integrationId: state.linear.integrationId,
         provider: "linear",
@@ -1401,6 +1448,10 @@ export function defaultNeonToolsState(): PluginToolsState {
 
 export function defaultBetterStackToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("betterstack");
+}
+
+export function defaultPostHogToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("posthog");
 }
 
 export function defaultSlackToolsState(): PluginToolsState {
@@ -1475,6 +1526,12 @@ export function slackToolsStateFromPlugin(plugin: PluginInstallationDto | null):
 
 export function signozToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
   return officialPluginToolsStateFromPlugin(plugin, "signoz");
+}
+
+export function posthogToolsStateFromPlugin(
+  plugin: PluginInstallationDto | null,
+): PluginToolsState {
+  return officialPluginToolsStateFromPlugin(plugin, "posthog");
 }
 
 function officialPluginToolsStateFromPlugin(
@@ -1593,6 +1650,10 @@ export function slackToolsStateFromPreview(preview: PluginImportPreviewDto): Plu
 
 export function signozToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
   return officialPluginToolsStateFromPreview(preview, "signoz");
+}
+
+export function posthogToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
+  return officialPluginToolsStateFromPreview(preview, "posthog");
 }
 
 function officialPluginToolsStateFromPreview(

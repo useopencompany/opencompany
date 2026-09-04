@@ -87,6 +87,9 @@ export async function resolveActionCatalog(
   const neonPluginInstalled = remoteMcpRegistrations.some((registration) =>
     registration.source.startsWith("plugin:neon:"),
   );
+  const posthogPluginInstalled = remoteMcpRegistrations.some((registration) =>
+    registration.source.startsWith("plugin:posthog:"),
+  );
   const xPluginInstalled = remoteMcpRegistrations.some((registration) =>
     registration.source.startsWith("plugin:x:"),
   );
@@ -99,7 +102,7 @@ export async function resolveActionCatalog(
       ? null
       : resolveGoogleDriveActions(input.userWorkosId).catch(() => null),
     linearPluginInstalled ? null : resolveLinearActions(input.userWorkosId).catch(() => null),
-    resolvePostHogActions(input.userWorkosId).catch(() => null),
+    posthogPluginInstalled ? null : resolvePostHogActions(input.userWorkosId).catch(() => null),
     resolveLatitudeActions(input.userWorkosId).catch(() => null),
     neonPluginInstalled ? null : resolveNeonActions(input.userWorkosId).catch(() => null),
     resolveAttioActions(input.userWorkosId).catch(() => null),

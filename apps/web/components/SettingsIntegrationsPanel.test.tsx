@@ -426,7 +426,7 @@ describe("SettingsIntegrationsPanel", () => {
     expect(screen.getByRole("button", { name: "Personal" })).not.toHaveTextContent("1");
   });
 
-  it("shows PostHog with read-on and create-insights-ask permissions", () => {
+  it("keeps the PostHog connection off the legacy integrations surface", () => {
     const integrations = integrationStateFromRows([
       {
         id: "gint_posthog_mcp",
@@ -440,25 +440,8 @@ describe("SettingsIntegrationsPanel", () => {
 
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
 
-    const posthogCard = screen
-      .getByText("Explore product analytics and create focused insights from opencompany.")
-      .closest("div.rounded-2xl");
-    expect(posthogCard).not.toBeNull();
-    expect(within(posthogCard as HTMLElement).getByText("Connected")).toBeInTheDocument();
-    const readPermission = within(posthogCard as HTMLElement).getByRole("group", {
-      name: "Read analytics permission",
-    });
-    const writePermission = within(posthogCard as HTMLElement).getByRole("group", {
-      name: "Create insights permission",
-    });
-    expect(within(readPermission).getByRole("button", { name: "On" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(within(writePermission).getByRole("button", { name: "Ask" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(screen.queryByText("PostHog")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Workspace" })).not.toHaveTextContent("1");
   });
 
   it("removes the legacy Gmail settings card after the plugin cutover", () => {

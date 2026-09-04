@@ -24,6 +24,8 @@ const mocks = vi.hoisted(() => ({
   loadBetterStackConnection: vi.fn(),
   getRenderState: vi.fn(),
   loadRenderConnection: vi.fn(),
+  getPostHogState: vi.fn(),
+  loadPostHogConnection: vi.fn(),
   getSlackState: vi.fn(),
   loadSlackConnection: vi.fn(),
   getSigNozState: vi.fn(),
@@ -79,9 +81,10 @@ vi.mock("./integrations/google-drive-mcp", () => ({
   loadGoogleDriveMcpWorkerConnection: mocks.loadGoogleDriveConnection,
 }));
 vi.mock("./integrations/posthog-mcp", () => ({
-  POSTHOG_MCP_ENDPOINT_URL: "https://mcp.posthog.com/mcp",
-  getPostHogIntegrationState: vi.fn(),
-  loadPostHogMcpWorkerConnection: vi.fn(),
+  POSTHOG_MCP_ENDPOINT_URL:
+    "https://mcp.posthog.com/mcp?mode=tools&tools=dashboards-get-all,dashboard-get,dashboard-insights-run,insights-list,insight-get,insight-query,read-data-schema,query-trends,query-funnel,query-retention,query-paths,query-stickiness,query-lifecycle,insight-create",
+  getPostHogIntegrationState: mocks.getPostHogState,
+  loadPostHogMcpWorkerConnection: mocks.loadPostHogConnection,
 }));
 vi.mock("./integrations/render-mcp", () => ({
   RENDER_MCP_ENDPOINT_URL: "https://mcp.render.com/mcp",
@@ -532,6 +535,42 @@ describe("plugin gateway registration cache", () => {
           headers: {},
         },
       }),
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
+  it("binds PostHog credentials only to the reviewed tool-filtered endpoint", async () => {
+    const endpoint =
+      "https://mcp.posthog.com/mcp?mode=tools&tools=dashboards-get-all,dashboard-get,dashboard-insights-run,insights-list,insight-get,insight-query,read-data-schema,query-trends,query-funnel,query-retention,query-paths,query-stickiness,query-lifecycle,insight-create";
+    const posthogRecord = record({
+      pluginName: "posthog",
+      pluginLabel: "posthog",
+      pluginDescription: "PostHog analytics tools.",
+      connectionProvider: "posthog",
+      server: {
+        name: "posthog",
+        type: "streamable-http",
+        url: endpoint,
+        headers: {},
+      },
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([posthogRecord]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:posthog:posthog",
+        connectionProvider: "posthog",
+        getState: mocks.getPostHogState,
+        loadConnection: mocks.loadPostHogConnection,
+      }),
+    ]);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...posthogRecord,
+        server: { ...posthogRecord.server, url: "https://mcp.posthog.com/mcp" },
+      },
     ]);
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
   });

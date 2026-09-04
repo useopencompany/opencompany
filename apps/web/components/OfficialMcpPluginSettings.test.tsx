@@ -12,6 +12,7 @@ import type { IntegrationAccountView } from "@/lib/integration-state";
 import {
   BetterStackPluginDetailView,
   betterStackToolsStateFromPlugin,
+  defaultPostHogToolsState,
   defaultSigNozToolsState,
   GitHubPluginDetail,
   GitHubPluginDetailView,
@@ -30,6 +31,7 @@ import {
   NeonPluginDetailView,
   neonToolsStateFromPlugin,
   type PluginToolsState,
+  PostHogPluginDetail,
   SigNozPluginDetail,
   SlackPluginDetail,
   slackToolsStateFromPlugin,
@@ -44,6 +46,7 @@ import {
   GOOGLE_DRIVE_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
+  POSTHOG_PLUGIN_SOURCE,
   SLACK_PLUGIN_SOURCE,
   X_PLUGIN_SOURCE,
 } from "./PluginSettings";
@@ -86,6 +89,14 @@ const appData = vi.hoisted(() => ({
       statusReason: null,
       accountName: "Linear tool access",
       integrationId: "gint_linear_tools",
+      capabilityModes: { read: "on", write: "ask" },
+    },
+    posthog: {
+      connected: true,
+      status: "connected",
+      statusReason: null,
+      accountName: "Acme Analytics",
+      integrationId: "gint_posthog_tools",
       capabilityModes: { read: "on", write: "ask" },
     },
     slack: {
@@ -1135,6 +1146,31 @@ describe("Linear plugin settings", () => {
     expect(html).toContain("Read SigNoz documentation");
     expect(html).toContain("Inspect observability data");
     expect(html).toContain("Manage SigNoz");
+  });
+
+  it("maps the existing PostHog OAuth connection onto the official plugin surface", () => {
+    const posthogPlugin = {
+      ...plugin,
+      id: "plugin_posthog",
+      name: "posthog",
+      manifest: { name: "posthog", description: "Explore PostHog analytics." },
+      source: { ...plugin.source, path: "posthog" },
+    } satisfies PluginInstallationDto;
+    const html = renderToString(
+      <PostHogPluginDetail
+        pluginState={{ status: "ready", plugin: posthogPlugin }}
+        toolsState={defaultPostHogToolsState()}
+        canEdit
+      />,
+    );
+
+    expect(html).toContain("Acme Analytics");
+    expect(html).toContain("Read analytics");
+    expect(html).toContain("Create insights");
+    expect(POSTHOG_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/4ba32cd5a7618d9be3714ec0efd3c8784209046c/posthog",
+    );
+    expect(useLiveQuery).not.toHaveBeenCalled();
   });
 
   it("shows provenance, accounts, discovered tools, and read-only skills", async () => {
