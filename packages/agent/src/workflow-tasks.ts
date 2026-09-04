@@ -141,7 +141,7 @@ export function compileWorkflowHarnessSpec(input: {
       ...(input.workflow.description
         ? [`Workflow description: ${input.workflow.description}`]
         : []),
-      "Complete this step using the task request plus explicit handoff artifacts from prior steps. Work autonomously; there is no interactive user in this run.",
+      "Run this step in the background using the task request plus explicit handoff artifacts from prior steps. The user cannot respond during the run; if these step instructions require a plan, question, decision, or approval before continuing, end with that request so the task can pause for review.",
       "",
       "<workflow_step_instructions>",
       step.instructions,

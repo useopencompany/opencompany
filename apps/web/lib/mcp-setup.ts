@@ -1,5 +1,5 @@
-// One connector per user: this endpoint spans every brain the signed-in user
-// can access. Kept here (client-safe) and reused by lib/mcp-oauth.ts.
+// One connector per user: this endpoint spans every workspace Wiki the signed-in
+// user can access. Kept here (client-safe) and reused by lib/mcp-oauth.ts.
 export {
   isMcpSetupCompletionRun,
   MCP_SERVER_NAME,
@@ -19,10 +19,10 @@ export function isMcpClient(value: unknown): value is McpClient {
 export function buildMcpFirstPrompt(input: { displayName: string; workspaceName: string }) {
   return [
     "Use the opencompany connector for this entire answer.",
-    `First list my brains, then query for "${input.displayName}".`,
+    `First inspect my workspace Wiki tree, then search it for "${input.displayName}".`,
     `Then brief me on the active projects, recent decisions, and people most relevant to my work at ${input.workspaceName}.`,
-    "Cite the brain pages you used.",
-    "If the brain has little about me, say so and give me the most important recent workspace brief instead.",
+    "Cite the Wiki pages you used.",
+    "If the Wiki has little about me, say so and give me the most important recent workspace brief instead.",
   ].join(" ");
 }
 

@@ -4,20 +4,27 @@ import {
   actorHasPermission,
   BRAIN_READ_PERMISSION,
   CoreError,
+  WIKI_READ_PERMISSION,
+  WIKI_WRITE_PERMISSION,
 } from "@opencompany/core";
 import {
   cancelBrainImport,
+  cancelWikiImport,
   confirmBrainImport,
+  confirmWikiImport,
   normalizeCompanyUrl,
   retryBrainImportDiscovery,
+  retryWikiImportDiscovery,
   startBrainImportRunIdempotent,
+  startWikiImportRunIdempotent,
 } from "@opencompany/db/brain-import";
 import type {
   BrainImportProvider,
   BrainImportSourceSelection,
   BrainImportStatus,
 } from "@opencompany/db/product-schema";
-import { getBrainAccess } from "@opencompany/db/workspaces";
+import { getBrainAccess, isLegacyBrainEnabledForWorkspace } from "@opencompany/db/workspaces";
+import type { WikiSourceDto } from "@opencompany/protocol";
 import type { BrainSourceApplicationService } from "./brain-sources";
 
 type DbLike = any;
@@ -31,6 +38,14 @@ const IMPORT_INTEGRATION_PROVIDERS = [
   "linear",
 ] as const;
 const IMPORT_PROVIDERS = ["public_web", ...IMPORT_INTEGRATION_PROVIDERS] as const;
+const WIKI_IMPORT_INTEGRATION_PROVIDERS = [
+  "github",
+  "jamie",
+  "granola",
+  "gmail",
+  "linear",
+] as const;
+const WIKI_IMPORT_PROVIDERS = ["public_web", ...WIKI_IMPORT_INTEGRATION_PROVIDERS] as const;
 
 type ImportIntegrationProvider = (typeof IMPORT_INTEGRATION_PROVIDERS)[number];
 
@@ -241,6 +256,141 @@ export class BrainImportApplicationService {
   }
 }
 
+export class WikiImportApplicationService {
+  constructor(
+    private readonly db: DbLike,
+    private readonly wikiSources: { list(actor: Actor): Promise<WikiSourceDto[]> },
+  ) {}
+
+  async start(
+    actor: Actor,
+    input: {
+      idempotencyKey: string;
+      companyUrl: string;
+      focus?: string;
+      sourceSelection: BrainImportSelectionInput;
+    },
+  ): Promise<BrainImportCommandResult> {
+    await this.authorizeAdminWiki(actor);
+    let company: { url: string; domain: string };
+    try {
+      company = normalizeCompanyUrl(input.companyUrl);
+    } catch (error) {
+      throw new CoreError(
+        "invalid_argument",
+        error instanceof Error ? error.message : "Enter a valid company website.",
+      );
+    }
+    const result = await startWikiImportRunIdempotent({
+      actor,
+      idempotencyKey: idempotencyKey(input.idempotencyKey),
+      companyUrl: company.url,
+      focus: boundedOptional(input.focus, 2_000, "focus") ?? null,
+      sourceSelection: await this.validateSelection(actor, input.sourceSelection),
+      db: this.db,
+    });
+    return {
+      importRunId: result.run.id,
+      status: result.run.status,
+      replayed: result.idempotentReplay,
+    };
+  }
+
+  async confirm(
+    actor: Actor,
+    importRunId: string,
+    enabledProviders: BrainImportProvider[],
+  ): Promise<BrainImportCommandResult> {
+    await this.authorizeAdminWiki(actor);
+    const runId = resourceId(importRunId, "importRunId");
+    await confirmWikiImport({
+      importRunId: runId,
+      workspaceId: actor.workspaceId,
+      enabledProviders: sanitizeWikiEnabledProviders(enabledProviders),
+      actingUserWorkosId: actor.userId,
+      db: this.db,
+    });
+    return { importRunId: runId, status: "ingesting", replayed: false };
+  }
+
+  async cancel(actor: Actor, importRunId: string): Promise<BrainImportCommandResult> {
+    await this.authorizeAdminWiki(actor);
+    const runId = resourceId(importRunId, "importRunId");
+    await cancelWikiImport({ importRunId: runId, workspaceId: actor.workspaceId, db: this.db });
+    return { importRunId: runId, status: "canceled", replayed: false };
+  }
+
+  async retry(actor: Actor, importRunId: string): Promise<BrainImportCommandResult> {
+    await this.authorizeAdminWiki(actor);
+    const runId = resourceId(importRunId, "importRunId");
+    await retryWikiImportDiscovery({
+      importRunId: runId,
+      workspaceId: actor.workspaceId,
+      db: this.db,
+    });
+    return { importRunId: runId, status: "discovering", replayed: false };
+  }
+
+  private async authorizeAdminWiki(actor: Actor) {
+    if (
+      !actor.userId.trim() ||
+      !actor.workspaceId.trim() ||
+      !actorHasPermission(actor, WIKI_READ_PERMISSION) ||
+      !actorHasPermission(actor, WIKI_WRITE_PERMISSION)
+    ) {
+      throw new CoreError("forbidden", "The actor is not allowed to write to the Wiki.");
+    }
+    if (actor.role !== "admin") {
+      throw new CoreError("forbidden", "Only workspace admins can import company context.");
+    }
+    if (await isLegacyBrainEnabledForWorkspace(actor.workspaceId, { db: this.db })) {
+      throw new CoreError("not_found", "Wiki import is unavailable in this workspace.");
+    }
+  }
+
+  private async validateSelection(
+    actor: Actor,
+    selection: BrainImportSelectionInput,
+  ): Promise<BrainImportSourceSelection> {
+    const sources = await this.wikiSources.list(actor);
+    const next: BrainImportSourceSelection = {
+      public_web: { enabled: selection.public_web?.enabled !== false },
+    };
+    for (const provider of WIKI_IMPORT_INTEGRATION_PROVIDERS) {
+      const requested = selection[provider];
+      if (!requested?.enabled) {
+        next[provider] = { enabled: false };
+        continue;
+      }
+      const source = sources.find(
+        (candidate) =>
+          candidate.provider === provider &&
+          candidate.integrationId === requested.integrationId &&
+          candidate.canConfigure &&
+          candidate.integrationStatus === "connected",
+      );
+      if (!source) {
+        throw new CoreError(
+          "invalid_argument",
+          `Configure ${providerLabel(provider)} in Wiki Sources first.`,
+        );
+      }
+      if (provider === "github" && !hasConfiguredEntries(source.config.repos)) {
+        throw new CoreError("invalid_argument", "Select at least one GitHub repository.");
+      }
+      if (provider === "linear" && !hasConfiguredEntries(source.config.teams)) {
+        throw new CoreError("invalid_argument", "Select at least one Linear team.");
+      }
+      next[provider] = {
+        enabled: true,
+        integrationId: source.integrationId,
+        config: source.config,
+      };
+    }
+    return next;
+  }
+}
+
 function integrationIdFor(
   details: Awaited<ReturnType<BrainSourceApplicationService["list"]>>,
   provider: ImportIntegrationProvider,
@@ -260,6 +410,13 @@ function hasConfiguredEntries(value: unknown) {
 // matching the pre-cutover Server Action behavior.
 function sanitizeEnabledProviders(value: BrainImportProvider[]): BrainImportProvider[] {
   const allowed = new Set<string>(IMPORT_PROVIDERS);
+  return Array.from(
+    new Set(value.filter((provider) => typeof provider === "string" && allowed.has(provider))),
+  );
+}
+
+function sanitizeWikiEnabledProviders(value: BrainImportProvider[]): BrainImportProvider[] {
+  const allowed = new Set<string>(WIKI_IMPORT_PROVIDERS);
   return Array.from(
     new Set(value.filter((provider) => typeof provider === "string" && allowed.has(provider))),
   );

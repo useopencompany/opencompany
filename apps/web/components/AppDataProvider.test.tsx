@@ -2,6 +2,7 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppDataProvider, type AppInitialData, useAppData } from "@/components/AppDataProvider";
+import { integrationStateFromRows } from "@/lib/integration-state";
 import {
   addOptimisticChatSummary,
   clearAllOptimisticChatSummaries,
@@ -91,6 +92,50 @@ describe("AppDataProvider", () => {
 
     expect(mocks.useLiveQuery).toHaveBeenCalled();
     expect(mocks.getHeadlessTaskSchedules).not.toHaveBeenCalled();
+  });
+
+  it("preserves the server-selected Gmail account while live accounts hydrate", async () => {
+    const data = initialData();
+    data.integrations = integrationStateFromRows([
+      {
+        id: "gint_gmail_primary",
+        provider: "gmail",
+        status: "connected",
+        scopes: ["https://www.googleapis.com/auth/gmail.modify"],
+        capabilityModes: { query: "ask" },
+      },
+    ]);
+    const perCollection = [
+      { data: [], isLoading: false },
+      { data: [], isLoading: false },
+      { data: [], isLoading: false },
+      {
+        data: [
+          {
+            id: "gint_gmail_other",
+            provider: "gmail",
+            status: "connected",
+            scopes: ["https://www.googleapis.com/auth/gmail.modify"],
+            capabilityModes: { query: "off" },
+          },
+        ],
+        isLoading: false,
+      },
+    ];
+    let call = 0;
+    mocks.useLiveQuery.mockImplementation(
+      () => perCollection[call++ % perCollection.length] ?? { data: [], isLoading: false },
+    );
+
+    render(
+      <AppDataProvider initialData={data}>
+        <GmailPrimaryProbe />
+      </AppDataProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("gmail-primary").textContent).toBe("gint_gmail_primary"),
+    );
   });
 
   it("preloads only active-runtime transcripts after live conversations are ready", async () => {
@@ -509,6 +554,10 @@ function DataProbe() {
   return <div>{`${data.user.email}:${data.archivedChats.length}`}</div>;
 }
 
+function GmailPrimaryProbe() {
+  return <div data-testid="gmail-primary">{useAppData().integrations.gmail.integrationId}</div>;
+}
+
 function initialData(): AppInitialData {
   return {
     user: {
@@ -527,8 +576,13 @@ function initialData(): AppInitialData {
     tasks: [],
     schedules: [],
     recentChats: [],
-    integrations: {} as AppInitialData["integrations"],
-    featureFlags: { taskSpawning: false, autoModelRouting: false, imessage: false, wiki: false },
+    integrations: integrationStateFromRows([]),
+    featureFlags: {
+      taskSpawning: false,
+      autoModelRouting: false,
+      imessage: false,
+      legacyBrain: false,
+    },
     codexConnected: false,
     claudeCodeConnected: false,
     mcpSetup: { preferredClient: null, completedAt: null },

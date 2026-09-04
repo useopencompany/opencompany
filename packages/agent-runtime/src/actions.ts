@@ -16,8 +16,28 @@ export const ACTION_HOST_TOOL_CONTRACT_VERSIONS = [
   ACTION_HOST_TOOL_CONTRACT_VERSION,
 ] as const;
 
+// The legacy Brain-only contract remains readable during rolling deploys and
+// also carries the workspace Wiki tool. Keep this list here so prompt assembly,
+// capability authorization, and MCP registration use one predicate.
+export const WIKI_HOST_TOOL_CONTRACT_VERSIONS = [
+  ...ACTION_HOST_TOOL_CONTRACT_VERSIONS,
+  "goat-codex-brain.v1",
+] as const;
+
 export function isActionHostToolContractVersion(value: string | null | undefined): boolean {
   return ACTION_HOST_TOOL_CONTRACT_VERSIONS.some((version) => version === value);
+}
+
+export function isWikiHostToolContractVersion(value: string | null | undefined): boolean {
+  return WIKI_HOST_TOOL_CONTRACT_VERSIONS.some((version) => version === value);
+}
+
+export function hostToolContractVersionForEngine(
+  engine: "opencompany" | "codex" | "claude_code",
+): typeof CHAT_HOST_TOOL_CONTRACT_VERSION | typeof ACTION_HOST_TOOL_CONTRACT_VERSION {
+  return engine === "opencompany"
+    ? CHAT_HOST_TOOL_CONTRACT_VERSION
+    : ACTION_HOST_TOOL_CONTRACT_VERSION;
 }
 
 export const ACTION_MAX_CALLS_PER_TURN = 16;

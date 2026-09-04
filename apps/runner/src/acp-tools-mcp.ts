@@ -20,6 +20,7 @@ import {
   type ActionGatewayResponse,
   type ExternalEngineGatewayTicketPayload,
   isActionHostToolContractVersion,
+  isWikiHostToolContractVersion,
   verifyExternalEngineGatewayTicket,
 } from "@opencompany/agent-runtime";
 import { type ActionTurnRef, resolveActionApproval } from "@opencompany/db/action-governance";
@@ -96,10 +97,29 @@ export function registerAcpToolsMcpRoute(
         reply.status(401).send({ error: "Unauthorized." });
         return;
       }
+      const observedMethod = observedMcpMethod(request.body);
       const authorizedContext = await resolved.authorize({ capability });
       if (!authorizedContext) {
+        if (observedMethod) {
+          logger.warn("ACP tools MCP request lost turn authority", {
+            event: "opencompany.goat_acp_tools_mcp_authority_denied",
+            codex_chat_session_id: capability.codexChatSessionId,
+            codex_chat_turn_id: capability.codexChatTurnId,
+            attempt_id: capability.attemptId,
+            rpc_method: observedMethod,
+          });
+        }
         reply.status(403).send({ error: "This engine turn is no longer active." });
         return;
+      }
+      if (observedMethod) {
+        logger.info("Authorized ACP tools MCP initialization request", {
+          event: "opencompany.goat_acp_tools_mcp_authorized",
+          codex_chat_session_id: capability.codexChatSessionId,
+          codex_chat_turn_id: capability.codexChatTurnId,
+          attempt_id: capability.attemptId,
+          rpc_method: observedMethod,
+        });
       }
 
       const authorizeOperation = () => resolved.authorize({ capability });
@@ -156,7 +176,7 @@ export function registerAcpToolsMcpRoute(
           signal: request.signal,
         });
       }
-      if (authorizedContext.brainRef) {
+      if (authorizedContext.legacyBrainEnabled && authorizedContext.brainRef) {
         registerBrainTools({
           server,
           capability,
@@ -236,6 +256,12 @@ function verifiedCapability(
   if (!ticket || ticket.length > 4_096) return null;
   const payload = verifyExternalEngineGatewayTicket({ ticket, secret: env.internalToken });
   return payload?.v === 2 ? payload : null;
+}
+
+function observedMcpMethod(body: unknown): "initialize" | "tools/list" | null {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) return null;
+  const method = (body as Record<string, unknown>).method;
+  return method === "initialize" || method === "tools/list" ? method : null;
 }
 
 function authorityActionError() {
@@ -587,9 +613,7 @@ function rowsFromExecute<Row>(result: unknown): Row[] {
 function wikiToolEnabled(
   context: NonNullable<Awaited<ReturnType<typeof authorizePersistedExternalEngineToolCapability>>>,
 ) {
-  return (
-    context.wikiEnabled && context.hostToolContractVersion === ACTION_HOST_TOOL_CONTRACT_VERSION
-  );
+  return isWikiHostToolContractVersion(context.hostToolContractVersion);
 }
 
 function registerExternalEngineWikiTool(input: {
@@ -627,7 +651,6 @@ function registerExternalEngineWikiTool(input: {
         const current = userWorkosId === initialContext.actorId ? await currentContext() : null;
         return current
           ? {
-              enabled: true,
               workspaces: [
                 {
                   id: current.workspaceId,
@@ -636,7 +659,7 @@ function registerExternalEngineWikiTool(input: {
                 },
               ],
             }
-          : { enabled: false, workspaces: [] };
+          : { workspaces: [] };
       },
       execute: async ({ userWorkosId, workspaceId, command, idempotencyKey }) => {
         const current =
@@ -680,10 +703,11 @@ function registerBrainTools(input: {
   signal: AbortSignal;
 }) {
   const brainRef = input.authorizedContext.brainRef;
-  if (!brainRef) return;
+  if (!input.authorizedContext.legacyBrainEnabled || !brainRef) return;
   const checkAbort = async () => {
     if (input.signal.aborted) throw new Error("The tool call was canceled.");
-    if (!(await input.authorizeOperation())) {
+    const current = await input.authorizeOperation();
+    if (!current?.legacyBrainEnabled || current.brainRef !== brainRef) {
       throw new Error("This engine turn is no longer active.");
     }
   };

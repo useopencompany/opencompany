@@ -1,15 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { awaitHeadlessTaskTransaction } from "./headless-task-collections";
+import {
+  awaitHeadlessTaskCommentTransaction,
+  awaitHeadlessTaskTransaction,
+} from "./headless-task-collections";
 import {
   archiveHeadlessTask,
   cancelHeadlessTaskRun,
   createHeadlessTask,
+  createHeadlessTaskComment,
   getHeadlessTaskSummary,
   getLegacyTaskCompatibilityHistory,
   listLegacyTaskCompatibility,
 } from "./headless-task-commands";
 
 vi.mock("./headless-task-collections", () => ({
+  awaitHeadlessTaskCommentTransaction: vi.fn(async () => undefined),
   awaitHeadlessTaskTransaction: vi.fn(async () => undefined),
 }));
 
@@ -99,6 +104,54 @@ describe("headless Task commands", () => {
     expect(new URL(sent.url).pathname).toBe("/v1/tasks/TASK-1");
     await expect(sent.json()).resolves.toEqual({ archived: true });
     expect(awaitHeadlessTaskTransaction).toHaveBeenCalledWith("43", {
+      scopeKey: "workspace_1",
+    });
+  });
+
+  it("posts a verbatim Task comment and reconciles both committed read models", async () => {
+    let request: Request | null = null;
+    const body = "  Continue from this exact context.\n  Keep indentation.  ";
+    const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      request = input instanceof Request ? input : new Request(input, init);
+      return Response.json(
+        {
+          data: {
+            task: { ...task, status: "running" },
+            comment: {
+              id: "task_activity_comment_1",
+              taskId: task.id,
+              author: "user",
+              kind: "comment",
+              body,
+              createdAt: task.createdAt,
+            },
+            messageId: "message_comment_1",
+            assistantMessageId: "message_comment_assistant_1",
+            runId: "run_comment_1",
+            transactionId: "44",
+            replayed: false,
+          },
+          meta,
+        },
+        { status: 202 },
+      );
+    });
+
+    await createHeadlessTaskComment(
+      task.id,
+      { id: "task_activity_comment_1", body },
+      {
+        baseUrl: "https://app.example.test",
+        fetch: fetchMock as typeof fetch,
+        scopeKey: "workspace_1",
+      },
+    );
+
+    const sent = request as unknown as Request;
+    expect(sent.method).toBe("POST");
+    expect(new URL(sent.url).pathname).toBe("/v1/tasks/task_1/comments");
+    await expect(sent.json()).resolves.toEqual({ id: "task_activity_comment_1", body });
+    expect(awaitHeadlessTaskCommentTransaction).toHaveBeenCalledWith(task.id, "44", {
       scopeKey: "workspace_1",
     });
   });

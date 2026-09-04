@@ -46,7 +46,7 @@ export type OnboardingStateView = {
 export type OnboardingWorkspaceView = {
   workspaceId: string;
   organizationId: string;
-  brainId: string;
+  brainId: string | null;
   createdByCaller: boolean;
 };
 
@@ -154,7 +154,7 @@ export function createOnboardingService(input: { db: DbLike; workos: WorkOS }): 
 
         if (context) {
           const brain = await activeBrain(identity.userId, context.workspace.id, db);
-          if (!brain) {
+          if (context.workspace.legacyBrainEnabled && !brain) {
             throw new ApiError(404, "not_found", "No brain is available for this workspace.");
           }
           const organizationId = await ensureWorkspaceOrganization(context.workspace, {
@@ -170,11 +170,13 @@ export function createOnboardingService(input: { db: DbLike; workos: WorkOS }): 
             { userWorkosId: identity.userId, workspaceId: context.workspace.id },
             { db },
           );
-          await scaffoldOnboardingFolders(identity.userId, brain.id, db);
+          if (context.workspace.legacyBrainEnabled && brain) {
+            await scaffoldOnboardingFolders(identity.userId, brain.id, db);
+          }
           return {
             workspaceId: context.workspace.id,
             organizationId,
-            brainId: brain.id,
+            brainId: context.workspace.legacyBrainEnabled ? (brain?.id ?? null) : null,
             createdByCaller: context.workspace.createdByWorkosId === identity.userId,
           };
         }
@@ -200,11 +202,10 @@ export function createOnboardingService(input: { db: DbLike; workos: WorkOS }): 
           { userWorkosId: identity.userId, workspaceId: created.workspace.id },
           { db },
         );
-        await scaffoldOnboardingFolders(identity.userId, created.brain.id, db);
         return {
           workspaceId: created.workspace.id,
           organizationId,
-          brainId: created.brain.id,
+          brainId: null,
           createdByCaller: true,
         };
       } catch (error) {

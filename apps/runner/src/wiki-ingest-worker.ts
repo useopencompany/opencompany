@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { calculateModelUsageCost, calculatePlatformFeeUsdMicros } from "@opencompany/billing";
 import { recordCreditDebit } from "@opencompany/db/credits";
+import { brainImportRuns } from "@opencompany/db/product-schema";
 import {
   type ClaimedWikiIngestJob,
   claimNextWikiIngestJob,
@@ -24,6 +25,8 @@ import {
   withSpan,
 } from "@opencompany/telemetry";
 import { flushLatitude } from "@opencompany/telemetry/latitude";
+import { and, eq } from "drizzle-orm";
+import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { createPollingWorker } from "./polling-worker";
 import {
@@ -98,7 +101,8 @@ export type WikiIngestStore = {
     now: Date;
   }): Promise<boolean>;
   resolveSource(input: {
-    integrationId: string;
+    integrationId: string | null;
+    importRunId: string | null;
     workspaceId: string;
     sourceProvider: ClaimedWikiIngestJob["sourceProvider"];
   }): Promise<{ actorUserWorkosId: string; config: Record<string, unknown> }>;
@@ -119,6 +123,24 @@ export function createDbWikiIngestStore(): WikiIngestStore {
     fail: failWikiIngestJobWithBackoff,
     skip: skipWikiIngestJob,
     async resolveSource(input) {
+      if (input.sourceProvider === "opencompany-import") {
+        if (!input.importRunId || input.integrationId) {
+          throw new Error("Wiki import ingestion target is invalid.");
+        }
+        const [run] = await getDb()
+          .select({ userWorkosId: brainImportRuns.userWorkosId })
+          .from(brainImportRuns)
+          .where(
+            and(
+              eq(brainImportRuns.id, input.importRunId),
+              eq(brainImportRuns.workspaceId, input.workspaceId),
+            ),
+          )
+          .limit(1);
+        if (!run) throw new Error("Wiki import run was not found for this ingestion job.");
+        return { actorUserWorkosId: run.userWorkosId, config: {} };
+      }
+      if (!input.integrationId) throw new Error("Wiki source integration is missing.");
       const sources = await listEnabledWikiSourcesForIntegration(input.integrationId);
       const source = sources.find(
         (candidate) =>
@@ -317,6 +339,7 @@ export async function runClaimedWikiIngestJob(input: {
     }
     const resolvedSource = await store.resolveSource({
       integrationId: input.job.integrationId,
+      importRunId: input.job.importRunId,
       workspaceId: input.job.workspaceId,
       sourceProvider: input.job.sourceProvider,
     });
@@ -689,6 +712,7 @@ function resolveActorForDebit(store: WikiIngestStore, job: ClaimedWikiIngestJob)
   return store
     .resolveSource({
       integrationId: job.integrationId,
+      importRunId: job.importRunId,
       workspaceId: job.workspaceId,
       sourceProvider: job.sourceProvider,
     })

@@ -377,6 +377,133 @@
         ],
         "additionalProperties": false
       },
+      "CreateTaskCommentEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "task": {
+                "$ref": "#/components/schemas/Task"
+              },
+              "comment": {
+                "$ref": "#/components/schemas/TaskComment"
+              },
+              "messageId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "assistantMessageId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "runId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "transactionId": {
+                "type": "string",
+                "pattern": "^[0-9]+$/u"
+              },
+              "replayed": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "task",
+              "comment",
+              "messageId",
+              "assistantMessageId",
+              "runId",
+              "transactionId",
+              "replayed"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "TaskComment": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "taskId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "author": {
+            "type": "string",
+            "enum": [
+              "user"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "comment"
+            ]
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "taskId",
+          "author",
+          "kind",
+          "body",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
+      "CreateTaskCommentBody": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "id",
+          "body"
+        ],
+        "additionalProperties": false
+      },
       "TaskEnvelope": {
         "type": "object",
         "properties": {
@@ -4417,7 +4544,10 @@
             "type": "boolean"
           },
           "wikiEnabled": {
-            "type": "boolean"
+            "type": "boolean",
+            "enum": [
+              true
+            ]
           },
           "taskViewMode": {
             "type": "string",
@@ -4501,13 +4631,17 @@
               "admin",
               "member"
             ]
+          },
+          "legacyBrainEnabled": {
+            "type": "boolean"
           }
         },
         "required": [
           "id",
           "name",
           "slug",
-          "role"
+          "role",
+          "legacyBrainEnabled"
         ],
         "additionalProperties": false
       },
@@ -5062,6 +5196,7 @@
               },
               "brainId": {
                 "type": "string",
+                "nullable": true,
                 "minLength": 1,
                 "maxLength": 256,
                 "example": "run_019fed53"
@@ -9898,7 +10033,10 @@
             "type": "boolean"
           },
           "wikiEnabled": {
-            "type": "boolean"
+            "type": "boolean",
+            "enum": [
+              true
+            ]
           },
           "taskViewMode": {
             "type": "string",
@@ -10525,6 +10663,93 @@
         ],
         "additionalProperties": false
       },
+      "RenderAccountStateEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "state": {
+                "$ref": "#/components/schemas/RenderAccountState"
+              }
+            },
+            "required": [
+              "state"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "RenderAccountState": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "render"
+            ]
+          },
+          "connected": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "not_connected",
+              "connected",
+              "needs_reauth",
+              "sync_failed"
+            ]
+          },
+          "integrationId": {
+            "type": "string",
+            "nullable": true,
+            "minLength": 1,
+            "maxLength": 128,
+            "example": "gint_0f8e7d6c5b4a",
+            "description": "Integration connection id."
+          },
+          "accountName": {
+            "type": "string",
+            "nullable": true
+          },
+          "statusReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "capabilityModes": {
+            "type": "object",
+            "additionalProperties": {
+              "nullable": true
+            }
+          },
+          "toolModes": {
+            "type": "object",
+            "additionalProperties": {
+              "nullable": true
+            }
+          }
+        },
+        "required": [
+          "provider",
+          "connected",
+          "status",
+          "integrationId",
+          "accountName",
+          "statusReason",
+          "capabilityModes",
+          "toolModes"
+        ],
+        "additionalProperties": false
+      },
       "ImessagePairingStartedEnvelope": {
         "type": "object",
         "properties": {
@@ -10859,6 +11084,8 @@
               "fathom",
               "attio",
               "betterstack",
+              "render",
+              "signoz",
               "latitude",
               "neon",
               "x_account"
@@ -13021,6 +13248,7 @@
             "enum": [
               "read",
               "query",
+              "draft",
               "write"
             ]
           },
@@ -13454,6 +13682,7 @@
                 "enum": [
                   "read",
                   "query",
+                  "draft",
                   "write"
                 ]
               },
@@ -13725,6 +13954,66 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/CreateTaskEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tasks/{taskId}/comments": {
+      "post": {
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "taskId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTaskCommentBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Comment recorded verbatim and Task resumed with a queued Run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateTaskCommentEnvelope"
                 }
               }
             }
@@ -17043,6 +17332,225 @@
         "responses": {
           "200": {
             "description": "Failed pre-confirmation discovery reset and started again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrainImportRunCommandEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/wiki/imports": {
+      "post": {
+        "tags": [
+          "Wiki"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartBrainImportBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Workspace Wiki company-context discovery started or replayed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrainImportRunCommandEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/wiki/imports/{importRunId}/confirm": {
+      "post": {
+        "tags": [
+          "Wiki"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "importRunId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmBrainImportBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Discovered Wiki import confirmed; ingestion begins.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrainImportRunCommandEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/wiki/imports/{importRunId}/cancel": {
+      "post": {
+        "tags": [
+          "Wiki"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "importRunId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Active Wiki import canceled; queued ingestion jobs are skipped.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrainImportRunCommandEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/wiki/imports/{importRunId}/retry": {
+      "post": {
+        "tags": [
+          "Wiki"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "importRunId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Failed Wiki discovery reset and started again.",
             "content": {
               "application/json": {
                 "schema": {
@@ -20390,6 +20898,7 @@
                 "chat-runs-v1",
                 "engine-sessions-v1",
                 "tasks-v1",
+                "task-activities-v1",
                 "workflows-v1",
                 "workflow-schedules-v1",
                 "task-schedules-v1",
@@ -20399,6 +20908,7 @@
                 "brain-edges-v1",
                 "brain-ingest-jobs-v1",
                 "brain-import-runs-v1",
+                "wiki-import-runs-v1",
                 "wiki-pages-v2",
                 "wiki-timeline-v1",
                 "integration-accounts-v1"
@@ -20428,6 +20938,17 @@
             },
             "required": false,
             "name": "brainId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": false,
+            "name": "taskId",
             "in": "query"
           },
           {
@@ -21084,6 +21605,53 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GranolaAccountStateEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/integration-accounts/render": {
+      "put": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntegrationApiKeyBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Render connected (or reconnected) for the acting user. The API key never appears in the response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RenderAccountStateEnvelope"
                 }
               }
             }

@@ -46,7 +46,7 @@ export type PluginManifestResult = {
 
 export const OPENCOMPANY_CAPABILITIES_EXTENSION = "so.opencompany.capabilities";
 
-export type PluginCapabilityId = "read" | "query" | "write";
+export type PluginCapabilityId = "read" | "query" | "draft" | "write";
 export type PluginCapabilityMode = "on" | "ask" | "off";
 
 export type PluginCapabilityDefinition = {
@@ -220,7 +220,7 @@ export function parsePluginCapabilities(
 
   const definitions: PluginCapabilityDefinition[] = [];
   for (const [id, group] of Object.entries(value)) {
-    if (id !== "read" && id !== "query" && id !== "write") {
+    if (id !== "read" && id !== "query" && id !== "draft" && id !== "write") {
       issues.push(`Unknown capability group \`${id}\` was ignored.`);
       continue;
     }

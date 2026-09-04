@@ -12,6 +12,7 @@ import {
   MessageSummaryReadModelSchema,
   ReadModelSchema,
   ResolveApprovalBodySchema,
+  TaskActivityReadModelSchema,
   UpdateWorkflowBodySchema,
 } from "./schemas";
 
@@ -60,6 +61,7 @@ describe("headless protocol", () => {
     const document = createOpenApiDocument();
     expect(Object.keys(document.paths ?? {})).toEqual([
       "/v1/tasks",
+      "/v1/tasks/{taskId}/comments",
       "/v1/tasks/{taskId}",
       "/v1/tasks/{taskId}/summary",
       "/v1/compatibility/tasks",
@@ -111,6 +113,10 @@ describe("headless protocol", () => {
       "/v1/brains/{brainId}/imports/{importRunId}/confirm",
       "/v1/brains/{brainId}/imports/{importRunId}/cancel",
       "/v1/brains/{brainId}/imports/{importRunId}/retry",
+      "/v1/wiki/imports",
+      "/v1/wiki/imports/{importRunId}/confirm",
+      "/v1/wiki/imports/{importRunId}/cancel",
+      "/v1/wiki/imports/{importRunId}/retry",
       "/v1/brains/{brainId}/documents",
       "/v1/brains/{brainId}/assets",
       "/v1/brains/{brainId}/assets/{documentId}/replace",
@@ -172,6 +178,7 @@ describe("headless protocol", () => {
       "/v1/integration-accounts/attio/{integrationId}",
       "/v1/integration-accounts/fathom",
       "/v1/integration-accounts/granola",
+      "/v1/integration-accounts/render",
       "/v1/integration-accounts/imessage/pairing",
       "/v1/integration-accounts/imessage/pairing/confirm",
       "/v1/integration-accounts/stripe",
@@ -278,10 +285,23 @@ describe("headless protocol", () => {
     ).toBe(true);
     expect(ChatReadModelSchema.safeParse("chat-messages-v2").success).toBe(true);
     expect(ReadModelSchema.safeParse("workflows-v1").success).toBe(true);
+    expect(ReadModelSchema.safeParse("task-activities-v1").success).toBe(true);
     expect(ReadModelSchema.safeParse("workflow-schedules-v1").success).toBe(true);
     expect(ReadModelSchema.safeParse("task-schedules-v1").success).toBe(true);
     expect(ReadModelSchema.safeParse("integration-accounts-v1").success).toBe(true);
     expect(ReadModelSchema.safeParse("goat.workflow_read_model_v1").success).toBe(false);
+    expect(
+      TaskActivityReadModelSchema.safeParse({
+        id: "task_activity_1",
+        taskId: "task_1",
+        author: "orchestrator",
+        authorWorkosId: null,
+        kind: "comment",
+        body: "Ready for review.",
+        metadata: { runId: "run_1" },
+        createdAt: "2026-08-11T10:00:00.000Z",
+      }).success,
+    ).toBe(true);
   });
 
   it("requires optimistic versions without accepting tenancy or planner state", () => {

@@ -289,7 +289,7 @@ export function McpSetupGuide({
             </h2>
             <div className="rounded-xl border border-border bg-surface p-4">
               <p className="text-[12px] leading-5 text-ink-subtle">
-                Paste this into {selectedClient.label}. It starts with a Brain search so opencompany
+                Paste this into {selectedClient.label}. It starts with a Wiki search so opencompany
                 can verify the connection.
               </p>
               <div className="mt-3 rounded-lg bg-surface-muted p-3">
@@ -321,7 +321,7 @@ function GuideHeader() {
   return (
     <div className="mb-7 flex flex-col gap-2">
       <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-ink">
-        Use your brain where you already work
+        Use your Wiki where you already work
       </h1>
       <p className="text-[14px] leading-6 text-ink-muted">
         Connect one AI client, then ask a real question so opencompany can verify everything works.
@@ -390,7 +390,7 @@ function SetupStatus({
     <div className="mt-3 flex items-start gap-2.5 rounded-xl border border-border bg-surface px-4 py-3">
       <Loader2 size={15} className="mt-0.5 shrink-0 animate-spin text-ink-subtle" />
       <div>
-        <p className="text-[12.5px] font-medium text-ink">Waiting for your first Brain query…</p>
+        <p className="text-[12.5px] font-medium text-ink">Waiting for your first Wiki query…</p>
         <p
           className={`mt-0.5 text-[11.5px] leading-4 ${pollError ? "text-warning" : "text-ink-subtle"}`}
         >

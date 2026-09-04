@@ -34,7 +34,11 @@ it("loads only aggregate stats for the Brain overview", async () => {
     retrievalsLast7Days: 7,
     activeSources: 3,
   };
-  currentUserMock.mockResolvedValue({ brains: [brain], activeBrain: brain });
+  currentUserMock.mockResolvedValue({
+    brains: [brain],
+    activeBrain: brain,
+    workspace: { legacyBrainEnabled: true },
+  });
   getHeadlessBrainOverviewMock.mockResolvedValue(stats);
 
   const page = await BrainPage({
@@ -59,7 +63,11 @@ it("loads the document snapshot and aggregate stats for local Overview navigatio
     retrievalsLast7Days: 7,
     activeSources: 3,
   };
-  currentUserMock.mockResolvedValue({ brains: [brain], activeBrain: brain });
+  currentUserMock.mockResolvedValue({
+    brains: [brain],
+    activeBrain: brain,
+    workspace: { legacyBrainEnabled: true },
+  });
   getHeadlessBrainSnapshotMock.mockResolvedValue(snapshot);
   getHeadlessBrainOverviewMock.mockResolvedValue(stats);
 

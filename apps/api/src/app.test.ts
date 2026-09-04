@@ -9,6 +9,7 @@ import {
   CoreError,
   type CreateMessageCommand,
   type CreateTaskCommand,
+  type CreateTaskCommentCommand,
   KnowledgeApplicationService,
   type KnowledgeRepository,
   type PluginGatewayLifecycle,
@@ -85,6 +86,51 @@ function messageHeaders(idempotencyKey: string) {
 }
 
 describe("canonical Hono API", () => {
+  it("mounts the first-party Gmail MCP at its package endpoint", async () => {
+    const handle = vi.fn(async (_request: Request) => Response.json({ ok: true }));
+    const app = testApp(fakeRepository(), { gmailMcp: { handle } });
+    const response = await app.request("/mcp/plugins/gmail", {
+      method: "POST",
+      headers: { authorization: "Bearer narrow-ticket" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(handle).toHaveBeenCalledOnce();
+    expect(handle.mock.calls[0]?.[0].headers.get("authorization")).toBe("Bearer narrow-ticket");
+    expect((await app.request("/mcp/plugins/gmail", { method: "GET" })).status).toBe(404);
+  });
+
+  it("mounts the first-party Google Calendar MCP at its package endpoint", async () => {
+    const handle = vi.fn(async (_request: Request) => Response.json({ ok: true }));
+    const app = testApp(fakeRepository(), { googleCalendarMcp: { handle } });
+    const response = await app.request("/mcp/plugins/google-calendar", {
+      method: "POST",
+      headers: { authorization: "Bearer narrow-ticket" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(handle).toHaveBeenCalledOnce();
+    expect(handle.mock.calls[0]?.[0].headers.get("authorization")).toBe("Bearer narrow-ticket");
+    expect((await app.request("/mcp/plugins/google-calendar", { method: "GET" })).status).toBe(404);
+  });
+
+  it("mounts the first-party Google Drive MCP at its package endpoint", async () => {
+    const handle = vi.fn(async (_request: Request) => Response.json({ ok: true }));
+    const app = testApp(fakeRepository(), { googleDriveMcp: { handle } });
+    const response = await app.request("/mcp/plugins/google-drive", {
+      method: "POST",
+      headers: { authorization: "Bearer narrow-ticket" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(handle).toHaveBeenCalledOnce();
+    expect(handle.mock.calls[0]?.[0].headers.get("authorization")).toBe("Bearer narrow-ticket");
+    expect((await app.request("/mcp/plugins/google-drive", { method: "GET" })).status).toBe(404);
+  });
+
   it("reports the deployed API release for expected-SHA health gates", async () => {
     const previousRelease = process.env.RENDER_GIT_COMMIT;
     process.env.RENDER_GIT_COMMIT = "api-release-sha";
@@ -120,6 +166,7 @@ describe("canonical Hono API", () => {
       wikiSources: fakeWikiSources(),
       brainSources: fakeBrainSources(),
       brainImports: fakeBrainImports(),
+      wikiImports: fakeWikiImports(),
       browserProfiles: fakeBrowserProfiles(),
       skillImports: fakeSkillImportService(),
       pluginImports: fakePluginImportService(),
@@ -214,6 +261,43 @@ describe("canonical Hono API", () => {
       model: "moonshotai/kimi-k3",
       source: "manual",
     });
+
+    const commentBody = "  Continue with the revised brief.\nKeep this indentation.  ";
+    const commented = await app.request("/v1/tasks/task_1/comments", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: "task_activity_comment_1", body: commentBody }),
+    });
+    expect(commented.status).toBe(202);
+    await expect(commented.json()).resolves.toMatchObject({
+      data: {
+        task: { id: "task_1", status: "running" },
+        comment: {
+          id: "task_activity_comment_1",
+          taskId: "task_1",
+          author: "user",
+          kind: "comment",
+          body: commentBody,
+        },
+        messageId: "message_task_comment_1",
+        assistantMessageId: "message_task_comment_assistant_1",
+        runId: "run_task_comment_1",
+        transactionId: "45",
+        replayed: false,
+      },
+    });
+    expect(tasks.lastComment).toEqual({ id: "task_activity_comment_1", body: commentBody });
+
+    tasks.createTaskCommentAndRun = vi.fn(async () => {
+      throw new CoreError("conflict", "Wait for the active Task run to finish before commenting.");
+    });
+    const activeComment = await app.request("/v1/tasks/task_1/comments", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: "task_activity_comment_2", body: "One more note" }),
+    });
+    expect(activeComment.status).toBe(409);
+    await expect(activeComment.json()).resolves.toMatchObject({ error: { code: "conflict" } });
 
     const listed = await app.request("/v1/tasks?archived=false");
     expect(listed.status).toBe(200);
@@ -1183,6 +1267,7 @@ describe("canonical Hono API", () => {
     }));
     const app = testApp(fakeRepository(), {
       brainImports: brainImportService({ start, confirm, cancel, retry }),
+      wikiImports: fakeWikiImports(),
     });
 
     const started = await app.request("/v1/brains/brain_1/imports", {
@@ -1251,6 +1336,7 @@ describe("canonical Hono API", () => {
     }));
     const app = testApp(fakeRepository(), {
       brainImports: brainImportService({ start }),
+      wikiImports: fakeWikiImports(),
     });
 
     const missingKey = await app.request("/v1/brains/brain_1/imports", {
@@ -1274,6 +1360,58 @@ describe("canonical Hono API", () => {
     expect(start).not.toHaveBeenCalled();
   });
 
+  it("drives the workspace Wiki import lifecycle without a Brain parameter", async () => {
+    const start = vi.fn(async () => ({
+      importRunId: "gbimp_wiki",
+      status: "discovering" as const,
+      replayed: false,
+    }));
+    const confirm = vi.fn(async () => ({
+      importRunId: "gbimp_wiki",
+      status: "ingesting" as const,
+      replayed: false,
+    }));
+    const cancel = vi.fn(async () => ({
+      importRunId: "gbimp_wiki",
+      status: "canceled" as const,
+      replayed: false,
+    }));
+    const retry = vi.fn(async () => ({
+      importRunId: "gbimp_wiki",
+      status: "discovering" as const,
+      replayed: false,
+    }));
+    const app = testApp(fakeRepository(), {
+      wikiImports: wikiImportService({ start, confirm, cancel, retry }),
+    });
+
+    const started = await app.request("/v1/wiki/imports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "wiki-import-1" },
+      body: JSON.stringify({
+        companyUrl: "acme.com",
+        sourceSelection: { public_web: { enabled: true } },
+      }),
+    });
+    expect(started.status).toBe(201);
+    expect(start).toHaveBeenCalledWith(actor, {
+      idempotencyKey: "wiki-import-1",
+      companyUrl: "acme.com",
+      sourceSelection: { public_web: { enabled: true } },
+    });
+
+    await app.request("/v1/wiki/imports/gbimp_wiki/confirm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabledProviders: ["public_web"] }),
+    });
+    expect(confirm).toHaveBeenCalledWith(actor, "gbimp_wiki", ["public_web"]);
+    await app.request("/v1/wiki/imports/gbimp_wiki/cancel", { method: "POST" });
+    expect(cancel).toHaveBeenCalledWith(actor, "gbimp_wiki");
+    await app.request("/v1/wiki/imports/gbimp_wiki/retry", { method: "POST" });
+    expect(retry).toHaveBeenCalledWith(actor, "gbimp_wiki");
+  });
+
   it("maps import state conflicts to typed conflict responses", async () => {
     const app = testApp(fakeRepository(), {
       brainImports: brainImportService({
@@ -1284,6 +1422,7 @@ describe("canonical Hono API", () => {
           );
         },
       }),
+      wikiImports: fakeWikiImports(),
     });
     const response = await app.request("/v1/brains/brain_1/imports/gbimp_1/confirm", {
       method: "POST",
@@ -1644,6 +1783,8 @@ describe("canonical Hono API", () => {
       ["GET", "/integrations/neon/callback", "mcp.callback.neon"],
       ["GET", "/integrations/latitude/start", "mcp.start.latitude"],
       ["GET", "/integrations/latitude/callback", "mcp.callback.latitude"],
+      ["GET", "/integrations/signoz/start", "mcp.start.signoz"],
+      ["GET", "/integrations/signoz/callback", "mcp.callback.signoz"],
       ["GET", "/integrations/x-account/start", "x-account.start"],
       ["GET", "/integrations/x-account/callback", "x-account.callback"],
       ["GET", "/integrations/slack-bot/start", "slack-bot.start"],
@@ -2360,7 +2501,7 @@ describe("canonical Hono API", () => {
           workspaceId: actor.workspaceId,
           role: actor.role,
           taskSpawningEnabled: true,
-          wikiEnabled: true,
+          legacyBrainEnabled: true,
         },
       ],
     }));
@@ -2545,6 +2686,34 @@ describe("canonical Hono API", () => {
         conversationId: "conversation_task_1",
       }),
     );
+  });
+
+  it("authorizes a task-scoped activity read model before contacting Electric", async () => {
+    const tasks = fakeTaskRepository();
+    const getTask = vi.fn(tasks.getTask);
+    tasks.getTask = getTask;
+    const stream = vi.fn(async () => Response.json([]));
+    const app = testApp(fakeRepository(), {
+      tasks: new TaskApplicationService(tasks),
+      readModels: { stream },
+    });
+
+    const response = await app.request("/v1/read-models/task-activities-v1?taskId=task_1");
+
+    expect(response.status).toBe(200);
+    expect(getTask).toHaveBeenCalledWith({ actor, taskId: "task_1" });
+    expect(stream).toHaveBeenCalledWith(
+      expect.objectContaining({ actor, readModel: "task-activities-v1", taskId: "task_1" }),
+    );
+
+    const missing = await app.request("/v1/read-models/task-activities-v1?taskId=task_other");
+    expect(missing.status).toBe(404);
+    expect(stream).toHaveBeenCalledTimes(1);
+
+    const unscoped = await app.request("/v1/read-models/task-activities-v1");
+    expect(unscoped.status).toBe(400);
+    const misplacedScope = await app.request("/v1/read-models/tasks-v1?taskId=task_1");
+    expect(misplacedScope.status).toBe(400);
   });
 
   it("authorizes Brain read models before forwarding the fixed Brain scope", async () => {
@@ -2991,7 +3160,7 @@ describe("canonical Hono API", () => {
     const updatePreferences = vi.fn(async () => ({
       timezone: "Europe/Berlin",
       taskSpawningEnabled: true,
-      wikiEnabled: false,
+      wikiEnabled: true as const,
       taskViewMode: "list" as const,
       imessageEnabled: false,
       autoModelRoutingEnabled: true,
@@ -3385,11 +3554,22 @@ describe("canonical Hono API", () => {
       workspaceName: "Acme CRM",
       statusReason: null,
     }));
+    const connectRender = vi.fn(async () => ({
+      provider: "render" as const,
+      connected: true,
+      status: "connected" as const,
+      integrationId: "gint_render",
+      accountName: "Acme Hosting",
+      statusReason: null,
+      capabilityModes: {},
+      toolModes: {},
+    }));
     const app = testApp(fakeRepository(), {
       integrationAccounts: integrationAccountService({
         connectStripe,
         disconnectStripe,
         connectAttio,
+        connectRender,
       }),
     });
 
@@ -3423,6 +3603,20 @@ describe("canonical Hono API", () => {
     await expect(attio.json()).resolves.toMatchObject({
       data: { state: { provider: "attio", workspaceName: "Acme CRM" } },
     });
+
+    const renderKey = "rnd_supersecretrenderkey000";
+    const render = await app.request("/v1/integration-accounts/render", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: renderKey }),
+    });
+    expect(render.status).toBe(200);
+    const renderBody = await render.json();
+    expect(JSON.stringify(renderBody)).not.toContain(renderKey);
+    expect(renderBody).toMatchObject({
+      data: { state: { provider: "render", connected: true, accountName: "Acme Hosting" } },
+    });
+    expect(connectRender).toHaveBeenCalledWith(actor, renderKey);
   });
 
   it("gives iMessage pairing starts their own small rate bucket", async () => {
@@ -4368,7 +4562,24 @@ describe("POST /internal/wiki/commands", () => {
     const response = await app.request("/internal/wiki/commands", {
       method: "POST",
       headers: headers(),
-      body: body({ command: "write", path: "projects/plan", body: "# Plan" }),
+      body: body({
+        command: "write",
+        path: "projects/plan",
+        body: "# Plan",
+        kind: "other",
+        title: "",
+        pages: "",
+        query: "",
+        since: "",
+        to: "",
+        at: "",
+        text: "",
+        depth: 0,
+        limit: 100,
+        offset: 0,
+        recursive: false,
+        ignoreCase: true,
+      }),
     });
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
@@ -4420,6 +4631,7 @@ function testApp(
     wikiSources: fakeWikiSources(),
     brainSources: fakeBrainSources(),
     brainImports: fakeBrainImports(),
+    wikiImports: fakeWikiImports(),
     browserProfiles: fakeBrowserProfiles(),
     skillImports: fakeSkillImportService(),
     pluginImports: fakePluginImportService(),
@@ -4592,7 +4804,6 @@ function fakeIdentity(): Parameters<typeof createApiApp>[0]["identity"] {
       autoModelRoutingEnabled: false,
       chatCapabilitiesBetaEnabled: false,
       imessageEnabled: false,
-      wikiEnabled: true,
       taskViewMode: "board" as const,
       preferredMcpClient: null,
       mcpSetupCompletedAt: null,
@@ -4606,6 +4817,7 @@ function fakeIdentity(): Parameters<typeof createApiApp>[0]["identity"] {
         name: "Workspace",
         slug: "workspace",
         role: "admin" as const,
+        legacyBrainEnabled: true,
       },
     ],
     activeWorkspaceId: actor.workspaceId,
@@ -4672,10 +4884,41 @@ function fakeBrainImports(): Parameters<typeof createApiApp>[0]["brainImports"] 
   };
 }
 
+function fakeWikiImports(): Parameters<typeof createApiApp>[0]["wikiImports"] {
+  return {
+    start: vi.fn(async () => ({
+      importRunId: "gbimp_wiki",
+      status: "discovering" as const,
+      replayed: false,
+    })),
+    confirm: vi.fn(async () => ({
+      importRunId: "gbimp_wiki",
+      status: "ingesting" as const,
+      replayed: false,
+    })),
+    cancel: vi.fn(async () => ({
+      importRunId: "gbimp_wiki",
+      status: "canceled" as const,
+      replayed: false,
+    })),
+    retry: vi.fn(async () => ({
+      importRunId: "gbimp_wiki",
+      status: "discovering" as const,
+      replayed: false,
+    })),
+  };
+}
+
 function brainImportService(
   overrides: Partial<Parameters<typeof createApiApp>[0]["brainImports"]>,
 ): Parameters<typeof createApiApp>[0]["brainImports"] {
   return { ...fakeBrainImports(), ...overrides };
+}
+
+function wikiImportService(
+  overrides: Partial<Parameters<typeof createApiApp>[0]["wikiImports"]>,
+): Parameters<typeof createApiApp>[0]["wikiImports"] {
+  return { ...fakeWikiImports(), ...overrides };
 }
 
 function fakeUserSettings(): Parameters<typeof createApiApp>[0]["userSettings"] {
@@ -4771,6 +5014,9 @@ function fakeIntegrationAccounts(): Parameters<typeof createApiApp>[0]["integrat
     },
     connectGranola: async () => {
       throw new Error("Unexpected Granola connect.");
+    },
+    connectRender: async () => {
+      throw new Error("Unexpected Render connect.");
     },
     startImessagePairing: async () => {
       throw new Error("Unexpected iMessage pairing start.");
@@ -5370,7 +5616,10 @@ function fakePluginInstallation(): PluginInstallation {
 
 type FakeRepository = ChatRepository & { lastCommand: CreateMessageCommand | null };
 
-type FakeTaskRepository = TaskRepository & { lastCommand: CreateTaskCommand | null };
+type FakeTaskRepository = TaskRepository & {
+  lastCommand: CreateTaskCommand | null;
+  lastComment: CreateTaskCommentCommand | null;
+};
 
 function fakeAutomationServices() {
   const workflowRepository: WorkflowRepository = {
@@ -5596,6 +5845,7 @@ function populatedAutomationServices() {
 function fakeTaskRepository(): FakeTaskRepository {
   const repository: FakeTaskRepository = {
     lastCommand: null,
+    lastComment: null,
     listTasks: async () => ({ tasks: [fakeTask()], nextCursor: null }),
     getTask: async ({ taskId }) => (taskId === "task_1" ? fakeTask() : null),
     getTaskSummary: async ({ taskId }) =>
@@ -5623,6 +5873,25 @@ function fakeTaskRepository(): FakeTaskRepository {
         assistantMessageId: "message_task_assistant_1",
         runId: "run_task_1",
         transactionId: "43",
+        idempotentReplay: false,
+      };
+    },
+    createTaskCommentAndRun: async ({ actor, taskId, command }) => {
+      repository.lastComment = command;
+      if (taskId !== "task_1") return null;
+      return {
+        task: fakeTask({ status: "running" }),
+        comment: {
+          id: command.id,
+          taskId: "task_1",
+          authorWorkosId: actor.userId,
+          body: command.body,
+          createdAt,
+        },
+        messageId: "message_task_comment_1",
+        assistantMessageId: "message_task_comment_assistant_1",
+        runId: "run_task_comment_1",
+        transactionId: "45",
         idempotentReplay: false,
       };
     },

@@ -12,7 +12,7 @@ import { activateWorkspace } from "@/lib/workspace-session";
 
 export type OnboardingActionResult = { ok: true } | { ok: false; error: string };
 export type OnboardingWorkspaceActionResult =
-  | { ok: true; workspaceId: string; brainRef: string }
+  | { ok: true; workspaceId: string; brainRef: string | null }
   | { ok: false; error: string };
 
 const WORKSPACE_SAVE_ERROR = "Could not save your workspace. Please try again.";

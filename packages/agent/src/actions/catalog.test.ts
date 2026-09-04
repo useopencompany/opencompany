@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  calendar: vi.fn(),
   github: vi.fn(),
+  gmail: vi.fn(),
+  googleDrive: vi.fn(),
   noop: vi.fn(),
   remote: vi.fn(),
   registrations: vi.fn(),
@@ -12,9 +15,9 @@ vi.mock("../plugin-gateway", () => ({
 }));
 vi.mock("./attio", () => ({ resolveAttioActions: mocks.noop }));
 vi.mock("./github", () => ({ resolveGitHubActions: mocks.github }));
-vi.mock("./gmail", () => ({ resolveGmailActions: mocks.noop }));
-vi.mock("./google-calendar", () => ({ resolveGoogleCalendarActions: mocks.noop }));
-vi.mock("./google-drive", () => ({ resolveGoogleDriveActions: mocks.noop }));
+vi.mock("./gmail", () => ({ resolveGmailActions: mocks.gmail }));
+vi.mock("./google-calendar", () => ({ resolveGoogleCalendarActions: mocks.calendar }));
+vi.mock("./google-drive", () => ({ resolveGoogleDriveActions: mocks.googleDrive }));
 vi.mock("./latitude", () => ({ resolveLatitudeActions: mocks.noop }));
 vi.mock("./linear", () => ({ resolveLinearActions: mocks.noop }));
 vi.mock("./neon", () => ({ resolveNeonActions: mocks.noop }));
@@ -31,6 +34,12 @@ describe("resolveActionCatalog plugin reconciliation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.noop.mockResolvedValue(null);
+    mocks.calendar.mockResolvedValue({
+      id: "google_calendar",
+      label: "Google Calendar",
+      description: "Legacy Calendar actions.",
+      actions: [{ id: "google_calendar.list_events" }],
+    });
     mocks.remote.mockResolvedValue(null);
     mocks.registrations.mockResolvedValue([]);
     mocks.github.mockResolvedValue({
@@ -38,6 +47,18 @@ describe("resolveActionCatalog plugin reconciliation", () => {
       label: "GitHub",
       description: "Legacy workspace GitHub actions.",
       actions: [{ id: "github.search_issues" }],
+    });
+    mocks.gmail.mockResolvedValue({
+      id: "gmail",
+      label: "Gmail",
+      description: "Legacy Gmail actions.",
+      actions: [{ id: "gmail.search_messages" }],
+    });
+    mocks.googleDrive.mockResolvedValue({
+      id: "google_drive",
+      label: "Google Drive",
+      description: "Legacy Google Drive actions.",
+      actions: [{ id: "google_drive.search_files" }],
     });
   });
 
@@ -49,6 +70,40 @@ describe("resolveActionCatalog plugin reconciliation", () => {
 
     expect(mocks.github).toHaveBeenCalledWith("workspace_1");
     expect(catalog.actions).toContainEqual(expect.objectContaining({ id: "github.search_issues" }));
+  });
+
+  it("keeps Calendar fallback actions only while the official plugin is absent", async () => {
+    const withoutPlugin = await resolveActionCatalog(
+      { userWorkosId: "user_1", workspaceId: "workspace_1" },
+      { remoteMcpRegistrations: [] },
+    );
+    expect(mocks.calendar).toHaveBeenCalledWith("user_1");
+    expect(withoutPlugin.actions).toContainEqual(
+      expect.objectContaining({ id: "google_calendar.list_events" }),
+    );
+
+    mocks.calendar.mockClear();
+    const calendarPluginRegistration = {
+      source: "plugin:google-calendar:google-calendar",
+    } as unknown as RemoteMcpGatewayRegistration;
+    mocks.remote.mockResolvedValueOnce({
+      id: "plugin:google-calendar:google-calendar",
+      label: "Google Calendar",
+      description: "Official Google Calendar plugin tools.",
+      actions: [{ id: "plugin:google-calendar:google-calendar.list_events" }],
+    });
+    const withPlugin = await resolveActionCatalog(
+      { userWorkosId: "user_1", workspaceId: "workspace_1" },
+      { remoteMcpRegistrations: [calendarPluginRegistration] },
+    );
+
+    expect(mocks.calendar).not.toHaveBeenCalled();
+    expect(withPlugin.actions).not.toContainEqual(
+      expect.objectContaining({ id: "google_calendar.list_events" }),
+    );
+    expect(withPlugin.actions).toContainEqual(
+      expect.objectContaining({ id: "plugin:google-calendar:google-calendar.list_events" }),
+    );
   });
 
   it("suppresses the legacy GitHub issue search when the official plugin is installed", async () => {
@@ -130,6 +185,66 @@ describe("resolveActionCatalog plugin reconciliation", () => {
     );
     expect(withPlugin.actions).toContainEqual(
       expect.objectContaining({ id: "plugin:slack:slack.search" }),
+    );
+  });
+
+  it("keeps legacy Gmail as a fallback and suppresses it once the plugin is installed", async () => {
+    const withoutPlugin = await resolveActionCatalog(
+      { userWorkosId: "user_1", workspaceId: "workspace_1" },
+      { remoteMcpRegistrations: [] },
+    );
+    expect(mocks.gmail).toHaveBeenCalledWith("user_1");
+    expect(withoutPlugin.actions).toContainEqual(
+      expect.objectContaining({ id: "gmail.search_messages" }),
+    );
+
+    mocks.gmail.mockClear();
+    const gmailPluginRegistration = {
+      source: "plugin:gmail:gmail",
+    } as unknown as RemoteMcpGatewayRegistration;
+    mocks.remote.mockResolvedValueOnce({
+      id: "plugin:gmail:gmail",
+      label: "Gmail",
+      description: "Official Gmail plugin tools.",
+      actions: [{ id: "plugin:gmail:gmail.search_threads" }],
+    });
+    const withPlugin = await resolveActionCatalog(
+      { userWorkosId: "user_1", workspaceId: "workspace_1" },
+      { remoteMcpRegistrations: [gmailPluginRegistration] },
+    );
+
+    expect(mocks.gmail).not.toHaveBeenCalled();
+    expect(withPlugin.actions).toContainEqual(
+      expect.objectContaining({ id: "plugin:gmail:gmail.search_threads" }),
+    );
+    expect(withPlugin.actions).not.toContainEqual(
+      expect.objectContaining({ id: "gmail.search_messages" }),
+    );
+  });
+
+  it("keeps legacy Drive actions as fallback and suppresses them after plugin install", async () => {
+    const withoutPlugin = await resolveActionCatalog(
+      { userWorkosId: "user_1", workspaceId: "workspace_1" },
+      { remoteMcpRegistrations: [] },
+    );
+    expect(mocks.googleDrive).toHaveBeenCalledWith("user_1");
+    expect(withoutPlugin.actions).toContainEqual(
+      expect.objectContaining({ id: "google_drive.search_files" }),
+    );
+
+    mocks.googleDrive.mockClear();
+    const googleDrivePluginRegistration = {
+      source: "plugin:google-drive:google-drive",
+    } as unknown as RemoteMcpGatewayRegistration;
+    await resolveActionCatalog(
+      { userWorkosId: "user_1", workspaceId: "workspace_1" },
+      { remoteMcpRegistrations: [googleDrivePluginRegistration] },
+    );
+
+    expect(mocks.googleDrive).not.toHaveBeenCalled();
+    expect(mocks.remote).toHaveBeenCalledWith(
+      { userWorkosId: "user_1", workspaceId: "workspace_1" },
+      googleDrivePluginRegistration,
     );
   });
 });

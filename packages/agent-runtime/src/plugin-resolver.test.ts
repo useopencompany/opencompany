@@ -346,6 +346,109 @@ describe("resolvePlugin", () => {
     });
   });
 
+  it("loads the opencompany Google Calendar package with every exposed tool classified", async () => {
+    const fixtureRoot = fileURLToPath(
+      new URL("./test-fixtures/plugins/google-calendar", import.meta.url),
+    );
+    const files = await fixtureFiles(fixtureRoot, "google-calendar");
+    const plugin = await resolvePlugin({
+      url: "useopencompany/plugins",
+      selectedPath: "google-calendar",
+      fetcher: fetcher(files),
+      trustedCapabilitySources: ["useopencompany/plugins"],
+    });
+
+    expect(plugin.manifest).toMatchObject({ name: "google-calendar", version: "1.1.0" });
+    expect(plugin.skills).toEqual([]);
+    expect(plugin.remoteServers).toEqual([
+      {
+        name: "google-calendar",
+        type: "streamable-http",
+        url: "https://api.opencompany.chat/mcp/plugins/google-calendar",
+        headers: {},
+      },
+    ]);
+    expect(plugin.capabilities).toEqual([
+      {
+        id: "read",
+        label: "Check calendars",
+        defaultMode: "ask",
+        tools: ["list_calendars"],
+      },
+      {
+        id: "query",
+        label: "Read calendar events",
+        defaultMode: "ask",
+        tools: ["list_events", "get_event"],
+      },
+      {
+        id: "write",
+        label: "Manage calendar events",
+        defaultMode: "ask",
+        tools: ["create_event"],
+      },
+    ]);
+    expect(plugin.capabilities.flatMap((capability) => capability.tools)).toHaveLength(4);
+    expect(plugin.report.mcp).toMatchObject({
+      status: "parsed",
+      reports: [{ name: "google-calendar", status: "gateway-registered" }],
+    });
+    expect(plugin.report.capabilities).toEqual({
+      present: true,
+      status: "parsed",
+      issues: [],
+    });
+  });
+
+  it("loads the official SigNoz package with sensitive telemetry behind Ask", async () => {
+    const fixtureRoot = fileURLToPath(new URL("./test-fixtures/plugins/signoz", import.meta.url));
+    const files = await fixtureFiles(fixtureRoot, "signoz");
+    const plugin = await resolvePlugin({
+      url: "useopencompany/plugins",
+      selectedPath: "signoz",
+      fetcher: fetcher(files),
+      trustedCapabilitySources: ["useopencompany/plugins"],
+    });
+
+    expect(plugin.manifest).toMatchObject({ name: "signoz", version: "1.0.0" });
+    expect(plugin.skills).toEqual([]);
+    expect(plugin.remoteServers).toEqual([
+      {
+        name: "signoz",
+        type: "streamable-http",
+        url: "https://mcp.us.signoz.cloud/mcp",
+        headers: {},
+      },
+    ]);
+    expect(plugin.capabilities).toEqual([
+      expect.objectContaining({
+        id: "read",
+        defaultMode: "on",
+        tools: ["signoz_fetch_doc", "signoz_search_docs"],
+      }),
+      expect.objectContaining({
+        id: "query",
+        defaultMode: "ask",
+        tools: expect.arrayContaining(["signoz_search_logs", "signoz_get_trace_details"]),
+      }),
+      expect.objectContaining({
+        id: "write",
+        defaultMode: "ask",
+        tools: expect.arrayContaining(["signoz_create_alert", "signoz_delete_dashboard"]),
+      }),
+    ]);
+    expect(plugin.capabilities.flatMap((capability) => capability.tools)).toHaveLength(43);
+    expect(plugin.report.mcp).toMatchObject({
+      status: "parsed",
+      reports: [{ name: "signoz", status: "gateway-registered" }],
+    });
+    expect(plugin.report.capabilities).toEqual({
+      present: true,
+      status: "parsed",
+      issues: [],
+    });
+  });
+
   it("loads the official Slack package with least-privilege capability defaults", async () => {
     const fixtureRoot = fileURLToPath(new URL("./test-fixtures/plugins/slack", import.meta.url));
     const files = await fixtureFiles(fixtureRoot, "slack");
@@ -389,6 +492,60 @@ describe("resolvePlugin", () => {
     expect(plugin.report.mcp).toMatchObject({
       status: "parsed",
       reports: [{ name: "slack", status: "gateway-registered" }],
+    });
+    expect(plugin.report.capabilities).toEqual({
+      present: true,
+      status: "parsed",
+      issues: [],
+    });
+  });
+
+  it("loads the official Google Drive package with every reviewed tool classified", async () => {
+    const fixtureRoot = fileURLToPath(
+      new URL("./test-fixtures/plugins/google-drive", import.meta.url),
+    );
+    const files = await fixtureFiles(fixtureRoot, "google-drive");
+    const plugin = await resolvePlugin({
+      url: "useopencompany/plugins",
+      selectedPath: "google-drive",
+      fetcher: fetcher(files),
+      trustedCapabilitySources: ["useopencompany/plugins"],
+    });
+
+    expect(plugin.manifest).toMatchObject({ name: "google-drive", version: "1.1.0" });
+    expect(plugin.skills).toEqual([]);
+    expect(plugin.remoteServers).toEqual([
+      {
+        name: "google-drive",
+        type: "streamable-http",
+        url: "https://api.opencompany.chat/mcp/plugins/google-drive",
+        headers: {},
+      },
+    ]);
+    expect(plugin.capabilities).toEqual([
+      {
+        id: "read",
+        label: "Browse Drive files",
+        defaultMode: "ask",
+        tools: ["get_file_metadata", "list_recent_files", "search_files"],
+      },
+      {
+        id: "query",
+        label: "Read files & permissions",
+        defaultMode: "ask",
+        tools: ["download_file_content", "get_file_permissions", "read_file_content"],
+      },
+      {
+        id: "write",
+        label: "Create & copy files",
+        defaultMode: "ask",
+        tools: ["copy_file", "create_file"],
+      },
+    ]);
+    expect(plugin.capabilities.flatMap((capability) => capability.tools)).toHaveLength(8);
+    expect(plugin.report.mcp).toMatchObject({
+      status: "parsed",
+      reports: [{ name: "google-drive", status: "gateway-registered" }],
     });
     expect(plugin.report.capabilities).toEqual({
       present: true,

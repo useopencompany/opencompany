@@ -147,11 +147,13 @@ function collectRenderItems(
 ): AssistantRenderItem[] {
   const items: AssistantRenderItem[] = [];
   let textBuffer = "";
+  let textBufferItemId: string | null = null;
   let pendingCitations: BrainCitation[] = [];
 
   const flushText = (key: string) => {
     const text = textBuffer.trim();
     textBuffer = "";
+    textBufferItemId = null;
     if (!text) return;
     items.push({ type: "text", key, text, citations: pendingCitations });
     pendingCitations = [];
@@ -159,6 +161,14 @@ function collectRenderItems(
 
   for (const [index, part] of parts.entries()) {
     if (part.type === "text") {
+      const itemId = typeof part.itemId === "string" && part.itemId ? part.itemId : null;
+      // Durable coding-engine text is already assembled by semantic item id. Keep adjacent items
+      // distinct so progress updates remain separate messages; an id-less suffix can still be the
+      // transient continuation of the current durable item while Electric catches up.
+      if (textBuffer && itemId && itemId !== textBufferItemId) {
+        flushText(`${keyPrefix}text-${index}`);
+      }
+      if (!textBuffer) textBufferItemId = itemId;
       textBuffer += typeof part.text === "string" ? part.text : "";
       continue;
     }

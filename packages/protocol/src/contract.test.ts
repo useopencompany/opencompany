@@ -186,6 +186,7 @@ describe("v1 protocol contract", () => {
     const document = createOpenApiDocument();
     expect(Object.keys(document.paths ?? {})).toEqual([
       "/v1/tasks",
+      "/v1/tasks/{taskId}/comments",
       "/v1/tasks/{taskId}",
       "/v1/tasks/{taskId}/summary",
       "/v1/compatibility/tasks",
@@ -237,6 +238,10 @@ describe("v1 protocol contract", () => {
       "/v1/brains/{brainId}/imports/{importRunId}/confirm",
       "/v1/brains/{brainId}/imports/{importRunId}/cancel",
       "/v1/brains/{brainId}/imports/{importRunId}/retry",
+      "/v1/wiki/imports",
+      "/v1/wiki/imports/{importRunId}/confirm",
+      "/v1/wiki/imports/{importRunId}/cancel",
+      "/v1/wiki/imports/{importRunId}/retry",
       "/v1/brains/{brainId}/documents",
       "/v1/brains/{brainId}/assets",
       "/v1/brains/{brainId}/assets/{documentId}/replace",
@@ -298,6 +303,7 @@ describe("v1 protocol contract", () => {
       "/v1/integration-accounts/attio/{integrationId}",
       "/v1/integration-accounts/fathom",
       "/v1/integration-accounts/granola",
+      "/v1/integration-accounts/render",
       "/v1/integration-accounts/imessage/pairing",
       "/v1/integration-accounts/imessage/pairing/confirm",
       "/v1/integration-accounts/stripe",

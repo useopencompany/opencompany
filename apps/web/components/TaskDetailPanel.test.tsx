@@ -35,6 +35,7 @@ vi.mock("@/components/AppDataProvider", () => ({
       firstName: "Ada",
     },
     activeBrain: null,
+    workspace: { id: "workspace_1" },
     tasks: mocks.tasks,
     schedules: [],
     recentChats: [],
@@ -44,6 +45,8 @@ vi.mock("@/components/AppDataProvider", () => ({
     featureFlags: {
       taskSpawning: true,
       autoModelRouting: false,
+      imessage: false,
+      legacyBrain: false,
     },
   }),
 }));
@@ -105,6 +108,7 @@ describe("TaskDetailPanel", () => {
     });
     expect(mocks.surfaceProps).toMatchObject({
       taskSpawningEnabled: true,
+      workspaceId: "workspace_1",
       userName: "Ada",
       userWorkosId: "user_1",
     });

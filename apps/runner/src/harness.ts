@@ -23,16 +23,13 @@ import {
   HARNESS_MODEL_OPTIONS,
   HARNESS_SKILL_OPTIONS,
 } from "./prompts/harness-creation";
+import { systemPromptForTaskResultMode } from "./task-result-mode";
 import { normalizeTaskToolNames } from "./task-tool-names";
 
 export const PLANNER_MODEL = "anthropic/claude-sonnet-4.6";
 const DEFAULT_MAX_MODEL_STEPS = 16;
 const MAX_MODEL_STEPS = 32;
 const MIN_BROWSER_MODEL_STEPS = 16;
-const CODEX_GOAL_OBJECTIVE_MAX_LENGTH = 4_000;
-const DEFAULT_CODEX_GOAL_TOKEN_BUDGET = 200_000;
-const MIN_CODEX_GOAL_TOKEN_BUDGET = 1;
-const MAX_CODEX_GOAL_TOKEN_BUDGET = 1_000_000;
 
 export async function planHarnessForTask(input: {
   prompt: string;
@@ -172,23 +169,6 @@ function harnessSpecResponseSchema(
           repository: { type: ["string", "null"] },
           createPullRequest: { type: "boolean" },
           reasoningEffort: { type: "string", enum: ["low", "medium", "high", "xhigh"] },
-          goalMode: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              objective: {
-                type: "string",
-                minLength: 1,
-                maxLength: CODEX_GOAL_OBJECTIVE_MAX_LENGTH,
-              },
-              tokenBudget: {
-                type: ["integer", "null"],
-                minimum: MIN_CODEX_GOAL_TOKEN_BUDGET,
-                maximum: MAX_CODEX_GOAL_TOKEN_BUDGET,
-              },
-            },
-            required: ["objective"],
-          },
         },
       },
     },
@@ -323,12 +303,10 @@ function readCodexHarnessConfig(
     inferCodexRepositoryFromPrompt(prompt, githubRepositories) ??
     plannedRepository;
   const promptPullRequestIntent = readPullRequestIntent(prompt);
-  const goalMode = readCodexGoalMode(record.goalMode);
   return {
     repository,
     createPullRequest: promptPullRequestIntent ?? record.createPullRequest === true,
     reasoningEffort: readCodexReasoningEffort(record.reasoningEffort),
-    ...(goalMode ? { goalMode } : {}),
   };
 }
 
@@ -336,25 +314,6 @@ function readCodexReasoningEffort(value: unknown) {
   return value === "low" || value === "medium" || value === "high" || value === "xhigh"
     ? value
     : "high";
-}
-
-function readCodexGoalMode(value: unknown): NonNullable<HarnessSpec["codex"]>["goalMode"] | null {
-  const record = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
-  if (!record) return null;
-  const objective = readNonEmptyString(record.objective);
-  if (!objective) return null;
-  const hasTokenBudget = Object.prototype.hasOwnProperty.call(record, "tokenBudget");
-  const tokenBudget = !hasTokenBudget
-    ? DEFAULT_CODEX_GOAL_TOKEN_BUDGET
-    : record.tokenBudget === null
-      ? null
-      : typeof record.tokenBudget === "number"
-        ? clampInteger(record.tokenBudget, MIN_CODEX_GOAL_TOKEN_BUDGET, MAX_CODEX_GOAL_TOKEN_BUDGET)
-        : DEFAULT_CODEX_GOAL_TOKEN_BUDGET;
-  return {
-    objective: objective.slice(0, CODEX_GOAL_OBJECTIVE_MAX_LENGTH),
-    tokenBudget,
-  };
 }
 
 function inferCodexRepositoryFromPrompt(prompt: string, githubRepositories: readonly string[]) {
@@ -436,19 +395,7 @@ function augmentSystemPrompt(
   const sections = [withTaskSafetyPromptText(systemPrompt)];
   const skillPrompt = buildHarnessSkillSystemPrompt(skillIds);
   if (skillPrompt) sections.push(skillPrompt);
-  if (resultMode === "brain_markdown_report") {
-    sections.push(
-      [
-        "<brain_markdown_report_result_contract>",
-        "Finish with only the complete Markdown report body.",
-        "Do not include conversational framing, delivery notes, or a separate summary outside the report.",
-        "Use a clear H1 title, concise executive summary, sourced findings, uncertainty, and practical next steps when relevant.",
-        "The harness will save this final Markdown as a .md file in the user's Brain and return the file link as the task result.",
-        "</brain_markdown_report_result_contract>",
-      ].join("\n"),
-    );
-  }
-  return sections.join("\n\n");
+  return systemPromptForTaskResultMode(sections.join("\n\n"), resultMode);
 }
 
 function withTaskSafetyPromptText(systemPrompt: string) {

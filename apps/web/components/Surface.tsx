@@ -204,6 +204,8 @@ import {
   archiveHeadlessTask,
   cancelHeadlessTaskRun,
   createHeadlessTask,
+  createHeadlessTaskComment,
+  newHeadlessTaskCommentId,
 } from "@/lib/headless-task-commands";
 import { isRecentChatActivity, isRecentHomeActivity } from "@/lib/home-activity";
 import { alwaysAllowChatActionAction } from "@/lib/integration-account-actions";
@@ -451,6 +453,7 @@ export function Surface({
   const pendingNewSessionIdRef = useRef<string | null>(null);
   const pendingInputCaretRef = useRef<number | null>(null);
   const pendingProgrammaticPromptRef = useRef<string | null>(null);
+  const pendingTaskCommentRef = useRef<{ id: string; body: string } | null>(null);
   const backgroundTaskFocusOriginRef = useRef<Element | null>(null);
   const onboardingKickoffReadRef = useRef(false);
   const onboardingKickoffPromptRef = useRef<string | null>(null);
@@ -556,6 +559,7 @@ export function Surface({
   const conversationRunning = isChatRuntimeActive(conversationRuntime);
   const [engineSubmitting, setEngineSubmitting] = useState(false);
   const [backgroundTaskSubmitting, setBackgroundTaskSubmitting] = useState(false);
+  const [taskCommentSubmitting, setTaskCommentSubmitting] = useState(false);
   const [stoppingTaskId, setStoppingTaskId] = useState<string | null>(null);
   const [newChatCommandOpen, setNewChatCommandOpen] = useState(false);
   const [commandPaletteView, setCommandPaletteView] = useState<"search" | "compose">("search");
@@ -600,11 +604,11 @@ export function Surface({
     taskConversation && initialChat?.id === chatSessionId ? taskConversation : null;
   const backgroundInputDirective = parseBackgroundChatDirective(input);
   const backgroundDirectiveActive = Boolean(backgroundInputDirective);
-  const workflowMentionsEnabled =
-    taskSpawningEnabled && (!activeTaskConversation || backgroundDirectiveActive);
+  const workflowMentionsEnabled = taskSpawningEnabled && !activeTaskConversation;
   const readOnly = readOnlyNotice !== null;
-  const skillMentionsEnabled = !readOnly;
+  const skillMentionsEnabled = !readOnly && !activeTaskConversation;
   const activeSelectedMentions = selectedMentions.filter((mention) => {
+    if (activeTaskConversation) return false;
     if (!chatMentionIsVisible(input, mention)) return false;
     if (mention.kind === "engine") {
       return mention.id === "claude" ? claudeCodeConnected : codexConnected;
@@ -1106,6 +1110,12 @@ export function Surface({
   );
   const isAgentWorking = isForegroundTurnWorking || isTaskConversationWorking;
   const isInteractionPending = isAgentWorking || isTaskConversationStopping;
+  const activeAssistantMessageId =
+    foregroundAssistantMessageId && !isChatTurnTerminal(chatTurnPhase)
+      ? foregroundAssistantMessageId
+      : isTaskConversationWorking && chatMessages.at(-1)?.role === "assistant"
+        ? latestAssistantMessageId
+        : null;
   const isBackgroundSubmit = backgroundDirectiveActive || Boolean(selectedWorkflowMention);
   const activeTurnTimerStartedAtMs =
     foregroundTurn?.startedAtMs ??
@@ -1683,8 +1693,40 @@ export function Surface({
   const onSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (readOnly) return;
-    const prompt = (pendingProgrammaticPromptRef.current ?? input).trim();
+    const rawPrompt = pendingProgrammaticPromptRef.current ?? input;
+    const prompt = rawPrompt.trim();
     pendingProgrammaticPromptRef.current = null;
+    if (activeTaskConversation) {
+      if (isTaskConversationWorking || taskCommentSubmitting || !prompt) return;
+      const command =
+        pendingTaskCommentRef.current?.body === rawPrompt
+          ? pendingTaskCommentRef.current
+          : { id: newHeadlessTaskCommentId(), body: rawPrompt };
+      pendingTaskCommentRef.current = command;
+      clearError();
+      setInput("");
+      setMentionToken(null);
+      setSelectedMentions([]);
+      setTaskCommentSubmitting(true);
+      void createHeadlessTaskComment(activeTaskConversation.taskId, command, {
+        scopeKey: workspaceId,
+      })
+        .then(() => {
+          if (!mountedRef.current) return;
+          pendingTaskCommentRef.current = null;
+          router.refresh();
+          toast.success("Comment posted. The task is running again.");
+        })
+        .catch((error) => {
+          if (!mountedRef.current) return;
+          if (!inputRef.current?.value) setInput(rawPrompt);
+          toast.error(error instanceof Error ? error.message : "Could not post the comment.");
+        })
+        .finally(() => {
+          if (mountedRef.current) setTaskCommentSubmitting(false);
+        });
+      return;
+    }
     const backgroundChat = parseBackgroundChatDirective(prompt);
     const backgroundLaunch = backgroundChat
       ? resolveBackgroundChatLaunchSelection({
@@ -2454,6 +2496,7 @@ export function Surface({
   const onInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     const nextInput = event.target.value;
     pendingProgrammaticPromptRef.current = null;
+    if (pendingTaskCommentRef.current?.body !== nextInput) pendingTaskCommentRef.current = null;
     setInput(nextInput);
     setSelectedMentions((current) =>
       current.filter((mention) => chatMentionIsVisible(nextInput, mention)),
@@ -2748,7 +2791,7 @@ export function Surface({
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col items-center overflow-hidden">
           {mode === "home" ? (
             <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
-              <div className="flex w-full max-w-[560px] flex-col gap-8 pb-40 pt-16 sm:pt-24">
+              <div className="flex w-full max-w-[720px] flex-col gap-8 pb-40 pt-16 sm:pt-24">
                 {hasHomeActivity ? (
                   <>
                     {homeTasks.length > 0 ? (
@@ -2888,6 +2931,7 @@ export function Surface({
                       allowActionApproval={message.id === latestAssistantMessageId}
                       isTaskSession={Boolean(activeTaskConversation)}
                       compactTrace={isCloudCodingEngine(activeChatEngine)}
+                      turnActive={message.id === activeAssistantMessageId}
                     />
                   ))}
                   {isTaskConversationStopping ? (
@@ -2942,7 +2986,7 @@ export function Surface({
                 >
                   {readOnlyNotice}
                 </p>
-              ) : chatSendBlocked ? (
+              ) : !activeTaskConversation && chatSendBlocked ? (
                 <p
                   className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] leading-4 text-ink shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
                   role="alert"
@@ -2956,7 +3000,7 @@ export function Surface({
                     Top up to continue
                   </button>
                 </p>
-              ) : lowCreditBalance && creditBalance ? (
+              ) : !activeTaskConversation && lowCreditBalance && creditBalance ? (
                 <p
                   className="rounded-lg border border-border bg-surface px-3 py-2 text-[12px] leading-4 text-ink-subtle shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
                   role="status"
@@ -3051,7 +3095,21 @@ export function Surface({
                   ))}
                 </div>
               ) : null}
-              {selectedAdHocTask ? (
+              {activeTaskConversation ? (
+                <div
+                  role="status"
+                  className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-[12px] leading-4 text-ink-subtle shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+                >
+                  <MessageSquare size={13} strokeWidth={2} className="shrink-0" />
+                  <span>
+                    {isTaskConversationWorking
+                      ? "You can comment when the current run finishes."
+                      : taskCommentSubmitting
+                        ? "Posting your comment…"
+                        : "Posting a comment resumes this task."}
+                  </span>
+                </div>
+              ) : selectedAdHocTask ? (
                 <div
                   role="status"
                   data-testid="ad-hoc-task-hint"
@@ -3105,11 +3163,13 @@ export function Surface({
                       name="prompt"
                       value={input}
                       placeholder={
-                        mode === "chat"
-                          ? "Reply..."
-                          : taskSpawningEnabled
-                            ? "Ask a question or describe a task..."
-                            : "Ask opencompany anything..."
+                        activeTaskConversation
+                          ? "Add a comment…"
+                          : mode === "chat"
+                            ? "Reply..."
+                            : taskSpawningEnabled
+                              ? "Ask a question or describe a task..."
+                              : "Ask opencompany anything..."
                       }
                       onChange={onInputChange}
                       onBlur={() => setMentionToken(null)}
@@ -3132,7 +3192,12 @@ export function Surface({
                           event.currentTarget.selectionStart,
                         )
                       }
-                      disabled={backgroundTaskSubmitting || readOnly}
+                      disabled={
+                        backgroundTaskSubmitting ||
+                        taskCommentSubmitting ||
+                        isTaskConversationWorking ||
+                        readOnly
+                      }
                       readOnly={voiceDictation.isActive}
                       className={cn(
                         "relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-ink outline-none placeholder:text-ink-subtle",
@@ -3168,10 +3233,12 @@ export function Surface({
                         )) ||
                       composerAttachments.isUploading ||
                       (!isBackgroundSubmit && isForegroundTurnWorking) ||
+                      isTaskConversationWorking ||
+                      taskCommentSubmitting ||
                       backgroundTaskSubmitting ||
                       voiceDictation.isActive ||
                       readOnly ||
-                      chatSendBlocked
+                      (!activeTaskConversation && chatSendBlocked)
                     }
                     isGenerating={
                       isBackgroundSubmit
@@ -3180,122 +3247,136 @@ export function Surface({
                     }
                     isStopping={!isBackgroundSubmit && isTaskConversationStopping}
                     startsTask={selectedAdHocTask || Boolean(selectedWorkflowMention)}
+                    submitsComment={Boolean(activeTaskConversation)}
                     onStop={stopGeneration}
                   />
                 </div>
                 <div className="flex items-center gap-1 border-t border-border px-2.5 py-1.5">
-                  {attachmentsEnabled ? (
+                  {activeTaskConversation ? (
+                    <span className="min-h-7 px-1 text-[11.5px] leading-7 text-ink-subtle">
+                      Comments are sent verbatim to this task.
+                    </span>
+                  ) : (
                     <>
-                      <input
-                        ref={attachmentFileInputRef}
-                        type="file"
-                        multiple
-                        accept={CHAT_ATTACHMENT_ACCEPT}
-                        className="hidden"
-                        onChange={(event) => {
-                          const files = Array.from(event.currentTarget.files ?? []);
-                          event.currentTarget.value = "";
-                          if (files.length > 0) composerAttachments.acceptFiles(files);
-                        }}
-                      />
+                      {attachmentsEnabled ? (
+                        <>
+                          <input
+                            ref={attachmentFileInputRef}
+                            type="file"
+                            multiple
+                            accept={CHAT_ATTACHMENT_ACCEPT}
+                            className="hidden"
+                            onChange={(event) => {
+                              const files = Array.from(event.currentTarget.files ?? []);
+                              event.currentTarget.value = "";
+                              if (files.length > 0) composerAttachments.acceptFiles(files);
+                            }}
+                          />
+                          <button
+                            type="button"
+                            aria-label="Attach files"
+                            disabled={
+                              isForegroundTurnWorking || readOnly || voiceDictation.isActive
+                            }
+                            onClick={() => attachmentFileInputRef.current?.click()}
+                            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
+                          >
+                            <Plus size={16} strokeWidth={1.9} />
+                          </button>
+                        </>
+                      ) : null}
                       <button
                         type="button"
-                        aria-label="Attach files"
-                        disabled={isForegroundTurnWorking || readOnly || voiceDictation.isActive}
-                        onClick={() => attachmentFileInputRef.current?.click()}
+                        aria-label="Start voice dictation"
+                        disabled={
+                          isForegroundTurnWorking ||
+                          backgroundTaskSubmitting ||
+                          readOnly ||
+                          voiceDictation.isActive ||
+                          newChatCommandOpen
+                        }
+                        onClick={voiceDictation.start}
                         className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
                       >
-                        <Plus size={16} strokeWidth={1.9} />
+                        <Mic size={15} strokeWidth={1.9} />
                       </button>
+                      <ModelPicker
+                        value={composerChatModel}
+                        onChange={(model) => {
+                          setSelectedMentions((current) =>
+                            current.filter((mention) => mention.kind !== "engine"),
+                          );
+                          setChatModelOverride(model);
+                          persistLastChatSelection(userWorkosId, model);
+                          if (model === CODEX_PICKER_VALUE && model !== composerChatModel) {
+                            setCodexReasoningEffort(DEFAULT_CODEX_CHAT_REASONING_EFFORT);
+                          } else if (model === CLAUDE_PICKER_VALUE && model !== composerChatModel) {
+                            setCodexReasoningEffort(DEFAULT_CLAUDE_CHAT_REASONING_EFFORT);
+                            setCodexPlanModeEnabled(false);
+                            setCodexGoalModeEnabled(false);
+                            setCodexGoalObjective("");
+                            setCodexGoalTokenBudget("");
+                          } else if (
+                            model !== CODEX_PICKER_VALUE &&
+                            model !== CLAUDE_PICKER_VALUE
+                          ) {
+                            setCodexPlanModeEnabled(false);
+                            setCodexGoalModeEnabled(false);
+                            setCodexGoalObjective("");
+                            setCodexGoalTokenBudget("");
+                          }
+                        }}
+                        disabled={
+                          isForegroundTurnWorking ||
+                          Boolean(chatSessionId) ||
+                          voiceDictation.isActive ||
+                          readOnly
+                        }
+                        codexConnected={codexConnected}
+                        claudeCodeConnected={claudeCodeConnected}
+                        autoModelRoutingEnabled={autoModelRoutingEnabled}
+                      />
+                      {showEngineComposerControls ? (
+                        <EngineComposerControls
+                          model={
+                            composerEngine === "codex"
+                              ? { engine: "codex", value: codexModel, onChange: setCodexModel }
+                              : composerEngine === "claude_code"
+                                ? {
+                                    engine: "claude_code",
+                                    value: claudeModel,
+                                    onChange: setClaudeModel,
+                                  }
+                                : null
+                          }
+                          engineLabel={composerEngine === "claude_code" ? "Claude" : "Codex"}
+                          reasoningEffortAvailable={
+                            composerEngine !== "claude_code" ||
+                            claudeCodeModelSupportsReasoningEffort(claudeModel)
+                          }
+                          reasoningEffort={codexReasoningEffort}
+                          planModeEnabled={codexPlanModeEnabled}
+                          planModeAvailable={composerEngine === "codex"}
+                          goalModeAvailable={composerEngine !== "claude_code"}
+                          goalModeEnabled={codexGoalModeEnabled}
+                          goalObjective={codexGoalObjective}
+                          goalTokenBudget={codexGoalTokenBudget}
+                          disabled={isForegroundTurnWorking || readOnly || voiceDictation.isActive}
+                          modelDisabled={
+                            isForegroundTurnWorking ||
+                            Boolean(activeEngineChat) ||
+                            readOnly ||
+                            voiceDictation.isActive
+                          }
+                          onReasoningEffortChange={setCodexReasoningEffort}
+                          onPlanModeEnabledChange={setCodexPlanModeEnabled}
+                          onGoalModeEnabledChange={setCodexGoalModeEnabled}
+                          onGoalObjectiveChange={setCodexGoalObjective}
+                          onGoalTokenBudgetChange={setCodexGoalTokenBudget}
+                        />
+                      ) : null}
                     </>
-                  ) : null}
-                  <button
-                    type="button"
-                    aria-label="Start voice dictation"
-                    disabled={
-                      isForegroundTurnWorking ||
-                      backgroundTaskSubmitting ||
-                      readOnly ||
-                      voiceDictation.isActive ||
-                      newChatCommandOpen
-                    }
-                    onClick={voiceDictation.start}
-                    className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
-                  >
-                    <Mic size={15} strokeWidth={1.9} />
-                  </button>
-                  <ModelPicker
-                    value={composerChatModel}
-                    onChange={(model) => {
-                      setSelectedMentions((current) =>
-                        current.filter((mention) => mention.kind !== "engine"),
-                      );
-                      setChatModelOverride(model);
-                      persistLastChatSelection(userWorkosId, model);
-                      if (model === CODEX_PICKER_VALUE && model !== composerChatModel) {
-                        setCodexReasoningEffort(DEFAULT_CODEX_CHAT_REASONING_EFFORT);
-                      } else if (model === CLAUDE_PICKER_VALUE && model !== composerChatModel) {
-                        setCodexReasoningEffort(DEFAULT_CLAUDE_CHAT_REASONING_EFFORT);
-                        setCodexPlanModeEnabled(false);
-                        setCodexGoalModeEnabled(false);
-                        setCodexGoalObjective("");
-                        setCodexGoalTokenBudget("");
-                      } else if (model !== CODEX_PICKER_VALUE && model !== CLAUDE_PICKER_VALUE) {
-                        setCodexPlanModeEnabled(false);
-                        setCodexGoalModeEnabled(false);
-                        setCodexGoalObjective("");
-                        setCodexGoalTokenBudget("");
-                      }
-                    }}
-                    disabled={
-                      isForegroundTurnWorking ||
-                      Boolean(chatSessionId) ||
-                      voiceDictation.isActive ||
-                      readOnly
-                    }
-                    codexConnected={codexConnected}
-                    claudeCodeConnected={claudeCodeConnected}
-                    autoModelRoutingEnabled={autoModelRoutingEnabled}
-                  />
-                  {showEngineComposerControls ? (
-                    <EngineComposerControls
-                      model={
-                        composerEngine === "codex"
-                          ? { engine: "codex", value: codexModel, onChange: setCodexModel }
-                          : composerEngine === "claude_code"
-                            ? {
-                                engine: "claude_code",
-                                value: claudeModel,
-                                onChange: setClaudeModel,
-                              }
-                            : null
-                      }
-                      engineLabel={composerEngine === "claude_code" ? "Claude" : "Codex"}
-                      reasoningEffortAvailable={
-                        composerEngine !== "claude_code" ||
-                        claudeCodeModelSupportsReasoningEffort(claudeModel)
-                      }
-                      reasoningEffort={codexReasoningEffort}
-                      planModeEnabled={codexPlanModeEnabled}
-                      planModeAvailable={composerEngine === "codex"}
-                      goalModeAvailable={composerEngine !== "claude_code"}
-                      goalModeEnabled={codexGoalModeEnabled}
-                      goalObjective={codexGoalObjective}
-                      goalTokenBudget={codexGoalTokenBudget}
-                      disabled={isForegroundTurnWorking || readOnly || voiceDictation.isActive}
-                      modelDisabled={
-                        isForegroundTurnWorking ||
-                        Boolean(activeEngineChat) ||
-                        readOnly ||
-                        voiceDictation.isActive
-                      }
-                      onReasoningEffortChange={setCodexReasoningEffort}
-                      onPlanModeEnabledChange={setCodexPlanModeEnabled}
-                      onGoalModeEnabledChange={setCodexGoalModeEnabled}
-                      onGoalObjectiveChange={setCodexGoalObjective}
-                      onGoalTokenBudgetChange={setCodexGoalTokenBudget}
-                    />
-                  ) : null}
+                  )}
                 </div>
               </div>
             </div>
@@ -6453,12 +6534,14 @@ function SubmitButton({
   isGenerating,
   isStopping = false,
   startsTask = false,
+  submitsComment = false,
   onStop,
 }: {
   disabled: boolean;
   isGenerating: boolean;
   isStopping?: boolean;
   startsTask?: boolean;
+  submitsComment?: boolean;
   onStop: () => void;
 }) {
   if (isStopping) {
@@ -6492,8 +6575,8 @@ function SubmitButton({
   return (
     <button
       type="submit"
-      aria-label={startsTask ? "Start task" : "Send message"}
-      title={startsTask ? "Start task" : undefined}
+      aria-label={startsTask ? "Start task" : submitsComment ? "Post comment" : "Send message"}
+      title={startsTask ? "Start task" : submitsComment ? "Post comment" : undefined}
       disabled={disabled}
       className="mb-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-ink text-canvas transition-opacity duration-150 hover:opacity-90 focus:outline-none disabled:opacity-30"
     >
@@ -6581,6 +6664,14 @@ function getTaskMeta(task: TaskView): {
       icon: X,
       className: "text-ink-subtle",
       detail: `${recurringPrefix}${task.error ?? STATUS_COPY.canceled}`,
+      spin: false,
+    };
+  }
+  if (task.status === "waiting") {
+    return {
+      icon: AlertCircle,
+      className: "text-warning",
+      detail: `${recurringPrefix}${task.outcomeComment ?? STATUS_COPY.waiting}`,
       spin: false,
     };
   }

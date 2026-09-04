@@ -8,6 +8,7 @@ import {
 } from "@opencompany/agent/application/persisted-action-gateway";
 import {
   ACTION_HOST_TOOL_CONTRACT_VERSION,
+  ACTION_HOST_TOOL_CONTRACT_VERSION_V2,
   createExternalEngineGatewayTicket,
 } from "@opencompany/agent-runtime";
 import { CODEX_BRAIN_TOOL_CONTRACT_VERSION } from "@opencompany/brain";
@@ -38,7 +39,7 @@ const authorized = {
   workspaceId: "workspace_1",
   workspaceName: "Acme",
   workspaceSlug: "acme",
-  wikiEnabled: true,
+  legacyBrainEnabled: false,
   conversationId: "conversation_1",
   sandboxId: "sandbox_1",
   engine: "claude_code" as const,
@@ -275,8 +276,8 @@ describe("runner ACP tools MCP", () => {
     }
   });
 
-  it("does not advertise wiki when the user has it disabled", async () => {
-    const authorize = vi.fn(async () => ({ ...authorized, wikiEnabled: false }));
+  it("advertises wiki when legacy Brain is disabled", async () => {
+    const authorize = vi.fn(async () => ({ ...authorized, legacyBrainEnabled: false }));
     const app = Fastify();
     apps.push(app);
     registerAcpToolsMcpRoute(app, env, { authorize });
@@ -299,6 +300,7 @@ describe("runner ACP tools MCP", () => {
         "publish_artifact",
         "list_actions",
         "use_action",
+        "wiki",
       ]);
     } finally {
       await client.close();
@@ -578,6 +580,7 @@ describe("runner ACP tools MCP", () => {
       ...authorized,
       engine: "codex" as const,
       brainRef: "brain_1",
+      legacyBrainEnabled: true,
     }));
     const app = Fastify();
     apps.push(app);
@@ -615,6 +618,7 @@ describe("runner ACP tools MCP", () => {
       ...authorized,
       engine: "codex" as const,
       brainRef: "brain_1",
+      legacyBrainEnabled: true,
       hostToolContractVersion: CODEX_BRAIN_TOOL_CONTRACT_VERSION,
     }));
     const app = Fastify();
@@ -635,7 +639,39 @@ describe("runner ACP tools MCP", () => {
 
     try {
       await client.connect(transport as Parameters<typeof client.connect>[0]);
-      expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual(["goat_brain"]);
+      expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([
+        "wiki",
+        "goat_brain",
+      ]);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("registers the Wiki tool for retained v2 host-tool sessions", async () => {
+    const authorize = vi.fn(async () => ({
+      ...authorized,
+      hostToolContractVersion: ACTION_HOST_TOOL_CONTRACT_VERSION_V2,
+    }));
+    const app = Fastify();
+    apps.push(app);
+    registerAcpToolsMcpRoute(app, env, { authorize });
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const address = app.server.address();
+    if (!address || typeof address === "string") throw new Error("Expected a TCP test server.");
+    const ticket = createExternalEngineGatewayTicket({
+      ...capability,
+      secret: env.internalToken,
+    }).ticket;
+    const transport = new StreamableHTTPClientTransport(
+      new URL(`http://127.0.0.1:${address.port}/internal/goat/acp-tools`),
+      { requestInit: { headers: { "x-opencompany-tool-ticket": ticket } } },
+    );
+    const client = new Client({ name: "runner-test", version: "0.1.0" });
+
+    try {
+      await client.connect(transport as Parameters<typeof client.connect>[0]);
+      expect((await client.listTools()).tools.map((tool) => tool.name)).toContain("wiki");
     } finally {
       await client.close();
     }

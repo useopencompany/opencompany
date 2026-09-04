@@ -1,7 +1,7 @@
 import { getDb } from "@opencompany/db/client";
 import type { IntegrationProvider, TaskToolName } from "@opencompany/db/product-schema";
 import { integrations } from "@opencompany/db/product-schema";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, ne } from "drizzle-orm";
 import {
   type GmailSourceProviderState,
   type GoogleDriveSourceProviderState,
@@ -13,6 +13,7 @@ import { getLatitudeIntegrationState } from "./latitude-mcp";
 import { getLinearIntegrationState } from "./linear-mcp";
 
 const GOOGLE_PROVIDERS: IntegrationProvider[] = ["gmail", "google_calendar", "google_drive"];
+type DbLike = any;
 const BROWSER_TOOLS = [
   "browser_open",
   "browser_snapshot",
@@ -30,22 +31,85 @@ const BROWSER_TOOLS = [
 export async function getGoogleIntegrationState(userWorkosId: string) {
   const rows = await getDb()
     .select({
+      id: integrations.id,
       provider: integrations.provider,
+      workspaceId: integrations.workspaceId,
       accountEmail: integrations.accountEmail,
       accountName: integrations.accountName,
       status: integrations.status,
+      scopes: integrations.scopes,
+      capabilityModes: integrations.capabilityModes,
       updatedAt: integrations.updatedAt,
     })
     .from(integrations)
     .where(
       and(
         eq(integrations.userWorkosId, userWorkosId),
+        isNull(integrations.workspaceId),
         inArray(integrations.provider, GOOGLE_PROVIDERS),
+        ne(integrations.status, "disconnected"),
       ),
     )
-    .orderBy(integrations.provider, integrations.updatedAt);
+    // integrationStateFromRows keeps the last row for each provider. Ascending
+    // order therefore selects the same newest personal account as the MCP
+    // loaders below; the id tie-breaker makes equal timestamps deterministic.
+    .orderBy(asc(integrations.provider), asc(integrations.updatedAt), asc(integrations.id));
 
   return googleIntegrationStateFromRows(rows);
+}
+
+export async function loadGoogleCalendarIntegration(input: { userWorkosId: string; db?: DbLike }) {
+  const [row] = await (input.db ?? getDb())
+    .select({
+      id: integrations.id,
+      userWorkosId: integrations.userWorkosId,
+      status: integrations.status,
+      accountEmail: integrations.accountEmail,
+      accountName: integrations.accountName,
+      statusReason: integrations.statusReason,
+      scopes: integrations.scopes,
+      capabilityModes: integrations.capabilityModes,
+      toolModes: integrations.toolModes,
+    })
+    .from(integrations)
+    .where(
+      and(
+        eq(integrations.userWorkosId, input.userWorkosId),
+        isNull(integrations.workspaceId),
+        eq(integrations.provider, "google_calendar"),
+        ne(integrations.status, "disconnected"),
+      ),
+    )
+    .orderBy(desc(integrations.updatedAt))
+    .limit(1);
+  return row;
+}
+
+export async function loadGoogleDriveIntegration(input: { userWorkosId: string; db?: DbLike }) {
+  const [row] = await (input.db ?? getDb())
+    .select({
+      id: integrations.id,
+      userWorkosId: integrations.userWorkosId,
+      status: integrations.status,
+      accountEmail: integrations.accountEmail,
+      accountName: integrations.accountName,
+      statusReason: integrations.statusReason,
+      scopes: integrations.scopes,
+      capabilityModes: integrations.capabilityModes,
+      toolModes: integrations.toolModes,
+    })
+    .from(integrations)
+    .where(
+      and(
+        eq(integrations.userWorkosId, input.userWorkosId),
+        isNull(integrations.workspaceId),
+        eq(integrations.provider, "google_drive"),
+        ne(integrations.status, "disconnected"),
+      ),
+    )
+    .orderBy(desc(integrations.updatedAt))
+    .limit(1);
+  return row;
 }
 
 // Gmail-as-a-brain-source state: same integration rows as the Gmail tool
@@ -63,7 +127,7 @@ export async function getGmailSourceIntegrationState(
     })
     .from(integrations)
     .where(and(eq(integrations.userWorkosId, userWorkosId), eq(integrations.provider, "gmail")))
-    .orderBy(desc(integrations.updatedAt))
+    .orderBy(desc(integrations.updatedAt), desc(integrations.id))
     .limit(1);
 
   if (!row || row.status === "disconnected") {
@@ -85,6 +149,30 @@ export async function getGmailSourceIntegrationState(
     accountEmail: row.accountEmail,
     statusReason: row.statusReason,
   };
+}
+
+export async function loadGmailIntegration(input: { userWorkosId: string; db?: DbLike }) {
+  const [row] = await (input.db ?? getDb())
+    .select({
+      id: integrations.id,
+      userWorkosId: integrations.userWorkosId,
+      status: integrations.status,
+      scopes: integrations.scopes,
+      capabilityModes: integrations.capabilityModes,
+      toolModes: integrations.toolModes,
+    })
+    .from(integrations)
+    .where(
+      and(
+        eq(integrations.userWorkosId, input.userWorkosId),
+        isNull(integrations.workspaceId),
+        eq(integrations.provider, "gmail"),
+        ne(integrations.status, "disconnected"),
+      ),
+    )
+    .orderBy(desc(integrations.updatedAt), desc(integrations.id))
+    .limit(1);
+  return row;
 }
 
 export async function getGoogleDriveSourceIntegrationState(

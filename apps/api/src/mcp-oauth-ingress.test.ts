@@ -16,6 +16,10 @@ import {
   completePostHogMcpOAuth,
   startPostHogMcpOAuth,
 } from "@opencompany/agent/integrations/posthog-mcp";
+import {
+  completeSigNozMcpOAuth,
+  startSigNozMcpOAuth,
+} from "@opencompany/agent/integrations/signoz-mcp";
 import { listWorkspacesForUser } from "@opencompany/db/workspaces";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./errors";
@@ -40,6 +44,11 @@ vi.mock("@opencompany/agent/integrations/posthog-mcp", async (importOriginal) =>
   startPostHogMcpOAuth: vi.fn(),
   completePostHogMcpOAuth: vi.fn(),
 }));
+vi.mock("@opencompany/agent/integrations/signoz-mcp", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  startSigNozMcpOAuth: vi.fn(),
+  completeSigNozMcpOAuth: vi.fn(),
+}));
 vi.mock("@opencompany/agent/integrations/neon-mcp", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   startNeonMcpOAuth: vi.fn(),
@@ -53,7 +62,14 @@ vi.mock("@opencompany/agent/integrations/latitude-mcp", async (importOriginal) =
 
 const STATE_SECRET = "mcp-state-secret-mcp-state-secret";
 const sentinelDb = { sentinel: "db" };
-const PROVIDERS: McpOAuthProvider[] = ["linear", "posthog", "neon", "latitude", "betterstack"];
+const PROVIDERS: McpOAuthProvider[] = [
+  "linear",
+  "posthog",
+  "neon",
+  "latitude",
+  "betterstack",
+  "signoz",
+];
 
 // The mocked module-level start/complete wrappers, keyed like the ingress.
 const flowMocks = {
@@ -62,6 +78,7 @@ const flowMocks = {
   neon: { start: startNeonMcpOAuth, complete: completeNeonMcpOAuth },
   latitude: { start: startLatitudeMcpOAuth, complete: completeLatitudeMcpOAuth },
   betterstack: { start: startBetterStackMcpOAuth, complete: completeBetterStackMcpOAuth },
+  signoz: { start: startSigNozMcpOAuth, complete: completeSigNozMcpOAuth },
 } as const;
 
 function ingress(
@@ -196,8 +213,8 @@ describe("remote MCP OAuth ingress", () => {
       const expectedPath =
         provider === "linear"
           ? "/settings"
-          : provider === "betterstack"
-            ? "/settings/plugins/betterstack"
+          : provider === "betterstack" || provider === "signoz"
+            ? `/settings/plugins/${provider}`
             : "/settings/integrations";
       expect(response.headers.get("location"), provider).toBe(
         `https://opencompany.example.com${expectedPath}?integration=${provider}&setup=error&reason=invalid_state`,

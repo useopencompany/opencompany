@@ -9,7 +9,7 @@ export type ProductAnalyticsUsageSource =
   | "external_harness"
   | "subscription_covered";
 export type ProductOnboardingFlow = "owner" | "member";
-export type ProductOnboardingStep = "profile" | "workspace" | "sources" | "welcome" | "finish";
+export type ProductOnboardingStep = "profile" | "workspace" | "welcome" | "finish";
 
 export type ProductAnalyticsEventPropertiesByName = {
   app_opened: {
@@ -37,8 +37,6 @@ export type ProductAnalyticsEventPropertiesByName = {
     flow: ProductOnboardingFlow;
     total_steps: number;
     workspace_id: string;
-    sources_feeding: number;
-    source_goal_met: boolean;
   };
   chat_message_sent: {
     workspace_id: string;
@@ -201,7 +199,7 @@ export const productAnalyticsEvents = {
   onboarding_completed: {
     name: "onboarding_completed",
     description: "A user completed the opencompany onboarding flow.",
-    safeProperties: ["flow", "total_steps", "workspace_id", "sources_feeding", "source_goal_met"],
+    safeProperties: ["flow", "total_steps", "workspace_id"],
   },
   chat_message_sent: {
     name: "chat_message_sent",

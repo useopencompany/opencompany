@@ -1,15 +1,14 @@
 import { createHash, randomUUID } from "node:crypto";
-import { and, asc, eq, or, sql } from "drizzle-orm";
-import { defaultBrainFolderManifestEntries, normalizeBrainId } from "../../brain/src/index";
+import { and, asc, eq, isNull, or, sql } from "drizzle-orm";
+import { normalizeBrainId } from "../../brain/src/index";
 import { calendarMonthWindow, PRO_STRIPE_PRODUCT_KEY } from "./billing-constants";
-import { hashBrainContent, seedDefaultBrainFolders } from "./brain-files";
+import { seedDefaultBrainFolders } from "./brain-files";
 import { getDb } from "./client";
 import { grantMonthlyIncludedUsage } from "./credits";
 import {
   type Brain,
   type BrainIntelligence,
   type BrainVisibility,
-  brainFolders,
   brainMembers,
   brains,
   type Onboarding,
@@ -191,12 +190,51 @@ export async function listAccessibleBrainsForUser(
         eq(workspaceMembers.userWorkosId, userWorkosId),
       ),
     )
-    .where(brainAccessCondition(userWorkosId))
+    .where(and(eq(workspaces.legacyBrainEnabled, true), brainAccessCondition(userWorkosId)))
     .orderBy(asc(workspaces.createdAt), asc(brains.createdAt));
   return rows.map((row) => ({
     ...row,
     workspaceRole: row.workspaceRole ?? "member",
   }));
+}
+
+export async function getLegacyBrainAccessForUser(
+  userWorkosId: string,
+  options: { db?: DbClient } = {},
+) {
+  const memberships = await listWorkspacesForUser(userWorkosId, options);
+  return memberships
+    .filter(({ workspace }) => workspace.legacyBrainEnabled)
+    .map(({ workspace }) => ({
+      id: workspace.id,
+      name: workspace.name,
+      slug: workspace.slug,
+    }));
+}
+
+export async function isLegacyBrainEnabledForWorkspace(
+  workspaceId: string,
+  options: { db?: DbClient } = {},
+) {
+  const db = options.db ?? getDb();
+  const [workspace] = await db
+    .select({ enabled: workspaces.legacyBrainEnabled })
+    .from(workspaces)
+    .where(eq(workspaces.id, workspaceId))
+    .limit(1);
+  return workspace?.enabled === true;
+}
+
+export async function markMcpSetupCompletedForUser(
+  userWorkosId: string,
+  options: { db?: DbClient; completedAt?: Date } = {},
+) {
+  const db = options.db ?? getDb();
+  const completedAt = options.completedAt ?? new Date();
+  await db
+    .update(users)
+    .set({ mcpSetupCompletedAt: completedAt, updatedAt: completedAt })
+    .where(and(eq(users.workosUserId, userWorkosId), isNull(users.mcpSetupCompletedAt)));
 }
 
 export async function getBrainAccess(
@@ -299,9 +337,9 @@ export async function getDefaultBrainForUser(
   return brains.find((brain) => brain.slug === DEFAULT_BRAIN_SLUG) ?? brains[0] ?? null;
 }
 
-// Creates the local resources for a user-created WorkOS organization. The
-// workspace, admin membership, default brain, and required folder rows are one
-// atomic write so a failed provision never leaves a partially usable workspace.
+// Creates the local resources for a user-created WorkOS organization. Wiki is
+// the default knowledge system, so new workspaces intentionally have no Brain.
+// Existing legacy-enabled workspaces and explicit Brain creation are untouched.
 export async function createWorkspaceForUser(
   input: {
     workspaceId: string;
@@ -311,12 +349,11 @@ export async function createWorkspaceForUser(
     slug?: string | null;
   },
   options: { db?: DbClient } = {},
-): Promise<{ workspace: Workspace; brain: Brain }> {
+): Promise<{ workspace: Workspace; brain: null }> {
   const db = options.db ?? getDb();
   const name = input.name.trim();
   if (!name) throw new Error("Workspace name cannot be empty.");
 
-  const brainId = newBrainId(DEFAULT_BRAIN_SLUG);
   const workspaceValues = {
     id: input.workspaceId,
     workosOrganizationId: input.workosOrganizationId,
@@ -330,52 +367,28 @@ export async function createWorkspaceForUser(
     userWorkosId: input.userWorkosId,
     role: "admin" as const,
   };
-  const brainValues = {
-    id: brainId,
-    workspaceId: input.workspaceId,
-    name: DEFAULT_BRAIN_NAME,
-    slug: DEFAULT_BRAIN_SLUG,
-    visibility: "workspace" as const,
-    createdByWorkosId: input.userWorkosId,
-  };
-  const folderValues = defaultBrainFolderManifestEntries().map((folder) => ({
-    id: `goat_brain_folder_${hashBrainContent(`${brainId}:${folder.path}`).slice(0, 24)}`,
-    userWorkosId: input.userWorkosId,
-    brainRef: brainId,
-    path: folder.path,
-    source: folder.source,
-  }));
-
   let workspace: Workspace | undefined;
-  let brain: Brain | undefined;
 
   // neon-http exposes transactional batches but no interactive transactions;
   // the canonical API's node-postgres client exposes the inverse surface.
   if ("batch" in db) {
-    const [workspaceRows, , brainRows] = await db.batch([
+    const [workspaceRows] = await db.batch([
       db.insert(workspaces).values(workspaceValues).returning(),
       db.insert(workspaceMembers).values(membershipValues),
-      db.insert(brains).values(brainValues).returning(),
-      ...folderValues.map((folder) => db.insert(brainFolders).values(folder)),
     ]);
     workspace = workspaceRows[0];
-    brain = brainRows[0];
   } else {
-    ({ workspace, brain } = await db.transaction(async (tx: DbClient) => {
+    workspace = await db.transaction(async (tx: DbClient) => {
       const [workspace] = await tx.insert(workspaces).values(workspaceValues).returning();
       await tx.insert(workspaceMembers).values(membershipValues);
-      const [brain] = await tx.insert(brains).values(brainValues).returning();
-      for (const folder of folderValues) {
-        await tx.insert(brainFolders).values(folder);
-      }
-      if (!workspace || !brain) {
+      if (!workspace) {
         throw new Error("Could not persist the opencompany workspace.");
       }
-      return { workspace, brain };
-    }));
+      return workspace;
+    });
   }
 
-  if (!workspace || !brain) throw new Error("Could not persist the opencompany workspace.");
+  if (!workspace) throw new Error("Could not persist the opencompany workspace.");
 
   // Monthly-allowance writes are idempotent and deliberately non-blocking: a
   // billing outage must not turn a successfully created organization into a
@@ -397,7 +410,7 @@ export async function createWorkspaceForUser(
     );
   }
 
-  return { workspace, brain };
+  return { workspace, brain: null };
 }
 
 // Adopts local memberships for WorkOS organizations the user already belongs

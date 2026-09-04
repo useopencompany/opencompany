@@ -1008,12 +1008,12 @@ describe("Electric read models", () => {
     );
   });
 
-  it("scopes Wiki shapes to the authenticated Workspace and ignores caller shape parameters", async () => {
-    let upstreamUrl = "";
+  it("scopes Wiki page and import shapes to the authenticated Workspace", async () => {
+    const upstreamUrls: string[] = [];
     const proxy = new ElectricReadModelProxy({
       electricUrl: "https://electric.example.test",
       fetch: vi.fn(async (input: URL | RequestInfo) => {
-        upstreamUrl = String(input);
+        upstreamUrls.push(String(input));
         return Response.json([]);
       }) as typeof fetch,
     });
@@ -1025,12 +1025,25 @@ describe("Electric read models", () => {
         "https://api.example.test/v1/read-models/wiki-pages-v2?table=goat.users&where=true&params[1]=workspace_other",
       ),
     });
+    await proxy.stream({
+      actor,
+      readModel: "wiki-import-runs-v1",
+      requestUrl: new URL(
+        "https://api.example.test/v1/read-models/wiki-import-runs-v1?table=goat.users&where=true&params[1]=workspace_other",
+      ),
+    });
 
-    const requestedUrl = new URL(upstreamUrl);
-    expect(requestedUrl.searchParams.get("table")).toBe("goat.wiki_pages");
-    expect(requestedUrl.searchParams.get("where")).toBe('"workspace_id" = $1');
-    expect(requestedUrl.searchParams.get("params[1]")).toBe("workspace_1");
-    expect(requestedUrl.searchParams.get("columns")).not.toContain("created_by_workos_id");
+    const pagesUrl = new URL(upstreamUrls[0]!);
+    expect(pagesUrl.searchParams.get("table")).toBe("goat.wiki_pages");
+    expect(pagesUrl.searchParams.get("where")).toBe('"workspace_id" = $1');
+    expect(pagesUrl.searchParams.get("params[1]")).toBe("workspace_1");
+    expect(pagesUrl.searchParams.get("columns")).not.toContain("created_by_workos_id");
+
+    const importsUrl = new URL(upstreamUrls[1]!);
+    expect(importsUrl.searchParams.get("table")).toBe("goat.brain_import_runs");
+    expect(importsUrl.searchParams.get("where")).toBe('"workspace_id" = $1');
+    expect(importsUrl.searchParams.get("params[1]")).toBe("workspace_1");
+    expect(importsUrl.searchParams.get("columns")).not.toMatch(/brain_ref|user_workos|lease/iu);
   });
 
   it("scopes the Task shape to the server-owned Workspace and nests canonical outcome fields", async () => {
@@ -1109,6 +1122,73 @@ describe("Electric read models", () => {
           archivedAt: null,
           createdAt: "2026-08-11T10:00:00.000Z",
           updatedAt: "2026-08-11T10:01:00.000Z",
+        },
+      },
+    ]);
+  });
+
+  it("scopes Task activities to one authorized Task and projects only timeline fields", async () => {
+    let upstreamUrl = "";
+    const proxy = new ElectricReadModelProxy({
+      electricUrl: "https://electric.example.test",
+      fetch: vi.fn(async (input: URL | RequestInfo) => {
+        upstreamUrl = String(input);
+        return Response.json([
+          {
+            headers: { operation: "insert" },
+            key: '"task_activity_1"',
+            value: {
+              id: "task_activity_1",
+              task_id: "task_1",
+              author: "system",
+              author_workos_id: null,
+              kind: "run_finished",
+              body: "Launch brief ready.",
+              metadata: JSON.stringify({
+                runId: "run_1",
+                disposition: "done",
+                stepIndex: 0,
+                stepCount: 1,
+              }),
+              created_at: "2026-08-11 10:01:00+00",
+              workspace_id: "must-not-cross",
+            },
+          },
+        ]);
+      }) as typeof fetch,
+    });
+
+    const response = await proxy.stream({
+      actor,
+      readModel: "task-activities-v1",
+      taskId: "task_1",
+      requestUrl: new URL(
+        "https://api.example.test/v1/read-models/task-activities-v1?taskId=task_1&table=goat.users&where=true",
+      ),
+    });
+
+    const requestedUrl = new URL(upstreamUrl);
+    expect(requestedUrl.searchParams.get("table")).toBe("goat.task_activities");
+    expect(requestedUrl.searchParams.get("where")).toBe('"task_id" = $1');
+    expect(requestedUrl.searchParams.get("params[1]")).toBe("task_1");
+    expect(await response.json()).toEqual([
+      {
+        headers: { operation: "insert" },
+        key: '"task_activity_1"',
+        value: {
+          id: "task_activity_1",
+          taskId: "task_1",
+          author: "system",
+          authorWorkosId: null,
+          kind: "run_finished",
+          body: "Launch brief ready.",
+          metadata: {
+            runId: "run_1",
+            disposition: "done",
+            stepIndex: 0,
+            stepCount: 1,
+          },
+          createdAt: "2026-08-11T10:01:00.000Z",
         },
       },
     ]);

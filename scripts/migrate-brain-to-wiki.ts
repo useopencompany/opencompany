@@ -3,8 +3,8 @@
 // more brain activity if needed. Chat-driven migration was rejected on
 // purpose: a script can be tested, diffed, and repeated per workspace.
 //
-// - Non-destructive: brain tables are never written. Cleanup is the separate
-//   demolition step after the cutover settles.
+// - Non-destructive: Brain tables are never written. Legacy source shutdown is
+//   a separate reversible disable step; no Brain rows are deleted.
 // - Idempotent: pages write through the wiki storage layer (unchanged bodies
 //   are no-ops), timeline entries dedupe on (at, text), asset rows skip when
 //   the path already exists.
@@ -58,13 +58,24 @@ if (workspaces.length === 0) {
 }
 
 for (const workspace of workspaces) {
-  const workspaceBrains = await db
+  const allWorkspaceBrains = await db
     .select()
     .from(brainRows)
     .where(eq(brainRows.workspaceId, workspace.id))
     .orderBy(asc(brainRows.createdAt));
-  if (workspaceBrains.length === 0) {
+  if (allWorkspaceBrains.length === 0) {
     console.log(`\n${workspace.name} (${workspace.id}): no brains, skipping.`);
+    continue;
+  }
+  const restrictedBrains = allWorkspaceBrains.filter((brain) => brain.visibility === "restricted");
+  for (const brain of restrictedBrains) {
+    console.log(
+      `\n${workspace.name} (${workspace.id}): restricted brain ${brain.name} (${brain.id}) skipped.`,
+    );
+  }
+  const workspaceBrains = allWorkspaceBrains.filter((brain) => brain.visibility !== "restricted");
+  if (workspaceBrains.length === 0) {
+    console.log(`  no workspace-visible brains to migrate.`);
     continue;
   }
   // "general" first so it wins contested slugs; then by age.
@@ -103,7 +114,7 @@ for (const workspace of workspaces) {
 
   const plan = planWikiMigration(sourceDocuments);
   console.log(
-    `\n${workspace.name} (${workspace.id}): ${workspaceBrains.length} brain(s), ${plan.pages.length} page(s) to write, ` +
+    `\n${workspace.name} (${workspace.id}): ${workspaceBrains.length} workspace-visible brain(s), ${restrictedBrains.length} restricted brain(s) skipped, ${plan.pages.length} page(s) to write, ` +
       `${plan.skippedMerged.length} merged skipped, ${plan.collisions.length} slug collision(s).`,
   );
   for (const collision of plan.collisions) {

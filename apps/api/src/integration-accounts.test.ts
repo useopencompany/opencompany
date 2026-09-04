@@ -9,6 +9,11 @@ import {
   validateGranolaApiKey,
 } from "@opencompany/agent/integrations/granola";
 import { saveJamieWebhookApiKey } from "@opencompany/agent/integrations/jamie";
+import {
+  connectRenderMcpIntegration,
+  getRenderIntegrationState,
+  validateRenderApiKey,
+} from "@opencompany/agent/integrations/render-mcp";
 import { disconnectStripeIntegration } from "@opencompany/agent/integrations/stripe";
 import type { Actor } from "@opencompany/core";
 import {
@@ -79,6 +84,22 @@ vi.mock("@opencompany/agent/integrations/jamie", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   createOrResetJamieWebhookEndpoint: vi.fn(),
   saveJamieWebhookApiKey: vi.fn(),
+}));
+
+vi.mock("@opencompany/agent/integrations/render-mcp", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  validateRenderApiKey: vi.fn(),
+  connectRenderMcpIntegration: vi.fn(async () => ({ integrationId: "gint_render" })),
+  getRenderIntegrationState: vi.fn(async () => ({
+    provider: "render" as const,
+    connected: true,
+    status: "connected" as const,
+    integrationId: "gint_render",
+    accountName: "Acme",
+    statusReason: null,
+    capabilityModes: {},
+    toolModes: {},
+  })),
 }));
 
 vi.mock("@opencompany/agent/integrations/stripe", async (importOriginal) => ({
@@ -320,6 +341,9 @@ describe("integration account service", () => {
     await expect(service.connectGranola(member, "not-a-granola-key")).rejects.toMatchObject({
       message: "Granola API keys start with grn_. Check the key and try again.",
     });
+    await expect(service.connectRender(member, "not-a-render-key")).rejects.toMatchObject({
+      message: "Render API keys start with rnd_. Check the key and try again.",
+    });
   });
 
   it("connects Granola with the trimmed key and returns the refreshed state", async () => {
@@ -358,6 +382,36 @@ describe("integration account service", () => {
       status: 400,
       message: "Granola rejected this API key. Check it and try again.",
     });
+  });
+
+  it("connects Render with a validated key and refreshes plugin discovery", async () => {
+    vi.mocked(validateRenderApiKey).mockResolvedValueOnce({
+      ok: true,
+      owner: { id: "tea_123", name: "Acme", email: "founder@example.com" },
+    });
+    const refreshRenderPluginRegistrations = vi.fn(async () => undefined);
+    const service = createIntegrationAccountService({
+      db: fakeDb(),
+      refreshRenderPluginRegistrations,
+    });
+
+    await expect(service.connectRender(member, "  rnd_abcdefgh12345678  ")).resolves.toMatchObject({
+      provider: "render",
+      connected: true,
+      integrationId: "gint_render",
+    });
+    expect(connectRenderMcpIntegration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userWorkosId: "user_1",
+        apiKey: "rnd_abcdefgh12345678",
+        owner: { id: "tea_123", name: "Acme", email: "founder@example.com" },
+      }),
+    );
+    expect(refreshRenderPluginRegistrations).toHaveBeenCalledWith({
+      userWorkosId: "user_1",
+      workspaceId: "workspace_1",
+    });
+    expect(getRenderIntegrationState).toHaveBeenCalled();
   });
 
   it("requires the preference toggle and a configured provider before pairing", async () => {

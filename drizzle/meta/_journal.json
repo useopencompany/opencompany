@@ -1685,8 +1685,64 @@
     {
       "idx": 240,
       "version": "7",
-      "when": 1788440400000,
-      "tag": "0240_goat_chat_attachment_upload_idempotency",
+      "when": 1788427719715,
+      "tag": "0240_goat_task_host_tool_contracts",
+      "breakpoints": true
+    },
+    {
+      "idx": 241,
+      "version": "7",
+      "when": 1788436800000,
+      "tag": "0241_goat_signoz_integration",
+      "breakpoints": true
+    },
+    {
+      "idx": 242,
+      "version": "7",
+      "when": 1788436801000,
+      "tag": "0242_goat_legacy_brain_flag",
+      "breakpoints": true
+    },
+    {
+      "idx": 243,
+      "version": "7",
+      "when": 1788436802000,
+      "tag": "0243_goat_render_integration",
+      "breakpoints": true
+    },
+    {
+      "idx": 244,
+      "version": "7",
+      "when": 1788436803000,
+      "tag": "0244_wiki_native_company_imports",
+      "breakpoints": true
+    },
+    {
+      "idx": 245,
+      "version": "7",
+      "when": 1788436804000,
+      "tag": "0245_goat_task_activities",
+      "breakpoints": true
+    },
+    {
+      "idx": 246,
+      "version": "7",
+      "when": 1788436805000,
+      "tag": "0246_goat_task_waiting_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 247,
+      "version": "7",
+      "when": 1788454430567,
+      "tag": "0247_preserve_assistant_message_boundaries",
+      "breakpoints": true
+    },
+    {
+      "idx": 248,
+      "version": "7",
+      "when": 1788480900000,
+      "tag": "0248_goat_chat_attachment_upload_idempotency",
       "breakpoints": true
     }
   ]

@@ -18,6 +18,7 @@ import {
   MessageSummaryReadModelSchema,
   type ReadModel,
   RunReadModelSchema,
+  TaskActivityReadModelSchema,
   TaskOutcomeSchema,
   TaskReadModelSchema,
   TaskScheduleReadModelSchema,
@@ -71,6 +72,7 @@ const PREDECODED_READ_MODEL_FIELDS = new Set([
   "capabilityModes",
   "hasUnseen",
   "enabled",
+  "metadata",
   "planPaused",
 ]);
 
@@ -80,6 +82,7 @@ export interface ReadModelService {
     readModel: ReadModel;
     conversationId?: string;
     brainId?: string;
+    taskId?: string;
     messageShapeEpoch?: number;
     requestUrl: URL;
   }): Promise<Response>;
@@ -109,6 +112,7 @@ export class ElectricReadModelProxy implements ReadModelService {
     readModel: ReadModel;
     conversationId?: string;
     brainId?: string;
+    taskId?: string;
     messageShapeEpoch?: number;
     requestUrl: URL;
   }) {
@@ -179,6 +183,7 @@ function readModelShape(input: {
   readModel: ReadModel;
   conversationId?: string;
   brainId?: string;
+  taskId?: string;
   messageShapeEpoch?: number;
 }) {
   switch (input.readModel) {
@@ -321,6 +326,25 @@ function readModelShape(input: {
         ],
         where: `("workspace_id" = $2 OR (` + `"workspace_id" IS NULL AND "actor_id" = $1))`,
         params: [input.actor.userId, input.actor.workspaceId],
+      };
+    case "task-activities-v1":
+      if (!input.taskId) {
+        throw new ApiError(400, "invalid_request", "taskId is required for this read model.");
+      }
+      return {
+        table: "goat.task_activities",
+        columns: [
+          "id",
+          "task_id",
+          "author",
+          "author_workos_id",
+          "kind",
+          "body",
+          "metadata",
+          "created_at",
+        ],
+        where: `"task_id" = $1`,
+        params: [input.taskId],
       };
     case "workflows-v1":
       return {
@@ -489,6 +513,26 @@ function readModelShape(input: {
         "created_at",
         "updated_at",
       ]);
+    case "wiki-import-runs-v1":
+      return {
+        table: "goat.brain_import_runs",
+        columns: [
+          "id",
+          "status",
+          "company_url",
+          "company_name",
+          "focus",
+          "source_selection",
+          "discovery_summary",
+          "last_error",
+          "confirmed_at",
+          "completed_at",
+          "created_at",
+          "updated_at",
+        ],
+        where: `"workspace_id" = $1`,
+        params: [input.actor.workspaceId],
+      };
     case "wiki-pages-v2":
       return {
         table: "goat.wiki_pages",
@@ -642,7 +686,7 @@ function projectReadModelValue(
   if (readModel === "brain-ingest-jobs-v1" && Object.hasOwn(projected, "lastError")) {
     projected.lastError = boundedNullableString(projected.lastError, 2_000);
   }
-  if (readModel === "brain-import-runs-v1") {
+  if (readModel === "brain-import-runs-v1" || readModel === "wiki-import-runs-v1") {
     if (Object.hasOwn(projected, "sourceSelection")) {
       projected.sourceSelection = publicBrainImportSourceSelection(projected.sourceSelection);
     }
@@ -700,6 +744,10 @@ function projectReadModelValue(
       return (partial ? TaskScheduleReadModelSchema.partial() : TaskScheduleReadModelSchema).parse(
         projected,
       );
+    case "task-activities-v1":
+      return (partial ? TaskActivityReadModelSchema.partial() : TaskActivityReadModelSchema).parse(
+        projected,
+      );
     case "integration-accounts-v1":
       return (
         partial ? IntegrationAccountReadModelSchema.partial() : IntegrationAccountReadModelSchema
@@ -725,6 +773,7 @@ function projectReadModelValue(
         partial ? BrainIngestJobReadModelSchema.partial() : BrainIngestJobReadModelSchema
       ).parse(projected);
     case "brain-import-runs-v1":
+    case "wiki-import-runs-v1":
       return (
         partial ? BrainImportRunReadModelSchema.partial() : BrainImportRunReadModelSchema
       ).parse(projected);
@@ -770,7 +819,8 @@ function readModelFieldValue(readModel: ReadModel, name: string, value: unknown)
     name === "sourceSelection" ||
     name === "discoverySummary" ||
     name === "scopes" ||
-    name === "capabilityModes"
+    name === "capabilityModes" ||
+    name === "metadata"
   ) {
     return jsonValue(value);
   }
@@ -1091,6 +1141,16 @@ const READ_MODEL_COLUMN_NAMES = {
     created_at: "createdAt",
     updated_at: "updatedAt",
   },
+  "task-activities-v1": {
+    id: "id",
+    task_id: "taskId",
+    author: "author",
+    author_workos_id: "authorWorkosId",
+    kind: "kind",
+    body: "body",
+    metadata: "metadata",
+    created_at: "createdAt",
+  },
   "workflows-v1": {
     id: "id",
     slug: "slug",
@@ -1215,6 +1275,20 @@ const READ_MODEL_COLUMN_NAMES = {
     updated_at: "updatedAt",
   },
   "brain-import-runs-v1": {
+    id: "id",
+    status: "status",
+    company_url: "companyUrl",
+    company_name: "companyName",
+    focus: "focus",
+    source_selection: "sourceSelection",
+    discovery_summary: "discoverySummary",
+    last_error: "lastError",
+    confirmed_at: "confirmedAt",
+    completed_at: "completedAt",
+    created_at: "createdAt",
+    updated_at: "updatedAt",
+  },
+  "wiki-import-runs-v1": {
     id: "id",
     status: "status",
     company_url: "companyUrl",

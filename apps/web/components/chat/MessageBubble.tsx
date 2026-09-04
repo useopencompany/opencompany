@@ -37,6 +37,7 @@ export function MessageBubble({
   readOnly = false,
   isTaskSession = false,
   compactTrace = false,
+  turnActive = false,
   attachmentSrc,
   artifactHref,
 }: {
@@ -51,6 +52,7 @@ export function MessageBubble({
   readOnly?: boolean;
   isTaskSession?: boolean;
   compactTrace?: boolean;
+  turnActive?: boolean;
   attachmentSrc?: (messageId: string, attachment: ChatUiAttachment) => string | undefined;
   artifactHref?: (artifact: PublishedChatArtifact) => string;
 }) {
@@ -70,6 +72,7 @@ export function MessageBubble({
       readOnly={readOnly}
       isTaskSession={isTaskSession}
       compactTrace={compactTrace}
+      turnActive={turnActive}
       {...(artifactHref ? { artifactHref } : {})}
     />
   );
@@ -87,6 +90,7 @@ function AssistantTurn({
   readOnly,
   isTaskSession,
   compactTrace,
+  turnActive,
   artifactHref,
 }: {
   message: ChatUiMessage;
@@ -100,6 +104,7 @@ function AssistantTurn({
   readOnly: boolean;
   isTaskSession: boolean;
   compactTrace: boolean;
+  turnActive: boolean;
   artifactHref?: (artifact: PublishedChatArtifact) => string;
 }) {
   const [traceExpanded, setTraceExpanded] = useState(false);
@@ -157,7 +162,7 @@ function AssistantTurn({
     stopped: stopped || resolvedMessage.metadata?.aborted === true,
     includeMetadataTaskCard: !isTaskSession,
   });
-  const compactedTrace = compactTrace ? compactAssistantTrace(items) : null;
+  const compactedTrace = compactTrace && !turnActive ? compactAssistantTrace(items) : null;
   // `nested` is set when rendering a subagent's own trace: its steps are historical, so they render
   // as plain read-only rows (no plan-implement / approval affordances).
   const renderItem = (item: AssistantRenderItem, nested: boolean): ReactNode => {

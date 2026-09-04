@@ -7,9 +7,10 @@ import {
   createGoogleIntegrationState,
   exchangeGoogleCode,
   fetchGoogleUserInfo,
-  GOOGLE_PROVIDER_CONFIG,
   type GoogleIntegrationProvider,
+  googleAuthorizationConfigForReturnTo,
   googleOAuthRedirectUri,
+  googleProviderConfigForAccess,
   isGoogleIntegrationConfigured,
   verifyGoogleIntegrationState,
 } from "@opencompany/agent/integrations/google-oauth";
@@ -39,6 +40,11 @@ export type GoogleIngressService = {
 export function createGoogleIngress(input: {
   db: DbLike;
   identify: ApiIdentityVerifier;
+  refreshPluginRegistrations?: (input: {
+    provider: GoogleIntegrationProvider;
+    userWorkosId: string;
+    workspaceIds: string[];
+  }) => Promise<void>;
 }): GoogleIngressService {
   return {
     start: (provider, request) => handleStart(input, provider, request),
@@ -47,7 +53,15 @@ export function createGoogleIngress(input: {
   };
 }
 
-type IngressInput = { db: DbLike; identify: ApiIdentityVerifier };
+type IngressInput = {
+  db: DbLike;
+  identify: ApiIdentityVerifier;
+  refreshPluginRegistrations?: (input: {
+    provider: GoogleIntegrationProvider;
+    userWorkosId: string;
+    workspaceIds: string[];
+  }) => Promise<void>;
+};
 
 async function handleStart(
   input: IngressInput,
@@ -58,7 +72,10 @@ async function handleStart(
   if (session.kind === "redirect") return session.response;
   const url = new URL(request.url);
   const returnTo = url.searchParams.get("returnTo") ?? "/settings";
-  const config = GOOGLE_PROVIDER_CONFIG[provider];
+  const access =
+    provider === "gmail" && url.searchParams.get("access") === "mcp" ? "gmail_mcp" : "default";
+  const config = googleProviderConfigForAccess(provider, access);
+  const authorizationConfig = googleAuthorizationConfigForReturnTo(config, returnTo);
   const oauthRedirectUri = googleOAuthRedirectUri(config);
 
   if (!isGoogleIntegrationConfigured()) {
@@ -67,10 +84,14 @@ async function handleStart(
 
   const state = createGoogleIntegrationState({
     provider,
+    access,
     userWorkosId: session.userId,
     returnTo,
   });
-  return sessionRedirect(session, buildGoogleAuthorizationUrl(config, state, oauthRedirectUri));
+  return sessionRedirect(
+    session,
+    buildGoogleAuthorizationUrl(authorizationConfig, state, oauthRedirectUri),
+  );
 }
 
 async function handleCallback(
@@ -81,7 +102,6 @@ async function handleCallback(
   const session = await resolveIngressSession(input, request);
   if (session.kind === "redirect") return session.response;
   const url = new URL(request.url);
-  const config = GOOGLE_PROVIDER_CONFIG[provider];
   const errorRedirect = (returnTo: string) => statusRedirect(session, returnTo, provider, "error");
 
   let state: ReturnType<typeof verifyGoogleIntegrationState>;
@@ -105,6 +125,7 @@ async function handleCallback(
     });
     return errorRedirect(state.returnTo);
   }
+  const config = googleProviderConfigForAccess(provider, state.access);
 
   if (!isGoogleIntegrationConfigured()) {
     return errorRedirect(state.returnTo);
@@ -127,6 +148,7 @@ async function handleCallback(
   }
 
   try {
+    const authorizationConfig = googleAuthorizationConfigForReturnTo(config, state.returnTo);
     const { tokens, expiresAt } = await exchangeGoogleCode(
       config,
       code,
@@ -141,7 +163,7 @@ async function handleCallback(
       accountName: userInfo.name ?? null,
       tokens,
       expiresAt,
-      scopes: readScopes(tokens.scope, config.scopes),
+      scopes: readScopes(tokens.scope, authorizationConfig.scopes),
       db: input.db,
     });
     await captureIntegrationAddedAnalytics({
@@ -149,6 +171,9 @@ async function handleCallback(
       workspaceId: session.workspaceId,
       provider,
     });
+    if (provider !== "gmail" || state.access === "gmail_mcp") {
+      await refreshGooglePluginAfterConnection(input, session, provider);
+    }
 
     return statusRedirect(session, state.returnTo, provider, "connected");
   } catch (error) {
@@ -159,6 +184,32 @@ async function handleCallback(
       error_message: error instanceof Error ? error.message : String(error),
     });
     return errorRedirect(state.returnTo);
+  }
+}
+
+async function refreshGooglePluginAfterConnection(
+  input: IngressInput,
+  session: Extract<Awaited<ReturnType<typeof resolveIngressSession>>, { kind: "actor" }>,
+  provider: GoogleIntegrationProvider,
+) {
+  if (!input.refreshPluginRegistrations) return;
+  try {
+    await input.refreshPluginRegistrations({
+      provider,
+      userWorkosId: session.userId,
+      workspaceIds: session.workspaces.map((entry) => entry.workspace.id),
+    });
+  } catch (error) {
+    logger.warn("Google plugin discovery refresh after connection failed", {
+      event:
+        provider === "google_drive"
+          ? "goat.google_drive_plugin_reconnect_refresh_failed"
+          : provider === "gmail"
+            ? "goat.gmail_plugin_reconnect_refresh_failed"
+            : "goat.google_calendar_plugin_reconnect_refresh_failed",
+      provider,
+      error_message: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 

@@ -45,6 +45,7 @@ import {
   DEFAULT_BRAIN_SLUG,
   getBrainAccess,
   getWorkspaceRole,
+  isLegacyBrainEnabledForWorkspace,
   listAccessibleBrains,
 } from "@opencompany/db/workspaces";
 import { createLogger } from "@opencompany/observability";
@@ -82,6 +83,7 @@ import {
   buildTaskTurnCompletion,
   closeTaskTurn,
   markTaskTurnRunning,
+  orchestrateTaskFailure,
   type TaskTurnContext,
 } from "./task-turn";
 import { loadWorkflowTaskSkillBundles } from "./workflow-skill-bundles";
@@ -182,11 +184,16 @@ export async function runProductChatTurn(input: {
       const message =
         "This workspace is out of credits. Hobby usage refreshes on the first of the month; Pro admins can add credits in Settings → Billing.";
       projection = { parts: [{ type: "text", text: message }] };
-      await projector.failed(
-        message,
-        projection,
-        input.taskContext ? buildTaskTerminalProjection(input.taskContext) : null,
-      );
+      const taskCompletion = input.taskContext
+        ? await orchestrateTaskFailure({
+            context: input.taskContext,
+            error: message,
+            env,
+            session,
+            turn,
+          })
+        : null;
+      await projector.failed(message, projection, taskCompletion);
       return "settled";
     }
   }
@@ -293,7 +300,7 @@ export async function runProductChatTurn(input: {
     const taskOutcome = input.taskContext
       ? await closeTaskTurn({
           context: input.taskContext,
-          finalContent: taskResult,
+          run: { status: "completed", result: taskResult },
           env,
           session,
           turn,
@@ -308,8 +315,13 @@ export async function runProductChatTurn(input: {
         ? buildTaskTurnCompletion({
             context: input.taskContext,
             result: taskResult,
-            reportedOutcome: taskOutcome?.reportedOutcome,
-            outcomeComment: taskOutcome?.outcomeComment,
+            disposition:
+              taskOutcome?.disposition === "done" ||
+              taskOutcome?.disposition === "needs_attention" ||
+              taskOutcome?.disposition === "waiting"
+                ? taskOutcome.disposition
+                : null,
+            outcomeComment: taskOutcome?.comment,
           })
         : null,
     );
@@ -350,11 +362,16 @@ export async function runProductChatTurn(input: {
       error_name: effectiveError instanceof Error ? effectiveError.name : typeof effectiveError,
       error: message,
     });
-    await projector.failed(
-      message,
-      projection,
-      input.taskContext ? buildTaskTerminalProjection(input.taskContext) : null,
-    );
+    const taskCompletion = input.taskContext
+      ? await orchestrateTaskFailure({
+          context: input.taskContext,
+          error: message,
+          env,
+          session,
+          turn,
+        })
+      : null;
+    await projector.failed(message, projection, taskCompletion);
     return "settled";
   } finally {
     await abortWatcher.stop();
@@ -956,9 +973,10 @@ async function resolveProductChatRuntime(input: {
   if (!workspaceRole) {
     throw new Error("You no longer have access to this chat's workspace.");
   }
+  const legacyBrainEnabled = await isLegacyBrainEnabledForWorkspace(workspaceId, { db: getDb() });
 
   let brain = null;
-  if (session.brainRef) {
+  if (legacyBrainEnabled && session.brainRef) {
     const access = await getBrainAccess(
       { userWorkosId: turn.userWorkosId, brainRef: session.brainRef },
       { db: getDb() },
@@ -967,7 +985,7 @@ async function resolveProductChatRuntime(input: {
       throw new Error("You no longer have access to this chat's Brain.");
     }
     brain = access.brain;
-  } else {
+  } else if (legacyBrainEnabled) {
     const brains = await listAccessibleBrains(
       { userWorkosId: turn.userWorkosId, workspaceId },
       { db: getDb() },
@@ -981,29 +999,26 @@ async function resolveProductChatRuntime(input: {
     signal,
     approvalContinuation: Boolean(turn.settings.approvalContinuation),
   });
-  const hostTools = taskContext
-    ? null
-    : await loadHostTools({
-        sessionId: session.id,
-        turnId: turn.id,
-        env,
-        signal,
-        mentionedSkillIds: (turn.settings.mentions ?? []).map((mention) => mention.id),
-        approvalContinuation: Boolean(turn.settings.approvalContinuation),
-      });
-  if (!taskContext && (!actionDispatcher || !hostTools)) {
+  const hostTools = await loadHostTools({
+    sessionId: session.id,
+    turnId: turn.id,
+    env,
+    signal,
+    mentionedSkillIds: (turn.settings.mentions ?? []).map((mention) => mention.id),
+    approvalContinuation: Boolean(turn.settings.approvalContinuation),
+  });
+  if (!actionDispatcher || !hostTools) {
     throw new Error("The durable Chat host gateways are not configured.");
   }
 
   const currentDate = new Date();
-  const brainCapture =
-    brain && !taskContext
-      ? createBrainCaptureRunner({
-          sessionId: session.id,
-          turnId: turn.id,
-          signal,
-        })
-      : null;
+  const brainCapture = brain
+    ? createBrainCaptureRunner({
+        sessionId: session.id,
+        turnId: turn.id,
+        signal,
+      })
+    : null;
   const exaApiKey = env.exaApiKey?.trim();
   const imessageDelivery =
     resolveImessageProvider() !== null
@@ -1102,7 +1117,7 @@ async function resolveProductChatRuntime(input: {
     browserToolsEnabled: Boolean(hostTools?.browserTools),
     taskToolsEnabled: Boolean(hostTools?.bootstrap.taskToolsEnabled),
     scheduleToolsEnabled: Boolean(hostTools?.bootstrap.taskToolsEnabled),
-    brainCaptureEnabled: Boolean(brainCapture),
+    wikiToolEnabled: Boolean(hostTools?.runWiki),
     activeBrain: brain
       ? {
           name: brain.name,

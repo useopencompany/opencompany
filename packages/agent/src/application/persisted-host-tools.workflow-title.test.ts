@@ -61,7 +61,7 @@ describe("persisted workflow host tools", () => {
           timezone: "Europe/London",
           taskToolsEnabled: true,
           skillToolsEnabled: true,
-          wikiEnabled: true,
+          legacyBrainEnabled: false,
         })),
       },
     });

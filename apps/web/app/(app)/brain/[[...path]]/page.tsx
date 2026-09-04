@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { BrainRoute } from "@/components/Routes";
 import { currentUser } from "@/lib/auth";
 import {
@@ -13,7 +14,8 @@ type PageProps = {
 export default async function BrainPage({ params }: PageProps) {
   const { path } = await params;
   const segments = path ?? [];
-  const { brains, activeBrain } = await currentUser();
+  const { brains, activeBrain, workspace } = await currentUser();
+  if (!workspace.legacyBrainEnabled) redirect("/wiki");
   const explicitBrain = segments[0] ? brains.find((brain) => brain.id === segments[0]) : null;
   const selectedBrain = explicitBrain ?? activeBrain;
   const routeBrainId = explicitBrain?.id ?? null;

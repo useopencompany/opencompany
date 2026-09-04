@@ -63,7 +63,7 @@ function harnessInput(
 }
 
 describe("AcpHarness", () => {
-  it("runs an ACP turn, streams updates, and answers permission requests", async () => {
+  it("starts Claude with core MCP tools ready while plugin MCP tools stay deferred", async () => {
     let resolvePermission: (() => void) | null = null;
     const permissionAnswered = new Promise<void>((resolve) => {
       resolvePermission = resolve;
@@ -87,6 +87,19 @@ describe("AcpHarness", () => {
       } else if (message.method === "session/set_config_option") {
         await emit({ jsonrpc: "2.0", id: message.id, result: {} });
       } else if (message.method === "session/prompt") {
+        await emit({
+          jsonrpc: "2.0",
+          method: "_claude/sdkMessage",
+          params: {
+            sessionId: "session_new",
+            message: {
+              type: "system",
+              subtype: "init",
+              tools: ["mcp__opencompany__list_actions", "mcp__opencompany__use_action"],
+              mcp_servers: [{ name: "opencompany", status: "connected" }],
+            },
+          },
+        });
         await emit({
           jsonrpc: "2.0",
           id: "permission_1",
@@ -122,19 +135,27 @@ describe("AcpHarness", () => {
     const onPermissionRequest = vi.fn(async () => ({
       outcome: { outcome: "selected" as const, optionId: "allow-once" },
     }));
+    const onNotification = vi.fn(async () => undefined);
     const onEngineStopped = vi.fn(async () => undefined);
     const input = harnessInput(transport.sandbox, {
       mcpServers: [
         {
-          name: "opencompany-actions",
+          name: "opencompany",
           type: "http",
           url: "https://runner.example.test/mcp",
           headers: [{ name: "x-opencompany-tool-ticket", value: "ticket" }],
+        },
+        {
+          name: "plugin-linear",
+          type: "http",
+          url: "https://plugins.example.test/linear/mcp",
+          headers: [{ name: "authorization", value: "Bearer plugin-ticket" }],
         },
       ],
       onRuntimeEvents: vi.fn(async (events) => {
         runtimeEvents.push(...events);
       }),
+      onNotification,
       onPermissionRequest,
       onEngineStopped,
       model: "claude-sonnet-5",
@@ -153,16 +174,36 @@ describe("AcpHarness", () => {
       params: {
         mcpServers: [
           {
-            name: "opencompany-actions",
+            name: "plugin-linear",
             type: "http",
-            url: "https://runner.example.test/mcp",
-            headers: [{ name: "x-opencompany-tool-ticket", value: "ticket" }],
+            url: "https://plugins.example.test/linear/mcp",
+            headers: [{ name: "authorization", value: "Bearer plugin-ticket" }],
           },
         ],
-        _meta: { claudeCode: { options: { maxTurns: 250, strictMcpConfig: true } } },
+        _meta: {
+          claudeCode: {
+            emitRawSDKMessages: [{ type: "system", subtype: "init" }],
+            options: {
+              maxTurns: 250,
+              strictMcpConfig: true,
+              mcpServers: {
+                opencompany: {
+                  type: "http",
+                  url: "https://runner.example.test/mcp",
+                  headers: { "x-opencompany-tool-ticket": "ticket" },
+                  alwaysLoad: true,
+                },
+              },
+            },
+          },
+        },
       },
     });
     expect(input.onEngineSessionId).toHaveBeenCalledWith("session_new");
+    expect(onNotification).toHaveBeenCalledWith({
+      method: "_claude/sdkMessage",
+      params: expect.objectContaining({ sessionId: "session_new" }),
+    });
     expect(onPermissionRequest).toHaveBeenCalledWith(
       expect.objectContaining({ id: "permission_1", method: "session/request_permission" }),
     );
@@ -530,7 +571,16 @@ describe("AcpHarness", () => {
         await emit({
           jsonrpc: "2.0",
           id: message.id,
-          result: { agentCapabilities: { loadSession: true } },
+          result: {
+            agentCapabilities: { loadSession: true },
+            _meta: {
+              goal: {
+                version: 1,
+                controlMethod: "_custom/session_goal",
+                actions: ["set", "pause", "resume", "clear"],
+              },
+            },
+          },
         });
       } else if (message.method === "session/new") {
         await emit({
@@ -548,7 +598,7 @@ describe("AcpHarness", () => {
         });
       } else if (
         message.method === "session/set_config_option" ||
-        message.method === "_session/goal"
+        message.method === "_custom/session_goal"
       ) {
         await emit({ jsonrpc: "2.0", id: message.id, result: {} });
       } else if (message.method === "session/prompt") {
@@ -610,7 +660,7 @@ describe("AcpHarness", () => {
     expect(transport.requests).toContainEqual({
       jsonrpc: "2.0",
       id: expect.any(Number),
-      method: "_session/goal",
+      method: "_custom/session_goal",
       params: {
         sessionId: "codex_session",
         action: "set",
@@ -636,6 +686,95 @@ describe("AcpHarness", () => {
       id: "elicitation_1",
       result: { action: "accept", content: { branch: "feature/acp" } },
     });
+  });
+
+  it("falls back to a normal prompt when the adapter does not advertise Goal controls", async () => {
+    const transport = fakeAcpSandbox(async (message, emit) => {
+      if (message.method === "initialize") {
+        await emit({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: { agentCapabilities: { loadSession: true } },
+        });
+      } else if (message.method === "session/new") {
+        await emit({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: { sessionId: "codex_session", configOptions: [] },
+        });
+      } else if (message.method === "session/prompt") {
+        await emit({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: { stopReason: "end_turn" },
+        });
+      }
+    });
+
+    await new AcpHarness().runTurn(
+      harnessInput(transport.sandbox, {
+        adapter: CODEX_ACP_ENGINE_ADAPTER,
+        goal: { objective: "Finish issue 1324" },
+      }),
+    );
+
+    expect(transport.requests.some((request) => String(request.method).includes("goal"))).toBe(
+      false,
+    );
+    expect(transport.requests.some((request) => request.method === "session/prompt")).toBe(true);
+  });
+
+  it("lets an advertised Goal control run beyond the setup request timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const transport = fakeAcpSandbox(async (message, emit) => {
+        if (message.method === "initialize") {
+          await emit({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: {
+              agentCapabilities: { loadSession: true },
+              _meta: {
+                goal: {
+                  version: 1,
+                  controlMethod: "_session/goal",
+                  actions: ["set"],
+                },
+              },
+            },
+          });
+        } else if (message.method === "session/new") {
+          await emit({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: { sessionId: "codex_session", configOptions: [] },
+          });
+        } else if (message.method === "_session/goal") {
+          setTimeout(() => {
+            void emit({ jsonrpc: "2.0", id: message.id, result: {} });
+          }, 31_000);
+        } else if (message.method === "session/prompt") {
+          await emit({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: { stopReason: "end_turn" },
+          });
+        }
+      });
+      const run = new AcpHarness().runTurn(
+        harnessInput(transport.sandbox, {
+          adapter: CODEX_ACP_ENGINE_ADAPTER,
+          goal: { objective: "Finish issue 1324" },
+          timeoutMs: 60_000,
+        }),
+      );
+
+      await vi.advanceTimersByTimeAsync(31_000);
+
+      await expect(run).resolves.toMatchObject({ promptResponse: { stopReason: "end_turn" } });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("loads a stored session without projecting its replayed transcript", async () => {
@@ -691,6 +830,56 @@ describe("AcpHarness", () => {
     expect(result.loadedSession).toBe(true);
     expect(JSON.stringify(runtimeEvents)).not.toContain("Historical answer");
     expect(JSON.stringify(runtimeEvents)).toContain("Current answer");
+  });
+
+  it("fails the active prompt when a notification observer rejects", async () => {
+    const observerError = new Error("Required runtime capability was unavailable.");
+    const transport = fakeAcpSandbox(async (message, emit) => {
+      if (message.method === "initialize") {
+        await emit({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: { agentCapabilities: { loadSession: true } },
+        });
+      } else if (message.method === "session/new") {
+        await emit({ jsonrpc: "2.0", id: message.id, result: { sessionId: "session_guarded" } });
+      } else if (message.method === "session/prompt") {
+        await emit({
+          jsonrpc: "2.0",
+          method: "_claude/sdkMessage",
+          params: {
+            sessionId: "session_guarded",
+            message: { type: "system", subtype: "init" },
+          },
+        });
+        await Promise.resolve();
+        await emit({
+          jsonrpc: "2.0",
+          method: "session/update",
+          params: {
+            sessionId: "session_guarded",
+            update: {
+              sessionUpdate: "agent_message_chunk",
+              content: { type: "text", text: "Do not project after the observer fails." },
+            },
+          },
+        });
+      }
+    });
+    const runtimeEvents: Record<string, unknown>[] = [];
+    const input = harnessInput(transport.sandbox, {
+      onNotification: vi.fn(async (notification) => {
+        if (notification.method === "_claude/sdkMessage") throw observerError;
+      }),
+      onRuntimeEvents: vi.fn(async (events) => {
+        runtimeEvents.push(...events);
+      }),
+    });
+
+    await expect(new AcpHarness().runTurn(input)).rejects.toBe(observerError);
+
+    expect(JSON.stringify(runtimeEvents)).not.toContain("Do not project");
+    expect(transport.kill).toHaveBeenCalledWith(41);
   });
 
   it("injects Codex steering through the provider extension while a prompt is active", async () => {

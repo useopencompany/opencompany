@@ -26,7 +26,7 @@ export type ChatHostContext = {
   timezone: string;
   taskToolsEnabled: boolean;
   skillToolsEnabled: boolean;
-  wikiEnabled: boolean;
+  legacyBrainEnabled: boolean;
 };
 
 export type ChatHostToolCommand = {
@@ -480,7 +480,6 @@ async function executeOperation(
       });
     }
     case "wiki":
-      if (!context.wikiEnabled) throw new Error("Wiki is not enabled for this user.");
       return dependencies.runWikiTool({
         workspaceId: context.workspaceId,
         actorId: context.actorId,
@@ -531,7 +530,6 @@ async function bootstrap(
     workspaceName: context.workspaceName,
     taskToolsEnabled: context.taskToolsEnabled,
     skillToolsEnabled: context.skillToolsEnabled,
-    wikiEnabled: context.wikiEnabled,
     browserToolsEnabled: true,
     browserProfiles: browserProfiles.map(({ id, name, siteHost }) => ({ id, name, siteHost })),
     skills,
@@ -550,6 +548,7 @@ async function activeBrainRef(
   context: ChatHostContext,
   dependencies: ChatHostToolServiceDependencies,
 ) {
+  if (!context.legacyBrainEnabled) return null;
   if (context.brainRef) return context.brainRef;
   const brains = await dependencies.listBrains({
     actorId: context.actorId,
