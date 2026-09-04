@@ -1,0 +1,33 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "fathom",
+  "version": "1.0.0",
+  "description": "Search Fathom meetings and read summaries, transcripts, action items, and account metadata with approval.",
+  "author": {
+    "name": "opencompany",
+    "url": "https://opencompany.com"
+  },
+  "homepage": "https://developers.fathom.ai/mcp-docs",
+  "repository": "https://github.com/useopencompany/plugins/tree/main/fathom",
+  "license": "MIT",
+  "keywords": ["fathom", "meetings", "transcripts", "summaries", "action-items"],
+  "extensions": {
+    "so.opencompany.capabilities": {
+      "query": {
+        "label": "Read Fathom meetings",
+        "defaultMode": "ask",
+        "tools": [
+          "search_meetings",
+          "find_person",
+          "list_meetings",
+          "get_meeting_transcript",
+          "get_meeting_summary",
+          "get_recording_by_url",
+          "get_recording_by_call_id",
+          "list_teams",
+          "get_identity"
+        ]
+      }
+    }
+  }
+}

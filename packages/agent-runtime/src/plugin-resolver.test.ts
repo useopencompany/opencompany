@@ -558,6 +558,55 @@ describe("resolvePlugin", () => {
     });
   });
 
+  it("loads the official Fathom package with all meeting data behind Ask", async () => {
+    const fixtureRoot = fileURLToPath(new URL("./test-fixtures/plugins/fathom", import.meta.url));
+    const files = await fixtureFiles(fixtureRoot, "fathom");
+    const plugin = await resolvePlugin({
+      url: "useopencompany/plugins",
+      selectedPath: "fathom",
+      fetcher: fetcher(files),
+      trustedCapabilitySources: ["useopencompany/plugins"],
+    });
+
+    expect(plugin.manifest).toMatchObject({ name: "fathom", version: "1.0.0" });
+    expect(plugin.skills).toEqual([]);
+    expect(plugin.remoteServers).toEqual([
+      {
+        name: "fathom",
+        type: "streamable-http",
+        url: "https://api.fathom.ai/mcp",
+        headers: {},
+      },
+    ]);
+    expect(plugin.capabilities).toEqual([
+      {
+        id: "query",
+        label: "Read Fathom meetings",
+        defaultMode: "ask",
+        tools: [
+          "search_meetings",
+          "find_person",
+          "list_meetings",
+          "get_meeting_transcript",
+          "get_meeting_summary",
+          "get_recording_by_url",
+          "get_recording_by_call_id",
+          "list_teams",
+          "get_identity",
+        ],
+      },
+    ]);
+    expect(plugin.report.mcp).toMatchObject({
+      status: "parsed",
+      reports: [{ name: "fathom", status: "gateway-registered" }],
+    });
+    expect(plugin.report.capabilities).toEqual({
+      present: true,
+      status: "parsed",
+      issues: [],
+    });
+  });
+
   it("loads the official PostHog package with every reviewed analytics tool classified", async () => {
     const fixtureRoot = fileURLToPath(new URL("./test-fixtures/plugins/posthog", import.meta.url));
     const files = await fixtureFiles(fixtureRoot, "posthog");

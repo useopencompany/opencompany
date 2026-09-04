@@ -1,6 +1,7 @@
 export type OfficialMcpPluginName =
   | "attio"
   | "betterstack"
+  | "fathom"
   | "github"
   | "gmail"
   | "granola"
@@ -42,6 +43,7 @@ export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
   connectionProvider:
     | "attio"
     | "betterstack"
+    | "fathom"
     | "github_user"
     | "gmail"
     | "granola"
@@ -99,6 +101,20 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectionProvider: "betterstack",
     connectHref: "/api/integrations/betterstack/start?returnTo=/settings/plugins/betterstack",
     accountDescription: "The account opencompany uses when you run Better Stack tools.",
+  },
+  fathom: {
+    name: "fathom",
+    kind: "mcp",
+    label: "Fathom",
+    description: "Search meetings and read summaries, transcripts, and action items with approval.",
+    category: "productivity",
+    source:
+      "https://github.com/useopencompany/plugins/tree/444dd4dbfaaed6abd2c7c8000024c5be0ff4fa48/fathom",
+    connectionProvider: "fathom",
+    connectHref: "/api/integrations/fathom-mcp/start?returnTo=/settings/plugins/fathom",
+    accountDescription: "The Fathom account opencompany uses when you search meeting content.",
+    ingestionHref: "/wiki/sources",
+    ingestionLabel: "Configure legacy Fathom ingestion in Wiki sources",
   },
   github: {
     name: "github",

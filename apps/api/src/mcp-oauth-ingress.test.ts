@@ -8,6 +8,10 @@ import {
   startBetterStackMcpOAuth,
 } from "@opencompany/agent/integrations/betterstack-mcp";
 import {
+  completeFathomMcpOAuth,
+  startFathomMcpOAuth,
+} from "@opencompany/agent/integrations/fathom-mcp";
+import {
   completeGranolaMcpOAuth,
   startGranolaMcpOAuth,
 } from "@opencompany/agent/integrations/granola-mcp";
@@ -50,6 +54,11 @@ vi.mock("@opencompany/agent/integrations/betterstack-mcp", async (importOriginal
   ...(await importOriginal<Record<string, unknown>>()),
   startBetterStackMcpOAuth: vi.fn(),
   completeBetterStackMcpOAuth: vi.fn(),
+}));
+vi.mock("@opencompany/agent/integrations/fathom-mcp", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  startFathomMcpOAuth: vi.fn(),
+  completeFathomMcpOAuth: vi.fn(),
 }));
 vi.mock("@opencompany/agent/integrations/linear-mcp", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -98,6 +107,7 @@ const PROVIDERS: McpOAuthProvider[] = [
   "neon",
   "latitude",
   "betterstack",
+  "fathom",
   "signoz",
 ];
 
@@ -111,6 +121,7 @@ const flowMocks = {
   neon: { start: startNeonMcpOAuth, complete: completeNeonMcpOAuth },
   latitude: { start: startLatitudeMcpOAuth, complete: completeLatitudeMcpOAuth },
   betterstack: { start: startBetterStackMcpOAuth, complete: completeBetterStackMcpOAuth },
+  fathom: { start: startFathomMcpOAuth, complete: completeFathomMcpOAuth },
   signoz: { start: startSigNozMcpOAuth, complete: completeSigNozMcpOAuth },
 } as const;
 
@@ -248,6 +259,7 @@ describe("remote MCP OAuth ingress", () => {
           ? "/settings"
           : provider === "attio" ||
               provider === "betterstack" ||
+              provider === "fathom" ||
               provider === "signoz" ||
               provider === "hubspot" ||
               provider === "granola"

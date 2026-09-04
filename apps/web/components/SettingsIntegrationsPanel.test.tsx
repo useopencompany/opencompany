@@ -500,6 +500,26 @@ describe("SettingsIntegrationsPanel", () => {
     expect(screen.getByRole("button", { name: "Workspace" })).not.toHaveTextContent("1");
   });
 
+  it("removes the legacy Fathom card after the plugin cutover", () => {
+    const integrations = integrationStateFromRows([
+      {
+        id: "gint_fathom_ingest",
+        provider: "fathom",
+        externalId: "fathom:user_1",
+        accountName: "Fathom",
+        status: "connected",
+        capabilityModes: {},
+      },
+    ]) as IntegrationState;
+
+    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
+
+    expect(
+      screen.queryByText("Meeting recordings flow in after Fathom finishes each summary."),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Workspace" })).not.toHaveTextContent("1");
+  });
+
   it("keeps Attio ingestion accounts off the legacy integrations surface", () => {
     const integrations = integrationStateFromRows([
       {

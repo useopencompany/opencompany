@@ -21,6 +21,7 @@ export type ActionProviderId =
   | "betterstack"
   | "render"
   | "signoz"
+  | "fathom"
   | "x_account";
 
 export type ActionSourceId = ActionProviderId | ManagedCapabilitySource | `plugin:${string}`;

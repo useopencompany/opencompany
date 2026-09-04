@@ -1829,6 +1829,8 @@ describe("canonical Hono API", () => {
       ["GET", "/integrations/latitude/callback", "mcp.callback.latitude"],
       ["GET", "/integrations/signoz/start", "mcp.start.signoz"],
       ["GET", "/integrations/signoz/callback", "mcp.callback.signoz"],
+      ["GET", "/integrations/fathom-mcp/start", "mcp.start.fathom"],
+      ["GET", "/integrations/fathom-mcp/callback", "mcp.callback.fathom"],
       ["GET", "/integrations/x-account/start", "x-account.start"],
       ["GET", "/integrations/x-account/callback", "x-account.callback"],
       ["GET", "/integrations/slack-bot/start", "slack-bot.start"],

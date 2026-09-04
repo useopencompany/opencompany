@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   discoverSnapshot: vi.fn(),
   getState: vi.fn(),
   getGitHubState: vi.fn(),
+  getFathomState: vi.fn(),
   getGmailState: vi.fn(),
   loadGmailConnection: vi.fn(),
   getGranolaState: vi.fn(),
@@ -19,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   getGoogleCalendarState: vi.fn(),
   loadConnection: vi.fn(),
   loadGitHubConnection: vi.fn(),
+  loadFathomConnection: vi.fn(),
   getGoogleDriveState: vi.fn(),
   loadGoogleDriveConnection: vi.fn(),
   loadGoogleCalendarConnection: vi.fn(),
@@ -75,6 +77,11 @@ vi.mock("./integrations/github-user-mcp", () => ({
   GITHUB_USER_MCP_ENDPOINT_URL: "https://api.githubcopilot.com/mcp/",
   getGitHubUserMcpIntegrationState: mocks.getGitHubState,
   loadGitHubUserMcpWorkerConnection: mocks.loadGitHubConnection,
+}));
+vi.mock("./integrations/fathom-mcp", () => ({
+  FATHOM_MCP_ENDPOINT_URL: "https://api.fathom.ai/mcp",
+  getFathomMcpIntegrationState: mocks.getFathomState,
+  loadFathomMcpWorkerConnection: mocks.loadFathomConnection,
 }));
 vi.mock("./integrations/gmail-mcp", () => ({
   GMAIL_MCP_ENDPOINT_URL: "https://api.opencompany.chat/mcp/plugins/gmail",
@@ -330,6 +337,48 @@ describe("plugin gateway registration cache", () => {
       {
         ...xRecord,
         server: { ...xRecord.server, url: "https://api.x.com.evil.example/mcp" },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
+  it("binds Fathom credentials only to Fathom's exact hosted MCP endpoint", async () => {
+    const fathomRecord = record({
+      pluginName: "fathom",
+      pluginLabel: "fathom",
+      pluginDescription: "Fathom meeting tools.",
+      connectionProvider: "fathom",
+      server: {
+        name: "fathom",
+        type: "streamable-http",
+        url: "https://api.fathom.ai/mcp",
+        headers: {},
+      },
+      capabilities: [
+        {
+          id: "query",
+          label: "Read Fathom meetings",
+          defaultMode: "ask",
+          tools: ["search_meetings", "get_meeting_transcript"],
+        },
+      ],
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([fathomRecord]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:fathom:fathom",
+        connectionProvider: "fathom",
+        getState: mocks.getFathomState,
+        loadConnection: mocks.loadFathomConnection,
+      }),
+    ]);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...fathomRecord,
+        server: { ...fathomRecord.server, url: "https://api.fathom.ai.evil.example/mcp" },
       },
     ]);
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);

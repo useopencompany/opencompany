@@ -2850,6 +2850,8 @@ export function createApiApp(input: CreateApiAppInput) {
     app.get("/integrations/betterstack/callback", (c) =>
       ingress.callback("betterstack", c.req.raw),
     );
+    app.get("/integrations/fathom-mcp/start", (c) => ingress.start("fathom", c.req.raw));
+    app.get("/integrations/fathom-mcp/callback", (c) => ingress.callback("fathom", c.req.raw));
     app.get("/integrations/signoz/start", (c) => ingress.start("signoz", c.req.raw));
     app.get("/integrations/signoz/callback", (c) => ingress.callback("signoz", c.req.raw));
     app.get("/integrations/linear/start", (c) => ingress.start("linear", c.req.raw));

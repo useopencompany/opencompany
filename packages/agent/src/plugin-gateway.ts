@@ -25,6 +25,11 @@ import {
   loadBetterStackMcpWorkerConnection,
 } from "./integrations/betterstack-mcp";
 import {
+  FATHOM_MCP_ENDPOINT_URL,
+  getFathomMcpIntegrationState,
+  loadFathomMcpWorkerConnection,
+} from "./integrations/fathom-mcp";
+import {
   GITHUB_USER_MCP_ENDPOINT_URL,
   getGitHubUserMcpIntegrationState,
   loadGitHubUserMcpWorkerConnection,
@@ -129,6 +134,12 @@ const providerBindings = {
     endpointUrl: GITHUB_USER_MCP_ENDPOINT_URL,
     getState: getGitHubUserMcpIntegrationState,
     loadConnection: loadGitHubUserMcpWorkerConnection,
+  },
+  fathom: {
+    provider: "fathom",
+    endpointUrl: FATHOM_MCP_ENDPOINT_URL,
+    getState: getFathomMcpIntegrationState,
+    loadConnection: loadFathomMcpWorkerConnection,
   },
   gmail: {
     provider: "gmail",
