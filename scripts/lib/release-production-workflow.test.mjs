@@ -53,6 +53,17 @@ test("tracks and finalizes every production surface independently", async () => 
   assert.match(workflow, /state=inactive/u);
 });
 
+test("does not fail a release that a newer main commit superseded", async () => {
+  const workflow = await readFile(workflowUrl, "utf8");
+  const resultGate = workflow.slice(workflow.indexOf("- name: Require every selected surface"));
+
+  assert.match(
+    resultGate,
+    /if: \$\{\{ always\(\) && !cancelled\(\) && steps\.current-before-deploy\.outputs\.should_release == 'true' \}\}/u,
+  );
+  assert.doesNotMatch(resultGate, /steps\.current-before-migration\.outputs\.should_release/u);
+});
+
 test("production credentials are scoped to the release job", async () => {
   const workflow = await readFile(workflowUrl, "utf8");
   const releaseStart = workflow.indexOf("  release:\n");
