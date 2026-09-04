@@ -20,7 +20,7 @@ describe("resolveProductLanguageModel", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("recognizes only the subscription-eligible model IDs", () => {
-    expect(isCodexSubscriptionModel("openai/gpt-6-astra")).toBe(true);
+    expect(isCodexSubscriptionModel("openai/gpt-6-astra")).toBe(false);
     expect(isCodexSubscriptionModel("openai/gpt-5.6-sol")).toBe(true);
     expect(isCodexSubscriptionModel("openai/gpt-5.6-terra")).toBe(true);
     expect(isCodexSubscriptionModel("openai/gpt-5.6-luna")).toBe(false);
@@ -44,6 +44,7 @@ describe("resolveProductLanguageModel", () => {
 
     expect(resolution.provider).toBe("codex-backend");
     expect(resolution.billing).toBe("subscription_covered");
+    expect((resolution.model as { modelId: string }).modelId).toBe("gpt-5.6-sol");
     expect(mocks.createGateway).not.toHaveBeenCalled();
   });
 

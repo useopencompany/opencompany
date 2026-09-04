@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AGENT_MODEL_CATALOG,
+  AVAILABLE_AGENT_MODEL_CATALOG,
   CLAUDE_CODE_AGENT_MODEL_IDS,
   CODEX_AGENT_MODEL_IDS,
   CODEX_DEFAULT_MODEL_ID,
@@ -9,16 +10,17 @@ import {
   codexCliModelNameForModelId,
   getAgentModelRuntimeOptions,
   isCodexModelId,
+  resolveAvailableAgentModelId,
 } from "./models";
 
 describe("Codex model catalog", () => {
-  it("offers GPT 6 Astra and the latest GPT 5.6 family for new Codex work", () => {
+  it("offers the verified GPT 5.6 family for new Codex work", () => {
     expect(CODEX_AGENT_MODEL_IDS).toEqual([
-      "openai/gpt-6-astra",
       "openai/gpt-5.6-sol",
       "openai/gpt-5.6-terra",
       "openai/gpt-5.6-luna",
     ]);
+    expect(isCodexModelId("openai/gpt-6-astra")).toBe(false);
     expect(isCodexModelId("openai/gpt-5.5")).toBe(false);
     expect(isCodexModelId("openai/gpt-5.4")).toBe(false);
     expect(isCodexModelId("openai/gpt-5.4-mini")).toBe(false);
@@ -30,13 +32,21 @@ describe("Codex model catalog", () => {
   });
 
   it.each([
-    ["openai/gpt-6-astra", "gpt-6-astra"],
     ["openai/gpt-5.6-sol", "gpt-5.6-sol"],
     ["openai/gpt-5.6-terra", "gpt-5.6-terra"],
     ["openai/gpt-5.6-luna", "gpt-5.6-luna"],
   ])("maps %s to its Codex CLI model name", (modelId, cliModel) => {
     expect(isCodexModelId(modelId)).toBe(true);
     expect(codexCliModelNameForModelId(modelId)).toBe(cliModel);
+  });
+
+  it("maps persisted rollout-gated Astra work to Sol", () => {
+    expect(resolveAvailableAgentModelId("openai/gpt-6-astra")).toBe(CODEX_DEFAULT_MODEL_ID);
+    expect(codexCliModelNameForModelId("openai/gpt-6-astra")).toBe("gpt-5.6-sol");
+    expect(AVAILABLE_AGENT_MODEL_CATALOG.map((model) => model.id)).not.toContain(
+      "openai/gpt-6-astra",
+    );
+    expect(AGENT_MODEL_CATALOG.map((model) => model.id)).toContain("openai/gpt-6-astra");
   });
 
   it("keeps retired Codex selections runnable for persisted work", () => {

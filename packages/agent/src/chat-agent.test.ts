@@ -335,6 +335,24 @@ describe("start_task tool", () => {
     expect(startTask).not.toHaveBeenCalled();
   });
 
+  it("rejects a rollout-gated model for a new task", async () => {
+    const startTask = vi.fn();
+    const context = createProductChatToolContext({ model, startTask });
+    const startTaskTool = context.tools[START_TASK_TOOL_NAME] as {
+      execute: (args: unknown) => Promise<unknown>;
+    };
+
+    await expect(
+      startTaskTool.execute({
+        name: "Analyze launch",
+        prompt: "Analyze the launch.",
+        engine: "opencompany",
+        model: "openai/gpt-6-astra",
+      }),
+    ).rejects.toThrow('Unsupported task model "openai/gpt-6-astra"');
+    expect(startTask).not.toHaveBeenCalled();
+  });
+
   it("starts distinct tasks for separate calls in the same turn", async () => {
     const startTask = vi.fn(
       async (task: { prompt: string; name?: string }, context: { toolCallId: string }) => ({

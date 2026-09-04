@@ -5,7 +5,9 @@ import {
   codexCliModelNameForModelId,
   isClaudeCodeModelId,
   isCodexModelId,
+  resolveAvailableAgentModelId,
 } from "@opencompany/agent-runtime";
+import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { Actor, ChatEngine } from "@opencompany/core";
 import type { MessageEngine } from "@opencompany/protocol";
 import type { EngineAuthService } from "./engine-auth";
@@ -31,7 +33,8 @@ export async function admitEngineMessage(input: {
   auth: Pick<EngineAuthService, "getClaudeCodeStatus" | "getCodexStatus">;
 }): Promise<EngineMessageAdmission> {
   if (input.engine.type === "opencompany") {
-    const model = input.model ?? input.defaultProductModel;
+    const requestedModel = input.model ?? input.defaultProductModel;
+    const model = resolveAvailableAgentModelId(requestedModel as AgentModelId);
     return { engine: "opencompany", model, runtimeModel: model };
   }
 
@@ -40,7 +43,8 @@ export async function admitEngineMessage(input: {
     if (status.status !== "connected") {
       throw new ApiError(409, "conflict", CODEX_DISCONNECTED_MESSAGE);
     }
-    const model = input.model ?? CODEX_DEFAULT_MODEL_ID;
+    const requestedModel = input.model ?? CODEX_DEFAULT_MODEL_ID;
+    const model = resolveAvailableAgentModelId(requestedModel as AgentModelId);
     if (!isCodexModelId(model)) {
       throw new ApiError(400, "invalid_request", "Select a supported Codex model.");
     }

@@ -1,3 +1,5 @@
+import { resolveAvailableAgentModelId } from "@opencompany/agent-runtime";
+import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { getDb } from "@opencompany/db/client";
 import { loadWorkspaceCodexEngineAccount } from "@opencompany/db/codex-auth";
 import { createGateway, type LanguageModel } from "ai";
@@ -6,11 +8,7 @@ import {
   createCodexBackendLanguageModel,
 } from "./codex-backend-language-model";
 
-export const CODEX_SUBSCRIPTION_MODEL_IDS = [
-  "openai/gpt-6-astra",
-  "openai/gpt-5.6-sol",
-  "openai/gpt-5.6-terra",
-] as const;
+export const CODEX_SUBSCRIPTION_MODEL_IDS = ["openai/gpt-5.6-sol", "openai/gpt-5.6-terra"] as const;
 
 export type ProductModelFeature = "chat" | "task" | "slack-bot";
 export type ProductModelBilling = "metered_gateway" | "subscription_covered";
@@ -35,7 +33,8 @@ export async function resolveProductLanguageModel(input: {
   fetchImpl?: typeof fetch;
 }): Promise<ProductLanguageModelResolution> {
   const db = input.db ?? getDb();
-  if (isCodexSubscriptionModel(input.modelId)) {
+  const modelId = resolveAvailableAgentModelId(input.modelId as AgentModelId);
+  if (isCodexSubscriptionModel(modelId)) {
     const account = await loadWorkspaceCodexEngineAccount({
       db,
       workspaceId: input.workspaceId,
@@ -45,7 +44,7 @@ export async function resolveProductLanguageModel(input: {
         model: createCodexBackendLanguageModel({
           db,
           userWorkosId: account.providerUserWorkosId,
-          modelId: input.modelId,
+          modelId,
           ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
         }),
         provider: "codex-backend",
@@ -60,7 +59,7 @@ export async function resolveProductLanguageModel(input: {
   }
   const gateway = createGateway({ apiKey: input.gatewayApiKey });
   return {
-    model: gateway(input.modelId),
+    model: gateway(modelId),
     provider: "gateway",
     billing: "metered_gateway",
   };
