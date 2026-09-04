@@ -31,16 +31,6 @@ export const WIKI_SOURCE_PROVIDERS: WikiSourceProviderDef[] = [
     scopeRequired: true,
   },
   {
-    id: "jamie",
-    name: "Jamie",
-    description: "Add completed meeting notes to your workspace Wiki automatically.",
-    monogram: "J",
-    tileClass: "bg-[#5B5BD6] text-white",
-    connectionKind: "webhook",
-    connectHref: "/settings/jamie",
-    scopeRequired: false,
-  },
-  {
     id: "granola",
     name: "Granola",
     description: "Feed finished Granola meeting summaries into your workspace Wiki.",

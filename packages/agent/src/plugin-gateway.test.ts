@@ -26,6 +26,8 @@ const mocks = vi.hoisted(() => ({
   loadGoogleCalendarConnection: vi.fn(),
   getHubSpotState: vi.fn(),
   loadHubSpotConnection: vi.fn(),
+  getJamieState: vi.fn(),
+  loadJamieConnection: vi.fn(),
   getLatitudeState: vi.fn(),
   loadLatitudeConnection: vi.fn(),
   getNeonState: vi.fn(),
@@ -111,6 +113,11 @@ vi.mock("./integrations/hubspot-mcp", () => ({
   HUBSPOT_MCP_ENDPOINT_URL: "https://mcp.hubspot.com",
   getHubSpotMcpIntegrationState: mocks.getHubSpotState,
   loadHubSpotMcpWorkerConnection: mocks.loadHubSpotConnection,
+}));
+vi.mock("./integrations/jamie-mcp", () => ({
+  JAMIE_MCP_ENDPOINT_URL: "https://mcp.meetjamie.ai/mcp",
+  getJamieMcpIntegrationState: mocks.getJamieState,
+  loadJamieMcpWorkerConnection: mocks.loadJamieConnection,
 }));
 vi.mock("./integrations/posthog-mcp", () => ({
   POSTHOG_MCP_ENDPOINT_URL:
@@ -751,6 +758,55 @@ describe("plugin gateway registration cache", () => {
       {
         ...hubspotRecord,
         server: { ...hubspotRecord.server, url: "https://evil.example/mcp" },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
+  it("binds Jamie OAuth credentials only to Jamie's exact hosted MCP endpoint", async () => {
+    const jamieRecord = record({
+      pluginName: "jamie",
+      pluginLabel: "jamie",
+      pluginDescription: "Jamie meeting tools.",
+      connectionProvider: "jamie",
+      server: {
+        name: "jamie",
+        type: "streamable-http",
+        url: "https://mcp.meetjamie.ai/mcp",
+        headers: {},
+      },
+      capabilities: [
+        {
+          id: "query",
+          label: "Read meetings & tasks",
+          defaultMode: "ask",
+          tools: ["list_meetings", "get_meeting", "list_tasks"],
+        },
+      ],
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([jamieRecord]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:jamie:jamie",
+        connectionProvider: "jamie",
+        getState: mocks.getJamieState,
+        loadConnection: mocks.loadJamieConnection,
+        capabilities: [
+          expect.objectContaining({
+            id: "query",
+            defaultMode: "ask",
+            tools: ["list_meetings", "get_meeting", "list_tasks"],
+          }),
+        ],
+      }),
+    ]);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...jamieRecord,
+        server: { ...jamieRecord.server, url: "https://mcp.meetjamie.ai.evil.example/mcp" },
       },
     ]);
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);

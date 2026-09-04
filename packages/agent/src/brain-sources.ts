@@ -15,7 +15,6 @@ import {
 } from "@opencompany/db/attio";
 import {
   deleteBrainSource,
-  hasAnyBrainSourceForIntegration,
   listBrainSourcesForBrain,
   listPersonalIntegrationAccounts,
   setBrainSourceEnabled,
@@ -63,7 +62,7 @@ import {
   integrations,
   isWorkspaceOwnedIntegrationProvider,
 } from "@opencompany/db/product-schema";
-import { getBrainAccess, getDefaultBrainForUser } from "@opencompany/db/workspaces";
+import { getBrainAccess } from "@opencompany/db/workspaces";
 import { and, desc, eq, inArray, isNull, ne, or, type SQL } from "drizzle-orm";
 import { getAppUrl } from "./app-url";
 import type {
@@ -73,7 +72,6 @@ import type {
   GoogleDriveSourceProviderState,
   GranolaProviderState,
   HubspotSourceProviderState,
-  JamieProviderState,
   LinearSourceProviderState,
 } from "./integration-state";
 import { FATHOM_MCP_EXTERNAL_ID } from "./integrations/fathom-mcp";
@@ -92,7 +90,6 @@ import { GRANOLA_MCP_EXTERNAL_ID } from "./integrations/granola-mcp";
 type DbLike = any;
 
 const SOURCE_INTEGRATION_PROVIDERS = [
-  "jamie",
   "gmail",
   "google_drive",
   "github",
@@ -102,7 +99,6 @@ const SOURCE_INTEGRATION_PROVIDERS = [
   "fathom",
   "attio",
 ] as const satisfies readonly IntegrationProvider[];
-const JAMIE_API_KEY_EXTERNAL_ID_PREFIX = "jamie_api_key_sha256:";
 
 export type BrainSourceView = {
   sourceId: string;
@@ -139,11 +135,6 @@ export type BrainSourcesDetails = {
     "linear" | "gmail" | "google_drive" | "hubspot" | "granola" | "fathom" | "attio",
     OwnSourceAccount[]
   >;
-  jamie: {
-    integration: JamieProviderState;
-    legacyDefaultDelivery: boolean;
-    isDefaultBrain: boolean;
-  };
   linear: { integration: LinearSourceProviderState };
   github: { integration: GitHubProviderState };
   gmail: { integration: GmailSourceProviderState };
@@ -264,17 +255,10 @@ export class BrainSourceApplicationService {
       this.listOwnAccounts(actor.userId),
     ]);
     const state = sourceProviderStates(integrationRows, actor);
-    const jamieConfigured = state.jamie.integrationId
-      ? await hasAnyBrainSourceForIntegration(state.jamie.integrationId, this.db)
-      : false;
-    const jamieOwnerDefaultBrain = state.jamie.integrationId
-      ? await this.defaultBrainForIntegrationOwner(state.jamie.integrationId)
-      : null;
-
     return {
       viewer: { actorId: actor.userId, isAdmin },
       sources: sources
-        .filter((source) => source.provider !== "slack")
+        .filter((source) => source.provider !== "slack" && source.provider !== "jamie")
         .map((source) => {
           const workspaceOwned = Boolean(source.integrationWorkspaceId);
           const ownWorkspaceSource =
@@ -301,11 +285,6 @@ export class BrainSourceApplicationService {
           };
         }),
       ownAccounts,
-      jamie: {
-        integration: state.jamie,
-        legacyDefaultDelivery: state.jamie.apiKeyConfigured && !jamieConfigured,
-        isDefaultBrain: jamieOwnerDefaultBrain?.id === id,
-      },
       linear: { integration: state.linear },
       github: { integration: state.github },
       gmail: { integration: state.gmail },
@@ -434,27 +413,6 @@ export class BrainSourceApplicationService {
     const integration = await this.loadSourceIntegration(actor, integrationId, integrationProvider);
     if (!integration || integration.status === "disconnected") {
       throw new CoreError("conflict", "Connect this integration in your settings first.");
-    }
-    if (provider === "jamie" && !isJamieApiKeyConfigured(integration)) {
-      throw new CoreError("conflict", "Save the Jamie API key before adding it as a brain source.");
-    }
-
-    const hadExplicitConfig = await hasAnyBrainSourceForIntegration(integrationId, this.db);
-    if (!hadExplicitConfig && provider === "jamie") {
-      const defaultBrain = await getDefaultBrainForUser(integration.userWorkosId, {
-        db: this.db,
-      });
-      if (defaultBrain && defaultBrain.id !== brainId) {
-        await upsertBrainSource({
-          brainRef: defaultBrain.id,
-          provider,
-          integrationId,
-          userWorkosId: integration.userWorkosId,
-          createdByWorkosId: actor.userId,
-          enabled: true,
-          db: this.db,
-        });
-      }
     }
     await this.upsertSource(actor, {
       brainRef: brainId,
@@ -940,22 +898,13 @@ export class BrainSourceApplicationService {
       ]),
     ) as BrainSourcesDetails["ownAccounts"];
   }
-
-  private async defaultBrainForIntegrationOwner(integrationId: string) {
-    const [row] = await this.db
-      .select({ userWorkosId: integrations.userWorkosId })
-      .from(integrations)
-      .where(eq(integrations.id, integrationId))
-      .limit(1);
-    return row ? getDefaultBrainForUser(row.userWorkosId, { db: this.db }) : null;
-  }
 }
 
 function sourceProviderStates(rows: IntegrationRow[], actor: Actor) {
-  const workspaceRow = (provider: "jamie" | "github") =>
+  const workspaceRow = (provider: "github") =>
     rows.find((row) => row.provider === provider && row.workspaceId === actor.workspaceId);
   const personalRow = (
-    provider: Exclude<(typeof SOURCE_INTEGRATION_PROVIDERS)[number], "jamie" | "github">,
+    provider: Exclude<(typeof SOURCE_INTEGRATION_PROVIDERS)[number], "github">,
   ) => {
     const usesLatestActiveRow =
       provider === "granola" || provider === "fathom" || provider === "attio";
@@ -970,7 +919,6 @@ function sourceProviderStates(rows: IntegrationRow[], actor: Actor) {
         (!usesLatestActiveRow || row.status !== "disconnected"),
     );
   };
-  const jamieRow = connectedStateRow(workspaceRow("jamie"));
   const linearRow = connectedStateRow(personalRow("linear"));
   const githubRow = connectedStateRow(workspaceRow("github"));
   const gmailRow = connectedStateRow(personalRow("gmail"));
@@ -980,18 +928,6 @@ function sourceProviderStates(rows: IntegrationRow[], actor: Actor) {
   const fathomRow = connectedStateRow(personalRow("fathom"));
   const attioRow = connectedStateRow(personalRow("attio"));
   return {
-    jamie: jamieRow
-      ? {
-          provider: "jamie" as const,
-          connected: jamieRow.status === "connected",
-          status: jamieRow.status,
-          accountName: jamieRow.accountName,
-          statusReason: jamieRow.statusReason,
-          integrationId: jamieRow.id,
-          webhookUrl: `${getAppUrl()}/api/webhooks/jamie`,
-          apiKeyConfigured: isJamieApiKeyConfigured(jamieRow),
-        }
-      : emptyJamieState(),
     linear: linearRow
       ? {
           provider: "linear" as const,
@@ -1118,19 +1054,6 @@ function googleDriveBoundaryError(
   return new CoreError("unavailable", options.fallback);
 }
 
-function emptyJamieState(): JamieProviderState {
-  return {
-    provider: "jamie",
-    connected: false,
-    status: "not_connected",
-    accountName: null,
-    statusReason: null,
-    integrationId: null,
-    webhookUrl: null,
-    apiKeyConfigured: false,
-  };
-}
-
 function emptyLinearState(): LinearSourceProviderState {
   return {
     provider: "linear",
@@ -1241,12 +1164,6 @@ function brainSourceCapabilities(source: ExistingBrainSourceRow, actor: Actor) {
   }
   const isOwn = source.userWorkosId === actor.userId;
   return { canConfigure: isOwn, canToggle: isOwn || isAdmin, canRemove: isOwn || isAdmin };
-}
-
-function isJamieApiKeyConfigured(input: Pick<IntegrationRow, "status" | "externalId">) {
-  return (
-    input.status === "connected" || input.externalId.startsWith(JAMIE_API_KEY_EXTERNAL_ID_PREFIX)
-  );
 }
 
 function requireBrainRead(actor: Actor) {

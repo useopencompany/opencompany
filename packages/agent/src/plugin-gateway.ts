@@ -63,6 +63,11 @@ import {
   loadHubSpotMcpWorkerConnection,
 } from "./integrations/hubspot-mcp";
 import {
+  getJamieMcpIntegrationState,
+  JAMIE_MCP_ENDPOINT_URL,
+  loadJamieMcpWorkerConnection,
+} from "./integrations/jamie-mcp";
+import {
   getLatitudeIntegrationState,
   LATITUDE_MCP_ENDPOINT_URL,
   loadLatitudeMcpWorkerConnection,
@@ -200,6 +205,12 @@ const providerBindings = {
     endpointUrl: LATITUDE_MCP_ENDPOINT_URL,
     getState: getLatitudeIntegrationState,
     loadConnection: loadLatitudeMcpWorkerConnection,
+  },
+  jamie: {
+    provider: "jamie",
+    endpointUrl: JAMIE_MCP_ENDPOINT_URL,
+    getState: getJamieMcpIntegrationState,
+    loadConnection: loadJamieMcpWorkerConnection,
   },
   slack: {
     provider: "slack",

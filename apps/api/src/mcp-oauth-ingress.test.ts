@@ -20,6 +20,10 @@ import {
   startHubSpotMcpOAuth,
 } from "@opencompany/agent/integrations/hubspot-mcp";
 import {
+  completeJamieMcpOAuth,
+  startJamieMcpOAuth,
+} from "@opencompany/agent/integrations/jamie-mcp";
+import {
   completeLatitudeMcpOAuth,
   startLatitudeMcpOAuth,
 } from "@opencompany/agent/integrations/latitude-mcp";
@@ -70,6 +74,11 @@ vi.mock("@opencompany/agent/integrations/hubspot-mcp", async (importOriginal) =>
   startHubSpotMcpOAuth: vi.fn(),
   completeHubSpotMcpOAuth: vi.fn(),
 }));
+vi.mock("@opencompany/agent/integrations/jamie-mcp", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  startJamieMcpOAuth: vi.fn(),
+  completeJamieMcpOAuth: vi.fn(),
+}));
 vi.mock("@opencompany/agent/integrations/granola-mcp", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   startGranolaMcpOAuth: vi.fn(),
@@ -109,6 +118,7 @@ const PROVIDERS: McpOAuthProvider[] = [
   "betterstack",
   "fathom",
   "signoz",
+  "jamie",
 ];
 
 // The mocked module-level start/complete wrappers, keyed like the ingress.
@@ -123,6 +133,7 @@ const flowMocks = {
   betterstack: { start: startBetterStackMcpOAuth, complete: completeBetterStackMcpOAuth },
   fathom: { start: startFathomMcpOAuth, complete: completeFathomMcpOAuth },
   signoz: { start: startSigNozMcpOAuth, complete: completeSigNozMcpOAuth },
+  jamie: { start: startJamieMcpOAuth, complete: completeJamieMcpOAuth },
 } as const;
 
 function ingress(
@@ -262,6 +273,7 @@ describe("remote MCP OAuth ingress", () => {
               provider === "fathom" ||
               provider === "signoz" ||
               provider === "hubspot" ||
+              provider === "jamie" ||
               provider === "granola"
             ? `/settings/plugins/${provider}`
             : "/settings/integrations";

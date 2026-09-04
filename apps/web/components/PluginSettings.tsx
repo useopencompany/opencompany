@@ -30,6 +30,7 @@ import { cn } from "@opencompany/ui/lib/utils";
 import {
   Activity,
   Archive,
+  AudioLines,
   ChevronDown,
   ExternalLink,
   FileArchive,
@@ -170,6 +171,11 @@ export const OFFICIAL_MCP_PLUGINS = {
     Icon: HubSpotIcon,
     iconClassName: "bg-[#FF7A59] text-white",
   },
+  jamie: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.jamie,
+    Icon: AudioLines,
+    iconClassName: "bg-[#5B5BD6] text-white",
+  },
   latitude: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.latitude,
     Icon: Activity,
@@ -242,6 +248,8 @@ export const GOOGLE_DRIVE_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS["google-drive"].nam
 export const GOOGLE_DRIVE_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS["google-drive"].source;
 export const HUBSPOT_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.hubspot.name;
 export const HUBSPOT_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.hubspot.source;
+export const JAMIE_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.jamie.name;
+export const JAMIE_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.jamie.source;
 export const ATTIO_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.attio.name;
 export const ATTIO_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.attio.source;
 export const LATITUDE_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.latitude.name;

@@ -2,10 +2,6 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { saveAttioApiKeyAction } from "./attio-actions";
-import {
-  createOrResetJamieWebhookEndpointAction,
-  saveJamieWebhookApiKeyAction,
-} from "./jamie-actions";
 import { saveRenderApiKeyAction } from "./render-actions";
 import {
   disconnectStripeIntegrationAction,
@@ -141,25 +137,5 @@ describe("provider account command adapters", () => {
     expect(request.method).toBe("DELETE");
     expect(new URL(request.url).pathname).toBe("/v1/integration-accounts/stripe");
     expect(revalidatePath).toHaveBeenCalledWith("/", "layout");
-  });
-
-  it("returns the Jamie webhook setup exactly as the API delivers it", async () => {
-    const setup = {
-      integrationId: "gint_jamie",
-      webhookUrl: "https://app.example.test/api/webhooks/jamie",
-      headerName: "x-api-key",
-      apiKeyConfigured: false,
-    };
-    const requests = stubApi(() => Response.json({ data: { setup }, meta }));
-    await expect(createOrResetJamieWebhookEndpointAction()).resolves.toEqual({ ok: true, setup });
-    expect(new URL((requests[0] as Request).url).pathname).toBe(
-      "/v1/integration-accounts/jamie/webhook-endpoint",
-    );
-
-    stubApi(() => errorEnvelope("Create a Jamie webhook endpoint before saving the API key.", 400));
-    await expect(saveJamieWebhookApiKeyAction("sk_x")).resolves.toEqual({
-      ok: false,
-      error: "Create a Jamie webhook endpoint before saving the API key.",
-    });
   });
 });

@@ -97,7 +97,6 @@ import {
   IntegrationCapabilityModeEnvelopeSchema,
   InviteWorkspaceMemberBodySchema,
   InvokeWorkflowBodySchema,
-  JamieWebhookSetupEnvelopeSchema,
   LegacyTaskHistoryEnvelopeSchema,
   LegacyTaskPageSchema,
   ManagedCapabilitySourceSchema,
@@ -2975,42 +2974,6 @@ export const disconnectStripeAccountRoute = createRoute({
   },
 });
 
-export const createJamieWebhookEndpointRoute = createRoute({
-  method: "post",
-  path: "/v1/integration-accounts/jamie/webhook-endpoint",
-  tags: ["Integrations"],
-  security: actorSecurity,
-  responses: {
-    200: {
-      description:
-        "Jamie webhook endpoint created or reset for the workspace. Admin only. Any previously saved API key binding is cleared.",
-      content: { "application/json": { schema: JamieWebhookSetupEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const saveJamieApiKeyRoute = createRoute({
-  method: "put",
-  path: "/v1/integration-accounts/jamie/api-key",
-  tags: ["Integrations"],
-  security: actorSecurity,
-  request: {
-    body: {
-      required: true,
-      content: { "application/json": { schema: IntegrationApiKeyBodySchema } },
-    },
-  },
-  responses: {
-    200: {
-      description:
-        "Jamie webhook API key bound to the workspace endpoint. Admin only; only a hash is stored and the key never appears in the response.",
-      content: { "application/json": { schema: JamieWebhookSetupEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
 export const getIntegrationAccountUsageRoute = createRoute({
   method: "get",
   path: "/v1/integration-accounts/{integrationId}/usage",
@@ -3647,8 +3610,6 @@ export type V1RouteHandlers = {
   connectRenderAccount: RouteHandler<typeof connectRenderAccountRoute>;
   connectStripeAccount: RouteHandler<typeof connectStripeAccountRoute>;
   disconnectStripeAccount: RouteHandler<typeof disconnectStripeAccountRoute>;
-  createJamieWebhookEndpoint: RouteHandler<typeof createJamieWebhookEndpointRoute>;
-  saveJamieApiKey: RouteHandler<typeof saveJamieApiKeyRoute>;
   listIntegrationAccounts: RouteHandler<typeof listIntegrationAccountsRoute>;
   getSlackBotWorkspaceSettings: RouteHandler<typeof getSlackBotWorkspaceSettingsRoute>;
   disconnectSlackBot: RouteHandler<typeof disconnectSlackBotRoute>;
@@ -3838,8 +3799,6 @@ export function createV1Router(
       .openapi(connectRenderAccountRoute, handlers.connectRenderAccount)
       .openapi(connectStripeAccountRoute, handlers.connectStripeAccount)
       .openapi(disconnectStripeAccountRoute, handlers.disconnectStripeAccount)
-      .openapi(createJamieWebhookEndpointRoute, handlers.createJamieWebhookEndpoint)
-      .openapi(saveJamieApiKeyRoute, handlers.saveJamieApiKey)
       .openapi(listIntegrationAccountsRoute, handlers.listIntegrationAccounts)
       .openapi(getSlackBotWorkspaceSettingsRoute, handlers.getSlackBotWorkspaceSettings)
       .openapi(disconnectSlackBotRoute, handlers.disconnectSlackBot)
@@ -4306,20 +4265,6 @@ const contractDocumentHandlers: V1RouteHandlers = {
             granola: [],
             fathom: [],
             attio: [],
-          },
-          jamie: {
-            integration: {
-              provider: "jamie",
-              connected: false,
-              status: "not_connected",
-              integrationId: null,
-              accountName: null,
-              statusReason: null,
-              webhookUrl: null,
-              apiKeyConfigured: false,
-            },
-            legacyDefaultDelivery: false,
-            isDefaultBrain: false,
           },
           linear: {
             integration: {
@@ -5190,36 +5135,6 @@ const contractDocumentHandlers: V1RouteHandlers = {
       200,
     ),
   disconnectStripeAccount: (c) => c.json({ data: { deleted: true as const }, meta }, 200),
-  createJamieWebhookEndpoint: (c) =>
-    c.json(
-      {
-        data: {
-          setup: {
-            integrationId: "gint_contract",
-            webhookUrl: "https://app.example.com/api/webhooks/jamie",
-            headerName: "x-api-key",
-            apiKeyConfigured: false,
-          },
-        },
-        meta,
-      },
-      200,
-    ),
-  saveJamieApiKey: (c) =>
-    c.json(
-      {
-        data: {
-          setup: {
-            integrationId: "gint_contract",
-            webhookUrl: "https://app.example.com/api/webhooks/jamie",
-            headerName: "x-api-key",
-            apiKeyConfigured: true,
-          },
-        },
-        meta,
-      },
-      200,
-    ),
   listIntegrationAccounts: (c) => c.json({ data: [], meta }, 200),
   getSlackBotWorkspaceSettings: (c) =>
     c.json(

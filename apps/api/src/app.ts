@@ -99,7 +99,6 @@ import type { GoogleIngressService } from "./google-ingress";
 import type { HubspotIngressService } from "./hubspot-ingress";
 import type { IdentityService } from "./identity";
 import type { IntegrationAccountService } from "./integration-accounts";
-import type { JamieIngressService } from "./jamie-ingress";
 import type { LinearIngressService } from "./linear-ingress";
 import type { McpOAuthIngressService } from "./mcp-oauth-ingress";
 import { type MessagePresentationService, messagePresentationEtag } from "./message-presentations";
@@ -224,7 +223,6 @@ export type CreateApiAppInput = {
   linearIngress?: LinearIngressService;
   hubspotIngress?: HubspotIngressService;
   attioIngress?: AttioIngressService;
-  jamieIngress?: JamieIngressService;
   mcpOAuthIngress?: McpOAuthIngressService;
   xAccountIngress?: XAccountIngressService;
   slackBotIngress?: SlackBotIngressService;
@@ -2254,21 +2252,6 @@ export function createApiApp(input: CreateApiAppInput) {
       await input.integrationAccounts.disconnectStripe(actor);
       return c.json({ data: { deleted: true as const }, meta }, 200);
     },
-    createJamieWebhookEndpoint: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const setup = await input.integrationAccounts.createOrResetJamieWebhookEndpoint(actor);
-      return c.json({ data: { setup }, meta }, 200);
-    },
-    saveJamieApiKey: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const setup = await input.integrationAccounts.saveJamieWebhookApiKey(
-        actor,
-        c.req.valid("json").apiKey,
-      );
-      return c.json({ data: { setup }, meta }, 200);
-    },
     listIntegrationAccounts: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);
@@ -2833,15 +2816,6 @@ export function createApiApp(input: CreateApiAppInput) {
     app.use("/webhooks/attio/events", ingressBodyLimit(5 * 1024 * 1024));
     app.post("/webhooks/attio/events", (c) => ingress.webhook(c.req.raw));
   }
-  if (input.jamieIngress) {
-    const ingress = input.jamieIngress;
-    app.use("/webhooks/jamie", ingressBodyLimit(5 * 1024 * 1024));
-    app.post("/webhooks/jamie", (c) => ingress.webhook(c.req.raw));
-    app.use("/webhooks/jamie/:integrationId", ingressBodyLimit(5 * 1024 * 1024));
-    app.post("/webhooks/jamie/:integrationId", (c) =>
-      ingress.webhookForIntegration(c.req.param("integrationId"), c.req.raw),
-    );
-  }
   if (input.mcpOAuthIngress) {
     const ingress = input.mcpOAuthIngress;
     app.get("/integrations/attio-mcp/start", (c) => ingress.start("attio", c.req.raw));
@@ -2866,6 +2840,8 @@ export function createApiApp(input: CreateApiAppInput) {
     app.get("/integrations/neon/callback", (c) => ingress.callback("neon", c.req.raw));
     app.get("/integrations/latitude/start", (c) => ingress.start("latitude", c.req.raw));
     app.get("/integrations/latitude/callback", (c) => ingress.callback("latitude", c.req.raw));
+    app.get("/integrations/jamie-mcp/start", (c) => ingress.start("jamie", c.req.raw));
+    app.get("/integrations/jamie-mcp/callback", (c) => ingress.callback("jamie", c.req.raw));
   }
   if (input.xAccountIngress) {
     const ingress = input.xAccountIngress;

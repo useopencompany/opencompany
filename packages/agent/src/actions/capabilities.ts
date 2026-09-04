@@ -136,6 +136,32 @@ export const PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
+  jamie: [
+    {
+      id: "read",
+      label: "Browse Jamie organization",
+      description: "List the meeting templates and tags available in your Jamie account.",
+      defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Read meeting data",
+      description: "Search and read meetings, transcripts, people, and action items.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Manage Jamie content",
+      description: "Create tasks and manage meeting templates, tags, and tag sharing.",
+      defaultMode: "ask",
+    },
+    {
+      id: "draft",
+      label: "Permanently delete tags",
+      description: "Delete a Jamie tag and remove it from every meeting that uses it.",
+      defaultMode: "off",
+    },
+  ],
   hubspot: [
     {
       id: "read",

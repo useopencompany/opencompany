@@ -56,7 +56,6 @@ import {
   type IntegrationAccountView,
   type IntegrationState,
   integrationStateFromRows,
-  type JamieProviderState,
   type LinearProviderState,
   type PersonalAccountProvider,
 } from "@/lib/integration-state";
@@ -73,10 +72,10 @@ import {
 // components derive everything from the provider string.
 type SettingsPersonalAccountProvider = Exclude<
   PersonalAccountProvider,
-  "attio" | "fathom" | "granola" | "latitude" | "slack"
+  "attio" | "fathom" | "granola" | "jamie" | "latitude" | "slack"
 >;
 
-type IntegrationMetaKey = SettingsPersonalAccountProvider | "github" | "jamie" | "infisical";
+type IntegrationMetaKey = SettingsPersonalAccountProvider | "github" | "infisical";
 
 type IntegrationMeta = {
   label: string;
@@ -100,12 +99,6 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     description: "Let opencompany work with repositories, issues, and pull requests as you.",
     Icon: GitHubIcon,
     tileClass: "bg-[#181717] text-white",
-  },
-  jamie: {
-    label: "Jamie",
-    description: "Meeting notes land in opencompany after every completed meeting.",
-    monogram: "J",
-    tileClass: "bg-[#5B5BD6] text-white",
   },
   gmail: {
     label: "Gmail",
@@ -267,12 +260,6 @@ function LiveSettingsIntegrations({
       ...liveIntegrations,
       codex: initialIntegrations.codex,
       claude_code: initialIntegrations.claude_code,
-      jamie: {
-        ...liveIntegrations.jamie,
-        integrationId: initialIntegrations.jamie.integrationId,
-        webhookUrl: initialIntegrations.jamie.webhookUrl,
-        apiKeyConfigured: initialIntegrations.jamie.apiKeyConfigured,
-      },
     };
   }, [initialIntegrations, isLoading, rows]);
 
@@ -315,7 +302,6 @@ function countConnectedAccounts(
 function countWorkspaceConnected(integrations: IntegrationState) {
   return (
     (integrationStatus(integrations.github) === "Connected" ? 1 : 0) +
-    (integrationStatus(integrations.jamie) === "Connected" ? 1 : 0) +
     (integrations.infisical.connected ? 1 : 0) +
     countConnectedAccounts(integrations, WORKSPACE_ACCOUNT_PROVIDERS)
   );
@@ -357,7 +343,6 @@ function IntegrationCards({
               canManage={isWorkspaceAdmin}
             />
             <IntegrationCardRow integration={integrations.github} canConnect={isWorkspaceAdmin} />
-            <IntegrationCardRow integration={integrations.jamie} canConnect={isWorkspaceAdmin} />
           </div>
         </section>
       ) : (
@@ -712,13 +697,13 @@ function NotConnectedStatus() {
   );
 }
 
-// Single workspace connection (GitHub, Jamie): one status per provider. Renders
+// Single workspace connection (GitHub): one status per provider. Renders
 // read-only for non-admin members via `canConnect`.
 function IntegrationCardRow({
   integration,
   canConnect = true,
 }: {
-  integration: GoogleProviderState | LinearProviderState | GitHubProviderState | JamieProviderState;
+  integration: GoogleProviderState | LinearProviderState | GitHubProviderState;
   canConnect?: boolean;
 }) {
   const meta = INTEGRATION_META[integration.provider];
@@ -732,9 +717,7 @@ function IntegrationCardRow({
       ? integration.accountName
       : integration.provider === "github"
         ? integration.accountName
-        : integration.provider === "jamie"
-          ? integration.accountName
-          : (integration.accountEmail ?? integration.accountName);
+        : (integration.accountEmail ?? integration.accountName);
   const capabilityBody =
     connected && integration.provider === "linear" && integration.integrationId ? (
       <CapabilityModeRows
@@ -836,9 +819,11 @@ export function IntegrationAccountRow({
     reconnectHref ??
     (account.provider === "posthog"
       ? "/api/integrations/posthog/start?returnTo=/settings/plugins/posthog"
-      : account.provider === "granola"
-        ? "/api/integrations/granola-mcp/start?returnTo=/settings/plugins/granola"
-        : integrationConnectHref(account.provider));
+      : account.provider === "jamie"
+        ? "/api/integrations/jamie-mcp/start?returnTo=/settings/plugins/jamie"
+        : account.provider === "granola"
+          ? "/api/integrations/granola-mcp/start?returnTo=/settings/plugins/granola"
+          : integrationConnectHref(account.provider));
   const needsGmailMcpScope =
     account.provider === "gmail" && account.connected && !gmailMcpScopesSatisfied(account.scopes);
 
@@ -1284,12 +1269,9 @@ function InfisicalIntegrationCard({
 }
 
 function integrationStatus(
-  integration: GoogleProviderState | LinearProviderState | GitHubProviderState | JamieProviderState,
+  integration: GoogleProviderState | LinearProviderState | GitHubProviderState,
 ) {
   if (integration.status === "connected") return "Connected";
-  if (integration.provider === "jamie" && integration.apiKeyConfigured) return "Connected";
-  if (integration.provider === "jamie" && integration.status === "needs_reauth")
-    return "Finish setup";
   if (integration.status === "needs_reauth" || integration.status === "sync_failed") {
     return "Reconnect";
   }
@@ -1297,18 +1279,18 @@ function integrationStatus(
 }
 
 function integrationNeedsReconnect(
-  integration: GoogleProviderState | LinearProviderState | GitHubProviderState | JamieProviderState,
+  integration: GoogleProviderState | LinearProviderState | GitHubProviderState,
 ) {
   return integration.status === "needs_reauth" || integration.status === "sync_failed";
 }
 
 function integrationStatusReason(
-  integration: GoogleProviderState | LinearProviderState | GitHubProviderState | JamieProviderState,
+  integration: GoogleProviderState | LinearProviderState | GitHubProviderState,
 ) {
   return "statusReason" in integration ? integration.statusReason : null;
 }
 
-function integrationConnectHref(provider: PersonalAccountProvider | "github" | "jamie") {
+function integrationConnectHref(provider: PersonalAccountProvider | "github") {
   if (provider === "gmail") return "/api/integrations/gmail/start?returnTo=/settings/integrations";
   if (provider === "google_calendar") {
     return "/api/integrations/google-calendar/start?returnTo=/settings/integrations";
@@ -1320,7 +1302,6 @@ function integrationConnectHref(provider: PersonalAccountProvider | "github" | "
     return "/api/integrations/github/start?returnTo=/settings/integrations";
   if (provider === "github_user")
     return "/api/integrations/github-user/start?returnTo=/settings/plugins/github";
-  if (provider === "jamie") return "/settings/jamie";
   if (provider === "granola")
     return "/api/integrations/granola-mcp/start?returnTo=/settings/plugins/granola";
   if (provider === "fathom")

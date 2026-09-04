@@ -8,6 +8,7 @@ export type OfficialMcpPluginName =
   | "google-calendar"
   | "google-drive"
   | "hubspot"
+  | "jamie"
   | "latitude"
   | "linear"
   | "neon"
@@ -50,6 +51,7 @@ export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
     | "google_calendar"
     | "google_drive"
     | "hubspot"
+    | "jamie"
     | "latitude"
     | "linear"
     | "neon"
@@ -201,6 +203,19 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     accountDescription: "The HubSpot account opencompany uses when you run CRM tools.",
     ingestionHref: "/wiki/sources",
     ingestionLabel: "Configure HubSpot ingestion in Wiki sources",
+  },
+  jamie: {
+    name: "jamie",
+    kind: "mcp",
+    label: "Jamie",
+    description:
+      "Search meeting notes and transcripts, review action items, and organize meetings with approval.",
+    category: "productivity",
+    source:
+      "https://github.com/useopencompany/plugins/tree/ad062203fcbb628ad27572d564cd536025f2d6ed/jamie",
+    connectionProvider: "jamie",
+    connectHref: "/api/integrations/jamie-mcp/start?returnTo=/settings/plugins/jamie",
+    accountDescription: "The Jamie account opencompany uses when you run meeting tools.",
   },
   latitude: {
     name: "latitude",

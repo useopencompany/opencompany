@@ -258,6 +258,42 @@ describe("HubSpot integration state", () => {
   });
 });
 
+describe("Jamie integration state", () => {
+  it("ignores retired workspace webhook rows and selects only the personal MCP OAuth row", () => {
+    const state = integrationStateFromRows([
+      {
+        id: "gint_jamie_webhook",
+        provider: "jamie",
+        workspaceId: "workspace_1",
+        externalId: "jamie_webhook",
+        accountName: "Retired webhook",
+        status: "connected",
+      },
+      {
+        id: "gint_jamie_mcp",
+        provider: "jamie",
+        externalId: "jamie_mcp",
+        accountName: "Jamie",
+        status: "connected",
+        capabilityModes: { read: "on", query: "ask", write: "ask", draft: "off" },
+      },
+    ]);
+
+    expect(state.jamie).toMatchObject({
+      integrationId: "gint_jamie_mcp",
+      connected: true,
+      capabilityModes: { read: "on", query: "ask", write: "ask", draft: "off" },
+    });
+    expect(state.personalAccounts.jamie).toEqual([
+      expect.objectContaining({
+        integrationId: "gint_jamie_mcp",
+        provider: "jamie",
+        connected: true,
+      }),
+    ]);
+  });
+});
+
 describe("Attio integration state", () => {
   it("keeps MCP tool authorization separate from Wiki ingestion accounts", () => {
     const state = integrationStateFromRows([

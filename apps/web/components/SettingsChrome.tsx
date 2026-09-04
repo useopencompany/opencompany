@@ -52,8 +52,7 @@ const NAV_GROUPS: SettingsNavGroup[] = [
         href: "/settings/integrations",
         icon: Blocks,
         label: "Integrations",
-        isActive: (pathname) =>
-          pathname === "/settings/integrations" || pathname.startsWith("/settings/jamie"),
+        isActive: (pathname) => pathname === "/settings/integrations",
       },
       {
         href: "/settings/mcp",

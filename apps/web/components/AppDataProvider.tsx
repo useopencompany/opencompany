@@ -388,12 +388,7 @@ function AppLiveDataSubscriptions({
       codex: initialData.integrations.codex,
       claude_code: initialData.integrations.claude_code,
       infisical: initialData.integrations.infisical,
-      jamie: {
-        ...liveIntegrations.jamie,
-        integrationId: initialData.integrations.jamie.integrationId,
-        webhookUrl: initialData.integrations.jamie.webhookUrl,
-        apiKeyConfigured: initialData.integrations.jamie.apiKeyConfigured,
-      },
+      jamie: initialData.integrations.jamie,
     };
   }, [initialData.integrations, integrationRows, integrationsLoading]);
 

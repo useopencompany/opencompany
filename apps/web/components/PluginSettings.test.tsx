@@ -18,6 +18,7 @@ import {
   GOOGLE_DRIVE_PLUGIN_SOURCE,
   GRANOLA_PLUGIN_SOURCE,
   HUBSPOT_PLUGIN_SOURCE,
+  JAMIE_PLUGIN_SOURCE,
   LATITUDE_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
@@ -309,6 +310,12 @@ describe("Plugin settings", () => {
       "/settings/plugins/latitude",
     );
     expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(17);
+    await user.click(screen.getByRole("button", { name: "View all productivity plugins" }));
+    expect(screen.getByRole("link", { name: /jamie/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/jamie",
+    );
+    await user.click(screen.getByRole("button", { name: "All" }));
     await user.click(screen.getByRole("button", { name: "View all business plugins" }));
     expect(screen.getByRole("link", { name: /yc advise/i })).toHaveAttribute(
       "href",
@@ -348,6 +355,9 @@ describe("Plugin settings", () => {
     );
     expect(HUBSPOT_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/6b4e00b71f7d1b388fe5aa225aa86c8d35ba2578/hubspot",
+    );
+    expect(JAMIE_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/ad062203fcbb628ad27572d564cd536025f2d6ed/jamie",
     );
     expect(ATTIO_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/0daeec4cff5d5f9925af2901410e1aa6c8baf0d8/attio",

@@ -29,22 +29,9 @@ import type { BrainSourceApplicationService } from "./brain-sources";
 
 type DbLike = any;
 
-const IMPORT_INTEGRATION_PROVIDERS = [
-  "github",
-  "jamie",
-  "granola",
-  "fathom",
-  "gmail",
-  "linear",
-] as const;
+const IMPORT_INTEGRATION_PROVIDERS = ["github", "granola", "fathom", "gmail", "linear"] as const;
 const IMPORT_PROVIDERS = ["public_web", ...IMPORT_INTEGRATION_PROVIDERS] as const;
-const WIKI_IMPORT_INTEGRATION_PROVIDERS = [
-  "github",
-  "jamie",
-  "granola",
-  "gmail",
-  "linear",
-] as const;
+const WIKI_IMPORT_INTEGRATION_PROVIDERS = ["github", "granola", "gmail", "linear"] as const;
 const WIKI_IMPORT_PROVIDERS = ["public_web", ...WIKI_IMPORT_INTEGRATION_PROVIDERS] as const;
 
 type ImportIntegrationProvider = (typeof IMPORT_INTEGRATION_PROVIDERS)[number];

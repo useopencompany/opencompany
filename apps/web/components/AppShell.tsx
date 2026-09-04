@@ -23,7 +23,7 @@ import { getGoogleIntegrationState } from "@/lib/integrations/google-data";
 import { getGranolaIntegrationState } from "@/lib/integrations/granola";
 import { getGranolaMcpIntegrationState } from "@/lib/integrations/granola-mcp";
 import { getHubSpotMcpIntegrationState } from "@/lib/integrations/hubspot-mcp";
-import { getJamieIntegrationState } from "@/lib/integrations/jamie";
+import { getJamieMcpIntegrationState } from "@/lib/integrations/jamie-mcp";
 import { getLinearIntegrationState } from "@/lib/integrations/linear-mcp";
 import { getPersonalAccounts } from "@/lib/integrations/personal-accounts";
 import { getPostHogIntegrationState } from "@/lib/integrations/posthog-mcp";
@@ -92,7 +92,7 @@ export async function AppShell({ children }: { children: ReactNode }) {
     ),
     loadOptionalAppShellData(
       "jamie_integration",
-      () => getJamieIntegrationState(workspace.id),
+      () => getJamieMcpIntegrationState(user.workosUserId),
       emptyIntegrations.jamie,
     ),
     loadOptionalAppShellData(
