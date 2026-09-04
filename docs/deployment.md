@@ -28,6 +28,11 @@ environments are `production-database`, `production-api`, `production-runner`, `
 `production-marketing`. They are state records created inside the protected `production` job; they
 do not hold production credentials.
 
+The credential-free PR verifier cannot call production-authenticated providers. After the protected
+release job loads its credentials, it verifies every live managed-capability contract before making
+production changes. The probe retries bounded transport, rate-limit, malformed-success, and upstream
+server failures; authentication failures and deterministic contract mismatches remain fail-closed.
+
 The workflow loads release credentials from Infisical `prod` `/release`, validates selected
 web/API/runner configuration, and builds selected Vercel artifacts in runner-local storage before
 changing production. It then rechecks the current `main` SHA, runs production migrations once when
