@@ -7,6 +7,7 @@ export type ActionProviderId =
   | "gmail"
   | "google_calendar"
   | "google_drive"
+  | "granola"
   | "linear"
   | "hubspot"
   | "posthog"

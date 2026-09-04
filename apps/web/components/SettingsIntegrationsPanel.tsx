@@ -8,7 +8,6 @@ import {
   GmailIcon,
   GoogleCalendarIcon,
   GoogleDriveIcon,
-  GranolaIcon,
   HubSpotIcon,
   type LucideIcon as IconComponent,
   LinearIcon,
@@ -75,7 +74,7 @@ import {
 // components derive everything from the provider string.
 type SettingsPersonalAccountProvider = Exclude<
   PersonalAccountProvider,
-  "attio" | "latitude" | "slack"
+  "attio" | "granola" | "latitude" | "slack"
 >;
 
 type IntegrationMetaKey = SettingsPersonalAccountProvider | "github" | "jamie" | "infisical";
@@ -168,12 +167,6 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     description: "Give workspace coding agents access to the real Infisical CLI.",
     monogram: "I",
     tileClass: "bg-[#6C47FF] text-white",
-  },
-  granola: {
-    label: "Granola",
-    description: "Meeting notes flow in once Granola finishes each summary.",
-    Icon: GranolaIcon,
-    tileClass: "bg-[#F0EBE1] text-[#1A1714]",
   },
   fathom: {
     label: "Fathom",
@@ -310,10 +303,9 @@ const INFISICAL_REGIONS = [
 // Group-card providers surfaced under each scope. These are all user-owned in the
 // data model (each member connects their own account), but the CRM / meeting /
 // issue-tracking tools read as shared workspace tooling, so we present them under
-// the Workspace scope. Official Gmail, Calendar, Drive, HubSpot, and Attio tool accounts live
-// under Plugins; their separate ingestion connections are managed from Wiki sources.
+// the Workspace scope. Official Gmail, Calendar, Drive, HubSpot, Attio, and Granola tool accounts
+// live under Plugins; their separate ingestion connections are managed from Wiki sources.
 const WORKSPACE_ACCOUNT_PROVIDERS = [
-  "granola",
   "fathom",
 ] as const satisfies readonly SettingsPersonalAccountProvider[];
 
@@ -374,10 +366,6 @@ function IntegrationCards({
             />
             <IntegrationCardRow integration={integrations.github} canConnect={isWorkspaceAdmin} />
             <IntegrationCardRow integration={integrations.jamie} canConnect={isWorkspaceAdmin} />
-            <IntegrationProviderGroupCard
-              provider="granola"
-              accounts={integrations.personalAccounts.granola}
-            />
             <IntegrationProviderGroupCard
               provider="fathom"
               accounts={integrations.personalAccounts.fathom}
@@ -915,7 +903,9 @@ export function IntegrationAccountRow({
     reconnectHref ??
     (account.provider === "posthog"
       ? "/api/integrations/posthog/start?returnTo=/settings/plugins/posthog"
-      : integrationConnectHref(account.provider));
+      : account.provider === "granola"
+        ? "/api/integrations/granola-mcp/start?returnTo=/settings/plugins/granola"
+        : integrationConnectHref(account.provider));
   const needsGmailMcpScope =
     account.provider === "gmail" && account.connected && !gmailMcpScopesSatisfied(account.scopes);
 
@@ -1398,9 +1388,7 @@ function integrationConnectHref(provider: PersonalAccountProvider | "github" | "
   if (provider === "github_user")
     return "/api/integrations/github-user/start?returnTo=/settings/plugins/github";
   if (provider === "jamie") return "/settings/jamie";
-  if (provider === "granola") return "/settings/granola";
   if (provider === "fathom") return "/settings/fathom";
-  if (provider === "attio") return "/settings/plugins/attio";
   if (provider === "slack") return "/settings/plugins/slack";
   if (provider === "hubspot")
     return "/api/integrations/hubspot/start?returnTo=/settings/integrations";

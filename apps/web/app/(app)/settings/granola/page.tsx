@@ -1,5 +1,5 @@
-import { GranolaSettingsRoute } from "@/components/Routes";
+import { redirect } from "next/navigation";
 
 export default function GranolaSettingsPage() {
-  return <GranolaSettingsRoute />;
+  redirect("/wiki/sources");
 }

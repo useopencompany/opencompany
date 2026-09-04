@@ -15,6 +15,7 @@ import {
   GMAIL_PLUGIN_SOURCE,
   GOOGLE_CALENDAR_PLUGIN_SOURCE,
   GOOGLE_DRIVE_PLUGIN_SOURCE,
+  GRANOLA_PLUGIN_SOURCE,
   HUBSPOT_PLUGIN_SOURCE,
   LATITUDE_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
@@ -266,6 +267,10 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/gmail",
     );
+    expect(screen.getByRole("link", { name: /granola/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/granola",
+    );
     expect(screen.getByRole("link", { name: /google drive/i })).toHaveAttribute(
       "href",
       "/settings/plugins/google-drive",
@@ -298,7 +303,7 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/latitude",
     );
-    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(15);
+    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(16);
     await user.click(screen.getByRole("button", { name: "View all business plugins" }));
     expect(screen.getByRole("link", { name: /yc advise/i })).toHaveAttribute(
       "href",
@@ -357,6 +362,9 @@ describe("Plugin settings", () => {
     expect(GMAIL_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/587fb06ae2a4e4bed7532e216f8712979ca35e7b/gmail",
     );
+    expect(GRANOLA_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/cf036c82fc5186f5187e4da59b040ce92e492df3/granola",
+    );
     expect(GOOGLE_CALENDAR_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/de04f0c11eeb4e4eb4ed1140818205e14b08401f/google-calendar",
     );
@@ -367,6 +375,7 @@ describe("Plugin settings", () => {
     expect(
       within(linearCard as HTMLElement).getByRole("button", { name: "Install" }),
     ).toBeEnabled();
+    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(5);
     expect(previewHeadlessPluginImport).not.toHaveBeenCalled();
     expect(importHeadlessPlugin).not.toHaveBeenCalled();
   });

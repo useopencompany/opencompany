@@ -91,6 +91,21 @@ export const PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
+  granola: [
+    {
+      id: "read",
+      label: "Check Granola account",
+      description: "Confirm which Granola account and active workspace are connected.",
+      defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Read meeting content",
+      description:
+        "Search and read meeting titles, attendees, notes, folders, summaries, and transcripts.",
+      defaultMode: "ask",
+    },
+  ],
   github_user: [
     {
       id: "read",

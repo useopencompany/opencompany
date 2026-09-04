@@ -1,0 +1,34 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "granola",
+  "version": "1.0.0",
+  "description": "Search and read sensitive meeting notes, folders, summaries, and transcripts through Granola's official MCP server.",
+  "author": {
+    "name": "opencompany",
+    "url": "https://opencompany.com"
+  },
+  "homepage": "https://docs.granola.ai/help-center/sharing/integrations/mcp",
+  "repository": "https://github.com/useopencompany/plugins/tree/main/granola",
+  "license": "MIT",
+  "keywords": ["granola", "meetings", "notes", "transcripts", "research"],
+  "extensions": {
+    "so.opencompany.capabilities": {
+      "read": {
+        "label": "Check Granola account",
+        "defaultMode": "on",
+        "tools": ["get_account_info"]
+      },
+      "query": {
+        "label": "Read meeting content",
+        "defaultMode": "ask",
+        "tools": [
+          "query_granola_meetings",
+          "list_meeting_folders",
+          "list_meetings",
+          "get_meetings",
+          "get_meeting_transcript"
+        ]
+      }
+    }
+  }
+}

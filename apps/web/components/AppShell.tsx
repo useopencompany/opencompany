@@ -21,6 +21,7 @@ import { getFathomIntegrationState } from "@/lib/integrations/fathom";
 import { getGitHubIntegrationState } from "@/lib/integrations/github";
 import { getGoogleIntegrationState } from "@/lib/integrations/google-data";
 import { getGranolaIntegrationState } from "@/lib/integrations/granola";
+import { getGranolaMcpIntegrationState } from "@/lib/integrations/granola-mcp";
 import { getHubSpotMcpIntegrationState } from "@/lib/integrations/hubspot-mcp";
 import { getJamieIntegrationState } from "@/lib/integrations/jamie";
 import { getLinearIntegrationState } from "@/lib/integrations/linear-mcp";
@@ -49,6 +50,7 @@ export async function AppShell({ children }: { children: ReactNode }) {
     jamie,
     slack,
     granola,
+    granolaMcp,
     fathom,
     attio,
     stripe,
@@ -102,6 +104,11 @@ export async function AppShell({ children }: { children: ReactNode }) {
       "granola_integration",
       () => getGranolaIntegrationState(user.workosUserId),
       emptyIntegrations.granola,
+    ),
+    loadOptionalAppShellData(
+      "granola_mcp_integration",
+      () => getGranolaMcpIntegrationState(user.workosUserId),
+      emptyIntegrations.granola_mcp,
     ),
     loadOptionalAppShellData(
       "fathom_integration",
@@ -193,6 +200,7 @@ export async function AppShell({ children }: { children: ReactNode }) {
       jamie,
       slack,
       granola,
+      granolaMcp,
       fathom,
       attio,
       stripe,
@@ -272,6 +280,7 @@ function buildIntegrationState(input: {
   jamie: IntegrationState["jamie"];
   slack: IntegrationState["slack"];
   granola: IntegrationState["granola"];
+  granolaMcp: IntegrationState["granola_mcp"];
   fathom: IntegrationState["fathom"];
   attio: IntegrationState["attio"];
   stripe: IntegrationState["stripe"];
@@ -292,6 +301,7 @@ function buildIntegrationState(input: {
     jamie: input.jamie,
     slack: input.slack,
     granola: input.granola,
+    granola_mcp: input.granolaMcp,
     fathom: input.fathom,
     attio: input.attio,
     stripe: input.stripe,

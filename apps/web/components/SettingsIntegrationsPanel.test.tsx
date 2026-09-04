@@ -471,6 +471,35 @@ describe("SettingsIntegrationsPanel", () => {
     expect(screen.queryByText("louis@example.com")).toBeNull();
   });
 
+  it("removes the legacy Granola settings card after the plugin cutover", () => {
+    const integrations = integrationStateFromRows([
+      {
+        id: "gint_granola_ingest",
+        provider: "granola",
+        externalId: "granola:user_1",
+        accountEmail: "founder@example.com",
+        accountType: "granola_api_key",
+        status: "connected",
+      },
+      {
+        id: "gint_granola_mcp",
+        provider: "granola",
+        externalId: "granola_mcp",
+        accountName: "Granola",
+        accountType: "mcp_server",
+        status: "connected",
+      },
+    ]) as IntegrationState;
+
+    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
+
+    expect(
+      screen.queryByText("Meeting notes flow in once Granola finishes each summary."),
+    ).toBeNull();
+    expect(screen.queryByText("founder@example.com")).toBeNull();
+    expect(screen.getByRole("button", { name: "Workspace" })).not.toHaveTextContent("1");
+  });
+
   it("keeps Attio ingestion accounts off the legacy integrations surface", () => {
     const integrations = integrationStateFromRows([
       {

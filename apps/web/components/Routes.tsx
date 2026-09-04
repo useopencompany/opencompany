@@ -46,7 +46,6 @@ import { type BrainSummaryView, useAppData } from "@/components/AppDataProvider"
 import { BrainSettings } from "@/components/BrainSettings";
 import { BrainView } from "@/components/BrainView";
 import { FathomIntegrationSetup } from "@/components/FathomIntegrationSetup";
-import { GranolaIntegrationSetup } from "@/components/GranolaIntegrationSetup";
 import { InferenceSettingsPanel } from "@/components/InferenceSettingsPanel";
 import { JamieIntegrationSetup } from "@/components/JamieIntegrationSetup";
 import { McpSetupGuide } from "@/components/McpSetupGuide";
@@ -387,27 +386,6 @@ export function JamieSettingsRoute() {
         initialState={integrations.jamie}
         brainSourcesHref={brainSourcesHref}
         canManage={workspace.role === "admin"}
-      />
-    </SettingsContent>
-  );
-}
-
-export function GranolaSettingsRoute() {
-  const { activeBrain, featureFlags, integrations } = useAppData();
-  const brainSourcesHref =
-    featureFlags.legacyBrain && activeBrain
-      ? `/brain/${encodeURIComponent(activeBrain.id)}/settings`
-      : null;
-
-  return (
-    <SettingsContent
-      title="Granola"
-      description="Meeting notes for opencompany Brain"
-      backLink={{ href: "/settings/integrations", label: "Integrations" }}
-    >
-      <GranolaIntegrationSetup
-        initialState={integrations.granola}
-        brainSourcesHref={brainSourcesHref}
       />
     </SettingsContent>
   );
