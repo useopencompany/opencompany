@@ -76,6 +76,7 @@ describe("TaskApplicationService", () => {
     await service.createComment(actor(), " task_1 ", {
       id: " comment_1 ",
       body: "  Approved — keep the original spacing.\n",
+      attachmentIds: [" attachment_1 "],
     });
 
     expect(repository.createTaskCommentAndRun).toHaveBeenCalledWith({
@@ -84,7 +85,19 @@ describe("TaskApplicationService", () => {
       command: {
         id: "comment_1",
         body: "  Approved — keep the original spacing.\n",
+        attachmentIds: ["attachment_1"],
       },
+    });
+
+    await service.createComment(actor(), "task_1", {
+      id: "comment_2",
+      body: "",
+      attachmentIds: ["attachment_2"],
+    });
+    expect(repository.createTaskCommentAndRun).toHaveBeenLastCalledWith({
+      actor: actor(),
+      taskId: "task_1",
+      command: { id: "comment_2", body: "", attachmentIds: ["attachment_2"] },
     });
   });
 
@@ -100,7 +113,14 @@ describe("TaskApplicationService", () => {
     ).rejects.toThrow(/not allowed/i);
     await expect(
       service.createComment(actor(), "task_1", { id: "comment_1", body: " \n " }),
-    ).rejects.toThrow(/comment is required/i);
+    ).rejects.toThrow(/comment or attachment is required/i);
+    await expect(
+      service.createComment(actor(), "task_1", {
+        id: "comment_1",
+        body: "Approved",
+        attachmentIds: ["attachment_1", "attachment_1"],
+      }),
+    ).rejects.toThrow(/unique/i);
     await expect(
       service.createComment(actor(), "task_1", {
         id: "comment_1",

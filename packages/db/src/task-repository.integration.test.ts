@@ -931,6 +931,90 @@ describe("Postgres Task repository", () => {
     });
   });
 
+  it("claims attachments when an attachment-only comment resumes a Task", async () => {
+    const created = await service.createTask(actor(), {
+      idempotencyKey: "task-attachment-comment",
+      goal: "Review the updated screenshot.",
+      engine: "opencompany",
+      model: "moonshotai/kimi-k3",
+      source: "manual",
+    });
+    await database.query(
+      `UPDATE goat.codex_chat_turns SET status = 'completed', completed_at = now() WHERE id = $1`,
+      [created.runId],
+    );
+    await database.query(
+      `UPDATE goat.codex_chat_sessions SET status = 'idle', active_turn_id = NULL
+       WHERE chat_session_id = $1`,
+      [created.task.conversationId],
+    );
+    await database.query(
+      `UPDATE goat.tasks SET status = 'succeeded', stage = 'completed' WHERE id = $1`,
+      [created.task.id],
+    );
+
+    const uploads = new PostgresChatAttachmentRepository(
+      execute,
+      () => new Date("2026-08-11T10:00:00.000Z"),
+    );
+    await uploads.create({
+      actor: actor(),
+      id: "attachment_comment_1",
+      format: "image",
+      mediaType: "image/png",
+      filename: "updated.png",
+      sizeBytes: 1024,
+      blobPathname: "private/user_1/updated.png",
+      blobUrl: "https://blob.invalid/updated.png",
+      extractedText: null,
+      expiresAt: new Date("2026-08-12T10:00:00.000Z"),
+    });
+    const attachmentService = new TaskApplicationService(
+      new PostgresTaskRepository(execute, {
+        now: () => new Date("2026-08-11T10:00:00.000Z"),
+        resolveAttachments: (input) => uploads.resolve(input),
+      }),
+    );
+    const command = {
+      id: "task_comment_attachment_1",
+      body: "",
+      attachmentIds: ["attachment_comment_1"],
+    };
+
+    const resumed = await attachmentService.createComment(actor(), created.task.id, command);
+    await expect(
+      attachmentService.createComment(actor(), created.task.id, command),
+    ).resolves.toMatchObject({
+      messageId: resumed.messageId,
+      assistantMessageId: resumed.assistantMessageId,
+      runId: resumed.runId,
+      idempotentReplay: true,
+    });
+    await expect(
+      database.query<{
+        claimed_message_id: string;
+        attachment_id: string;
+        message_content: string;
+      }>(
+        `SELECT
+           upload.claimed_message_id,
+           message.attachments->0->>'id' AS attachment_id,
+           message.content AS message_content
+         FROM goat.chat_attachment_uploads AS upload
+         JOIN goat.chat_messages AS message ON message.id = upload.claimed_message_id
+         WHERE upload.id = 'attachment_comment_1'`,
+      ),
+    ).resolves.toMatchObject({
+      rows: [
+        {
+          claimed_message_id: resumed.messageId,
+          attachment_id: "attachment_comment_1",
+          message_content: "",
+        },
+      ],
+    });
+  });
+
   it("rejects comments on archived Tasks", async () => {
     const created = await service.createTask(actor(), {
       idempotencyKey: "task-archived-comment",

@@ -139,7 +139,7 @@ describe("headless Task commands", () => {
 
     await createHeadlessTaskComment(
       task.id,
-      { id: "task_activity_comment_1", body },
+      { id: "task_activity_comment_1", body, attachmentIds: ["attachment_1"] },
       {
         baseUrl: "https://app.example.test",
         fetch: fetchMock as typeof fetch,
@@ -150,7 +150,11 @@ describe("headless Task commands", () => {
     const sent = request as unknown as Request;
     expect(sent.method).toBe("POST");
     expect(new URL(sent.url).pathname).toBe("/v1/tasks/task_1/comments");
-    await expect(sent.json()).resolves.toEqual({ id: "task_activity_comment_1", body });
+    await expect(sent.json()).resolves.toEqual({
+      id: "task_activity_comment_1",
+      body,
+      attachmentIds: ["attachment_1"],
+    });
     expect(awaitHeadlessTaskCommentTransaction).toHaveBeenCalledWith(task.id, "44", {
       scopeKey: "workspace_1",
     });
