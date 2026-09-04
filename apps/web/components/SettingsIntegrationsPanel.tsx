@@ -2,7 +2,6 @@
 
 import { toast } from "@opencompany/ui/components/sonner";
 import {
-  AnthropicIcon,
   AttioIcon,
   BetterStackIcon,
   FathomIcon,
@@ -15,7 +14,6 @@ import {
   type LucideIcon as IconComponent,
   LinearIcon,
   NeonIcon,
-  OpenAIIcon,
   XIcon,
 } from "@opencompany/ui/icons";
 import { cn } from "@opencompany/ui/lib/utils";
@@ -32,13 +30,6 @@ import {
   type ProviderCapability,
   providerCapabilities,
 } from "@/lib/actions/capabilities";
-import { disconnectClaudeCodeAuth, saveClaudeCodeToken } from "@/lib/claude-code-auth";
-import {
-  type CodexDeviceAuthFlow,
-  disconnectCodexAuth,
-  pollCodexDeviceAuth,
-  startCodexDeviceAuth,
-} from "@/lib/codex-auth";
 import {
   completeHeadlessBrowserProfileLogin,
   createHeadlessBrowserProfile,
@@ -62,8 +53,6 @@ import {
   setIntegrationCapabilityModeAction,
 } from "@/lib/integration-account-actions";
 import {
-  type ClaudeCodeProviderState,
-  type CodexProviderState,
   type GitHubProviderState,
   type GoogleProviderState,
   type ImessageProviderState,
@@ -93,8 +82,6 @@ type IntegrationMetaKey =
   | "github"
   | "jamie"
   | "infisical"
-  | "codex"
-  | "claude_code"
   | "imessage";
 
 type IntegrationMeta = {
@@ -209,18 +196,6 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     description: "Meeting recordings flow in after Fathom finishes each summary.",
     Icon: FathomIcon,
     tileClass: "bg-[#1355FF] text-white",
-  },
-  codex: {
-    label: "Codex",
-    description: "Connect your Codex subscription so opencompany can run coding tasks.",
-    Icon: OpenAIIcon,
-    tileClass: "bg-black text-white",
-  },
-  claude_code: {
-    label: "Claude Code",
-    description: "Connect your Claude subscription so opencompany can run coding tasks.",
-    Icon: AnthropicIcon,
-    tileClass: "bg-[#CC785C] text-white",
   },
   imessage: {
     label: "iMessage",
@@ -401,8 +376,6 @@ function countWorkspaceConnected(integrations: IntegrationState) {
 function countPersonalConnected(integrations: IntegrationState, includeImessage: boolean) {
   return (
     countConnectedAccounts(integrations, PERSONAL_ACCOUNT_PROVIDERS) +
-    (integrations.codex.connected ? 1 : 0) +
-    (integrations.claude_code.connected ? 1 : 0) +
     (includeImessage && integrations.imessage.connected ? 1 : 0)
   );
 }
@@ -470,8 +443,6 @@ function IntegrationCards({
               provider="latitude"
               accounts={integrations.personalAccounts.latitude}
             />
-            <CodexIntegrationCard integration={integrations.codex} />
-            <ClaudeCodeIntegrationCard integration={integrations.claude_code} />
             {imessageEnabled ? (
               <IMessageIntegrationCard integration={integrations.imessage} />
             ) : null}
@@ -1445,267 +1416,6 @@ function InfisicalIntegrationCard({
   );
 }
 
-function CodexIntegrationCard({ integration }: { integration: CodexProviderState }) {
-  const router = useRouter();
-  const [flow, setFlow] = useState<CodexDeviceAuthFlow | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [isPolling, setIsPolling] = useState(false);
-  const [isPending, startTransition] = useTransition();
-  const status = flow?.status ?? integration.status;
-
-  useEffect(() => {
-    if (
-      !flow ||
-      flow.status === "completed" ||
-      flow.status === "failed" ||
-      flow.status === "expired"
-    ) {
-      return;
-    }
-
-    let active = true;
-    let pollInFlight = false;
-    const timer = window.setInterval(() => {
-      if (pollInFlight) return;
-      pollInFlight = true;
-      setIsPolling(true);
-      void (async () => {
-        try {
-          const result = await pollCodexDeviceAuth(flow.id);
-          if (!active) return;
-          if (result.ok) {
-            if (result.flow.status === "completed") {
-              setFlow(null);
-              setError(null);
-              router.refresh();
-            } else {
-              setFlow(result.flow);
-            }
-          } else {
-            setError(result.error);
-          }
-        } finally {
-          pollInFlight = false;
-          if (active) setIsPolling(false);
-        }
-      })();
-    }, 2500);
-
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-      setIsPolling(false);
-    };
-  }, [flow, router]);
-
-  const startAuth = () => {
-    setError(null);
-    startTransition(async () => {
-      const result = await startCodexDeviceAuth();
-      if (result.ok) {
-        if (result.flow.status === "completed") {
-          setFlow(null);
-          router.refresh();
-        } else {
-          setFlow(result.flow);
-        }
-      } else {
-        setError(result.error);
-      }
-    });
-  };
-
-  const disconnect = () => {
-    setError(null);
-    setIsPolling(false);
-    startTransition(async () => {
-      await disconnectCodexAuth();
-      setFlow(null);
-      router.refresh();
-    });
-  };
-
-  const accountLabel =
-    integration.status === "connected"
-      ? integration.lastValidatedAt
-        ? `Validated ${formatDateTime(integration.lastValidatedAt)}`
-        : "Subscription connected"
-      : integration.statusReason;
-
-  return (
-    <IntegrationCard
-      meta={INTEGRATION_META.codex}
-      body={
-        <div className="flex flex-col gap-2">
-          {accountLabel ? (
-            <p className="truncate text-[12px] leading-4 text-ink-subtle">{accountLabel}</p>
-          ) : null}
-          {flow?.status === "code_ready" && flow.verificationUri && flow.userCode ? (
-            <div className="rounded-lg border border-border bg-surface-muted px-3 py-2 text-[12px] leading-5 text-ink-muted">
-              <a
-                href={flow.verificationUri}
-                target="_blank"
-                rel="noreferrer"
-                className="font-medium text-ink underline underline-offset-2"
-              >
-                Open Codex sign-in
-              </a>
-              <span> and enter </span>
-              <span className="font-mono font-semibold text-ink">{flow.userCode}</span>
-            </div>
-          ) : null}
-          {flow?.statusReason || error ? (
-            <div className="text-[12px] leading-4 text-warning">{error ?? flow?.statusReason}</div>
-          ) : null}
-        </div>
-      }
-      footer={
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={startAuth}
-            disabled={isPending}
-            aria-busy={isPending || isPolling}
-            className="inline-flex items-center justify-center rounded-full border border-border px-4 py-1.5 text-[13px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-60"
-          >
-            {buttonLabel(status, isPending)}
-          </button>
-          {integration.connected ? (
-            <button
-              type="button"
-              onClick={disconnect}
-              disabled={isPending}
-              className="inline-flex items-center justify-center rounded-full px-3 py-1.5 text-[13px] font-medium text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink disabled:opacity-60"
-            >
-              Disconnect
-            </button>
-          ) : null}
-        </div>
-      }
-    />
-  );
-}
-
-function ClaudeCodeIntegrationCard({ integration }: { integration: ClaudeCodeProviderState }) {
-  const router = useRouter();
-  const [token, setToken] = useState("");
-  const [showForm, setShowForm] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
-
-  const submitToken = () => {
-    setError(null);
-    startTransition(async () => {
-      const result = await saveClaudeCodeToken(token);
-      if (result.ok) {
-        setToken("");
-        setShowForm(false);
-        router.refresh();
-      } else {
-        setError(result.error);
-      }
-    });
-  };
-
-  const disconnect = () => {
-    setError(null);
-    startTransition(async () => {
-      await disconnectClaudeCodeAuth();
-      setShowForm(false);
-      router.refresh();
-    });
-  };
-
-  const accountLabel =
-    integration.status === "connected"
-      ? integration.lastValidatedAt
-        ? `Connected ${formatDateTime(integration.lastValidatedAt)}`
-        : "Token saved; validation pending"
-      : integration.statusReason;
-
-  return (
-    <IntegrationCard
-      meta={INTEGRATION_META.claude_code}
-      body={
-        <div className="flex flex-col gap-2">
-          {accountLabel ? (
-            <p className="truncate text-[12px] leading-4 text-ink-subtle">{accountLabel}</p>
-          ) : null}
-          {showForm ? (
-            <div className="flex flex-col gap-2">
-              <p className="text-[12px] leading-5 text-ink-muted">
-                Run <span className="font-mono font-semibold text-ink">claude setup-token</span> on
-                your machine, approve in the browser, and paste the token here. Tokens last about a
-                year.
-              </p>
-              <input
-                type="password"
-                value={token}
-                onChange={(event) => setToken(event.target.value)}
-                placeholder="sk-ant-oat…"
-                autoComplete="off"
-                spellCheck={false}
-                className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 font-mono text-[12px] text-ink placeholder:text-ink-subtle focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-              />
-            </div>
-          ) : null}
-          {error ? <div className="text-[12px] leading-4 text-warning">{error}</div> : null}
-        </div>
-      }
-      footer={
-        <div className="flex items-center gap-2">
-          {showForm ? (
-            <>
-              <button
-                type="button"
-                onClick={submitToken}
-                disabled={isPending || !token.trim()}
-                aria-busy={isPending}
-                className="inline-flex items-center justify-center rounded-full border border-border px-4 py-1.5 text-[13px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-60"
-              >
-                {isPending ? "Working" : "Save token"}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowForm(false);
-                  setToken("");
-                  setError(null);
-                }}
-                disabled={isPending}
-                className="inline-flex items-center justify-center rounded-full px-3 py-1.5 text-[13px] font-medium text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink disabled:opacity-60"
-              >
-                Cancel
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                type="button"
-                onClick={() => setShowForm(true)}
-                disabled={isPending}
-                className="inline-flex items-center justify-center rounded-full border border-border px-4 py-1.5 text-[13px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-60"
-              >
-                {buttonLabel(integration.status, isPending)}
-              </button>
-              {integration.connected ? (
-                <button
-                  type="button"
-                  onClick={disconnect}
-                  disabled={isPending}
-                  className="inline-flex items-center justify-center rounded-full px-3 py-1.5 text-[13px] font-medium text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink disabled:opacity-60"
-                >
-                  Disconnect
-                </button>
-              ) : null}
-            </>
-          )}
-        </div>
-      }
-    />
-  );
-}
-
 function IMessageIntegrationCard({ integration }: { integration: ImessageProviderState }) {
   return (
     <IntegrationCard
@@ -1799,11 +1509,4 @@ function buttonLabel(status: string, isPending: boolean) {
   if (status === "needs_reauth") return "Reconnect";
   if (status === "failed" || status === "expired") return "Retry";
   return "Connect";
-}
-
-function formatDateTime(value: string) {
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
 }
