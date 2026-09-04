@@ -33,23 +33,10 @@ vi.mock("@/components/useHydrated", () => ({
   useHydrated: () => false,
 }));
 
-vi.mock("@/lib/codex-auth", () => ({
-  disconnectCodexAuth: vi.fn(),
-  pollCodexDeviceAuth: vi.fn(),
-  setCodexWorkspaceEngineEnabled: vi.fn(),
-  startCodexDeviceAuth: vi.fn(),
-}));
-
 vi.mock("@/lib/infisical-auth", () => ({
   completeInfisicalAuth: completeInfisicalAuth,
   disconnectInfisicalAuth: disconnectInfisicalAuth,
   startInfisicalAuth: startInfisicalAuth,
-}));
-
-// Pulls in @/lib/auth (authkit), which vitest cannot resolve.
-vi.mock("@/lib/claude-code-auth", () => ({
-  disconnectClaudeCodeAuth: vi.fn(async () => ({ ok: true })),
-  saveClaudeCodeToken: vi.fn(async () => ({ ok: true })),
 }));
 
 // Pulls in @/lib/auth (authkit), which vitest cannot resolve.
@@ -127,7 +114,7 @@ describe("SettingsIntegrationsPanel", () => {
     expect(screen.queryByRole("link", { name: "/settings/mcp" })).not.toBeInTheDocument();
   });
 
-  it("shows a saved Claude Code token as pending until a successful turn validates it", () => {
+  it("keeps coding subscriptions out of the personal integrations scope", () => {
     const integrations = integrationStateFromRows([]) as IntegrationState;
     integrations.claude_code = {
       provider: "claude_code",
@@ -140,7 +127,9 @@ describe("SettingsIntegrationsPanel", () => {
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
     fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
 
-    expect(screen.getByText("Token saved; validation pending")).toBeInTheDocument();
+    expect(screen.queryByText("Codex")).not.toBeInTheDocument();
+    expect(screen.queryByText("Claude Code")).not.toBeInTheDocument();
+    expect(screen.queryByText("Token saved; validation pending")).not.toBeInTheDocument();
   });
 
   it("switches between the workspace and personal scopes", () => {

@@ -219,10 +219,11 @@ export function InferenceSettingsRoute() {
   return (
     <SettingsContent
       title="Inference"
-      description="Configure how this workspace runs AI model inference."
+      description="Connect model subscriptions and choose how your workspace runs AI."
     >
       <InferenceSettingsPanel
-        integration={integrations.codex}
+        codex={integrations.codex}
+        claudeCode={integrations.claude_code}
         canManage={workspace.role === "admin"}
       />
     </SettingsContent>
