@@ -123,6 +123,7 @@ export function HomeRoute({
       <Surface
         key={data.activeBrain?.id ?? "no-brain"}
         tasks={data.tasks}
+        allTasks={data.allTasks}
         schedules={data.schedules}
         defaultModel={DEFAULT_MODEL}
         initialChat={initialChat}

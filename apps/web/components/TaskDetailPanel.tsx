@@ -87,6 +87,7 @@ function CanonicalTaskDetailView({
     <Surface
       key={data.activeBrain?.id ?? "no-brain"}
       tasks={data.tasks}
+      allTasks={data.allTasks}
       schedules={data.schedules}
       defaultModel={initialChat.model}
       initialChat={initialChat}
@@ -124,6 +125,7 @@ function LegacyTaskDetailPanel({ initialRun }: { initialRun: HarnessRunViewModel
     <Surface
       key={data.activeBrain?.id ?? "no-brain"}
       tasks={data.tasks}
+      allTasks={data.allTasks}
       schedules={data.schedules}
       defaultModel={initialChat.model}
       initialChat={initialChat}
