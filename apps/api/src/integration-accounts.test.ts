@@ -1,9 +1,4 @@
 import {
-  connectImessageIntegration,
-  getImessageIntegrationState,
-  hashImessagePairingCode,
-} from "@opencompany/agent/imessage/connect";
-import {
   connectGranolaIntegration,
   getGranolaIntegrationState,
   validateGranolaApiKey,
@@ -22,12 +17,6 @@ import {
 } from "@opencompany/agent/integrations/stripe";
 import type { Actor } from "@opencompany/core";
 import {
-  consumeImessageChallenge,
-  getImessagePairingChallenge,
-  incrementImessageChallengeAttempts,
-  upsertImessagePairingChallenge,
-} from "@opencompany/db/imessage";
-import {
   applyIntegrationCapabilityMode,
   disconnectPersonalIntegration,
 } from "@opencompany/db/integrations";
@@ -43,31 +32,9 @@ vi.mock("@opencompany/db/integrations", async (importOriginal) => ({
   loadIntegrationCredential: vi.fn(async () => null),
 }));
 
-vi.mock("@opencompany/db/imessage", async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  getImessagePairingChallenge: vi.fn(async () => null),
-  upsertImessagePairingChallenge: vi.fn(async () => undefined),
-  incrementImessageChallengeAttempts: vi.fn(async () => undefined),
-  consumeImessageChallenge: vi.fn(async () => undefined),
-  recordImessageSend: vi.fn(async () => undefined),
-}));
-
 vi.mock("@opencompany/db/wiki-sources", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   ensureWikiSourceEnabledOnConnect: vi.fn(async () => true),
-}));
-
-vi.mock("@opencompany/agent/imessage/connect", async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  connectImessageIntegration: vi.fn(async () => ({ integrationId: "gint_imsg" })),
-  getImessageIntegrationState: vi.fn(async () => ({
-    provider: "imessage" as const,
-    connected: true,
-    status: "connected" as const,
-    integrationId: "gint_imsg",
-    phoneE164: "+14155551234",
-    statusReason: null,
-  })),
 }));
 
 vi.mock("@opencompany/agent/integrations/granola", async (importOriginal) => ({
@@ -463,119 +430,6 @@ describe("integration account service", () => {
       workspaceId: "workspace_1",
     });
     expect(getRenderIntegrationState).toHaveBeenCalled();
-  });
-
-  it("requires the preference toggle and a configured provider before pairing", async () => {
-    const service = createIntegrationAccountService({
-      db: fakeDb([[{ imessageEnabled: false }]]),
-      resolveImessageProvider: () => null,
-    });
-    await expect(service.startImessagePairing(member, "+14155551234")).rejects.toMatchObject({
-      message: "Enable iMessage notifications in Preferences first.",
-    });
-
-    const unconfigured = createIntegrationAccountService({
-      db: fakeDb([[{ imessageEnabled: true }]]),
-      resolveImessageProvider: () => null,
-    });
-    await expect(unconfigured.startImessagePairing(member, "+14155551234")).rejects.toMatchObject({
-      status: 503,
-      message: "iMessage sending is not configured on this environment.",
-    });
-  });
-
-  it("sends a pairing code and records the delivery", async () => {
-    const send = vi.fn(async () => ({ ok: true as const, providerMessageId: null }));
-    const service = createIntegrationAccountService({
-      db: fakeDb([[{ imessageEnabled: true }]]),
-      resolveImessageProvider: () => ({ name: "log", send }),
-      generatePairingCode: () => "123456",
-    });
-    await expect(
-      service.startImessagePairing(member, "+1 (415) 555-1234"),
-    ).resolves.toBeUndefined();
-    expect(send).toHaveBeenCalledWith({
-      to: "+14155551234",
-      text: "Your opencompany verification code is 123456. It expires in 10 minutes.",
-    });
-    expect(upsertImessagePairingChallenge).toHaveBeenCalledWith(
-      expect.objectContaining({ userWorkosId: "user_1", phoneE164: "+14155551234" }),
-      expect.anything(),
-    );
-  });
-
-  it("throttles pairing resends inside the cooldown window", async () => {
-    const now = new Date("2026-08-13T08:00:00.000Z");
-    vi.mocked(getImessagePairingChallenge).mockResolvedValueOnce({
-      id: "chal_1",
-      phoneE164: "+14155551234",
-      codeHash: "hash",
-      attemptCount: 0,
-      consumedAt: null,
-      createdAt: new Date(now.getTime() - 5_000),
-      expiresAt: new Date(now.getTime() + 60_000),
-    } as never);
-    const service = createIntegrationAccountService({
-      db: fakeDb([[{ imessageEnabled: true }]]),
-      resolveImessageProvider: () => ({ name: "log", send: vi.fn() as never }),
-      now: () => now,
-    });
-    await expect(service.startImessagePairing(member, "+14155551234")).rejects.toMatchObject({
-      status: 429,
-      message: "A code was just sent. Wait a moment before requesting another.",
-    });
-  });
-
-  it("confirms a matching pairing code and connects the number", async () => {
-    const now = new Date("2026-08-13T08:00:00.000Z");
-    const codeHash = hashImessagePairingCode({
-      code: "654321",
-      userWorkosId: "user_1",
-      phoneE164: "+14155551234",
-    });
-    vi.mocked(getImessagePairingChallenge).mockResolvedValueOnce({
-      id: "chal_1",
-      phoneE164: "+14155551234",
-      codeHash,
-      attemptCount: 0,
-      consumedAt: null,
-      createdAt: new Date(now.getTime() - 60_000),
-      expiresAt: new Date(now.getTime() + 60_000),
-    } as never);
-    const service = createIntegrationAccountService({ db: fakeDb(), now: () => now });
-    await expect(service.confirmImessagePairing(member, "654321")).resolves.toMatchObject({
-      provider: "imessage",
-      connected: true,
-      phoneE164: "+14155551234",
-    });
-    expect(consumeImessageChallenge).toHaveBeenCalledWith("chal_1", expect.anything());
-    expect(connectImessageIntegration).toHaveBeenCalledWith(
-      expect.objectContaining({ userWorkosId: "user_1", phoneE164: "+14155551234" }),
-    );
-  });
-
-  it("counts down remaining attempts on a mismatched code", async () => {
-    const now = new Date("2026-08-13T08:00:00.000Z");
-    vi.mocked(getImessagePairingChallenge).mockResolvedValueOnce({
-      id: "chal_1",
-      phoneE164: "+14155551234",
-      codeHash: hashImessagePairingCode({
-        code: "654321",
-        userWorkosId: "user_1",
-        phoneE164: "+14155551234",
-      }),
-      attemptCount: 3,
-      consumedAt: null,
-      createdAt: new Date(now.getTime() - 60_000),
-      expiresAt: new Date(now.getTime() + 60_000),
-    } as never);
-    const service = createIntegrationAccountService({ db: fakeDb(), now: () => now });
-    await expect(service.confirmImessagePairing(member, "111111")).rejects.toMatchObject({
-      status: 400,
-      message: "That code doesn't match. 1 attempt left.",
-    });
-    expect(incrementImessageChallengeAttempts).toHaveBeenCalledWith("chal_1", expect.anything());
-    expect(getImessageIntegrationState).not.toHaveBeenCalled();
   });
 
   it("admin-gates the workspace-scoped Stripe and Jamie commands", async () => {

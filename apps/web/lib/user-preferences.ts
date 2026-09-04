@@ -12,7 +12,6 @@ type UserPreferences = {
   taskSpawningEnabled: boolean;
   wikiEnabled: true;
   taskViewMode: TaskViewMode;
-  imessageEnabled: boolean;
   autoModelRoutingEnabled: boolean;
 };
 
@@ -38,14 +37,6 @@ export async function updateTaskViewModeAction(mode: TaskViewMode) {
   } catch {
     return { ok: false, mode } as const;
   }
-}
-
-export async function updateImessageEnabledAction(enabled: boolean) {
-  const preferences = await patchPreferences({ imessageEnabled: enabled === true });
-  revalidatePath("/");
-  revalidatePath("/settings/preferences");
-  revalidatePath("/settings/integrations");
-  return { ok: true, enabled: preferences.imessageEnabled } as const;
 }
 
 export async function updateAutoModelRoutingAction(enabled: boolean) {

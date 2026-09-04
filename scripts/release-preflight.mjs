@@ -189,14 +189,6 @@ const groups = {
       "OPENCOMPANY_FEEDBACK_LINEAR_TEAM_ID",
       "OPENCOMPANY_FEEDBACK_LINEAR_LABELS",
       "OPENCOMPANY_FEEDBACK_LINEAR_PROJECT_ID",
-      // iMessage pairing (#1203 5a2) moved behind /v1: the API sends the
-      // verification text. Optional (mirrors the web group's classification):
-      // without a provider, pairing fails with a clear "not configured" error.
-      "LINQ_API_TOKEN",
-      "LINQ_FROM_NUMBER",
-      "LINQ_API_BASE_URL",
-      "OPENCOMPANY_IMESSAGE_PROVIDER",
-      "OPENCOMPANY_IMESSAGE_KILL_SWITCH",
       // Optional internal-network override for runner control calls.
       "RUNNER_INTERNAL_URL",
     ],
@@ -282,12 +274,6 @@ const groups = {
       "OPENCOMPANY_OBSERVABILITY_ENABLED",
       "OPENCOMPANY_OTEL_EXPORTER_OTLP_ENDPOINT",
       "OPENCOMPANY_OTEL_EXPORTER_OTLP_HEADERS",
-      "LINQ_API_TOKEN",
-      "LINQ_FROM_NUMBER",
-      "LINQ_API_BASE_URL",
-      "OPENCOMPANY_IMESSAGE_PROVIDER",
-      "OPENCOMPANY_IMESSAGE_KILL_SWITCH",
-      "OPENCOMPANY_IMESSAGE_DAILY_CAP",
       "LATITUDE_API_KEY",
       "LATITUDE_PROJECT_SLUG",
       "LATITUDE_SERVICE_NAME",

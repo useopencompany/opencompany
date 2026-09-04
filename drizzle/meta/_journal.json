@@ -1751,6 +1751,13 @@
       "when": 1788481000000,
       "tag": "0249_opencompany_chat_context_compactions",
       "breakpoints": true
+    },
+    {
+      "idx": 250,
+      "version": "7",
+      "when": 1788481100000,
+      "tag": "0250_remove_imessage_integration",
+      "breakpoints": true
     }
   ]
 }

@@ -16,7 +16,6 @@ const storedPreferences = {
   taskSpawningEnabled: false,
   wikiEnabled: true as const,
   taskViewMode: "board" as const,
-  imessageEnabled: false,
   autoModelRoutingEnabled: false,
 };
 

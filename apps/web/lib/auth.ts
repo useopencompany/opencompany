@@ -25,7 +25,6 @@ export type IdentityUser = {
   taskSpawningEnabled: boolean;
   autoModelRoutingEnabled: boolean;
   chatCapabilitiesBetaEnabled: boolean;
-  imessageEnabled: boolean;
   /** @deprecated Wiki is always enabled. */
   wikiEnabled: true;
   taskViewMode: "board" | "list";
@@ -227,7 +226,6 @@ function identityUser(user: IdentityDto["user"]): IdentityUser {
     taskSpawningEnabled: user.taskSpawningEnabled,
     autoModelRoutingEnabled: user.autoModelRoutingEnabled,
     chatCapabilitiesBetaEnabled: user.chatCapabilitiesBetaEnabled,
-    imessageEnabled: user.imessageEnabled,
     wikiEnabled: true,
     taskViewMode: user.taskViewMode,
     preferredMcpClient: user.preferredMcpClient,
