@@ -28,6 +28,7 @@ import {
   GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
   modelSupportsAttachments,
   parsePublishedChatArtifact,
+  resolveAvailableAgentModelId,
 } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { ChatPresentationPublisher } from "@opencompany/chat-presentation";
@@ -130,7 +131,18 @@ export async function runProductChatTurn(input: {
   presentationPublisher?: ChatPresentationPublisher;
   shouldAbort?: () => Error | null;
 }): Promise<"settled" | "handed_off"> {
-  const { turn, session, env } = input;
+  const { turn, env } = input;
+  const requestedModel = input.session.model as AgentModelId;
+  const availableModel = resolveAvailableAgentModelId(requestedModel);
+  const session =
+    availableModel === requestedModel ? input.session : { ...input.session, model: availableModel };
+  if (availableModel !== requestedModel) {
+    logger.warn("Durable opencompany chat model is rollout-gated; using the safe replacement", {
+      event: "opencompany.goat_opencompany_chat_model_rollout_gated",
+      requested_model: requestedModel,
+      runtime_model: availableModel,
+    });
+  }
   const leaseId = turn.leaseId;
   const leaseOwner = turn.leaseOwner;
   if (!leaseId || !leaseOwner) {

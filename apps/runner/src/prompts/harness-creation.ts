@@ -44,8 +44,6 @@ export type HarnessSkillOption = {
 };
 
 const CODEX_HARNESS_MODEL_GUIDANCE = {
-  "openai/gpt-6-astra":
-    "Use for the hardest end-to-end Codex work when maximum capability matters more than speed or cost.",
   "openai/gpt-5.6-sol": "Default Codex model. Use for complex coding, research, and computer use.",
   "openai/gpt-5.6-terra": "Use for capable, efficient everyday Codex work.",
   "openai/gpt-5.6-luna":

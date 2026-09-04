@@ -339,6 +339,32 @@ describe("opencompany Chat Task host tools", () => {
     expect(createTask).not.toHaveBeenCalled();
   });
 
+  it("rejects rollout-gated task models at the host boundary", async () => {
+    const createTask = vi.fn(async () => taskResult);
+    const dependencies = testDependencies({ createTask });
+
+    await expect(
+      executeChatHostToolService({
+        command: {
+          operation: "start_task",
+          sessionId: "runtime_1",
+          runId: "run_1",
+          input: {
+            name: "Analyze launch",
+            prompt: "Analyze the launch.",
+            model: "openai/gpt-6-astra",
+            engine: "opencompany",
+          },
+        },
+        dependencies,
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      error: 'Unsupported model "openai/gpt-6-astra".',
+    });
+    expect(createTask).not.toHaveBeenCalled();
+  });
+
   it("delegates an agent-created Workflow invocation through the Workflow Task creator", async () => {
     const createWorkflowTask = vi.fn(async () => taskResult);
     const dependencies = testDependencies({ createWorkflowTask });

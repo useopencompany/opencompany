@@ -7,6 +7,7 @@ import {
   getAgentModelDefinition,
   isClaudeCodeModelId,
   isCodexModelId,
+  resolveAvailableAgentModelId,
 } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { ChatEngine } from "@opencompany/core";
@@ -14,7 +15,6 @@ import type { ChatEngine } from "@opencompany/core";
 const MODEL_IDS = [
   "anthropic/claude-sonnet-5",
   "anthropic/claude-opus-4.8",
-  "openai/gpt-6-astra",
   "openai/gpt-5.6-sol",
   "openai/gpt-5.6-terra",
   "openai/gpt-5.5",
@@ -39,8 +39,9 @@ export type ModelOption = (typeof MODELS)[number];
 export const DEFAULT_MODEL: AgentModelId = "moonshotai/kimi-k3";
 
 export function normalizeModel(value: unknown): AgentModelId {
-  if (typeof value === "string" && MODEL_ID_SET.has(value)) {
-    return value as AgentModelId;
+  if (typeof value === "string") {
+    const availableModel = resolveAvailableAgentModelId(value as AgentModelId);
+    if (MODEL_ID_SET.has(availableModel)) return availableModel;
   }
   return DEFAULT_MODEL;
 }

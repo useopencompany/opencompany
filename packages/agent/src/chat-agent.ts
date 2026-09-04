@@ -1,6 +1,6 @@
 import {
   ACTION_TOOL_CONTRACT,
-  AGENT_MODEL_CATALOG,
+  AVAILABLE_AGENT_MODEL_CATALOG,
   CLAUDE_CODE_AGENT_MODEL_IDS,
   CLAUDE_CODE_DEFAULT_MODEL_ID,
   CODEX_AGENT_MODEL_IDS,
@@ -670,7 +670,7 @@ export function createProductChatToolContext(input: {
         ? CODEX_AGENT_MODEL_IDS
         : taskEngineHint === "claude_code"
           ? CLAUDE_CODE_AGENT_MODEL_IDS
-          : AGENT_MODEL_CATALOG.map((model) => model.id);
+          : AVAILABLE_AGENT_MODEL_CATALOG.map((model) => model.id);
     tools[START_TASK_TOOL_NAME] = tool<
       StartTaskToolInput,
       StartTaskToolOutput,
@@ -1721,7 +1721,10 @@ function normalizeStartTaskEngine(value: unknown): HarnessEngine | undefined {
 
 function normalizeStartTaskModel(value: unknown): AgentModelId | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== "string" || !AGENT_MODEL_CATALOG.some((model) => model.id === value)) {
+  if (
+    typeof value !== "string" ||
+    !AVAILABLE_AGENT_MODEL_CATALOG.some((model) => model.id === value)
+  ) {
     throw new Error(`Unsupported task model "${String(value)}".`);
   }
   return value as AgentModelId;
