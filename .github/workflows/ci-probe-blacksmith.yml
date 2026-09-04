@@ -1,0 +1,14 @@
+name: CI probe - Blacksmith
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 2
+    steps:
+      - run: echo "Blacksmith runner startup succeeded"
