@@ -3503,6 +3503,7 @@ export const OnboardingEmailClaimEnvelopeSchema = z
   .openapi("OnboardingEmailClaimEnvelope");
 
 export const TaskViewModeSchema = z.enum(["board", "list"]);
+export const TaskTimeRangeSchema = z.enum(["24h", "2d", "7d", "30d", "90d", "all"]);
 export const McpClientSchema = z.enum(["claude", "chatgpt", "cursor"]);
 
 // Authenticated browser identity read model. Provider organization ids and raw
@@ -3522,6 +3523,7 @@ export const IdentityUserSchema = z
     /** @deprecated Wiki is always enabled. */
     wikiEnabled: z.literal(true),
     taskViewMode: TaskViewModeSchema,
+    taskTimeRange: TaskTimeRangeSchema,
     preferredMcpClient: McpClientSchema.nullable(),
     mcpSetupCompletedAt: TimestampSchema.nullable(),
     onboardedAt: TimestampSchema.nullable(),
@@ -3579,6 +3581,7 @@ export const UserPreferencesSchema = z
     /** @deprecated Wiki is always enabled. */
     wikiEnabled: z.literal(true),
     taskViewMode: TaskViewModeSchema,
+    taskTimeRange: TaskTimeRangeSchema,
     autoModelRoutingEnabled: z.boolean(),
   })
   .strict()
@@ -3591,6 +3594,7 @@ export const UpdateUserPreferencesBodySchema = z
     /** @deprecated Accepted for compatibility and ignored; Wiki is always enabled. */
     wikiEnabled: z.boolean().optional(),
     taskViewMode: TaskViewModeSchema.optional(),
+    taskTimeRange: TaskTimeRangeSchema.optional(),
     autoModelRoutingEnabled: z.boolean().optional(),
   })
   .strict()

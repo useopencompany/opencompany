@@ -106,8 +106,15 @@ const updateTaskViewModeMock = vi.hoisted(() =>
     async (mode: "board" | "list") => ({ ok: true, mode }) as { ok: boolean; mode: typeof mode },
   ),
 );
+const updateTaskTimeRangeMock = vi.hoisted(() =>
+  vi.fn(
+    async (range: "24h" | "2d" | "7d" | "30d" | "90d" | "all") =>
+      ({ ok: true, range }) as { ok: boolean; range: typeof range },
+  ),
+);
 
 vi.mock("@/lib/user-preferences", () => ({
+  updateTaskTimeRangeAction: updateTaskTimeRangeMock,
   updateTaskViewModeAction: updateTaskViewModeMock,
 }));
 
@@ -544,6 +551,7 @@ describe("TasksBoardRoute", () => {
     expect(screen.queryByText("Recent done task")).not.toBeInTheDocument();
     expect(screen.queryByText("Recent canceled task")).not.toBeInTheDocument();
 
+    await waitFor(() => expect(timeRangeFilter).toHaveTextContent("Last 24 hours"));
     await user.click(timeRangeFilter);
     await user.click(await screen.findByRole("option", { name: "Last 2 days" }));
 
@@ -551,6 +559,38 @@ describe("TasksBoardRoute", () => {
     expect(screen.getByText("Recent in-review task")).toBeInTheDocument();
     expect(screen.getByText("Recent done task")).toBeInTheDocument();
     expect(screen.getByText("Recent canceled task")).toBeInTheDocument();
+  });
+
+  it("starts from the saved time range and persists changes", async () => {
+    const user = userEvent.setup();
+
+    render(<TasksBoardRoute workflowNames={{}} initialTimeRange="24h" />);
+
+    const timeRangeFilter = screen.getByRole("combobox", {
+      name: "Filter tasks by time range",
+    });
+    expect(timeRangeFilter).toHaveTextContent("Last 24 hours");
+
+    await user.click(timeRangeFilter);
+    await user.click(await screen.findByRole("option", { name: "All time" }));
+
+    expect(timeRangeFilter).toHaveTextContent("All time");
+    expect(updateTaskTimeRangeMock).toHaveBeenCalledWith("all");
+  });
+
+  it("reverts the time filter if persisting the preference fails", async () => {
+    updateTaskTimeRangeMock.mockResolvedValueOnce({ ok: false, range: "24h" });
+    const user = userEvent.setup();
+
+    render(<TasksBoardRoute workflowNames={{}} />);
+
+    const timeRangeFilter = screen.getByRole("combobox", {
+      name: "Filter tasks by time range",
+    });
+    await user.click(timeRangeFilter);
+    await user.click(await screen.findByRole("option", { name: "Last 24 hours" }));
+
+    await waitFor(() => expect(timeRangeFilter).toHaveTextContent("Last 7 days"));
   });
 
   it("filters tasks by their workflow and keeps non-workflow tasks out of the result", async () => {

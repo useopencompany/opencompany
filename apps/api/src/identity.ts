@@ -167,6 +167,7 @@ export function createIdentityService(input: {
         chatCapabilitiesBetaEnabled: user.chatCapabilitiesBetaEnabled,
         wikiEnabled: true as const,
         taskViewMode: user.taskViewMode,
+        taskTimeRange: user.taskTimeRange,
         preferredMcpClient: user.preferredMcpClient,
         mcpSetupCompletedAt: user.mcpSetupCompletedAt?.toISOString() ?? null,
         onboardedAt: user.onboardedAt?.toISOString() ?? null,
