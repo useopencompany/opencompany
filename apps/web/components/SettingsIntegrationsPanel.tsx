@@ -50,13 +50,10 @@ import {
   setIntegrationCapabilityModeAction,
 } from "@/lib/integration-account-actions";
 import {
-  type GitHubProviderState,
-  type GoogleProviderState,
   type InfisicalProviderState,
   type IntegrationAccountView,
   type IntegrationState,
   integrationStateFromRows,
-  type LinearProviderState,
   type PersonalAccountProvider,
 } from "@/lib/integration-state";
 import { gmailMcpScopesSatisfied } from "@/lib/integrations/gmail-scopes";
@@ -75,7 +72,7 @@ type SettingsPersonalAccountProvider = Exclude<
   "attio" | "fathom" | "granola" | "jamie" | "latitude" | "slack"
 >;
 
-type IntegrationMetaKey = SettingsPersonalAccountProvider | "github" | "infisical";
+type IntegrationMetaKey = SettingsPersonalAccountProvider | "infisical";
 
 type IntegrationMeta = {
   label: string;
@@ -88,12 +85,6 @@ type IntegrationMeta = {
 };
 
 const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
-  github: {
-    label: "GitHub workspace ingestion",
-    description: "Ingest pull requests and issues from selected repositories through webhooks.",
-    Icon: GitHubIcon,
-    tileClass: "bg-[#181717] text-white",
-  },
   github_user: {
     label: "GitHub as you",
     description: "Let opencompany work with repositories, issues, and pull requests as you.",
@@ -307,7 +298,6 @@ function countConnectedAccounts(
 
 function countWorkspaceConnected(integrations: IntegrationState) {
   return (
-    (integrationStatus(integrations.github) === "Connected" ? 1 : 0) +
     (integrations.infisical.connected ? 1 : 0) +
     countConnectedAccounts(integrations, WORKSPACE_ACCOUNT_PROVIDERS)
   );
@@ -348,7 +338,6 @@ function IntegrationCards({
               integration={integrations.infisical}
               canManage={isWorkspaceAdmin}
             />
-            <IntegrationCardRow integration={integrations.github} canConnect={isWorkspaceAdmin} />
           </div>
         </section>
       ) : (
@@ -661,121 +650,6 @@ function IntegrationCard({
       {body}
       {footer ? <div className="mt-auto pt-1">{footer}</div> : null}
     </div>
-  );
-}
-
-// The outline pill used for navigation actions (Connect / Reconnect / Set up).
-function ConnectLink({ href, label }: { href: string; label: string }) {
-  return (
-    <a
-      href={href}
-      className="inline-flex items-center justify-center rounded-full border border-border px-4 py-1.5 text-[13px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-    >
-      {label}
-    </a>
-  );
-}
-
-function ConnectedStatus({ label = "Connected" }: { label?: string }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 text-[13px] font-medium text-ink-subtle">
-      <span className="size-1.5 rounded-full bg-[#22C55E]" aria-hidden="true" />
-      {label}
-    </span>
-  );
-}
-
-function NeedsReconnectStatus() {
-  return (
-    <span className="inline-flex items-center gap-1.5 text-[13px] font-medium text-warning">
-      <span className="size-1.5 rounded-full bg-warning" aria-hidden="true" />
-      Needs reconnect
-    </span>
-  );
-}
-
-function NotConnectedStatus() {
-  return (
-    <span className="inline-flex items-center gap-1.5 text-[13px] font-medium text-ink-subtle">
-      <span className="size-1.5 rounded-full bg-ink-subtle/40" aria-hidden="true" />
-      Not connected
-    </span>
-  );
-}
-
-// Single workspace connection (GitHub): one status per provider. Renders
-// read-only for non-admin members via `canConnect`.
-function IntegrationCardRow({
-  integration,
-  canConnect = true,
-}: {
-  integration: GoogleProviderState | LinearProviderState | GitHubProviderState;
-  canConnect?: boolean;
-}) {
-  const meta = INTEGRATION_META[integration.provider];
-  const status = integrationStatus(integration);
-  const connectHref = integrationConnectHref(integration.provider);
-  const connected = status === "Connected";
-  const needsReconnect = integrationNeedsReconnect(integration);
-  const statusReason = integrationStatusReason(integration);
-  const accountLabel =
-    integration.provider === "linear"
-      ? integration.accountName
-      : integration.provider === "github"
-        ? integration.accountName
-        : (integration.accountEmail ?? integration.accountName);
-  const capabilityBody =
-    connected && integration.provider === "linear" && integration.integrationId ? (
-      <CapabilityModeRows
-        integrationId={integration.integrationId}
-        provider={integration.provider}
-        capabilityModes={integration.capabilityModes}
-      />
-    ) : undefined;
-
-  return (
-    <IntegrationCard
-      meta={meta}
-      body={capabilityBody}
-      footer={
-        connected ? (
-          <div className="flex min-w-0 items-center justify-between gap-3">
-            <div className="flex min-w-0 items-center gap-1.5">
-              <ConnectedStatus />
-              {accountLabel ? (
-                <span className="truncate text-[12px] leading-4 text-ink-subtle">
-                  · {accountLabel}
-                </span>
-              ) : null}
-            </div>
-            {integration.provider === "github" && canConnect ? (
-              <ConnectLink href="/settings/repositories" label="Configure repositories" />
-            ) : null}
-          </div>
-        ) : needsReconnect && canConnect ? (
-          <div className="flex min-w-0 flex-col gap-2">
-            <div className="flex min-w-0 items-center justify-between gap-3">
-              <div className="flex min-w-0 items-center gap-1.5">
-                <NeedsReconnectStatus />
-                {accountLabel ? (
-                  <span className="truncate text-[12px] leading-4 text-ink-subtle">
-                    · {accountLabel}
-                  </span>
-                ) : null}
-              </div>
-              <ConnectLink href={connectHref} label="Reconnect" />
-            </div>
-            {statusReason ? (
-              <p className="text-[12px] leading-4 text-warning">{statusReason}</p>
-            ) : null}
-          </div>
-        ) : canConnect ? (
-          <ConnectLink href={connectHref} label={status} />
-        ) : (
-          <NotConnectedStatus />
-        )
-      }
-    />
   );
 }
 
@@ -1274,29 +1148,7 @@ function InfisicalIntegrationCard({
   );
 }
 
-function integrationStatus(
-  integration: GoogleProviderState | LinearProviderState | GitHubProviderState,
-) {
-  if (integration.status === "connected") return "Connected";
-  if (integration.status === "needs_reauth" || integration.status === "sync_failed") {
-    return "Reconnect";
-  }
-  return "Connect";
-}
-
-function integrationNeedsReconnect(
-  integration: GoogleProviderState | LinearProviderState | GitHubProviderState,
-) {
-  return integration.status === "needs_reauth" || integration.status === "sync_failed";
-}
-
-function integrationStatusReason(
-  integration: GoogleProviderState | LinearProviderState | GitHubProviderState,
-) {
-  return "statusReason" in integration ? integration.statusReason : null;
-}
-
-function integrationConnectHref(provider: PersonalAccountProvider | "github") {
+function integrationConnectHref(provider: PersonalAccountProvider) {
   if (provider === "gmail") return "/api/integrations/gmail/start?returnTo=/settings/integrations";
   if (provider === "google_calendar") {
     return "/api/integrations/google-calendar/start?returnTo=/settings/integrations";
@@ -1304,8 +1156,6 @@ function integrationConnectHref(provider: PersonalAccountProvider | "github") {
   if (provider === "google_drive") {
     return "/api/integrations/google-drive/start?returnTo=/settings/integrations";
   }
-  if (provider === "github")
-    return "/api/integrations/github/start?returnTo=/settings/integrations";
   if (provider === "github_user")
     return "/api/integrations/github-user/start?returnTo=/settings/plugins/github";
   if (provider === "granola")

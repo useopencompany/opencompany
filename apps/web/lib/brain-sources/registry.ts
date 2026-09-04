@@ -1,15 +1,6 @@
 import type { BrainSourceConfigProvider } from "@opencompany/protocol";
 import type { LucideIcon } from "lucide-react";
-import {
-  Contact,
-  Files,
-  GitBranch,
-  Handshake,
-  ListTodo,
-  Mail,
-  NotebookPen,
-  Video,
-} from "lucide-react";
+import { Contact, Files, Handshake, ListTodo, Mail, NotebookPen, Video } from "lucide-react";
 
 const DOCS_ORIGIN = "https://docs.opencompany.cloud";
 
@@ -69,15 +60,6 @@ export const BRAIN_SOURCE_PROVIDERS: BrainSourceProviderDef[] = [
     connectHref: "/api/integrations/google-drive/start?returnTo=/settings/integrations",
   },
   {
-    id: "github",
-    name: "GitHub",
-    description: "New and merged pull requests and new issues from repos you choose.",
-    icon: GitBranch,
-    connectionKind: "oauth",
-    available: true,
-    connectHref: "/api/integrations/github/start?returnTo=/settings/integrations",
-  },
-  {
     id: "linear",
     name: "Linear",
     description: "Ingest selected issue and comment events from selected teams into this brain.",
@@ -118,11 +100,6 @@ export const BRAIN_SOURCE_PROVIDERS: BrainSourceProviderDef[] = [
 // connect instead of prompting for config.
 export function brainSourceNeedsConfig(id: BrainSourceConfigProvider): boolean {
   return (
-    id === "linear" ||
-    id === "github" ||
-    id === "gmail" ||
-    id === "google_drive" ||
-    id === "hubspot" ||
-    id === "attio"
+    id === "linear" || id === "gmail" || id === "google_drive" || id === "hubspot" || id === "attio"
   );
 }

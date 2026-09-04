@@ -9,7 +9,7 @@ import {
 describe("opencompany onboarding integrations", () => {
   it("replaces an integration's settings return path with the popup completion route", () => {
     const href = onboardingConnectHref(
-      "/api/integrations/github/start?returnTo=/settings/integrations",
+      "/api/integrations/github-user/start?returnTo=/settings/plugins/github",
     );
 
     expect(new URL(href, "https://opencompany.test").searchParams.get("returnTo")).toBe(
@@ -18,8 +18,8 @@ describe("opencompany onboarding integrations", () => {
   });
 
   it("turns provider failures into actionable onboarding copy", () => {
-    expect(onboardingConnectionError("github", "admin_required")).toBe(
-      "Only a workspace admin can connect GitHub.",
+    expect(onboardingConnectionError("slack", "admin_required")).toBe(
+      "Only a workspace admin can connect Slack.",
     );
     expect(onboardingConnectionError("slack", "slack_denied")).toBe(
       "Slack authorization was cancelled.",
@@ -57,10 +57,10 @@ describe("opencompany onboarding integrations", () => {
     expect(onboardingConnectionError("vercel", "vercel_denied")).toBe(
       "Vercel authorization was cancelled.",
     );
-    expect(onboardingConnectionError("github", "missing_code")).toContain(
+    expect(onboardingConnectionError("github_user", "missing_code")).toContain(
       "did not return a valid authorization",
     );
-    expect(onboardingConnectionError("github", "invalid_state")).toContain(
+    expect(onboardingConnectionError("github_user", "invalid_state")).toContain(
       "did not return a valid authorization",
     );
     expect(onboardingConnectionError("github_user", "github_user_denied")).toBe(

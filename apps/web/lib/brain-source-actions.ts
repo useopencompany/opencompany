@@ -96,20 +96,6 @@ export async function setBrainAttioSourceAction(
   });
 }
 
-export async function setBrainGitHubSourceAction(
-  input: Omit<ConfigureBody<"github">, "operation" | "provider"> & {
-    brainRef: string;
-    integrationId: string;
-  },
-): Promise<WorkspaceActionResult> {
-  const { brainRef, integrationId, ...configuration } = input;
-  return setSource(brainRef, integrationId, {
-    operation: "configure",
-    provider: "github",
-    ...configuration,
-  });
-}
-
 export async function setBrainGmailSourceAction(
   input: Omit<ConfigureBody<"gmail">, "operation" | "provider"> & {
     brainRef: string;
@@ -149,21 +135,6 @@ export async function listLinearTeamsAction(integrationId: string): Promise<Line
     return { ok: false, error: "Linear returned an invalid source-option response." };
   }
   return { ok: true, teams: result.data.teams, partial: result.data.partial };
-}
-
-export type GitHubRepositoryListResult =
-  | (Omit<Extract<BrainSourceOptions, { provider: "github" }>, "provider"> & { ok: true })
-  | { ok: false; error: string };
-
-export async function listGitHubRepositoriesAction(
-  integrationId: string,
-): Promise<GitHubRepositoryListResult> {
-  const result = await listSourceOptions(integrationId, { provider: "github" });
-  if (!result.ok) return result;
-  if (result.data.provider !== "github") {
-    return { ok: false, error: "GitHub returned an invalid source-option response." };
-  }
-  return { ok: true, repos: result.data.repos };
 }
 
 export type GoogleDriveResourceListResult =
@@ -259,8 +230,6 @@ function sourceLabel(provider: BrainSourceCommand["provider"]) {
   switch (provider) {
     case "google_drive":
       return "Google Drive";
-    case "github":
-      return "GitHub";
     case "hubspot":
       return "HubSpot";
     default:

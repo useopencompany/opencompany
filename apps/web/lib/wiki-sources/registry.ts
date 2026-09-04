@@ -1,11 +1,5 @@
 import type { WikiSourceProvider } from "@opencompany/protocol";
-import {
-  GitHubIcon,
-  GmailIcon,
-  GranolaIcon,
-  LinearIcon,
-  type LucideIcon,
-} from "@opencompany/ui/icons";
+import { GmailIcon, GranolaIcon, LinearIcon, type LucideIcon } from "@opencompany/ui/icons";
 
 export type WikiSourceProviderDef = {
   id: WikiSourceProvider;
@@ -48,16 +42,6 @@ export const WIKI_SOURCE_PROVIDERS: WikiSourceProviderDef[] = [
     tileClass: "bg-[#5E6AD2] text-white",
     connectionKind: "oauth",
     connectHref: "/api/integrations/linear-ingest/start?returnTo=/wiki/sources",
-    scopeRequired: true,
-  },
-  {
-    id: "github",
-    name: "GitHub",
-    description: "Bring repository, pull request, and issue context into the Wiki.",
-    Icon: GitHubIcon,
-    tileClass: "bg-[#181717] text-white",
-    connectionKind: "oauth",
-    connectHref: "/api/integrations/github/start?returnTo=/wiki/sources",
     scopeRequired: true,
   },
 ];

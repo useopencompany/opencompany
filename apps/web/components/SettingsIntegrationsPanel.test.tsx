@@ -142,9 +142,7 @@ describe("SettingsIntegrationsPanel", () => {
 
     // Workspace scope is shown first and personal connections are hidden.
     expect(
-      screen.getByText(
-        "Ingest pull requests and issues from selected repositories through webhooks.",
-      ),
+      screen.getByText("Give workspace coding agents access to the real Infisical CLI."),
     ).toBeInTheDocument();
     expect(
       screen.queryByText("Let opencompany view and update your schedule and events."),
@@ -166,9 +164,7 @@ describe("SettingsIntegrationsPanel", () => {
       screen.queryByText("Let opencompany view and update your schedule and events."),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByText(
-        "Ingest pull requests and issues from selected repositories through webhooks.",
-      ),
+      screen.queryByText("Give workspace coding agents access to the real Infisical CLI."),
     ).not.toBeInTheDocument();
   });
 
@@ -324,25 +320,6 @@ describe("SettingsIntegrationsPanel", () => {
     expect(card).not.toBeNull();
     expect(within(card as HTMLElement).getByText("Managed by workspace admins.")).toBeVisible();
     expect(within(card as HTMLElement).queryByRole("button", { name: "Connect" })).toBeNull();
-  });
-
-  it("links a connected GitHub workspace to repository configuration", () => {
-    const integrations = integrationStateFromRows([]) as IntegrationState;
-    integrations.github = {
-      provider: "github",
-      connected: true,
-      status: "connected",
-      accountName: "opencompany",
-      statusReason: null,
-    };
-
-    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
-
-    expect(screen.getByText("GitHub workspace ingestion")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Configure repositories" })).toHaveAttribute(
-      "href",
-      "/settings/repositories",
-    );
   });
 
   it("keeps Linear out of the legacy Integrations panel", () => {

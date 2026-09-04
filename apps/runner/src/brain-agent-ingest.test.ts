@@ -3,7 +3,6 @@ import path from "node:path";
 import {
   normalizeAttioObjectWindow,
   normalizeChatCapture,
-  normalizeGitHubActivityWebhook,
   normalizeGmailThreadWindow,
   normalizeGoogleDriveDocument,
   normalizeHubspotObjectWindow,
@@ -94,20 +93,17 @@ import {
   BrainIngestBudgetError,
   buildAttioObjectAgentIngestPrompt,
   buildChatCaptureAgentIngestPrompt,
-  buildGitHubActivityAgentIngestPrompt,
   buildGmailThreadAgentIngestPrompt,
   buildGoogleDriveDocumentAgentIngestPrompt,
   buildHubspotObjectAgentIngestPrompt,
   CHAT_CAPTURE_INGEST_PROFILE,
   CHAT_CAPTURE_INGEST_SYSTEM_PROMPT,
   formatBrainFolderInventoryPrompt,
-  GITHUB_ACTIVITY_INGEST_SYSTEM_PROMPT,
   HUBSPOT_OBJECT_INGEST_SYSTEM_PROMPT,
   LINEAR_ISSUE_INGEST_SYSTEM_PROMPT,
   placeMovingAnthropicCacheBreakpoint,
   runAttioObjectAgentIngest,
   runChatCaptureAgentIngest,
-  runGitHubActivityAgentIngest,
   runGmailThreadAgentIngest,
   UPLOAD_ASSET_INGEST_PROFILE,
   validateBrainAgentInvocation,
@@ -139,29 +135,6 @@ function uploadAssetItem(contentSha256 = "a".repeat(64)) {
     contentSha256,
     uploadedAt: "2026-08-12T10:00:00.000Z",
   });
-}
-
-function githubActivityItem() {
-  const item = normalizeGitHubActivityWebhook(
-    "pull_request",
-    {
-      action: "closed",
-      repository: { id: 4242, full_name: "acme/api", private: true },
-      pull_request: {
-        number: 123,
-        merged: true,
-        title: "Add usage-based billing",
-        body: "Implements metered billing per workspace.",
-        html_url: "https://github.com/acme/api/pull/123",
-        user: { login: "ada" },
-        merged_by: { login: "grace" },
-        merged_at: "2026-07-01T11:58:00Z",
-      },
-    },
-    { capturedAt: "2026-07-01T12:00:00.000Z" },
-  );
-  if (!item) throw new Error("Expected a normalized GitHub activity item.");
-  return item;
 }
 
 function gmailItem() {
@@ -249,56 +222,6 @@ function attioItem() {
     ],
     flushedAt: "2026-07-16T10:30:00.000Z",
   });
-}
-
-function githubCommentItem() {
-  const item = normalizeGitHubActivityWebhook(
-    "issue_comment",
-    {
-      action: "created",
-      repository: { id: 4242, full_name: "acme/api", private: false },
-      issue: {
-        number: 45,
-        title: "Billing webhook drops retries",
-        html_url: "https://github.com/acme/api/issues/45",
-        labels: [{ name: "bug" }],
-      },
-      comment: {
-        id: 987654321,
-        body: "We decided to drop retries older than 24h and alert on the rest.",
-        html_url: "https://github.com/acme/api/issues/45#issuecomment-987654321",
-        user: { login: "grace" },
-        created_at: "2026-07-02T08:15:00Z",
-      },
-      installation: { id: 777 },
-    },
-    { capturedAt: "2026-07-02T08:16:00.000Z" },
-  );
-  if (!item) throw new Error("Expected GitHub comment fixture to normalize.");
-  return item;
-}
-
-function githubOpenedIssueItem() {
-  const item = normalizeGitHubActivityWebhook(
-    "issues",
-    {
-      action: "opened",
-      repository: { id: 4242, full_name: "acme/api", private: false },
-      issue: {
-        number: 45,
-        title: "Billing webhook drops retries",
-        body: "Stripe retries are acknowledged before processing.",
-        html_url: "https://github.com/acme/api/issues/45",
-        user: { login: "ada" },
-        created_at: "2026-07-01T10:00:00Z",
-        labels: [{ name: "bug" }],
-      },
-      installation: { id: 777 },
-    },
-    { capturedAt: "2026-07-01T10:01:00.000Z" },
-  );
-  if (!item) throw new Error("Expected GitHub issue fixture to normalize.");
-  return item;
 }
 
 function triageResult(
@@ -450,16 +373,6 @@ describe("validateBrainAgentInvocation", () => {
   });
 });
 
-describe("buildGitHubActivityAgentIngestPrompt", () => {
-  it("maps product surfaces to the valid project entity type", () => {
-    const prompt = buildGitHubActivityAgentIngestPrompt(githubActivityItem());
-
-    expect(prompt).toContain("project page with entity type `project`");
-    expect(prompt).toContain("Do not use `product` as an entity type; it is not valid.");
-    expect(prompt).not.toContain("project/product page");
-  });
-});
-
 describe("capture-first ingest profiles", () => {
   // Regression guard for the incident that motivated the profile refactor: both
   // capture-first sources persist their content (an inbox draft, an uploaded
@@ -508,13 +421,12 @@ describe("capture-first ingest profiles", () => {
 });
 
 describe("tracker ingest profiles", () => {
-  it.each([LINEAR_ISSUE_INGEST_SYSTEM_PROMPT, GITHUB_ACTIVITY_INGEST_SYSTEM_PROMPT])(
-    "allows pointer-backed pages to become active without evidence snapshots",
-    (prompt) => {
-      expect(prompt).toContain("cites provenance with [[evidence:...]] or [[source:...]]");
-      expect(prompt).toContain("compiled truth has neither citation");
-    },
-  );
+  it("allows pointer-backed pages to become active without evidence snapshots", () => {
+    expect(LINEAR_ISSUE_INGEST_SYSTEM_PROMPT).toContain(
+      "cites provenance with [[evidence:...]] or [[source:...]]",
+    );
+    expect(LINEAR_ISSUE_INGEST_SYSTEM_PROMPT).toContain("compiled truth has neither citation");
+  });
 });
 
 describe("buildChatCaptureAgentIngestPrompt", () => {
@@ -821,37 +733,6 @@ describe("cheap source triage", () => {
 
     expect(result).toMatchObject({ skipped: true, skipMode: "triage" });
     expect(brainFilesMock.materializeBrainFilesToRoot).not.toHaveBeenCalled();
-  });
-
-  it("triages GitHub comments but sends opened issues directly to the full agent", async () => {
-    const runTriage = vi.fn(async () => triageResult("skip"));
-    const commentResult = await runGitHubActivityAgentIngest(
-      {
-        userWorkosId: "user_123",
-        brainRef: "gbrain_123",
-        item: githubCommentItem(),
-        env: { vercelAiGatewayApiKey: "gw_test" },
-      },
-      { runCli: okCli, runTriage },
-    );
-    expect(commentResult).toMatchObject({ skipped: true, skipMode: "triage" });
-
-    mockAgentRun({
-      finalText: "Updated billing project.",
-      toolInvocations: [{ command: "timeline-add", args: ["billing", "--body", "Bug opened."] }],
-    });
-    const openedResult = await runGitHubActivityAgentIngest(
-      {
-        userWorkosId: "user_123",
-        brainRef: "gbrain_123",
-        item: githubOpenedIssueItem(),
-        env: { vercelAiGatewayApiKey: "gw_test" },
-      },
-      { runCli: okCli, runTriage },
-    );
-
-    expect(openedResult).toMatchObject({ skipped: false });
-    expect(runTriage).toHaveBeenCalledTimes(1);
   });
 });
 

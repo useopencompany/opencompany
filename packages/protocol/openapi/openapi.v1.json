@@ -2461,65 +2461,6 @@
             ],
             "additionalProperties": false
           },
-          "github": {
-            "type": "object",
-            "properties": {
-              "integration": {
-                "type": "object",
-                "properties": {
-                  "provider": {
-                    "type": "string",
-                    "enum": [
-                      "github"
-                    ]
-                  },
-                  "connected": {
-                    "type": "boolean"
-                  },
-                  "status": {
-                    "type": "string",
-                    "enum": [
-                      "connected",
-                      "needs_reauth",
-                      "sync_failed",
-                      "disconnected",
-                      "not_connected"
-                    ]
-                  },
-                  "integrationId": {
-                    "type": "string",
-                    "nullable": true,
-                    "minLength": 1,
-                    "maxLength": 256,
-                    "example": "run_019fed53"
-                  },
-                  "statusReason": {
-                    "type": "string",
-                    "nullable": true,
-                    "maxLength": 2000
-                  },
-                  "accountName": {
-                    "type": "string",
-                    "nullable": true,
-                    "maxLength": 512
-                  }
-                },
-                "required": [
-                  "provider",
-                  "connected",
-                  "status",
-                  "integrationId",
-                  "statusReason",
-                  "accountName"
-                ],
-                "additionalProperties": false
-              }
-            },
-            "required": [
-              "integration"
-            ],
-            "additionalProperties": false
-          },
           "gmail": {
             "type": "object",
             "properties": {
@@ -2898,7 +2839,6 @@
           "sources",
           "ownAccounts",
           "linear",
-          "github",
           "gmail",
           "googleDrive",
           "hubspot",
@@ -2922,7 +2862,6 @@
             "enum": [
               "gmail",
               "google_drive",
-              "github",
               "linear",
               "slack_bot",
               "hubspot",
@@ -3091,7 +3030,6 @@
                 "enum": [
                   "gmail",
                   "google_drive",
-                  "github",
                   "linear",
                   "slack_bot",
                   "hubspot",
@@ -3138,7 +3076,6 @@
                 "enum": [
                   "gmail",
                   "google_drive",
-                  "github",
                   "linear",
                   "slack_bot",
                   "hubspot",
@@ -3380,72 +3317,6 @@
               "provider",
               "enabled",
               "objectTypes",
-              "events"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "operation": {
-                "type": "string",
-                "enum": [
-                  "configure"
-                ]
-              },
-              "provider": {
-                "type": "string",
-                "enum": [
-                  "github"
-                ]
-              },
-              "enabled": {
-                "type": "boolean"
-              },
-              "repos": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    },
-                    "fullName": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "fullName"
-                  ],
-                  "additionalProperties": false
-                },
-                "maxItems": 500
-              },
-              "events": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "enum": [
-                    "pull_request_opened",
-                    "pull_request_merged",
-                    "pull_request_commented",
-                    "issue_opened",
-                    "issue_commented"
-                  ]
-                },
-                "maxItems": 50
-              }
-            },
-            "required": [
-              "operation",
-              "provider",
-              "enabled",
-              "repos",
               "events"
             ],
             "additionalProperties": false
@@ -5275,49 +5146,6 @@
               "provider": {
                 "type": "string",
                 "enum": [
-                  "github"
-                ]
-              },
-              "repos": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    },
-                    "fullName": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    },
-                    "private": {
-                      "type": "boolean"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "fullName",
-                    "private"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            },
-            "required": [
-              "provider",
-              "repos"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "provider": {
-                "type": "string",
-                "enum": [
                   "google_drive"
                 ]
               },
@@ -5457,32 +5285,6 @@
                   "minLength": 1,
                   "maxLength": 256,
                   "example": "run_019fed53"
-                },
-                "config": {
-                  "type": "object",
-                  "properties": {
-                    "repos": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 200
-                          },
-                          "fullName": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 200
-                          }
-                        },
-                        "additionalProperties": false
-                      },
-                      "maxItems": 20
-                    }
-                  },
-                  "additionalProperties": false
                 }
               },
               "required": [
@@ -5507,7 +5309,6 @@
               "type": "string",
               "enum": [
                 "public_web",
-                "github",
                 "granola",
                 "fathom",
                 "gmail",
@@ -6165,8 +5966,7 @@
             "enum": [
               "gmail",
               "granola",
-              "linear",
-              "github"
+              "linear"
             ]
           },
           "integrationId": {
@@ -6316,8 +6116,7 @@
             "enum": [
               "gmail",
               "granola",
-              "linear",
-              "github"
+              "linear"
             ]
           },
           "sourceType": {
@@ -6455,8 +6254,7 @@
             "enum": [
               "gmail",
               "granola",
-              "linear",
-              "github"
+              "linear"
             ]
           },
           "enabled": {
@@ -16771,21 +16569,6 @@
                         "type": "string",
                         "enum": [
                           "linear"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "provider"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "provider": {
-                        "type": "string",
-                        "enum": [
-                          "github"
                         ]
                       }
                     },

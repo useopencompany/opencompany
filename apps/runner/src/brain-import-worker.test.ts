@@ -34,8 +34,8 @@ describe("Wiki company import writer handoff", () => {
       },
       {
         id: "gbimpc_1",
-        provider: "github",
-        sourceRef: "github:acme/api:pull:42",
+        provider: "linear",
+        sourceRef: "linear:acme:ENG-42",
         title: "Ship onboarding",
         occurredAt: new Date("2026-09-01T10:00:00.000Z"),
         capturedAt: new Date("2026-09-01T10:05:00.000Z"),
@@ -47,13 +47,13 @@ describe("Wiki company import writer handoff", () => {
     expect(item).toMatchObject({
       sourceProvider: "opencompany-import",
       sourceType: "run",
-      sourceRef: "opencompany-import:run:gbimp_1:candidate:github:gbimpc_1",
+      sourceRef: "opencompany-import:run:gbimp_1:candidate:linear:gbimpc_1",
       content: {
         phase: "research",
         importRunId: "gbimp_1",
         evidence: {
-          provider: "github",
-          sourceRef: "github:acme/api:pull:42",
+          provider: "linear",
+          sourceRef: "linear:acme:ENG-42",
         },
       },
     });

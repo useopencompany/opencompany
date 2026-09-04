@@ -64,7 +64,6 @@ import { ElectricReadModelProxy } from "./electric-read-models";
 import { createEngineAuthService } from "./engine-auth";
 import { createEngineSessionService } from "./engine-sessions";
 import { createFeedbackService } from "./feedback";
-import { createGitHubIngress } from "./github-ingress";
 import { createGitHubUserIngress } from "./github-user-ingress";
 import { createGoogleIngress } from "./google-ingress";
 import { createHubspotIngress } from "./hubspot-ingress";
@@ -278,16 +277,6 @@ const app = createApiApp({
   identify: identityVerifier,
   ...(process.env.CRON_SECRET ? { emailLifecycleInternalSecret: process.env.CRON_SECRET } : {}),
   browserOrigins: parseBrowserOrigins(process.env.API_BROWSER_ORIGINS),
-  githubIngress: createGitHubIngress({
-    db: database.db,
-    identify: identityVerifier,
-    wakeWikiIngest: () =>
-      runnerClient.postJson(
-        "/internal/goat/wiki-ingest/wake",
-        {},
-        { errorFormat: "error-message" },
-      ),
-  }),
   githubUserIngress: createGitHubUserIngress({
     db: database.db,
     identify: identityVerifier,

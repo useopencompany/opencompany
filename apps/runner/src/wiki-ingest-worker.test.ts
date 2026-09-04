@@ -219,7 +219,7 @@ describe("opencompany wiki ingest worker", () => {
     agentResult.trace.triage = triage;
 
     await runClaimedWikiIngestJob({
-      job: job({ sourceProvider: "github", sourceType: "activity" }),
+      job: job({ sourceProvider: "linear", sourceType: "issue" }),
       env,
       store: ingestStore,
       agentRun: vi.fn(async () => agentResult),

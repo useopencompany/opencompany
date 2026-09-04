@@ -1,16 +1,10 @@
 "use client";
 
-import type { GitHubActivityEventType } from "@opencompany/brain";
 import type { WikiSourceDto } from "@opencompany/protocol";
 import { toast } from "@opencompany/ui/components/sonner";
 import { Search } from "lucide-react";
 import { useEffect, useMemo, useState, useTransition } from "react";
-import {
-  type GitHubRepositoryListResult,
-  type LinearTeamListResult,
-  listGitHubRepositoriesAction,
-  listLinearTeamsAction,
-} from "@/lib/brain-source-actions";
+import { type LinearTeamListResult, listLinearTeamsAction } from "@/lib/brain-source-actions";
 import { upsertWikiSource } from "@/lib/wiki-source-api";
 
 type WikiScopePickerProps = {
@@ -19,168 +13,6 @@ type WikiScopePickerProps = {
   canConfigure: boolean;
   onSaved: (source: WikiSourceDto) => void;
 };
-
-const GITHUB_EVENT_OPTIONS: { id: GitHubActivityEventType; label: string }[] = [
-  { id: "pull_request_opened", label: "Pull request opened" },
-  { id: "pull_request_merged", label: "Pull request merged" },
-  { id: "pull_request_commented", label: "Pull request comment" },
-  { id: "issue_opened", label: "Issue created" },
-  { id: "issue_commented", label: "Issue comment" },
-];
-
-export function WikiGitHubRepoPicker({
-  integrationId,
-  source,
-  canConfigure,
-  onSaved,
-}: WikiScopePickerProps) {
-  const saved = useMemo(() => githubReposFromConfig(source?.config), [source]);
-  const savedEvents = useMemo(() => githubEventsFromConfig(source?.config), [source]);
-  const [expanded, setExpanded] = useState(false);
-  const [repos, setRepos] = useState<GitHubRepositoryListResult | null>(null);
-  const [search, setSearch] = useState("");
-  const [selection, setSelection] = useState<Map<string, string>>(
-    () => new Map(saved.map((repo) => [repo.id, repo.fullName])),
-  );
-  const [events, setEvents] = useState<Set<GitHubActivityEventType>>(() => new Set(savedEvents));
-  const [dirty, setDirty] = useState(false);
-  const [isPending, startTransition] = useTransition();
-
-  useEffect(() => {
-    if (!expanded || repos) return;
-    let active = true;
-    void listGitHubRepositoriesAction(integrationId).then(
-      (result) => {
-        if (active) setRepos(result);
-      },
-      (error: unknown) => {
-        if (active)
-          setRepos({ ok: false, error: errorMessage(error, "Repositories could not load.") });
-      },
-    );
-    return () => {
-      active = false;
-    };
-  }, [expanded, integrationId, repos]);
-
-  const selectedCount = selection.size;
-  const eventSummary =
-    events.size === 0
-      ? "no events"
-      : GITHUB_EVENT_OPTIONS.filter((option) => events.has(option.id))
-          .map((option) => option.label.toLowerCase())
-          .join(", ");
-  const summary =
-    selectedCount === 0
-      ? "No repositories selected yet — nothing is ingested until you choose some."
-      : `${selectedCount} repositor${selectedCount === 1 ? "y" : "ies"} selected · ${eventSummary}.`;
-
-  if (!expanded) {
-    return (
-      <CollapsedScopePicker
-        summary={summary}
-        action="Configure"
-        canConfigure={canConfigure}
-        onExpand={() => setExpanded(true)}
-      />
-    );
-  }
-
-  const query = search.trim().toLowerCase();
-  const repoOptions = (repos?.ok ? repos.repos : []).filter(
-    (repo) => !query || repo.fullName.toLowerCase().includes(query),
-  );
-
-  const save = () => {
-    startTransition(async () => {
-      try {
-        const updated = await upsertWikiSource({
-          integrationId,
-          provider: "github",
-          enabled: source?.enabled ?? true,
-          config: {
-            repos: [...selection].map(([id, fullName]) => ({ id, fullName })),
-            events: [...events],
-          },
-        });
-        setDirty(false);
-        onSaved(updated);
-        toast.success("GitHub source updated.");
-      } catch (error) {
-        toast.error(errorMessage(error, "GitHub source could not be updated."));
-      }
-    });
-  };
-
-  return (
-    <div className="flex flex-col gap-2 border-t border-border/70 pt-2">
-      <ScopeSearch
-        value={search}
-        placeholder="Search repositories"
-        onChange={setSearch}
-        onCollapse={() => setExpanded(false)}
-      />
-      {repos === null ? (
-        <div className="px-1 py-1.5 text-[12px] text-ink-subtle">Loading repositories…</div>
-      ) : !repos.ok ? (
-        <div className="px-1 py-1.5 text-[12px] text-warning">{repos.error}</div>
-      ) : (
-        <div className="flex max-h-[220px] flex-col gap-px overflow-y-auto rounded-md border border-border/70 p-1">
-          {repoOptions.length === 0 ? (
-            <div className="px-2 py-1.5 text-[12px] text-ink-subtle">No repositories found.</div>
-          ) : (
-            repoOptions.map((repo) => (
-              <label
-                key={repo.id}
-                className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink/90 transition-colors hover:bg-surface-hover"
-              >
-                <input
-                  type="checkbox"
-                  checked={selection.has(repo.id)}
-                  onChange={() => {
-                    setDirty(true);
-                    setSelection((current) => toggleMapValue(current, repo.id, repo.fullName));
-                  }}
-                  className="accent-ink"
-                />
-                <span className="min-w-0 flex-1 truncate">{repo.fullName}</span>
-                {repo.private ? (
-                  <span className="shrink-0 text-[11px] text-ink-subtle">private</span>
-                ) : null}
-              </label>
-            ))
-          )}
-        </div>
-      )}
-      <div className="flex flex-col gap-1 rounded-md border border-border/70 p-2">
-        <p className="text-[12px] font-medium text-ink">Events to ingest</p>
-        {GITHUB_EVENT_OPTIONS.map((option) => (
-          <label
-            key={option.id}
-            className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-[13px] text-ink/90 transition-colors hover:bg-surface-hover"
-          >
-            <input
-              type="checkbox"
-              checked={events.has(option.id)}
-              onChange={() => {
-                setDirty(true);
-                setEvents((current) => toggleSetValue(current, option.id));
-              }}
-              className="accent-ink"
-            />
-            <span>{option.label}</span>
-          </label>
-        ))}
-        {events.size === 0 ? (
-          <p className="text-[11.5px] leading-4 text-ink-subtle">
-            No events selected — nothing is ingested from the chosen repositories.
-          </p>
-        ) : null}
-      </div>
-      <ScopeSaveButton dirty={dirty} pending={isPending} label="Save GitHub source" onSave={save} />
-    </div>
-  );
-}
 
 type LinearEventSelection =
   | "issue_created"
@@ -445,30 +277,6 @@ function ScopeSaveButton({
         {pending ? "Saving…" : label}
       </button>
     </div>
-  );
-}
-
-function githubReposFromConfig(config: Record<string, unknown> | undefined) {
-  const value = config?.repos;
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((entry) => {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
-    const record = entry as Record<string, unknown>;
-    const id = typeof record.id === "string" ? record.id.trim() : "";
-    if (!id) return [];
-    const fullName = typeof record.fullName === "string" ? record.fullName.trim() : "";
-    return [{ id, fullName: fullName || id }];
-  });
-}
-
-function githubEventsFromConfig(config: Record<string, unknown> | undefined) {
-  const known = new Set(GITHUB_EVENT_OPTIONS.map((option) => option.id));
-  if (!Array.isArray(config?.events)) return known;
-  return new Set(
-    config.events.filter(
-      (entry): entry is GitHubActivityEventType =>
-        typeof entry === "string" && known.has(entry as GitHubActivityEventType),
-    ),
   );
 }
 

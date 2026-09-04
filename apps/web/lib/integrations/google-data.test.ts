@@ -3,7 +3,7 @@ import { getAvailableHarnessTools } from "@/lib/integrations/google-data";
 
 const mocks = vi.hoisted(() => ({
   orderBy: vi.fn(),
-  getGitHubIntegrationState: vi.fn(),
+  getGitHubUserIntegrationState: vi.fn(),
   getLatitudeIntegrationState: vi.fn(),
   getLinearIntegrationState: vi.fn(),
   googleIntegrationStateFromRows: vi.fn(),
@@ -25,8 +25,8 @@ vi.mock("@opencompany/agent/integration-state", () => ({
   googleIntegrationStateFromRows: mocks.googleIntegrationStateFromRows,
 }));
 
-vi.mock("@opencompany/agent/integrations/github", () => ({
-  getGitHubIntegrationState: mocks.getGitHubIntegrationState,
+vi.mock("@opencompany/agent/integrations/github-user", () => ({
+  getGitHubUserIntegrationState: mocks.getGitHubUserIntegrationState,
 }));
 
 vi.mock("@opencompany/agent/integrations/linear-mcp", () => ({
@@ -49,7 +49,7 @@ describe("getAvailableHarnessTools", () => {
     });
     mocks.getLinearIntegrationState.mockResolvedValue({ connected: false });
     mocks.getLatitudeIntegrationState.mockResolvedValue({ connected: false });
-    mocks.getGitHubIntegrationState.mockResolvedValue({ connected: false });
+    mocks.getGitHubUserIntegrationState.mockResolvedValue({ connected: false });
     delete process.env.APIFY_API_TOKEN;
   });
 

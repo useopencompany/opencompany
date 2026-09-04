@@ -1,6 +1,4 @@
 import { type EncryptedPayload, EncryptionKeyConfigError } from "@opencompany/crypto";
-import type { SQL } from "drizzle-orm";
-import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RepoConfigDb } from "./repo-configs";
 import {
@@ -94,16 +92,6 @@ describe("opencompany repository configs", () => {
         envContent: "DATABASE_URL=database-secret-value\nAPI_TOKEN=token_secret",
       },
     ]);
-    expect(selectDb.innerJoin).toHaveBeenCalledTimes(2);
-    const joinQueries = selectDb.innerJoin.mock.calls.map((call) =>
-      new PgDialect().sqlToQuery(call[1] as SQL),
-    );
-    expect(joinQueries[0]?.sql).toContain(
-      '"external_id" = "goat"."repo_configs"."repository_external_id"',
-    );
-    expect(joinQueries[0]?.params).toEqual(["github", "repository", "available"]);
-    expect(joinQueries[1]?.sql).toContain('"workspace_id" = "goat"."repo_configs"."workspace_id"');
-    expect(joinQueries[1]?.params).toEqual(["github", "connected"]);
   });
 
   it("skips a row that cannot be decrypted without dropping valid available rows", async () => {

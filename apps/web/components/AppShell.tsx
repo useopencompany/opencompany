@@ -18,7 +18,6 @@ import {
 } from "@/lib/integration-state";
 import { getAttioMcpIntegrationState } from "@/lib/integrations/attio-mcp";
 import { getFathomIntegrationState } from "@/lib/integrations/fathom";
-import { getGitHubIntegrationState } from "@/lib/integrations/github";
 import { getGoogleIntegrationState } from "@/lib/integrations/google-data";
 import { getGranolaIntegrationState } from "@/lib/integrations/granola";
 import { getGranolaMcpIntegrationState } from "@/lib/integrations/granola-mcp";
@@ -46,7 +45,6 @@ export async function AppShell({ children }: { children: ReactNode }) {
     linear,
     hubspot,
     posthog,
-    github,
     jamie,
     slack,
     granola,
@@ -84,11 +82,6 @@ export async function AppShell({ children }: { children: ReactNode }) {
       "posthog_integration",
       () => getPostHogIntegrationState(user.workosUserId),
       emptyIntegrations.posthog,
-    ),
-    loadOptionalAppShellData(
-      "github_integration",
-      () => getGitHubIntegrationState(workspace.id),
-      emptyIntegrations.github,
     ),
     loadOptionalAppShellData(
       "jamie_integration",
@@ -196,7 +189,6 @@ export async function AppShell({ children }: { children: ReactNode }) {
       linear,
       hubspot,
       posthog,
-      github,
       jamie,
       slack,
       granola,
@@ -276,7 +268,6 @@ function buildIntegrationState(input: {
   linear: IntegrationState["linear"];
   hubspot: IntegrationState["hubspot"];
   posthog: IntegrationState["posthog"];
-  github: IntegrationState["github"];
   jamie: IntegrationState["jamie"];
   slack: IntegrationState["slack"];
   granola: IntegrationState["granola"];
@@ -297,7 +288,6 @@ function buildIntegrationState(input: {
     linear: input.linear,
     hubspot: input.hubspot,
     posthog: input.posthog,
-    github: input.github,
     jamie: input.jamie,
     slack: input.slack,
     granola: input.granola,

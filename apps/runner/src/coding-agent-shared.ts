@@ -6,12 +6,9 @@ import {
   loadGitHubUserCredentialIdentity,
   loadGitHubUserIntegration,
 } from "@opencompany/agent/integrations/github-user";
-import { integrations } from "@opencompany/db/product-schema";
 import { createLogger } from "@opencompany/observability";
-import { and, desc, eq } from "drizzle-orm";
 import type { CodingChatHistory } from "./coding-chat-history";
 import { getDb } from "./db";
-import { getGitHubWorkInstallationToken } from "./github";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "coding-agent-github" });
 
@@ -49,13 +46,13 @@ export function gitAuthHeader(token: string) {
 export type GitHubCommandAuth = {
   githubAuthHeader: string;
   githubToken: string;
-  provider: "github_user" | "github";
+  provider: "github_user";
   gitAuthorName?: string;
   gitAuthorEmail?: string;
 };
 
-// A connected personal account is the identity the user explicitly chose for the GitHub plugin,
-// so it takes precedence over the legacy workspace installation. Refresh immediately before the
+// A connected personal account is the identity the user explicitly chose for the GitHub plugin.
+// Refresh immediately before the
 // token enters a sandbox; getGitHubUserAccessToken delegates to the shared expiring-OAuth helper,
 // which owns both in-process single-flight and the database refresh lease used by concurrent
 // runner/gateway consumers.
@@ -114,8 +111,7 @@ async function loadConnectedGitHubUserAuth(
 }
 
 // Missing GitHub auth is not an error: a sandbox can still work with public repositories. A
-// connected personal credential is different — refresh failures propagate rather than silently
-// switching the sandbox to the workspace App identity.
+// connected personal credential is different — refresh failures propagate.
 export async function loadGitHubAuthForUser(
   userWorkosId: string,
 ): Promise<GitHubCommandAuth | null> {
@@ -128,30 +124,7 @@ export async function loadGitHubAuthForUser(
     if (personalIntegration.status !== "connected") return null;
     return loadConnectedGitHubUserAuth(userWorkosId, personalIntegration, db);
   }
-
-  const [integration] = await db
-    .select({ installationId: integrations.externalId })
-    .from(integrations)
-    .where(
-      and(
-        eq(integrations.userWorkosId, userWorkosId),
-        eq(integrations.provider, "github"),
-        eq(integrations.status, "connected"),
-      ),
-    )
-    .orderBy(desc(integrations.updatedAt))
-    .limit(1);
-  if (!integration?.installationId) return null;
-
-  const githubToken = await getGitHubWorkInstallationToken({
-    installationId: integration.installationId,
-  }).catch(() => null);
-  if (!githubToken) return null;
-  return {
-    githubToken,
-    githubAuthHeader: gitAuthHeader(githubToken),
-    provider: "github",
-  };
+  return null;
 }
 
 export function buildGitHubCommandEnv(input: {

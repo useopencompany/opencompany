@@ -810,7 +810,6 @@ export const BrainSourceItemListEnvelopeSchema = z
 export const BrainSourceConfigProviderSchema = z.enum([
   "gmail",
   "google_drive",
-  "github",
   "linear",
   "slack_bot",
   "hubspot",
@@ -881,13 +880,6 @@ const LinearSourceProviderStateSchema = z
     organizationName: NullableLabelSchema,
   })
   .strict();
-const GitHubSourceProviderStateSchema = z
-  .object({
-    provider: z.literal("github"),
-    ...BrainSourceProviderBaseShape,
-    accountName: NullableLabelSchema,
-  })
-  .strict();
 const GmailSourceProviderStateSchema = z
   .object({
     provider: z.literal("gmail"),
@@ -950,7 +942,6 @@ export const BrainSourceDetailsSchema = z
       })
       .strict(),
     linear: z.object({ integration: LinearSourceProviderStateSchema }).strict(),
-    github: z.object({ integration: GitHubSourceProviderStateSchema }).strict(),
     gmail: z.object({ integration: GmailSourceProviderStateSchema }).strict(),
     googleDrive: z.object({ integration: GoogleDriveSourceProviderStateSchema }).strict(),
     hubspot: z.object({ integration: HubspotSourceProviderStateSchema }).strict(),
@@ -997,17 +988,6 @@ const AttioObjectTypeRefSchema = z.object({ id: z.enum(["person", "company", "de
 const AttioEventRefSchema = z
   .object({ id: z.enum(["object_created", "object_updated", "note_added"]) })
   .strict();
-const GitHubActivityEventSchema = z.enum([
-  "pull_request_opened",
-  "pull_request_merged",
-  "pull_request_commented",
-  "issue_opened",
-  "issue_commented",
-]);
-const GitHubRepositoryRefSchema = z
-  .object({ id: z.string().min(1).max(512), fullName: z.string().min(1).max(512) })
-  .strict();
-
 export const SetBrainSourceBodySchema = z
   .union([
     z
@@ -1042,15 +1022,6 @@ export const SetBrainSourceBodySchema = z
         enabled: z.boolean(),
         objectTypes: z.array(AttioObjectTypeRefSchema).max(50),
         events: z.array(AttioEventRefSchema).max(50),
-      })
-      .strict(),
-    z
-      .object({
-        operation: z.literal("configure"),
-        provider: z.literal("github"),
-        enabled: z.boolean(),
-        repos: z.array(GitHubRepositoryRefSchema).max(500),
-        events: z.array(GitHubActivityEventSchema).max(50),
       })
       .strict(),
     z
@@ -1105,7 +1076,6 @@ export const BrainSourceDeleteEnvelopeSchema = z
 
 export const BrainSourceOptionsBodySchema = z.discriminatedUnion("provider", [
   z.object({ provider: z.literal("linear") }).strict(),
-  z.object({ provider: z.literal("github") }).strict(),
   z
     .object({
       provider: z.literal("google_drive"),
@@ -1138,12 +1108,6 @@ export const BrainSourceOptionsSchema = z
       .strict(),
     z
       .object({
-        provider: z.literal("github"),
-        repos: z.array(GitHubRepositoryRefSchema.extend({ private: z.boolean() }).strict()),
-      })
-      .strict(),
-    z
-      .object({
         provider: z.literal("google_drive"),
         files: z.array(GoogleDriveOptionSchema),
         nextPageToken: z.string().max(4_096).nullable(),
@@ -1159,7 +1123,6 @@ export const BrainSourceOptionsEnvelopeSchema = z
 
 export const BrainImportProviderSchema = z.enum([
   "public_web",
-  "github",
   "granola",
   "fathom",
   "gmail",
@@ -1177,23 +1140,10 @@ export const BrainImportRunStatusSchema = z.enum([
   "canceled",
 ]);
 
-// GitHub is the only provider whose import scope may be chosen at start time before a
-// configured Brain source exists. Every other provider reuses its stored source configuration.
-const BrainImportGitHubRepositoryRefSchema = z
-  .object({
-    id: z.string().min(1).max(200).optional(),
-    fullName: z.string().min(1).max(200).optional(),
-  })
-  .strict();
-
 const BrainImportSourceSelectionEntrySchema = z
   .object({
     enabled: z.boolean(),
     integrationId: ResourceIdSchema.optional(),
-    config: z
-      .object({ repos: z.array(BrainImportGitHubRepositoryRefSchema).max(20).optional() })
-      .strict()
-      .optional(),
   })
   .strict();
 
@@ -1302,7 +1252,7 @@ export const WikiPageReadModelSchema = WikiPageSchema.openapi("WikiPageReadModel
 export const WikiTimelineReadModelSchema =
   WikiTimelineEntrySchema.openapi("WikiTimelineReadModelV1");
 
-export const WikiSourceProviderSchema = z.enum(["gmail", "granola", "linear", "github"]);
+export const WikiSourceProviderSchema = z.enum(["gmail", "granola", "linear"]);
 
 export const WikiSourceConfigSchema = z
   .record(z.string().min(1).max(128), z.unknown())
@@ -4205,7 +4155,7 @@ export type DeleteBrainFolderBody = z.infer<typeof DeleteBrainFolderBodySchema>;
 export type WikiPageDto = z.infer<typeof WikiPageSchema>;
 export type WikiPageReadModel = z.infer<typeof WikiPageReadModelSchema>;
 export type WikiTimelineReadModel = z.infer<typeof WikiTimelineReadModelSchema>;
-export type WikiSourceProvider = "gmail" | "granola" | "linear" | "github";
+export type WikiSourceProvider = "gmail" | "granola" | "linear";
 export type WikiSourceDto = z.infer<typeof WikiSourceSchema>;
 export type WikiIngestActivityItemDto = {
   id: string;

@@ -14,7 +14,6 @@ import {
   type NormalizedBrainSourceItem,
   type NormalizedChatCaptureSourceItem,
   type NormalizedFathomMeetingSourceItem,
-  type NormalizedGitHubActivitySourceItem,
   type NormalizedGmailThreadContent,
   type NormalizedGmailThreadSourceItem,
   type NormalizedGoogleDriveDocumentSourceItem,
@@ -88,7 +87,6 @@ import {
 import {
   type BrainIngestTriageInput,
   buildAttioIngestTriagePrompt,
-  buildGitHubCommentIngestTriagePrompt,
   buildGmailIngestTriagePrompt,
   runBrainIngestTriage,
 } from "./brain-ingest-triage";
@@ -149,7 +147,6 @@ const PROMPT_CAPTURE_BYTES = 64_000;
 const PROMPT_ASSET_TEXT_BYTES = 100_000;
 const PROMPT_LINEAR_DESCRIPTION_BYTES = 24_000;
 const PROMPT_LINEAR_ACTIVITY_BYTES = 80_000;
-const PROMPT_GITHUB_ACTIVITY_BYTES = 80_000;
 const PROMPT_HUBSPOT_ACTIVITY_BYTES = 60_000;
 const PROMPT_HUBSPOT_PROPERTIES_BYTES = 24_000;
 const PROMPT_ATTIO_ACTIVITY_BYTES = 60_000;
@@ -668,122 +665,6 @@ export function buildLinearIssueAgentIngestPrompt(item: NormalizedLinearIssueSou
     description ? `## Issue description\n${description}` : null,
     `## Activity window\n${activityText}`,
     issue.comments.length > 0 ? `## Comments\n${formatLinearIssueComments(issue)}` : null,
-  ]
-    .filter((line): line is string => line !== null)
-    .join("\n");
-}
-
-export const GITHUB_ACTIVITY_INGEST_SYSTEM_PROMPT = buildBrainIngestSystemPrompt({
-  mission:
-    "folds one GitHub activity event or one buffered pull-request activity window into a single brain of Markdown knowledge documents.",
-  skipRule: `GitHub activity is often routine: dependency bumps, typo fixes, chores, housekeeping issues, and comments that are acknowledgements or status pings ("LGTM", "+1", "done") carry no durable knowledge. If the event is not brain-worthy, make no writes and reply with exactly ${BRAIN_AGENT_SKIP_SENTINEL}. Only work that changes a project's state of play belongs in the brain: shipped or in-flight features, meaningful fixes, newly surfaced problems, and decisions recorded in a description or comment.`,
-});
-
-export function buildGitHubActivityAgentIngestPrompt(item: NormalizedGitHubActivitySourceItem) {
-  const activity = item.content.activity;
-  if (activity.events && activity.events.length > 0) {
-    const fullActivityText = activity.events
-      .map((event, index) => {
-        const stats = [
-          event.author ? `- Author: ${event.author}` : null,
-          event.mergedBy ? `- Merged by: ${event.mergedBy}` : null,
-          event.baseRef && event.headRef
-            ? `- Branches: ${event.headRef} -> ${event.baseRef}`
-            : null,
-          event.additions !== undefined && event.deletions !== undefined
-            ? `- Size: +${event.additions} / -${event.deletions}${
-                event.changedFiles !== undefined ? ` across ${event.changedFiles} files` : ""
-              }`
-            : null,
-          event.labels?.length ? `- Labels: ${event.labels.join(", ")}` : null,
-        ].filter((line): line is string => line !== null);
-        return [
-          `### ${index + 1}. ${event.state} at ${event.occurredAt}`,
-          `- Source ref: ${event.sourceRef}`,
-          `- URL: ${event.url}`,
-          ...stats,
-          event.truncatedBody ? "- Body was truncated at normalization time." : null,
-          "",
-          event.body.trim() || "(no description or comment body)",
-        ]
-          .filter((line): line is string => line !== null)
-          .join("\n");
-      })
-      .join("\n\n");
-    const activityText = truncateByBytes(fullActivityText, PROMPT_GITHUB_ACTIVITY_BYTES);
-    const truncated =
-      Buffer.byteLength(activityText, "utf8") < Buffer.byteLength(fullActivityText, "utf8");
-    return [
-      `Ingest this batch of GitHub activity on pull request ${activity.repository.fullName}#${activity.number} into the brain. It is one activity window containing everything buffered since the last ingest.`,
-      "",
-      "Required outcome, all scoped to this brain:",
-      "1. Query the brain first for the project, product, or repository this work belongs to, and for the entities the window touches, so you update existing knowledge instead of duplicating it.",
-      "2. Judge the window as a whole: keep only durable changes to a project's state of play — substantial work started or shipped, meaningful fixes, newly surfaced problems, and decisions in discussion. Ignore routine review acknowledgements and status pings.",
-      `3. Fold each durable point into the page where it belongs: rewrite compiled truth when the state of play changes and add dated evidence with the event's listed source ref. The PR-level source ref is ${item.sourceRef}.`,
-      `4. Pointer discipline: this pull request has a canonical live home (${activity.url}). Cite it as a pointer plus a one-line current-state summary — [[source:${item.sourceRef}|${activity.repository.fullName}#${activity.number}]]. Never copy the full description or discussion into a page and never snapshot it into evidence/.`,
-      "5. Create a project/product page only when this work is substantial enough to seed one. Update person or company pages only when the window reveals durable knowledge about them; do not create person pages for authors or reviewers merely participating in the PR.",
-      "",
-      `Source ref: ${item.sourceRef}`,
-      `Window: ${activity.windowStart} to ${activity.windowEnd}`,
-      `Current title: ${activity.title}`,
-      `Current state: ${activity.state}`,
-      `URL: ${activity.url}`,
-      truncated ? "The activity below was truncated to fit the 80 KB prompt limit." : null,
-      "",
-      `## Activity window\n${activityText}`,
-    ]
-      .filter((line): line is string => line !== null)
-      .join("\n");
-  }
-
-  const artifact = activity.kind === "pull_request" ? "pull request" : "issue";
-  const ref = `${activity.repository.fullName}#${activity.number}`;
-  const label =
-    activity.state === "commented"
-      ? `comment on ${artifact} ${ref}`
-      : activity.state === "merged"
-        ? `merged pull request ${ref}`
-        : `newly opened ${artifact} ${ref}`;
-  const stats =
-    activity.state === "commented"
-      ? [activity.author ? `- Comment by: ${activity.author}` : null]
-      : activity.kind === "pull_request"
-        ? [
-            activity.author ? `- Author: ${activity.author}` : null,
-            activity.mergedBy ? `- Merged by: ${activity.mergedBy}` : null,
-            activity.baseRef && activity.headRef
-              ? `- Branches: ${activity.headRef} -> ${activity.baseRef}`
-              : null,
-            activity.additions !== undefined && activity.deletions !== undefined
-              ? `- Size: +${activity.additions} / -${activity.deletions}${
-                  activity.changedFiles !== undefined
-                    ? ` across ${activity.changedFiles} files`
-                    : ""
-                }`
-              : null,
-          ]
-        : [activity.author ? `- Author: ${activity.author}` : null];
-  const labels = activity.labels && activity.labels.length > 0 ? activity.labels.join(", ") : null;
-  return [
-    `Ingest this ${label} into the brain.`,
-    "",
-    "Required outcome, all scoped to this brain:",
-    "1. Query the brain first for the project or repository area this work belongs to (including any named product surface), and for the entities the event touches, so you update existing knowledge instead of duplicating it.",
-    `2. Judge brain-worthiness: does this event change what someone should believe about a project's state of play? Routine housekeeping does not. ${activity.state === "commented" ? "A comment records discussion on a tracked item — ingest it only when it carries a durable decision, a new fact, or a change in direction, not routine back-and-forth, acknowledgements, or status pings." : activity.state === "opened" ? "An opened item records work or a problem now in flight — ingest it only when what it starts or surfaces matters at the project level." : "A merged pull request records shipped work — ingest it only when what shipped matters at the project level."}`,
-    `3. Fold what it changes into the page where it belongs — usually a project page: rewrite compiled truth when the state of play changes, and record the event as dated evidence with timeline-add --source-ref ${item.sourceRef}.`,
-    `4. Pointer discipline: this is a tracked work item with a canonical live home (${activity.url}). Cite it as a pointer plus a one-line current-state summary — [[source:${item.sourceRef}|${activity.repository.fullName}${activity.number !== undefined ? `#${activity.number}` : ""}]]. Never copy the description into a page and never snapshot it into evidence/; the tracker copy goes stale immediately.`,
-    "5. Create a project page with entity type `project` when the repository area or product surface clearly has none yet and this event is substantial enough to seed one. If a matching custom folder such as product/ exists, use it for product-surface work. Do not use `product` as an entity type; it is not valid. Do not fold product implementation details into the top-level company page merely because no page exists yet. Update person or company pages only when the event reveals durable knowledge about them; do not create person pages for people who merely authored or merged the change.",
-    "",
-    `Source ref: ${item.sourceRef}`,
-    `Occurred at: ${item.occurredAt}`,
-    `URL: ${activity.url}`,
-    activity.truncatedBody
-      ? `The ${activity.state === "commented" ? "comment" : "description"} below was truncated to fit the size limit.`
-      : null,
-    "",
-    `## Event\n- Repository: ${activity.repository.fullName}${activity.repository.private ? " (private)" : ""}\n- Kind: ${activity.kind}\n- State: ${activity.state}\n- Title: ${activity.title}${labels ? `\n- Labels: ${labels}` : ""}`,
-    ...stats.filter((line): line is string => line !== null),
-    `## ${activity.state === "commented" ? "Comment" : "Description"}\n${activity.body.trim() || "(none)"}`,
   ]
     .filter((line): line is string => line !== null)
     .join("\n");
@@ -1728,7 +1609,7 @@ export function runChatCaptureAgentIngest(
   return runBrainIngestProfile(CHAT_CAPTURE_INGEST_PROFILE, input, deps);
 }
 
-// Linear, HubSpot, Attio, GitHub, and Drive share one shape: fold a
+// Linear, HubSpot, Attio, and Drive share one shape: fold a
 // window of externally-authored activity into the brain, skipping when nothing
 // is brain-worthy (the common, correct outcome for high-noise sources). They
 // differ only in prompt and returned metadata.
@@ -1901,29 +1782,6 @@ export function runGoogleDriveDocumentAgentIngest(
   deps: BrainAgentIngestDeps = {},
 ): Promise<Record<string, unknown>> {
   return runBrainIngestProfile(GOOGLE_DRIVE_DOCUMENT_INGEST_PROFILE, input, deps);
-}
-
-const GITHUB_ACTIVITY_INGEST_PROFILE = externalActivityProfile<NormalizedGitHubActivitySourceItem>({
-  system: GITHUB_ACTIVITY_INGEST_SYSTEM_PROMPT,
-  buildPrompt: buildGitHubActivityAgentIngestPrompt,
-  buildTriagePrompt: (item) =>
-    item.content.activity.state === "commented" ? buildGitHubCommentIngestTriagePrompt(item) : null,
-  metadata: (item) => {
-    const activity = item.content.activity;
-    return {
-      activityKind: activity.kind,
-      activityState: activity.state,
-      repository: activity.repository.fullName,
-      ...(activity.number !== undefined ? { number: activity.number } : {}),
-    };
-  },
-});
-
-export function runGitHubActivityAgentIngest(
-  input: BrainIngestProfileInput<NormalizedGitHubActivitySourceItem>,
-  deps: BrainAgentIngestDeps = {},
-): Promise<Record<string, unknown>> {
-  return runBrainIngestProfile(GITHUB_ACTIVITY_INGEST_PROFILE, input, deps);
 }
 
 export const UPLOAD_ASSET_INGEST_PROFILE: BrainIngestProfile<NormalizedUploadAssetSourceItem> = {

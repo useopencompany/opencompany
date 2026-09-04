@@ -806,6 +806,28 @@ export async function runClaudeCodeChatTurn(input: {
         model: session.model || null,
         reasoningEffort,
         permissionMode: "bypassPermissions",
+        ...(taskContext
+          ? {
+              emptyResultRepair: {
+                shouldRepair: () => {
+                  const current = acpNormalizer.summary();
+                  return current?.status === "success" && !current.result?.trim();
+                },
+                onRepair: () => {
+                  logger.warn(
+                    "Claude Code completed a task turn without an assistant result; repairing",
+                    {
+                      event: "opencompany.goat_acp_empty_result_repair",
+                      engine: "claude_code",
+                      turn_id: turn.id,
+                      codex_chat_session_id: session.id,
+                      attempt: turn.attempts,
+                    },
+                  );
+                },
+              },
+            }
+          : {}),
         timeoutMs: env.codexTimeoutMs,
         redact,
         checkAbort: async () => {

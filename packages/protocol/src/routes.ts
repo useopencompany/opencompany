@@ -4277,16 +4277,6 @@ const contractDocumentHandlers: V1RouteHandlers = {
               statusReason: null,
             },
           },
-          github: {
-            integration: {
-              provider: "github",
-              connected: false,
-              status: "not_connected",
-              integrationId: null,
-              accountName: null,
-              statusReason: null,
-            },
-          },
           gmail: {
             integration: {
               provider: "gmail",
@@ -4380,7 +4370,8 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       200,
     ),
-  listBrainSourceOptions: (c) => c.json({ data: { provider: "github", repos: [] }, meta }, 200),
+  listBrainSourceOptions: (c) =>
+    c.json({ data: { provider: "linear", teams: [], partial: false }, meta }, 200),
   listBrowserProfiles: (c) => c.json({ data: [], meta }, 200),
   createBrowserProfile: (c) => c.json({ data: placeholderBrowserProfile, meta }, 201),
   deleteBrowserProfile: (c) =>

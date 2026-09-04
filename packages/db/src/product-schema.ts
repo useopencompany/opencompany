@@ -176,10 +176,11 @@ export type IntegrationProvider =
 // Ownership is a property of the integration's binding, not a per-connect
 // choice. Identity-bound connections (OAuth acting as a person: Gmail,
 // Calendar, Slack user token, Linear, GitHub user token, PostHog, Neon, Better Stack, Render, Vercel, SigNoz, X) are always personal. Installation-bound
-// connections (GitHub App org installs, Jamie webhook secrets, the Slack
-// answer-bot install) are workspace plumbing: they carry no human identity,
+// connections (Jamie webhook secrets and the Slack answer-bot install) are
+// workspace plumbing: they carry no human identity,
 // must survive the connecting admin leaving, and are manageable by any
-// workspace admin.
+// workspace admin. `github` remains here only for historical rows from the
+// retired workspace-ingestion integration.
 export const WORKSPACE_OWNED_INTEGRATION_PROVIDERS = [
   "github",
   "jamie",
@@ -223,8 +224,9 @@ export type BrainSourceProvider =
   | "granola"
   | "fathom"
   | "attio";
-// The persisted source unions still include Slack so historical rows remain
-// readable during the cutover. Active API schemas and workers exclude it.
+// The persisted source unions still include retired Slack and GitHub ingestion
+// providers so historical rows remain readable. Active API schemas and workers
+// exclude them.
 // "slack_bot" rows are answer *destinations* (which channels a brain answers
 // in via the Slack bot), not ingestion sources; no ingestion path reads them.
 export type BrainSourceConfigProvider =
@@ -2647,12 +2649,8 @@ export const linearIssueEvents = productSchema.table(
   }),
 );
 
-// Raw GitHub pull-request activity buffer: the webhook inserts one row per
-// opened, commented, or merged event; the runner's flush sweeper batches
-// unflushed rows per pull request into one activity-window source item after a
-// quiet period (source_item_id NULL = unflushed). Issue activity remains
-// direct-enqueue because it does not have the open-to-merge lifecycle that
-// causes repeated PR ingestion.
+// Retired GitHub-ingestion storage. Kept so this cutover does not delete
+// customer data; no webhook or runner path writes or flushes these rows.
 export const gitHubPullRequestEvents = productSchema.table(
   "github_pull_request_events",
   {

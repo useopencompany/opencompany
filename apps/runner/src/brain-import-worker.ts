@@ -59,14 +59,7 @@ const GRANOLA_IMPORT_MAX_LIST_PAGES = 5;
 const GRANOLA_IMPORT_MAX_NOTES = 20;
 const FATHOM_IMPORT_MAX_LIST_PAGES = 5;
 const FATHOM_IMPORT_MAX_MEETINGS = 20;
-const PROVIDERS: BrainImportProvider[] = [
-  "public_web",
-  "github",
-  "granola",
-  "fathom",
-  "gmail",
-  "linear",
-];
+const PROVIDERS: BrainImportProvider[] = ["public_web", "granola", "fathom", "gmail", "linear"];
 
 let registeredWakeup: (() => void) | null = null;
 
