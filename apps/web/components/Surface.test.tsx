@@ -1348,7 +1348,10 @@ describe("Surface chat streaming UI", () => {
     });
 
     await waitFor(() => expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledTimes(1));
-    expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledWith({ file: screenshot });
+    expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledWith({
+      file: screenshot,
+      pendingId: expect.any(String),
+    });
     expect(await screen.findByText("screenshot.png")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Post comment" }));
@@ -4187,7 +4190,10 @@ describe("Surface chat streaming UI", () => {
     });
 
     await waitFor(() => expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledTimes(1));
-    expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledWith({ file });
+    expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledWith({
+      file,
+      pendingId: expect.any(String),
+    });
     expect(await within(dialog).findByText("PDF")).toBeInTheDocument();
   });
 
@@ -5603,7 +5609,10 @@ describe("Surface chat streaming UI", () => {
       fireEvent.drop(window, { dataTransfer: { types: ["Files"], files: [file] } });
 
       await waitFor(() => expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledTimes(1));
-      expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledWith({ file });
+      expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledWith({
+        file,
+        pendingId: expect.any(String),
+      });
     });
 
     it("reports local chat selection changes through onOpenChat", async () => {

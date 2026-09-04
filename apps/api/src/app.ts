@@ -1679,7 +1679,25 @@ export function createApiApp(input: CreateApiAppInput) {
       if (!(file instanceof File)) {
         throw new ApiError(400, "invalid_request", "A file upload is required.");
       }
-      const upload = await input.attachments.upload({ actor, file });
+      const idempotencyKey = c.req.valid("header")["idempotency-key"];
+      if (!idempotencyKey) {
+        logger.info("Attachment upload omitted an idempotency key", {
+          event: "opencompany.chat_attachment_upload_idempotency_key_missing",
+          missing_key_count: 1,
+        });
+      }
+      const upload = await input.attachments.upload({
+        actor,
+        file,
+        ...(idempotencyKey ? { idempotencyKey } : {}),
+      });
+      if (upload.replayed) {
+        logger.info("Attachment upload replayed", {
+          event: "opencompany.chat_attachment_upload_replayed",
+          replayed_count: 1,
+          attachment_id: upload.id,
+        });
+      }
       return c.json(
         {
           data: {
@@ -1691,6 +1709,7 @@ export function createApiApp(input: CreateApiAppInput) {
               kind: upload.format === "image" ? ("image" as const) : ("document" as const),
             },
             expiresAt: upload.expiresAt.toISOString(),
+            replayed: upload.replayed,
           },
           meta,
         },

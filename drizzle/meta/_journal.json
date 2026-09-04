@@ -1737,6 +1737,13 @@
       "when": 1788454430567,
       "tag": "0247_preserve_assistant_message_boundaries",
       "breakpoints": true
+    },
+    {
+      "idx": 248,
+      "version": "7",
+      "when": 1788480900000,
+      "tag": "0248_goat_chat_attachment_upload_idempotency",
+      "breakpoints": true
     }
   ]
 }

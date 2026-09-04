@@ -2778,6 +2778,7 @@ describe("canonical Hono API", () => {
           mediaType: file.type,
           sizeBytes: file.size,
           expiresAt: new Date("2026-08-11T20:00:00.000Z"),
+          replayed: false,
         };
       },
     };
@@ -2795,9 +2796,46 @@ describe("canonical Hono API", () => {
           filename: "brief.pdf",
           kind: "document",
         },
+        replayed: false,
       },
     });
     expect(JSON.stringify(json)).not.toMatch(/blob|pathname|url/iu);
+  });
+
+  it("passes a valid optional attachment idempotency key and rejects non-visible ASCII", async () => {
+    const upload = vi.fn(async ({ file }) => ({
+      id: "attachment_1",
+      format: "text" as const,
+      filename: file.name,
+      mediaType: file.type,
+      sizeBytes: file.size,
+      expiresAt: new Date("2026-08-11T20:00:00.000Z"),
+      replayed: true,
+    }));
+    const app = testApp(fakeRepository(), { attachments: { upload } });
+    const form = new FormData();
+    form.set("file", new File(["text"], "brief.txt", { type: "text/plain" }));
+
+    const response = await app.request("/v1/attachments", {
+      method: "POST",
+      headers: { "Idempotency-Key": "web-chat-attachment:pending-1" },
+      body: form,
+    });
+    expect(response.status).toBe(201);
+    expect(upload).toHaveBeenCalledWith(
+      expect.objectContaining({ idempotencyKey: "web-chat-attachment:pending-1" }),
+    );
+    await expect(response.json()).resolves.toMatchObject({ data: { replayed: true } });
+
+    const invalidForm = new FormData();
+    invalidForm.set("file", new File(["text"], "brief.txt", { type: "text/plain" }));
+    const invalid = await app.request("/v1/attachments", {
+      method: "POST",
+      headers: { "Idempotency-Key": "contains a space" },
+      body: invalidForm,
+    });
+    expect(invalid.status).toBe(400);
+    expect(upload).toHaveBeenCalledOnce();
   });
 
   it("owns authenticated Conversation shares behind the canonical resource", async () => {
