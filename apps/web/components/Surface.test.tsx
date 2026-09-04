@@ -2744,6 +2744,29 @@ describe("Surface chat streaming UI", () => {
     expect(await screen.findByText("14k / 1.0M context · 1%")).toBeVisible();
   });
 
+  it("shows the session model in a tooltip from the header icon", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "conversation_model_tooltip_1",
+          title: "Model details",
+          model: "openai/gpt-5.6-terra",
+          engine: "codex",
+          messages: [],
+        }}
+      />,
+    );
+
+    const modelIcon = screen.getByRole("button", { name: "Model: GPT 5.6 Terra" });
+    await user.hover(modelIcon);
+
+    expect(await screen.findByText("Model: GPT 5.6 Terra")).toBeVisible();
+  });
+
   it("shows when a Codex chat is waiting for runner capacity", () => {
     render(
       <Surface
