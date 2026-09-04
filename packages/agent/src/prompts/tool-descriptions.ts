@@ -36,12 +36,6 @@ export const SAVE_TO_BRAIN_TITLE_DESCRIPTION =
 export const SAVE_TO_BRAIN_INTENT_DESCRIPTION =
   "Optional one-line note on what the user wants this for, e.g. 'reference for the pricing page rework'. Helps the background curation agent file it.";
 
-export const SEND_USER_MESSAGE_TOOL_DESCRIPTION =
-  "Send a short one-way iMessage notification to the user's own paired phone. Use it only when the user asked to be notified (in this conversation or as part of the task instructions) or when a long-running piece of work they asked to be told about finishes or fails. Never use it for routine replies you are already giving in chat, and never send more than one message about the same event. The user cannot reply over iMessage. Keep it under 500 characters of plain text.";
-
-export const SEND_USER_MESSAGE_MESSAGE_DESCRIPTION =
-  "The notification text, plain and self-contained (the user reads it on their phone with no chat context). Under 500 characters, no markdown.";
-
 export const START_TASK_TOOL_DESCRIPTION =
   "Start a task when the user's request should become an asynchronous tracked task, including work that needs connected-account context, external research, monitoring, or a specialized just-in-time agent. If the user explicitly asks for Codex, Claude Code, a coding-engine task, repository edits, tests, debugging, code review, or pull-request work, preserve that execution intent by setting engine to the requested executor. When the user explicitly asks for several separate tasks, call this tool once per discrete task with the requested engine and model, up to 10 tasks in one turn.";
 

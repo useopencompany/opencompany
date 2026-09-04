@@ -446,7 +446,6 @@ export const IntegrationAccountReadModelSchema = z
       "latitude",
       "posthog",
       "neon",
-      "imessage",
       "x_account",
     ]),
     workspaceId: z.string().min(1).max(128).nullable(),
@@ -3520,7 +3519,6 @@ export const IdentityUserSchema = z
     taskSpawningEnabled: z.boolean(),
     autoModelRoutingEnabled: z.boolean(),
     chatCapabilitiesBetaEnabled: z.boolean(),
-    imessageEnabled: z.boolean(),
     /** @deprecated Wiki is always enabled. */
     wikiEnabled: z.literal(true),
     taskViewMode: TaskViewModeSchema,
@@ -3581,7 +3579,6 @@ export const UserPreferencesSchema = z
     /** @deprecated Wiki is always enabled. */
     wikiEnabled: z.literal(true),
     taskViewMode: TaskViewModeSchema,
-    imessageEnabled: z.boolean(),
     autoModelRoutingEnabled: z.boolean(),
   })
   .strict()
@@ -3594,7 +3591,6 @@ export const UpdateUserPreferencesBodySchema = z
     /** @deprecated Accepted for compatibility and ignored; Wiki is always enabled. */
     wikiEnabled: z.boolean().optional(),
     taskViewMode: TaskViewModeSchema.optional(),
-    imessageEnabled: z.boolean().optional(),
     autoModelRoutingEnabled: z.boolean().optional(),
   })
   .strict()
@@ -3989,48 +3985,6 @@ export const GranolaAccountStateEnvelopeSchema = z
   })
   .strict()
   .openapi("GranolaAccountStateEnvelope");
-
-export const ImessageAccountStateSchema = z
-  .object({
-    provider: z.literal("imessage"),
-    connected: z.boolean(),
-    status: IntegrationAccountStatusSchema,
-    integrationId: IntegrationAccountIdSchema.nullable(),
-    phoneE164: z.string().nullable(),
-    statusReason: z.string().nullable(),
-  })
-  .strict()
-  .openapi("ImessageAccountState");
-
-export const ImessageAccountStateEnvelopeSchema = z
-  .object({
-    data: z.object({ state: ImessageAccountStateSchema }).strict(),
-    meta: ProtocolMetadataSchema,
-  })
-  .strict()
-  .openapi("ImessageAccountStateEnvelope");
-
-export const StartImessagePairingBodySchema = z
-  .object({
-    // E.164 normalization happens server-side so typos keep the retired
-    // action's human-readable error copy.
-    phone: z.string().min(1).max(64),
-  })
-  .strict()
-  .openapi("StartImessagePairingBody");
-
-export const ImessagePairingStartedEnvelopeSchema = z
-  .object({
-    data: z.object({ started: z.literal(true) }).strict(),
-    meta: ProtocolMetadataSchema,
-  })
-  .strict()
-  .openapi("ImessagePairingStartedEnvelope");
-
-export const ConfirmImessagePairingBodySchema = z
-  .object({ code: z.string().min(1).max(16) })
-  .strict()
-  .openapi("ConfirmImessagePairingBody");
 
 export const StripeAccountStateSchema = z
   .object({
@@ -4480,6 +4434,5 @@ export type SetSlackBotDestinationBody = z.infer<typeof SetSlackBotDestinationBo
 export type AttioAccountStateDto = z.infer<typeof AttioAccountStateSchema>;
 export type FathomAccountStateDto = z.infer<typeof FathomAccountStateSchema>;
 export type GranolaAccountStateDto = z.infer<typeof GranolaAccountStateSchema>;
-export type ImessageAccountStateDto = z.infer<typeof ImessageAccountStateSchema>;
 export type StripeAccountStateDto = z.infer<typeof StripeAccountStateSchema>;
 export type JamieWebhookSetupDto = z.infer<typeof JamieWebhookSetupSchema>;

@@ -65,7 +65,7 @@ describe("composeChatTranscript", () => {
       },
       {
         type: "dynamic-tool",
-        toolName: "send_user_message",
+        toolName: "notify_user",
         toolCallId: "tool_2",
         state: "input-available",
         input: { message: "Done" },

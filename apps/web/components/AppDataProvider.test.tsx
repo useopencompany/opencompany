@@ -670,7 +670,6 @@ function initialData(): AppInitialData {
     featureFlags: {
       taskSpawning: false,
       autoModelRouting: false,
-      imessage: false,
       legacyBrain: false,
     },
     codexConnected: false,

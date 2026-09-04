@@ -165,7 +165,6 @@ export function createIdentityService(input: {
         taskSpawningEnabled: user.taskSpawningEnabled,
         autoModelRoutingEnabled: user.autoModelRoutingEnabled,
         chatCapabilitiesBetaEnabled: user.chatCapabilitiesBetaEnabled,
-        imessageEnabled: user.imessageEnabled,
         wikiEnabled: true as const,
         taskViewMode: user.taskViewMode,
         preferredMcpClient: user.preferredMcpClient,

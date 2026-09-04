@@ -20,8 +20,6 @@ import {
 } from "@opencompany/agent/chat-ui";
 import { executeChatExaFetch } from "@opencompany/agent/chat-web-fetch";
 import { executeChatExaSearch } from "@opencompany/agent/chat-web-search";
-import { resolveImessageProvider } from "@opencompany/agent/imessage/provider";
-import { createSendUserMessageRunner } from "@opencompany/agent/imessage/send-user-message";
 import { resolveProductLanguageModel } from "@opencompany/agent/language-model";
 import { createProductChatSystemPrompt } from "@opencompany/agent/prompts";
 import {
@@ -35,7 +33,6 @@ import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { ChatPresentationPublisher } from "@opencompany/chat-presentation";
 import { ensureMonthlyIncludedUsage } from "@opencompany/db/billing";
 import { hasPositiveCreditBalance } from "@opencompany/db/credits";
-import { resolveImessageDelivery } from "@opencompany/db/imessage";
 import {
   type ChatMessageAttachment,
   type CodexChatSession,
@@ -1197,25 +1194,9 @@ async function resolveProductChatRuntime(input: {
       })
     : null;
   const exaApiKey = env.exaApiKey?.trim();
-  const imessageDelivery =
-    resolveImessageProvider() !== null
-      ? await resolveImessageDelivery(turn.userWorkosId, getDb()).catch(() => null)
-      : null;
   const toolContext = createProductChatToolContext({
     model,
     latestUserMessage: turn.prompt,
-    ...(imessageDelivery
-      ? {
-          sendUserMessage: createSendUserMessageRunner({
-            userWorkosId: turn.userWorkosId,
-            phoneE164: imessageDelivery.phoneE164,
-            source: "task",
-            chatSessionId: session.chatSessionId,
-            turnId: turn.id,
-            signal,
-          }),
-        }
-      : {}),
     ...(brain
       ? {
           runBrainCli: (toolInput) =>
