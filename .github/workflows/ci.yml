@@ -4,10 +4,12 @@ on:
   pull_request:
     branches: [main, "feat/**"]
 
-# Pull request code is untrusted. This caller and the reusable verifier must stay
-# free of secrets, OIDC, production environments, and deploy permissions.
-permissions:
-  contents: read
+# Pull request code is untrusted. Repository settings block fork runs while the
+# repository is private and must hold every outside contributor's fork run for
+# maintainer approval when it becomes public. This caller and the reusable
+# verifier must also stay free of secrets, OIDC, production environments,
+# writable caches, and deploy permissions.
+permissions: {}
 
 concurrency:
   group: pr-gate-${{ github.event.pull_request.number }}
@@ -29,6 +31,8 @@ jobs:
     name: Dependency review
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - name: Review dependency changes
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
@@ -41,6 +45,7 @@ jobs:
     needs: [verify, dependency-review]
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions: {}
     steps:
       - name: Require every gate job to pass
         run: |

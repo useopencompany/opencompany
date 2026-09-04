@@ -39,8 +39,9 @@ documented local path, and execute the same core checks as maintainers.
 - Confirm public-release maintainer ownership and operational coverage.
 - Exercise setup from clean macOS and Linux clones without company Infisical, Neon, Vercel, or
   Render access.
-- Confirm untrusted pull requests cannot access secrets, deployment credentials, writable caches,
-  production environments, or organization-scoped automation tokens.
+- Apply and verify the public-repository `all_external_contributors` workflow approval policy during
+  the visibility change. The versioned PR isolation and private fail-closed settings are documented
+  in [CI security](../ci-security.md).
 - Audit tracked deployment metadata and one-off maintenance tools; retain only what is safe and
   useful to forks.
 - Verify dependency, migration, documentation-link, secret, and build checks from the public CI

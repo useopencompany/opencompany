@@ -54,6 +54,24 @@ The project does not require a contributor license agreement or Developer Certif
 sign-off. Opening a pull request does not transfer copyright or grant rights to the opencompany
 name or logos; see [OPEN_SOURCE.md](./OPEN_SOURCE.md) and [TRADEMARKS.md](./TRADEMARKS.md).
 
+## External Pull Requests and CI Approval
+
+Pull requests from maintainers with write access and trusted automation start CI normally. For
+public contributions, GitHub holds every workflow run opened from an outside contributor's fork
+until a maintainer reviews the proposed commit and explicitly approves that run. Opening a pull
+request is not CI approval, and approving CI is not approval to merge.
+
+Before approving a run, maintainers inspect the complete diff, with particular care around
+`.github/workflows/`, install and lifecycle scripts, dependency files, and code executed during the
+build. Contributors should expect CI to remain pending until that review is complete. New commits
+may require another approval.
+
+The PR workflow deliberately has no secrets, OIDC, deployment environment, write permission,
+self-hosted runner, or cache-save path. Production release automation only runs from `main`. The
+repository-level controls and the visibility-change procedure are documented in
+[CI security](./docs/ci-security.md); those settings are part of the contribution boundary and must
+not be relaxed to make a pull request pass.
+
 ## Local Checks
 
 Use Bun `1.3.2` and Node `20.20.0` or newer. Install exactly the committed dependency graph:
