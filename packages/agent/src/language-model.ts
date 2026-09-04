@@ -6,7 +6,11 @@ import {
   createCodexBackendLanguageModel,
 } from "./codex-backend-language-model";
 
-export const CODEX_SUBSCRIPTION_MODEL_IDS = ["openai/gpt-5.6-sol", "openai/gpt-5.6-terra"] as const;
+export const CODEX_SUBSCRIPTION_MODEL_IDS = [
+  "openai/gpt-6-astra",
+  "openai/gpt-5.6-sol",
+  "openai/gpt-5.6-terra",
+] as const;
 
 export type ProductModelFeature = "chat" | "task" | "slack-bot";
 export type ProductModelBilling = "metered_gateway" | "subscription_covered";

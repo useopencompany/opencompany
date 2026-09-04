@@ -45,6 +45,7 @@ export const GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS = {
 
 export const CODEX_DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.6-sol";
 export const CODEX_AGENT_MODEL_IDS = [
+  "openai/gpt-6-astra",
   "openai/gpt-5.6-sol",
   "openai/gpt-5.6-terra",
   "openai/gpt-5.6-luna",
@@ -126,6 +127,27 @@ export function claudeCodeModelSupportsReasoningEffort(model: string): boolean {
 // judge router and is rated qualitatively from OpenRouter's Fusion defaults
 // rather than a single model benchmark.
 export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
+  {
+    id: "openai/gpt-6-astra",
+    type: "model",
+    contextWindowTokens: 1_050_000,
+    label: "GPT 6 Astra",
+    description: "OpenAI's most capable model for complex end-to-end work.",
+    category: "Deep",
+    supportsReasoning: true,
+    supportsImages: true,
+    supportsPdf: false,
+    ratings: { capability: 3, speed: 1, cost: 3 },
+    reasoning: {
+      providerOptions: {
+        openai: {
+          reasoningEffort: "medium",
+          reasoningSummary: "concise",
+        },
+      },
+      exposure: "summary",
+    },
+  },
   {
     id: "openai/gpt-5.6-sol",
     type: "model",

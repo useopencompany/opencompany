@@ -19,7 +19,8 @@ import { isCodexSubscriptionModel, resolveProductLanguageModel } from "./languag
 describe("resolveProductLanguageModel", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("recognizes only the two subscription-eligible model IDs", () => {
+  it("recognizes only the subscription-eligible model IDs", () => {
+    expect(isCodexSubscriptionModel("openai/gpt-6-astra")).toBe(true);
     expect(isCodexSubscriptionModel("openai/gpt-5.6-sol")).toBe(true);
     expect(isCodexSubscriptionModel("openai/gpt-5.6-terra")).toBe(true);
     expect(isCodexSubscriptionModel("openai/gpt-5.6-luna")).toBe(false);
@@ -35,7 +36,7 @@ describe("resolveProductLanguageModel", () => {
 
     const resolution = await resolveProductLanguageModel({
       workspaceId: "workspace_1",
-      modelId: "openai/gpt-5.6-sol",
+      modelId: "openai/gpt-6-astra",
       feature: "chat",
       gatewayApiKey: "gateway-key",
       db: {},

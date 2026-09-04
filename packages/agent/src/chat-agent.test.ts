@@ -190,7 +190,7 @@ describe("start_task tool", () => {
     },
   );
 
-  it("advertises only GPT 5.6 models when the user requests a Codex task", () => {
+  it("advertises only current Codex models when the user requests a Codex task", () => {
     const context = createProductChatToolContext({
       model,
       latestUserMessage: "Use Codex to fix the repository.",
@@ -205,7 +205,7 @@ describe("start_task tool", () => {
     );
   });
 
-  it("preserves an already Codex-compatible GPT 5.6 task model", async () => {
+  it("preserves an already Codex-compatible task model", async () => {
     const startTask = vi.fn(async (task: { prompt: string; name?: string }) => ({
       id: "task_1",
       displayId: "TASK-1",
