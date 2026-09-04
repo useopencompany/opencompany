@@ -378,7 +378,7 @@ jobs:
           node scripts/release-deployment.mjs "${args[@]}"
 
       - name: Require every selected surface to succeed
-        if: ${{ always() && !cancelled() && steps.current-before-migration.outputs.should_release == 'true' }}
+        if: ${{ always() && !cancelled() && steps.current-before-deploy.outputs.should_release == 'true' }}
         env:
           DATABASE_SELECTED: ${{ needs.plan.outputs.database }}
           DATABASE_DEPLOYMENT_ID: ${{ steps.deployment-database.outputs.deployment_id }}

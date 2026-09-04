@@ -93,7 +93,7 @@ describe("WikiSourcesPanel", () => {
     render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin mode="onboarding" />);
 
     expect(await screen.findByText("Connect your sources")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Connect Gmail" })).toHaveAttribute(
+    expect(await screen.findByRole("link", { name: "Connect Gmail" })).toHaveAttribute(
       "href",
       "/api/integrations/gmail/start?returnTo=%2Fonboarding%2Fconnected",
     );
