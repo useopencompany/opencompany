@@ -1,6 +1,7 @@
 import { once } from "node:events";
 import { request as requestHttp } from "node:http";
 import { serve } from "@hono/node-server";
+import { captureProductServerEvent } from "@opencompany/analytics/product/server";
 import type { ChatPresentationReader } from "@opencompany/chat-presentation";
 import {
   type Actor,
@@ -52,6 +53,10 @@ import type { BrainAssetService } from "./brain-assets";
 import type { ChatResourceService } from "./chat-resources";
 import { ApiError } from "./errors";
 import type { ApiRateLimiter } from "./rate-limit";
+
+vi.mock("@opencompany/analytics/product/server", () => ({
+  captureProductServerEvent: vi.fn(async () => undefined),
+}));
 
 const actor: Actor = {
   userId: "user_1",
@@ -990,6 +995,7 @@ describe("canonical Hono API", () => {
   });
 
   it("previews and manages Plugins without exposing package bytes or MCP environment values", async () => {
+    vi.mocked(captureProductServerEvent).mockClear();
     const installation = fakePluginInstallation();
     const packageBytes = new TextEncoder().encode("private plugin package");
     const resolved: ResolvedPluginPackage = {
@@ -1092,6 +1098,13 @@ describe("canonical Hono API", () => {
       data: { plugin: { name: "quality-tools", stdioServers: [{ envKeys: ["PRIVATE_TOKEN"] }] } },
     });
     expect(JSON.stringify(importedBody)).not.toContain("secret-value");
+    expect(captureProductServerEvent).toHaveBeenCalledWith("plugin_installed", actor.userId, {
+      workspace_id: actor.workspaceId,
+      plugin_name: "quality-tools",
+      plugin_kind: "mcp",
+      skill_count: 0,
+      mcp_server_count: 2,
+    });
 
     await expect(app.request("/v1/plugins")).resolves.toMatchObject({ status: 200 });
     const inspected = await app.request("/v1/plugins/quality-tools");

@@ -21,6 +21,7 @@ import type { GoogleCalendarMcpService } from "@opencompany/agent/integrations/g
 import type { GoogleDriveMcpService } from "@opencompany/agent/integrations/google-drive-mcp-server";
 import type { RenderProviderState } from "@opencompany/agent/integrations/render-mcp";
 import type { McpService } from "@opencompany/agent/mcp-http";
+import { captureProductServerEvent } from "@opencompany/analytics/product/server";
 import type { BillingApplicationService } from "@opencompany/billing/application-service";
 import {
   CHAT_PRESENTATION_READ_LIMIT,
@@ -1382,6 +1383,25 @@ export function createApiApp(input: CreateApiAppInput) {
         idempotencyKey: c.req.valid("header")["idempotency-key"],
         ...c.req.valid("json"),
       });
+      if (!result.idempotentReplay) {
+        const skillCount = result.plugin.skills.length;
+        const mcpServerCount =
+          result.plugin.stdioServers.length + result.plugin.remoteMcpServers.length;
+        await captureProductServerEvent("plugin_installed", actor.userId, {
+          workspace_id: actor.workspaceId,
+          plugin_name: result.plugin.name,
+          plugin_kind:
+            skillCount > 0 && mcpServerCount > 0
+              ? "hybrid"
+              : skillCount > 0
+                ? "skills"
+                : mcpServerCount > 0
+                  ? "mcp"
+                  : "empty",
+          skill_count: skillCount,
+          mcp_server_count: mcpServerCount,
+        });
+      }
       return c.json(
         {
           data: {

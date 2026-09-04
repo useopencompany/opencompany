@@ -1,4 +1,5 @@
 import "@testing-library/jest-dom/vitest";
+import { captureProductEvent } from "@opencompany/analytics/product/client";
 import type { PluginImportPreviewDto } from "@opencompany/protocol";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -32,6 +33,7 @@ const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
 const toasts = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
 
 vi.mock("next/navigation", () => ({ useRouter: () => router }));
+vi.mock("@opencompany/analytics/product/client", () => ({ captureProductEvent: vi.fn() }));
 vi.mock("@opencompany/ui/components/sonner", () => ({ toast: toasts }));
 vi.mock("@/lib/headless-knowledge-commands", () => ({
   approveHeadlessPluginMcp: vi.fn(),
@@ -181,6 +183,8 @@ describe("Plugin settings", () => {
     router.refresh.mockReset();
     toasts.error.mockReset();
     toasts.success.mockReset();
+    vi.mocked(captureProductEvent).mockReset();
+    vi.mocked(captureProductEvent).mockReturnValue(true);
     vi.mocked(previewHeadlessPluginImport).mockReset();
     vi.mocked(previewHeadlessPluginImport).mockResolvedValue(officialPreview);
     vi.mocked(importHeadlessPlugin).mockReset();
@@ -212,6 +216,7 @@ describe("Plugin settings", () => {
           },
         ]}
         canEdit
+        workspaceId="workspace_1"
       />,
     );
 
@@ -227,7 +232,11 @@ describe("Plugin settings", () => {
   });
 
   it("offers one-click installation for every uninstalled official package", () => {
-    render(<PluginsSettings plugins={[]} canEdit />);
+    render(<PluginsSettings plugins={[]} canEdit workspaceId="workspace_1" />);
+
+    expect(captureProductEvent).toHaveBeenCalledWith("plugin_catalog_viewed", {
+      workspace_id: "workspace_1",
+    });
 
     const linearLink = screen.getByRole("link", { name: /linear/i });
     const linearCard = linearLink.closest("li");
@@ -350,7 +359,7 @@ describe("Plugin settings", () => {
 
   it("searches the catalog and narrows it by category", async () => {
     const user = userEvent.setup();
-    render(<PluginsSettings plugins={[]} canEdit />);
+    render(<PluginsSettings plugins={[]} canEdit workspaceId="workspace_1" />);
 
     const search = screen.getByRole("searchbox", { name: "Search plugins" });
     await user.type(search, "database");
@@ -371,7 +380,7 @@ describe("Plugin settings", () => {
 
   it("opens a full category from its overview section", async () => {
     const user = userEvent.setup();
-    render(<PluginsSettings plugins={[]} canEdit />);
+    render(<PluginsSettings plugins={[]} canEdit workspaceId="workspace_1" />);
 
     await user.click(screen.getByRole("button", { name: "View all engineering plugins" }));
 
@@ -386,7 +395,7 @@ describe("Plugin settings", () => {
 
   it("recovers from an empty search", async () => {
     const user = userEvent.setup();
-    render(<PluginsSettings plugins={[]} canEdit />);
+    render(<PluginsSettings plugins={[]} canEdit workspaceId="workspace_1" />);
 
     await user.type(screen.getByRole("searchbox", { name: "Search plugins" }), "no-such-plugin");
     expect(screen.getByText("No plugins found")).toBeInTheDocument();
@@ -405,7 +414,7 @@ describe("Plugin settings", () => {
         }),
     );
 
-    render(<PluginsSettings plugins={[]} canEdit />);
+    render(<PluginsSettings plugins={[]} canEdit workspaceId="workspace_1" />);
 
     const linearCard = screen.getByRole("link", { name: /linear/i }).closest("li");
     expect(linearCard).not.toBeNull();
@@ -434,7 +443,7 @@ describe("Plugin settings", () => {
       new Error("Package source unavailable."),
     );
 
-    render(<PluginsSettings plugins={[]} canEdit />);
+    render(<PluginsSettings plugins={[]} canEdit workspaceId="workspace_1" />);
 
     const linearCard = screen.getByRole("link", { name: /linear/i }).closest("li");
     expect(linearCard).not.toBeNull();
