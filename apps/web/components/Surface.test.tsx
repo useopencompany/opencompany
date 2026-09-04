@@ -1348,7 +1348,10 @@ describe("Surface chat streaming UI", () => {
     });
 
     await waitFor(() => expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledTimes(1));
-    expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledWith({ file: screenshot });
+    expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledWith({
+      file: screenshot,
+      pendingId: expect.any(String),
+    });
     expect(await screen.findByText("screenshot.png")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Post comment" }));

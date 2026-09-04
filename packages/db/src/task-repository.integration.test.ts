@@ -958,17 +958,23 @@ describe("Postgres Task repository", () => {
       execute,
       () => new Date("2026-08-11T10:00:00.000Z"),
     );
-    await uploads.create({
+    await uploads.reserve({
       actor: actor(),
-      id: "attachment_comment_1",
+      commandId: "attachment_comment_command_1",
+      idempotencyKey: "task-comment-attachment-upload",
+      requestHash: "b".repeat(64),
+      attachmentId: "attachment_comment_1",
+      blobPathname: "private/user_1/attachment_comment_1/content",
+      expiresAt: new Date("2026-08-12T10:00:00.000Z"),
+    });
+    await uploads.complete({
+      commandId: "attachment_comment_command_1",
       format: "image",
       mediaType: "image/png",
       filename: "updated.png",
       sizeBytes: 1024,
-      blobPathname: "private/user_1/updated.png",
       blobUrl: "https://blob.invalid/updated.png",
       extractedText: null,
-      expiresAt: new Date("2026-08-12T10:00:00.000Z"),
     });
     const attachmentService = new TaskApplicationService(
       new PostgresTaskRepository(execute, {
@@ -996,13 +1002,19 @@ describe("Postgres Task repository", () => {
         claimed_message_id: string;
         attachment_id: string;
         message_content: string;
+        command_claimed_at: Date;
+        command_cleaned_at: Date;
       }>(
         `SELECT
            upload.claimed_message_id,
            message.attachments->0->>'id' AS attachment_id,
-           message.content AS message_content
+           message.content AS message_content,
+           command.claimed_at AS command_claimed_at,
+           command.cleaned_at AS command_cleaned_at
          FROM goat.chat_attachment_uploads AS upload
          JOIN goat.chat_messages AS message ON message.id = upload.claimed_message_id
+         JOIN goat.chat_attachment_upload_commands AS command
+           ON command.attachment_id = upload.id
          WHERE upload.id = 'attachment_comment_1'`,
       ),
     ).resolves.toMatchObject({
@@ -1011,6 +1023,8 @@ describe("Postgres Task repository", () => {
           claimed_message_id: resumed.messageId,
           attachment_id: "attachment_comment_1",
           message_content: "",
+          command_claimed_at: new Date("2026-08-11T10:00:00.000Z"),
+          command_cleaned_at: new Date("2026-08-11T10:00:00.000Z"),
         },
       ],
     });

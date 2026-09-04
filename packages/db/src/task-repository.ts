@@ -853,6 +853,13 @@ export class PostgresTaskRepository implements TaskRepository {
           AND ${taskAccessPredicate(input.actor)}
         FOR UPDATE OF task, runtime
       ),
+      locked_attachment_commands AS MATERIALIZED (
+        -- Completion and cleanup also lock keyed commands before their upload row.
+        SELECT command.command_id
+        FROM goat.chat_attachment_upload_commands AS command
+        WHERE command.attachment_id IN (${attachmentIdList})
+        FOR UPDATE
+      ),
       eligible_attachments AS MATERIALIZED (
         SELECT upload.id
         FROM goat.chat_attachment_uploads AS upload
@@ -863,6 +870,7 @@ export class PostgresTaskRepository implements TaskRepository {
           AND upload.expires_at > ${now}
           AND upload.id IN (${attachmentIdList})
           AND EXISTS (SELECT 1 FROM authorized)
+          AND (SELECT count(*) FROM locked_attachment_commands) >= 0
         FOR UPDATE
       ),
       matching_replay AS MATERIALIZED (
@@ -963,6 +971,17 @@ export class PostgresTaskRepository implements TaskRepository {
         WHERE upload.id IN (SELECT id FROM eligible_attachments)
           AND upload.claimed_at IS NULL
         RETURNING upload.id
+      ),
+      terminal_attachment_commands AS MATERIALIZED (
+        UPDATE goat.chat_attachment_upload_commands AS command
+        SET claimed_at = ${now},
+            cleaned_at = ${now},
+            touched_at = ${now}
+        FROM claimed_attachments AS upload
+        WHERE command.attachment_id = upload.id
+          AND command.claimed_at IS NULL
+          AND command.cleaned_at IS NULL
+        RETURNING command.command_id
       ),
       inserted_user_message AS MATERIALIZED (
         INSERT INTO goat.chat_messages (
@@ -1137,7 +1156,8 @@ export class PostgresTaskRepository implements TaskRepository {
         selected_comment.metadata->>'assistantMessageId' AS "assistantMessageId",
         selected_comment.metadata->>'runId' AS "runId",
         pg_current_xact_id()::text AS "transactionId",
-        (SELECT count(*) FROM notified) AS "notifyCount"
+        (SELECT count(*) FROM notified) AS "notifyCount",
+        (SELECT count(*) FROM terminal_attachment_commands) AS "terminalAttachmentCommandCount"
       FROM authorized
       JOIN goat.tasks AS task ON task.id = authorized.id
       JOIN goat.chat_sessions AS conversation ON conversation.id = task.session_id
