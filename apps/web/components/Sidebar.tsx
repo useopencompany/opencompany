@@ -16,6 +16,7 @@ import {
   Pin,
   PlugZap,
   Plus,
+  Puzzle,
   ScrollText,
   Settings,
   Workflow,
@@ -125,6 +126,8 @@ export function Sidebar({
   const tasksActive = pathname === "/tasks" || pathname.startsWith("/tasks/");
   const workflowsActive = pathname === "/workflows" || pathname.startsWith("/workflows/");
   const wikiActive = pathname === "/wiki" || pathname.startsWith("/wiki/");
+  const pluginsActive =
+    pathname === "/settings/plugins" || pathname.startsWith("/settings/plugins/");
 
   return (
     <aside
@@ -207,6 +210,12 @@ export function Sidebar({
 
         {/* Account / settings footer */}
         <div className="px-2 pb-3 pt-2">
+          <SidebarNavRow
+            href="/settings/plugins"
+            icon={Puzzle}
+            label="Plugins"
+            active={pluginsActive}
+          />
           <SidebarFeedback />
           <SidebarAccountMenu />
         </div>

@@ -1,5 +1,6 @@
 "use client";
 
+import { captureProductEvent } from "@opencompany/analytics/product/client";
 import type {
   PluginImportPreviewDto,
   PluginInstallationDto,
@@ -41,7 +42,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type ReactNode, useEffect, useState, useTransition } from "react";
+import { type ReactNode, useEffect, useRef, useState, useTransition } from "react";
 import { SettingsContent } from "@/components/SettingsChrome";
 import {
   approveHeadlessPluginMcp,
@@ -329,11 +330,14 @@ function pluginCatalogFilterLabel(filter: Exclude<PluginCatalogFilter, "all">) {
 export function PluginsSettings({
   plugins,
   canEdit,
+  workspaceId,
 }: {
   plugins: PluginListItemDto[];
   canEdit: boolean;
+  workspaceId: string;
 }) {
   const router = useRouter();
+  const catalogViewCaptured = useRef(false);
   const [query, setQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState<PluginCatalogFilter>("all");
   const [installingPluginName, setInstallingPluginName] = useState<OfficialPluginName | null>(null);
@@ -343,6 +347,13 @@ export function PluginsSettings({
   const installedPlugins = new Map(
     plugins.map((plugin) => [plugin.name.toLocaleLowerCase(), plugin] as const),
   );
+
+  useEffect(() => {
+    if (catalogViewCaptured.current) return;
+    if (captureProductEvent("plugin_catalog_viewed", { workspace_id: workspaceId })) {
+      catalogViewCaptured.current = true;
+    }
+  }, [workspaceId]);
 
   const install = (config: OfficialPluginConfig) => {
     if (isInstalling) return;

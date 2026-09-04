@@ -185,9 +185,19 @@ describe("Sidebar", () => {
     const account = screen.getByRole("button", { name: "Account menu for Ada Lovelace" });
     expect(account).toBeInTheDocument();
 
+    const plugins = screen.getByRole("link", { name: "Plugins" });
+    expect(plugins).toHaveAttribute("href", "/settings/plugins");
     const feedback = screen.getByRole("button", { name: "Feedback" });
+    expect(plugins.nextElementSibling).toBe(feedback);
     expect(feedback.nextElementSibling).toBe(account);
     expect(screen.queryByRole("link", { name: "Changelog" })).not.toBeInTheDocument();
+  });
+
+  it("marks Plugins active throughout plugin settings", () => {
+    pathnameMock.value = "/settings/plugins/linear";
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.getByRole("link", { name: "Plugins" })).toHaveAttribute("aria-current", "page");
   });
 
   it("keeps the wiki visible and hides legacy Brain navigation by default", () => {
