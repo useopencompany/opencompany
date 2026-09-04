@@ -10,6 +10,7 @@ import { Button, buttonVariants } from "@opencompany/ui/components/button";
 import { Input } from "@opencompany/ui/components/input";
 import { toast } from "@opencompany/ui/components/sonner";
 import {
+  AttioIcon,
   BetterStackIcon,
   GitHubIcon,
   GmailIcon,
@@ -124,6 +125,11 @@ export type OfficialMcpPluginConfig = OfficialMcpPluginMetadata & OfficialPlugin
 export type OfficialSkillPluginConfig = OfficialSkillPluginMetadata & OfficialPluginAppearance;
 
 export const OFFICIAL_MCP_PLUGINS = {
+  attio: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.attio,
+    Icon: AttioIcon,
+    iconClassName: "bg-[#111111] text-white",
+  },
   betterstack: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.betterstack,
     Icon: BetterStackIcon,
@@ -238,6 +244,8 @@ export const HUBSPOT_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.hubspot.name;
 export const HUBSPOT_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.hubspot.source;
 export const JAMIE_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.jamie.name;
 export const JAMIE_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.jamie.source;
+export const ATTIO_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.attio.name;
+export const ATTIO_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.attio.source;
 export const LATITUDE_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.latitude.name;
 export const LATITUDE_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.latitude.source;
 export const LINEAR_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.linear.name;
@@ -308,6 +316,10 @@ export function installOfficialGoogleDrivePlugin(preview?: PluginImportPreviewDt
 
 export function installOfficialHubSpotPlugin(preview?: PluginImportPreviewDto) {
   return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.hubspot, preview);
+}
+
+export function installOfficialAttioPlugin(preview?: PluginImportPreviewDto) {
+  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.attio, preview);
 }
 
 export function installOfficialLatitudePlugin(preview?: PluginImportPreviewDto) {

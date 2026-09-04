@@ -1,4 +1,5 @@
 export type OfficialMcpPluginName =
+  | "attio"
   | "betterstack"
   | "github"
   | "gmail"
@@ -40,6 +41,7 @@ export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
   name: OfficialMcpPluginName;
   kind: "mcp";
   connectionProvider:
+    | "attio"
     | "betterstack"
     | "github_user"
     | "gmail"
@@ -73,6 +75,20 @@ export type OfficialPluginMetadata = OfficialMcpPluginMetadata | OfficialSkillPl
 
 // The public repository is the reviewed trust boundary. Keep every source pinned to a full commit.
 export const OFFICIAL_MCP_PLUGIN_METADATA = {
+  attio: {
+    name: "attio",
+    kind: "mcp",
+    label: "Attio",
+    description: "Inspect CRM structure, query workspace data, and make approved changes.",
+    category: "business",
+    source:
+      "https://github.com/useopencompany/plugins/tree/0daeec4cff5d5f9925af2901410e1aa6c8baf0d8/attio",
+    connectionProvider: "attio",
+    connectHref: "/api/integrations/attio-mcp/start?returnTo=/settings/plugins/attio",
+    accountDescription: "The Attio account opencompany uses when you run CRM tools.",
+    ingestionHref: "/wiki/sources",
+    ingestionLabel: "Configure Attio ingestion in Wiki sources",
+  },
   betterstack: {
     name: "betterstack",
     kind: "mcp",

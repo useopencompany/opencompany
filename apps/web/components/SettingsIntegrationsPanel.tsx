@@ -2,7 +2,6 @@
 
 import { toast } from "@opencompany/ui/components/sonner";
 import {
-  AttioIcon,
   BetterStackIcon,
   FathomIcon,
   GitHubIcon,
@@ -74,7 +73,7 @@ import {
 // components derive everything from the provider string.
 type SettingsPersonalAccountProvider = Exclude<
   PersonalAccountProvider,
-  "granola" | "jamie" | "latitude" | "slack"
+  "attio" | "granola" | "jamie" | "latitude" | "slack"
 >;
 
 type IntegrationMetaKey = SettingsPersonalAccountProvider | "github" | "infisical";
@@ -137,12 +136,6 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     description: "Sync CRM activity on contacts, companies, and deals.",
     Icon: HubSpotIcon,
     tileClass: "bg-[#FF7A59] text-white",
-  },
-  attio: {
-    label: "Attio",
-    description: "Sync CRM records and notes from Attio.",
-    Icon: AttioIcon,
-    tileClass: "bg-[#111111] text-white",
   },
   betterstack: {
     label: "Better Stack",
@@ -297,10 +290,9 @@ const INFISICAL_REGIONS = [
 // Group-card providers surfaced under each scope. These are all user-owned in the
 // data model (each member connects their own account), but the CRM / meeting /
 // issue-tracking tools read as shared workspace tooling, so we present them under
-// the Workspace scope. Official Gmail, Calendar, Drive, and HubSpot tool accounts live under
-// Plugins.
+// the Workspace scope. Official Gmail, Calendar, Drive, HubSpot, Attio, and Granola tool accounts
+// live under Plugins; their separate ingestion connections are managed from Wiki sources.
 const WORKSPACE_ACCOUNT_PROVIDERS = [
-  "attio",
   "fathom",
 ] as const satisfies readonly SettingsPersonalAccountProvider[];
 
@@ -359,10 +351,6 @@ function IntegrationCards({
               canManage={isWorkspaceAdmin}
             />
             <IntegrationCardRow integration={integrations.github} canConnect={isWorkspaceAdmin} />
-            <IntegrationProviderGroupCard
-              provider="attio"
-              accounts={integrations.personalAccounts.attio}
-            />
             <IntegrationProviderGroupCard
               provider="fathom"
               accounts={integrations.personalAccounts.fathom}
@@ -1382,7 +1370,6 @@ function integrationConnectHref(provider: PersonalAccountProvider | "github") {
   if (provider === "github_user")
     return "/api/integrations/github-user/start?returnTo=/settings/plugins/github";
   if (provider === "fathom") return "/settings/fathom";
-  if (provider === "attio") return "/settings/attio";
   if (provider === "slack") return "/settings/plugins/slack";
   if (provider === "hubspot")
     return "/api/integrations/hubspot/start?returnTo=/settings/integrations";

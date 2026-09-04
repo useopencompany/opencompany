@@ -186,7 +186,7 @@ describe("resolveAttioActions", () => {
         permission: {
           provider: "attio",
           capabilityId: "write",
-          label: "Update Attio",
+          label: "Change Attio",
           integrationIds: ["gint_attio_1"],
         },
       });

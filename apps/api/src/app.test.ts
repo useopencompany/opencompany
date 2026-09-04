@@ -1807,6 +1807,8 @@ describe("canonical Hono API", () => {
       ["GET", "/integrations/hubspot/callback", "hubspot.callback"],
       ["POST", "/webhooks/hubspot/events", "hubspot.webhook"],
       ["POST", "/webhooks/attio/events", "attio.webhook"],
+      ["GET", "/integrations/attio-mcp/start", "mcp.start.attio"],
+      ["GET", "/integrations/attio-mcp/callback", "mcp.callback.attio"],
       ["GET", "/integrations/linear/start", "mcp.start.linear"],
       ["GET", "/integrations/linear/callback", "mcp.callback.linear"],
       ["GET", "/integrations/hubspot-mcp/start", "mcp.start.hubspot"],

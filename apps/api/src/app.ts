@@ -2818,6 +2818,8 @@ export function createApiApp(input: CreateApiAppInput) {
   }
   if (input.mcpOAuthIngress) {
     const ingress = input.mcpOAuthIngress;
+    app.get("/integrations/attio-mcp/start", (c) => ingress.start("attio", c.req.raw));
+    app.get("/integrations/attio-mcp/callback", (c) => ingress.callback("attio", c.req.raw));
     app.get("/integrations/betterstack/start", (c) => ingress.start("betterstack", c.req.raw));
     app.get("/integrations/betterstack/callback", (c) =>
       ingress.callback("betterstack", c.req.raw),

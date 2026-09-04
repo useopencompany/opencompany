@@ -158,6 +158,16 @@ export type AttioProviderState = {
   statusReason: string | null;
 };
 
+export type AttioMcpProviderState = {
+  provider: "attio";
+  connected: boolean;
+  status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
+  integrationId: string | null;
+  accountName: string | null;
+  statusReason: string | null;
+  capabilityModes: Record<string, unknown>;
+};
+
 export type StripeProviderState = {
   provider: "stripe";
   connected: boolean;
@@ -277,7 +287,7 @@ export type IntegrationState = {
   granola: GranolaProviderState;
   granola_mcp: GranolaMcpProviderState;
   fathom: FathomProviderState;
-  attio: AttioProviderState;
+  attio: AttioMcpProviderState;
   stripe: StripeProviderState;
   x_account: XAccountProviderState;
   codex: CodexProviderState;
@@ -317,8 +327,8 @@ type IntegrationStateRow = {
 const JAMIE_MCP_EXTERNAL_ID = "jamie_mcp";
 
 // Collects every personal (non-workspace) account row per provider. The
-// Linear and HubSpot ingestion connections count as accounts; their dedicated
-// MCP connector rows (external_id "linear_mcp" / "hubspot_mcp") never do.
+// Linear, HubSpot, Attio, and Granola ingestion connections count as accounts; their dedicated
+// MCP connector rows never do.
 export function personalAccountsFromRows(
   rows: readonly IntegrationStateRow[],
 ): Record<PersonalAccountProvider, IntegrationAccountView[]> {
@@ -362,6 +372,12 @@ export function personalAccountsFromRows(
       }
       continue;
     }
+    if (row.provider === "attio") {
+      if ((row.externalId ?? row.external_id) !== "attio_mcp") {
+        personalAccounts.attio.push(accountViewFromRow("attio", row));
+      }
+      continue;
+    }
     if (row.provider === "granola") {
       if ((row.externalId ?? row.external_id) !== "granola_mcp") {
         personalAccounts.granola.push(accountViewFromRow("granola", row));
@@ -375,7 +391,6 @@ export function personalAccountsFromRows(
       row.provider === "github_user" ||
       row.provider === "slack" ||
       row.provider === "fathom" ||
-      row.provider === "attio" ||
       row.provider === "betterstack" ||
       row.provider === "render" ||
       row.provider === "signoz" ||
@@ -407,6 +422,11 @@ export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): 
     }
     if (row.provider === "granola" && (row.externalId ?? row.external_id) === "granola_mcp") {
       granolaMcpRow = row;
+      continue;
+    }
+    // Attio's API-key connection remains available for Wiki ingestion and as
+    // a legacy action fallback. Plugin settings reflect only the MCP OAuth row.
+    if (row.provider === "attio" && (row.externalId ?? row.external_id) !== "attio_mcp") {
       continue;
     }
     // GitHub and Stripe are workspace-owned; personal rows for those providers
@@ -443,7 +463,7 @@ export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): 
     granola: granolaProviderState(byProvider.get("granola")),
     granola_mcp: granolaMcpProviderState(granolaMcpRow),
     fathom: fathomProviderState(byProvider.get("fathom")),
-    attio: attioProviderState(byProvider.get("attio")),
+    attio: attioMcpProviderState(byProvider.get("attio")),
     stripe: stripeProviderState(byProvider.get("stripe")),
     x_account: xAccountProviderState(byProvider.get("x_account")),
     codex: {
@@ -759,15 +779,16 @@ function fathomProviderState(row: IntegrationStateRow | undefined): FathomProvid
   };
 }
 
-function attioProviderState(row: IntegrationStateRow | undefined): AttioProviderState {
+function attioMcpProviderState(row: IntegrationStateRow | undefined): AttioMcpProviderState {
   if (!row || row.status === "disconnected") {
     return {
       provider: "attio",
       connected: false,
       status: "not_connected",
       integrationId: null,
-      workspaceName: null,
+      accountName: null,
       statusReason: null,
+      capabilityModes: {},
     };
   }
 
@@ -776,8 +797,9 @@ function attioProviderState(row: IntegrationStateRow | undefined): AttioProvider
     connected: row.status === "connected",
     status: row.status,
     integrationId: row.id ?? null,
-    workspaceName: row.connectionLabel ?? row.connection_label ?? null,
+    accountName: row.accountName ?? row.account_name ?? null,
     statusReason: row.statusReason ?? row.status_reason ?? null,
+    capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
   };
 }
 

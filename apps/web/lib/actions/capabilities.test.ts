@@ -55,9 +55,10 @@ describe("PROVIDER_CAPABILITIES", () => {
     ]);
   });
 
-  it("registers Attio reads on by default and updates behind ask", () => {
+  it("keeps Attio structure visible and guards CRM data and changes", () => {
     expect(PROVIDER_CAPABILITIES.attio).toEqual([
       expect.objectContaining({ id: "read", defaultMode: "on" }),
+      expect.objectContaining({ id: "query", defaultMode: "ask" }),
       expect.objectContaining({ id: "write", defaultMode: "ask" }),
     ]);
   });
@@ -144,7 +145,8 @@ describe("mode helpers", () => {
     expect(providerCapability("github_user", "write")?.label).toBe("Manage GitHub");
     expect(providerCapability("linear", "write")?.label).toBe("Manage issues");
     expect(providerCapability("slack", "read")?.label).toBe("Search public Slack");
-    expect(providerCapability("attio", "write")?.label).toBe("Update Attio");
+    expect(providerCapability("attio", "query")?.label).toBe("Read CRM data");
+    expect(providerCapability("attio", "write")?.label).toBe("Change Attio");
     expect(providerCapability("neon", "read")?.label).toBe("Inspect Neon structure");
     expect(providerCapability("neon", "query")?.label).toBe("Query database data");
     expect(providerCapability("signoz", "read")?.label).toBe("Read SigNoz documentation");
