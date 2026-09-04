@@ -2752,7 +2752,7 @@ describe("Surface chat streaming UI", () => {
         tasks={[]}
         defaultModel={DEFAULT_MODEL}
         initialChat={{
-          id: "goat_chat_model_tooltip_1",
+          id: "conversation_model_tooltip_1",
           title: "Model details",
           model: "openai/gpt-5.6-terra",
           engine: "codex",
