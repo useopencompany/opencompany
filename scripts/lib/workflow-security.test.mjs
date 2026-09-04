@@ -34,8 +34,11 @@ test("the pull request path remains credential-free", async () => {
 
   assert.match(caller, /^on:\n\s+pull_request:\n\s+branches: \[main, "feat\/\*\*"\]/mu);
   assert.match(verifier, /^on:\n\s+workflow_call:/mu);
-  assert.match(caller, /^permissions:\n\s+contents: read$/mu);
+  assert.match(caller, /^permissions: \{\}$/mu);
   assert.match(verifier, /^permissions:\n\s+contents: read$/mu);
+  assert.match(caller, /^ {2}verify:\n[\s\S]*?^ {4}permissions:\n {6}contents: read$/mu);
+  assert.match(caller, /^ {2}dependency-review:\n[\s\S]*?^ {4}permissions:\n {6}contents: read$/mu);
+  assert.match(caller, /^ {2}gate:\n[\s\S]*?^ {4}permissions: \{\}$/mu);
   assert.match(combined, /persist-credentials: false/u);
 
   for (const forbidden of [
