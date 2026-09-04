@@ -253,6 +253,25 @@ export function HubSpotPluginDetail({
   );
 }
 
+export function LatitudePluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.latitude}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
 export function LinearPluginDetail({
   pluginState,
   canEdit,
@@ -1559,6 +1578,10 @@ export function defaultHubSpotToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("hubspot");
 }
 
+export function defaultLatitudeToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("latitude");
+}
+
 export function defaultNeonToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("neon");
 }
@@ -1635,6 +1658,12 @@ export function hubspotToolsStateFromPlugin(
   plugin: PluginInstallationDto | null,
 ): PluginToolsState {
   return officialPluginToolsStateFromPlugin(plugin, "hubspot");
+}
+
+export function latitudeToolsStateFromPlugin(
+  plugin: PluginInstallationDto | null,
+): PluginToolsState {
+  return officialPluginToolsStateFromPlugin(plugin, "latitude");
 }
 
 export function neonToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
@@ -1789,6 +1818,10 @@ export function posthogToolsStateFromPreview(preview: PluginImportPreviewDto): P
 
 export function hubspotToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
   return officialPluginToolsStateFromPreview(preview, "hubspot");
+}
+
+export function latitudeToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
+  return officialPluginToolsStateFromPreview(preview, "latitude");
 }
 
 export function stripeToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {

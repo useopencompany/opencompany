@@ -158,6 +158,11 @@ export const OFFICIAL_MCP_PLUGINS = {
     Icon: AudioLines,
     iconClassName: "bg-[#5B5BD6] text-white",
   },
+  latitude: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.latitude,
+    Icon: Activity,
+    iconClassName: "bg-[#171717] text-white",
+  },
   linear: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.linear,
     Icon: LinearIcon,
@@ -225,6 +230,8 @@ export const HUBSPOT_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.hubspot.name;
 export const HUBSPOT_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.hubspot.source;
 export const JAMIE_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.jamie.name;
 export const JAMIE_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.jamie.source;
+export const LATITUDE_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.latitude.name;
+export const LATITUDE_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.latitude.source;
 export const LINEAR_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.linear.name;
 export const LINEAR_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.linear.source;
 export const NEON_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.neon.name;
@@ -293,6 +300,10 @@ export function installOfficialGoogleDrivePlugin(preview?: PluginImportPreviewDt
 
 export function installOfficialHubSpotPlugin(preview?: PluginImportPreviewDto) {
   return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.hubspot, preview);
+}
+
+export function installOfficialLatitudePlugin(preview?: PluginImportPreviewDto) {
+  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.latitude, preview);
 }
 
 export function installOfficialNeonPlugin(preview?: PluginImportPreviewDto) {

@@ -4479,6 +4479,17 @@
               "list"
             ]
           },
+          "taskTimeRange": {
+            "type": "string",
+            "enum": [
+              "24h",
+              "2d",
+              "7d",
+              "30d",
+              "90d",
+              "all"
+            ]
+          },
           "preferredMcpClient": {
             "type": "string",
             "nullable": true,
@@ -4520,6 +4531,7 @@
           "chatCapabilitiesBetaEnabled",
           "wikiEnabled",
           "taskViewMode",
+          "taskTimeRange",
           "preferredMcpClient",
           "mcpSetupCompletedAt",
           "onboardedAt",
@@ -9963,6 +9975,17 @@
               "list"
             ]
           },
+          "taskTimeRange": {
+            "type": "string",
+            "enum": [
+              "24h",
+              "2d",
+              "7d",
+              "30d",
+              "90d",
+              "all"
+            ]
+          },
           "autoModelRoutingEnabled": {
             "type": "boolean"
           }
@@ -9972,6 +9995,7 @@
           "taskSpawningEnabled",
           "wikiEnabled",
           "taskViewMode",
+          "taskTimeRange",
           "autoModelRoutingEnabled"
         ],
         "additionalProperties": false
@@ -9995,6 +10019,17 @@
             "enum": [
               "board",
               "list"
+            ]
+          },
+          "taskTimeRange": {
+            "type": "string",
+            "enum": [
+              "24h",
+              "2d",
+              "7d",
+              "30d",
+              "90d",
+              "all"
             ]
           },
           "autoModelRoutingEnabled": {

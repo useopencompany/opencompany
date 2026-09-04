@@ -3198,6 +3198,7 @@ describe("canonical Hono API", () => {
       taskSpawningEnabled: true,
       wikiEnabled: true as const,
       taskViewMode: "list" as const,
+      taskTimeRange: "24h" as const,
       autoModelRoutingEnabled: true,
     }));
     const app = testApp(fakeRepository(), {
@@ -3211,7 +3212,12 @@ describe("canonical Hono API", () => {
     });
     expect(updated.status).toBe(200);
     await expect(updated.json()).resolves.toMatchObject({
-      data: { timezone: "Europe/Berlin", taskViewMode: "list", autoModelRoutingEnabled: true },
+      data: {
+        timezone: "Europe/Berlin",
+        taskViewMode: "list",
+        taskTimeRange: "24h",
+        autoModelRoutingEnabled: true,
+      },
       meta: { apiVersion: "v1" },
     });
     expect(updatePreferences).toHaveBeenCalledWith(actor, {
@@ -3232,6 +3238,13 @@ describe("canonical Hono API", () => {
       body: JSON.stringify({ taskViewMode: "kanban" }),
     });
     expect(invalidMode.status).toBe(400);
+
+    const invalidTimeRange = await app.request("/v1/me/preferences", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ taskTimeRange: "1h" }),
+    });
+    expect(invalidTimeRange.status).toBe(400);
   });
 
   it("requires authentication for the settings surfaces", async () => {
@@ -4816,6 +4829,7 @@ function fakeIdentity(): Parameters<typeof createApiApp>[0]["identity"] {
       autoModelRoutingEnabled: false,
       chatCapabilitiesBetaEnabled: false,
       taskViewMode: "board" as const,
+      taskTimeRange: "7d" as const,
       preferredMcpClient: null,
       mcpSetupCompletedAt: null,
       onboardedAt: "2026-08-13T12:00:00.000Z",

@@ -1,21 +1,49 @@
 ---
 title: Latitude
-description: Use Latitude's live MCP tool catalog from opencompany.
+description: Install the Latitude plugin to investigate agent observability data and manage workspace resources.
 ---
 
-## What connecting does
+## Connect Latitude
 
-Latitude is a personal OAuth connection for observing, understanding, and improving AI agents. Its
-available tools are discovered from Latitude's live MCP server rather than copied into a fixed local
-catalog.
+1. Ask a workspace admin to open **Settings → Plugins → Latitude** and select **Install**.
+2. Review the integrity-pinned package and its three tool permission groups.
+3. Select **Connect Latitude account**.
+4. Sign in to Latitude, choose the organization to bind to opencompany, and approve access.
 
-## Scopes and permissions
+Latitude's hosted MCP server uses OAuth and binds the connection to the organization chosen during
+consent. OAuth credentials stay encrypted and server-side, and opencompany sends them only to the
+reviewed `https://api.latitude.so/v1/mcp` endpoint. Installing or uninstalling the workspace plugin
+does not create or remove a person's Latitude connection.
 
-Tools Latitude marks read-only default to **On**; mutations and tools without a read-only annotation
-default to **Ask**. The provider's current OAuth scopes and MCP annotations are authoritative. A
-detailed tool reference is coming soon.
+## Permissions
 
-## Brain ingestion
+The package classifies all 127 tools in Latitude's reviewed MCP catalog:
 
-Latitude is not a configurable Brain source. Save a result explicitly if it should become durable
-workspace knowledge.
+- **Inspect Latitude workspace** defaults to **On** for lower-risk project structure, aggregate tool
+  analytics, signal, dataset, monitor, experiment, and import metadata.
+- **Read traces and user data** defaults to **Ask** because traces, spans, sessions, end-user
+  activity, dataset rows, memories, members, and access-key metadata can contain sensitive data.
+- **Manage Latitude** defaults to **Ask** for every create, update, export, invite, revoke, delete,
+  and other state-changing operation.
+- Newly discovered or unclassified tools remain on **Ask** until an updated package reviews them.
+
+Persistent coding sessions receive only permissions set to **On**. Leave sensitive reads and
+mutations on **Ask** unless you deliberately want a trusted session to run them without pausing.
+
+## Safety and limitations
+
+Latitude traces can contain full prompts, model responses, tool inputs and outputs, customer
+identifiers, application metadata, and secrets accidentally captured by instrumentation. Prefer
+aggregate queries, narrow time ranges, and minimal fields before requesting raw trace or memory
+content. Carefully review changes involving API keys, OAuth keys, members, monitors, datasets, or
+project deletion.
+
+The official plugin accepts only Latitude's hosted cloud endpoint. Self-hosted or user-supplied MCP
+URLs are not accepted, preventing stored credentials from being redirected to an arbitrary server.
+
+Uninstalling the plugin suppresses its tools and restores the existing legacy Latitude actions as a
+fallback. The personal OAuth connection is retained for a later reinstall. Tool results enter Brain
+only through an explicit supported capture path.
+
+See [Latitude's MCP guide](https://docs.latitude.so/getting-started/mcp) for provider-specific OAuth
+and revocation details.

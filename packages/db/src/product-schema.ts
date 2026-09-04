@@ -423,6 +423,7 @@ export type TaskResultMode = HarnessSpec extends { resultMode: infer Mode } ? Mo
 export type WorkspaceRole = "admin" | "member";
 export type McpClient = "claude" | "chatgpt" | "cursor";
 export type TaskViewMode = "board" | "list";
+export type TaskTimeRange = "24h" | "2d" | "7d" | "30d" | "90d" | "all";
 export type WorkspacePlan = "hobby" | "pro";
 export type StripeSubscriptionStatus =
   | "incomplete"
@@ -739,6 +740,8 @@ export const users = productSchema.table(
     wikiEnabled: boolean("wiki_enabled").notNull().default(false),
     // Board vs list layout for the Tasks page; persisted per user across devices.
     taskViewMode: text("task_view_mode").notNull().default("board").$type<TaskViewMode>(),
+    // Time window for the Tasks page; persisted per user across devices.
+    taskTimeRange: text("task_time_range").notNull().default("7d").$type<TaskTimeRange>(),
     preferredMcpClient: text("preferred_mcp_client").$type<McpClient>(),
     // Set exactly once, when this user first completes a successful knowledge query over MCP.
     mcpSetupCompletedAt: timestamp("mcp_setup_completed_at", { withTimezone: true }),
@@ -755,6 +758,10 @@ export const users = productSchema.table(
     taskViewModeCheck: check(
       "goat_users_task_view_mode_check",
       sql`${table.taskViewMode} IN ('board', 'list')`,
+    ),
+    taskTimeRangeCheck: check(
+      "opencompany_users_task_time_range_check",
+      sql`${table.taskTimeRange} IN ('24h', '2d', '7d', '30d', '90d', 'all')`,
     ),
   }),
 );

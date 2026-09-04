@@ -6,6 +6,7 @@ export type OfficialMcpPluginName =
   | "google-drive"
   | "hubspot"
   | "jamie"
+  | "latitude"
   | "linear"
   | "neon"
   | "posthog"
@@ -45,6 +46,7 @@ export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
     | "google_drive"
     | "hubspot"
     | "jamie"
+    | "latitude"
     | "linear"
     | "neon"
     | "posthog"
@@ -166,6 +168,19 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectionProvider: "jamie",
     connectHref: "/api/integrations/jamie-mcp/start?returnTo=/settings/plugins/jamie",
     accountDescription: "The Jamie account opencompany uses when you run meeting tools.",
+  },
+  latitude: {
+    name: "latitude",
+    kind: "mcp",
+    label: "Latitude",
+    description:
+      "Inspect agent observability data and manage Latitude workspace resources with approval.",
+    category: "engineering",
+    source:
+      "https://github.com/useopencompany/plugins/tree/56855e7d53ee3544520ec1fdef84d9e2f5ae6896/latitude",
+    connectionProvider: "latitude",
+    connectHref: "/api/integrations/latitude/start?returnTo=/settings/plugins/latitude",
+    accountDescription: "The Latitude account opencompany uses when you run observability tools.",
   },
   linear: {
     name: "linear",

@@ -60,6 +60,7 @@ const identity = {
     chatCapabilitiesBetaEnabled: false,
     wikiEnabled: true as const,
     taskViewMode: "board" as const,
+    taskTimeRange: "7d" as const,
     preferredMcpClient: "claude" as const,
     mcpSetupCompletedAt: "2026-08-13T12:00:00.000Z",
     onboardedAt: "2026-08-13T12:00:00.000Z",

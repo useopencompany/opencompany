@@ -73,7 +73,10 @@ import {
 // monogram fallback where no square vector mark exists), the colored logo tile,
 // and a short connection-focused description. Keyed by provider so the card
 // components derive everything from the provider string.
-type SettingsPersonalAccountProvider = Exclude<PersonalAccountProvider, "slack" | "jamie">;
+type SettingsPersonalAccountProvider = Exclude<
+  PersonalAccountProvider,
+  "jamie" | "latitude" | "slack"
+>;
 
 type IntegrationMetaKey = SettingsPersonalAccountProvider | "github" | "infisical";
 
@@ -123,12 +126,6 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     description: "Connect issues, projects, and comments from Linear.",
     Icon: LinearIcon,
     tileClass: "bg-[#5E6AD2] text-white",
-  },
-  latitude: {
-    label: "Latitude",
-    description: "Observe, understand, and improve your AI agents from opencompany.",
-    monogram: "L",
-    tileClass: "bg-[#171717] text-white",
   },
   neon: {
     label: "Neon",
@@ -315,10 +312,6 @@ const WORKSPACE_ACCOUNT_PROVIDERS = [
   "fathom",
 ] as const satisfies readonly SettingsPersonalAccountProvider[];
 
-const PERSONAL_ACCOUNT_PROVIDERS = [
-  "latitude",
-] as const satisfies readonly SettingsPersonalAccountProvider[];
-
 function countConnectedAccounts(
   integrations: IntegrationState,
   providers: readonly SettingsPersonalAccountProvider[],
@@ -338,8 +331,8 @@ function countWorkspaceConnected(integrations: IntegrationState) {
   );
 }
 
-function countPersonalConnected(integrations: IntegrationState) {
-  return countConnectedAccounts(integrations, PERSONAL_ACCOUNT_PROVIDERS);
+function countPersonalConnected() {
+  return 0;
 }
 
 function IntegrationCards({
@@ -359,7 +352,7 @@ function IntegrationCards({
         scope={scope}
         onScopeChange={setScope}
         workspaceCount={countWorkspaceConnected(integrations)}
-        personalCount={countPersonalConnected(integrations)}
+        personalCount={countPersonalConnected()}
       />
       {scope === "workspace" ? (
         <section className="flex flex-col gap-3">
@@ -394,10 +387,6 @@ function IntegrationCards({
             Connections that act as you. Only you can manage them or wire them into brains.
           </p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <IntegrationProviderGroupCard
-              provider="latitude"
-              accounts={integrations.personalAccounts.latitude}
-            />
             {browserProfilesEnabled ? <BrowserProfilesCard /> : null}
           </div>
         </section>
@@ -1391,7 +1380,7 @@ function integrationStatusReason(
 }
 
 function integrationConnectHref(
-  provider: Exclude<IntegrationMetaKey, "codex" | "claude_code" | "infisical"> | "slack",
+  provider: PersonalAccountProvider | "github" | "imessage" | "jamie",
 ) {
   if (provider === "gmail") return "/api/integrations/gmail/start?returnTo=/settings/integrations";
   if (provider === "google_calendar") {
@@ -1411,7 +1400,7 @@ function integrationConnectHref(
   if (provider === "hubspot")
     return "/api/integrations/hubspot/start?returnTo=/settings/integrations";
   if (provider === "latitude")
-    return "/api/integrations/latitude/start?returnTo=/settings/integrations";
+    return "/api/integrations/latitude/start?returnTo=/settings/plugins/latitude";
   if (provider === "neon") return "/api/integrations/neon/start?returnTo=/settings/integrations";
   if (provider === "betterstack") {
     return "/api/integrations/betterstack/start?returnTo=/settings/plugins/betterstack";
