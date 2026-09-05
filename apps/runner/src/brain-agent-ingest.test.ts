@@ -92,6 +92,7 @@ import {
   BrainAgentOutcomeError,
   BrainIngestBudgetError,
   buildAttioObjectAgentIngestPrompt,
+  buildBrainIngestModelPrompt,
   buildChatCaptureAgentIngestPrompt,
   buildGmailThreadAgentIngestPrompt,
   buildGoogleDriveDocumentAgentIngestPrompt,
@@ -252,14 +253,20 @@ type CapturedMessage = {
   providerOptions?: Record<string, unknown>;
 };
 
-// The system prompt rides in messages[0] (not the system param) so it can
-// carry an Anthropic cache breakpoint.
-function systemPromptFrom(options: { messages: CapturedMessage[] }): string {
-  const first = options.messages[0];
-  if (!first || first.role !== "system" || typeof first.content !== "string") {
-    throw new Error("Expected the first message to be the system prompt.");
+function systemPromptFrom(options: {
+  instructions?: string | CapturedMessage;
+  messages?: CapturedMessage[];
+}): string {
+  const instructions = options.instructions;
+  if (
+    !instructions ||
+    typeof instructions === "string" ||
+    instructions.role !== "system" ||
+    typeof instructions.content !== "string"
+  ) {
+    throw new Error("Expected structured system instructions.");
   }
-  return first.content;
+  return instructions.content;
 }
 
 function userPromptFrom(options: { messages: CapturedMessage[] }): string {
@@ -1797,7 +1804,7 @@ describe("runChatCaptureAgentIngest", () => {
 });
 
 describe("anthropic prompt caching", () => {
-  it("sends cached system and source messages plus a prepareStep hook", async () => {
+  it("uses cached instructions and source messages without violating the AI SDK 7 prompt boundary", async () => {
     mockAgentRun({
       finalText: "Promoted the capture.",
       toolInvocations: [
@@ -1817,15 +1824,47 @@ describe("anthropic prompt caching", () => {
 
     const options = aiMock.generateText.mock.calls[0]?.[0] as {
       system?: string;
+      instructions?: CapturedMessage;
+      allowSystemInMessages?: boolean;
       messages: CapturedMessage[];
       prepareStep?: (input: { messages: CapturedMessage[] }) => { messages: CapturedMessage[] };
     };
     const cacheBreakpoint = { anthropic: { cacheControl: { type: "ephemeral" } } };
-    // The system prompt must ride in messages so it can carry a breakpoint.
     expect(options.system).toBeUndefined();
-    expect(options.messages[0]).toMatchObject({ role: "system", providerOptions: cacheBreakpoint });
-    expect(options.messages[1]).toMatchObject({ role: "user", providerOptions: cacheBreakpoint });
+    expect(options.allowSystemInMessages).toBeUndefined();
+    expect(options.instructions).toMatchObject({
+      role: "system",
+      providerOptions: cacheBreakpoint,
+    });
+    expect(options.messages).not.toContainEqual(expect.objectContaining({ role: "system" }));
+    expect(options.messages[0]).toMatchObject({ role: "user", providerOptions: cacheBreakpoint });
     expect(typeof options.prepareStep).toBe("function");
+  });
+
+  it("passes the AI SDK 7 prompt validator", async () => {
+    const realAi = await vi.importActual<typeof import("ai")>("ai");
+    const { MockLanguageModelV3 } = await vi.importActual<typeof import("ai/test")>("ai/test");
+    const prompt = buildBrainIngestModelPrompt({
+      system: "Curate durable knowledge.",
+      prompt: "Capture this source.",
+    });
+
+    await expect(
+      realAi.generateText({
+        model: new MockLanguageModelV3({
+          doGenerate: async () => ({
+            content: [{ type: "text", text: "Done." }],
+            finishReason: { unified: "stop", raw: "stop" },
+            usage: {
+              inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+              outputTokens: { total: 1, text: 1, reasoning: 0 },
+            },
+            warnings: [],
+          }),
+        }),
+        ...prompt,
+      }),
+    ).resolves.toMatchObject({ text: "Done." });
   });
 
   it("records cache read/write token detail from the gateway usage", async () => {
@@ -1871,7 +1910,6 @@ describe("anthropic prompt caching", () => {
 describe("placeMovingAnthropicCacheBreakpoint", () => {
   const cacheBreakpoint = { anthropic: { cacheControl: { type: "ephemeral" as const } } };
   const staticPrefix = [
-    { role: "system" as const, content: "system", providerOptions: cacheBreakpoint },
     { role: "user" as const, content: "source", providerOptions: cacheBreakpoint },
   ];
 
@@ -1890,9 +1928,8 @@ describe("placeMovingAnthropicCacheBreakpoint", () => {
     ]);
 
     expect(marked[0]?.providerOptions).toMatchObject(cacheBreakpoint);
-    expect(marked[1]?.providerOptions).toMatchObject(cacheBreakpoint);
+    expect(marked[1]?.providerOptions).toEqual({});
     expect(marked[2]?.providerOptions).toEqual({});
-    expect(marked[3]?.providerOptions).toEqual({});
-    expect(marked[4]?.providerOptions).toMatchObject(cacheBreakpoint);
+    expect(marked[3]?.providerOptions).toMatchObject(cacheBreakpoint);
   });
 });
