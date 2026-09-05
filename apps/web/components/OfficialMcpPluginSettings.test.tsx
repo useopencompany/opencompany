@@ -341,12 +341,12 @@ const appData = vi.hoisted(() => ({
         {
           integrationId: "gint_vercel",
           provider: "vercel",
-          status: "connected",
-          connected: true,
+          status: "needs_reauth",
+          connected: false,
           accountEmail: null,
           accountName: "Vercel",
           connectionLabel: "Vercel",
-          statusReason: null,
+          statusReason: "Vercel MCP authorization started.",
           scopes: ["openid"],
           capabilityModes: { read: "on", query: "ask", draft: "ask", write: "off" },
         },
@@ -1416,6 +1416,12 @@ describe("Linear plugin settings", () => {
     );
 
     expect(html).toContain("Vercel");
+    expect(html).toContain("Connection unavailable");
+    expect(html).toContain("Unavailable");
+    expect(html).not.toContain("Needs reconnect");
+    expect(html).toContain("opencompany is awaiting that approval");
+    expect(html).not.toContain("Connect Vercel account");
+    expect(html).not.toContain("Reconnect");
     expect(html).toContain("Inspect Vercel projects");
     expect(html).toContain("Read operational data");
     expect(html).toContain("Deploy, share, and collaborate");

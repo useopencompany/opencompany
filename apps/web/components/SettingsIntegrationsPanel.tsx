@@ -642,6 +642,7 @@ export function IntegrationAccountRow({
   account,
   purposeLabel,
   reconnectHref,
+  reconnectUnavailableReason,
   showCapabilityModes = true,
   capabilityIds,
   capabilityOverrides,
@@ -649,6 +650,7 @@ export function IntegrationAccountRow({
   account: IntegrationAccountView<PersonalAccountProvider | "posthog">;
   purposeLabel?: string;
   reconnectHref?: string;
+  reconnectUnavailableReason?: string;
   showCapabilityModes?: boolean;
   capabilityIds?: readonly CapabilityId[];
   capabilityOverrides?: Partial<
@@ -740,6 +742,10 @@ export function IntegrationAccountRow({
             <span className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle">
               Connected
             </span>
+          ) : reconnectUnavailableReason ? (
+            <span className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle">
+              Unavailable
+            </span>
           ) : needsReconnect ? (
             <span className="rounded-full bg-warning-bg px-2 py-0.5 text-[11px] font-medium leading-4 text-warning">
               Needs reconnect
@@ -780,15 +786,19 @@ export function IntegrationAccountRow({
       </div>
       {needsReconnect ? (
         <div className="flex flex-col gap-1">
-          {account.statusReason ? (
-            <p className="text-[12px] leading-4 text-warning">{account.statusReason}</p>
+          {reconnectUnavailableReason || account.statusReason ? (
+            <p className="text-[12px] leading-4 text-warning">
+              {reconnectUnavailableReason || account.statusReason}
+            </p>
           ) : null}
-          <a
-            href={accountConnectHref}
-            className="w-fit rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink"
-          >
-            Reconnect
-          </a>
+          {reconnectUnavailableReason ? null : (
+            <a
+              href={accountConnectHref}
+              className="w-fit rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink"
+            >
+              Reconnect
+            </a>
+          )}
         </div>
       ) : null}
       {account.connected && showCapabilityModes ? (

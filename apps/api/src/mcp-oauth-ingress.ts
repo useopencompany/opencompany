@@ -112,6 +112,7 @@ type McpProviderFlow = {
   // state's returnTo was trusted; Linear predates the /settings/integrations
   // surface and kept the older target.
   invalidStatePath: string;
+  unavailableReason?: string;
 };
 
 const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
@@ -158,6 +159,7 @@ const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
     deniedReason: "vercel_denied",
     invalidStatePath:
       "/settings/plugins/vercel?integration=vercel&setup=error&reason=invalid_state",
+    unavailableReason: "provider_approval_required",
   },
   linear: {
     start: startLinearMcpOAuth,
@@ -253,6 +255,10 @@ async function handleStart(
   const url = new URL(request.url);
   const returnTo = url.searchParams.get("returnTo") ?? "/settings";
   const flow = MCP_PROVIDER_FLOWS[provider];
+
+  if (flow.unavailableReason) {
+    return statusRedirect(session, flow, returnTo, "error", flow.unavailableReason);
+  }
 
   try {
     const result = await flow.start({

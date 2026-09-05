@@ -1027,6 +1027,13 @@ function AccountsSection({
         title="Accounts"
         description={config.accountDescription}
       />
+      {config.connectionUnavailableReason ? (
+        <Alert>
+          <AlertCircle />
+          <AlertTitle>Connection unavailable</AlertTitle>
+          <AlertDescription>{config.connectionUnavailableReason}</AlertDescription>
+        </Alert>
+      ) : null}
       {state.status === "loading" ? (
         <SectionSkeleton label={`Loading ${accountLabel} accounts`} rows={2} compact />
       ) : state.status === "error" ? (
@@ -1064,6 +1071,9 @@ function AccountsSection({
                     : accountLabel
               }
               reconnectHref={config.connectHref}
+              {...(config.connectionUnavailableReason
+                ? { reconnectUnavailableReason: config.connectionUnavailableReason }
+                : {})}
               showCapabilityModes={false}
             />
           ))}
@@ -1077,7 +1087,7 @@ function AccountsSection({
             connected={Boolean(permissionConnection?.connected)}
             canManage={canEdit}
           />
-        ) : (
+        ) : config.connectionUnavailableReason ? null : (
           <a
             href={config.connectHref}
             className={buttonVariants({ variant: "outline", size: "sm" })}
