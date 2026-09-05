@@ -26,6 +26,8 @@ const mocks = vi.hoisted(() => ({
   loadGoogleCalendarConnection: vi.fn(),
   getHubSpotState: vi.fn(),
   loadHubSpotConnection: vi.fn(),
+  getInfisicalState: vi.fn(),
+  loadInfisicalConnection: vi.fn(),
   getJamieState: vi.fn(),
   loadJamieConnection: vi.fn(),
   getLatitudeState: vi.fn(),
@@ -36,6 +38,8 @@ const mocks = vi.hoisted(() => ({
   loadBetterStackConnection: vi.fn(),
   getRenderState: vi.fn(),
   loadRenderConnection: vi.fn(),
+  getVercelState: vi.fn(),
+  loadVercelConnection: vi.fn(),
   getPostHogState: vi.fn(),
   loadPostHogConnection: vi.fn(),
   getSlackState: vi.fn(),
@@ -85,6 +89,11 @@ vi.mock("./integrations/fathom-mcp", () => ({
   getFathomMcpIntegrationState: mocks.getFathomState,
   loadFathomMcpWorkerConnection: mocks.loadFathomConnection,
 }));
+vi.mock("./integrations/infisical-docs-mcp", () => ({
+  INFISICAL_DOCS_MCP_ENDPOINT_URL: "https://infisical.com/docs/mcp",
+  getInfisicalDocsMcpIntegrationState: mocks.getInfisicalState,
+  loadInfisicalDocsMcpWorkerConnection: mocks.loadInfisicalConnection,
+}));
 vi.mock("./integrations/gmail-mcp", () => ({
   GMAIL_MCP_ENDPOINT_URL: "https://api.opencompany.chat/mcp/plugins/gmail",
   gmailMcpRuntimeEndpointUrl: () => "https://api.opencompany.chat/mcp/plugins/gmail",
@@ -129,6 +138,11 @@ vi.mock("./integrations/render-mcp", () => ({
   RENDER_MCP_ENDPOINT_URL: "https://mcp.render.com/mcp",
   getRenderIntegrationState: mocks.getRenderState,
   loadRenderMcpWorkerConnection: mocks.loadRenderConnection,
+}));
+vi.mock("./integrations/vercel-mcp", () => ({
+  VERCEL_MCP_ENDPOINT_URL: "https://mcp.vercel.com",
+  getVercelIntegrationState: mocks.getVercelState,
+  loadVercelMcpWorkerConnection: mocks.loadVercelConnection,
 }));
 vi.mock("./integrations/neon-mcp", () => ({
   NEON_MCP_ENDPOINT_URL:
@@ -311,6 +325,54 @@ describe("plugin gateway registration cache", () => {
       {
         ...githubRecord,
         server: { ...githubRecord.server, url: "https://evil.example/mcp" },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
+  it("binds Infisical only to its public docs endpoint and workspace connection gate", async () => {
+    const infisicalRecord = record({
+      pluginName: "infisical",
+      pluginLabel: "Infisical",
+      pluginDescription: "Infisical docs and sandbox secret workflows.",
+      connectionProvider: "infisical",
+      server: {
+        name: "infisical",
+        type: "streamable-http",
+        url: "https://infisical.com/docs/mcp",
+        headers: {},
+      },
+      capabilities: [
+        {
+          id: "read",
+          label: "Read Infisical docs",
+          defaultMode: "on",
+          tools: ["search_infisical", "query_docs_filesystem_infisical"],
+        },
+        {
+          id: "write",
+          label: "Send docs feedback",
+          defaultMode: "off",
+          tools: ["submit_feedback"],
+        },
+      ],
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([infisicalRecord]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:infisical:infisical",
+        connectionProvider: "infisical",
+        getState: mocks.getInfisicalState,
+        loadConnection: mocks.loadInfisicalConnection,
+      }),
+    ]);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...infisicalRecord,
+        server: { ...infisicalRecord.server, url: "https://evil.example/mcp" },
       },
     ]);
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
@@ -943,6 +1005,48 @@ describe("plugin gateway registration cache", () => {
       {
         ...renderRecord,
         server: { ...renderRecord.server, url: "https://mcp.render.com.evil.example/mcp" },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
+  it("binds Vercel credentials only to Vercel's exact MCP root endpoint", async () => {
+    const vercelRecord = record({
+      pluginName: "vercel",
+      pluginLabel: "vercel",
+      pluginDescription: "Vercel plugin tools.",
+      connectionProvider: "vercel",
+      server: {
+        name: "vercel",
+        type: "streamable-http",
+        url: "https://mcp.vercel.com",
+        headers: {},
+      },
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([vercelRecord]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:vercel:vercel",
+        connectionProvider: "vercel",
+        getState: mocks.getVercelState,
+        loadConnection: mocks.loadVercelConnection,
+      }),
+    ]);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...vercelRecord,
+        server: { ...vercelRecord.server, url: "https://mcp.vercel.com/mcp" },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...vercelRecord,
+        server: { ...vercelRecord.server, url: "https://mcp.vercel.com.evil.example" },
       },
     ]);
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);

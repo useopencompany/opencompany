@@ -261,6 +261,7 @@ export type PersonalAccountProvider =
   | "attio"
   | "betterstack"
   | "render"
+  | "vercel"
   | "signoz"
   | "latitude"
   | "neon"
@@ -339,6 +340,7 @@ export function personalAccountsFromRows(
     attio: [],
     betterstack: [],
     render: [],
+    vercel: [],
     signoz: [],
     latitude: [],
     neon: [],
@@ -391,6 +393,7 @@ export function personalAccountsFromRows(
       row.provider === "slack" ||
       row.provider === "betterstack" ||
       row.provider === "render" ||
+      row.provider === "vercel" ||
       row.provider === "signoz" ||
       row.provider === "latitude" ||
       row.provider === "neon" ||

@@ -1765,6 +1765,13 @@
       "when": 1788523200000,
       "tag": "0251_goat_task_time_range",
       "breakpoints": true
+    },
+    {
+      "idx": 252,
+      "version": "7",
+      "when": 1788529500000,
+      "tag": "0252_opencompany_vercel_integration",
+      "breakpoints": true
     }
   ]
 }

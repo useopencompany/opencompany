@@ -21,8 +21,10 @@ export type ActionProviderId =
   | "neon"
   | "betterstack"
   | "render"
+  | "vercel"
   | "signoz"
   | "fathom"
+  | "infisical"
   | "x_account";
 
 export type ActionSourceId = ActionProviderId | ManagedCapabilitySource | `plugin:${string}`;

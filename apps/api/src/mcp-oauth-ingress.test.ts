@@ -40,6 +40,10 @@ import {
   completeSigNozMcpOAuth,
   startSigNozMcpOAuth,
 } from "@opencompany/agent/integrations/signoz-mcp";
+import {
+  completeVercelMcpOAuth,
+  startVercelMcpOAuth,
+} from "@opencompany/agent/integrations/vercel-mcp";
 import { listWorkspacesForUser } from "@opencompany/db/workspaces";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./errors";
@@ -94,6 +98,11 @@ vi.mock("@opencompany/agent/integrations/signoz-mcp", async (importOriginal) => 
   startSigNozMcpOAuth: vi.fn(),
   completeSigNozMcpOAuth: vi.fn(),
 }));
+vi.mock("@opencompany/agent/integrations/vercel-mcp", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  startVercelMcpOAuth: vi.fn(),
+  completeVercelMcpOAuth: vi.fn(),
+}));
 vi.mock("@opencompany/agent/integrations/neon-mcp", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   startNeonMcpOAuth: vi.fn(),
@@ -119,6 +128,7 @@ const PROVIDERS: McpOAuthProvider[] = [
   "fathom",
   "signoz",
   "jamie",
+  "vercel",
 ];
 
 // The mocked module-level start/complete wrappers, keyed like the ingress.
@@ -134,6 +144,7 @@ const flowMocks = {
   fathom: { start: startFathomMcpOAuth, complete: completeFathomMcpOAuth },
   signoz: { start: startSigNozMcpOAuth, complete: completeSigNozMcpOAuth },
   jamie: { start: startJamieMcpOAuth, complete: completeJamieMcpOAuth },
+  vercel: { start: startVercelMcpOAuth, complete: completeVercelMcpOAuth },
 } as const;
 
 function ingress(
@@ -274,7 +285,8 @@ describe("remote MCP OAuth ingress", () => {
               provider === "signoz" ||
               provider === "hubspot" ||
               provider === "jamie" ||
-              provider === "granola"
+              provider === "granola" ||
+              provider === "vercel"
             ? `/settings/plugins/${provider}`
             : "/settings/integrations";
       expect(response.headers.get("location"), provider).toBe(
