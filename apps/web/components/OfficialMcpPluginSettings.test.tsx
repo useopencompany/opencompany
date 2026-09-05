@@ -97,6 +97,11 @@ const accountActions = vi.hoisted(() => ({
   })),
   setIntegrationCapabilityModeAction: vi.fn(async () => ({ ok: true as const })),
 }));
+const infisicalAuth = vi.hoisted(() => ({
+  completeInfisicalAuth: vi.fn(),
+  disconnectInfisicalAuth: vi.fn(),
+  startInfisicalAuth: vi.fn(),
+}));
 const appData = vi.hoisted(() => ({
   integrations: {
     infisical: {
@@ -417,9 +422,9 @@ vi.mock("@/components/AppDataProvider", () => ({
 }));
 vi.mock("@/lib/headless-knowledge-commands", () => commands);
 vi.mock("@/lib/infisical-auth", () => ({
-  completeInfisicalAuth: vi.fn(),
-  disconnectInfisicalAuth: vi.fn(),
-  startInfisicalAuth: vi.fn(),
+  completeInfisicalAuth: infisicalAuth.completeInfisicalAuth,
+  disconnectInfisicalAuth: infisicalAuth.disconnectInfisicalAuth,
+  startInfisicalAuth: infisicalAuth.startInfisicalAuth,
 }));
 vi.mock("@/lib/integration-account-actions", () => accountActions);
 
@@ -1236,6 +1241,7 @@ describe("Linear plugin settings", () => {
     accountActions.getIntegrationAccountUsageAction.mockClear();
     accountActions.setIntegrationCapabilityModeAction.mockReset();
     accountActions.setIntegrationCapabilityModeAction.mockResolvedValue({ ok: true });
+    for (const action of Object.values(infisicalAuth)) action.mockReset();
     useLiveQuery.mockClear();
     window.history.replaceState({}, "", "/settings/plugins/linear");
   });
@@ -1263,8 +1269,12 @@ describe("Linear plugin settings", () => {
     );
 
     expect(screen.getByRole("heading", { level: 1, name: "Infisical" })).toBeInTheDocument();
-    expect(screen.getByText("Connected as developer@example.com · US")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Reconnect" })).toBeInTheDocument();
+    expect(screen.getByText("developer@example.com · US")).toBeInTheDocument();
+    expect(screen.getByText("Connected")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reconnect Infisical account" })).toBeInTheDocument();
+    expect(
+      screen.queryByText("Give workspace coding agents access to the real Infisical CLI."),
+    ).not.toBeInTheDocument();
     expect(screen.getByText("infisical-sandbox-secrets")).toBeInTheDocument();
     expect(screen.getByText("Search infisical")).toBeInTheDocument();
     expect(screen.getByText("Submit feedback")).toBeInTheDocument();
@@ -1272,6 +1282,57 @@ describe("Linear plugin settings", () => {
       screen.getByText(/Documentation reads stay On and documentation feedback stays Off/u),
     ).toBeInTheDocument();
     expect(INFISICAL_PLUGIN_SOURCE).toContain("f283f509c195464f90f5f78f7e30a9a472b6393b/infisical");
+  });
+
+  it("keeps the Infisical token handoff inside the standard plugin account section", async () => {
+    const user = userEvent.setup();
+    infisicalAuth.startInfisicalAuth.mockResolvedValue({
+      ok: true,
+      flow: {
+        id: "ginff_eu",
+        status: "link_ready",
+        loginUrl: "https://eu.infisical.com/login?callback_port=23456",
+        statusReason: null,
+        expiresAt: "2026-09-05T17:00:00.000Z",
+      },
+    });
+    infisicalAuth.completeInfisicalAuth.mockResolvedValue({
+      ok: true,
+      flow: {
+        id: "ginff_eu",
+        status: "completed",
+        loginUrl: "https://eu.infisical.com/login?callback_port=23456",
+        statusReason: null,
+        expiresAt: "2026-09-05T17:00:00.000Z",
+      },
+    });
+
+    render(
+      <InfisicalPluginDetail pluginState={{ status: "ready", plugin: infisicalPlugin }} canEdit />,
+    );
+    await user.click(screen.getByRole("button", { name: "EU" }));
+    await user.click(screen.getByRole("button", { name: "Reconnect Infisical account" }));
+
+    await waitFor(() => {
+      expect(infisicalAuth.startInfisicalAuth).toHaveBeenCalledWith({
+        host: "https://eu.infisical.com",
+      });
+    });
+    expect(screen.getByRole("link", { name: /Open Infisical sign-in/ })).toHaveAttribute(
+      "href",
+      "https://eu.infisical.com/login?callback_port=23456",
+    );
+
+    await user.type(screen.getByLabelText("Browser token"), "browser-token");
+    await user.click(screen.getByRole("button", { name: "Finish connection" }));
+
+    await waitFor(() => {
+      expect(infisicalAuth.completeInfisicalAuth).toHaveBeenCalledWith({
+        flowId: "ginff_eu",
+        browserToken: "browser-token",
+      });
+      expect(router.refresh).toHaveBeenCalled();
+    });
   });
 
   it("maps the personal github_user connection onto the GitHub plugin surface", () => {

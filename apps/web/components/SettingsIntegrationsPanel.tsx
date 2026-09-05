@@ -1,24 +1,12 @@
 "use client";
 
 import { toast } from "@opencompany/ui/components/sonner";
-import {
-  BetterStackIcon,
-  GitHubIcon,
-  GmailIcon,
-  GoogleCalendarIcon,
-  GoogleDriveIcon,
-  HubSpotIcon,
-  type LucideIcon as IconComponent,
-  LinearIcon,
-  NeonIcon,
-  XIcon,
-} from "@opencompany/ui/icons";
 import { cn } from "@opencompany/ui/lib/utils";
 import { useLiveQuery } from "@tanstack/react-db";
 import { ExternalLink, Globe2, Loader2, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { CapabilityModeToggle } from "@/components/CapabilityModeToggle";
 import { useHydrated } from "@/components/useHydrated";
 import {
@@ -40,18 +28,11 @@ import {
   type HeadlessIntegrationAccountReadModel,
 } from "@/lib/headless-integration-collections";
 import {
-  completeInfisicalAuth,
-  disconnectInfisicalAuth,
-  type InfisicalAuthFlow,
-  startInfisicalAuth,
-} from "@/lib/infisical-auth";
-import {
   disconnectIntegrationAccountAction,
   getIntegrationAccountUsageAction,
   setIntegrationCapabilityModeAction,
 } from "@/lib/integration-account-actions";
 import {
-  type InfisicalProviderState,
   type IntegrationAccountView,
   type IntegrationState,
   integrationStateFromRows,
@@ -63,108 +44,6 @@ import {
   integrationConnectionError,
   integrationConnectionSuccess,
 } from "@/lib/onboarding-integrations";
-
-// Presentation metadata for each integration card: the real brand logo (or a
-// monogram fallback where no square vector mark exists), the colored logo tile,
-// and a short connection-focused description. Keyed by provider so the card
-// components derive everything from the provider string.
-type SettingsPersonalAccountProvider = Exclude<
-  PersonalAccountProvider,
-  "attio" | "fathom" | "granola" | "jamie" | "latitude" | "slack"
->;
-
-type IntegrationMetaKey = SettingsPersonalAccountProvider | "infisical";
-
-type IntegrationMeta = {
-  label: string;
-  description: string;
-  // Brand logo component; when omitted the tile shows `monogram` instead.
-  Icon?: IconComponent;
-  monogram?: string;
-  // Tailwind classes for the circular logo tile (background + icon/text color).
-  tileClass: string;
-};
-
-const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
-  github_user: {
-    label: "GitHub as you",
-    description: "Let opencompany work with repositories, issues, and pull requests as you.",
-    Icon: GitHubIcon,
-    tileClass: "bg-[#181717] text-white",
-  },
-  gmail: {
-    label: "Gmail",
-    description: "Let opencompany read and act on your email.",
-    Icon: GmailIcon,
-    tileClass: "bg-[#EA4335] text-white",
-  },
-  google_calendar: {
-    label: "Google Calendar",
-    description: "Let opencompany view and update your schedule and events.",
-    Icon: GoogleCalendarIcon,
-    tileClass: "bg-[#1A73E8] text-white",
-  },
-  google_drive: {
-    label: "Google Drive",
-    description: "Sync files and folders you choose into opencompany.",
-    Icon: GoogleDriveIcon,
-    tileClass: "bg-[#1FA463] text-white",
-  },
-  linear: {
-    label: "Linear",
-    description: "Connect issues, projects, and comments from Linear.",
-    Icon: LinearIcon,
-    tileClass: "bg-[#5E6AD2] text-white",
-  },
-  neon: {
-    label: "Neon",
-    description: "Inspect Neon projects and schemas, and run permission-gated read-only SQL.",
-    Icon: NeonIcon,
-    tileClass: "bg-[#00E599] text-[#0B0F14]",
-  },
-  hubspot: {
-    label: "HubSpot",
-    description: "Sync CRM activity on contacts, companies, and deals.",
-    Icon: HubSpotIcon,
-    tileClass: "bg-[#FF7A59] text-white",
-  },
-  betterstack: {
-    label: "Better Stack",
-    description: "Investigate observability data and manage monitoring and incident response.",
-    Icon: BetterStackIcon,
-    tileClass: "bg-[#1B1F23] text-white",
-  },
-  render: {
-    label: "Render",
-    description: "Deploy and operate services and datastores through Render's official MCP server.",
-    monogram: "R",
-    tileClass: "bg-[#0B0D0E] text-white",
-  },
-  vercel: {
-    label: "Vercel",
-    description: "Inspect deployments, investigate production issues, and deploy with approval.",
-    monogram: "V",
-    tileClass: "bg-black text-white",
-  },
-  signoz: {
-    label: "SigNoz",
-    description: "Investigate observability data and manage alerts and dashboards.",
-    monogram: "S",
-    tileClass: "bg-[#FF6B35] text-white",
-  },
-  infisical: {
-    label: "Infisical",
-    description: "Give workspace coding agents access to the real Infisical CLI.",
-    monogram: "I",
-    tileClass: "bg-[#6C47FF] text-white",
-  },
-  x_account: {
-    label: "X",
-    description: "Connect X accounts and publish account-specific posts from chat.",
-    Icon: XIcon,
-    tileClass: "bg-black text-white",
-  },
-};
 
 export function SettingsIntegrationsPanel({
   initialIntegrations,
@@ -262,12 +141,10 @@ function LiveSettingsIntegrations({
 }
 
 type IntegrationScope = "workspace" | "personal";
-type InfisicalHost = NonNullable<InfisicalProviderState["host"]>;
-
-const INFISICAL_REGIONS = [
-  { host: "https://app.infisical.com", label: "US" },
-  { host: "https://eu.infisical.com", label: "EU" },
-] as const satisfies ReadonlyArray<{ host: InfisicalHost; label: string }>;
+type SettingsPersonalAccountProvider = Exclude<
+  PersonalAccountProvider,
+  "attio" | "fathom" | "granola" | "jamie" | "latitude" | "slack"
+>;
 
 // Group-card providers surfaced under each scope. These are all user-owned in the
 // data model (each member connects their own account), but the CRM / meeting /
@@ -601,43 +478,6 @@ function IntegrationScopeSwitch({
   );
 }
 
-// The card shell that matches every integration: a colored brand-logo tile, the
-// title + description, an optional body (connected accounts, code panels), and a
-// footer action pinned to the bottom so the "Connect" pills line up across a row.
-function IntegrationCard({
-  meta,
-  body,
-  footer,
-}: {
-  meta: IntegrationMeta;
-  body?: ReactNode;
-  footer?: ReactNode;
-}) {
-  const Icon = meta.Icon;
-  return (
-    <div className="flex flex-col gap-4 rounded-2xl border border-border bg-surface p-5 shadow-sm">
-      <div
-        className={cn(
-          "flex size-12 shrink-0 items-center justify-center rounded-full",
-          meta.tileClass,
-        )}
-      >
-        {Icon ? (
-          <Icon size={24} />
-        ) : (
-          <span className="text-[18px] font-semibold leading-none">{meta.monogram}</span>
-        )}
-      </div>
-      <div className="flex flex-col gap-1">
-        <span className="text-[15px] font-semibold leading-tight text-ink">{meta.label}</span>
-        <p className="text-[13px] leading-5 text-ink-subtle">{meta.description}</p>
-      </div>
-      {body}
-      {footer ? <div className="mt-auto pt-1">{footer}</div> : null}
-    </div>
-  );
-}
-
 export function IntegrationAccountRow({
   account,
   purposeLabel,
@@ -921,218 +761,6 @@ function CapabilityModeRow({
   );
 }
 
-export function InfisicalWorkspaceConnectionCard({
-  integration,
-  canManage,
-}: {
-  integration: InfisicalProviderState;
-  canManage: boolean;
-}) {
-  const router = useRouter();
-  const [flow, setFlow] = useState<InfisicalAuthFlow | null>(null);
-  const [host, setHost] = useState<InfisicalHost>(
-    integration.host === "https://eu.infisical.com"
-      ? "https://eu.infisical.com"
-      : "https://app.infisical.com",
-  );
-  const [browserToken, setBrowserToken] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
-
-  const startAuth = () => {
-    setError(null);
-    setBrowserToken("");
-    startTransition(async () => {
-      const result = await startInfisicalAuth({ host });
-      if (result.ok) setFlow(result.flow);
-      else setError(result.error);
-    });
-  };
-
-  const completeAuth = () => {
-    if (!flow) return;
-    setError(null);
-    startTransition(async () => {
-      const result = await completeInfisicalAuth({ flowId: flow.id, browserToken });
-      if (!result.ok) {
-        setError(result.error);
-        return;
-      }
-      if (result.flow.status === "completed") {
-        setFlow(null);
-        setBrowserToken("");
-        router.refresh();
-      } else {
-        setFlow(result.flow);
-        setError(result.flow.statusReason);
-      }
-    });
-  };
-
-  const disconnect = () => {
-    if (
-      !window.confirm(
-        "Disconnect Infisical from this workspace? New coding turns will remove the saved login. Commands already running are not interrupted.",
-      )
-    ) {
-      return;
-    }
-    setError(null);
-    startTransition(async () => {
-      const result = await disconnectInfisicalAuth();
-      if (!result.ok) {
-        setError(result.error);
-        return;
-      }
-      setFlow(null);
-      setBrowserToken("");
-      router.refresh();
-    });
-  };
-
-  const regionLabel = INFISICAL_REGIONS.find((region) => region.host === host)?.label ?? "US";
-  const connectedRegionLabel =
-    INFISICAL_REGIONS.find((region) => region.host === integration.host)?.label ?? regionLabel;
-  const accountLabel = integration.connected
-    ? integration.accountEmail
-      ? `Connected as ${integration.accountEmail} · ${connectedRegionLabel}`
-      : `Connected · ${connectedRegionLabel}`
-    : integration.statusReason;
-
-  return (
-    <IntegrationCard
-      meta={INTEGRATION_META.infisical}
-      body={
-        <div className="flex flex-col gap-2">
-          <p className="text-[12px] leading-5 text-ink-muted">
-            Coding agents get this account&apos;s Infisical permissions, including secret writes.
-            Use a dedicated, least-privilege account.
-          </p>
-          {accountLabel ? (
-            <p className="truncate text-[12px] leading-4 text-ink-subtle">{accountLabel}</p>
-          ) : null}
-          {!canManage ? (
-            <p className="text-[12px] leading-4 text-ink-subtle">Managed by workspace admins.</p>
-          ) : null}
-          {canManage && flow?.status !== "link_ready" ? (
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-[12px] leading-4 text-ink-subtle">Region</span>
-              <div
-                role="group"
-                aria-label="Infisical region"
-                className="inline-flex rounded-full bg-surface-muted p-0.5"
-              >
-                {INFISICAL_REGIONS.map((region) => {
-                  const selected = region.host === host;
-                  return (
-                    <button
-                      key={region.host}
-                      type="button"
-                      aria-pressed={selected}
-                      disabled={isPending}
-                      onClick={() => setHost(region.host)}
-                      className={cn(
-                        "rounded-full px-2.5 py-0.5 text-[11px] font-medium leading-4 transition-colors duration-150",
-                        selected
-                          ? "bg-surface text-ink shadow-sm"
-                          : "text-ink-subtle hover:text-ink",
-                      )}
-                    >
-                      {region.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          ) : null}
-          {flow?.status === "link_ready" && flow.loginUrl ? (
-            <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface-muted px-3 py-2 text-[12px] leading-5 text-ink-muted">
-              <span>
-                Open Infisical {regionLabel}, finish signing in without changing regions, then copy
-                the browser token immediately.
-              </span>
-              <a
-                href={flow.loginUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex w-fit items-center gap-1.5 font-medium text-ink underline underline-offset-2"
-              >
-                Open Infisical sign-in
-                <ExternalLink size={13} />
-              </a>
-              <input
-                type="password"
-                value={browserToken}
-                onChange={(event) => setBrowserToken(event.target.value)}
-                placeholder="Paste browser token"
-                autoComplete="off"
-                spellCheck={false}
-                className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 font-mono text-[12px] text-ink placeholder:text-ink-subtle focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-              />
-            </div>
-          ) : null}
-          {flow?.statusReason || error ? (
-            <div className="text-[12px] leading-4 text-warning">{error ?? flow?.statusReason}</div>
-          ) : null}
-        </div>
-      }
-      footer={
-        canManage ? (
-          <div className="flex items-center gap-2">
-            {flow?.status === "link_ready" ? (
-              <>
-                <button
-                  type="button"
-                  onClick={completeAuth}
-                  disabled={isPending || !browserToken.trim()}
-                  aria-busy={isPending}
-                  className="inline-flex items-center justify-center rounded-full border border-border px-4 py-1.5 text-[13px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-60"
-                >
-                  {isPending ? "Connecting" : "Finish connection"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setFlow(null);
-                    setBrowserToken("");
-                    setError(null);
-                  }}
-                  disabled={isPending}
-                  className="inline-flex items-center justify-center rounded-full px-3 py-1.5 text-[13px] font-medium text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink disabled:opacity-60"
-                >
-                  Cancel
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  onClick={startAuth}
-                  disabled={isPending}
-                  aria-busy={isPending}
-                  className="inline-flex items-center justify-center rounded-full border border-border px-4 py-1.5 text-[13px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-60"
-                >
-                  {buttonLabel(integration.status, isPending)}
-                </button>
-                {integration.connected ? (
-                  <button
-                    type="button"
-                    onClick={disconnect}
-                    disabled={isPending}
-                    className="inline-flex items-center justify-center rounded-full px-3 py-1.5 text-[13px] font-medium text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink disabled:opacity-60"
-                  >
-                    Disconnect
-                  </button>
-                ) : null}
-              </>
-            )}
-          </div>
-        ) : null
-      }
-    />
-  );
-}
-
 function integrationConnectHref(provider: PersonalAccountProvider) {
   if (provider === "gmail") return "/api/integrations/gmail/start?returnTo=/settings/integrations";
   if (provider === "google_calendar") {
@@ -1168,12 +796,4 @@ function integrationConnectHref(provider: PersonalAccountProvider) {
   if (provider === "x_account")
     return "/api/integrations/x-account/start?returnTo=/settings/integrations";
   return "/api/integrations/linear/start?returnTo=/settings/integrations";
-}
-
-function buttonLabel(status: string, isPending: boolean) {
-  if (isPending) return "Working";
-  if (status === "connected") return "Reconnect";
-  if (status === "needs_reauth") return "Reconnect";
-  if (status === "failed" || status === "expired") return "Retry";
-  return "Connect";
 }
