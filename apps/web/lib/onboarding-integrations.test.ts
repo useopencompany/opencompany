@@ -33,6 +33,9 @@ describe("opencompany onboarding integrations", () => {
     expect(onboardingConnectionError("linear", "session_mismatch")).toContain(
       "Sign in with the same account",
     );
+    expect(onboardingConnectionError("vercel", "provider_approval_required")).toBe(
+      "Vercel requires provider approval before it can connect. It isn't available yet.",
+    );
     expect(onboardingConnectionError("posthog", "posthog_denied")).toBe(
       "PostHog authorization was cancelled.",
     );

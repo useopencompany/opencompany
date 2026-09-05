@@ -26,6 +26,8 @@ export function integrationConnectionError(provider: string | null, reason: stri
       return `${name} isn't available right now. Please try again later.`;
     case "session_mismatch":
       return `Sign in with the same account that started the ${name} connection, then try again.`;
+    case "provider_approval_required":
+      return `${name} requires provider approval before it can connect. It isn't available yet.`;
     case "github_user_denied":
     case "gmail_denied":
     case "slack_denied":
