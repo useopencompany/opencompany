@@ -11,10 +11,13 @@ import {
   type McpConfigResult,
   type PluginCapabilitiesReport,
   type PluginCapabilityDefinition,
+  type PluginEventDefinition,
+  type PluginEventsReport,
   type PluginManifest,
   PluginSpecError,
   parseMcpConfig,
   parsePluginCapabilities,
+  parsePluginEvents,
   parsePluginManifest,
   type RemoteMcpServer,
   type StdioMcpServer,
@@ -73,6 +76,7 @@ export type PluginValidationReport = {
   skills: PluginSkillValidationReport[];
   mcp: PluginMcpValidationReport;
   capabilities: PluginCapabilitiesReport;
+  events: PluginEventsReport;
 };
 
 export type ResolvedPlugin = {
@@ -89,6 +93,7 @@ export type ResolvedPlugin = {
   // sandbox or a model-visible catalog.
   remoteServers: RemoteMcpServer[];
   capabilities: PluginCapabilityDefinition[];
+  events: PluginEventDefinition[];
   report: PluginValidationReport;
 };
 
@@ -160,6 +165,9 @@ export async function resolvePlugin(input: {
   const capabilities = parsePluginCapabilities(manifestResult.manifest.extensions, {
     trusted: isTrustedCapabilitySource(parsed.owner, parsed.repo, input.trustedCapabilitySources),
   });
+  const events = parsePluginEvents(manifestResult.manifest.extensions, {
+    trusted: isTrustedCapabilitySource(parsed.owner, parsed.repo, input.trustedCapabilitySources),
+  });
 
   const files = await gatherPluginFiles({
     entries: tree.entries,
@@ -227,11 +235,13 @@ export async function resolvePlugin(input: {
     stdioServers,
     remoteServers,
     capabilities: capabilities.definitions,
+    events: events.definitions,
     report: {
       ignoredManifestFields: manifestResult.ignoredFields,
       skills: skillReports,
       mcp: mcpReport,
       capabilities: capabilities.report,
+      events: events.report,
     },
   };
 }

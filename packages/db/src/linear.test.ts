@@ -4,8 +4,10 @@ import {
   linearEventTypeFor,
   linearRouteMatchesEvent,
   linearSelectedEventTypes,
+  linearWorkflowRouteMatchesEvent,
   parseLinearBrainSourceConfig,
   parseLinearWikiSourceConfig,
+  parseWorkflowEventConfig,
 } from "./linear";
 
 describe("opencompany Linear brain source config", () => {
@@ -124,5 +126,66 @@ describe("opencompany Linear brain source config", () => {
         "state_triage",
       ),
     ).toBe(false);
+  });
+
+  it("matches issue.created routes by declared team filters", () => {
+    const route = {
+      workflowId: "workflow_1",
+      workspaceId: "workspace_1",
+      userWorkosId: "user_1",
+      workflowSlug: "new-issue",
+      workflowName: "New issue",
+      prompt: "Review it.",
+      harnessSpec: {} as never,
+      provider: "linear",
+      event: "issue.created",
+      filters: { team: { id: "team_1" } },
+    };
+    expect(
+      linearWorkflowRouteMatchesEvent(route, {
+        type: "Issue",
+        action: "create",
+        teamId: "team_1",
+      }),
+    ).toBe(true);
+    expect(
+      linearWorkflowRouteMatchesEvent(route, {
+        type: "Issue",
+        action: "create",
+        teamId: "team_2",
+      }),
+    ).toBe(false);
+    expect(
+      linearWorkflowRouteMatchesEvent(route, {
+        type: "Issue",
+        action: "update",
+        teamId: "team_1",
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps normalized legacy triage subscriptions routable", () => {
+    expect(
+      parseWorkflowEventConfig({
+        provider: "linear",
+        event: "issue_enters_triage",
+        integrationId: "gint_1",
+        filters: {
+          team: {
+            id: "team_1",
+            name: "Engineering",
+            metadata: { triageStateId: "state_triage" },
+          },
+        },
+        prompt: "Review it.",
+      }),
+    ).toEqual({
+      provider: "linear",
+      event: "issue_enters_triage",
+      integrationId: "gint_1",
+      filters: { team: { id: "team_1" } },
+      prompt: "Review it.",
+      legacyTriageStateId: "state_triage",
+    });
   });
 });

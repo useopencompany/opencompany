@@ -123,13 +123,31 @@ describe("WorkflowEditor", () => {
     expect(screen.getByText("Saved")).toBeInTheDocument();
   });
 
-  it("saves a Linear team entering triage as an event trigger", async () => {
+  it("saves an enabled Linear issue-created event trigger with a team filter", async () => {
     render(
       <WorkflowEditor
         workflow={workflow}
         canEdit
         skillCatalog={[]}
         linearAccounts={[{ integrationId: "gint_1", label: "Acme Linear" }]}
+        workflowEvents={[
+          {
+            provider: "linear",
+            id: "issue.created",
+            label: "Issue created",
+            description: "Starts when an issue is created.",
+            delivery: "webhook",
+            filters: [
+              {
+                id: "team",
+                label: "Team",
+                kind: "integration_resource",
+                resourceType: "team",
+                required: true,
+              },
+            ],
+          },
+        ]}
       />,
     );
 
@@ -149,13 +167,14 @@ describe("WorkflowEditor", () => {
         trigger: {
           type: "event",
           provider: "linear",
-          event: "issue_enters_triage",
+          event: "issue.created",
           integrationId: "gint_1",
-          team: {
-            id: "team_1",
-            name: "Core",
-            key: "CORE",
-            triageStateId: "state_triage",
+          filters: {
+            team: {
+              id: "team_1",
+              name: "Core",
+              key: "CORE",
+            },
           },
           prompt: "Investigate the issue and propose the next step.",
         },

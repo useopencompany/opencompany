@@ -520,7 +520,13 @@ describe("Postgres immutable Plugin repository", () => {
     const installed = await repository.install({
       actor: actor(),
       idempotencyKey: "first",
-      plugin: await resolvedPlugin("quality-tools", "review", "First."),
+      plugin: await resolvedPlugin("quality-tools", "review", "First.", { events: true }),
+    });
+    await repository.setEventEnabled({
+      actor: actor(),
+      name: "quality-tools",
+      eventId: "issue.created",
+      enabled: true,
     });
 
     await repository.archive({ actor: actor(), name: "quality-tools" });
@@ -537,9 +543,10 @@ describe("Postgres immutable Plugin repository", () => {
     const replacement = await repository.install({
       actor: actor(),
       idempotencyKey: "second",
-      plugin: await resolvedPlugin("quality-tools", "review", "Second."),
+      plugin: await resolvedPlugin("quality-tools", "review", "Second.", { events: true }),
     });
     expect(replacement.plugin.id).not.toBe(installed.plugin.id);
+    expect(replacement.plugin.eventModes).toEqual({ "issue.created": true });
     await expect(
       database.query<{ plugins: number }>("SELECT COUNT(*)::int AS plugins FROM goat.plugins"),
     ).resolves.toMatchObject({ rows: [{ plugins: 2 }] });
@@ -581,6 +588,24 @@ describe("Postgres immutable Plugin repository", () => {
   });
 });
 
+function pluginEventDeclaration() {
+  return {
+    id: "issue.created",
+    label: "Issue created",
+    description: "Starts when an issue is created.",
+    delivery: "webhook" as const,
+    filters: [
+      {
+        id: "team",
+        label: "Team",
+        kind: "integration_resource" as const,
+        resourceType: "team",
+        required: true,
+      },
+    ],
+  };
+}
+
 async function resolvedPlugin(
   pluginName: string,
   skillName: string,
@@ -590,6 +615,7 @@ async function resolvedPlugin(
     mcp?: boolean;
     remoteMcp?: boolean;
     capabilities?: boolean;
+    events?: boolean;
   } = {},
 ): Promise<ResolvedPluginPackage> {
   const skill = await resolvedSkill(skillName, description, `skills/${skillName}`);
@@ -598,13 +624,18 @@ async function resolvedPlugin(
       $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
       name: pluginName,
       description: `${pluginName} plugin.`,
-      ...(options.capabilities
+      ...(options.capabilities || options.events
         ? {
             extensions: {
-              "so.opencompany.capabilities": {
-                read: { label: "Read Linear", defaultMode: "on", tools: ["list_issues"] },
-                write: { label: "Manage issues", defaultMode: "ask", tools: ["save_issue"] },
-              },
+              ...(options.capabilities
+                ? {
+                    "so.opencompany.capabilities": {
+                      read: { label: "Read Linear", defaultMode: "on", tools: ["list_issues"] },
+                      write: { label: "Manage issues", defaultMode: "ask", tools: ["save_issue"] },
+                    },
+                  }
+                : {}),
+              ...(options.events ? { "so.opencompany.events": [pluginEventDeclaration()] } : {}),
             },
           }
         : {}),
@@ -650,13 +681,18 @@ async function resolvedPlugin(
     manifest: {
       name: pluginName,
       description: `${pluginName} plugin.`,
-      ...(options.capabilities
+      ...(options.capabilities || options.events
         ? {
             extensions: {
-              "so.opencompany.capabilities": {
-                read: { label: "Read Linear", defaultMode: "on", tools: ["list_issues"] },
-                write: { label: "Manage issues", defaultMode: "ask", tools: ["save_issue"] },
-              },
+              ...(options.capabilities
+                ? {
+                    "so.opencompany.capabilities": {
+                      read: { label: "Read Linear", defaultMode: "on", tools: ["list_issues"] },
+                      write: { label: "Manage issues", defaultMode: "ask", tools: ["save_issue"] },
+                    },
+                  }
+                : {}),
+              ...(options.events ? { "so.opencompany.events": [pluginEventDeclaration()] } : {}),
             },
           }
         : {}),
@@ -702,6 +738,7 @@ async function resolvedPlugin(
           { id: "write", label: "Manage issues", defaultMode: "ask", tools: ["save_issue"] },
         ]
       : [],
+    events: options.events ? [pluginEventDeclaration()] : [],
     report: {
       ignoredManifestFields: [],
       skills: [
@@ -741,6 +778,9 @@ async function resolvedPlugin(
           }
         : { status: "absent" },
       capabilities: options.capabilities
+        ? { present: true, status: "parsed", issues: [] }
+        : { status: "absent" },
+      events: options.events
         ? { present: true, status: "parsed", issues: [] }
         : { status: "absent" },
     },

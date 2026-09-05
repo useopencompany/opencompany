@@ -855,7 +855,10 @@ function WorkflowListRow({ workflow }: { workflow: WorkflowListItem }) {
         {workflow.trigger.type === "event" ? (
           <span className="mt-1 inline-flex max-w-full items-center gap-1.5 truncate text-[11.5px] leading-4 text-ink-subtle">
             <span className="truncate">
-              Linear · {workflow.trigger.team.key ?? workflow.trigger.team.name} enters triage
+              {workflow.trigger.provider} · {workflow.trigger.event}
+              {workflow.trigger.filters.team
+                ? ` · ${workflow.trigger.filters.team.key ?? workflow.trigger.filters.team.name}`
+                : ""}
             </span>
           </span>
         ) : null}

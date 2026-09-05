@@ -9,6 +9,7 @@ import {
   scheduleSummary,
 } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import type { PluginEventDefinitionDto } from "@opencompany/protocol";
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import {
   ArrowLeft,
@@ -66,14 +67,18 @@ type WorkflowTriggerDraft =
   | { type: "manual" }
   | {
       type: "event";
-      provider: "linear";
-      event: "issue_enters_triage";
+      provider: string;
+      event: string;
       integrationId: string;
-      team: { id: string; name: string; key?: string; triageStateId: string };
+      filters: Record<
+        string,
+        { id: string; name: string; key?: string; metadata?: Record<string, string> }
+      >;
       prompt: string;
     }
   | { type: "schedule"; cron: string; timezone: string; prompt: string };
 type LinearWorkflowAccount = { integrationId: string; label: string };
+type WorkflowEventOption = PluginEventDefinitionDto & { provider: string };
 type WorkflowStepPatch = Partial<Omit<WorkflowStep, "runtimeModel" | "reasoningEffort">> & {
   runtimeModel?: WorkflowStep["runtimeModel"] | undefined;
   reasoningEffort?: WorkflowStep["reasoningEffort"] | undefined;
@@ -93,12 +98,14 @@ export function WorkflowEditor({
   canEdit,
   skillCatalog,
   linearAccounts = [],
+  workflowEvents = [],
 }: {
   workflow: WorkflowDetail;
   workspaceId: string;
   canEdit: boolean;
   skillCatalog: SkillCatalogItem[];
   linearAccounts?: LinearWorkflowAccount[];
+  workflowEvents?: WorkflowEventOption[];
 }) {
   const router = useRouter();
   const [draft, setDraft] = useState<WorkflowDraft>(() => workflowDraft(workflow));
@@ -349,6 +356,7 @@ export function WorkflowEditor({
             trigger={draft.trigger}
             canEdit={canEdit}
             linearAccounts={linearAccounts}
+            workflowEvents={workflowEvents}
             onChange={(trigger) => patch({ trigger })}
           />
 
@@ -529,11 +537,13 @@ function TriggerSection({
   trigger,
   canEdit,
   linearAccounts,
+  workflowEvents,
   onChange,
 }: {
   trigger: WorkflowTriggerDraft;
   canEdit: boolean;
   linearAccounts: LinearWorkflowAccount[];
+  workflowEvents: WorkflowEventOption[];
   onChange: (trigger: WorkflowTriggerDraft) => void;
 }) {
   const setManual = () => onChange({ type: "manual" });
@@ -548,19 +558,20 @@ function TriggerSection({
             prompt: DEFAULT_WORKFLOW_SCHEDULE_PROMPT,
           },
     );
-  const setLinearEvent = () => {
+  const setEvent = () => {
     if (trigger.type === "event") {
       onChange(trigger);
       return;
     }
     const account = linearAccounts[0];
-    if (!account) return;
+    const event = workflowEvents[0];
+    if (!account || !event) return;
     onChange({
       type: "event",
-      provider: "linear",
-      event: "issue_enters_triage",
+      provider: event.provider,
+      event: event.id,
       integrationId: account.integrationId,
-      team: { id: "", name: "", triageStateId: "" },
+      filters: {},
       prompt: DEFAULT_LINEAR_EVENT_PROMPT,
     });
   };
@@ -598,20 +609,25 @@ function TriggerSection({
             icon={Webhook}
             label="On an event"
             selected={trigger.type === "event"}
-            disabled={!canEdit || (linearAccounts.length === 0 && trigger.type !== "event")}
-            onSelect={setLinearEvent}
+            disabled={
+              !canEdit ||
+              ((linearAccounts.length === 0 || workflowEvents.length === 0) &&
+                trigger.type !== "event")
+            }
+            onSelect={setEvent}
           />
         </div>
 
-        {linearAccounts.length === 0 && trigger.type !== "event" ? (
+        {(linearAccounts.length === 0 || workflowEvents.length === 0) &&
+        trigger.type !== "event" ? (
           <p className="mt-3 text-[12px] text-ink-subtle">
             <Link
-              href="/settings/integrations"
+              href="/settings/plugins/linear"
               className="underline underline-offset-2 hover:text-ink"
             >
-              Connect Linear
+              {linearAccounts.length === 0 ? "Connect Linear" : "Enable a Linear event"}
             </Link>{" "}
-            to trigger workflows from issues entering triage.
+            to trigger workflows from Linear activity.
           </p>
         ) : null}
 
@@ -641,6 +657,7 @@ function TriggerSection({
           <LinearEventTriggerEditor
             trigger={trigger}
             accounts={linearAccounts}
+            events={workflowEvents}
             canEdit={canEdit}
             onChange={onChange}
           />
@@ -653,11 +670,13 @@ function TriggerSection({
 function LinearEventTriggerEditor({
   trigger,
   accounts,
+  events,
   canEdit,
   onChange,
 }: {
   trigger: Extract<WorkflowTriggerDraft, { type: "event" }>;
   accounts: LinearWorkflowAccount[];
+  events: WorkflowEventOption[];
   canEdit: boolean;
   onChange: (trigger: WorkflowTriggerDraft) => void;
 }) {
@@ -681,18 +700,45 @@ function LinearEventTriggerEditor({
   const accountOptions = accounts.some((account) => account.integrationId === trigger.integrationId)
     ? accounts
     : [{ integrationId: trigger.integrationId, label: "Disconnected Linear account" }, ...accounts];
+  const selectedTeam = trigger.filters.team;
+  const selectedTeamOption = selectedTeam
+    ? { ...selectedTeam, triageStateId: selectedTeam.metadata?.triageStateId }
+    : null;
   const teamOptions =
-    teams?.ok && !teams.teams.some((team) => team.id === trigger.team.id)
-      ? [trigger.team, ...teams.teams]
+    teams?.ok &&
+    selectedTeamOption &&
+    !teams.teams.some((team) => team.id === selectedTeamOption.id)
+      ? [selectedTeamOption, ...teams.teams]
       : teams?.ok
         ? teams.teams
-        : [trigger.team];
+        : selectedTeamOption
+          ? [selectedTeamOption]
+          : [];
+  const selectedEvent = events.find(
+    (event) => event.provider === trigger.provider && event.id === trigger.event,
+  );
+  const eventOptions = selectedEvent
+    ? events
+    : [
+        {
+          provider: trigger.provider,
+          id: trigger.event,
+          label:
+            trigger.event === "issue_enters_triage"
+              ? "Issue enters triage (legacy)"
+              : trigger.event,
+          description: "This workflow uses a legacy or currently disabled event.",
+          delivery: "webhook" as const,
+          filters: [],
+        },
+        ...events,
+      ];
+  const needsTriageState = trigger.event === "issue_enters_triage";
 
   return (
     <div className="mt-3 flex flex-col gap-3">
       <p className="text-[12px] leading-5 text-ink-subtle">
-        Starts one task when an issue for the selected team is created in or moved into Linear
-        triage.
+        {selectedEvent?.description ?? "Starts one task when an issue enters Linear triage."}
       </p>
       {accounts.length === 0 ? (
         <p className="text-[12px] text-warning">
@@ -704,6 +750,27 @@ function LinearEventTriggerEditor({
         </p>
       ) : null}
       <div className="grid gap-3 sm:grid-cols-2">
+        <label className="flex min-w-0 flex-col gap-1.5 sm:col-span-2">
+          <span className="text-[12px] font-medium text-ink-subtle">Event</span>
+          <select
+            value={`${trigger.provider}:${trigger.event}`}
+            disabled={!canEdit}
+            onChange={(event) => {
+              const option = events.find(
+                (candidate) => `${candidate.provider}:${candidate.id}` === event.target.value,
+              );
+              if (option)
+                onChange({ ...trigger, provider: option.provider, event: option.id, filters: {} });
+            }}
+            className="h-8 rounded-lg border border-border bg-canvas px-2.5 text-[12.5px] text-ink outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-70"
+          >
+            {eventOptions.map((event) => (
+              <option key={`${event.provider}:${event.id}`} value={`${event.provider}:${event.id}`}>
+                {event.label}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="flex min-w-0 flex-col gap-1.5">
           <span className="text-[12px] font-medium text-ink-subtle">Linear account</span>
           <select
@@ -713,7 +780,7 @@ function LinearEventTriggerEditor({
               onChange({
                 ...trigger,
                 integrationId: event.target.value,
-                team: { id: "", name: "", triageStateId: "" },
+                filters: {},
               })
             }
             className="h-8 rounded-lg border border-border bg-canvas px-2.5 text-[12.5px] text-ink outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-70"
@@ -728,18 +795,32 @@ function LinearEventTriggerEditor({
         <label className="flex min-w-0 flex-col gap-1.5">
           <span className="text-[12px] font-medium text-ink-subtle">Team</span>
           <select
-            value={trigger.team.id}
+            value={selectedTeam?.id ?? ""}
             disabled={!canEdit || !teams?.ok}
             onChange={(event) => {
               const team = teamOptions.find((candidate) => candidate.id === event.target.value);
-              if (team?.triageStateId)
-                onChange({ ...trigger, team: { ...team, triageStateId: team.triageStateId } });
+              if (team && (!needsTriageState || team.triageStateId)) {
+                onChange({
+                  ...trigger,
+                  filters: {
+                    ...trigger.filters,
+                    team: {
+                      id: team.id,
+                      name: team.name,
+                      ...(team.key ? { key: team.key } : {}),
+                      ...(needsTriageState && team.triageStateId
+                        ? { metadata: { triageStateId: team.triageStateId } }
+                        : {}),
+                    },
+                  },
+                });
+              }
             }}
             className="h-8 rounded-lg border border-border bg-canvas px-2.5 text-[12.5px] text-ink outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-70"
           >
-            {!trigger.team.id ? <option value="">Select a team…</option> : null}
+            {!selectedTeam?.id ? <option value="">Select a team…</option> : null}
             {teamOptions
-              .filter((team) => team.id && team.triageStateId)
+              .filter((team) => team.id && (!needsTriageState || team.triageStateId))
               .map((team) => (
                 <option key={team.id} value={team.id}>
                   {team.key ? `${team.key} · ` : ""}
@@ -750,7 +831,7 @@ function LinearEventTriggerEditor({
           {teams && !teams.ok ? (
             <span className="text-[11.5px] text-warning">{teams.error}</span>
           ) : null}
-          {teams?.ok && teams.teams.every((team) => !team.triageStateId) ? (
+          {needsTriageState && teams?.ok && teams.teams.every((team) => !team.triageStateId) ? (
             <span className="text-[11.5px] text-warning">
               No teams with Triage enabled were found in this Linear workspace.
             </span>
@@ -1496,12 +1577,9 @@ function serializeWorkflowDraft(draft: WorkflowDraft) {
 function workflowDraftReadyToSave(draft: WorkflowDraft) {
   return (
     draft.trigger.type !== "event" ||
-    Boolean(
-      draft.trigger.integrationId &&
-        draft.trigger.team.id &&
-        draft.trigger.team.name &&
-        draft.trigger.team.triageStateId,
-    )
+    (Boolean(draft.trigger.integrationId) &&
+      Object.keys(draft.trigger.filters).length > 0 &&
+      Object.values(draft.trigger.filters).every((filter) => filter.id && filter.name))
   );
 }
 

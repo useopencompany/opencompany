@@ -1087,15 +1087,13 @@
               },
               "provider": {
                 "type": "string",
-                "enum": [
-                  "linear"
-                ]
+                "minLength": 1,
+                "maxLength": 64
               },
               "event": {
                 "type": "string",
-                "enum": [
-                  "issue_enters_triage"
-                ]
+                "minLength": 1,
+                "maxLength": 128
               },
               "integrationId": {
                 "type": "string",
@@ -1103,36 +1101,40 @@
                 "maxLength": 256,
                 "example": "run_019fed53"
               },
-              "team": {
+              "filters": {
                 "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 256
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "key": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "metadata": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string",
+                        "maxLength": 256
+                      }
+                    }
                   },
-                  "name": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 256
-                  },
-                  "key": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 32
-                  },
-                  "triageStateId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 256
-                  }
-                },
-                "required": [
-                  "id",
-                  "name",
-                  "triageStateId"
-                ],
-                "additionalProperties": false
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "additionalProperties": false
+                }
               },
               "prompt": {
                 "type": "string",
@@ -1145,7 +1147,7 @@
               "provider",
               "event",
               "integrationId",
-              "team",
+              "filters",
               "prompt"
             ],
             "additionalProperties": false
@@ -1372,15 +1374,13 @@
               },
               "provider": {
                 "type": "string",
-                "enum": [
-                  "linear"
-                ]
+                "minLength": 1,
+                "maxLength": 64
               },
               "event": {
                 "type": "string",
-                "enum": [
-                  "issue_enters_triage"
-                ]
+                "minLength": 1,
+                "maxLength": 128
               },
               "integrationId": {
                 "type": "string",
@@ -1388,36 +1388,40 @@
                 "maxLength": 256,
                 "example": "run_019fed53"
               },
-              "team": {
+              "filters": {
                 "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 256
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "key": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "metadata": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string",
+                        "maxLength": 256
+                      }
+                    }
                   },
-                  "name": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 256
-                  },
-                  "key": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 32
-                  },
-                  "triageStateId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 256
-                  }
-                },
-                "required": [
-                  "id",
-                  "name",
-                  "triageStateId"
-                ],
-                "additionalProperties": false
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "additionalProperties": false
+                }
               },
               "prompt": {
                 "type": "string",
@@ -1429,7 +1433,7 @@
               "provider",
               "event",
               "integrationId",
-              "team"
+              "filters"
             ],
             "additionalProperties": false
           },
@@ -12180,6 +12184,19 @@
           "installReport": {
             "$ref": "#/components/schemas/PluginInstallReport"
           },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginEventDefinition"
+            },
+            "maxItems": 64
+          },
+          "eventModes": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "boolean"
+            }
+          },
           "mcpApprovedIntegrity": {
             "type": "string",
             "nullable": true,
@@ -12220,6 +12237,8 @@
           "source",
           "integrity",
           "installReport",
+          "events",
+          "eventModes",
           "mcpApprovedIntegrity",
           "createdAt",
           "updatedAt",
@@ -12342,6 +12361,80 @@
             "$ref": "#/components/schemas/PluginMcpReport"
           },
           "capabilities": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "absent"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "present": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "ignored"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "present",
+                  "status",
+                  "reason"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "present": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "parsed"
+                    ]
+                  },
+                  "issues": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "present",
+                  "status",
+                  "issues"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "events": {
             "oneOf": [
               {
                 "type": "object",
@@ -12670,6 +12763,84 @@
         ],
         "additionalProperties": false
       },
+      "PluginEventDefinition": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "delivery": {
+            "type": "string",
+            "enum": [
+              "webhook"
+            ]
+          },
+          "filters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginEventFilterDefinition"
+            },
+            "maxItems": 16
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "description",
+          "delivery",
+          "filters"
+        ],
+        "additionalProperties": false
+      },
+      "PluginEventFilterDefinition": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "integration_resource"
+            ]
+          },
+          "resourceType": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "required": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "kind",
+          "resourceType",
+          "required"
+        ],
+        "additionalProperties": false
+      },
       "PluginImportPreviewEnvelope": {
         "type": "object",
         "properties": {
@@ -12775,6 +12946,13 @@
               "$ref": "#/components/schemas/PluginRemoteMcpPreviewServer"
             }
           },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginEventDefinition"
+            },
+            "maxItems": 64
+          },
           "report": {
             "$ref": "#/components/schemas/PluginValidationReport"
           }
@@ -12789,6 +12967,7 @@
           "skills",
           "stdioServers",
           "remoteMcpServers",
+          "events",
           "report"
         ],
         "additionalProperties": false
@@ -13025,6 +13204,80 @@
                 "additionalProperties": false
               }
             ]
+          },
+          "events": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "absent"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "present": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "ignored"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "present",
+                  "status",
+                  "reason"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "present": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "parsed"
+                    ]
+                  },
+                  "issues": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "present",
+                  "status",
+                  "issues"
+                ],
+                "additionalProperties": false
+              }
+            ]
           }
         },
         "required": [
@@ -13116,6 +13369,19 @@
           "installReport": {
             "$ref": "#/components/schemas/PluginInstallReport"
           },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginEventDefinition"
+            },
+            "maxItems": 64
+          },
+          "eventModes": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "boolean"
+            }
+          },
           "mcpApprovedIntegrity": {
             "type": "string",
             "nullable": true,
@@ -13169,6 +13435,8 @@
           "source",
           "integrity",
           "installReport",
+          "events",
+          "eventModes",
           "mcpApprovedIntegrity",
           "createdAt",
           "updatedAt",
@@ -13489,6 +13757,18 @@
         "required": [
           "data",
           "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SetPluginEventEnabledBody": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
         ],
         "additionalProperties": false
       }
@@ -23297,6 +23577,77 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PluginDataDeleteEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/plugins/{name}/events/{eventId}": {
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "eventId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetPluginEventEnabledBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Plugin event subscription setting updated for the workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginInstallationEnvelope"
                 }
               }
             }

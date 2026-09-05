@@ -255,23 +255,25 @@ export const WorkflowStepSchema = z
   .strict()
   .openapi("WorkflowStep");
 
+const WorkflowEventFilterValueSchema = z
+  .object({
+    id: z.string().min(1).max(256),
+    name: z.string().min(1).max(256),
+    key: z.string().min(1).max(64).optional(),
+    metadata: z.record(z.string().max(64), z.string().max(256)).optional(),
+  })
+  .strict();
+
 export const WorkflowTriggerSchema = z
   .discriminatedUnion("type", [
     z.object({ type: z.literal("manual") }).strict(),
     z
       .object({
         type: z.literal("event"),
-        provider: z.literal("linear"),
-        event: z.literal("issue_enters_triage"),
+        provider: z.string().min(1).max(64),
+        event: z.string().min(1).max(128),
         integrationId: ResourceIdSchema,
-        team: z
-          .object({
-            id: z.string().min(1).max(256),
-            name: z.string().min(1).max(256),
-            key: z.string().min(1).max(32).optional(),
-            triageStateId: z.string().min(1).max(256),
-          })
-          .strict(),
+        filters: z.record(z.string().max(64), WorkflowEventFilterValueSchema),
         prompt: z.string().min(1).max(10_000),
       })
       .strict(),
@@ -295,17 +297,10 @@ export const WorkflowTriggerInputSchema = z
     z
       .object({
         type: z.literal("event"),
-        provider: z.literal("linear"),
-        event: z.literal("issue_enters_triage"),
+        provider: z.string().min(1).max(64),
+        event: z.string().min(1).max(128),
         integrationId: ResourceIdSchema,
-        team: z
-          .object({
-            id: z.string().min(1).max(256),
-            name: z.string().min(1).max(256),
-            key: z.string().min(1).max(32).optional(),
-            triageStateId: z.string().min(1).max(256),
-          })
-          .strict(),
+        filters: z.record(z.string().max(64), WorkflowEventFilterValueSchema),
         prompt: z.string().max(10_000).optional(),
       })
       .strict(),
@@ -1595,6 +1590,25 @@ export const PluginValidationReportSchema = z
           .strict(),
       ])
       .optional(),
+    events: z
+      .discriminatedUnion("status", [
+        z.object({ status: z.literal("absent") }).strict(),
+        z
+          .object({
+            present: z.literal(true),
+            status: z.literal("ignored"),
+            reason: z.string(),
+          })
+          .strict(),
+        z
+          .object({
+            present: z.literal(true),
+            status: z.literal("parsed"),
+            issues: z.array(z.string()),
+          })
+          .strict(),
+      ])
+      .optional(),
   })
   .strict()
   .openapi("PluginValidationReport");
@@ -1625,6 +1639,28 @@ export const PluginCapabilityDefinitionSchema = z
   })
   .strict()
   .openapi("PluginCapabilityDefinition");
+
+export const PluginEventFilterDefinitionSchema = z
+  .object({
+    id: z.string().min(1).max(64),
+    label: z.string().min(1).max(120),
+    kind: z.literal("integration_resource"),
+    resourceType: z.string().min(1).max(64),
+    required: z.boolean(),
+  })
+  .strict()
+  .openapi("PluginEventFilterDefinition");
+
+export const PluginEventDefinitionSchema = z
+  .object({
+    id: z.string().min(1).max(128),
+    label: z.string().min(1).max(120),
+    description: z.string().min(1).max(500),
+    delivery: z.literal("webhook"),
+    filters: z.array(PluginEventFilterDefinitionSchema).max(16),
+  })
+  .strict()
+  .openapi("PluginEventDefinition");
 
 export const PluginDiscoveredToolSchema = z
   .object({
@@ -1676,6 +1712,8 @@ const PluginBaseSchema = z
     source: PluginSourceSchema,
     integrity: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
     installReport: PluginInstallReportSchema,
+    events: z.array(PluginEventDefinitionSchema).max(64),
+    eventModes: z.record(z.string(), z.boolean()),
     mcpApprovedIntegrity: z
       .string()
       .regex(/^sha256:[0-9a-f]{64}$/u)
@@ -1733,6 +1771,7 @@ export const PluginImportPreviewSchema = z
     ),
     stdioServers: z.array(PluginStdioServerSchema),
     remoteMcpServers: z.array(PluginRemoteMcpPreviewServerSchema),
+    events: z.array(PluginEventDefinitionSchema).max(64),
     report: PluginValidationReportSchema,
   })
   .strict()
@@ -2098,6 +2137,10 @@ export const ApprovePluginMcpBodySchema = z
   .object({ integrity: z.string().regex(/^sha256:[0-9a-f]{64}$/iu) })
   .strict()
   .openapi("ApprovePluginMcpBody");
+export const SetPluginEventEnabledBodySchema = z
+  .object({ enabled: z.boolean() })
+  .strict()
+  .openapi("SetPluginEventEnabledBody");
 export const PluginListEnvelopeSchema = z
   .object({ data: z.array(PluginListItemSchema), meta: ProtocolMetadataSchema })
   .strict()
@@ -4233,10 +4276,12 @@ export type PluginSourceDto = z.infer<typeof PluginSourceSchema>;
 export type PluginRemoteMcpServerDto = z.infer<typeof PluginRemoteMcpServerSchema>;
 export type PluginListItemDto = z.infer<typeof PluginListItemSchema>;
 export type PluginInstallationDto = z.infer<typeof PluginInstallationSchema>;
+export type PluginEventDefinitionDto = z.infer<typeof PluginEventDefinitionSchema>;
 export type PluginImportPreviewDto = z.infer<typeof PluginImportPreviewSchema>;
 export type PluginImportPreviewBody = z.infer<typeof PluginImportPreviewBodySchema>;
 export type InstallPluginBody = z.infer<typeof InstallPluginBodySchema>;
 export type ApprovePluginMcpBody = z.infer<typeof ApprovePluginMcpBodySchema>;
+export type SetPluginEventEnabledBody = z.infer<typeof SetPluginEventEnabledBodySchema>;
 export type CreateWorkflowBody = z.infer<typeof CreateWorkflowBodySchema>;
 export type UpdateWorkflowBody = z.infer<typeof UpdateWorkflowBodySchema>;
 export type ArchiveVersionBody = z.infer<typeof ArchiveVersionBodySchema>;

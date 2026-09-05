@@ -20,6 +20,7 @@ import {
 import type { ResolvedChatAttachments } from "@opencompany/db/chat-repository";
 import type { HarnessSpec } from "@opencompany/db/product-schema";
 import { PostgresTaskRepository } from "@opencompany/db/task-repository";
+import { validateWorkflowEventSubscription } from "@opencompany/db/workflow-event-subscriptions";
 import {
   PostgresTaskScheduleRepository,
   PostgresWorkflowRepository,
@@ -92,6 +93,8 @@ export function createAutomationServices(input: AutomationServicesInput) {
           steps: definition.steps as never,
           trigger: definition.trigger as never,
         }),
+      validateEventSubscription: (subscription) =>
+        validateWorkflowEventSubscription(input.execute, subscription),
     }),
     schedules: new TaskScheduleApplicationService(
       new PostgresTaskScheduleRepository(input.execute),

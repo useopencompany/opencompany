@@ -31,6 +31,23 @@
         "defaultMode": "ask",
         "tools": ["save_issue", "save_comment"]
       }
-    }
+    },
+    "so.opencompany.events": [
+      {
+        "id": "issue.created",
+        "label": "Issue created",
+        "description": "Starts a workflow when a Linear issue is created.",
+        "delivery": "webhook",
+        "filters": [
+          {
+            "id": "team",
+            "label": "Team",
+            "kind": "integration_resource",
+            "resourceType": "team",
+            "required": true
+          }
+        ]
+      }
+    ]
   }
 }

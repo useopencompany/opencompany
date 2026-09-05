@@ -164,11 +164,13 @@ describe("WorkflowApplicationService", () => {
       provider: "linear" as const,
       event: "issue_enters_triage" as const,
       integrationId: "gint_linear_1",
-      team: {
-        id: "team_1",
-        name: "Engineering",
-        key: "ENG",
-        triageStateId: "state_triage_1",
+      filters: {
+        team: {
+          id: "team_1",
+          name: "Engineering",
+          key: "ENG",
+          metadata: { triageStateId: "state_triage_1" },
+        },
       },
       prompt: "Assess impact and recommend an owner.",
     };
@@ -202,6 +204,41 @@ describe("WorkflowApplicationService", () => {
         event: { execution: executionPlan() },
       }),
     );
+  });
+
+  it("rejects an event trigger that is not enabled by its installed plugin", async () => {
+    const repository = fakeWorkflowRepository();
+    const planner = fakePlanner();
+    const validateEventSubscription = vi.fn(async () => "Enable this plugin event first.");
+    const service = workflowService(repository, { planner, validateEventSubscription });
+
+    await expect(
+      service.updateWorkflow(actor(), "workflow_1", {
+        expectedVersion: 1,
+        name: "New issues",
+        description: "Review incoming work",
+        steps: [
+          {
+            id: "step_1",
+            title: "Review",
+            model: "provider/model",
+            instructions: "Review the issue.",
+          },
+        ],
+        status: "active",
+        trigger: {
+          type: "event",
+          provider: "linear",
+          event: "issue.created",
+          integrationId: "gint_linear_1",
+          filters: { team: { id: "team_1", name: "Engineering" } },
+          prompt: "Review this issue.",
+        },
+      }),
+    ).rejects.toThrow("Enable this plugin event first.");
+    expect(validateEventSubscription).toHaveBeenCalledOnce();
+    expect(planner.prepareWorkflow).not.toHaveBeenCalled();
+    expect(repository.updateWorkflow).not.toHaveBeenCalled();
   });
 
   it("routes invoke and run-now through canonical Task creation", async () => {
@@ -549,6 +586,7 @@ function workflowService(
   overrides: {
     planner?: ReturnType<typeof fakePlanner>;
     taskCreator?: ReturnType<typeof fakeTaskCreator>;
+    validateEventSubscription?: () => Promise<string | null>;
   } = {},
 ) {
   return new WorkflowApplicationService(repository, {
@@ -557,6 +595,9 @@ function workflowService(
     taskCreator: overrides.taskCreator ?? fakeTaskCreator(),
     now: () => now,
     newStepId: () => "step_new",
+    ...(overrides.validateEventSubscription
+      ? { validateEventSubscription: overrides.validateEventSubscription }
+      : {}),
   });
 }
 
