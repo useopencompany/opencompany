@@ -724,6 +724,74 @@ export function calculateSandboxUsageCost(input: SandboxUsageCostInput): UsageCo
   };
 }
 
+// --- Browserbase browser-session pricing ------------------------------------
+// Browserbase's session API reports provider timing and proxy bytes, but not a
+// per-session dollar amount. Price those final provider metrics at the published
+// Developer overage rates. Browser time has a one-minute minimum per session;
+// managed proxy traffic has a 1 MB minimum and is rounded to the nearest MB.
+// verified 2026-09-05 against https://www.browserbase.com/pricing and
+// https://docs.browserbase.com/optimizations/cost/cost-optimization
+const BROWSERBASE_BROWSER_USD_MICROS_PER_HOUR = 120_000;
+const BROWSERBASE_PROXY_USD_MICROS_PER_GB = 12_000_000;
+const BROWSERBASE_MINIMUM_BROWSER_MS = 60_000;
+const BROWSERBASE_PROXY_BILLING_BYTES = 1_000_000;
+const BROWSERBASE_PRICING_VERSION = "browserbase.developer.2026-09-05";
+
+export function calculateBrowserbaseSessionCost(input: {
+  durationMs: number;
+  proxyBytes: number;
+}): UsageCostResult {
+  const durationMs =
+    Number.isFinite(input.durationMs) && input.durationMs > 0 ? Math.floor(input.durationMs) : 0;
+  const proxyBytes =
+    Number.isFinite(input.proxyBytes) && input.proxyBytes > 0 ? Math.floor(input.proxyBytes) : 0;
+  const billedDurationMs =
+    durationMs > 0 ? Math.max(durationMs, BROWSERBASE_MINIMUM_BROWSER_MS) : 0;
+  const billedProxyBytes =
+    proxyBytes > 0
+      ? Math.max(
+          BROWSERBASE_PROXY_BILLING_BYTES,
+          Math.round(proxyBytes / BROWSERBASE_PROXY_BILLING_BYTES) *
+            BROWSERBASE_PROXY_BILLING_BYTES,
+        )
+      : 0;
+  const browserCostUsdMicros = Math.round(
+    (billedDurationMs / (60 * 60_000)) * BROWSERBASE_BROWSER_USD_MICROS_PER_HOUR,
+  );
+  const proxyCostUsdMicros = Math.round(
+    (billedProxyBytes / 1_000_000_000) * BROWSERBASE_PROXY_USD_MICROS_PER_GB,
+  );
+  const providerCostUsdMicros = browserCostUsdMicros + proxyCostUsdMicros;
+  const platformFeeUsdMicros = calculatePlatformFeeUsdMicros(providerCostUsdMicros);
+  const totalCostUsdMicros = providerCostUsdMicros + platformFeeUsdMicros;
+
+  return {
+    billable: totalCostUsdMicros > 0,
+    providerCostUsdMicros,
+    platformFeeUsdMicros,
+    totalCostUsdMicros,
+    costBasis: {
+      kind: "sandbox_usage",
+      provider: "browserbase",
+      costSource: "provider_metrics_published_rate",
+      pricingVersion: BROWSERBASE_PRICING_VERSION,
+      platformFeeBps: PLATFORM_FEE_BPS,
+      durationMs,
+      billedDurationMs,
+      proxyBytes,
+      billedProxyBytes,
+      rates: {
+        browserUsdMicrosPerHour: BROWSERBASE_BROWSER_USD_MICROS_PER_HOUR,
+        proxyUsdMicrosPerGb: BROWSERBASE_PROXY_USD_MICROS_PER_GB,
+      },
+      costsUsdMicros: {
+        browser: browserCostUsdMicros,
+        proxy: proxyCostUsdMicros,
+      },
+    },
+  };
+}
+
 export async function recordWorkspaceUsageDebit(input: WorkspaceUsageDebitInput) {
   if (input.totalCostUsdMicros <= 0) {
     return { ok: false as const, reason: "zero_cost" as const };

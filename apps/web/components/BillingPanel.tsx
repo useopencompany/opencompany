@@ -462,6 +462,7 @@ function billingActivityLabel(
 ) {
   if (source === "chat_model_usage") return "Chat";
   if (source === "subscription_covered") return "Chat · covered by ChatGPT subscription";
+  if (source === "sandbox_usage") return "Cloud browser";
   if (
     source === "ingest_model_usage" ||
     source === "ingest_fee" ||
