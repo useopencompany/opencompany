@@ -16,6 +16,7 @@ import { startAttioFlushWorker } from "./attio-flush-worker";
 import { setBrainImportWakeup, startBrainImportWorker } from "./brain-import-worker";
 import { setBrainIngestWakeup, startBrainIngestWorker } from "./brain-ingest-worker";
 import { startBrainWorkerAdmissionListener } from "./brain-worker-admission";
+import { startBrowserProfileReconciler } from "./browser-profile-reconciler";
 import {
   requireChatAttachmentCleanupToken,
   startChatAttachmentCleanupWorker,
@@ -120,6 +121,10 @@ const codexChatSelfHealSweeper =
 const sandboxReconciler = env.taskWorkerEnabled
   ? startSandboxReconciler({ namespace: env.sandboxNamespace })
   : null;
+const browserProfileReconciler =
+  env.taskWorkerEnabled && process.env.OPENCOMPANY_BROWSER_PROFILES_ENABLED === "true"
+    ? startBrowserProfileReconciler()
+    : null;
 const taskScheduleWorker = codexChatWorker
   ? startTaskScheduleWorker({
       onTaskCreated: () => {
@@ -233,6 +238,7 @@ async function shutdownRunner(signal: "SIGINT" | "SIGTERM") {
     runnerDrainTask("stuck_work_monitor", stuckWorkMonitor),
     runnerDrainTask("codex_chat_self_heal", codexChatSelfHealSweeper),
     runnerDrainTask("sandbox_reconciler", sandboxReconciler),
+    runnerDrainTask("browser_profile_reconciler", browserProfileReconciler),
     runnerDrainTask("brain_worker_admission", brainWorkerAdmissionListener),
     { name: "http_server", stop: async () => server.close() },
     chatPresentation

@@ -578,6 +578,10 @@ export type ChatTools = {
     input: WebSearchToolInput;
     output: WebSearchToolOutput;
   };
+  browser_use_profile: {
+    input: BrowserUseProfileToolInput;
+    output: BrowserUseProfileToolOutput;
+  };
   list_actions: {
     input: ListActionsToolInput;
     output: ListActionsToolOutput;
