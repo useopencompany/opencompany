@@ -819,7 +819,9 @@ export async function consumeProductChatStream(input: {
 }
 
 function publishedArtifactFromActionResult(toolName: string, output: unknown) {
-  if (toolName !== "use_action" || !isRecord(output) || output.ok !== true) return null;
+  if (!isRecord(output) || output.ok !== true) return null;
+  if (toolName === "write_artifact") return parsePublishedChatArtifact(output);
+  if (toolName !== "use_action") return null;
   const result = isRecord(output.result) ? output.result : null;
   return result ? parsePublishedChatArtifact({ ok: true, artifact: result.artifact }) : null;
 }
@@ -1232,6 +1234,7 @@ async function resolveProductChatRuntime(input: {
       : {}),
     ...(hostTools?.editWorkspaceSkill ? { editWorkspaceSkill: hostTools.editWorkspaceSkill } : {}),
     ...(hostTools?.runWiki ? { runWiki: hostTools.runWiki as never } : {}),
+    ...(hostTools?.writeArtifact ? { writeArtifact: hostTools.writeArtifact } : {}),
     ...(hostTools?.browserTools ? { browserTools: hostTools.browserTools } : {}),
     ...(hostTools?.browserProfiles ? { browserProfiles: hostTools.browserProfiles } : {}),
     ...(hostTools?.skills ? { skills: hostTools.skills } : {}),
@@ -1288,6 +1291,7 @@ async function resolveProductChatRuntime(input: {
     taskToolsEnabled: Boolean(hostTools?.bootstrap.taskToolsEnabled),
     scheduleToolsEnabled: Boolean(hostTools?.bootstrap.taskToolsEnabled),
     wikiToolEnabled: Boolean(hostTools?.runWiki),
+    artifactToolEnabled: Boolean(hostTools?.writeArtifact),
     activeBrain: brain
       ? {
           name: brain.name,

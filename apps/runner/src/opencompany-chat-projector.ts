@@ -74,6 +74,7 @@ export function createProductChatProjector(input: {
     input.execution ?? new PostgresRunExecutionRepository((query) => getDb().execute(query));
   let lastProjectedContent: string | null = null;
   const toolEventStates = new Map<string, "started" | "completed" | "failed">();
+  const publishedArtifactIds = new Set<string>();
 
   const turnLeaseSubquery = (options: { runningOnly: boolean }) => sql`
     SELECT 1
@@ -171,7 +172,9 @@ export function createProductChatProjector(input: {
       });
       lastProjectedContent = content;
     }
-    events.push(...toolEventsFromProjection(projection.parts, toolEventStates));
+    events.push(
+      ...toolEventsFromProjection(projection.parts, toolEventStates, publishedArtifactIds),
+    );
     await appendEvents(events);
   };
 
@@ -374,45 +377,72 @@ function canonicalRunSettlement(attemptId: string, assistantMessageId: string, c
 function toolEventsFromProjection(
   parts: readonly ProductChatUiPart[],
   states: Map<string, "started" | "completed" | "failed">,
+  artifactIds: Set<string>,
 ): RunEventDraft[] {
   const events: RunEventDraft[] = [];
   for (const part of parts) {
     const toolCallId = typeof part.toolCallId === "string" ? part.toolCallId : null;
     const state = typeof part.state === "string" ? part.state : null;
-    if (!toolCallId || !state) continue;
-    const prior = states.get(toolCallId);
-    if (!prior) {
-      const name =
-        typeof part.toolName === "string"
-          ? part.toolName
-          : part.type.startsWith("tool-")
-            ? part.type.slice("tool-".length)
-            : "tool";
-      events.push({
-        id: `run_event_${randomUUID()}`,
-        type: "tool.started",
-        payload: { toolCallId, name },
-      });
-      states.set(toolCallId, "started");
+    if (toolCallId && state) {
+      const prior = states.get(toolCallId);
+      if (!prior) {
+        const name =
+          typeof part.toolName === "string"
+            ? part.toolName
+            : part.type.startsWith("tool-")
+              ? part.type.slice("tool-".length)
+              : "tool";
+        events.push({
+          id: `run_event_${randomUUID()}`,
+          type: "tool.started",
+          payload: { toolCallId, name },
+        });
+        states.set(toolCallId, "started");
+      }
+      if (state === "output-available" && states.get(toolCallId) !== "completed") {
+        events.push({
+          id: `run_event_${randomUUID()}`,
+          type: "tool.completed",
+          payload: { toolCallId },
+        });
+        states.set(toolCallId, "completed");
+      } else if (state === "output-error" && states.get(toolCallId) !== "failed") {
+        events.push({
+          id: `run_event_${randomUUID()}`,
+          type: "tool.failed",
+          payload: {
+            toolCallId,
+            code: "tool_error",
+            message: typeof part.errorText === "string" ? part.errorText : "Tool execution failed.",
+          },
+        });
+        states.set(toolCallId, "failed");
+      }
     }
-    if (state === "output-available" && states.get(toolCallId) !== "completed") {
-      events.push({
-        id: `run_event_${randomUUID()}`,
-        type: "tool.completed",
-        payload: { toolCallId },
-      });
-      states.set(toolCallId, "completed");
-    } else if (state === "output-error" && states.get(toolCallId) !== "failed") {
-      events.push({
-        id: `run_event_${randomUUID()}`,
-        type: "tool.failed",
-        payload: {
-          toolCallId,
-          code: "tool_error",
-          message: typeof part.errorText === "string" ? part.errorText : "Tool execution failed.",
-        },
-      });
-      states.set(toolCallId, "failed");
+    if (part.type === "data-artifact-file" && isRecord(part.data)) {
+      const artifact = part.data;
+      const artifactId = typeof artifact.artifactId === "string" ? artifact.artifactId : null;
+      if (
+        artifactId &&
+        !artifactIds.has(artifactId) &&
+        typeof artifact.title === "string" &&
+        typeof artifact.filename === "string" &&
+        typeof artifact.mediaType === "string" &&
+        typeof artifact.sizeBytes === "number"
+      ) {
+        events.push({
+          id: `run_event_${randomUUID()}`,
+          type: "artifact.published",
+          payload: {
+            artifactId,
+            title: artifact.title,
+            filename: artifact.filename,
+            mediaType: artifact.mediaType,
+            sizeBytes: artifact.sizeBytes,
+          },
+        });
+        artifactIds.add(artifactId);
+      }
     }
   }
   return events;

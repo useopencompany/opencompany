@@ -44,6 +44,7 @@ import {
   CapabilityApprovalEnvelopeSchema,
   CapabilitySessionBudgetEnvelopeSchema,
   ChatArtifactDeleteEnvelopeSchema,
+  ChatArtifactVersionListEnvelopeSchema,
   ChatShareIdSchema,
   CheckOnboardingWorkspaceSlugBodySchema,
   ClaudeCodeAuthStatusEnvelopeSchema,
@@ -1880,6 +1881,21 @@ export const downloadChatArtifactRoute = createRoute({
   responses: { 200: binaryResponse, default: errorResponse },
 });
 
+export const listChatArtifactVersionsRoute = createRoute({
+  method: "get",
+  path: "/v1/chat-artifacts/{artifactId}/versions",
+  tags: ["Chat"],
+  security: actorSecurity,
+  request: { params: z.object({ artifactId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Authorized metadata for every immutable version of a Chat artifact.",
+      content: { "application/json": { schema: ChatArtifactVersionListEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const downloadChatAttachmentRoute = createRoute({
   method: "get",
   path: "/v1/chat-attachments/{messageId}/{attachmentId}",
@@ -3580,6 +3596,7 @@ export type V1RouteHandlers = {
   createMessage: RouteHandler<typeof createMessageRoute>;
   uploadAttachment: RouteHandler<typeof uploadAttachmentRoute>;
   deleteChatArtifact: RouteHandler<typeof deleteChatArtifactRoute>;
+  listChatArtifactVersions: RouteHandler<typeof listChatArtifactVersionsRoute>;
   downloadChatArtifact: RouteHandler<typeof downloadChatArtifactRoute>;
   downloadChatAttachment: RouteHandler<typeof downloadChatAttachmentRoute>;
   getMessagePresentation: RouteHandler<typeof getMessagePresentationRoute>;
@@ -3766,6 +3783,7 @@ export function createV1Router(
       .openapi(createMessageRoute, handlers.createMessage)
       .openapi(uploadAttachmentRoute, handlers.uploadAttachment)
       .openapi(deleteChatArtifactRoute, handlers.deleteChatArtifact)
+      .openapi(listChatArtifactVersionsRoute, handlers.listChatArtifactVersions)
       .openapi(downloadChatArtifactRoute, handlers.downloadChatArtifact)
       .openapi(downloadChatAttachmentRoute, handlers.downloadChatAttachment)
       .openapi(getMessagePresentationRoute, handlers.getMessagePresentation)
@@ -4874,6 +4892,28 @@ const contractDocumentHandlers: V1RouteHandlers = {
     ),
   deleteChatArtifact: (c) =>
     c.json({ data: { artifactId: "artifact_contract", state: "deleted" as const }, meta }, 200),
+  listChatArtifactVersions: (c) =>
+    c.json(
+      {
+        data: {
+          artifactId: "artifact_contract",
+          currentVersion: 1,
+          versions: [
+            {
+              artifactVersionId: "artifact_version_contract",
+              version: 1,
+              title: "Artifact",
+              filename: "artifact.md",
+              mediaType: "text/markdown",
+              sizeBytes: 8,
+              createdAt: placeholderTime,
+            },
+          ],
+        },
+        meta,
+      },
+      200,
+    ),
   downloadChatArtifact: (c) =>
     c.body("contract", 200, { "Content-Type": "application/octet-stream" }),
   downloadChatAttachment: (c) =>

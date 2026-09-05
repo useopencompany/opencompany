@@ -25,6 +25,15 @@ const CONNECTED_INTEGRATIONS = [
 ];
 
 describe("createProductChatSystemPrompt integrations", () => {
+  it("steers substantial documents and revisions through the artifact tool", () => {
+    const withoutArtifacts = createProductChatSystemPrompt({ artifactToolEnabled: false });
+    const withArtifacts = createProductChatSystemPrompt({ artifactToolEnabled: true });
+
+    expect(withoutArtifacts).not.toContain("write_artifact");
+    expect(withArtifacts).toContain("Use write_artifact");
+    expect(withArtifacts).toContain("current expected_version");
+  });
+
   it("produces an identical prompt when integrations are absent or empty", () => {
     const currentDate = "2026-07-18";
     const base = createProductChatSystemPrompt({ currentDate });

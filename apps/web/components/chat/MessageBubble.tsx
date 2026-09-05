@@ -39,6 +39,7 @@ export function MessageBubble({
   turnActive = false,
   attachmentSrc,
   artifactHref,
+  onOpenArtifact,
 }: {
   message: ChatUiMessage;
   taskLookup: ChatTaskLookup;
@@ -53,6 +54,7 @@ export function MessageBubble({
   turnActive?: boolean;
   attachmentSrc?: (messageId: string, attachment: ChatUiAttachment) => string | undefined;
   artifactHref?: (artifact: PublishedChatArtifact) => string;
+  onOpenArtifact?: (selection: { artifact: PublishedChatArtifact; href: string }) => void;
 }) {
   if (message.role === "user") {
     return <UserMessageBubble message={message} {...(attachmentSrc ? { attachmentSrc } : {})} />;
@@ -71,6 +73,7 @@ export function MessageBubble({
       isTaskSession={isTaskSession}
       turnActive={turnActive}
       {...(artifactHref ? { artifactHref } : {})}
+      {...(onOpenArtifact ? { onOpenArtifact } : {})}
     />
   );
 }
@@ -88,6 +91,7 @@ function AssistantTurn({
   isTaskSession,
   turnActive,
   artifactHref,
+  onOpenArtifact,
 }: {
   message: ChatUiMessage;
   taskLookup: ChatTaskLookup;
@@ -101,6 +105,7 @@ function AssistantTurn({
   isTaskSession: boolean;
   turnActive: boolean;
   artifactHref?: (artifact: PublishedChatArtifact) => string;
+  onOpenArtifact?: (selection: { artifact: PublishedChatArtifact; href: string }) => void;
 }) {
   const [traceExpanded, setTraceExpanded] = useState(false);
   const presentationKey =
@@ -176,15 +181,18 @@ function AssistantTurn({
       );
     }
     if (item.type === "artifact") {
+      const href =
+        artifactHref?.(item.artifact) ??
+        `/v1/chat-artifacts/${encodeURIComponent(item.artifact.artifactId)}/versions/${encodeURIComponent(item.artifact.artifactVersionId)}`;
       return (
         <ArtifactFileCard
           key={item.key}
           artifact={item.artifact}
-          href={
-            artifactHref?.(item.artifact) ??
-            `/v1/chat-artifacts/${encodeURIComponent(item.artifact.artifactId)}/versions/${encodeURIComponent(item.artifact.artifactVersionId)}`
-          }
+          href={href}
           readOnly={readOnly || nested}
+          {...(onOpenArtifact
+            ? { onOpen: () => onOpenArtifact({ artifact: item.artifact, href }) }
+            : {})}
         />
       );
     }
