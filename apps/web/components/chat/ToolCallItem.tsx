@@ -40,6 +40,7 @@ import {
 import {
   type HistoricalPresentationDetailController,
   HistoricalPresentationDetailStatus,
+  useHistoricalPresentationDetail,
 } from "./HistoricalPresentationDetail";
 
 export type CodexToolAction =
@@ -892,6 +893,7 @@ function ToolCallRow({
   detail?: HistoricalPresentationDetailController;
 }) {
   const [expanded, setExpanded] = useState(false);
+  useHistoricalPresentationDetail(expanded, detail);
   const meta = getToolCallMeta(tool);
   const Icon = meta.icon;
   const hasOutput = tool.output !== undefined;
@@ -991,6 +993,7 @@ export function SubagentRow({
   // Expanded while the subagent is still working so its live trace is visible; collapsed once it
   // finishes to keep the transcript tidy (the user can re-open it).
   const [expanded, setExpanded] = useState(tool.status === "running" || tool.status === "waiting");
+  useHistoricalPresentationDetail(expanded, detail);
   const meta = getToolCallMeta(tool);
   const result =
     isRecord(tool.output) && typeof tool.output.result === "string"

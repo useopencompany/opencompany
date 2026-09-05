@@ -1,10 +1,26 @@
 "use client";
 
+import { useEffect } from "react";
+
 export type HistoricalPresentationDetailController = {
   state: "idle" | "loading" | "loaded" | "error";
   error: string | null;
   load: () => Promise<void>;
 };
+
+export function useHistoricalPresentationDetail(
+  expanded: boolean,
+  detail: HistoricalPresentationDetailController | undefined,
+) {
+  const state = detail?.state;
+  const load = detail?.load;
+
+  useEffect(() => {
+    // A live row can stay expanded while Electric replaces it with a summary-backed revision.
+    // In that case there is no second disclosure click to start the historical-detail request.
+    if (expanded && state === "idle") void load?.();
+  }, [expanded, load, state]);
+}
 
 export function HistoricalPresentationDetailStatus({
   detail,
