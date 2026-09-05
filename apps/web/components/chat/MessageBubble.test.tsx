@@ -32,6 +32,62 @@ afterEach(() => {
 });
 
 describe("MessageBubble historical presentation details", () => {
+  it("keeps expanded reasoning visible and loads detail when a live row becomes historical", async () => {
+    const liveMessage = {
+      id: "assistant_reasoning_transition",
+      role: "assistant",
+      metadata: { sessionId: "conversation_1" },
+      parts: [
+        { type: "reasoning", text: "Live reasoning detail", state: "streaming" },
+        { type: "text", text: "Done" },
+      ],
+    } as ChatUiMessage;
+    const summaryMessage = {
+      ...liveMessage,
+      metadata: {
+        sessionId: "conversation_1",
+        presentation: {
+          source: "summary" as const,
+          updatedAt: "2026-09-04T20:00:01.000Z",
+        },
+      },
+      parts: [
+        { type: "reasoning", text: "Bounded reasoning preview", state: "done" },
+        { type: "text", text: "Done" },
+      ],
+    } as ChatUiMessage;
+    let resolvePresentation!: (message: ChatUiMessage) => void;
+    presentationMocks.load.mockReturnValueOnce(
+      new Promise<ChatUiMessage>((resolve) => {
+        resolvePresentation = resolve;
+      }),
+    );
+
+    const { rerender } = render(
+      <MessageBubble message={liveMessage} taskLookup={emptyTaskLookup} turnActive />,
+    );
+    await userEvent.click(screen.getByTestId("chat-reasoning-item").querySelector("button")!);
+    expect(screen.getAllByText("Live reasoning detail")).toHaveLength(2);
+
+    rerender(<MessageBubble message={summaryMessage} taskLookup={emptyTaskLookup} turnActive />);
+
+    await waitFor(() => expect(presentationMocks.load).toHaveBeenCalledOnce());
+    expect(screen.getAllByText("Bounded reasoning preview")).toHaveLength(2);
+    expect(screen.getByText("Loading details…")).toBeVisible();
+
+    await act(async () =>
+      resolvePresentation({
+        ...summaryMessage,
+        parts: [
+          { type: "reasoning", text: "Full persisted reasoning detail", state: "done" },
+          { type: "text", text: "Done" },
+        ],
+      }),
+    );
+    expect(await screen.findAllByText("Full persisted reasoning detail")).toHaveLength(2);
+    expect(screen.queryByText("Loading details…")).not.toBeInTheDocument();
+  });
+
   it("renders a summary-backed pending use_action approval without loading historical detail", () => {
     const onActionApproval = vi.fn(async () => undefined);
     const summaryMessage = {
