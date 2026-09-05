@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { executePublishArtifactDynamicTool, publishChatArtifact } from "./chat-artifacts";
+import {
+  executePublishArtifactDynamicTool,
+  publishChatArtifact,
+  publishInBandChatArtifact,
+} from "./chat-artifacts";
 import type { SandboxHandle } from "./sandbox";
 
 const blobMocks = vi.hoisted(() => ({ put: vi.fn(), del: vi.fn() }));
@@ -48,11 +52,7 @@ describe("publishChatArtifact", () => {
     dbMocks.execute
       .mockResolvedValueOnce({ rows: [{ count: 0 }] })
       .mockResolvedValueOnce({ rows: [{ id: "persisted_version" }] });
-    dbMocks.select.mockReset().mockReturnValue({
-      from: () => ({
-        innerJoin: () => ({ where: () => ({ limit: async () => [] }) }),
-      }),
-    });
+    dbMocks.select.mockReset().mockReturnValue(queryBuilder([]));
     blobMocks.put.mockResolvedValue({ pathname: "private/artifact/report.md" });
     blobMocks.del.mockResolvedValue(undefined);
   });
@@ -199,4 +199,177 @@ describe("publishChatArtifact", () => {
       error: "path is required.",
     });
   });
+
+  it("publishes in-band Markdown for an active opencompany turn", async () => {
+    dbMocks.select
+      .mockReset()
+      .mockReturnValueOnce(
+        queryBuilder([
+          {
+            session: {
+              id: "codex_session_1",
+              engine: "opencompany",
+              status: "running",
+              activeTurnId: "turn_1",
+              workspaceId: "workspace_1",
+            },
+            turn: {
+              id: "turn_1",
+              status: "running",
+              leaseId: "lease_1",
+              leaseOwner: "worker_1",
+              userWorkosId: "user_1",
+              chatSessionId: "chat_1",
+              assistantMessageId: "assistant_1",
+            },
+          },
+        ]),
+      )
+      .mockReturnValueOnce(queryBuilder([{ status: "running", interruptAt: null }]))
+      .mockReturnValueOnce(queryBuilder([]));
+    dbMocks.execute
+      .mockReset()
+      .mockResolvedValueOnce({ rows: [{ count: 0 }] })
+      .mockResolvedValueOnce({ rows: [{ id: "persisted_version" }] });
+
+    const result = await publishInBandChatArtifact({
+      codexChatSessionId: "codex_session_1",
+      codexChatTurnId: "turn_1",
+      toolCallId: "call_1",
+      arguments: {
+        filename: "report.md",
+        title: "Quarterly report",
+        content: "# Report",
+      },
+      env: { blobReadWriteToken: "blob_token" },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      artifact: {
+        version: 1,
+        filename: "report.md",
+        mediaType: "text/markdown",
+        sizeBytes: 8,
+      },
+    });
+    expect(blobMocks.put).toHaveBeenCalledWith(
+      expect.stringMatching(/^goat-chat-artifacts\/workspace_1\/goat_chat_artifact_/),
+      Buffer.from("# Report"),
+      expect.objectContaining({ contentType: "text/markdown", access: "private" }),
+    );
+  });
+
+  it("rejects paths and non-Markdown extensions from the in-band tool", async () => {
+    dbMocks.select.mockReset().mockReturnValueOnce(
+      queryBuilder([
+        {
+          session: {
+            id: "codex_session_1",
+            engine: "opencompany",
+            status: "running",
+            activeTurnId: "turn_1",
+            workspaceId: "workspace_1",
+          },
+          turn: {
+            id: "turn_1",
+            status: "running",
+            leaseId: "lease_1",
+            leaseOwner: "worker_1",
+            userWorkosId: "user_1",
+            chatSessionId: "chat_1",
+            assistantMessageId: "assistant_1",
+          },
+        },
+      ]),
+    );
+    const result = await publishInBandChatArtifact({
+      codexChatSessionId: "codex_session_1",
+      codexChatTurnId: "turn_1",
+      toolCallId: "call_1",
+      arguments: { filename: "../report.html", title: "Report", content: "<h1>Report</h1>" },
+      env: {},
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: "filename must be a Markdown filename ending in .md, without a path.",
+    });
+    expect(blobMocks.put).not.toHaveBeenCalled();
+  });
+
+  it("surfaces optimistic concurrency conflicts without uploading revision bytes", async () => {
+    dbMocks.select
+      .mockReset()
+      .mockReturnValueOnce(
+        queryBuilder([
+          {
+            session: {
+              id: "codex_session_1",
+              engine: "opencompany",
+              status: "running",
+              activeTurnId: "turn_1",
+              workspaceId: "workspace_1",
+            },
+            turn: {
+              id: "turn_1",
+              status: "running",
+              leaseId: "lease_1",
+              leaseOwner: "worker_1",
+              userWorkosId: "user_1",
+              chatSessionId: "chat_1",
+              assistantMessageId: "assistant_1",
+            },
+          },
+        ]),
+      )
+      .mockReturnValueOnce(queryBuilder([{ status: "running", interruptAt: null }]))
+      .mockReturnValueOnce(queryBuilder([]))
+      .mockReturnValueOnce(
+        queryBuilder([
+          {
+            id: "artifact_1",
+            currentVersion: 3,
+            title: "Report",
+            description: null,
+          },
+        ]),
+      );
+    dbMocks.execute.mockReset().mockResolvedValueOnce({ rows: [{ count: 0 }] });
+
+    const result = await publishInBandChatArtifact({
+      codexChatSessionId: "codex_session_1",
+      codexChatTurnId: "turn_1",
+      toolCallId: "call_2",
+      arguments: {
+        filename: "report.md",
+        title: "Report",
+        content: "# Revised report",
+        artifact_id: "artifact_1",
+        expected_version: 2,
+      },
+      env: {},
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: "This file is currently at version 3. Retry with expected_version 3.",
+    });
+    expect(blobMocks.put).not.toHaveBeenCalled();
+  });
 });
+
+function queryBuilder(rows: unknown[]) {
+  let builder: Record<string, unknown>;
+  builder = new Proxy(
+    {},
+    {
+      get(_target, property) {
+        if (property === "then") return undefined;
+        if (property === "limit") return async () => rows;
+        return () => builder;
+      },
+    },
+  );
+  return builder;
+}

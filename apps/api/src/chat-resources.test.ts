@@ -95,6 +95,47 @@ describe("Chat resource service", () => {
     expect(storage.delete).not.toHaveBeenCalled();
   });
 
+  it("lists authorized immutable artifact versions newest first without blob locators", async () => {
+    const db = fakeDb([
+      [{ id: "artifact_1", currentVersion: 2 }],
+      [
+        {
+          artifactVersionId: "version_2",
+          version: 2,
+          title: "Report",
+          description: "Revised report",
+          filename: "report.md",
+          mediaType: "text/markdown",
+          sizeBytes: 16,
+          createdAt: new Date("2026-09-05T10:00:00.000Z"),
+        },
+        {
+          artifactVersionId: "version_1",
+          version: 1,
+          title: "Report",
+          description: null,
+          filename: "report.md",
+          mediaType: "text/markdown",
+          sizeBytes: 8,
+          createdAt: new Date("2026-09-05T09:00:00.000Z"),
+        },
+      ],
+    ]);
+    const service = createChatResourceService({ db, storage: fakeStorage() });
+
+    const result = await service.listArtifactVersions(actor, "artifact_1");
+
+    expect(result).toEqual({
+      artifactId: "artifact_1",
+      currentVersion: 2,
+      versions: [
+        expect.objectContaining({ artifactVersionId: "version_2", version: 2 }),
+        expect.objectContaining({ artifactVersionId: "version_1", version: 1 }),
+      ],
+    });
+    expect(JSON.stringify(result)).not.toMatch(/blob|pathname|sha256/iu);
+  });
+
   it("streams only the selected attachment while keeping its locator server-side", async () => {
     const db = fakeDb([
       [

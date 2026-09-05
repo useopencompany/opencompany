@@ -27,7 +27,7 @@ import {
   type PublicChatShareMetadataDto,
 } from "@opencompany/protocol";
 import { del, get } from "@vercel/blob";
-import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { ApiError } from "./errors";
 
 const SHAREABLE_SESSION_KINDS = ["chat", "task"] as const;
@@ -65,6 +65,23 @@ export type ChatResourceService = {
   loadPublicShare(shareId: string): Promise<PublicChatShareDto>;
   loadPublicShareMetadata(shareId: string): Promise<PublicChatShareMetadataDto>;
   deleteArtifact(actor: Actor, artifactId: string): Promise<void>;
+  listArtifactVersions(
+    actor: Actor,
+    artifactId: string,
+  ): Promise<{
+    artifactId: string;
+    currentVersion: number;
+    versions: Array<{
+      artifactVersionId: string;
+      version: number;
+      title: string;
+      description?: string;
+      filename: string;
+      mediaType: string;
+      sizeBytes: number;
+      createdAt: string;
+    }>;
+  }>;
   downloadArtifact(input: {
     actor: Actor;
     artifactId: string;
@@ -238,6 +255,61 @@ export function createChatResourceService(input: {
         artifact_id: artifact.id,
         version_count: pathnames.length,
       });
+    },
+
+    async listArtifactVersions(actor, artifactId) {
+      const [artifact] = await input.db
+        .select({ id: chatArtifacts.id, currentVersion: chatArtifacts.currentVersion })
+        .from(chatArtifacts)
+        .where(
+          and(
+            eq(chatArtifacts.id, artifactId),
+            eq(chatArtifacts.userWorkosId, actor.userId),
+            eq(chatArtifacts.workspaceId, actor.workspaceId),
+            isNull(chatArtifacts.archivedAt),
+          ),
+        )
+        .limit(1);
+      if (!artifact || artifact.currentVersion < 1) throw notFound("Chat artifact not found.");
+      const versions = await input.db
+        .select({
+          artifactVersionId: chatArtifactVersions.id,
+          version: chatArtifactVersions.version,
+          title: chatArtifactVersions.title,
+          description: chatArtifactVersions.description,
+          filename: chatArtifactVersions.filename,
+          mediaType: chatArtifactVersions.mediaType,
+          sizeBytes: chatArtifactVersions.sizeBytes,
+          createdAt: chatArtifactVersions.createdAt,
+        })
+        .from(chatArtifactVersions)
+        .where(eq(chatArtifactVersions.artifactId, artifact.id))
+        .orderBy(desc(chatArtifactVersions.version));
+      return {
+        artifactId: artifact.id,
+        currentVersion: artifact.currentVersion,
+        versions: versions.map(
+          (version: {
+            artifactVersionId: string;
+            version: number;
+            title: string;
+            description: string | null;
+            filename: string;
+            mediaType: string;
+            sizeBytes: number;
+            createdAt: Date;
+          }) => ({
+            artifactVersionId: version.artifactVersionId,
+            version: version.version,
+            title: version.title,
+            ...(version.description ? { description: version.description } : {}),
+            filename: version.filename,
+            mediaType: version.mediaType,
+            sizeBytes: version.sizeBytes,
+            createdAt: version.createdAt.toISOString(),
+          }),
+        ),
+      };
     },
 
     async downloadArtifact(command) {

@@ -1738,6 +1738,13 @@ export function createApiApp(input: CreateApiAppInput) {
       await chatResourcesFrom(input).deleteArtifact(actor, artifactId);
       return c.json({ data: { artifactId, state: "deleted" as const }, meta }, 200);
     },
+    listChatArtifactVersions: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const artifactId = c.req.valid("param").artifactId;
+      const data = await chatResourcesFrom(input).listArtifactVersions(actor, artifactId);
+      return c.json({ data, meta }, 200);
+    },
     downloadChatArtifact: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);

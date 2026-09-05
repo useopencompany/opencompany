@@ -8,10 +8,12 @@ export function ArtifactFileCard({
   artifact,
   href,
   readOnly,
+  onOpen,
 }: {
   artifact: PublishedChatArtifact;
   href: string;
   readOnly: boolean;
+  onOpen?: () => void;
 }) {
   const [locallyDeleted, setLocallyDeleted] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -46,28 +48,42 @@ export function ArtifactFileCard({
       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface-muted text-ink-muted">
         <FileText size={17} strokeWidth={1.8} aria-hidden="true" />
       </div>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-[13.5px] font-medium leading-tight text-ink">
-          {artifact.title}
+      {onOpen ? (
+        <button
+          type="button"
+          onClick={onOpen}
+          disabled={deleted}
+          className="min-w-0 flex-1 text-left disabled:cursor-default"
+        >
+          <ArtifactDetails artifact={artifact} deleted={deleted} error={error} />
+        </button>
+      ) : (
+        <div className="min-w-0 flex-1">
+          <ArtifactDetails artifact={artifact} deleted={deleted} error={error} />
         </div>
-        <div className="mt-0.5 truncate text-[11.5px] leading-tight text-ink-subtle">
-          {deleted
-            ? "File deleted"
-            : `${artifact.filename} · ${formatBytes(artifact.sizeBytes)} · v${artifact.version}`}
-        </div>
-        {error ? <div className="mt-1 text-[11px] text-danger">{error}</div> : null}
-      </div>
+      )}
       {!deleted ? (
         <div className="flex shrink-0 items-center gap-0.5">
-          <a
-            href={href}
-            target="_blank"
-            rel="noreferrer"
-            aria-label={`Open ${artifact.title}`}
-            className="flex h-8 w-8 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-          >
-            <ExternalLink size={15} strokeWidth={1.9} aria-hidden="true" />
-          </a>
+          {onOpen ? (
+            <button
+              type="button"
+              onClick={onOpen}
+              aria-label={`Open ${artifact.title}`}
+              className="flex h-8 w-8 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+            >
+              <ExternalLink size={15} strokeWidth={1.9} aria-hidden="true" />
+            </button>
+          ) : (
+            <a
+              href={href}
+              target="_blank"
+              rel="noreferrer"
+              aria-label={`Open ${artifact.title}`}
+              className="flex h-8 w-8 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+            >
+              <ExternalLink size={15} strokeWidth={1.9} aria-hidden="true" />
+            </a>
+          )}
           <a
             href={downloadHref}
             aria-label={`Download ${artifact.title}`}
@@ -93,6 +109,30 @@ export function ArtifactFileCard({
         </div>
       ) : null}
     </div>
+  );
+}
+
+function ArtifactDetails({
+  artifact,
+  deleted,
+  error,
+}: {
+  artifact: PublishedChatArtifact;
+  deleted: boolean;
+  error: string | null;
+}) {
+  return (
+    <>
+      <div className="truncate text-[13.5px] font-medium leading-tight text-ink">
+        {artifact.title}
+      </div>
+      <div className="mt-0.5 truncate text-[11.5px] leading-tight text-ink-subtle">
+        {deleted
+          ? "File deleted"
+          : `${artifact.filename} · ${formatBytes(artifact.sizeBytes)} · v${artifact.version}`}
+      </div>
+      {error ? <div className="mt-1 text-[11px] text-danger">{error}</div> : null}
+    </>
   );
 }
 
