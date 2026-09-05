@@ -45,6 +45,10 @@ describe("Postgres immutable Plugin repository", () => {
         if (statement.trim()) await database.exec(statement);
       }
     }
+    await database.exec(`
+      ALTER TABLE goat.plugins ADD COLUMN events jsonb NOT NULL DEFAULT '[]'::jsonb;
+      ALTER TABLE goat.plugins ADD COLUMN event_modes jsonb NOT NULL DEFAULT '{}'::jsonb;
+    `);
     db = drizzle(database);
     repository = new PostgresPluginRepository(db, {
       pluginDataStorage: { delete: deletePluginDataBlob },
