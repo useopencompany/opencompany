@@ -641,8 +641,12 @@ function electricDeleteIdentity(readModel: ReadModel, row: Record<string, unknow
   const columnNames = READ_MODEL_COLUMN_NAMES[
     readModel as keyof typeof READ_MODEL_COLUMN_NAMES
   ] as Record<string, string>;
+  // Engine sessions deliberately hide their physical primary key and collections key them by
+  // Conversation instead. Every other read model exposes its physical `id` as the public `id`.
+  const publicIdentity = readModel === "engine-sessions-v1" ? "conversationId" : "id";
   const identityColumn = Object.entries(columnNames).find(
-    ([physicalName, publicName]) => publicName === "id" && Object.hasOwn(row, physicalName),
+    ([physicalName, publicName]) =>
+      publicName === publicIdentity && Object.hasOwn(row, physicalName),
   );
   return identityColumn ? { [identityColumn[0]]: row[identityColumn[0]] } : {};
 }

@@ -612,6 +612,39 @@ describe("Electric read models", () => {
     ]);
   });
 
+  it("retains the public engine session identity on delete", async () => {
+    const proxy = new ElectricReadModelProxy({
+      electricUrl: "https://electric.example.test",
+      fetch: vi.fn(async () =>
+        Response.json([
+          {
+            headers: { operation: "delete" },
+            key: '"runtime_retired"',
+            value: {
+              id: "runtime_retired",
+              chat_session_id: "conversation_retired",
+              engine: "retired_engine",
+            },
+          },
+        ]),
+      ) as typeof fetch,
+    });
+
+    const response = await proxy.stream({
+      actor,
+      readModel: "engine-sessions-v1",
+      requestUrl: new URL("https://api.example.test/v1/read-models/engine-sessions-v1"),
+    });
+
+    await expect(response.json()).resolves.toEqual([
+      {
+        headers: { operation: "delete" },
+        key: '"runtime_retired"',
+        value: { conversationId: "conversation_retired" },
+      },
+    ]);
+  });
+
   it("scopes an engine session shape to one Conversation without widening ownership", async () => {
     let upstreamUrl = "";
     const proxy = new ElectricReadModelProxy({
