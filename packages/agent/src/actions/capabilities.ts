@@ -404,6 +404,20 @@ export const PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
+  infisical: [
+    {
+      id: "read",
+      label: "Read Infisical docs",
+      description: "Search and read Infisical's public product documentation.",
+      defaultMode: "on",
+    },
+    {
+      id: "write",
+      label: "Send docs feedback",
+      description: "Send feedback about Infisical documentation to Infisical.",
+      defaultMode: "off",
+    },
+  ],
   x_account: [
     {
       id: "read",

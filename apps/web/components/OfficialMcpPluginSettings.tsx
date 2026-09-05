@@ -46,6 +46,7 @@ import {
 import { RenderApiKeyConnectionForm } from "@/components/RenderApiKeyConnectionForm";
 import { SettingsContent } from "@/components/SettingsChrome";
 import {
+  InfisicalWorkspaceConnectionCard,
   IntegrationAccountRow,
   IntegrationSetupFeedback,
 } from "@/components/SettingsIntegrationsPanel";
@@ -64,6 +65,7 @@ import {
 } from "@/lib/headless-knowledge-commands";
 import { setIntegrationCapabilityModeAction } from "@/lib/integration-account-actions";
 import {
+  type InfisicalProviderState,
   type IntegrationAccountView,
   type IntegrationState,
   type PersonalAccountProvider,
@@ -135,6 +137,7 @@ export type PluginAccountsState =
       status: "ready";
       accounts: PluginAccount[];
       permissionConnection: IntegrationAccountView<PluginConnectionProvider> | null;
+      workspaceInfisical?: InfisicalProviderState;
     };
 
 export type LinearAccountsState = PluginAccountsState;
@@ -303,6 +306,25 @@ export function HubSpotPluginDetail({
   return (
     <OfficialMcpPluginDetail
       config={OFFICIAL_MCP_PLUGINS.hubspot}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
+export function InfisicalPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.infisical}
       pluginState={pluginState}
       canEdit={canEdit}
       {...(toolsState ? { toolsState } : {})}
@@ -985,6 +1007,7 @@ function AccountsSection({
   canEdit: boolean;
 }) {
   const permissionConnection = state.status === "ready" ? state.permissionConnection : null;
+  const workspaceInfisical = state.status === "ready" ? state.workspaceInfisical : undefined;
   const displayedAccounts =
     state.status !== "ready"
       ? []
@@ -1008,6 +1031,8 @@ function AccountsSection({
         <SectionSkeleton label={`Loading ${accountLabel} accounts`} rows={2} compact />
       ) : state.status === "error" ? (
         <SectionError title="Accounts unavailable" message={state.message} />
+      ) : config.name === "infisical" && workspaceInfisical ? (
+        <InfisicalWorkspaceConnectionCard integration={workspaceInfisical} canManage={canEdit} />
       ) : displayedAccounts.length === 0 ? (
         <SectionEmpty icon={Users}>{`No ${accountLabel} accounts are connected.`}</SectionEmpty>
       ) : config.name === "stripe" ? (
@@ -1045,7 +1070,7 @@ function AccountsSection({
         </div>
       )}
       <div className="flex flex-wrap items-center gap-3">
-        {config.name === "render" ? (
+        {config.name === "infisical" ? null : config.name === "render" ? (
           <RenderApiKeyConnectionForm connected={Boolean(permissionConnection?.connected)} />
         ) : config.name === "stripe" ? (
           <StripeRestrictedKeyConnectionForm
@@ -1203,7 +1228,9 @@ function ToolsSection({
           </div>
           {plugin && !permissionConnection ? (
             <p className="text-[12px] leading-4 text-ink-subtle">
-              Connect a {config.label} account to change permission modes.
+              {config.name === "infisical"
+                ? "Documentation reads stay On and documentation feedback stays Off. Secret access uses the permission-gated sandbox CLI workflow."
+                : `Connect a ${config.label} account to change permission modes.`}
             </p>
           ) : null}
         </>
@@ -1505,7 +1532,15 @@ function pluginAccountsFromState(
 ): {
   accounts: PluginAccount[];
   permissionConnection: IntegrationAccountView<PluginConnectionProvider> | null;
+  workspaceInfisical?: InfisicalProviderState;
 } {
+  if (config.connectionProvider === "infisical") {
+    return {
+      accounts: [],
+      permissionConnection: null,
+      workspaceInfisical: state.infisical,
+    };
+  }
   if (config.connectionProvider === "granola") {
     const connection = state.granola_mcp;
     const permissionConnection: IntegrationAccountView<"granola"> | null = connection.integrationId
@@ -1688,6 +1723,10 @@ export function defaultGoogleDriveToolsState(): PluginToolsState {
 
 export function defaultHubSpotToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("hubspot");
+}
+
+export function defaultInfisicalToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("infisical");
 }
 
 export function defaultLatitudeToolsState(): PluginToolsState {

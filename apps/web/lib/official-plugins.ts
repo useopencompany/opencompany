@@ -8,6 +8,7 @@ export type OfficialMcpPluginName =
   | "google-calendar"
   | "google-drive"
   | "hubspot"
+  | "infisical"
   | "jamie"
   | "latitude"
   | "linear"
@@ -52,6 +53,7 @@ export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
     | "google_calendar"
     | "google_drive"
     | "hubspot"
+    | "infisical"
     | "jamie"
     | "latitude"
     | "linear"
@@ -205,6 +207,20 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     accountDescription: "The HubSpot account opencompany uses when you run CRM tools.",
     ingestionHref: "/wiki/sources",
     ingestionLabel: "Configure HubSpot ingestion in Wiki sources",
+  },
+  infisical: {
+    name: "infisical",
+    kind: "mcp",
+    label: "Infisical",
+    description:
+      "Search current Infisical documentation and safely use workspace secrets in coding sandboxes.",
+    category: "engineering",
+    source:
+      "https://github.com/useopencompany/plugins/tree/f283f509c195464f90f5f78f7e30a9a472b6393b/infisical",
+    connectionProvider: "infisical",
+    connectHref: "/settings/plugins/infisical",
+    accountDescription:
+      "The workspace CLI connection restored into coding sandboxes. Its credentials are never sent to the documentation MCP.",
   },
   jamie: {
     name: "jamie",

@@ -63,6 +63,11 @@ import {
   loadHubSpotMcpWorkerConnection,
 } from "./integrations/hubspot-mcp";
 import {
+  getInfisicalDocsMcpIntegrationState,
+  INFISICAL_DOCS_MCP_ENDPOINT_URL,
+  loadInfisicalDocsMcpWorkerConnection,
+} from "./integrations/infisical-docs-mcp";
+import {
   getJamieMcpIntegrationState,
   JAMIE_MCP_ENDPOINT_URL,
   loadJamieMcpWorkerConnection,
@@ -144,6 +149,12 @@ const providerBindings = {
     endpointUrl: GITHUB_USER_MCP_ENDPOINT_URL,
     getState: getGitHubUserMcpIntegrationState,
     loadConnection: loadGitHubUserMcpWorkerConnection,
+  },
+  infisical: {
+    provider: "infisical",
+    endpointUrl: INFISICAL_DOCS_MCP_ENDPOINT_URL,
+    getState: getInfisicalDocsMcpIntegrationState,
+    loadConnection: loadInfisicalDocsMcpWorkerConnection,
   },
   fathom: {
     provider: "fathom",

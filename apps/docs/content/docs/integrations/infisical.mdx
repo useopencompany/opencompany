@@ -1,19 +1,52 @@
 ---
 title: Infisical
-description: Give workspace coding agents access to the Infisical CLI.
+description: Search current documentation and safely use workspace secrets in coding sandboxes.
 ---
 
-## What connecting does
+## Install and connect
 
-Infisical is a workspace connection managed by workspace admins. The browser-token handoff makes the
-real Infisical CLI available to authorized cloud coding work without placing the token in Chat.
+1. Open **Settings → Plugins → Infisical**.
+2. Select **Install** and review the integrity-pinned package.
+3. Choose the Infisical Cloud region, then select **Connect**.
+4. Complete Infisical's browser login and paste the one-time browser token back into opencompany.
 
-## Scopes and permissions
+The workspace connection is managed by admins and restores the authenticated Infisical CLI into
+authorized coding sandboxes. The browser token and saved CLI credential bundle remain encrypted and
+server-side; they are never sent to the plugin's hosted MCP endpoint.
+
+## Tools and permissions
+
+Infisical's hosted MCP endpoint contains public documentation, not workspace secrets. The reviewed
+package uses two fixed permission groups:
+
+- **Read Infisical docs — On:** search Infisical documentation and read the matching pages or API
+  reference fragments.
+- **Send docs feedback — Off:** prevent agents from sending documentation feedback to Infisical.
+
+Newly discovered or unclassified tools fail safe at **Ask** until a reviewed package update assigns
+them to a group. The gateway accepts only Infisical's reviewed
+`https://infisical.com/docs/mcp` endpoint and sends it no workspace credential.
+
+## Sandbox secret access
+
+Secret reads and writes stay outside MCP results and model transcripts. The plugin's
+`infisical-sandbox-secrets` skill directs coding agents to inject the narrowest required environment
+directly into a child process with the authenticated CLI. Exporting an env file is reserved for
+tools that require one; generated files must be ignored, mode `600`, and never printed.
 
 The connected Infisical account and host determine what the CLI can reach. A detailed explanation of
-token lifetime, provider-side roles, and coding-sandbox handoff is coming soon. Until then, grant the
-narrowest Infisical access needed for the repositories and environments involved.
+provider-side roles and token lifetime is available in Infisical's documentation. Grant a dedicated
+account only the projects, environments, and paths needed by the workspace. Secret mutations require
+an explicit user request and an exact target; leave production changes to the existing reviewed
+release workflow.
+
+The official operational `@infisical/mcp` server is not used because it requires a second raw access
+token and returns plaintext secret values through MCP responses. The existing CLI boundary keeps
+secret values inside the process that needs them while preserving the current workspace connection.
 
 ## Brain ingestion
 
 Infisical is not a Brain source. Connecting it does not copy secrets or project values into Brain.
+
+See [Infisical's MCP documentation](https://infisical.com/docs/ai/model-context-protocol) for the
+hosted documentation server.

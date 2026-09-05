@@ -26,6 +26,8 @@ const mocks = vi.hoisted(() => ({
   loadGoogleCalendarConnection: vi.fn(),
   getHubSpotState: vi.fn(),
   loadHubSpotConnection: vi.fn(),
+  getInfisicalState: vi.fn(),
+  loadInfisicalConnection: vi.fn(),
   getJamieState: vi.fn(),
   loadJamieConnection: vi.fn(),
   getLatitudeState: vi.fn(),
@@ -86,6 +88,11 @@ vi.mock("./integrations/fathom-mcp", () => ({
   FATHOM_MCP_ENDPOINT_URL: "https://api.fathom.ai/mcp",
   getFathomMcpIntegrationState: mocks.getFathomState,
   loadFathomMcpWorkerConnection: mocks.loadFathomConnection,
+}));
+vi.mock("./integrations/infisical-docs-mcp", () => ({
+  INFISICAL_DOCS_MCP_ENDPOINT_URL: "https://infisical.com/docs/mcp",
+  getInfisicalDocsMcpIntegrationState: mocks.getInfisicalState,
+  loadInfisicalDocsMcpWorkerConnection: mocks.loadInfisicalConnection,
 }));
 vi.mock("./integrations/gmail-mcp", () => ({
   GMAIL_MCP_ENDPOINT_URL: "https://api.opencompany.chat/mcp/plugins/gmail",
@@ -318,6 +325,54 @@ describe("plugin gateway registration cache", () => {
       {
         ...githubRecord,
         server: { ...githubRecord.server, url: "https://evil.example/mcp" },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
+  it("binds Infisical only to its public docs endpoint and workspace connection gate", async () => {
+    const infisicalRecord = record({
+      pluginName: "infisical",
+      pluginLabel: "Infisical",
+      pluginDescription: "Infisical docs and sandbox secret workflows.",
+      connectionProvider: "infisical",
+      server: {
+        name: "infisical",
+        type: "streamable-http",
+        url: "https://infisical.com/docs/mcp",
+        headers: {},
+      },
+      capabilities: [
+        {
+          id: "read",
+          label: "Read Infisical docs",
+          defaultMode: "on",
+          tools: ["search_infisical", "query_docs_filesystem_infisical"],
+        },
+        {
+          id: "write",
+          label: "Send docs feedback",
+          defaultMode: "off",
+          tools: ["submit_feedback"],
+        },
+      ],
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([infisicalRecord]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:infisical:infisical",
+        connectionProvider: "infisical",
+        getState: mocks.getInfisicalState,
+        loadConnection: mocks.loadInfisicalConnection,
+      }),
+    ]);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...infisicalRecord,
+        server: { ...infisicalRecord.server, url: "https://evil.example/mcp" },
       },
     ]);
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);

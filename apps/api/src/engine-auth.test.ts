@@ -76,10 +76,16 @@ function fakeRunner(results: unknown[] = []) {
   return { runner, calls };
 }
 
-function service(runner?: RunnerClient) {
+function service(
+  runner?: RunnerClient,
+  refreshPluginRegistrations?: NonNullable<
+    Parameters<typeof createEngineAuthService>[0]["refreshPluginRegistrations"]
+  >,
+) {
   return createEngineAuthService({
     db: dbSentinel,
     runner: runner ?? fakeRunner().runner,
+    ...(refreshPluginRegistrations ? { refreshPluginRegistrations } : {}),
   });
 }
 
@@ -333,6 +339,37 @@ describe("engine auth service", () => {
     await expect(
       service(runner).completeInfisicalAuth(admin, "ginff_1", "browser-token"),
     ).rejects.toMatchObject({ status: 503, message: "That login link expired." });
+  });
+
+  it("refreshes installed Infisical plugin discovery after connection", async () => {
+    const completedFlow = { ...infisicalFlow, status: "completed" as const, loginUrl: null };
+    const { runner } = fakeRunner([{ ok: true, flow: completedFlow }]);
+    const refreshPluginRegistrations = vi.fn(async () => undefined);
+
+    await expect(
+      service(runner, refreshPluginRegistrations).completeInfisicalAuth(
+        admin,
+        "ginff_1",
+        "browser-token",
+      ),
+    ).resolves.toEqual(completedFlow);
+    expect(refreshPluginRegistrations).toHaveBeenCalledWith({
+      provider: "infisical",
+      userWorkosId: "user_1",
+      workspaceIds: ["workspace_1"],
+    });
+  });
+
+  it("does not fail a completed connection when plugin refresh fails", async () => {
+    const completedFlow = { ...infisicalFlow, status: "completed" as const, loginUrl: null };
+    const { runner } = fakeRunner([{ ok: true, flow: completedFlow }]);
+
+    await expect(
+      service(
+        runner,
+        vi.fn(async () => Promise.reject(new Error("discovery unavailable"))),
+      ).completeInfisicalAuth(admin, "ginff_1", "browser-token"),
+    ).resolves.toEqual(completedFlow);
   });
 
   it("disconnects Infisical through the threaded db handle", async () => {

@@ -34,6 +34,7 @@ import {
   ChevronDown,
   ExternalLink,
   FileArchive,
+  KeyRound,
   Link2,
   Loader2,
   PackageOpen,
@@ -172,6 +173,11 @@ export const OFFICIAL_MCP_PLUGINS = {
     Icon: HubSpotIcon,
     iconClassName: "bg-[#FF7A59] text-white",
   },
+  infisical: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.infisical,
+    Icon: KeyRound,
+    iconClassName: "bg-[#6C47FF] text-white",
+  },
   jamie: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.jamie,
     Icon: AudioLines,
@@ -254,6 +260,8 @@ export const GOOGLE_DRIVE_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS["google-drive"].nam
 export const GOOGLE_DRIVE_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS["google-drive"].source;
 export const HUBSPOT_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.hubspot.name;
 export const HUBSPOT_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.hubspot.source;
+export const INFISICAL_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.infisical.name;
+export const INFISICAL_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.infisical.source;
 export const JAMIE_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.jamie.name;
 export const JAMIE_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.jamie.source;
 export const ATTIO_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.attio.name;

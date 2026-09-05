@@ -290,9 +290,9 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/google-calendar",
     );
-    expect(screen.getByRole("link", { name: /render/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /infisical/i })).toHaveAttribute(
       "href",
-      "/settings/plugins/render",
+      "/settings/plugins/infisical",
     );
     expect(screen.getByRole("link", { name: /posthog/i })).toHaveAttribute(
       "href",
@@ -436,7 +436,7 @@ describe("Plugin settings", () => {
     await user.click(screen.getByRole("button", { name: "View all engineering plugins" }));
 
     const engineering = screen.getByRole("region", { name: "Engineering" });
-    expect(within(engineering).getAllByRole("link")).toHaveLength(7);
+    expect(within(engineering).getAllByRole("link")).toHaveLength(8);
     expect(within(engineering).getByRole("link", { name: /github/i })).toBeInTheDocument();
     expect(within(engineering).getByRole("link", { name: /signoz/i })).toHaveAttribute(
       "href",
@@ -445,6 +445,10 @@ describe("Plugin settings", () => {
     expect(within(engineering).getByRole("link", { name: /vercel/i })).toHaveAttribute(
       "href",
       "/settings/plugins/vercel",
+    );
+    expect(within(engineering).getByRole("link", { name: /infisical/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/infisical",
     );
     expect(screen.getByRole("button", { name: "Engineering" })).toHaveAttribute(
       "aria-pressed",

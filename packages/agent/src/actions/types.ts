@@ -24,6 +24,7 @@ export type ActionProviderId =
   | "vercel"
   | "signoz"
   | "fathom"
+  | "infisical"
   | "x_account";
 
 export type ActionSourceId = ActionProviderId | ManagedCapabilitySource | `plugin:${string}`;
