@@ -1934,7 +1934,7 @@ async function extractAssetText(format: string, bytes: Buffer): Promise<string> 
 }
 
 // Anthropic prompt-cache breakpoint, forwarded through the AI Gateway as a
-// prompt-level provider option. The loop places two static breakpoints on the
+// message-level provider option. The loop places two static breakpoints on the
 // fixed prefix (system instructions, source-content user message) and
 // prepareStep moves a third onto the newest message every step, so each step
 // reads the whole prior transcript from cache (~0.1x input price) instead of
@@ -1992,10 +1992,10 @@ function withoutAnthropicCacheBreakpoint<T extends ai.ModelMessage>(message: T):
   return { ...message, providerOptions };
 }
 
-// prepareStep hook: keep the static breakpoints on the first two messages and
-// place the moving breakpoint on the last message of this step. Earlier
-// non-static messages are stripped defensively so breakpoints never accumulate
-// past Anthropic's limit of 4, whatever the SDK does with prior step edits.
+// prepareStep hook: keep the static source-message breakpoint and place the
+// moving breakpoint on the last message of this step. Earlier non-static
+// messages are stripped defensively so breakpoints never accumulate past
+// Anthropic's limit of 4, whatever the SDK does with prior step edits.
 export function placeMovingAnthropicCacheBreakpoint(
   messages: ai.ModelMessage[],
 ): ai.ModelMessage[] {
