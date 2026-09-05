@@ -274,6 +274,39 @@ describe("Electric read models", () => {
     });
   });
 
+  it("reduces integration account delete history to its identity before validation", async () => {
+    const proxy = new ElectricReadModelProxy({
+      electricUrl: "https://electric.example.test",
+      fetch: vi.fn(async () =>
+        Response.json([
+          {
+            headers: { operation: "delete" },
+            key: JSON.stringify("integration_retired"),
+            value: {
+              id: "integration_retired",
+              provider: "imessage",
+              status: "disconnected",
+            },
+          },
+        ]),
+      ) as typeof fetch,
+    });
+
+    const response = await proxy.stream({
+      actor,
+      readModel: "integration-accounts-v1",
+      requestUrl: new URL("https://api.example.test/v1/read-models/integration-accounts-v1"),
+    });
+
+    await expect(response.json()).resolves.toEqual([
+      {
+        headers: { operation: "delete" },
+        key: JSON.stringify("integration_retired"),
+        value: { id: "integration_retired" },
+      },
+    ]);
+  });
+
   it("selects the physical shape server-side and returns only canonical Message fields", async () => {
     let upstreamUrl = "";
     const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
@@ -575,6 +608,39 @@ describe("Electric read models", () => {
           error: null,
           updatedAt: "2026-08-13T08:00:00.000Z",
         },
+      },
+    ]);
+  });
+
+  it("retains the public engine session identity on delete", async () => {
+    const proxy = new ElectricReadModelProxy({
+      electricUrl: "https://electric.example.test",
+      fetch: vi.fn(async () =>
+        Response.json([
+          {
+            headers: { operation: "delete" },
+            key: '"runtime_retired"',
+            value: {
+              id: "runtime_retired",
+              chat_session_id: "conversation_retired",
+              engine: "retired_engine",
+            },
+          },
+        ]),
+      ) as typeof fetch,
+    });
+
+    const response = await proxy.stream({
+      actor,
+      readModel: "engine-sessions-v1",
+      requestUrl: new URL("https://api.example.test/v1/read-models/engine-sessions-v1"),
+    });
+
+    await expect(response.json()).resolves.toEqual([
+      {
+        headers: { operation: "delete" },
+        key: '"runtime_retired"',
+        value: { conversationId: "conversation_retired" },
       },
     ]);
   });

@@ -173,6 +173,7 @@ describe("headless protocol", () => {
       "/v1/messages",
       "/v1/attachments",
       "/v1/chat-artifacts/{artifactId}",
+      "/v1/chat-artifacts/{artifactId}/versions",
       "/v1/chat-artifacts/{artifactId}/versions/{versionId}",
       "/v1/chat-attachments/{messageId}/{attachmentId}",
       "/v1/conversations/{conversationId}/messages/{messageId}/presentation",

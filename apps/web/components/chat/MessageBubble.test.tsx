@@ -268,6 +268,28 @@ describe("MessageBubble generated files", () => {
     );
   });
 
+  it("opens an artifact in the host viewer when requested", async () => {
+    const user = userEvent.setup();
+    const onOpenArtifact = vi.fn();
+    render(
+      <MessageBubble
+        message={message}
+        taskLookup={emptyTaskLookup}
+        onOpenArtifact={onOpenArtifact}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Open Launch plan" }));
+
+    expect(onOpenArtifact).toHaveBeenCalledWith({
+      artifact: expect.objectContaining({
+        artifactId: "artifact_1",
+        artifactVersionId: "version_1",
+      }),
+      href: "/v1/chat-artifacts/artifact_1/versions/version_1",
+    });
+  });
+
   it("deletes through the owner route and becomes a tombstone", async () => {
     const user = userEvent.setup();
     vi.spyOn(window, "confirm").mockReturnValue(true);

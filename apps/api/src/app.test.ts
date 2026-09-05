@@ -5364,6 +5364,7 @@ function chatResourceService(overrides: Partial<ChatResourceService>): ChatResou
     loadPublicShare: unexpected,
     loadPublicShareMetadata: unexpected,
     deleteArtifact: unexpected,
+    listArtifactVersions: unexpected,
     downloadArtifact: unexpected,
     downloadAttachment: unexpected,
     downloadScreenshot: unexpected,

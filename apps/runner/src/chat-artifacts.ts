@@ -11,6 +11,7 @@ import {
   type PublishArtifactToolResponse,
   type PublishedChatArtifact,
   shellQuote,
+  type WriteArtifactToolInput,
 } from "@opencompany/agent-runtime";
 import {
   type CodexChatEngine,
@@ -55,18 +56,22 @@ const MEDIA_TYPE_BY_EXTENSION: Readonly<Record<string, string>> = {
   ".webp": "image/webp",
 };
 
-type PublishArtifactContext = {
-  sandbox: SandboxHandle;
-  workDirectory: string;
+type ArtifactPersistenceContext = {
   workspaceId: string;
   userWorkosId: string;
   chatSessionId: string;
   codexChatSessionId: string;
   turnId: string;
   assistantMessageId: string;
-  engine: Exclude<CodexChatEngine, "opencompany">;
+  engine: CodexChatEngine;
   env: Pick<RunnerEnv, "blobReadWriteToken">;
   checkAbort: () => Promise<void>;
+};
+
+type PublishArtifactContext = ArtifactPersistenceContext & {
+  sandbox: SandboxHandle;
+  workDirectory: string;
+  engine: Exclude<CodexChatEngine, "opencompany">;
 };
 
 type PublishArtifactInput = {
@@ -143,6 +148,67 @@ export async function publishChatArtifact(input: {
     );
   }
 
+  const file = await loadPublishableSandboxFile({
+    sandbox: input.context.sandbox,
+    workDirectory: input.context.workDirectory,
+    requestedPath: input.input.path,
+  });
+  await input.context.checkAbort();
+
+  return publishChatArtifactBytes({
+    context: input.context,
+    input: {
+      filename: file.filename,
+      mediaType: file.mediaType,
+      bytes: file.bytes,
+      ...(input.input.title !== undefined ? { title: input.input.title } : {}),
+      ...(input.input.description !== undefined ? { description: input.input.description } : {}),
+      ...(input.input.artifactId ? { artifactId: input.input.artifactId } : {}),
+      ...(input.input.expectedVersion !== undefined
+        ? { expectedVersion: input.input.expectedVersion }
+        : {}),
+    },
+    toolCallId: input.toolCallId,
+    preflightChecked: true,
+  });
+}
+
+async function publishChatArtifactBytes(input: {
+  context: ArtifactPersistenceContext;
+  input: {
+    filename: string;
+    mediaType: string;
+    bytes: Buffer;
+    title?: string;
+    description?: string;
+    artifactId?: string;
+    expectedVersion?: number;
+  };
+  toolCallId: string;
+  preflightChecked?: boolean;
+}): Promise<PublishArtifactToolResponse> {
+  await input.context.checkAbort();
+  if (!input.toolCallId.trim() || input.toolCallId.length > 500) {
+    throw new Error("The host supplied an invalid tool call id.");
+  }
+  if (input.input.bytes.byteLength > CHAT_ARTIFACT_MAX_BYTES) {
+    throw new Error("The file is larger than the 20 MB publication limit.");
+  }
+  const db = getDb();
+  if (!input.preflightChecked) {
+    const priorPublication = await loadToolCallPublication({
+      turnId: input.context.turnId,
+      toolCallId: input.toolCallId,
+    });
+    if (priorPublication) return { ok: true, artifact: priorPublication };
+    const publicationCount = await countTurnPublications(db, input.context.turnId);
+    if (publicationCount >= CHAT_ARTIFACT_MAX_PER_TURN) {
+      throw new Error(
+        `This turn already published ${CHAT_ARTIFACT_MAX_PER_TURN} files, which is the limit.`,
+      );
+    }
+  }
+
   const existing = input.input.artifactId
     ? await loadExistingArtifact({
         artifactId: input.input.artifactId,
@@ -166,32 +232,25 @@ export async function publishChatArtifact(input: {
     throw new Error("expected_version is required when publishing a new version.");
   }
 
-  const file = await loadPublishableSandboxFile({
-    sandbox: input.context.sandbox,
-    workDirectory: input.context.workDirectory,
-    requestedPath: input.input.path,
-  });
-  await input.context.checkAbort();
-
   const artifactId = existing?.id ?? `goat_chat_artifact_${randomUUID()}`;
   const artifactVersionId = `goat_chat_artifact_version_${randomUUID()}`;
   const version = (existing?.currentVersion ?? 0) + 1;
-  const title = boundedText(input.input.title, 160) ?? existing?.title ?? file.filename;
+  const title = boundedText(input.input.title, 160) ?? existing?.title ?? input.input.filename;
   const description =
     input.input.description === undefined
       ? (existing?.description ?? undefined)
       : boundedText(input.input.description, 500);
-  const contentSha256 = createHash("sha256").update(file.bytes).digest("hex");
+  const contentSha256 = createHash("sha256").update(input.input.bytes).digest("hex");
   const blobPath = artifactBlobPath({
     workspaceId: input.context.workspaceId,
     artifactId,
     artifactVersionId,
-    filename: file.filename,
+    filename: input.input.filename,
   });
-  const stored = await put(blobPath, file.bytes, {
+  const stored = await put(blobPath, input.input.bytes, {
     access: "private",
     addRandomSuffix: false,
-    contentType: file.mediaType,
+    contentType: input.input.mediaType,
     ...(input.context.env.blobReadWriteToken
       ? { token: input.context.env.blobReadWriteToken }
       : {}),
@@ -207,9 +266,9 @@ export async function publishChatArtifact(input: {
           version,
           title,
           description,
-          filename: file.filename,
-          mediaType: file.mediaType,
-          sizeBytes: file.bytes.byteLength,
+          filename: input.input.filename,
+          mediaType: input.input.mediaType,
+          sizeBytes: input.input.bytes.byteLength,
           contentSha256,
           blobPathname: stored.pathname,
           context: input.context,
@@ -221,9 +280,9 @@ export async function publishChatArtifact(input: {
           version,
           title,
           description,
-          filename: file.filename,
-          mediaType: file.mediaType,
-          sizeBytes: file.bytes.byteLength,
+          filename: input.input.filename,
+          mediaType: input.input.mediaType,
+          sizeBytes: input.input.bytes.byteLength,
           contentSha256,
           blobPathname: stored.pathname,
           context: input.context,
@@ -250,9 +309,9 @@ export async function publishChatArtifact(input: {
     version,
     title,
     ...(description ? { description } : {}),
-    filename: file.filename,
-    mediaType: file.mediaType,
-    sizeBytes: file.bytes.byteLength,
+    filename: input.input.filename,
+    mediaType: input.input.mediaType,
+    sizeBytes: input.input.bytes.byteLength,
     state: "ready",
   };
   logger.info("Published a generated chat file", {
@@ -260,8 +319,8 @@ export async function publishChatArtifact(input: {
     artifact_id: artifactId,
     artifact_version_id: artifactVersionId,
     version,
-    media_type: file.mediaType,
-    size_bytes: file.bytes.byteLength,
+    media_type: input.input.mediaType,
+    size_bytes: input.input.bytes.byteLength,
     chat_session_id: input.context.chatSessionId,
     codex_chat_turn_id: input.context.turnId,
     engine: input.context.engine,
@@ -381,6 +440,110 @@ export async function publishExternalEngineChatArtifact(input: {
   }
 }
 
+export async function publishInBandChatArtifact(input: {
+  codexChatSessionId: string;
+  codexChatTurnId: string;
+  toolCallId: string;
+  arguments: unknown;
+  env: Pick<RunnerEnv, "blobReadWriteToken">;
+  signal?: AbortSignal;
+}): Promise<PublishArtifactToolResponse> {
+  const [row] = await getDb()
+    .select({ session: codexChatSessions, turn: codexChatTurns })
+    .from(codexChatTurns)
+    .innerJoin(codexChatSessions, eq(codexChatTurns.codexChatSessionId, codexChatSessions.id))
+    .innerJoin(
+      workspaceMembers,
+      and(
+        eq(workspaceMembers.workspaceId, codexChatSessions.workspaceId),
+        eq(workspaceMembers.userWorkosId, codexChatSessions.userWorkosId),
+      ),
+    )
+    .where(
+      and(
+        eq(codexChatTurns.id, input.codexChatTurnId),
+        eq(codexChatTurns.codexChatSessionId, input.codexChatSessionId),
+      ),
+    )
+    .limit(1);
+  if (
+    !row ||
+    row.session.engine !== "opencompany" ||
+    row.session.status !== "running" ||
+    row.session.activeTurnId !== row.turn.id ||
+    row.turn.status !== "running" ||
+    !row.session.workspaceId ||
+    !row.turn.leaseId ||
+    !row.turn.leaseOwner
+  ) {
+    return { ok: false, error: "This chat turn is no longer active." };
+  }
+  const checkAbort = async () => {
+    if (input.signal?.aborted) throw new Error("The artifact publication was canceled.");
+    const [active] = await getDb()
+      .select({
+        status: codexChatTurns.status,
+        interruptAt: codexChatTurns.interruptRequestedAt,
+      })
+      .from(codexChatTurns)
+      .where(
+        and(
+          eq(codexChatTurns.id, row.turn.id),
+          eq(codexChatTurns.leaseId, row.turn.leaseId as string),
+          eq(codexChatTurns.leaseOwner, row.turn.leaseOwner as string),
+        ),
+      )
+      .limit(1);
+    if (!active || active.status !== "running" || active.interruptAt) {
+      throw new Error("This chat turn is no longer active.");
+    }
+  };
+
+  try {
+    const artifactInput = normalizeWriteArtifactInput(input.arguments);
+    const bytes = Buffer.from(artifactInput.content, "utf8");
+    return await publishChatArtifactBytes({
+      context: {
+        workspaceId: row.session.workspaceId,
+        userWorkosId: row.turn.userWorkosId,
+        chatSessionId: row.turn.chatSessionId,
+        codexChatSessionId: row.session.id,
+        turnId: row.turn.id,
+        assistantMessageId: row.turn.assistantMessageId,
+        engine: "opencompany",
+        env: input.env,
+        checkAbort,
+      },
+      input: {
+        filename: artifactInput.filename,
+        mediaType: "text/markdown",
+        bytes,
+        title: artifactInput.title,
+        ...(artifactInput.description !== undefined
+          ? { description: artifactInput.description }
+          : {}),
+        ...(artifactInput.artifact_id ? { artifactId: artifactInput.artifact_id } : {}),
+        ...(artifactInput.expected_version !== undefined
+          ? { expectedVersion: artifactInput.expected_version }
+          : {}),
+      },
+      toolCallId: input.toolCallId,
+    });
+  } catch (error) {
+    logger.warn("Failed to write an opencompany chat artifact", {
+      event: "opencompany.goat_chat_artifact_write_failed",
+      chat_session_id: row.turn.chatSessionId,
+      codex_chat_turn_id: row.turn.id,
+      engine: "opencompany",
+      error: error instanceof Error ? error.message : "The artifact could not be published.",
+    });
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "The artifact could not be published.",
+    };
+  }
+}
+
 function normalizePublishArtifactInput(value: unknown): PublishArtifactInput {
   if (!isRecord(value)) throw new Error("publish_artifact expects an object input.");
   const requestedPath = boundedText(value.path, 4_096);
@@ -405,6 +568,39 @@ function normalizePublishArtifactInput(value: unknown): PublishArtifactInput {
       : {}),
     ...(artifactId ? { artifactId } : {}),
     ...(typeof expectedVersion === "number" ? { expectedVersion } : {}),
+  };
+}
+
+function normalizeWriteArtifactInput(value: unknown): WriteArtifactToolInput {
+  if (!isRecord(value)) throw new Error("write_artifact expects an object input.");
+  const filename = requiredBoundedString(value.filename, "filename", 255);
+  if (
+    filename !== path.posix.basename(filename) ||
+    path.posix.extname(filename).toLowerCase() !== ".md"
+  ) {
+    throw new Error("filename must be a Markdown filename ending in .md, without a path.");
+  }
+  const title = requiredBoundedString(value.title, "title", 160);
+  if (typeof value.content !== "string") throw new Error("content must be a string.");
+  const artifactId = boundedText(value.artifact_id, 200);
+  const expectedVersion = value.expected_version;
+  if (
+    expectedVersion !== undefined &&
+    (typeof expectedVersion !== "number" ||
+      !Number.isSafeInteger(expectedVersion) ||
+      expectedVersion < 1)
+  ) {
+    throw new Error("expected_version must be a positive integer.");
+  }
+  return {
+    filename,
+    title,
+    content: value.content,
+    ...(value.description !== undefined
+      ? { description: requiredBoundedString(value.description, "description", 500) }
+      : {}),
+    ...(artifactId ? { artifact_id: artifactId } : {}),
+    ...(typeof expectedVersion === "number" ? { expected_version: expectedVersion } : {}),
   };
 }
 
@@ -538,7 +734,7 @@ type PersistArtifactInput = {
   sizeBytes: number;
   contentSha256: string;
   blobPathname: string;
-  context: PublishArtifactContext;
+  context: ArtifactPersistenceContext;
 };
 
 async function persistNewArtifact(input: PersistArtifactInput) {

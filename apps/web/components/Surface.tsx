@@ -98,6 +98,7 @@ import {
   type CodingWorkspacePanelHandle,
 } from "@/components/CodingWorkspacePanel";
 import { ConversationRuntimeSync } from "@/components/ConversationRuntimeSync";
+import type { ArtifactSelection } from "@/components/chat/ArtifactViewer";
 import {
   buildChatTaskLookup,
   firstVisibleAssistantOutputKind,
@@ -472,6 +473,10 @@ export function Surface({
   const persistedMessageIdsRef = useRef<ReadonlySet<string>>(new Set());
   const [workspacePanelExpanded, setWorkspacePanelExpanded] = useState(false);
   const [workspacePanelSessionId, setWorkspacePanelSessionId] = useState<string | null>(null);
+  const [artifactPanelState, setArtifactPanelState] = useState<{
+    chatSessionId: string;
+    selection: ArtifactSelection;
+  } | null>(null);
   const [input, setInput] = useState("");
   const [mentionToken, setMentionToken] = useState<ActiveMentionToken | null>(null);
   const [selectedMentions, setSelectedMentions] = useState<ChatMention[]>([]);
@@ -480,6 +485,8 @@ export function Surface({
   const [mentionOptionIndex, setMentionOptionIndex] = useState(0);
   const [mode, setMode] = useState<"home" | "chat">(() => (initialChat ? "chat" : "home"));
   const [chatSessionId, setChatSessionId] = useState<string | null>(initialChat?.id ?? null);
+  const artifactSelection =
+    artifactPanelState?.chatSessionId === chatSessionId ? artifactPanelState.selection : null;
   const [persistedChatSessionId, setPersistedChatSessionId] = useState<string | null>(
     initialChat?.id ?? null,
   );
@@ -3019,6 +3026,11 @@ export function Surface({
                       allowActionApproval={message.id === latestAssistantMessageId}
                       isTaskSession={Boolean(activeTaskConversation)}
                       turnActive={message.id === activeAssistantMessageId}
+                      onOpenArtifact={(selection) => {
+                        if (!chatSessionId) return;
+                        setArtifactPanelState({ chatSessionId, selection });
+                        workspacePanelRef.current?.openArtifact();
+                      }}
                     />
                   ))}
                   {isTaskConversationStopping ? (
@@ -3472,15 +3484,20 @@ export function Surface({
             </div>
           </form>
         </div>
-        {mode === "chat" && activeEngineChat ? (
+        {mode === "chat" && chatSessionId && (activeEngineChat || artifactSelection) ? (
           <CodingWorkspacePanel
-            key={activeEngineChat.chatSessionId}
+            key={chatSessionId}
             ref={workspacePanelRef}
-            chatSessionId={activeEngineChat.chatSessionId}
+            chatSessionId={activeEngineChat?.chatSessionId ?? chatSessionId}
             sandboxStatus={codingSandboxStatus}
-            engineLabel={ENGINE_REGISTRY[activeEngineChat.engine].label}
+            engineLabel={activeEngineChat ? ENGINE_REGISTRY[activeEngineChat.engine].label : "Chat"}
+            workspaceEnabled={Boolean(activeEngineChat)}
+            artifactSelection={artifactSelection}
             onExpandedChange={setWorkspacePanelExpanded}
-            onRequestFocusReturn={() => workspaceToggleButtonRef.current?.focus()}
+            onRequestFocusReturn={() => {
+              if (workspaceToggleButtonRef.current) workspaceToggleButtonRef.current.focus();
+              else inputRef.current?.focus();
+            }}
           />
         ) : null}
       </div>
