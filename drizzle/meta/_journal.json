@@ -1772,6 +1772,13 @@
       "when": 1788529500000,
       "tag": "0252_opencompany_vercel_integration",
       "breakpoints": true
+    },
+    {
+      "idx": 253,
+      "version": "7",
+      "when": 1788609000000,
+      "tag": "0253_browser_profile_session_settlement",
+      "breakpoints": true
     }
   ]
 }

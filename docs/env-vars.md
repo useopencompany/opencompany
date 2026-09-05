@@ -113,6 +113,20 @@ The marketing Vercel project uses `NEXT_PUBLIC_OPENCOMPANY_POSTHOG_TOKEN` and
 `NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST` for basic page and conversion analytics in the same PostHog project
 as the product. Both variables are required in production and optional for local marketing work.
 
+## Authenticated browser profiles
+
+Browser profiles use one Browserbase project across the canonical API and runner. Store
+`OPENCOMPANY_BROWSER_PROFILES_ENABLED`, `OPENCOMPANY_BROWSER_PROFILES_KILL_SWITCH`,
+`BROWSERBASE_API_KEY`, and `BROWSERBASE_PROJECT_ID` in Infisical `prod` `/api` and `/runner`.
+The API creates profiles and resolves owner-checked live-view redirects; the runner drives sessions,
+releases orphaned keep-alive sessions, and settles final provider timing and proxy usage. Release
+preflight requires both Browserbase credentials on both services when the enabled flag is `true`.
+
+Roll out with the enabled flag left `false`, verify the credentials and Browserbase paid plan, then
+enable both services together. Setting `OPENCOMPANY_BROWSER_PROFILES_KILL_SWITCH=true` blocks new
+profile use and closes an active profile before the next browser command; leave the enabled flag on
+so the runner reconciler can continue releasing and settling already-created sessions.
+
 ## Experimental Revolut Business connector
 
 Revolut Business is an internal, env-gated runner capability rather than a generally available

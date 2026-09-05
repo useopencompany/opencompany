@@ -64,16 +64,25 @@ test("production preflight follows the deployed runtime boundaries", async () =>
     "RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED",
     "RUNNER_SANDBOX_NAMESPACE",
   ]);
-  assertExcludes(
-    [...groups.runner.required, ...groups.runner.optional],
+  assertIncludes(groups.runner.optional, [
+    "BROWSERBASE_API_KEY",
+    "BROWSERBASE_PROJECT_ID",
+    "OPENCOMPANY_BROWSER_PROFILES_ENABLED",
+    "OPENCOMPANY_BROWSER_PROFILES_KILL_SWITCH",
+  ]);
+  assert.deepEqual(
+    [...groups.runner.conditional].map((condition) => ({
+      ...condition,
+      require: [...condition.require],
+    })),
     [
-      "BROWSERBASE_API_KEY",
-      "BROWSERBASE_PROJECT_ID",
-      "OPENCOMPANY_BROWSER_PROFILES_ENABLED",
-      "OPENCOMPANY_BROWSER_PROFILES_KILL_SWITCH",
+      {
+        when: "OPENCOMPANY_BROWSER_PROFILES_ENABLED",
+        equals: "true",
+        require: ["BROWSERBASE_API_KEY", "BROWSERBASE_PROJECT_ID"],
+      },
     ],
   );
-  assert.equal(groups.runner.conditional, undefined);
 
   for (const [name, group] of Object.entries(groups)) {
     const keys = [...group.required, ...group.optional];

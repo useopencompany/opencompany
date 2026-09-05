@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import Browserbase from "@browserbasehq/sdk";
+import { calculateBrowserbaseSessionCost } from "@opencompany/billing";
 import { CoreError } from "@opencompany/core";
 import {
   buildAad,
@@ -9,11 +10,13 @@ import {
   loadEncryptionKey,
 } from "@opencompany/crypto";
 import { getDb } from "@opencompany/db/client";
+import { recordCreditDebit } from "@opencompany/db/credits";
 import {
   type BrowserProfile,
   type BrowserProfileStatus,
   browserProfileSessions,
   browserProfiles,
+  codexChatSessions,
 } from "@opencompany/db/product-schema";
 import { and, desc, eq, isNull } from "drizzle-orm";
 
@@ -65,6 +68,17 @@ export type BrowserProfileAgentSession = {
   connectUrl: string;
   liveViewPath: string;
   startedAt: Date;
+};
+
+export type BrowserbaseSessionSnapshot = {
+  id: string;
+  projectId: string;
+  status: "PENDING" | "RUNNING" | "ERROR" | "TIMED_OUT" | "COMPLETED";
+  startedAt: string;
+  updatedAt: string;
+  endedAt?: string;
+  proxyBytes: number;
+  userMetadata?: Record<string, unknown>;
 };
 
 export function browserProfilesEnabled() {
@@ -207,7 +221,7 @@ export async function createLoginSession(
       liveViewUrl: live.debuggerFullscreenUrl,
     };
   } catch (error) {
-    if (browserbaseSessionId) await requestSessionRelease(browserbaseSessionId);
+    if (browserbaseSessionId) await requestBrowserbaseSessionRelease(browserbaseSessionId);
     await releaseProfileSession(input.userWorkosId, input.profileId, undefined, db);
     throw error;
   }
@@ -226,7 +240,7 @@ export async function completeLoginSession(
   if (profile.activeSessionId !== input.sessionId) {
     throw new CoreError("conflict", "This login session is no longer active.");
   }
-  await requestSessionRelease(input.sessionId);
+  await requestBrowserbaseSessionRelease(input.sessionId);
   const now = new Date();
   await db
     .update(browserProfiles)
@@ -242,12 +256,12 @@ export async function completeLoginSession(
         eq(browserProfiles.userWorkosId, input.userWorkosId),
       ),
     );
-  await finishBrowserbaseSession(
+  await settleBrowserbaseSession(
     {
       userWorkosId: input.userWorkosId,
       profileId: input.profileId,
       browserbaseSessionId: input.sessionId,
-      endedAt: now,
+      fallbackEndedAt: now,
     },
     db,
   );
@@ -318,7 +332,7 @@ export async function createAgentSession(
       startedAt: new Date(session.startedAt ?? Date.now()),
     } satisfies BrowserProfileAgentSession;
   } catch (error) {
-    if (browserbaseSessionId) await requestSessionRelease(browserbaseSessionId);
+    if (browserbaseSessionId) await requestBrowserbaseSessionRelease(browserbaseSessionId);
     await releaseProfileSession(input.userWorkosId, input.profileId, undefined, db);
     throw error;
   }
@@ -412,14 +426,14 @@ export async function endAgentSession(
   db: DbLike = getDb(),
 ) {
   const now = new Date();
-  await requestSessionRelease(input.sessionId);
+  await requestBrowserbaseSessionRelease(input.sessionId);
   await releaseProfileSession(input.userWorkosId, input.profileId, input.sessionId, db);
-  await finishBrowserbaseSession(
+  await settleBrowserbaseSession(
     {
       userWorkosId: input.userWorkosId,
       profileId: input.profileId,
       browserbaseSessionId: input.sessionId,
-      endedAt: now,
+      fallbackEndedAt: now,
     },
     db,
   );
@@ -432,7 +446,7 @@ export async function deleteBrowserProfile(
   assertBrowserProfilesAvailable();
   const profile = await loadOwnedProfile(input.userWorkosId, input.profileId, db);
   if (profile.activeSessionId) {
-    await requestSessionRelease(profile.activeSessionId);
+    await requestBrowserbaseSessionRelease(profile.activeSessionId);
   }
   const contextId = decryptBrowserbaseContextId(profile);
   await browserbase()
@@ -593,13 +607,33 @@ async function releaseProfileSession(
     );
 }
 
-async function requestSessionRelease(sessionId: string) {
-  await browserbase()
-    .sessions.update(sessionId, {
+export async function requestBrowserbaseSessionRelease(sessionId: string) {
+  try {
+    await browserbase().sessions.update(sessionId, {
       ...browserbaseProjectBody(),
       status: "REQUEST_RELEASE",
-    })
-    .catch(() => undefined);
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function listRunningBrowserbaseProfileSessions(): Promise<
+  BrowserbaseSessionSnapshot[]
+> {
+  const sessions = await browserbase().sessions.list({
+    status: "RUNNING",
+    q: "user_metadata['surface']:'goat-browser-profile'",
+  });
+  const projectId = process.env.BROWSERBASE_PROJECT_ID?.trim();
+  return projectId ? sessions.filter((session) => session.projectId === projectId) : sessions;
+}
+
+export async function retrieveBrowserbaseSession(
+  sessionId: string,
+): Promise<BrowserbaseSessionSnapshot> {
+  return browserbase().sessions.retrieve(sessionId);
 }
 
 async function recordBrowserbaseSession(
@@ -626,17 +660,25 @@ async function recordBrowserbaseSession(
   });
 }
 
-async function finishBrowserbaseSession(
+export async function settleBrowserbaseSession(
   input: {
     userWorkosId: string;
     profileId: string;
     browserbaseSessionId: string;
-    endedAt: Date;
+    fallbackEndedAt?: Date;
+    snapshot?: BrowserbaseSessionSnapshot;
   },
   db: DbLike,
 ) {
   const [row] = await db
-    .select({ startedAt: browserProfileSessions.startedAt })
+    .select({
+      id: browserProfileSessions.id,
+      chatSessionId: browserProfileSessions.chatSessionId,
+      kind: browserProfileSessions.kind,
+      startedAt: browserProfileSessions.startedAt,
+      endedAt: browserProfileSessions.endedAt,
+      costBasis: browserProfileSessions.costBasis,
+    })
     .from(browserProfileSessions)
     .where(
       and(
@@ -646,19 +688,127 @@ async function finishBrowserbaseSession(
       ),
     )
     .limit(1);
-  const durationMs = row?.startedAt
-    ? Math.max(0, input.endedAt.getTime() - row.startedAt.getTime())
-    : 0;
+  if (!row) return false;
+  if (row.endedAt && row.costBasis.status === "priced") return true;
+
+  let snapshot = input.snapshot;
+  if (!snapshot) {
+    try {
+      snapshot = await retrieveBrowserbaseSession(input.browserbaseSessionId);
+    } catch {
+      return false;
+    }
+  }
+  if (snapshot.status === "PENDING" || snapshot.status === "RUNNING") return false;
+
+  await releaseProfileSession(input.userWorkosId, input.profileId, input.browserbaseSessionId, db);
+
+  const startedAt = validProviderDate(snapshot.startedAt) ?? row.startedAt;
+  const endedAt =
+    validProviderDate(snapshot.endedAt) ??
+    validProviderDate(snapshot.updatedAt) ??
+    input.fallbackEndedAt ??
+    validProviderDate(snapshot.startedAt);
+  if (!startedAt || !endedAt) return false;
+  const durationMs = Math.max(0, endedAt.getTime() - startedAt.getTime());
+  const cost = calculateBrowserbaseSessionCost({
+    durationMs,
+    proxyBytes: snapshot.proxyBytes,
+  });
+  const rawMetrics = {
+    provider: "browserbase",
+    status: snapshot.status,
+    startedAt: snapshot.startedAt,
+    updatedAt: snapshot.updatedAt,
+    endedAt: snapshot.endedAt ?? endedAt.toISOString(),
+    proxyBytes: snapshot.proxyBytes,
+  };
+  let ledgerStatus: "recorded" | "not_billable" | "unattributed" = cost.billable
+    ? "unattributed"
+    : "not_billable";
+
+  if (cost.billable && row.chatSessionId) {
+    const [owner] = await db
+      .select({ workspaceId: codexChatSessions.workspaceId })
+      .from(codexChatSessions)
+      .where(
+        and(
+          eq(codexChatSessions.chatSessionId, row.chatSessionId),
+          eq(codexChatSessions.userWorkosId, input.userWorkosId),
+        ),
+      )
+      .limit(1);
+    if (!owner?.workspaceId) {
+      await markBrowserbaseSettlementPending(
+        row.id,
+        rawMetrics,
+        { ...cost.costBasis, status: "pricing_pending", reason: "workspace_unresolved" },
+        db,
+      );
+      return false;
+    }
+    try {
+      await recordCreditDebit({
+        workspaceId: owner.workspaceId,
+        userWorkosId: input.userWorkosId,
+        source: "sandbox_usage",
+        idempotencyKey: `browserbase-session:${input.browserbaseSessionId}`,
+        chatSessionId: row.chatSessionId,
+        providerCostUsdMicros: cost.providerCostUsdMicros,
+        platformFeeUsdMicros: cost.platformFeeUsdMicros,
+        totalCostUsdMicros: cost.totalCostUsdMicros,
+        costBasis: cost.costBasis,
+        metadata: {
+          provider: "browserbase",
+          browserProfileSessionId: row.id,
+          kind: row.kind,
+        },
+        db,
+      });
+      ledgerStatus = "recorded";
+    } catch {
+      await markBrowserbaseSettlementPending(
+        row.id,
+        rawMetrics,
+        { ...cost.costBasis, status: "pricing_pending", reason: "ledger_write_failed" },
+        db,
+      );
+      return false;
+    }
+  }
+
   await db
     .update(browserProfileSessions)
-    .set({ endedAt: input.endedAt, durationMs })
-    .where(
-      and(
-        eq(browserProfileSessions.userWorkosId, input.userWorkosId),
-        eq(browserProfileSessions.profileId, input.profileId),
-        eq(browserProfileSessions.browserbaseSessionId, input.browserbaseSessionId),
-      ),
-    );
+    .set({
+      startedAt,
+      endedAt,
+      durationMs,
+      providerCostUsdMicros: cost.providerCostUsdMicros,
+      platformFeeUsdMicros: cost.platformFeeUsdMicros,
+      totalCostUsdMicros: cost.totalCostUsdMicros,
+      rawMetrics,
+      costBasis: { ...cost.costBasis, status: "priced", ledgerStatus },
+    })
+    .where(eq(browserProfileSessions.id, row.id));
+  return true;
+}
+
+async function markBrowserbaseSettlementPending(
+  id: number,
+  rawMetrics: Record<string, unknown>,
+  costBasis: Record<string, unknown>,
+  db: DbLike,
+) {
+  await db
+    .update(browserProfileSessions)
+    .set({ rawMetrics, costBasis })
+    .where(eq(browserProfileSessions.id, id));
+}
+
+function validProviderDate(value: string | undefined) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date : null;
 }
 
 function toBrowserProfileView(row: BrowserProfile): BrowserProfileView {

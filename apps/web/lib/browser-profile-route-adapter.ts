@@ -77,7 +77,9 @@ export async function legacyBrowserProfileLiveView(
   request: Request,
   profileId: string,
 ): Promise<Response> {
-  const sessionId = new URL(request.url).searchParams.get("sessionId") ?? "";
+  const requestUrl = new URL(request.url);
+  const sessionId = requestUrl.searchParams.get("sessionId") ?? "";
+  const probe = requestUrl.searchParams.get("probe") === "1";
   const result = await forwardBrowserProfileRequest(
     request,
     `/v1/browser-profiles/${encodeURIComponent(profileId)}/live-view?sessionId=${encodeURIComponent(
@@ -90,9 +92,15 @@ export async function legacyBrowserProfileLiveView(
   if (result.status === 429) {
     return Response.json({ error: "The canonical API is unavailable." }, { status: 503 });
   }
-  if (!result.upstreamOk) return new Response(null, { status: 404 });
+  if (!result.upstreamOk) return new Response(null, { status: probe ? 410 : 404 });
   const data = (result.body.data ?? {}) as { url?: string };
-  if (!data.url) return new Response(null, { status: 404 });
+  if (!data.url) return new Response(null, { status: probe ? 410 : 404 });
+  if (probe) {
+    return withForwardedCookies(
+      result,
+      new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } }),
+    );
+  }
   return withForwardedCookies(result, Response.redirect(data.url, 302));
 }
 

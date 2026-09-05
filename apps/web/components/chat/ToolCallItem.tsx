@@ -10,6 +10,8 @@ import {
   CircleDotDashed,
   Clock,
   FileText,
+  Monitor,
+  RefreshCw,
   Square,
   Terminal,
 } from "lucide-react";
@@ -19,6 +21,7 @@ import { useAppDataOptional } from "@/components/AppDataProvider";
 import { GitHubInstallGapCard } from "@/components/GitHubRepositoryAccess";
 import {
   BRAIN_TOOL_NAME,
+  BROWSER_USE_PROFILE_TOOL_NAME,
   CODEX_APPROVAL_TOOL_NAME,
   CODEX_COMMAND_TOOL_NAME,
   CODEX_PLAN_TOOL_NAME,
@@ -898,6 +901,7 @@ function ToolCallRow({
   const Icon = meta.icon;
   const hasOutput = tool.output !== undefined;
   const screenshotUrl = browserScreenshotUrl(tool.output);
+  const browserProfileLiveView = browserProfileLiveViewFromTool(tool);
   const detailChips =
     tool.detailChips.length > 0 ? tool.detailChips : tool.detail ? [tool.detail] : [];
   return (
@@ -975,7 +979,103 @@ function ToolCallRow({
           className="ml-6 mt-2 max-h-[560px] w-auto max-w-[calc(100%-1.5rem)] rounded-lg border border-border bg-surface object-contain"
         />
       ) : null}
+      {browserProfileLiveView ? <BrowserProfileLiveView {...browserProfileLiveView} /> : null}
     </div>
+  );
+}
+
+function BrowserProfileLiveView({ url, siteHost }: { url: string; siteHost: string }) {
+  const [expanded, setExpanded] = useState(true);
+  const [revision, setRevision] = useState(0);
+  const [status, setStatus] = useState<"active" | "ended">("active");
+
+  useEffect(() => {
+    if (status === "ended") return;
+    const controller = new AbortController();
+    const probe = async () => {
+      try {
+        const response = await fetch(browserProfileProbeUrl(url), {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        if (response.status === 404 || response.status === 410) setStatus("ended");
+        else if (response.status === 204) setStatus("active");
+      } catch {
+        // A transient probe failure must not tear down an interactive session.
+      }
+    };
+    void probe();
+    const timer = window.setInterval(() => void probe(), 5_000);
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+    };
+  }, [status, url]);
+
+  return (
+    <section
+      data-testid="browser-profile-live-view"
+      className="ml-6 mt-2 overflow-hidden rounded-xl border border-border bg-surface shadow-[0_1px_3px_rgba(0,0,0,0.04)]"
+    >
+      <div className="flex min-h-10 items-center gap-2 border-b border-border px-3 py-2">
+        <Monitor size={13} className="shrink-0 text-ink-subtle" />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[11.5px] font-medium text-ink">Live browser</div>
+          <div className="truncate text-[10.5px] text-ink-subtle">{siteHost}</div>
+        </div>
+        {status === "active" ? (
+          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-success/10 px-1.5 py-px text-[10px] font-medium text-success">
+            <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-success" />
+            Authenticated session active
+          </span>
+        ) : (
+          <span className="shrink-0 text-[10.5px] font-medium text-ink-subtle">Session ended</span>
+        )}
+        {status === "active" && expanded ? (
+          <button
+            type="button"
+            aria-label="Refresh live browser"
+            onClick={() => setRevision((current) => current + 1)}
+            className="rounded-md p-1 text-ink-subtle hover:bg-surface-hover hover:text-ink"
+          >
+            <RefreshCw size={12} />
+          </button>
+        ) : null}
+        <button
+          type="button"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((current) => !current)}
+          className="rounded-md p-1 text-ink-subtle hover:bg-surface-hover hover:text-ink"
+        >
+          <ChevronRight
+            size={12}
+            className={`transition-transform ${expanded ? "rotate-90" : ""}`}
+          />
+          <span className="sr-only">
+            {expanded ? "Collapse live browser" : "Expand live browser"}
+          </span>
+        </button>
+      </div>
+      {expanded ? (
+        status === "active" ? (
+          <div className="h-[420px] bg-white focus-within:ring-2 focus-within:ring-inset focus-within:ring-ink/15">
+            <iframe
+              key={`${url}:${revision}`}
+              src={url}
+              title={`Authenticated browser session on ${siteHost}`}
+              sandbox="allow-same-origin allow-scripts"
+              allow="clipboard-read; clipboard-write"
+              referrerPolicy="no-referrer"
+              className="h-full w-full border-0 bg-white outline-none"
+            />
+          </div>
+        ) : (
+          <div className="px-3 py-5 text-center text-[11.5px] text-ink-subtle">
+            This authenticated browser session has ended.
+          </div>
+        )
+      ) : null}
+    </section>
   );
 }
 
@@ -1089,6 +1189,35 @@ function browserScreenshotUrl(value: unknown) {
     value.screenshotUrl.startsWith("/api/chat-screenshots/")
     ? value.screenshotUrl
     : null;
+}
+
+function browserProfileLiveViewFromTool(tool: ToolCallView) {
+  if (tool.name !== BROWSER_USE_PROFILE_TOOL_NAME || !isRecord(tool.output)) return null;
+  if (tool.output.ok !== true || typeof tool.output.liveViewUrl !== "string") return null;
+  if (!isRecord(tool.output.profile) || typeof tool.output.profile.siteHost !== "string") {
+    return null;
+  }
+  const url = safeBrowserProfileLiveViewPath(tool.output.liveViewUrl);
+  const siteHost = tool.output.profile.siteHost.trim();
+  return url && siteHost ? { url, siteHost } : null;
+}
+
+function safeBrowserProfileLiveViewPath(value: string) {
+  try {
+    const url = new URL(value, "https://opencompany.invalid");
+    if (url.origin !== "https://opencompany.invalid") return null;
+    if (!/^\/api\/browser-profiles\/[^/]+\/live-view$/u.test(url.pathname)) return null;
+    if (!url.searchParams.get("sessionId")) return null;
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return null;
+  }
+}
+
+function browserProfileProbeUrl(value: string) {
+  const url = new URL(value, "https://opencompany.invalid");
+  url.searchParams.set("probe", "1");
+  return `${url.pathname}${url.search}`;
 }
 
 function BrainToolCallRow({

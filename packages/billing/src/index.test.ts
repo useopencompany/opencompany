@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  calculateBrowserbaseSessionCost,
   calculateHostedToolUsageCost,
   calculateModelUsageCost,
   calculatePlatformFeeUsdMicros,
@@ -328,6 +329,39 @@ describe("calculateSandboxUsageCost", () => {
     expect(cost.providerCostUsdMicros).toBe(0);
     expect(cost.totalCostUsdMicros).toBe(0);
     expect(cost.billable).toBe(false);
+  });
+});
+
+describe("calculateBrowserbaseSessionCost", () => {
+  it("prices final provider timing and proxy bytes with Browserbase minimums", () => {
+    const cost = calculateBrowserbaseSessionCost({
+      durationMs: 15_000,
+      proxyBytes: 100_000,
+    });
+
+    expect(cost).toMatchObject({
+      billable: true,
+      providerCostUsdMicros: 14_000,
+      platformFeeUsdMicros: 0,
+      totalCostUsdMicros: 14_000,
+      costBasis: {
+        kind: "sandbox_usage",
+        provider: "browserbase",
+        durationMs: 15_000,
+        billedDurationMs: 60_000,
+        proxyBytes: 100_000,
+        billedProxyBytes: 1_000_000,
+        costsUsdMicros: { browser: 2_000, proxy: 12_000 },
+      },
+    });
+  });
+
+  it("does not invent usage when final provider metrics are empty", () => {
+    expect(calculateBrowserbaseSessionCost({ durationMs: 0, proxyBytes: 0 })).toMatchObject({
+      billable: false,
+      providerCostUsdMicros: 0,
+      totalCostUsdMicros: 0,
+    });
   });
 });
 
