@@ -133,7 +133,7 @@ describe("GitHub user ingress", () => {
     });
   });
 
-  it("lists repository access and force-refreshes the token only on explicit re-check", async () => {
+  it("lists repository access without rotating the shared token on explicit re-check", async () => {
     const service = ingress();
     const response = await service.installations(
       new Request(
@@ -158,7 +158,6 @@ describe("GitHub user ingress", () => {
         userWorkosId: "user_1",
         owner: "opencompany",
         repo: "private-repo",
-        forceRefresh: false,
         db,
       }),
     );
@@ -168,9 +167,14 @@ describe("GitHub user ingress", () => {
         userWorkosId: "user_1",
         owner: "opencompany",
         repo: "private-repo",
-        forceRefresh: true,
         db,
       }),
+    );
+    expect(vi.mocked(listGitHubUserRepositoryAccess).mock.calls[0]?.[0]).not.toHaveProperty(
+      "forceRefresh",
+    );
+    expect(vi.mocked(listGitHubUserRepositoryAccess).mock.calls[1]?.[0]).not.toHaveProperty(
+      "forceRefresh",
     );
   });
 

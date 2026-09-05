@@ -60,6 +60,7 @@ type GetExpiringOAuthAccessTokenInput<TPayload extends object> = {
   options?: {
     signal?: AbortSignal;
     forceRefresh?: boolean;
+    minimumValidityMs?: number;
     db?: DbLike;
     now?: Date;
   };
@@ -84,7 +85,9 @@ export async function getExpiringOAuthAccessToken<TPayload extends object>(
   if (!parsed) {
     return failAuthentication(input, input.invalidCredential, db, now);
   }
-  if (!input.options?.forceRefresh && isFresh(credential, now)) return parsed.accessToken;
+  if (!input.options?.forceRefresh && isFresh(credential, now, input.options?.minimumValidityMs)) {
+    return parsed.accessToken;
+  }
 
   const key = [
     input.connection.provider,
@@ -119,7 +122,10 @@ async function refreshWithLease<TPayload extends object>(
   if (!parsed) return failAuthentication(input, input.invalidCredential, db, now);
 
   const alreadyRotated = !sameInstant(current.lastRotatedAt, initiallyLoaded.lastRotatedAt);
-  if ((alreadyRotated || !input.options?.forceRefresh) && isFresh(current, now)) {
+  if (
+    (alreadyRotated || !input.options?.forceRefresh) &&
+    isFresh(current, now, input.options?.minimumValidityMs)
+  ) {
     return parsed.accessToken;
   }
   const leaseUntil = new Date(now.getTime() + REFRESH_LEASE_MS);
@@ -192,7 +198,7 @@ async function waitForRotatedAccessToken<TPayload extends object>(
       current &&
       parsed &&
       !sameInstant(current.lastRotatedAt, previousLastRotatedAt) &&
-      isFresh(current, now)
+      isFresh(current, now, input.options?.minimumValidityMs)
     ) {
       return parsed.accessToken;
     }
@@ -216,9 +222,14 @@ async function failAuthentication<TPayload extends object>(
   throw input.createAuthError(failure.message);
 }
 
-function isFresh(credential: LoadedIntegrationCredential, now: Date) {
+function isFresh(
+  credential: LoadedIntegrationCredential,
+  now: Date,
+  minimumValidityMs: number | undefined,
+) {
+  const requiredValidityMs = Math.max(REFRESH_SKEW_MS, minimumValidityMs ?? 0);
   return Boolean(
-    credential.expiresAt && credential.expiresAt.getTime() - REFRESH_SKEW_MS > now.getTime(),
+    credential.expiresAt && credential.expiresAt.getTime() - requiredValidityMs > now.getTime(),
   );
 }
 

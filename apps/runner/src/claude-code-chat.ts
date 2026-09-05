@@ -83,6 +83,7 @@ import {
   GITHUB_RECONNECT_NOTICE,
   GITHUB_UNAVAILABLE_NOTICE,
   type GitHubCommandAuth,
+  githubSandboxTokenMinimumValidityMs,
   loadGitHubAuthForUser,
   shouldAppendGitHubAuthNotice,
 } from "./coding-agent-shared";
@@ -510,7 +511,9 @@ export async function runClaudeCodeChatTurn(input: {
     let github: GitHubCommandAuth | null = null;
     let githubNotice: string | null = null;
     try {
-      github = await loadGitHubAuthForUser(turn.userWorkosId);
+      github = await loadGitHubAuthForUser(turn.userWorkosId, {
+        minimumValidityMs: githubSandboxTokenMinimumValidityMs(env.codexTimeoutMs),
+      });
     } catch (error) {
       const needsReconnect = error instanceof GitHubUserAccessAuthError;
       logger.warn("GitHub sandbox auth unavailable; continuing the chat turn", {
