@@ -5,6 +5,7 @@ import {
   type PluginTreeEntry,
   parseMcpConfig,
   parsePluginCapabilities,
+  parsePluginEvents,
   parsePluginManifest,
 } from "./plugin-spec";
 
@@ -229,6 +230,49 @@ describe("parsePluginCapabilities", () => {
     );
     expect(result.definitions).toEqual([]);
     expect(result.report).toMatchObject({ present: true, status: "ignored" });
+  });
+});
+
+describe("parsePluginEvents", () => {
+  const declaration = {
+    id: "issue.created",
+    label: "Issue created",
+    description: "Starts a workflow when an issue is created.",
+    delivery: "webhook",
+    filters: [
+      {
+        id: "team",
+        label: "Team",
+        kind: "integration_resource",
+        resourceType: "team",
+        required: true,
+      },
+    ],
+  };
+
+  test("parses reviewed declarative events", () => {
+    const result = parsePluginEvents({ "so.opencompany.events": [declaration] }, { trusted: true });
+    expect(result.definitions).toEqual([declaration]);
+    expect(result.report).toEqual({ present: true, status: "parsed", issues: [] });
+  });
+
+  test("retains but ignores third-party event claims", () => {
+    const result = parsePluginEvents(
+      { "so.opencompany.events": [declaration] },
+      { trusted: false },
+    );
+    expect(result.definitions).toEqual([]);
+    expect(result.report).toMatchObject({ present: true, status: "ignored" });
+  });
+
+  test("reports malformed and duplicate declarations without rejecting the plugin", () => {
+    const result = parsePluginEvents(
+      { "so.opencompany.events": [declaration, declaration, { ...declaration, delivery: "code" }] },
+      { trusted: true },
+    );
+    expect(result.definitions).toEqual([declaration]);
+    expect(result.report.status).toBe("parsed");
+    if (result.report.status === "parsed") expect(result.report.issues).toHaveLength(2);
   });
 });
 

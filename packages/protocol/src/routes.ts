@@ -140,6 +140,7 @@ import {
   SetBrainSourceBodySchema,
   SetCapabilitySessionBudgetBodySchema,
   SetIntegrationCapabilityModeBodySchema,
+  SetPluginEventEnabledBodySchema,
   SetRepoConfigEnvBodySchema,
   SetRepoConfigSetupBodySchema,
   SetSlackBotDestinationBodySchema,
@@ -1648,6 +1649,27 @@ export const deletePluginDataRoute = createRoute({
     200: {
       description: "Persistent data metadata deleted as an explicit destructive action.",
       content: { "application/json": { schema: PluginDataDeleteEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const setPluginEventEnabledRoute = createRoute({
+  method: "post",
+  path: "/v1/plugins/{name}/events/{eventId}",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ name: ResourceIdSchema, eventId: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: SetPluginEventEnabledBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Plugin event subscription setting updated for the workspace.",
+      content: { "application/json": { schema: PluginInstallationEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -3585,6 +3607,7 @@ export type V1RouteHandlers = {
   revokePluginMcp: RouteHandler<typeof revokePluginMcpRoute>;
   refreshPluginMcp: RouteHandler<typeof refreshPluginMcpRoute>;
   deletePluginData: RouteHandler<typeof deletePluginDataRoute>;
+  setPluginEventEnabled: RouteHandler<typeof setPluginEventEnabledRoute>;
   listConversations: RouteHandler<typeof listConversationsRoute>;
   getConversation: RouteHandler<typeof getConversationRoute>;
   updateConversation: RouteHandler<typeof updateConversationRoute>;
@@ -3859,6 +3882,7 @@ export function createV1Router(
       .openapi(revokePluginMcpRoute, handlers.revokePluginMcp)
       .openapi(refreshPluginMcpRoute, handlers.refreshPluginMcp)
       .openapi(deletePluginDataRoute, handlers.deletePluginData)
+      .openapi(setPluginEventEnabledRoute, handlers.setPluginEventEnabled)
   );
 }
 
@@ -4108,6 +4132,8 @@ const placeholderPlugin = {
       envKeys: ["CONTRACT_TOKEN"],
     },
   ],
+  events: [],
+  eventModes: {},
   installReport: {
     ignoredManifestFields: [],
     skills: [
@@ -4802,6 +4828,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
             },
           ],
           stdioServers: placeholderPlugin.stdioServers,
+          events: placeholderPlugin.events,
           report: {
             ignoredManifestFields: [],
             skills: placeholderPlugin.installReport.skills,
@@ -4830,6 +4857,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
   refreshPluginMcp: (c) => c.json({ data: placeholderPlugin, meta }, 200),
   deletePluginData: (c) =>
     c.json({ data: { name: placeholderPlugin.name, deleted: true }, meta }, 200),
+  setPluginEventEnabled: (c) => c.json({ data: placeholderPlugin, meta }, 200),
   listConversations: (c) => c.json({ data: [], nextCursor: null, meta }, 200),
   getConversation: (c) => c.json({ data: placeholderConversation, meta }, 200),
   updateConversation: (c) =>

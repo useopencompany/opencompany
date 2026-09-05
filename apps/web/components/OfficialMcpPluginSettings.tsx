@@ -1,6 +1,7 @@
 "use client";
 
 import type {
+  PluginEventDefinitionDto,
   PluginImportPreviewDto,
   PluginInstallationDto,
   PluginRemoteMcpServerDto,
@@ -30,6 +31,7 @@ import {
   Sparkles,
   Unplug,
   Users,
+  Webhook,
   Wrench,
 } from "lucide-react";
 import Link from "next/link";
@@ -62,6 +64,7 @@ import {
   enableHeadlessPlugin,
   previewHeadlessPluginImport,
   refreshHeadlessPluginMcp,
+  setHeadlessPluginEventEnabled,
 } from "@/lib/headless-knowledge-commands";
 import { setIntegrationCapabilityModeAction } from "@/lib/integration-account-actions";
 import {
@@ -783,6 +786,7 @@ function OfficialMcpPluginDetailView({
         {plugin ? (
           <AccountsSection config={config} state={accountsState} canEdit={canEdit} />
         ) : null}
+        {plugin?.events.length ? <EventsSection plugin={plugin} canEdit={canEdit} /> : null}
         {plugin &&
         config.name === "github" &&
         accountsState.status === "ready" &&
@@ -802,6 +806,67 @@ function OfficialMcpPluginDetailView({
         <SkillsSection config={config} state={pluginState} previewState={previewState} />
       </SettingsContent>
     </>
+  );
+}
+
+function EventsSection({ plugin, canEdit }: { plugin: PluginInstallationDto; canEdit: boolean }) {
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+  const [pendingEventId, setPendingEventId] = useState<string | null>(null);
+
+  const toggle = (eventId: string, enabled: boolean) => {
+    setError(null);
+    setPendingEventId(eventId);
+    void setHeadlessPluginEventEnabled(plugin.name, eventId, enabled)
+      .then(() => router.refresh())
+      .catch((cause) => setError(errorMessage(cause)))
+      .finally(() => setPendingEventId(null));
+  };
+
+  return (
+    <section aria-labelledby={`${plugin.name}-events-heading`} className="flex flex-col gap-3">
+      <SectionHeading
+        id={`${plugin.name}-events-heading`}
+        icon={Webhook}
+        title="Events"
+        description="Choose which provider events may start workflows in this workspace. Events are off by default."
+      />
+      <ul className="overflow-hidden rounded-lg border border-border bg-surface">
+        {plugin.events.map((event: PluginEventDefinitionDto) => {
+          const enabled = plugin.eventModes[event.id] === true;
+          const pending = pendingEventId === event.id;
+          return (
+            <li
+              key={event.id}
+              className="flex items-center gap-3 border-b border-border px-3 py-2.5 last:border-b-0"
+            >
+              <div className="min-w-0 flex-1">
+                <p className="text-[13px] font-medium text-ink">{event.label}</p>
+                <p className="mt-0.5 text-[12px] leading-4 text-ink-subtle">{event.description}</p>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant={enabled ? "default" : "outline"}
+                disabled={!canEdit || pending}
+                aria-pressed={enabled}
+                aria-label={`${event.label}: ${enabled ? "On" : "Off"}`}
+                onClick={() => toggle(event.id, !enabled)}
+              >
+                {pending ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                {enabled ? "On" : "Off"}
+              </Button>
+            </li>
+          );
+        })}
+      </ul>
+      {!canEdit ? (
+        <p className="text-[12px] leading-4 text-ink-subtle">
+          Only workspace admins can change event subscriptions.
+        </p>
+      ) : null}
+      {error ? <SectionError title="Event setting failed" message={error} /> : null}
+    </section>
   );
 }
 

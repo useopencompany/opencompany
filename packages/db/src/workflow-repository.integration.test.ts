@@ -355,11 +355,13 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
       provider: "linear" as const,
       event: "issue_enters_triage" as const,
       integrationId: "gint_linear_1",
-      team: {
-        id: "team_1",
-        name: "Engineering",
-        key: "ENG",
-        triageStateId: "state_triage_1",
+      filters: {
+        team: {
+          id: "team_1",
+          name: "Engineering",
+          key: "ENG",
+          metadata: { triageStateId: "state_triage_1" },
+        },
       },
       prompt: "Assess the issue and recommend an owner.",
     };

@@ -88,6 +88,7 @@ const commands = vi.hoisted(() => ({
   previewHeadlessPluginImport: vi.fn(),
   refreshHeadlessPluginMcp: vi.fn(),
   revokeHeadlessPluginMcp: vi.fn(),
+  setHeadlessPluginEventEnabled: vi.fn(),
 }));
 const accountActions = vi.hoisted(() => ({
   disconnectIntegrationAccountAction: vi.fn(async () => ({ ok: true as const })),
@@ -490,6 +491,24 @@ const plugin = {
       lastDiscoveryError: null,
     },
   ],
+  events: [
+    {
+      id: "issue.created",
+      label: "Issue created",
+      description: "Starts a workflow when a Linear issue is created.",
+      delivery: "webhook",
+      filters: [
+        {
+          id: "team",
+          label: "Team",
+          kind: "integration_resource",
+          resourceType: "team",
+          required: true,
+        },
+      ],
+    },
+  ],
+  eventModes: {},
   installReport: {
     ignoredManifestFields: [],
     skills: [],
@@ -597,6 +616,7 @@ const officialPreview = {
       capabilities,
     }),
   ),
+  events: plugin.events,
   report: {
     ignoredManifestFields: [],
     skills: [],
@@ -1235,6 +1255,7 @@ describe("Linear plugin settings", () => {
     commands.importHeadlessPlugin.mockResolvedValue({ plugin, replayed: false });
     commands.previewHeadlessPluginImport.mockResolvedValue(officialPreview);
     commands.refreshHeadlessPluginMcp.mockResolvedValue(plugin);
+    commands.setHeadlessPluginEventEnabled.mockResolvedValue(plugin);
     toasts.error.mockReset();
     toasts.success.mockReset();
     accountActions.disconnectIntegrationAccountAction.mockClear();
@@ -1725,6 +1746,7 @@ describe("Linear plugin settings", () => {
     );
 
     expect(screen.getByRole("heading", { name: "Accounts" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Events" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Tools" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Skills" })).toBeInTheDocument();
     expect(screen.queryByText("gint_linear_tools")).not.toBeInTheDocument();
@@ -1755,6 +1777,26 @@ describe("Linear plugin settings", () => {
         "gint_linear_tools",
         "read",
         "ask",
+      ),
+    );
+  });
+
+  it("enables a declared event for the workspace", async () => {
+    render(
+      <LinearPluginDetailView
+        pluginState={{ status: "ready", plugin }}
+        accountsState={accountsState}
+        toolsState={toolsState}
+        canEdit
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Issue created: Off" }));
+    await waitFor(() =>
+      expect(commands.setHeadlessPluginEventEnabled).toHaveBeenCalledWith(
+        "linear",
+        "issue.created",
+        true,
       ),
     );
   });

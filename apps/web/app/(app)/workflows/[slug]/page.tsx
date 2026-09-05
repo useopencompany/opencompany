@@ -1,9 +1,10 @@
+import type { PluginEventDefinitionDto, PluginListItemDto } from "@opencompany/protocol";
 import Link from "next/link";
 import { TasksWorkflowsDisabledRoute } from "@/components/Routes";
 import { WorkflowEditor } from "@/components/WorkflowEditor";
 import { currentUser } from "@/lib/auth";
 import { getHeadlessWorkflow } from "@/lib/headless-automation-server";
-import { listHeadlessSkillCatalog } from "@/lib/headless-knowledge-server";
+import { listHeadlessPlugins, listHeadlessSkillCatalog } from "@/lib/headless-knowledge-server";
 import type { IntegrationAccountView } from "@/lib/integration-state";
 import { getPersonalAccounts } from "@/lib/integrations/personal-accounts";
 
@@ -18,10 +19,11 @@ export default async function WorkflowEditorPage({ params }: WorkflowEditorPageP
     return <TasksWorkflowsDisabledRoute />;
   }
 
-  const [workflow, skillCatalog, personalAccounts] = await Promise.all([
+  const [workflow, skillCatalog, personalAccounts, plugins] = await Promise.all([
     getHeadlessWorkflow(slug),
     listHeadlessSkillCatalog(),
     getPersonalAccounts(),
+    listHeadlessPlugins(),
   ]);
 
   if (!workflow) {
@@ -52,6 +54,13 @@ export default async function WorkflowEditorPage({ params }: WorkflowEditorPageP
       integrationId: account.integrationId,
       label: account.connectionLabel ?? account.accountName ?? account.accountEmail ?? "Linear",
     }));
+  const workflowEvents = plugins.flatMap((plugin: PluginListItemDto) =>
+    plugin.name === "linear" && plugin.status === "enabled"
+      ? plugin.events
+          .filter((event: PluginEventDefinitionDto) => plugin.eventModes[event.id] === true)
+          .map((event: PluginEventDefinitionDto) => ({ provider: plugin.name, ...event }))
+      : [],
+  );
   return (
     <WorkflowEditor
       workflow={workflow}
@@ -59,6 +68,7 @@ export default async function WorkflowEditorPage({ params }: WorkflowEditorPageP
       canEdit
       skillCatalog={skillCatalog}
       linearAccounts={linearAccounts}
+      workflowEvents={workflowEvents}
     />
   );
 }

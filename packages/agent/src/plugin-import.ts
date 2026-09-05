@@ -58,6 +58,7 @@ export async function resolvePluginImport(input: {
       stdioServers: plugin.stdioServers,
       remoteServers: plugin.remoteServers,
       capabilities: plugin.capabilities,
+      events: plugin.events,
       report: plugin.report,
     };
   } catch (error) {

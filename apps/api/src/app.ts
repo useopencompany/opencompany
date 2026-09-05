@@ -1463,6 +1463,18 @@ export function createApiApp(input: CreateApiAppInput) {
       const result = await input.pluginImports.deleteData(actor, name);
       return c.json({ data: { name, deleted: result.deleted }, meta }, 200);
     },
+    setPluginEventEnabled: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const params = c.req.valid("param");
+      const plugin = await input.pluginImports.setEventEnabled(
+        actor,
+        params.name,
+        params.eventId,
+        c.req.valid("json").enabled,
+      );
+      return c.json({ data: publicPluginInstallation(plugin), meta }, 200);
+    },
     listConversations: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);

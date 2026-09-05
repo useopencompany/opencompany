@@ -45,6 +45,7 @@ export type PluginManifestResult = {
 };
 
 export const OPENCOMPANY_CAPABILITIES_EXTENSION = "so.opencompany.capabilities";
+export const OPENCOMPANY_EVENTS_EXTENSION = "so.opencompany.events";
 
 export type PluginCapabilityId = "read" | "query" | "draft" | "write";
 export type PluginCapabilityMode = "on" | "ask" | "off";
@@ -67,6 +68,32 @@ export type PluginCapabilitiesResult = {
   // gateway registration record.
   definitions: PluginCapabilityDefinition[];
   report: PluginCapabilitiesReport;
+};
+
+export type PluginEventFilterDefinition = {
+  id: string;
+  label: string;
+  kind: "integration_resource";
+  resourceType: string;
+  required: boolean;
+};
+
+export type PluginEventDefinition = {
+  id: string;
+  label: string;
+  description: string;
+  delivery: "webhook";
+  filters: PluginEventFilterDefinition[];
+};
+
+export type PluginEventsReport =
+  | { status: "absent" }
+  | { present: true; status: "ignored"; reason: string }
+  | { present: true; status: "parsed"; issues: string[] };
+
+export type PluginEventsResult = {
+  definitions: PluginEventDefinition[];
+  report: PluginEventsReport;
 };
 
 // Manifest name rule: 1-64 chars, lowercase alphanumerics, hyphens, and periods, alphanumeric
@@ -280,6 +307,112 @@ export function parsePluginCapabilities(
     })),
     report: { present: true, status: "parsed", issues },
   };
+}
+
+// Event declarations define a vocabulary only. They never provide executable ingress code, and
+// are honored exclusively for packages from the same reviewed source gate as capabilities.
+export function parsePluginEvents(
+  extensions: Record<string, unknown> | undefined,
+  options: { trusted: boolean },
+): PluginEventsResult {
+  const value = extensions?.[OPENCOMPANY_EVENTS_EXTENSION];
+  if (value === undefined) return { definitions: [], report: { status: "absent" } };
+  if (!options.trusted) {
+    return {
+      definitions: [],
+      report: {
+        present: true,
+        status: "ignored",
+        reason: "Event definitions are honored only from a reviewed official package source.",
+      },
+    };
+  }
+  if (!Array.isArray(value) || value.length > 64) {
+    return {
+      definitions: [],
+      report: {
+        present: true,
+        status: "parsed",
+        issues: [
+          `Extension \`${OPENCOMPANY_EVENTS_EXTENSION}\` must be an array with at most 64 events.`,
+        ],
+      },
+    };
+  }
+
+  const issues: string[] = [];
+  const definitions: PluginEventDefinition[] = [];
+  const ids = new Set<string>();
+  for (const [index, entry] of value.entries()) {
+    if (!isRecord(entry)) {
+      issues.push(`Event at index ${index} must be an object.`);
+      continue;
+    }
+    const id = nonEmptyBoundedString(entry.id, 128);
+    const label = nonEmptyBoundedString(entry.label, 120);
+    const description = nonEmptyBoundedString(entry.description, 500);
+    if (!id || !/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u.test(id)) {
+      issues.push(`Event at index ${index} has an invalid \`id\`.`);
+      continue;
+    }
+    if (ids.has(id)) {
+      issues.push(`Duplicate event \`${id}\` was ignored.`);
+      continue;
+    }
+    if (!label || !description || entry.delivery !== "webhook") {
+      issues.push(`Event \`${id}\` needs a label, description, and \`webhook\` delivery mode.`);
+      continue;
+    }
+    if (!Array.isArray(entry.filters) || entry.filters.length > 16) {
+      issues.push(`Event \`${id}.filters\` must be an array with at most 16 fields.`);
+      continue;
+    }
+    const filters: PluginEventFilterDefinition[] = [];
+    const filterIds = new Set<string>();
+    let valid = true;
+    for (const [filterIndex, candidate] of entry.filters.entries()) {
+      if (!isRecord(candidate)) {
+        issues.push(`Event \`${id}\` filter at index ${filterIndex} must be an object.`);
+        valid = false;
+        continue;
+      }
+      const filterId = nonEmptyBoundedString(candidate.id, 64);
+      const filterLabel = nonEmptyBoundedString(candidate.label, 120);
+      const resourceType = nonEmptyBoundedString(candidate.resourceType, 64);
+      if (
+        !filterId ||
+        !/^[a-z][a-z0-9_]*$/u.test(filterId) ||
+        filterIds.has(filterId) ||
+        !filterLabel ||
+        candidate.kind !== "integration_resource" ||
+        !resourceType ||
+        !/^[a-z][a-z0-9_]*$/u.test(resourceType) ||
+        typeof candidate.required !== "boolean"
+      ) {
+        issues.push(`Event \`${id}\` filter at index ${filterIndex} is invalid.`);
+        valid = false;
+        continue;
+      }
+      filterIds.add(filterId);
+      filters.push({
+        id: filterId,
+        label: filterLabel,
+        kind: "integration_resource",
+        resourceType,
+        required: candidate.required,
+      });
+    }
+    if (!valid) continue;
+    ids.add(id);
+    definitions.push({ id, label, description, delivery: "webhook", filters });
+  }
+  return { definitions, report: { present: true, status: "parsed", issues } };
+}
+
+function nonEmptyBoundedString(value: unknown, maxLength: number) {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized && normalized.length <= maxLength ? normalized : null;
 }
 
 // ---------------------------------------------------------------------------

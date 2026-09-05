@@ -347,6 +347,19 @@ export async function deleteHeadlessPluginData(name: string, options: ClientOpti
   return responseData(response, "Plugin data deletion failed");
 }
 
+export async function setHeadlessPluginEventEnabled(
+  name: string,
+  eventId: string,
+  enabled: boolean,
+  options: ClientOptions = {},
+) {
+  const response = await knowledgeClient(options).v1.plugins[":name"].events[":eventId"].$post({
+    param: { name, eventId },
+    json: { enabled },
+  });
+  return responseData(response, "Plugin event update failed");
+}
+
 function knowledgeClient(options: ClientOptions) {
   const baseUrl = options.baseUrl ?? headlessChatApiBaseUrl();
   return createApiClient(baseUrl, {

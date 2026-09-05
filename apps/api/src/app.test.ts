@@ -1018,6 +1018,7 @@ describe("canonical Hono API", () => {
       capabilities: [
         { id: "read", label: "Read tools", defaultMode: "on", tools: ["list_issues"] },
       ],
+      events: installation.events,
       report: {
         ignoredManifestFields: [],
         skills: [],
@@ -1051,10 +1052,24 @@ describe("canonical Hono API", () => {
     const revokeMcp = vi.fn(async () => ({ ...installation, mcpApprovedIntegrity: null }));
     const archive = vi.fn(async () => undefined);
     const deleteData = vi.fn(async () => ({ deleted: true }));
+    const setEventEnabled = vi.fn(async () => ({
+      ...installation,
+      eventModes: { "issue.created": true },
+    }));
     const refresh = vi.fn(async () => undefined);
     const app = testApp(fakeRepository(), {
       pluginImports: fakePluginImportService(
-        { install, list, get, setStatus, approveMcp, revokeMcp, archive, deleteData },
+        {
+          install,
+          list,
+          get,
+          setStatus,
+          setEventEnabled,
+          approveMcp,
+          revokeMcp,
+          archive,
+          deleteData,
+        },
         { resolve: vi.fn(async () => resolved) },
         { refresh },
       ),
@@ -1080,6 +1095,7 @@ describe("canonical Hono API", () => {
             capabilities: [{ id: "read", tools: ["list_issues"] }],
           },
         ],
+        events: [{ id: "issue.created" }],
       },
     });
     expect(JSON.stringify(previewBody)).not.toContain("private plugin package");
@@ -1155,6 +1171,13 @@ describe("canonical Hono API", () => {
       app.request("/v1/plugins/quality-tools/disable", { method: "POST" }),
     ).resolves.toMatchObject({ status: 200 });
     await expect(
+      app.request("/v1/plugins/quality-tools/events/issue.created", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: true }),
+      }),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
       app.request("/v1/plugins/quality-tools/data/delete", { method: "POST" }),
     ).resolves.toMatchObject({ status: 200 });
     await expect(
@@ -1162,6 +1185,12 @@ describe("canonical Hono API", () => {
     ).resolves.toMatchObject({ status: 200 });
 
     expect(setStatus).toHaveBeenCalledWith({ actor, name: "quality-tools", status: "disabled" });
+    expect(setEventEnabled).toHaveBeenCalledWith({
+      actor,
+      name: "quality-tools",
+      eventId: "issue.created",
+      enabled: true,
+    });
     expect(approveMcp).toHaveBeenCalledWith({
       actor,
       name: "quality-tools",
@@ -5452,6 +5481,7 @@ function fakePluginImportService(
     list: unexpected,
     get: unexpected,
     setStatus: unexpected,
+    setEventEnabled: unexpected,
     approveMcp: unexpected,
     revokeMcp: unexpected,
     archive: unexpected,
@@ -5615,6 +5645,16 @@ function fakePluginInstallation(): PluginInstallation {
         lastDiscoveryError: "Provider discovery timed out.",
       },
     ],
+    events: [
+      {
+        id: "issue.created",
+        label: "Issue created",
+        description: "Starts when an issue is created.",
+        delivery: "webhook",
+        filters: [],
+      },
+    ],
+    eventModes: {},
     installReport: {
       ignoredManifestFields: [],
       skills: [],

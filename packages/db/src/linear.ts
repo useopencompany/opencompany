@@ -9,6 +9,7 @@ import {
   type LinearEventAction,
   type LinearEventEntityType,
   linearIssueEvents,
+  plugins,
   wikiSources,
   workflowEventRuns,
   workflows,
@@ -64,7 +65,7 @@ export type LinearIntegrationForOrganization = {
   status: IntegrationStatus;
 };
 
-export type LinearWorkflowTriggerRoute = {
+export type WorkflowEventTriggerRoute = {
   workflowId: string;
   workspaceId: string;
   userWorkosId: string;
@@ -72,7 +73,10 @@ export type LinearWorkflowTriggerRoute = {
   workflowName: string;
   prompt: string;
   harnessSpec: HarnessSpec;
-  triageStateId: string;
+  provider: string;
+  event: string;
+  filters: Record<string, { id: string }>;
+  legacyTriageStateId?: string;
 };
 
 export type LinearBrainSourceRoute = {
@@ -270,13 +274,13 @@ export async function insertLinearIssueEvents(
   return rows.length;
 }
 
-export async function listLinearWorkflowTriggerRoutes(
+export async function listWorkflowEventTriggerRoutes(
   input: {
+    provider: string;
     integrations: readonly LinearIntegrationForOrganization[];
-    teamId: string;
   },
   db: DbLike = getDb(),
-): Promise<LinearWorkflowTriggerRoute[]> {
+): Promise<WorkflowEventTriggerRoute[]> {
   const connected = new Map(
     input.integrations
       .filter((integration) => integration.status === "connected")
@@ -303,6 +307,39 @@ export async function listLinearWorkflowTriggerRoutes(
         inArray(workflows.eventUserWorkosId, [...new Set(connected.values())]),
       ),
     );
+  if (rows.length === 0) return [];
+  const workspaceIds = [
+    ...new Set((rows as Array<{ workspaceId: string }>).map((row) => row.workspaceId)),
+  ];
+
+  const pluginRows = await db
+    .select({
+      workspaceId: plugins.workspaceId,
+      name: plugins.name,
+      events: plugins.events,
+      eventModes: plugins.eventModes,
+    })
+    .from(plugins)
+    .where(
+      and(
+        inArray(plugins.workspaceId, workspaceIds),
+        eq(plugins.name, input.provider),
+        eq(plugins.status, "enabled"),
+        isNull(plugins.archivedAt),
+      ),
+    );
+  const enabledEvents = new Set<string>();
+  for (const row of pluginRows as Array<{
+    workspaceId: string;
+    events: Array<{ id?: unknown }>;
+    eventModes: Record<string, unknown>;
+  }>) {
+    for (const event of Array.isArray(row.events) ? row.events : []) {
+      if (typeof event.id === "string" && row.eventModes?.[event.id] === true) {
+        enabledEvents.add(`${row.workspaceId}:${event.id}`);
+      }
+    }
+  }
 
   return rows.flatMap(
     (row: {
@@ -314,13 +351,14 @@ export async function listLinearWorkflowTriggerRoutes(
       config: unknown;
       harnessSpec: HarnessSpec | null;
     }) => {
-      const config = parseLinearWorkflowEventConfig(row.config);
+      const config = parseWorkflowEventConfig(row.config);
       if (
         !config ||
+        config.provider !== input.provider ||
         !row.userWorkosId ||
         !row.harnessSpec ||
         connected.get(config.integrationId) !== row.userWorkosId ||
-        config.team.id !== input.teamId
+        (!config.legacyTriageStateId && !enabledEvents.has(`${row.workspaceId}:${config.event}`))
       ) {
         return [];
       }
@@ -333,16 +371,21 @@ export async function listLinearWorkflowTriggerRoutes(
           workflowName: row.workflowName,
           prompt: config.prompt,
           harnessSpec: row.harnessSpec,
-          triageStateId: config.team.triageStateId,
+          provider: config.provider,
+          event: config.event,
+          filters: config.filters,
+          ...(config.legacyTriageStateId
+            ? { legacyTriageStateId: config.legacyTriageStateId }
+            : {}),
         },
       ];
     },
   );
 }
 
-export async function enqueueLinearWorkflowEventRuns(
+export async function enqueueWorkflowEventRuns(
   input: {
-    routes: readonly LinearWorkflowTriggerRoute[];
+    routes: readonly WorkflowEventTriggerRoute[];
     deliveryId: string;
     eventAt: Date;
     issue: Record<string, unknown>;
@@ -361,8 +404,8 @@ export async function enqueueLinearWorkflowEventRuns(
         userWorkosId: route.userWorkosId,
         workflowSlug: route.workflowSlug,
         workflowName: route.workflowName,
-        provider: "linear",
-        eventType: "issue_enters_triage",
+        provider: route.provider,
+        eventType: route.event,
         deliveryId: input.deliveryId,
         goal: linearWorkflowEventGoal(route.prompt, input.issue, input.issueUrl),
         harnessSpec: route.harnessSpec,
@@ -397,25 +440,71 @@ export function isLinearIssueEnteringTriage(
   return input.action === "create" || linearUpdatedFromHasStatusChange(input.updatedFrom);
 }
 
-function parseLinearWorkflowEventConfig(value: unknown) {
+export function linearWorkflowRouteMatchesEvent(
+  route: WorkflowEventTriggerRoute,
+  input: {
+    type?: string;
+    action?: string;
+    teamId?: string;
+    data?: Record<string, unknown>;
+    updatedFrom?: Record<string, unknown>;
+  },
+) {
+  if (route.provider !== "linear") return false;
+  if (route.filters.team && route.filters.team.id !== input.teamId) return false;
+  if (route.event === "issue_enters_triage" && route.legacyTriageStateId) {
+    return isLinearIssueEnteringTriage(input, route.legacyTriageStateId);
+  }
+  return route.event === "issue.created" && input.type === "Issue" && input.action === "create";
+}
+
+export function parseWorkflowEventConfig(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
-  const team = asRecord(record.team);
   const integrationId = asNonEmptyString(record.integrationId);
+  const provider = asNonEmptyString(record.provider);
+  const event = asNonEmptyString(record.event);
+  const prompt = asNonEmptyString(record.prompt);
+  if (!integrationId || !provider || !event || !prompt) return null;
+  const filtersRecord = asRecord(record.filters);
+  if (filtersRecord) {
+    const filters = Object.fromEntries(
+      Object.entries(filtersRecord).flatMap(([id, filter]) => {
+        const filterId = asNonEmptyString(asRecord(filter)?.id);
+        return filterId ? [[id, { id: filterId }]] : [];
+      }),
+    );
+    if (Object.keys(filters).length !== Object.keys(filtersRecord).length) return null;
+    const legacyTriageStateId =
+      provider === "linear" && event === "issue_enters_triage"
+        ? asNonEmptyString(asRecord(asRecord(filtersRecord.team)?.metadata)?.triageStateId)
+        : null;
+    if (provider === "linear" && event === "issue_enters_triage" && !legacyTriageStateId) {
+      return null;
+    }
+    return {
+      provider,
+      event,
+      integrationId,
+      filters,
+      prompt,
+      ...(legacyTriageStateId ? { legacyTriageStateId } : {}),
+    };
+  }
+  const team = asRecord(record.team);
   const teamId = asNonEmptyString(team?.id);
   const triageStateId = asNonEmptyString(team?.triageStateId);
-  const prompt = asNonEmptyString(record.prompt);
-  if (
-    record.provider !== "linear" ||
-    record.event !== "issue_enters_triage" ||
-    !integrationId ||
-    !teamId ||
-    !triageStateId ||
-    !prompt
-  ) {
+  if (provider !== "linear" || event !== "issue_enters_triage" || !teamId || !triageStateId) {
     return null;
   }
-  return { integrationId, team: { id: teamId, triageStateId }, prompt };
+  return {
+    provider,
+    event,
+    integrationId,
+    filters: { team: { id: teamId } },
+    prompt,
+    legacyTriageStateId: triageStateId,
+  };
 }
 
 function linearWorkflowEventGoal(

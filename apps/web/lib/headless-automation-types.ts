@@ -13,10 +13,13 @@ export type WorkflowTrigger =
   | { type: "manual" }
   | {
       type: "event";
-      provider: "linear";
-      event: "issue_enters_triage";
+      provider: string;
+      event: string;
       integrationId: string;
-      team: { id: string; name: string; key?: string; triageStateId: string };
+      filters: Record<
+        string,
+        { id: string; name: string; key?: string; metadata?: Record<string, string> }
+      >;
       prompt: string;
     }
   | {

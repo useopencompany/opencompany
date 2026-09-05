@@ -49,10 +49,13 @@ export type WorkflowTriggerInput =
   | { type: "manual" }
   | {
       type: "event";
-      provider: "linear";
-      event: "issue_enters_triage";
+      provider: string;
+      event: string;
       integrationId: string;
-      team: { id: string; name: string; key?: string; triageStateId: string };
+      filters: Record<
+        string,
+        { id: string; name: string; key?: string; metadata?: Record<string, string> }
+      >;
       prompt?: string | null;
     }
   | {
@@ -66,10 +69,13 @@ export type WorkflowTriggerDetail =
   | { type: "manual" }
   | {
       type: "event";
-      provider: "linear";
-      event: "issue_enters_triage";
+      provider: string;
+      event: string;
       integrationId: string;
-      team: { id: string; name: string; key?: string; triageStateId: string };
+      filters: Record<
+        string,
+        { id: string; name: string; key?: string; metadata?: Record<string, string> }
+      >;
       prompt: string;
     }
   | {
@@ -492,10 +498,13 @@ function normalizeWorkflowTriggerInput(
         | { type: "manual" }
         | {
             type: "event";
-            provider: "linear";
-            event: "issue_enters_triage";
+            provider: string;
+            event: string;
             integrationId: string;
-            team: { id: string; name: string; key?: string; triageStateId: string };
+            filters: Record<
+              string,
+              { id: string; name: string; key?: string; metadata?: Record<string, string> }
+            >;
             prompt: string;
           }
         | { type: "schedule"; cron: string; timezone: string; prompt: string };
@@ -504,20 +513,16 @@ function normalizeWorkflowTriggerInput(
   if (!input || input.type === "manual") return { ok: true, value: { type: "manual" } };
   if (input.type === "event") {
     const integrationId = input.integrationId.trim();
-    const teamId = input.team.id.trim();
-    const teamName = input.team.name.trim();
-    const triageStateId = input.team.triageStateId.trim();
-    const teamKey = input.team.key?.trim();
-    const prompt = input.prompt?.trim() || "Review and triage this Linear issue.";
+    const provider = input.provider.trim();
+    const event = input.event.trim();
+    const prompt = input.prompt?.trim() || "Handle this event.";
     if (
-      input.provider !== "linear" ||
-      input.event !== "issue_enters_triage" ||
+      !/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/u.test(provider) ||
+      !/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u.test(event) ||
       !integrationId ||
-      !teamId ||
-      !teamName ||
-      !triageStateId
+      Object.values(input.filters).some((filter) => !filter.id.trim() || !filter.name.trim())
     ) {
-      return { ok: false, message: "Linear event triggers need a connected account and team." };
+      return { ok: false, message: "Event triggers need a connected account and valid filters." };
     }
     if (prompt.length > WORKFLOW_SCHEDULE_PROMPT_MAX_LENGTH) {
       return {
@@ -529,15 +534,10 @@ function normalizeWorkflowTriggerInput(
       ok: true,
       value: {
         type: "event",
-        provider: "linear",
-        event: "issue_enters_triage",
+        provider,
+        event,
         integrationId,
-        team: {
-          id: teamId,
-          name: teamName,
-          triageStateId,
-          ...(teamKey ? { key: teamKey } : {}),
-        },
+        filters: input.filters,
         prompt,
       },
     };

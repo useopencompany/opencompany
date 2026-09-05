@@ -289,6 +289,10 @@ describe("resolvePlugin", () => {
       status: "parsed",
       issues: [],
     });
+    expect(plugin.events).toEqual([
+      expect.objectContaining({ id: "issue.created", delivery: "webhook" }),
+    ]);
+    expect(plugin.report.events).toEqual({ present: true, status: "parsed", issues: [] });
   });
 
   it("loads the official Granola package with sensitive meeting access behind Ask", async () => {

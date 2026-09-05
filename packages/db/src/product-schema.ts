@@ -6,6 +6,7 @@ import {
   type ChatAttachmentFormat,
   type ConversationRuntimeStatus,
   type PluginCapabilityDefinition,
+  type PluginEventDefinition,
   type PluginGatewayDiscoveredTool,
   type PluginInstallReport,
   type PluginManifest,
@@ -81,10 +82,13 @@ export type TaskStatus = "queued" | "running" | "waiting" | "succeeded" | "faile
 export type WorkflowStatus = "draft" | "active";
 export type WorkflowTrigger = "manual" | "slack" | "linear" | "schedule" | "event";
 export type WorkflowEventConfig = {
-  provider: "linear";
-  event: "issue_enters_triage";
+  provider: string;
+  event: string;
   integrationId: string;
-  team: { id: string; name: string; key?: string; triageStateId: string };
+  filters: Record<
+    string,
+    { id: string; name: string; key?: string; metadata?: Record<string, string> }
+  >;
   prompt: string;
 };
 export type WorkflowEventRunStatus = "pending" | "created" | "ignored" | "failed";
@@ -3311,6 +3315,11 @@ export const plugins = productSchema.table(
       .$type<PluginStdioServer[]>()
       .notNull()
       .default(sql`'[]'::jsonb`),
+    events: jsonb("events").$type<PluginEventDefinition[]>().notNull().default(sql`'[]'::jsonb`),
+    eventModes: jsonb("event_modes")
+      .$type<Record<string, boolean>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
     installReport: jsonb("install_report").$type<PluginInstallReport>().notNull(),
     mcpApprovedIntegrity: text("mcp_approved_integrity"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -3356,6 +3365,11 @@ export const plugins = productSchema.table(
     stdioMcpServersCheck: check(
       "plugins_stdio_mcp_servers_check",
       sql`jsonb_typeof(${table.stdioMcpServers}) = 'array'`,
+    ),
+    eventsCheck: check("plugins_events_check", sql`jsonb_typeof(${table.events}) = 'array'`),
+    eventModesCheck: check(
+      "plugins_event_modes_check",
+      sql`jsonb_typeof(${table.eventModes}) = 'object'`,
     ),
     installReportCheck: check(
       "plugins_install_report_check",
@@ -3799,7 +3813,7 @@ export const workflowEventRuns = productSchema.table(
     taskIdx: index("opencompany_workflow_event_runs_task_idx").on(table.taskId),
     providerCheck: check(
       "opencompany_workflow_event_runs_provider_check",
-      sql`${table.provider} IN ('linear')`,
+      sql`${table.provider} ~ '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$' AND char_length(${table.provider}) <= 64`,
     ),
     statusCheck: check(
       "opencompany_workflow_event_runs_status_check",

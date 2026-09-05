@@ -115,6 +115,10 @@ type PluginReportView = {
     | { status: "absent" }
     | { present: true; status: "ignored"; reason: string }
     | { present: true; status: "parsed"; issues: string[] };
+  events?:
+    | { status: "absent" }
+    | { present: true; status: "ignored"; reason: string }
+    | { present: true; status: "parsed"; issues: string[] };
   collisions: PluginCollisionView[];
 };
 
@@ -1350,13 +1354,16 @@ function ValidationReport({ report }: { report: PluginReportView }) {
       : [];
   const capabilityIssues =
     report.capabilities?.status === "parsed" ? report.capabilities.issues : [];
+  const eventIssues = report.events?.status === "parsed" ? report.events.issues : [];
   const hasMessages =
     report.ignoredManifestFields.length > 0 ||
     skipped.length > 0 ||
     report.mcp.status === "disabled" ||
     mcpIssues.length > 0 ||
     report.capabilities?.status === "ignored" ||
-    capabilityIssues.length > 0;
+    capabilityIssues.length > 0 ||
+    report.events?.status === "ignored" ||
+    eventIssues.length > 0;
   return (
     <section className="flex flex-col gap-2">
       <SectionLabel>Validation report</SectionLabel>
@@ -1389,6 +1396,12 @@ function ValidationReport({ report }: { report: PluginReportView }) {
           ) : null}
           {capabilityIssues.map((issue) => (
             <ReportRow key={`capability-${issue}`} label={`Capabilities: ${issue}`} />
+          ))}
+          {report.events?.status === "ignored" ? (
+            <ReportRow label={`Events ignored: ${report.events.reason}`} />
+          ) : null}
+          {eventIssues.map((issue) => (
+            <ReportRow key={`event-${issue}`} label={`Events: ${issue}`} />
           ))}
         </ul>
       )}

@@ -257,7 +257,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     category: "productivity",
     featured: true,
     source:
-      "https://github.com/useopencompany/plugins/tree/775df7a9a37f5585b9b87a26533ba6ed1035f1dc/linear",
+      "https://github.com/useopencompany/plugins/tree/9addd067ff8311fb3dcbc51285e4a3e671577838/linear",
     connectionProvider: "linear",
     connectHref: "/api/integrations/linear/start?returnTo=/settings/plugins/linear",
     accountDescription: "The account opencompany uses when you run Linear tools.",
