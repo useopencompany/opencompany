@@ -51,7 +51,10 @@ The surface contains ten reviewed tools. Downloads and uploads are limited to 5 
 natural-language reads accept supported documents up to 20 MB and return at most 200 KB of extracted
 Markdown. Focused Google Doc edits replace exact text and can be limited to one tab. Full-content
 replacement is deliberately separate because it removes existing body formatting and embedded
-content from the selected tab; both operations require explicit user approval. Unsupported,
+content from the selected tab before rebuilding the document. Pass Markdown to create native Google
+Docs headings, bullets, numbered lists, checkboxes, bold, italic, strikethrough, links, and code
+formatting; a legacy plain-text mode remains available for deliberately unformatted documents. Both
+edit operations require explicit user approval. Unsupported,
 encrypted, scanned, or image-only files fail clearly. The plugin does not expose deleting, moving,
 or sharing tools. Operators use the stable Drive and Docs APIs; the Google Drive MCP API
 (`drivemcp.googleapis.com`) is not used or required.

@@ -400,9 +400,108 @@ describe("opencompany Google Drive MCP server", () => {
         viewUrl: "https://docs.google.com/document/d/doc_1/edit?tab=t.child",
         tabId: "t.child",
         changed: true,
+        format: "plain_text",
         revisionId: "rev_8",
       },
     });
+  });
+
+  it("replaces literal Markdown with native Google Docs formatting", async () => {
+    mocks.apiCall
+      .mockResolvedValueOnce({
+        documentId: "doc_1",
+        revisionId: "rev_7",
+        tabs: [
+          {
+            tabProperties: { tabId: "t.0" },
+            documentTab: {
+              body: { content: [{ startIndex: 1, endIndex: 20, paragraph: {} }] },
+            },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        documentId: "doc_1",
+        writeControl: { requiredRevisionId: "rev_8" },
+      });
+    const response = await service().handle(
+      request(
+        { type: "tools/call", tool: "replace_document_contents", capability: "write" },
+        "tools/call",
+        {
+          name: "replace_document_contents",
+          arguments: {
+            fileId: "doc_1",
+            markdown: "# Sat, September 5th\n\n## Tasks\n\n- [ ] open source **repo**",
+          },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await responseJson(response);
+    expect(body.result).not.toMatchObject({ isError: true });
+    const update = mocks.apiCall.mock.calls[1]?.[3]?.body as {
+      requests: Array<Record<string, any>>;
+      writeControl: { requiredRevisionId: string };
+    };
+    expect(update.requests[1]).toEqual({
+      insertText: {
+        location: { index: 1, tabId: "t.0" },
+        text: "Sat, September 5th\nTasks\nopen source repo",
+      },
+    });
+    expect(update.requests).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          updateParagraphStyle: expect.objectContaining({
+            paragraphStyle: { namedStyleType: "TITLE" },
+          }),
+        }),
+        expect.objectContaining({
+          updateParagraphStyle: expect.objectContaining({
+            paragraphStyle: { namedStyleType: "HEADING_1" },
+          }),
+        }),
+        expect.objectContaining({
+          createParagraphBullets: expect.objectContaining({
+            bulletPreset: "BULLET_CHECKBOX",
+          }),
+        }),
+        expect.objectContaining({
+          updateTextStyle: expect.objectContaining({ textStyle: { bold: true } }),
+        }),
+      ]),
+    );
+    expect(update.writeControl).toEqual({ requiredRevisionId: "rev_7" });
+    expect(JSON.parse(body.result.content[0].text)).toEqual({
+      document: {
+        id: "doc_1",
+        viewUrl: "https://docs.google.com/document/d/doc_1/edit?tab=t.0",
+        tabId: "t.0",
+        changed: true,
+        format: "markdown",
+        revisionId: "rev_8",
+      },
+    });
+  });
+
+  it("rejects ambiguous full-document replacement input before writing", async () => {
+    const response = await service().handle(
+      request(
+        { type: "tools/call", tool: "replace_document_contents", capability: "write" },
+        "tools/call",
+        {
+          name: "replace_document_contents",
+          arguments: { fileId: "doc_1", text: "plain", markdown: "**rich**" },
+        },
+      ),
+    );
+
+    const body = await responseJson(response);
+    expect(body.result).toMatchObject({ isError: true });
+    expect(body.result.content[0].text).toContain('Exactly one of "markdown" or "text"');
+    expect(mocks.apiCall).not.toHaveBeenCalled();
   });
 
   it("returns a trusted reconnect envelope when Google revokes access during a call", async () => {

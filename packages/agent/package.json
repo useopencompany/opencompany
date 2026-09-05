@@ -46,9 +46,13 @@
     "drizzle-orm": "^0.45.2",
     "jose": "^5.10.0",
     "mcp-handler": "^1.1.0",
+    "mdast-util-from-markdown": "^2.0.3",
+    "mdast-util-gfm": "^3.1.0",
+    "micromark-extension-gfm": "^3.0.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/mdast": "^4.0.0",
     "@types/node": "^25.9.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
