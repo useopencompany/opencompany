@@ -66,6 +66,7 @@ export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
     | "stripe"
     | "x_account";
   connectHref: string;
+  connectionUnavailableReason?: string;
   accountLabel?: string;
   accountDescription: string;
   ingestionHref?: string;
@@ -313,6 +314,8 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
       "https://github.com/useopencompany/plugins/tree/14e7f6d3e978103c5427c725229ae93bc3e47f8c/vercel",
     connectionProvider: "vercel",
     connectHref: "/api/integrations/vercel/start?returnTo=/settings/plugins/vercel",
+    connectionUnavailableReason:
+      "Vercel requires MCP clients and their production callback URLs to be approved before they can connect. opencompany is awaiting that approval.",
     accountDescription: "The account opencompany uses when you run Vercel tools.",
   },
   signoz: {

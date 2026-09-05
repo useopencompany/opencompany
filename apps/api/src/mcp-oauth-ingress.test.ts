@@ -208,8 +208,8 @@ describe("remote MCP OAuth ingress", () => {
     vi.restoreAllMocks();
   });
 
-  it("starts each provider through the injected db and redirects to authorization", async () => {
-    for (const provider of PROVIDERS) {
+  it("starts each available provider through the injected db and redirects to authorization", async () => {
+    for (const provider of PROVIDERS.filter((candidate) => candidate !== "vercel")) {
       vi.mocked(flowMocks[provider].start).mockResolvedValue({
         status: "redirect",
         redirectUrl: `https://auth.example.com/${provider}`,
@@ -233,7 +233,7 @@ describe("remote MCP OAuth ingress", () => {
   });
 
   it("short-circuits an already-authorized server to the connected status", async () => {
-    for (const provider of PROVIDERS) {
+    for (const provider of PROVIDERS.filter((candidate) => candidate !== "vercel")) {
       vi.mocked(flowMocks[provider].start).mockResolvedValue({
         status: "connected",
         redirectUrl: null,
@@ -259,6 +259,20 @@ describe("remote MCP OAuth ingress", () => {
     expect(response.headers.get("location")).toBe(
       "https://opencompany.example.com/settings?integration=neon&setup=error&reason=start_failed",
     );
+  });
+
+  it("does not start Vercel OAuth until the provider approves the production callback", async () => {
+    const response = await ingress().start(
+      "vercel",
+      new Request(
+        "https://api.example.com/integrations/vercel/start?returnTo=/settings/plugins/vercel",
+      ),
+    );
+
+    expect(response.headers.get("location")).toBe(
+      "https://opencompany.example.com/settings/plugins/vercel?integration=vercel&setup=error&reason=provider_approval_required",
+    );
+    expect(startVercelMcpOAuth).not.toHaveBeenCalled();
   });
 
   it("redirects anonymous browsers to the web sign-in", async () => {
