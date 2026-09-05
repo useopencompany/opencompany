@@ -236,6 +236,7 @@ describe("headless protocol", () => {
       "/v1/plugins/{name}/mcp/revoke",
       "/v1/plugins/{name}/mcp/refresh",
       "/v1/plugins/{name}/data/delete",
+      "/v1/plugins/{name}/events/{eventId}",
     ]);
     expect(document.components?.securitySchemes).toHaveProperty("bearerAuth");
   });

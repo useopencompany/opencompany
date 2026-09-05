@@ -340,6 +340,7 @@ describe("v1 protocol contract", () => {
       "/v1/plugins/{name}/mcp/revoke",
       "/v1/plugins/{name}/mcp/refresh",
       "/v1/plugins/{name}/data/delete",
+      "/v1/plugins/{name}/events/{eventId}",
     ]);
     expect(document.paths?.["/v1/skills"]).toHaveProperty("get");
     expect(document.paths?.["/v1/skills"]).toHaveProperty("post");
