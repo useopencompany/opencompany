@@ -1935,13 +1935,46 @@ async function extractAssetText(format: string, bytes: Buffer): Promise<string> 
 
 // Anthropic prompt-cache breakpoint, forwarded through the AI Gateway as a
 // message-level provider option. The loop places two static breakpoints on the
-// fixed prefix (system prompt, source-content user message) and prepareStep
-// moves a third onto the newest message every step, so each step reads the
-// whole prior transcript from cache (~0.1x input price) instead of re-paying
-// it in full. Anthropic allows at most 4 breakpoints per request.
+// fixed prefix (system instructions, source-content user message) and
+// prepareStep moves a third onto the newest message every step, so each step
+// reads the whole prior transcript from cache (~0.1x input price) instead of
+// re-paying it in full. Anthropic allows at most 4 breakpoints per request.
 const ANTHROPIC_EPHEMERAL_CACHE_PROVIDER_OPTIONS = {
   anthropic: { cacheControl: { type: "ephemeral" as const } },
 };
+
+export function buildBrainIngestModelPrompt(input: {
+  system: string;
+  prompt: string;
+  files?: readonly { mediaType: string; data: Buffer }[];
+}): { instructions: ai.Instructions; messages: ai.ModelMessage[] } {
+  return {
+    // AI SDK 7 rejects system-role entries in `messages` by default. Keep the
+    // trusted system prompt in the dedicated instructions boundary while
+    // retaining its Anthropic cache breakpoint.
+    instructions: {
+      role: "system",
+      content: input.system,
+      providerOptions: ANTHROPIC_EPHEMERAL_CACHE_PROVIDER_OPTIONS,
+    },
+    messages: [
+      {
+        role: "user",
+        content: input.files?.length
+          ? [
+              { type: "text" as const, text: input.prompt },
+              ...input.files.map((file) => ({
+                type: "image" as const,
+                image: new Uint8Array(file.data),
+                mediaType: file.mediaType,
+              })),
+            ]
+          : input.prompt,
+        providerOptions: ANTHROPIC_EPHEMERAL_CACHE_PROVIDER_OPTIONS,
+      },
+    ],
+  };
+}
 
 function withAnthropicCacheBreakpoint<T extends ai.ModelMessage>(message: T): T {
   return {
@@ -1959,16 +1992,18 @@ function withoutAnthropicCacheBreakpoint<T extends ai.ModelMessage>(message: T):
   return { ...message, providerOptions };
 }
 
-// prepareStep hook: keep the static breakpoints on the first two messages and
-// place the moving breakpoint on the last message of this step. Earlier
-// non-static messages are stripped defensively so breakpoints never accumulate
-// past Anthropic's limit of 4, whatever the SDK does with prior step edits.
+// prepareStep hook: keep the static source-message breakpoint and place the
+// moving breakpoint on the last message of this step. Earlier non-static
+// messages are stripped defensively so breakpoints never accumulate past
+// Anthropic's limit of 4, whatever the SDK does with prior step edits.
 export function placeMovingAnthropicCacheBreakpoint(
   messages: ai.ModelMessage[],
 ): ai.ModelMessage[] {
-  if (messages.length <= 2) return messages;
+  // The system prompt is supplied through `instructions`, so only the first
+  // message (the source-content user message) is part of the static prefix.
+  if (messages.length <= 1) return messages;
   return messages.map((message, index) => {
-    if (index < 2) return message;
+    if (index === 0) return message;
     if (index < messages.length - 1) return withoutAnthropicCacheBreakpoint(message);
     return withAnthropicCacheBreakpoint(withoutAnthropicCacheBreakpoint(message));
   });
@@ -2414,29 +2449,11 @@ export async function runIngestAgentLoop(input: {
     const result = await generateText({
       model: gateway(input.model),
       maxOutputTokens: BRAIN_AGENT_INGEST_MAX_OUTPUT_TOKENS,
-      // The system prompt rides in messages (not the system param) so it can
-      // carry its own cache breakpoint; it is byte-stable for the whole job.
-      messages: [
-        {
-          role: "system",
-          content: system,
-          providerOptions: ANTHROPIC_EPHEMERAL_CACHE_PROVIDER_OPTIONS,
-        },
-        {
-          role: "user",
-          content: input.files?.length
-            ? [
-                { type: "text" as const, text: input.prompt },
-                ...input.files.map((file) => ({
-                  type: "image" as const,
-                  image: new Uint8Array(file.data),
-                  mediaType: file.mediaType,
-                })),
-              ]
-            : input.prompt,
-          providerOptions: ANTHROPIC_EPHEMERAL_CACHE_PROVIDER_OPTIONS,
-        },
-      ],
+      ...buildBrainIngestModelPrompt({
+        system,
+        prompt: input.prompt,
+        ...(input.files ? { files: input.files } : {}),
+      }),
       tools: { ...tools, ...enrichmentTools },
       ...latitudeTelemetry({
         name: "brain-ingest",
