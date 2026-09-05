@@ -7916,6 +7916,96 @@
         ],
         "additionalProperties": false
       },
+      "ChatArtifactVersionListEnvelopeV1": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "artifactId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "currentVersion": {
+                "type": "integer",
+                "minimum": 0,
+                "exclusiveMinimum": true
+              },
+              "versions": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ChatArtifactVersionV1"
+                }
+              }
+            },
+            "required": [
+              "artifactId",
+              "currentVersion",
+              "versions"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "ChatArtifactVersionV1": {
+        "type": "object",
+        "properties": {
+          "artifactVersionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0,
+            "exclusiveMinimum": true
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": "string"
+          },
+          "filename": {
+            "type": "string",
+            "minLength": 1
+          },
+          "mediaType": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "artifactVersionId",
+          "version",
+          "title",
+          "filename",
+          "mediaType",
+          "sizeBytes",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
       "MessagePresentationEnvelopeV1": {
         "type": "object",
         "properties": {
@@ -19544,6 +19634,56 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ChatArtifactDeleteEnvelopeV1"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat-artifacts/{artifactId}/versions": {
+      "get": {
+        "tags": [
+          "Chat"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "artifactId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized metadata for every immutable version of a Chat artifact.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatArtifactVersionListEnvelopeV1"
                 }
               }
             }

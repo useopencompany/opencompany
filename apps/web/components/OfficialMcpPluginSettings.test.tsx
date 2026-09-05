@@ -97,6 +97,11 @@ const accountActions = vi.hoisted(() => ({
   })),
   setIntegrationCapabilityModeAction: vi.fn(async () => ({ ok: true as const })),
 }));
+const infisicalAuth = vi.hoisted(() => ({
+  completeInfisicalAuth: vi.fn(),
+  disconnectInfisicalAuth: vi.fn(),
+  startInfisicalAuth: vi.fn(),
+}));
 const appData = vi.hoisted(() => ({
   integrations: {
     infisical: {
@@ -417,9 +422,9 @@ vi.mock("@/components/AppDataProvider", () => ({
 }));
 vi.mock("@/lib/headless-knowledge-commands", () => commands);
 vi.mock("@/lib/infisical-auth", () => ({
-  completeInfisicalAuth: vi.fn(),
-  disconnectInfisicalAuth: vi.fn(),
-  startInfisicalAuth: vi.fn(),
+  completeInfisicalAuth: infisicalAuth.completeInfisicalAuth,
+  disconnectInfisicalAuth: infisicalAuth.disconnectInfisicalAuth,
+  startInfisicalAuth: infisicalAuth.startInfisicalAuth,
 }));
 vi.mock("@/lib/integration-account-actions", () => accountActions);
 
@@ -1236,6 +1241,7 @@ describe("Linear plugin settings", () => {
     accountActions.getIntegrationAccountUsageAction.mockClear();
     accountActions.setIntegrationCapabilityModeAction.mockReset();
     accountActions.setIntegrationCapabilityModeAction.mockResolvedValue({ ok: true });
+    for (const action of Object.values(infisicalAuth)) action.mockReset();
     useLiveQuery.mockClear();
     window.history.replaceState({}, "", "/settings/plugins/linear");
   });
@@ -1263,8 +1269,12 @@ describe("Linear plugin settings", () => {
     );
 
     expect(screen.getByRole("heading", { level: 1, name: "Infisical" })).toBeInTheDocument();
-    expect(screen.getByText("Connected as developer@example.com · US")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Reconnect" })).toBeInTheDocument();
+    expect(screen.getByText("developer@example.com · US")).toBeInTheDocument();
+    expect(screen.getByText("Connected")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reconnect Infisical account" })).toBeInTheDocument();
+    expect(
+      screen.queryByText("Give workspace coding agents access to the real Infisical CLI."),
+    ).not.toBeInTheDocument();
     expect(screen.getByText("infisical-sandbox-secrets")).toBeInTheDocument();
     expect(screen.getByText("Search infisical")).toBeInTheDocument();
     expect(screen.getByText("Submit feedback")).toBeInTheDocument();
@@ -1272,6 +1282,57 @@ describe("Linear plugin settings", () => {
       screen.getByText(/Documentation reads stay On and documentation feedback stays Off/u),
     ).toBeInTheDocument();
     expect(INFISICAL_PLUGIN_SOURCE).toContain("f283f509c195464f90f5f78f7e30a9a472b6393b/infisical");
+  });
+
+  it("keeps the Infisical token handoff inside the standard plugin account section", async () => {
+    const user = userEvent.setup();
+    infisicalAuth.startInfisicalAuth.mockResolvedValue({
+      ok: true,
+      flow: {
+        id: "ginff_eu",
+        status: "link_ready",
+        loginUrl: "https://eu.infisical.com/login?callback_port=23456",
+        statusReason: null,
+        expiresAt: "2026-09-05T17:00:00.000Z",
+      },
+    });
+    infisicalAuth.completeInfisicalAuth.mockResolvedValue({
+      ok: true,
+      flow: {
+        id: "ginff_eu",
+        status: "completed",
+        loginUrl: "https://eu.infisical.com/login?callback_port=23456",
+        statusReason: null,
+        expiresAt: "2026-09-05T17:00:00.000Z",
+      },
+    });
+
+    render(
+      <InfisicalPluginDetail pluginState={{ status: "ready", plugin: infisicalPlugin }} canEdit />,
+    );
+    await user.click(screen.getByRole("button", { name: "EU" }));
+    await user.click(screen.getByRole("button", { name: "Reconnect Infisical account" }));
+
+    await waitFor(() => {
+      expect(infisicalAuth.startInfisicalAuth).toHaveBeenCalledWith({
+        host: "https://eu.infisical.com",
+      });
+    });
+    expect(screen.getByRole("link", { name: /Open Infisical sign-in/ })).toHaveAttribute(
+      "href",
+      "https://eu.infisical.com/login?callback_port=23456",
+    );
+
+    await user.type(screen.getByLabelText("Browser token"), "browser-token");
+    await user.click(screen.getByRole("button", { name: "Finish connection" }));
+
+    await waitFor(() => {
+      expect(infisicalAuth.completeInfisicalAuth).toHaveBeenCalledWith({
+        flowId: "ginff_eu",
+        browserToken: "browser-token",
+      });
+      expect(router.refresh).toHaveBeenCalled();
+    });
   });
 
   it("maps the personal github_user connection onto the GitHub plugin surface", () => {
@@ -1943,8 +2004,10 @@ describe("Linear plugin settings", () => {
   it("renders GitHub connection, discovery, and permission controls against github_user", async () => {
     const state = githubToolsStateFromPlugin(githubPlugin);
     window.history.replaceState({}, "", "/settings/plugins/github");
-    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) =>
-      Response.json({
+    let accessRequestCount = 0;
+    const fetchMock = vi.fn(async () => {
+      accessRequestCount += 1;
+      return Response.json({
         checkedAt: "2026-09-02T12:00:00.000Z",
         target: null,
         installations: [
@@ -1969,7 +2032,7 @@ describe("Linear plugin settings", () => {
                 private: true,
                 htmlUrl: "https://github.com/opencompany/private-repo",
               },
-              ...(init?.method === "POST"
+              ...(accessRequestCount > 1
                 ? [
                     {
                       id: "789",
@@ -1983,8 +2046,8 @@ describe("Linear plugin settings", () => {
             ],
           },
         ],
-      }),
-    );
+      });
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     render(
@@ -2027,7 +2090,7 @@ describe("Linear plugin settings", () => {
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/integrations/github-user/installations",
-        expect.objectContaining({ method: "POST" }),
+        expect.objectContaining({ method: "GET" }),
       ),
     );
     expect(await screen.findByTestId("github-installation-approved")).toHaveTextContent(

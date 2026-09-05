@@ -452,6 +452,7 @@ export type CreditLedgerSource =
   | "stripe_topup"
   | "chat_model_usage"
   | "subscription_covered"
+  | "sandbox_usage"
   | "capability_usage"
   | "frontier_ingest"
   | "ingest_overage"
@@ -1099,7 +1100,7 @@ export const creditLedger = productSchema.table(
       .where(sql`${table.source} = 'starter_grant'`),
     sourceCheck: check(
       "goat_credit_ledger_source_check",
-      sql`${table.source} IN ('starter_grant', 'seat_included_grant', 'seat_included_expiration', 'included_usage_grant', 'included_usage_expiration', 'stripe_topup', 'chat_model_usage', 'subscription_covered', 'capability_usage', 'frontier_ingest', 'ingest_overage', 'ingest_model_usage', 'ingest_fee', 'adjustment')`,
+      sql`${table.source} IN ('starter_grant', 'seat_included_grant', 'seat_included_expiration', 'included_usage_grant', 'included_usage_expiration', 'stripe_topup', 'chat_model_usage', 'subscription_covered', 'sandbox_usage', 'capability_usage', 'frontier_ingest', 'ingest_overage', 'ingest_model_usage', 'ingest_fee', 'adjustment')`,
     ),
   }),
 );
@@ -4554,6 +4555,13 @@ export const browserProfileSessions = productSchema.table(
     startedAt: timestamp("started_at", { withTimezone: true }),
     endedAt: timestamp("ended_at", { withTimezone: true }),
     durationMs: integer("duration_ms").notNull().default(0),
+    providerCostUsdMicros: bigint("provider_cost_usd_micros", { mode: "number" })
+      .notNull()
+      .default(0),
+    platformFeeUsdMicros: bigint("platform_fee_usd_micros", { mode: "number" })
+      .notNull()
+      .default(0),
+    totalCostUsdMicros: bigint("total_cost_usd_micros", { mode: "number" }).notNull().default(0),
     rawMetrics: jsonb("raw_metrics")
       .$type<Record<string, unknown>>()
       .notNull()

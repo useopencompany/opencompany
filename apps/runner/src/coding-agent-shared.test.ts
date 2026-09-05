@@ -57,11 +57,11 @@ describe("GitHub sandbox auth", () => {
     });
     githubUserMocks.getAccessToken.mockResolvedValue("ghu_personal");
 
-    const auth = await loadGitHubAuthForUser("user_1");
+    const auth = await loadGitHubAuthForUser("user_1", { minimumValidityMs: 1_800_000 });
 
     expect(githubUserMocks.getAccessToken).toHaveBeenCalledWith(
       { userWorkosId: "user_1", integrationId: "integration_personal" },
-      { db: dbMocks.db },
+      { db: dbMocks.db, minimumValidityMs: 1_800_000 },
     );
     expect(auth).toMatchObject({
       githubToken: "ghu_personal",

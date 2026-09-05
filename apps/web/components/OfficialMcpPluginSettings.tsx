@@ -38,6 +38,7 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import { useAppData } from "@/components/AppDataProvider";
 import { CapabilityModeToggle } from "@/components/CapabilityModeToggle";
 import { GitHubRepositoryAccessSection } from "@/components/GitHubRepositoryAccess";
+import { InfisicalPluginConnectionForm } from "@/components/InfisicalPluginConnectionForm";
 import {
   installOfficialMcpPlugin,
   OFFICIAL_MCP_PLUGINS,
@@ -46,7 +47,6 @@ import {
 import { RenderApiKeyConnectionForm } from "@/components/RenderApiKeyConnectionForm";
 import { SettingsContent } from "@/components/SettingsChrome";
 import {
-  InfisicalWorkspaceConnectionCard,
   IntegrationAccountRow,
   IntegrationSetupFeedback,
 } from "@/components/SettingsIntegrationsPanel";
@@ -118,6 +118,10 @@ export type PluginToolsState =
 
 type PluginConnectionProvider = PersonalAccountProvider | "posthog" | "stripe";
 type PluginAccount = { account: IntegrationAccountView<PluginConnectionProvider> };
+type ManagedPluginConnection = {
+  provider: "infisical";
+  integration: InfisicalProviderState;
+};
 
 type PluginSkill = {
   id: string;
@@ -137,7 +141,7 @@ export type PluginAccountsState =
       status: "ready";
       accounts: PluginAccount[];
       permissionConnection: IntegrationAccountView<PluginConnectionProvider> | null;
-      workspaceInfisical?: InfisicalProviderState;
+      managedConnection?: ManagedPluginConnection;
     };
 
 export type LinearAccountsState = PluginAccountsState;
@@ -1007,7 +1011,7 @@ function AccountsSection({
   canEdit: boolean;
 }) {
   const permissionConnection = state.status === "ready" ? state.permissionConnection : null;
-  const workspaceInfisical = state.status === "ready" ? state.workspaceInfisical : undefined;
+  const managedConnection = state.status === "ready" ? state.managedConnection : undefined;
   const displayedAccounts =
     state.status !== "ready"
       ? []
@@ -1038,21 +1042,20 @@ function AccountsSection({
         <SectionSkeleton label={`Loading ${accountLabel} accounts`} rows={2} compact />
       ) : state.status === "error" ? (
         <SectionError title="Accounts unavailable" message={state.message} />
-      ) : config.name === "infisical" && workspaceInfisical ? (
-        <InfisicalWorkspaceConnectionCard integration={workspaceInfisical} canManage={canEdit} />
+      ) : managedConnection ? (
+        <ManagedConnectionStatusRow connection={managedConnection} />
       ) : displayedAccounts.length === 0 ? (
         <SectionEmpty icon={Users}>{`No ${accountLabel} accounts are connected.`}</SectionEmpty>
-      ) : config.name === "stripe" ? (
-        <div className="flex min-w-0 items-center gap-2 rounded-lg border border-border/70 px-3 py-2">
-          <span className="min-w-0 flex-1 truncate text-[12px] leading-4 text-ink-subtle">
-            {permissionConnection?.connectionLabel ||
-              permissionConnection?.accountName ||
-              permissionConnection?.integrationId}
-          </span>
-          <span className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle">
-            {permissionConnection?.connected ? "Connected" : "Needs reconnect"}
-          </span>
-        </div>
+      ) : config.connectionProvider === "stripe" ? (
+        <PluginConnectionStatusRow
+          identity={
+            permissionConnection?.connectionLabel ||
+            permissionConnection?.accountName ||
+            permissionConnection?.integrationId ||
+            accountLabel
+          }
+          status={permissionConnection?.connected ? "Connected" : "Needs reconnect"}
+        />
       ) : (
         <div className="flex flex-col gap-2">
           {displayedAccounts.map(({ account }) => (
@@ -1080,21 +1083,12 @@ function AccountsSection({
         </div>
       )}
       <div className="flex flex-wrap items-center gap-3">
-        {config.name === "infisical" ? null : config.name === "render" ? (
-          <RenderApiKeyConnectionForm connected={Boolean(permissionConnection?.connected)} />
-        ) : config.name === "stripe" ? (
-          <StripeRestrictedKeyConnectionForm
-            connected={Boolean(permissionConnection?.connected)}
-            canManage={canEdit}
-          />
-        ) : config.connectionUnavailableReason ? null : (
-          <a
-            href={config.connectHref}
-            className={buttonVariants({ variant: "outline", size: "sm" })}
-          >
-            Connect {accountLabel} account
-          </a>
-        )}
+        <PluginConnectionControls
+          config={config}
+          permissionConnection={permissionConnection}
+          managedConnection={managedConnection}
+          canEdit={canEdit}
+        />
         {config.ingestionHref && config.ingestionLabel ? (
           <Link
             href={config.ingestionHref}
@@ -1105,6 +1099,72 @@ function AccountsSection({
         ) : null}
       </div>
     </section>
+  );
+}
+
+function ManagedConnectionStatusRow({ connection }: { connection: ManagedPluginConnection }) {
+  const { integration } = connection;
+  if (!integration.connected) {
+    return <SectionEmpty icon={Users}>No Infisical account is connected.</SectionEmpty>;
+  }
+
+  const region = integration.host === "https://eu.infisical.com" ? "EU" : "US";
+  return (
+    <PluginConnectionStatusRow
+      identity={[integration.accountEmail, region].filter(Boolean).join(" · ")}
+      status="Connected"
+    />
+  );
+}
+
+function PluginConnectionStatusRow({ identity, status }: { identity: string; status: string }) {
+  return (
+    <div className="flex min-w-0 items-center gap-2 rounded-lg border border-border/70 px-3 py-2">
+      <span className="min-w-0 flex-1 truncate text-[12px] leading-4 text-ink-subtle">
+        {identity}
+      </span>
+      <span className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle">
+        {status}
+      </span>
+    </div>
+  );
+}
+
+function PluginConnectionControls({
+  config,
+  permissionConnection,
+  managedConnection,
+  canEdit,
+}: {
+  config: OfficialMcpPluginConfig;
+  permissionConnection: IntegrationAccountView<PluginConnectionProvider> | null;
+  managedConnection: ManagedPluginConnection | undefined;
+  canEdit: boolean;
+}) {
+  if (config.connectionUnavailableReason) return null;
+  if (config.connectionProvider === "infisical") {
+    return managedConnection?.provider === "infisical" ? (
+      <InfisicalPluginConnectionForm
+        integration={managedConnection.integration}
+        canManage={canEdit}
+      />
+    ) : null;
+  }
+  if (config.connectionProvider === "render") {
+    return <RenderApiKeyConnectionForm connected={Boolean(permissionConnection?.connected)} />;
+  }
+  if (config.connectionProvider === "stripe") {
+    return (
+      <StripeRestrictedKeyConnectionForm
+        connected={Boolean(permissionConnection?.connected)}
+        canManage={canEdit}
+      />
+    );
+  }
+  return (
+    <a href={config.connectHref} className={buttonVariants({ variant: "outline", size: "sm" })}>
+      Connect {config.accountLabel ?? config.label} account
+    </a>
   );
 }
 
@@ -1238,7 +1298,7 @@ function ToolsSection({
           </div>
           {plugin && !permissionConnection ? (
             <p className="text-[12px] leading-4 text-ink-subtle">
-              {config.name === "infisical"
+              {config.connectionProvider === "infisical"
                 ? "Documentation reads stay On and documentation feedback stays Off. Secret access uses the permission-gated sandbox CLI workflow."
                 : `Connect a ${config.label} account to change permission modes.`}
             </p>
@@ -1542,13 +1602,13 @@ function pluginAccountsFromState(
 ): {
   accounts: PluginAccount[];
   permissionConnection: IntegrationAccountView<PluginConnectionProvider> | null;
-  workspaceInfisical?: InfisicalProviderState;
+  managedConnection?: ManagedPluginConnection;
 } {
   if (config.connectionProvider === "infisical") {
     return {
       accounts: [],
       permissionConnection: null,
-      workspaceInfisical: state.infisical,
+      managedConnection: { provider: "infisical", integration: state.infisical },
     };
   }
   if (config.connectionProvider === "granola") {

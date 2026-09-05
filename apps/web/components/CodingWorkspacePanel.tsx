@@ -5,6 +5,7 @@ import { cn } from "@opencompany/ui/lib/utils";
 import {
   AppWindow,
   ExternalLink,
+  FileText,
   LoaderCircle,
   Maximize2,
   Minimize2,
@@ -26,6 +27,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { createEngineRuntimeAccess } from "@/lib/headless-chat-commands";
+import { type ArtifactSelection, ArtifactViewer } from "./chat/ArtifactViewer";
 
 const CodingWorkspaceTerminal = dynamic(() => import("./CodingWorkspaceTerminal"), {
   ssr: false,
@@ -40,11 +42,13 @@ const PANEL_WIDTH_EVENT = "goat-coding-workspace-panel-width";
 const WORKSPACE_CONNECTION_TIMEOUT_MS = 150_000;
 
 type WorkspaceTab = "preview" | "terminal";
+type PanelTab = WorkspaceTab | "artifact";
 type ConnectionState = "dormant" | "waking" | "ready" | "disconnected" | "error";
 type PreviewPort = { port: number; isHttp: boolean; score: number };
 
 export type CodingWorkspacePanelHandle = {
   toggle: () => void;
+  openArtifact: () => void;
 };
 
 export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
@@ -52,19 +56,23 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
     chatSessionId,
     sandboxStatus,
     engineLabel,
+    workspaceEnabled = true,
+    artifactSelection,
     onExpandedChange,
     onRequestFocusReturn,
   }: {
     chatSessionId: string;
     sandboxStatus: EngineRuntimeStatus | null;
     engineLabel: string;
+    workspaceEnabled?: boolean;
+    artifactSelection?: ArtifactSelection | null;
     onExpandedChange?: (expanded: boolean) => void;
     onRequestFocusReturn?: () => void;
   },
   ref: Ref<CodingWorkspacePanelHandle>,
 ) {
-  const [expanded, setExpanded] = useState(false);
-  const [mobilePanelOpened, setMobilePanelOpened] = useState(false);
+  const [expanded, setExpanded] = useState(Boolean(artifactSelection));
+  const [mobilePanelOpened, setMobilePanelOpened] = useState(Boolean(artifactSelection));
   const [fullscreen, setFullscreen] = useState(false);
   const persistedWidth = useSyncExternalStore(
     subscribePanelWidth,
@@ -79,7 +87,9 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
     serverNarrowLayout,
   );
   const panelExpanded = expanded && (!isNarrow || mobilePanelOpened);
-  const [activeTab, setActiveTab] = useState<WorkspaceTab | null>(null);
+  const [activeTab, setActiveTab] = useState<PanelTab | null>(
+    artifactSelection ? "artifact" : null,
+  );
   const [connectionState, setConnectionState] = useState<ConnectionState>("dormant");
   const [error, setError] = useState<string | null>(null);
   const [socket, setSocket] = useState<WebSocket | null>(null);
@@ -279,6 +289,12 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
         setExpanded(true);
         setMobilePanelOpened(true);
       },
+      openArtifact: () => {
+        setExpanded(true);
+        setMobilePanelOpened(true);
+        setActiveTab("artifact");
+        setError(null);
+      },
     }),
     [collapse, panelExpanded],
   );
@@ -320,7 +336,7 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
       style={fullscreen || isNarrow ? undefined : { width }}
       role={fullscreen || isNarrow ? "dialog" : undefined}
       aria-modal={fullscreen || isNarrow ? true : undefined}
-      aria-label={`${engineLabel} workspace`}
+      aria-label={workspaceEnabled ? `${engineLabel} workspace` : "Artifact viewer"}
       onKeyDown={(event) => {
         if ((!isNarrow && !fullscreen) || event.key !== "Tab") return;
         trapFocus(panelRef.current, event);
@@ -369,22 +385,36 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
       ) : null}
 
       <header className="flex h-12 shrink-0 items-center gap-1 border-b border-border px-2">
-        <button
-          type="button"
-          onClick={() => selectTab("preview")}
-          aria-pressed={activeTab === "preview"}
-          className={tabClass(activeTab === "preview")}
-        >
-          <AppWindow size={14} /> Preview
-        </button>
-        <button
-          type="button"
-          onClick={() => selectTab("terminal")}
-          aria-pressed={activeTab === "terminal"}
-          className={tabClass(activeTab === "terminal")}
-        >
-          <TerminalSquare size={14} /> Terminal
-        </button>
+        {workspaceEnabled ? (
+          <>
+            <button
+              type="button"
+              onClick={() => selectTab("preview")}
+              aria-pressed={activeTab === "preview"}
+              className={tabClass(activeTab === "preview")}
+            >
+              <AppWindow size={14} /> Preview
+            </button>
+            <button
+              type="button"
+              onClick={() => selectTab("terminal")}
+              aria-pressed={activeTab === "terminal"}
+              className={tabClass(activeTab === "terminal")}
+            >
+              <TerminalSquare size={14} /> Terminal
+            </button>
+          </>
+        ) : null}
+        {artifactSelection ? (
+          <button
+            type="button"
+            onClick={() => setActiveTab("artifact")}
+            aria-pressed={activeTab === "artifact"}
+            className={tabClass(activeTab === "artifact")}
+          >
+            <FileText size={14} /> Artifact
+          </button>
+        ) : null}
         <div className="ml-auto flex items-center gap-0.5">
           <PanelButton
             label={fullscreen ? "Exit fullscreen" : "Fullscreen workspace"}
@@ -408,10 +438,19 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
       ) : null}
 
       <div className="flex min-h-0 flex-1 flex-col">
-        {activeTab === null ? (
+        {activeTab === "artifact" && artifactSelection ? (
+          <ArtifactViewer
+            key={`${artifactSelection.artifact.artifactId}:${artifactSelection.artifact.artifactVersionId}`}
+            selection={artifactSelection}
+          />
+        ) : activeTab === null ? (
           <WorkspaceNotice
-            title={workspaceStateTitle(sandboxStatus)}
-            detail="Choose Preview or Terminal to wake and connect to this workspace. Opening the panel alone keeps a sleeping sandbox dormant."
+            title={workspaceEnabled ? workspaceStateTitle(sandboxStatus) : "Choose an artifact"}
+            detail={
+              workspaceEnabled
+                ? "Choose Preview or Terminal to wake and connect to this workspace. Opening the panel alone keeps a sleeping sandbox dormant."
+                : "Open an artifact card in the conversation to read it here."
+            }
           />
         ) : connectionState === "waking" ? (
           <WorkspaceNotice
@@ -424,7 +463,9 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
             title={connectionState === "disconnected" ? "Connection lost" : "Workspace unavailable"}
             detail={error ?? "Reconnect to restore the terminal and preview."}
             actionLabel="Retry"
-            onAction={() => void connect(activeTab)}
+            onAction={() => {
+              if (activeTab !== "artifact") void connect(activeTab);
+            }}
           />
         ) : connectionState === "ready" && socket ? (
           activeTab === "terminal" ? (

@@ -2818,6 +2818,34 @@ export const ChatArtifactDeleteEnvelopeSchema = z
   .strict()
   .openapi("ChatArtifactDeleteEnvelopeV1");
 
+export const ChatArtifactVersionSchema = z
+  .object({
+    artifactVersionId: ResourceIdSchema,
+    version: z.number().int().positive(),
+    title: z.string().min(1),
+    description: z.string().optional(),
+    filename: z.string().min(1),
+    mediaType: z.string().min(1),
+    sizeBytes: z.number().int().min(0),
+    createdAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("ChatArtifactVersionV1");
+
+export const ChatArtifactVersionListEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        artifactId: ResourceIdSchema,
+        currentVersion: z.number().int().positive(),
+        versions: z.array(ChatArtifactVersionSchema),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("ChatArtifactVersionListEnvelopeV1");
+
 export const MessagePresentationEnvelopeSchema = z
   .object({ data: MessagePresentationSchema, meta: ProtocolMetadataSchema })
   .strict()

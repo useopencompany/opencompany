@@ -226,6 +226,35 @@ describe("legacy browser profile route adapters", () => {
     expect(missing.status).toBe(404);
   });
 
+  it("probes live-view state without returning or following the provider URL", async () => {
+    stubUpstream((request) => {
+      const sessionId = new URL(request.url).searchParams.get("sessionId");
+      return sessionId === "bb_1"
+        ? Response.json({ data: { url: "https://live.example.com/bb_1" }, meta })
+        : Response.json(
+            { error: { code: "not_found", message: "This browser session is not active." }, meta },
+            { status: 404 },
+          );
+    });
+
+    const active = await legacyBrowserProfileLiveView(
+      legacyRequest(
+        "https://my.opencompany.chat/api/browser-profiles/profile_1/live-view?sessionId=bb_1&probe=1",
+      ),
+      "profile_1",
+    );
+    expect(active.status).toBe(204);
+    expect(active.headers.get("location")).toBeNull();
+
+    const ended = await legacyBrowserProfileLiveView(
+      legacyRequest(
+        "https://my.opencompany.chat/api/browser-profiles/profile_1/live-view?sessionId=bb_2&probe=1",
+      ),
+      "profile_1",
+    );
+    expect(ended.status).toBe(410);
+  });
+
   it("rejects an empty complete-login session id locally with the legacy error", async () => {
     const calls = stubUpstream(() => Response.json({ data: {}, meta }));
     const response = await legacyCompleteBrowserProfileLogin(

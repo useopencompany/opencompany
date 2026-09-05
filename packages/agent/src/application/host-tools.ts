@@ -213,6 +213,13 @@ export type ChatHostToolServiceDependencies = {
     /** Stable per-tool-call key, e.g. `agent-wiki:<turnId>:<toolCallId>`. */
     idempotencyKey: string;
   }) => Promise<unknown>;
+  writeArtifact?: (input: {
+    context: ChatHostContext;
+    runId: string;
+    toolCallId: string;
+    toolInput: Record<string, unknown>;
+    signal: AbortSignal;
+  }) => Promise<unknown>;
   onRejected?: (command: ChatHostToolCommand) => void;
   onCompleted?: (command: ChatHostToolCommand, durationMs: number) => void;
   onFailed?: (command: ChatHostToolCommand, durationMs: number, error: unknown) => void;
@@ -488,6 +495,19 @@ async function executeOperation(
         // two intentional wiki calls in one turn get different keys.
         idempotencyKey: `agent-wiki:${command.runId}:${command.toolCallId ?? command.sessionId}`,
       });
+    case "write_artifact": {
+      if (!command.toolCallId) throw new Error("write_artifact requires a stable tool call id.");
+      if (!dependencies.writeArtifact) {
+        throw new Error("Artifact publishing is not configured for this runtime.");
+      }
+      return dependencies.writeArtifact({
+        context,
+        runId: command.runId,
+        toolCallId: command.toolCallId,
+        toolInput,
+        signal,
+      });
+    }
   }
 }
 

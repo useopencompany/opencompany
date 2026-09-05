@@ -314,6 +314,16 @@ services:
         sync: false
       - key: E2B_API_KEY
         sync: false
+      # Browser profile execution and orphan reconciliation run here. These
+      # values must match the canonical API's Browserbase project and flags.
+      - key: OPENCOMPANY_BROWSER_PROFILES_ENABLED
+        sync: false
+      - key: OPENCOMPANY_BROWSER_PROFILES_KILL_SWITCH
+        sync: false
+      - key: BROWSERBASE_API_KEY
+        sync: false
+      - key: BROWSERBASE_PROJECT_ID
+        sync: false
       - key: VERCEL_AI_GATEWAY_API_KEY
         sync: false
       # Optional opencompany OpenTelemetry export to SigNoz. Populated from Infisical prod `/runner`.

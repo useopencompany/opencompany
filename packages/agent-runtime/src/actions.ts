@@ -1,13 +1,14 @@
 export const ACTION_HOST_TOOL_CONTRACT_VERSION_V2 = "goat-codex-host-tools.v2";
 export const ACTION_HOST_TOOL_CONTRACT_VERSION = "goat-codex-host-tools.v3";
 export const CHAT_HOST_TOOL_CONTRACT_VERSION_V2 = "goat-chat-host-tools.v2";
-export const CHAT_HOST_TOOL_CONTRACT_VERSION = "goat-chat-host-tools.v3";
+export const CHAT_HOST_TOOL_CONTRACT_VERSION_V3 = "goat-chat-host-tools.v3";
+export const CHAT_HOST_TOOL_CONTRACT_VERSION = "goat-chat-host-tools.v4";
 
 // Sessions keep the stamp of the API release that last enqueued a turn, so a
 // runner must keep serving the previous chat contract or approval continuations
 // and deploy-window sends fail during a rolling release.
 export const CHAT_HOST_TOOL_CONTRACT_VERSIONS = [
-  CHAT_HOST_TOOL_CONTRACT_VERSION_V2,
+  CHAT_HOST_TOOL_CONTRACT_VERSION_V3,
   CHAT_HOST_TOOL_CONTRACT_VERSION,
 ] as const;
 

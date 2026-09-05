@@ -169,6 +169,47 @@ describe("createProductChatProjector", () => {
     expect(eventTypes.filter((type) => type === "tool.completed")).toHaveLength(1);
   });
 
+  it("emits artifact.published once when the OC projection gains an artifact", async () => {
+    const projector = createProjector();
+    const projection = {
+      parts: [
+        {
+          type: "data-artifact-file",
+          data: {
+            artifactId: "artifact_1",
+            artifactVersionId: "version_1",
+            version: 1,
+            title: "Report",
+            filename: "report.md",
+            mediaType: "text/markdown",
+            sizeBytes: 8,
+            state: "ready",
+          },
+        },
+      ],
+    };
+
+    await projector.project(projection);
+    await projector.project(projection);
+
+    const artifactEvents = vi
+      .mocked(executionMock.appendEvents)
+      .mock.calls.flatMap(([call]) => call.events)
+      .filter((event) => event.type === "artifact.published");
+    expect(artifactEvents).toEqual([
+      expect.objectContaining({
+        type: "artifact.published",
+        payload: {
+          artifactId: "artifact_1",
+          title: "Report",
+          filename: "report.md",
+          mediaType: "text/markdown",
+          sizeBytes: 8,
+        },
+      }),
+    ]);
+  });
+
   it("treats a missing lease row as lease loss before the stream can continue", async () => {
     dbMock.execute.mockResolvedValueOnce({ rows: [] });
 

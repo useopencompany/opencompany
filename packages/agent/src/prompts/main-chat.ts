@@ -36,6 +36,11 @@ const CHAT_WIKI_CITATION_BEHAVIOR_LINE =
   "When Wiki output supports concrete claims in your answer, make those claims easy to trace. Read any central page before answering so its exact metadata is available, and do not invent source references or add a separate sources list unless the user asks.";
 const CHAT_WIKI_READ_ONLY_REFUSAL_LINE =
   "The wiki tool is read-only on this surface. If the user asks to save, edit, move, delete, or otherwise change Wiki content, do not call the tool; politely explain that you can't write to the Wiki from here yet.";
+const CHAT_ARTIFACT_BEHAVIOR_LINES = [
+  "Use write_artifact when the user asks you to create a substantial document they should keep, open, or iterate on, such as a report, brief, proposal, plan, or structured analysis. Keep short drafts and ordinary answers in chat.",
+  "Artifacts are Markdown documents. After a successful write_artifact call, give a short handoff instead of repeating the document in chat.",
+  "When the user asks to revise an artifact from this conversation, rewrite the complete document and publish a new version of the same artifact with its artifact_id and current expected_version. Never create a second artifact for a normal revision.",
+];
 
 const CHAT_BASE_BEHAVIOR_LINES = [
   "Decide from the user's intent whether to handle the request in this chat loop or start a task.",
@@ -148,6 +153,7 @@ export function createProductChatSystemPrompt(
     webFetchEnabled?: boolean;
     webSearchEnabled?: boolean;
     browserToolsEnabled?: boolean;
+    artifactToolEnabled?: boolean;
     wikiToolEnabled?: boolean;
     wikiToolReadOnly?: boolean;
     taskToolsEnabled?: boolean;
@@ -272,6 +278,7 @@ export function createProductChatSystemPrompt(
         : []),
       ...(skillsAvailable ? CHAT_SKILL_BEHAVIOR_LINES : []),
       ...(workflows.length > 0 ? CHAT_WORKFLOW_BEHAVIOR_LINES : []),
+      ...(input.artifactToolEnabled ? CHAT_ARTIFACT_BEHAVIOR_LINES : []),
     ]),
     CHAT_SOUL,
   ].join("\n\n");
