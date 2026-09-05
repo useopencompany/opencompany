@@ -65,6 +65,12 @@ import {
   startSigNozMcpOAuth,
   verifySigNozMcpState,
 } from "@opencompany/agent/integrations/signoz-mcp";
+import {
+  appendVercelMcpStatus,
+  completeVercelMcpOAuth,
+  startVercelMcpOAuth,
+  verifyVercelMcpState,
+} from "@opencompany/agent/integrations/vercel-mcp";
 import { createLogger } from "@opencompany/observability";
 import type { ApiIdentityVerifier } from "./auth";
 import { type IngressSession, resolveIngressSession, sessionRedirect } from "./ingress-session";
@@ -84,7 +90,8 @@ export type McpOAuthProvider =
   | "jamie"
   | "betterstack"
   | "fathom"
-  | "signoz";
+  | "signoz"
+  | "vercel";
 
 // Provider ingress composition for the remote-MCP connectors. Each
 // provider shares the createRemoteMcpIntegration factory; this module
@@ -142,6 +149,15 @@ const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
     deniedReason: "signoz_denied",
     invalidStatePath:
       "/settings/plugins/signoz?integration=signoz&setup=error&reason=invalid_state",
+  },
+  vercel: {
+    start: startVercelMcpOAuth,
+    complete: completeVercelMcpOAuth,
+    verifyState: verifyVercelMcpState,
+    appendStatus: appendVercelMcpStatus,
+    deniedReason: "vercel_denied",
+    invalidStatePath:
+      "/settings/plugins/vercel?integration=vercel&setup=error&reason=invalid_state",
   },
   linear: {
     start: startLinearMcpOAuth,

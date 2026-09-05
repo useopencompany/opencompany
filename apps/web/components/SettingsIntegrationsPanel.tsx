@@ -16,6 +16,7 @@ import {
 import { cn } from "@opencompany/ui/lib/utils";
 import { useLiveQuery } from "@tanstack/react-db";
 import { ExternalLink, Globe2, Loader2, Trash2 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { CapabilityModeToggle } from "@/components/CapabilityModeToggle";
@@ -139,6 +140,12 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     monogram: "R",
     tileClass: "bg-[#0B0D0E] text-white",
   },
+  vercel: {
+    label: "Vercel",
+    description: "Inspect deployments, investigate production issues, and deploy with approval.",
+    monogram: "V",
+    tileClass: "bg-black text-white",
+  },
   signoz: {
     label: "SigNoz",
     description: "Investigate observability data and manage alerts and dashboards.",
@@ -161,7 +168,6 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
 
 export function SettingsIntegrationsPanel({
   initialIntegrations,
-  isWorkspaceAdmin,
   browserProfilesEnabled = false,
   scopeKey = "active",
 }: {
@@ -177,13 +183,11 @@ export function SettingsIntegrationsPanel({
       {!hydrated ? (
         <IntegrationCards
           integrations={initialIntegrations}
-          isWorkspaceAdmin={isWorkspaceAdmin}
           browserProfilesEnabled={browserProfilesEnabled}
         />
       ) : (
         <LiveSettingsIntegrations
           initialIntegrations={initialIntegrations}
-          isWorkspaceAdmin={isWorkspaceAdmin}
           browserProfilesEnabled={browserProfilesEnabled}
           scopeKey={scopeKey}
         />
@@ -225,12 +229,10 @@ export function IntegrationSetupFeedback() {
 
 function LiveSettingsIntegrations({
   initialIntegrations,
-  isWorkspaceAdmin,
   browserProfilesEnabled,
   scopeKey,
 }: {
   initialIntegrations: IntegrationState;
-  isWorkspaceAdmin: boolean;
   browserProfilesEnabled: boolean;
   scopeKey: string;
 }) {
@@ -255,11 +257,7 @@ function LiveSettingsIntegrations({
   }, [initialIntegrations, isLoading, rows]);
 
   return (
-    <IntegrationCards
-      integrations={integrations}
-      isWorkspaceAdmin={isWorkspaceAdmin}
-      browserProfilesEnabled={browserProfilesEnabled}
-    />
+    <IntegrationCards integrations={integrations} browserProfilesEnabled={browserProfilesEnabled} />
   );
 }
 
@@ -291,10 +289,7 @@ function countConnectedAccounts(
 }
 
 function countWorkspaceConnected(integrations: IntegrationState) {
-  return (
-    (integrations.infisical.connected ? 1 : 0) +
-    countConnectedAccounts(integrations, WORKSPACE_ACCOUNT_PROVIDERS)
-  );
+  return countConnectedAccounts(integrations, WORKSPACE_ACCOUNT_PROVIDERS);
 }
 
 function countPersonalConnected() {
@@ -303,11 +298,9 @@ function countPersonalConnected() {
 
 function IntegrationCards({
   integrations,
-  isWorkspaceAdmin,
   browserProfilesEnabled,
 }: {
   integrations: IntegrationState;
-  isWorkspaceAdmin: boolean;
   browserProfilesEnabled: boolean;
 }) {
   const [scope, setScope] = useState<IntegrationScope>("workspace");
@@ -323,16 +316,14 @@ function IntegrationCards({
       {scope === "workspace" ? (
         <section className="flex flex-col gap-3">
           <p className="text-[12px] leading-5 text-ink-subtle">
-            {`Shared connections available across this workspace.${
-              isWorkspaceAdmin ? "" : " Managed by workspace admins."
-            }`}
+            Workspace integrations are managed from Plugins.
           </p>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <InfisicalIntegrationCard
-              integration={integrations.infisical}
-              canManage={isWorkspaceAdmin}
-            />
-          </div>
+          <Link
+            href="/settings/plugins"
+            className="w-fit text-[12px] font-medium text-ink underline decoration-border underline-offset-2 hover:text-ink-muted"
+          >
+            Open Plugins
+          </Link>
         </section>
       ) : (
         <section className="flex flex-col gap-3">
@@ -930,7 +921,7 @@ function CapabilityModeRow({
   );
 }
 
-function InfisicalIntegrationCard({
+export function InfisicalWorkspaceConnectionCard({
   integration,
   canManage,
 }: {
@@ -1168,6 +1159,9 @@ function integrationConnectHref(provider: PersonalAccountProvider) {
     return "/api/integrations/betterstack/start?returnTo=/settings/plugins/betterstack";
   }
   if (provider === "render") return "/settings/plugins/render#render-api-key";
+  if (provider === "vercel") {
+    return "/api/integrations/vercel/start?returnTo=/settings/plugins/vercel";
+  }
   if (provider === "signoz") {
     return "/api/integrations/signoz/start?returnTo=/settings/plugins/signoz";
   }

@@ -8,12 +8,14 @@ export type OfficialMcpPluginName =
   | "google-calendar"
   | "google-drive"
   | "hubspot"
+  | "infisical"
   | "jamie"
   | "latitude"
   | "linear"
   | "neon"
   | "posthog"
   | "render"
+  | "vercel"
   | "signoz"
   | "slack"
   | "stripe"
@@ -51,12 +53,14 @@ export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
     | "google_calendar"
     | "google_drive"
     | "hubspot"
+    | "infisical"
     | "jamie"
     | "latitude"
     | "linear"
     | "neon"
     | "posthog"
     | "render"
+    | "vercel"
     | "signoz"
     | "slack"
     | "stripe"
@@ -204,6 +208,20 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     ingestionHref: "/wiki/sources",
     ingestionLabel: "Configure HubSpot ingestion in Wiki sources",
   },
+  infisical: {
+    name: "infisical",
+    kind: "mcp",
+    label: "Infisical",
+    description:
+      "Search current Infisical documentation and safely use workspace secrets in coding sandboxes.",
+    category: "engineering",
+    source:
+      "https://github.com/useopencompany/plugins/tree/f283f509c195464f90f5f78f7e30a9a472b6393b/infisical",
+    connectionProvider: "infisical",
+    connectHref: "/settings/plugins/infisical",
+    accountDescription:
+      "The workspace CLI connection restored into coding sandboxes. Its credentials are never sent to the documentation MCP.",
+  },
   jamie: {
     name: "jamie",
     kind: "mcp",
@@ -283,6 +301,19 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectionProvider: "render",
     connectHref: "/settings/plugins/render#render-api-key",
     accountDescription: "The Render account opencompany uses when you run Render tools.",
+  },
+  vercel: {
+    name: "vercel",
+    kind: "mcp",
+    label: "Vercel",
+    description:
+      "Inspect Vercel projects and deployments, investigate operational data, and perform permission-gated deployment and account actions.",
+    category: "engineering",
+    source:
+      "https://github.com/useopencompany/plugins/tree/14e7f6d3e978103c5427c725229ae93bc3e47f8c/vercel",
+    connectionProvider: "vercel",
+    connectHref: "/api/integrations/vercel/start?returnTo=/settings/plugins/vercel",
+    accountDescription: "The account opencompany uses when you run Vercel tools.",
   },
   signoz: {
     name: "signoz",
