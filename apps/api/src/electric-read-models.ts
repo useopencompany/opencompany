@@ -624,11 +624,27 @@ function conversationReadModelShape(
 function projectElectricEntry(readModel: ReadModel, entry: unknown) {
   if (!isRecord(entry) || !isRecord(entry.value)) return entry;
   const operation = isRecord(entry.headers) ? entry.headers.operation : undefined;
+  // Delete values can contain historical column data that is no longer valid under the current
+  // public contract (for example, a provider removed by the same migration that deleted its
+  // rows). A tombstone only needs its identity; forwarding old fields lets retained Electric
+  // history poison reconnecting clients after otherwise-safe enum retirement.
+  const value =
+    operation === "delete" ? electricDeleteIdentity(readModel, entry.value) : entry.value;
   return {
     key: entry.key,
     headers: entry.headers,
-    value: projectReadModelValue(readModel, entry.value, operation !== "insert"),
+    value: projectReadModelValue(readModel, value, operation !== "insert"),
   };
+}
+
+function electricDeleteIdentity(readModel: ReadModel, row: Record<string, unknown>) {
+  const columnNames = READ_MODEL_COLUMN_NAMES[
+    readModel as keyof typeof READ_MODEL_COLUMN_NAMES
+  ] as Record<string, string>;
+  const identityColumn = Object.entries(columnNames).find(
+    ([physicalName, publicName]) => publicName === "id" && Object.hasOwn(row, physicalName),
+  );
+  return identityColumn ? { [identityColumn[0]]: row[identityColumn[0]] } : {};
 }
 
 function projectReadModelValue(

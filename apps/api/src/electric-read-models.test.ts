@@ -274,6 +274,39 @@ describe("Electric read models", () => {
     });
   });
 
+  it("reduces integration account delete history to its identity before validation", async () => {
+    const proxy = new ElectricReadModelProxy({
+      electricUrl: "https://electric.example.test",
+      fetch: vi.fn(async () =>
+        Response.json([
+          {
+            headers: { operation: "delete" },
+            key: JSON.stringify("integration_retired"),
+            value: {
+              id: "integration_retired",
+              provider: "imessage",
+              status: "disconnected",
+            },
+          },
+        ]),
+      ) as typeof fetch,
+    });
+
+    const response = await proxy.stream({
+      actor,
+      readModel: "integration-accounts-v1",
+      requestUrl: new URL("https://api.example.test/v1/read-models/integration-accounts-v1"),
+    });
+
+    await expect(response.json()).resolves.toEqual([
+      {
+        headers: { operation: "delete" },
+        key: JSON.stringify("integration_retired"),
+        value: { id: "integration_retired" },
+      },
+    ]);
+  });
+
   it("selects the physical shape server-side and returns only canonical Message fields", async () => {
     let upstreamUrl = "";
     const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
