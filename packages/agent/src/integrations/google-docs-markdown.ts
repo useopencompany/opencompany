@@ -164,12 +164,13 @@ function appendList(
   definitions: Map<string, Definition>,
   nestingDepth: number,
 ) {
-  const bulletPreset = list.ordered
-    ? "NUMBERED_DECIMAL_ALPHA_ROMAN"
-    : list.children.some((item) => item.checked !== null && item.checked !== undefined)
-      ? "BULLET_CHECKBOX"
-      : "BULLET_DISC_CIRCLE_SQUARE";
   for (const item of list.children) {
+    const bulletPreset =
+      item.checked !== null && item.checked !== undefined
+        ? "BULLET_CHECKBOX"
+        : list.ordered
+          ? "NUMBERED_DECIMAL_ALPHA_ROMAN"
+          : "BULLET_DISC_CIRCLE_SQUARE";
     appendListItem(item, paragraphs, definitions, nestingDepth, bulletPreset);
   }
 }

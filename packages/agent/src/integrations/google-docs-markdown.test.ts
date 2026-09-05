@@ -80,6 +80,29 @@ describe("Google Docs Markdown compiler", () => {
     ).toBe(true);
   });
 
+  it("keeps ordinary bullets ordinary when they share a list with task items", () => {
+    const compiled = compileGoogleDocsMarkdown(
+      ["- [ ] pending task", "- ordinary note", "- [x] completed task"].join("\n"),
+      "t.0",
+    );
+    const bullets = compiled.requests.flatMap((request) =>
+      request.createParagraphBullets
+        ? [
+            request.createParagraphBullets as {
+              range: { startIndex: number; endIndex: number };
+              bulletPreset: string;
+            },
+          ]
+        : [],
+    );
+
+    expect(bullets.map(({ bulletPreset }) => bulletPreset).sort()).toEqual([
+      "BULLET_CHECKBOX",
+      "BULLET_CHECKBOX",
+      "BULLET_DISC_CIRCLE_SQUARE",
+    ]);
+  });
+
   it("uses UTF-16 indexes and ignores unsafe Markdown link protocols", () => {
     const compiled = compileGoogleDocsMarkdown(
       "# 🚀 Launch\n[unsafe](javascript:alert(1)) and [safe](https://example.com)",
