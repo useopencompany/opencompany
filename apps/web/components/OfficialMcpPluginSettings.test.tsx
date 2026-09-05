@@ -1998,8 +1998,10 @@ describe("Linear plugin settings", () => {
   it("renders GitHub connection, discovery, and permission controls against github_user", async () => {
     const state = githubToolsStateFromPlugin(githubPlugin);
     window.history.replaceState({}, "", "/settings/plugins/github");
-    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) =>
-      Response.json({
+    let accessRequestCount = 0;
+    const fetchMock = vi.fn(async () => {
+      accessRequestCount += 1;
+      return Response.json({
         checkedAt: "2026-09-02T12:00:00.000Z",
         target: null,
         installations: [
@@ -2024,7 +2026,7 @@ describe("Linear plugin settings", () => {
                 private: true,
                 htmlUrl: "https://github.com/opencompany/private-repo",
               },
-              ...(init?.method === "POST"
+              ...(accessRequestCount > 1
                 ? [
                     {
                       id: "789",
@@ -2038,8 +2040,8 @@ describe("Linear plugin settings", () => {
             ],
           },
         ],
-      }),
-    );
+      });
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     render(
@@ -2082,7 +2084,7 @@ describe("Linear plugin settings", () => {
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/integrations/github-user/installations",
-        expect.objectContaining({ method: "POST" }),
+        expect.objectContaining({ method: "GET" }),
       ),
     );
     expect(await screen.findByTestId("github-installation-approved")).toHaveTextContent(

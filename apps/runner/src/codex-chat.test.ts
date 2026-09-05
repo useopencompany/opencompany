@@ -116,6 +116,7 @@ vi.mock("./coding-agent-shared", () => ({
   buildGitHubCommandEnv: () => ({}),
   createKnownSecretRedactor: () => (value: string) => value,
   gitAuthHeader: (token: string) => `Authorization: Basic ${token}`,
+  githubSandboxTokenMinimumValidityMs: (turnTimeoutMs: number) => turnTimeoutMs + 600_000,
   loadGitHubAuthForUser: githubAuthMocks.loadGitHubAuthForUser,
   shouldAppendGitHubAuthNotice: (
     history: { messages: Array<{ role: string; content: string }> },
@@ -615,6 +616,9 @@ describe("runCodexChatTurn over ACP", () => {
       }),
     ).resolves.toBe("settled");
 
+    expect(githubAuthMocks.loadGitHubAuthForUser).toHaveBeenCalledWith("user_1", {
+      minimumValidityMs: 1_800_000,
+    });
     expect(eventMocks.appendNotice).toHaveBeenCalledWith(notice);
     expect(acpMocks.runTurn).toHaveBeenCalledOnce();
   });

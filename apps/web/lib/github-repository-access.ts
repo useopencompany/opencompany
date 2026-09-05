@@ -28,7 +28,6 @@ const ACCESS_CACHE_TTL_MS = 5_000;
 type SharedAccessRequest = {
   controller: AbortController;
   consumers: number;
-  sequence: number;
   settled: boolean;
   promise: Promise<GitHubRepositoryAccess>;
 };
@@ -37,9 +36,7 @@ type AccessCacheEntry = {
   fetcher: typeof globalThis.fetch;
   data: GitHubRepositoryAccess | null;
   expiresAt: number;
-  latestDataSequence: number;
-  nextSequence: number;
-  requests: Map<"GET" | "POST", SharedAccessRequest>;
+  request: SharedAccessRequest | null;
 };
 
 const accessCache = new Map<string, AccessCacheEntry>();
@@ -55,7 +52,6 @@ type GitHubToolView = {
 export async function fetchGitHubRepositoryAccess(input: {
   owner?: string;
   repo?: string;
-  forceRefresh?: boolean;
   bypassCache?: boolean;
   signal?: AbortSignal;
 }) {
@@ -67,7 +63,7 @@ export async function fetchGitHubRepositoryAccess(input: {
   const cacheKey = owner?.toLowerCase() ?? "*";
   let entry = accessCache.get(cacheKey);
   if (entry && entry.fetcher !== fetcher) {
-    for (const request of entry.requests.values()) request.controller.abort();
+    entry.request?.controller.abort();
     accessCache.delete(cacheKey);
     entry = undefined;
   }
@@ -76,51 +72,42 @@ export async function fetchGitHubRepositoryAccess(input: {
       fetcher,
       data: null,
       expiresAt: 0,
-      latestDataSequence: 0,
-      nextSequence: 0,
-      requests: new Map(),
+      request: null,
     };
     accessCache.set(cacheKey, entry);
   }
 
-  if (!input.forceRefresh && !input.bypassCache && entry.data && entry.expiresAt > Date.now()) {
+  if (!input.bypassCache && entry.data && entry.expiresAt > Date.now()) {
     input.signal?.throwIfAborted();
     return withRepositoryTarget(entry.data, owner, repo);
   }
 
-  const method = input.forceRefresh ? "POST" : "GET";
-  let request = entry.requests.get(method);
+  let request = entry.request;
   if (!request) {
     const controller = new AbortController();
     const promise = requestGitHubRepositoryAccess({
       owner,
-      method,
       fetcher,
       signal: controller.signal,
     });
     request = {
       controller,
       consumers: 0,
-      sequence: entry.nextSequence + 1,
       settled: false,
       promise,
     };
-    entry.nextSequence = request.sequence;
-    entry.requests.set(method, request);
+    entry.request = request;
     const currentRequest = request;
     void promise.then(
       (data) => {
         currentRequest.settled = true;
-        if (currentRequest.sequence >= entry.latestDataSequence) {
-          entry.data = data;
-          entry.expiresAt = Date.now() + ACCESS_CACHE_TTL_MS;
-          entry.latestDataSequence = currentRequest.sequence;
-        }
-        if (entry.requests.get(method) === currentRequest) entry.requests.delete(method);
+        entry.data = data;
+        entry.expiresAt = Date.now() + ACCESS_CACHE_TTL_MS;
+        if (entry.request === currentRequest) entry.request = null;
       },
       () => {
         currentRequest.settled = true;
-        if (entry.requests.get(method) === currentRequest) entry.requests.delete(method);
+        if (entry.request === currentRequest) entry.request = null;
       },
     );
   }
@@ -131,7 +118,6 @@ export async function fetchGitHubRepositoryAccess(input: {
 
 async function requestGitHubRepositoryAccess(input: {
   owner: string | null;
-  method: "GET" | "POST";
   fetcher: typeof globalThis.fetch;
   signal: AbortSignal;
 }) {
@@ -139,7 +125,7 @@ async function requestGitHubRepositoryAccess(input: {
   if (input.owner) search.set("owner", input.owner);
   const query = search.size > 0 ? `?${search.toString()}` : "";
   const response = await input.fetcher(`/api/integrations/github-user/installations${query}`, {
-    method: input.method,
+    method: "GET",
     signal: input.signal,
   });
   const value = (await response.json().catch(() => null)) as unknown;

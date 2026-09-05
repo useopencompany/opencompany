@@ -156,6 +156,27 @@ describe("GitHub user integration", () => {
     expect(mocks.rotateCredential).not.toHaveBeenCalled();
   });
 
+  it("rotates a token that cannot remain valid for the requesting sandbox turn", async () => {
+    mocks.loadCredential.mockResolvedValue({
+      ...storedCredential(),
+      expiresAt: new Date("2026-09-01T12:20:00.000Z"),
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({
+        access_token: "ghu_access_new",
+        expires_in: 28_800,
+        refresh_token: "ghr_refresh_new",
+        refresh_token_expires_in: 15_897_600,
+        token_type: "bearer",
+      }),
+    );
+
+    await expect(
+      getGitHubUserAccessToken(connection, { now, minimumValidityMs: 30 * 60_000 }),
+    ).resolves.toBe("ghu_access_new");
+    expect(mocks.rotateCredential).toHaveBeenCalledOnce();
+  });
+
   it("loads the stable account identity from the encrypted credential", async () => {
     mocks.loadCredential.mockResolvedValue(storedCredential());
 

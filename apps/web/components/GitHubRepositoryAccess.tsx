@@ -21,9 +21,7 @@ type AccessState =
       error: { message: string; code: GitHubRepositoryAccessRequestError["code"] | null };
     };
 
-type RefreshAccess = (options?: {
-  forceTokenRefresh?: boolean;
-}) => Promise<GitHubRepositoryAccess | null>;
+type RefreshAccess = () => Promise<GitHubRepositoryAccess | null>;
 
 const APPROVAL_POLL_DELAYS_MS = [5_000, 10_000, 20_000, 40_000, 60_000] as const;
 
@@ -292,32 +290,28 @@ function useGitHubRepositoryAccess(target: { owner?: string; repo?: string } = {
     };
   }, []);
 
-  const refresh = useCallback(
-    async (options: { forceTokenRefresh?: boolean } = {}) => {
-      requestRef.current?.abort();
-      const controller = new AbortController();
-      requestRef.current = controller;
-      if (mountedRef.current) setRefreshing(true);
-      try {
-        const data = await fetchGitHubRepositoryAccess({
-          ...(owner ? { owner } : {}),
-          ...(repo ? { repo } : {}),
-          ...(options.forceTokenRefresh ? { forceRefresh: true } : {}),
-          bypassCache: true,
-          signal: controller.signal,
-        });
-        if (mountedRef.current) setState({ status: "ready", data, error: null });
-        return data;
-      } catch (cause) {
-        if (controller.signal.aborted) return null;
-        if (mountedRef.current) setState(accessErrorState(cause));
-        return null;
-      } finally {
-        if (mountedRef.current && requestRef.current === controller) setRefreshing(false);
-      }
-    },
-    [owner, repo],
-  );
+  const refresh = useCallback(async () => {
+    requestRef.current?.abort();
+    const controller = new AbortController();
+    requestRef.current = controller;
+    if (mountedRef.current) setRefreshing(true);
+    try {
+      const data = await fetchGitHubRepositoryAccess({
+        ...(owner ? { owner } : {}),
+        ...(repo ? { repo } : {}),
+        bypassCache: true,
+        signal: controller.signal,
+      });
+      if (mountedRef.current) setState({ status: "ready", data, error: null });
+      return data;
+    } catch (cause) {
+      if (controller.signal.aborted) return null;
+      if (mountedRef.current) setState(accessErrorState(cause));
+      return null;
+    } finally {
+      if (mountedRef.current && requestRef.current === controller) setRefreshing(false);
+    }
+  }, [owner, repo]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -353,7 +347,6 @@ function useGitHubAccessApproval(
     | { status: "timed_out"; baseline: string | null }
     | { status: "waiting"; baseline: string | null; pollIndex: number }
   >({ status: "idle" });
-  const forcedRefreshUsedRef = useRef(false);
   const signature = data ? accessSignature(data, targetOwner) : null;
 
   useEffect(() => {
@@ -378,13 +371,10 @@ function useGitHubAccessApproval(
   return {
     status: state.status,
     begin: () => {
-      forcedRefreshUsedRef.current = false;
       setState({ status: "waiting", baseline: signature, pollIndex: 0 });
     },
     recheck: async () => {
-      const forceTokenRefresh = !forcedRefreshUsedRef.current;
-      forcedRefreshUsedRef.current = true;
-      const latest = await refresh({ forceTokenRefresh });
+      const latest = await refresh();
       const baseline = "baseline" in state ? state.baseline : null;
       if (approvalGranted(latest, baseline, targetOwner)) {
         setState({ status: "approved" });
