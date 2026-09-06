@@ -212,7 +212,7 @@ describe("Electric read models", () => {
     ]);
   });
 
-  it("serves integration accounts as a credential-free actor and workspace read model", async () => {
+  it("serves integration accounts with a provider-contract-scoped shape", async () => {
     let requestedUrl: URL | undefined;
     const proxy = new ElectricReadModelProxy({
       electricUrl: "https://electric.example.test",
@@ -253,10 +253,35 @@ describe("Electric read models", () => {
 
     expect(requestedUrl?.searchParams.get("table")).toBe("goat.integrations");
     expect(requestedUrl?.searchParams.get("where")).toBe(
-      `("user_workos_id" = $1 AND "workspace_id" IS NULL) OR "workspace_id" = $2`,
+      `(("user_workos_id" = $1 AND "workspace_id" IS NULL) OR "workspace_id" = $2) ` +
+        `AND CAST($3 AS text) = CAST($3 AS text)`,
     );
     expect(requestedUrl?.searchParams.get("params[1]")).toBe("user_1");
     expect(requestedUrl?.searchParams.get("params[2]")).toBe("workspace_1");
+    expect(requestedUrl?.searchParams.get("params[3]")?.split(",")).toEqual([
+      "gmail",
+      "google_calendar",
+      "google_drive",
+      "linear",
+      "github",
+      "github_user",
+      "jamie",
+      "slack",
+      "slack_bot",
+      "hubspot",
+      "granola",
+      "fathom",
+      "attio",
+      "betterstack",
+      "render",
+      "vercel",
+      "signoz",
+      "stripe",
+      "latitude",
+      "posthog",
+      "neon",
+      "x_account",
+    ]);
     expect(requestedUrl?.searchParams.get("columns")).not.toContain("credential");
     expect((await response.json())[0]?.value).toEqual({
       id: "integration_1",

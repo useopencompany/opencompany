@@ -76,6 +76,12 @@ const PREDECODED_READ_MODEL_FIELDS = new Set([
   "planPaused",
 ]);
 
+// Electric shape logs outlive individual table rows. Including the public provider contract in
+// the shape identity forces a fresh snapshot when providers are added or retired, so historical
+// inserts cannot be replayed against a newer, stricter protocol enum.
+const INTEGRATION_ACCOUNT_PROVIDER_CONTRACT =
+  IntegrationAccountReadModelSchema.shape.provider.options.join(",");
+
 export interface ReadModelService {
   stream(input: {
     actor: Actor;
@@ -423,8 +429,14 @@ function readModelShape(input: {
           "scopes",
           "capability_modes",
         ],
-        where: `("user_workos_id" = $1 AND "workspace_id" IS NULL) OR "workspace_id" = $2`,
-        params: [input.actor.userId, input.actor.workspaceId],
+        where:
+          `(("user_workos_id" = $1 AND "workspace_id" IS NULL) OR "workspace_id" = $2) ` +
+          `AND CAST($3 AS text) = CAST($3 AS text)`,
+        params: [
+          input.actor.userId,
+          input.actor.workspaceId,
+          INTEGRATION_ACCOUNT_PROVIDER_CONTRACT,
+        ],
       };
     case "brain-folders-v1":
       return brainShape(input, "goat.brain_folders", [
