@@ -1,7 +1,7 @@
 # Open-source release readiness
 
 - Status: Proposed
-- Last reviewed: 2026-09-04
+- Last reviewed: 2026-09-06
 
 ## Current state
 
@@ -22,10 +22,11 @@ drifting source snapshot. Keep deployable apps, shared packages, migrations, doc
 checks required to review changes together. Production credentials, private customer data, and
 company-only environment bindings remain outside the repository.
 
-The initial promise should be development-supported community setup, not production-grade
-self-hosting. Provider-backed features may be unavailable without personal credentials, but a new
-contributor should be able to install dependencies, understand the runtime boundaries, run the
-documented local path, and execute the same core checks as maintainers.
+The initial launch promise is contribution support, not production-grade self-hosting. Contributors
+can install dependencies, understand the runtime boundaries, and execute the repository's core
+checks. The current full-stack setup remains maintainer-oriented because it depends on
+opencompany-managed services. A credential-independent path for core local development is a planned
+follow-up, and provider-backed features may still require personal credentials.
 
 ## Remaining release gates
 
@@ -36,9 +37,8 @@ documented local path, and execute the same core checks as maintainers.
   privately notify contributors whose history contains personal or otherwise non-public addresses,
   and resolve objections before deciding whether the coordinated history-rewrite exception is
   necessary.
-- Confirm public-release maintainer ownership and operational coverage.
-- Exercise setup from clean macOS and Linux clones without company Infisical, Neon, Vercel, or
-  Render access.
+- Confirm public-release operational coverage for the active maintainers named in
+  [CODEOWNERS](../../.github/CODEOWNERS).
 - Apply and verify the public-repository `all_external_contributors` workflow approval policy during
   the visibility change. The versioned PR isolation and private fail-closed settings are documented
   in [CI security](../ci-security.md).
@@ -62,6 +62,12 @@ documented local path, and execute the same core checks as maintainers.
   See [CONTRIBUTING.md](../../CONTRIBUTING.md).
 - **Community policies:** [SECURITY.md](../../SECURITY.md) and
   [CODE_OF_CONDUCT.md](../../CODE_OF_CONDUCT.md) define the current reporting and conduct paths.
+
+## Tracked follow-up
+
+- Document and exercise a credential-independent core local-development path from clean macOS and
+  Linux clones. Until then, the README and getting-started guide must continue to state that the
+  full-stack setup requires access to opencompany-managed services.
 
 These decisions do not close the separate provenance and redistribution audit for tracked source,
 assets, fixtures, or generated material.
