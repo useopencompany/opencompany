@@ -7,19 +7,19 @@ import { useToast } from "@/shared/ui/toast";
 
 export function AccountUnavailableScreen() {
   const auth = useAuth();
-  const { showToast } = useToast();
+  const { showErrorToast } = useToast();
   const isIncomplete = auth.accountUnavailableReason === "incomplete-onboarding";
 
   const handleRefresh = async () => {
     if (auth.isRefreshingIdentity || auth.isSigningOut) return;
     const [error] = await until(auth.refreshIdentity);
-    if (error) showToast(error.message);
+    if (error) showErrorToast(error.message, error, "auth.identity.refresh");
   };
 
   const handleSignOut = async () => {
     if (auth.isRefreshingIdentity || auth.isSigningOut) return;
     const [error] = await until(auth.signOut);
-    if (error) showToast(error.message);
+    if (error) showErrorToast(error.message, error, "auth.sign-out");
   };
 
   return (

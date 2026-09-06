@@ -8,20 +8,21 @@ import {
   labelStyle,
   scaleEffect,
 } from "@expo/ui/swift-ui/modifiers";
-import type { ConversationDto } from "@opencompany/protocol/schemas";
-import { type Href, Link, router } from "expo-router";
+import { useQuery } from "@tanstack/react-query";
+import { Link, router, useGlobalSearchParams } from "expo-router";
 import { useDrawerProgress } from "expo-router/drawer";
-import type { SFSymbol } from "expo-symbols";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import Reanimated, { interpolate, useAnimatedStyle } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { until } from "until-async";
 import wordmark from "@/assets/images/wordmark.png";
 import wordmarkDark from "@/assets/images/wordmark-dark.png";
-import { useAuth } from "@/features/auth";
 import { StyledImage } from "@/shared/ui/styled-image";
 import { StyledSymbolView } from "@/shared/ui/styled-symbol-view";
+import { useToast } from "@/shared/ui/toast";
+import { chatQueryKeys, useChatCoordinator } from "@/widgets/chat/model/chat-coordinator";
+import { listStoredConversations } from "@/widgets/chat/model/chat-store";
 import {
   NativeSidebarHeader,
   SIDEBAR_HEADER_INITIAL_HEIGHT,
@@ -33,56 +34,44 @@ const SIDEBAR_SCROLL_VIEW_TEST_ID = "sidebar-scroll-view";
 const SIDEBAR_ACTION_CONTROL_SCALE = 0.875;
 const SIDEBAR_ACTION_ICON_SCALE = 1.25;
 
-const NAV_ITEMS: { label: string; icon: SFSymbol; href: Href }[] = [
-  { label: "Tasks", icon: "checklist", href: "/tasks" },
-  { label: "Brains", icon: "brain", href: "/brains" },
-];
+function getConversationsError(error: unknown): string | null {
+  if (!error) return null;
+  if (error instanceof Error) return error.message;
+  return "Recent chats could not be loaded.";
+}
 
 export function Sidebar() {
-  const { api, workspace } = useAuth();
+  const coordinator = useChatCoordinator();
+  const { showErrorToast } = useToast();
+  const { chatId: activeChatId } = useGlobalSearchParams<{ chatId?: string }>();
   const insets = useSafeAreaInsets();
   const [headerHeight, setHeaderHeight] = useState(insets.top + SIDEBAR_HEADER_INITIAL_HEIGHT);
-  const [conversations, setConversations] = useState<ConversationDto[]>([]);
-  const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [conversationsError, setConversationsError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setIsInitialLoading(true);
-    setConversations([]);
-    setConversationsError(null);
-
-    void until(api.listConversations).then(([error, data]) => {
-      if (cancelled) return;
-      if (error) {
-        setConversationsError(
-          error instanceof Error ? error.message : "Recent chats could not be loaded.",
-        );
-      } else {
-        setConversations(data);
-      }
-      setIsInitialLoading(false);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [api, workspace?.id]);
+  const [isSearchActive, setIsSearchActive] = useState(false);
+  const [searchValue, setSearchValue] = useState("");
+  const conversationsQuery = useQuery({
+    queryKey: coordinator.partition
+      ? chatQueryKeys.conversations(coordinator.partition)
+      : ["chat", "conversations", "signed-out"],
+    queryFn: () => listStoredConversations(coordinator.partition!),
+    enabled: Boolean(coordinator.partition),
+  });
+  const conversations = conversationsQuery.data ?? [];
+  const normalizedSearchValue = isSearchActive ? searchValue.trim().toLocaleLowerCase() : "";
+  const filteredConversations = normalizedSearchValue
+    ? conversations.filter((conversation) =>
+        conversation.title.toLocaleLowerCase().includes(normalizedSearchValue),
+      )
+    : conversations;
+  const conversationsError = getConversationsError(conversationsQuery.error);
 
   const refreshConversations = async () => {
     if (isRefreshing) return;
     setIsRefreshing(true);
-    const [error, data] = await until(api.listConversations);
-    if (error) {
-      setConversationsError(
-        error instanceof Error ? error.message : "Recent chats could not be refreshed.",
-      );
-    } else {
-      setConversations(data);
-      setConversationsError(null);
-    }
+    const [error] = await until(coordinator.refreshConversations);
     setIsRefreshing(false);
+    if (error)
+      showErrorToast("Recent chats could not be refreshed.", error, "chat.list.manual-refresh");
   };
 
   // 0 while closed, 1 while fully open, tracking the gesture in between. Driven
@@ -114,22 +103,7 @@ export function Sidebar() {
         scrollIndicatorInsets={{ top: headerHeight }}
         showsVerticalScrollIndicator={false}
       >
-        {NAV_ITEMS.map((item) => (
-          <Link key={item.label} href={item.href} asChild>
-            <Pressable className="flex-row items-center gap-3 px-3 py-2.5 rounded-xl active:bg-secondary border-continuous">
-              <StyledSymbolView
-                name={item.icon}
-                size={20}
-                tintColorClassName="accent-sidebar-foreground"
-              />
-              <Text className="text-[16px] font-medium text-sidebar-foreground">{item.label}</Text>
-            </Pressable>
-          </Link>
-        ))}
-
-        <Text className="px-3 pt-6 pb-2 text-[13px] font-semibold text-muted-foreground">
-          Recents
-        </Text>
+        <Text className="px-3 pb-2 text-[13px] font-semibold text-muted-foreground">Recents</Text>
 
         {conversationsError ? (
           <View className="mx-3 mb-2 gap-2 rounded-xl bg-secondary px-3 py-3 border-continuous">
@@ -148,7 +122,7 @@ export function Sidebar() {
           </View>
         ) : null}
 
-        {isInitialLoading ? (
+        {conversationsQuery.isLoading ? (
           <View className="flex-row items-center gap-2 px-3 py-3">
             <ActivityIndicator size="small" colorClassName="accent-muted-foreground" />
             <Text className="text-[14px] text-muted-foreground">Loading recent chats...</Text>
@@ -157,14 +131,24 @@ export function Sidebar() {
           <Text className="px-3 py-3 text-[14px] leading-5 text-muted-foreground">
             No recent chats yet.
           </Text>
+        ) : filteredConversations.length === 0 ? (
+          <Text className="px-3 py-3 text-[14px] leading-5 text-muted-foreground">
+            No chats found.
+          </Text>
         ) : (
-          conversations.map((conversation) => (
+          filteredConversations.map((conversation) => (
             <Link
               key={conversation.id}
               href={{ pathname: "/chats/[chatId]", params: { chatId: conversation.id } }}
               asChild
             >
-              <Pressable className="px-3 py-2.5 active:bg-secondary rounded-xl border-continuous">
+              <Pressable
+                className={
+                  conversation.id === activeChatId
+                    ? "rounded-xl border-continuous bg-secondary px-3 py-2.5"
+                    : "rounded-xl border-continuous px-3 py-2.5 active:bg-secondary"
+                }
+              >
                 <Text numberOfLines={1} className="text-[15px] text-sidebar-foreground">
                   {conversation.title}
                 </Text>
@@ -193,7 +177,8 @@ export function Sidebar() {
           </View>
         }
         onHeightChange={setHeaderHeight}
-        onSearchPress={() => {}}
+        onSearchActiveChange={setIsSearchActive}
+        onSearchValueChange={setSearchValue}
         scrollViewTestID={SIDEBAR_SCROLL_VIEW_TEST_ID}
         topInset={insets.top}
       />

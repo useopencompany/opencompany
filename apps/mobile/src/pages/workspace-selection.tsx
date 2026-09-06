@@ -1,4 +1,4 @@
-import { Button, Host } from "@expo/ui/swift-ui";
+import { Button, Host, HStack } from "@expo/ui/swift-ui";
 import { buttonStyle, controlSize } from "@expo/ui/swift-ui/modifiers";
 import { ActivityIndicator, FlatList, Pressable, Text, View } from "react-native";
 import { until } from "until-async";
@@ -8,22 +8,22 @@ import { useToast } from "@/shared/ui/toast";
 
 export function WorkspaceSelectionScreen() {
   const auth = useAuth();
-  const { showToast } = useToast();
+  const { showErrorToast } = useToast();
 
   const handleSelectWorkspace = async (workspaceId: string) => {
     if (auth.selectingWorkspaceId) return;
     const [error] = await until(() => auth.selectWorkspace(workspaceId));
-    if (error) showToast(error.message);
+    if (error) showErrorToast(error.message, error, "auth.workspace.select");
   };
 
   const handleRetry = async () => {
     const [error] = await until(auth.refreshIdentity);
-    if (error) showToast(error.message);
+    if (error) showErrorToast(error.message, error, "auth.identity.refresh");
   };
 
   const handleSignOut = async () => {
     const [error] = await until(auth.signOut);
-    if (error) showToast(error.message);
+    if (error) showErrorToast(error.message, error, "auth.sign-out");
   };
 
   return (
@@ -45,30 +45,25 @@ export function WorkspaceSelectionScreen() {
           ) : null}
         </View>
       }
-      ListEmptyComponent={
-        auth.errorMessage ? (
-          <Text className="py-8 text-center text-[15px] text-muted-foreground">
-            Your workspaces could not be loaded.
-          </Text>
-        ) : null
-      }
       ListFooterComponent={
-        <View className="mt-auto gap-3 pt-8">
-          {auth.errorMessage && auth.workspaces.length === 0 ? (
-            <Host matchContents={{ horizontal: true, vertical: false }} style={{ height: 44 }}>
+        <View className="mt-8">
+          <Host matchContents>
+            <HStack>
+              {auth.errorMessage && auth.workspaces.length === 0 ? (
+                <Button
+                  label={auth.isRefreshingIdentity ? "Loading..." : "Retry"}
+                  onPress={() => void handleRetry()}
+                  systemImage="arrow.clockwise"
+                  modifiers={[buttonStyle("glassProminent"), controlSize("large")]}
+                />
+              ) : null}
               <Button
-                label={auth.isRefreshingIdentity ? "Refreshing..." : "Retry"}
-                onPress={() => void handleRetry()}
-                modifiers={[buttonStyle("glassProminent"), controlSize("large")]}
+                label={auth.isSigningOut ? "Signing out..." : "Sign out"}
+                onPress={() => void handleSignOut()}
+                systemImage="rectangle.portrait.and.arrow.right"
+                modifiers={[buttonStyle("glass"), controlSize("large")]}
               />
-            </Host>
-          ) : null}
-          <Host matchContents={{ horizontal: true, vertical: false }} style={{ height: 44 }}>
-            <Button
-              label={auth.isSigningOut ? "Signing out..." : "Sign out"}
-              onPress={() => void handleSignOut()}
-              modifiers={[buttonStyle("glass"), controlSize("large")]}
-            />
+            </HStack>
           </Host>
         </View>
       }

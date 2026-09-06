@@ -11,7 +11,7 @@ import { useToast } from "@/shared/ui/toast";
 
 export default function SignInScreen() {
   const { errorMessage, isSigningIn, signIn } = useAuth();
-  const { showToast } = useToast();
+  const { showErrorToast } = useToast();
   const shownInitializationErrorRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -20,12 +20,12 @@ export default function SignInScreen() {
     }
 
     shownInitializationErrorRef.current = errorMessage;
-    showToast(errorMessage);
-  }, [errorMessage, showToast]);
+    showErrorToast(errorMessage, errorMessage, "auth.initialize");
+  }, [errorMessage, showErrorToast]);
 
   const handleSignIn = async () => {
     const [error] = await until(signIn);
-    if (error) showToast(error.message);
+    if (error) showErrorToast(error.message, error, "auth.sign-in");
   };
 
   return (
@@ -55,7 +55,6 @@ export default function SignInScreen() {
                 label="Sign in"
                 onPress={() => void handleSignIn()}
                 testID="sign-in-button"
-                systemImage="rectangle.portrait.and.arrow.right"
                 modifiers={[buttonStyle("glassProminent"), controlSize("large")]}
               />
             )}

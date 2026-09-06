@@ -1,10 +1,12 @@
 import { Host } from "@expo/ui";
 import { RNHostView } from "@expo/ui/swift-ui";
+import { useMutation } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { useEffect, useRef } from "react";
 import { useWindowDimensions, View } from "react-native";
 import { useCSSVariable } from "uniwind";
-
+import { until } from "until-async";
+import { useToast } from "@/shared/ui/toast";
 import { NativeChatComposerView } from "../../../../modules/native-chat-composer";
 import { useChatComposer } from "../model/chat-composer-context";
 import { ComposerAttachments } from "./composer-attachments";
@@ -26,27 +28,52 @@ const COMPOSER_CANVAS_PILL_HEIGHT =
   COMPOSER_CONTROL_SIZE;
 
 export function ChatComposer({
+  autoFocus,
   bottomInset,
+  conversationId,
   disabled,
+  isGenerating,
+  isStopping,
   onComposerHeightChange,
-  onFocusChange,
   onPillHeightChange,
   onSend,
+  onStop,
 }: {
+  autoFocus: boolean;
   bottomInset: number;
+  conversationId: string;
   disabled: boolean;
+  isGenerating: boolean;
+  isStopping: boolean;
   onComposerHeightChange: (height: number) => void;
-  onFocusChange: (focused: boolean) => void;
   onPillHeightChange: (height: number) => void;
-  onSend: (value: string) => void;
+  onSend: () => Promise<void>;
+  onStop: () => Promise<void>;
 }) {
   const { width } = useWindowDimensions();
   const [accent, accentForeground] = useCSSVariable([
     "--color-accent",
     "--color-accent-foreground",
   ]) as [string, string];
+  const { showErrorToast } = useToast();
   const pillHeightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const { attachments, clearAttachments, removeAttachment } = useChatComposer();
+  const composer = useChatComposer();
+  const sendMutation = useMutation({
+    mutationFn: async () => {
+      await composer.flushDraft();
+      await onSend();
+    },
+    onSuccess: () => composer.clearAfterSend(),
+    onError: (error) =>
+      showErrorToast(
+        error instanceof Error ? error.message : "The message could not be sent.",
+        error,
+        "chat.message.send",
+      ),
+  });
+  const isActiveConversation = composer.conversationId === conversationId;
+  const attachments = isActiveConversation ? composer.attachments : [];
+  const value = isActiveConversation ? composer.value : "";
   const canvasHeight =
     COMPOSER_CANVAS_PILL_HEIGHT +
     COMPOSER_ATTACHMENTS_CANVAS_HEIGHT +
@@ -89,24 +116,33 @@ export function ChatComposer({
         <NativeChatComposerView
           accentColor={accent}
           accentForegroundColor={accentForeground}
+          autoFocus={autoFocus}
           bottomInset={bottomInset}
-          disabled={disabled}
+          disabled={disabled || sendMutation.isPending || !isActiveConversation}
           hasAttachments={attachments.length > 0}
+          isGenerating={isGenerating}
+          isStopping={isStopping}
           nativeID="chat-composer"
           onAttachmentPress={() => router.push("/attachment-sheet")}
           onComposerHeightChange={(event) => handleComposerHeightChange(event.nativeEvent.height)}
-          onFocusChange={(event) => onFocusChange(event.nativeEvent.focused)}
-          onSend={(event) => {
-            clearAttachments();
-            onSend(event.nativeEvent.value);
+          onChangeText={(event) => composer.setValue(event.nativeEvent.value)}
+          onSend={() => {
+            if (!sendMutation.isPending) sendMutation.mutate();
+          }}
+          onStop={() => {
+            void until(onStop).then(([error]) => {
+              if (error)
+                showErrorToast("The stop request could not be saved.", error, "chat.run.stop");
+            });
           }}
           style={{ height: "100%", width: "100%" }}
+          value={value}
         >
           <RNHostView matchContents>
             <ComposerAttachments
               attachments={attachments}
               contentWidth={attachmentContentWidth}
-              onRemove={removeAttachment}
+              onRemove={composer.removeAttachment}
             />
           </RNHostView>
         </NativeChatComposerView>

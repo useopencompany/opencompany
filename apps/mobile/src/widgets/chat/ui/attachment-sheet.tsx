@@ -6,8 +6,10 @@ import { Alert, Pressable, ScrollView, Text, View } from "react-native";
 import { useUniwind } from "uniwind";
 import { until } from "until-async";
 
+import { PressableScale } from "@/shared/ui/pressable-scale";
 import { StyledImage } from "@/shared/ui/styled-image";
 import { StyledSymbolView } from "@/shared/ui/styled-symbol-view";
+import { MAX_CHAT_ATTACHMENTS, validateComposerAttachments } from "../model/attachment-validation";
 import {
   CHAT_MODELS,
   type ComposerAttachment,
@@ -22,14 +24,33 @@ interface AttachmentAction {
 
 let nextAttachmentSequence = 0;
 
-const createAttachmentId = (uri: string) => {
+function createAttachmentId(uri: string): string {
   nextAttachmentSequence += 1;
   return `${Date.now()}-${nextAttachmentSequence}-${uri}`;
-};
+}
 
 export default function AttachmentSheet() {
   const { theme } = useUniwind();
-  const { addAttachments, selectedModelId, selectModel } = useChatComposer();
+  const {
+    addAttachments,
+    attachments: currentAttachments,
+    selectedModelId,
+    selectModel,
+  } = useChatComposer();
+
+  const persistPickedAttachments = async (attachments: ComposerAttachment[]) => {
+    const validation = validateComposerAttachments(currentAttachments.length, attachments);
+    if (validation.error) {
+      Alert.alert("Attachment Not Added", validation.error);
+      return;
+    }
+    const [copyError] = await until(() => addAttachments(validation.valid));
+    if (copyError) {
+      Alert.alert("Attachment Not Added", "opencompany could not save that file on this device.");
+      return;
+    }
+    router.back();
+  };
 
   const pickPhotos = async () => {
     const [pickerError, result] = await until(() =>
@@ -37,7 +58,7 @@ export default function AttachmentSheet() {
         mediaTypes: ["images"],
         allowsEditing: false,
         allowsMultipleSelection: true,
-        selectionLimit: 4,
+        selectionLimit: Math.max(1, MAX_CHAT_ATTACHMENTS - currentAttachments.length),
         quality: 0.9,
       }),
     );
@@ -51,7 +72,7 @@ export default function AttachmentSheet() {
       return;
     }
 
-    addAttachments(
+    await persistPickedAttachments(
       result.assets.map((asset) => ({
         id: createAttachmentId(asset.uri),
         kind: "image",
@@ -63,7 +84,6 @@ export default function AttachmentSheet() {
         height: asset.height,
       })),
     );
-    router.back();
   };
 
   const pickFiles = async () => {
@@ -93,8 +113,7 @@ export default function AttachmentSheet() {
       ...(asset.size ? { size: asset.size } : {}),
     }));
 
-    addAttachments(attachments);
-    router.back();
+    await persistPickedAttachments(attachments);
   };
 
   const attachmentActions: AttachmentAction[] = [
@@ -110,16 +129,15 @@ export default function AttachmentSheet() {
   return (
     <ScrollView
       bounces={false}
-      contentContainerClassName="px-5 pt-7 pb-6"
+      contentContainerClassName="px-5 pt-7 pb-2"
       contentInsetAdjustmentBehavior="automatic"
       showsVerticalScrollIndicator={false}
     >
       <View className="flex-row gap-3">
         {attachmentActions.map((action) => (
-          <Pressable
+          <PressableScale
             accessibilityLabel={action.label}
-            accessibilityRole="button"
-            className="h-[84px] flex-1 items-center justify-center gap-2 rounded-[17px] border-continuous bg-secondary active:opacity-55"
+            className="h-[84px] flex-1 items-center justify-center gap-2 rounded-[17px] border-continuous bg-secondary"
             key={action.label}
             onPress={action.onPress}
           >
@@ -132,7 +150,7 @@ export default function AttachmentSheet() {
             <Text className="font-medium text-[17px] text-secondary-foreground leading-[21px] tracking-[-0.2px]">
               {action.label}
             </Text>
-          </Pressable>
+          </PressableScale>
         ))}
       </View>
 
@@ -150,7 +168,7 @@ export default function AttachmentSheet() {
               accessibilityLabel={`${model.label}, ${model.provider}`}
               accessibilityRole="button"
               accessibilityState={{ selected }}
-              className="min-h-[68px] flex-row items-center rounded-[14px] border-continuous px-1 active:bg-secondary"
+              className="min-h-[58px] flex-row items-center rounded-[14px] border-continuous px-1"
               key={model.id}
               onPress={() => {
                 selectModel(model.id);
@@ -167,19 +185,19 @@ export default function AttachmentSheet() {
                   />
                 ) : null}
               </View>
-              <View className="mr-4 w-10 items-center justify-center">
+              <View className="mr-3 w-9 items-center justify-center">
                 <StyledImage
                   accessibilityIgnoresInvertColors
-                  className="h-7 w-7 opacity-55"
+                  className="size-6 opacity-55"
                   contentFit="contain"
                   source={logoSource}
                 />
               </View>
               <View className="flex-1 py-2">
-                <Text className="font-medium text-[18px] text-foreground leading-[22px] tracking-[-0.25px]">
+                <Text className="font-medium text-[16px] text-foreground leading-5 tracking-[-0.2px]">
                   {model.label}
                 </Text>
-                <Text className="mt-0.5 text-[15px] text-muted-foreground leading-[19px] tracking-[-0.15px]">
+                <Text className="text-[13px] text-muted-foreground leading-[17px] tracking-[-0.1px]">
                   {model.provider}
                 </Text>
               </View>

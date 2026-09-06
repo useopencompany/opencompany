@@ -23,37 +23,27 @@ private enum ComposerMetrics {
 
 final class NativeChatComposerViewProps: ExpoSwiftUI.ViewProps {
   @Field var disabled = false
+  @Field var isGenerating = false
+  @Field var isStopping = false
+  @Field var value = ""
+  @Field var autoFocus = false
   @Field var bottomInset: Double = 0
   @Field var accentColor: Color = .blue
   @Field var accentForegroundColor: Color = .white
   @Field var hasAttachments = false
 
   let onSend = EventDispatcher()
+  let onStop = EventDispatcher()
+  let onChangeText = EventDispatcher()
   let onAttachmentPress = EventDispatcher()
   let onComposerHeightChange = EventDispatcher()
-  let onFocusChange = EventDispatcher()
-}
-
-private final class ComposerModel: ObservableObject {
-  @Published var text = ""
-  private var lastReportedHeight: CGFloat?
-
-  func reportHeight(_ height: CGFloat, dispatcher: EventDispatcher) {
-    if let lastReportedHeight, abs(lastReportedHeight - height) < 0.25 {
-      return
-    }
-
-    lastReportedHeight = height
-    dispatcher(["height": height])
-  }
 }
 
 struct NativeChatComposerView: ExpoSwiftUI.View {
   @ObservedObject var props: NativeChatComposerViewProps
-  @StateObject private var model = ComposerModel()
   @FocusState private var isInputFocused: Bool
   @State private var isExpanded = false
-  @State private var isKeyboardVisible = false
+  @State private var lastReportedHeight: CGFloat?
   @State private var singleLineHeight: CGFloat?
   @State private var measuredCollapsedContentHeight: CGFloat?
   @State private var measuredExpandedContentHeight: CGFloat?
@@ -74,15 +64,18 @@ struct NativeChatComposerView: ExpoSwiftUI.View {
       .frame(maxWidth: .infinity)
       .fixedSize(horizontal: false, vertical: true)
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-      .onChange(of: isInputFocused) {
-        props.onFocusChange(["focused": isInputFocused])
+      .defaultFocus($isInputFocused, props.autoFocus)
+      .onChange(of: props.autoFocus, initial: true) {
+        if props.autoFocus {
+          isInputFocused = true
+        }
       }
-      .onReceive(
-        NotificationCenter.default.publisher(
-          for: UIResponder.keyboardWillChangeFrameNotification
-        )
-      ) { notification in
-        updateKeyboardVisibility(from: notification)
+      .onChange(of: props.value) {
+        if props.value.isEmpty {
+          isExpanded = false
+        } else {
+          updateExpandedState()
+        }
       }
   }
 
@@ -156,7 +149,7 @@ struct NativeChatComposerView: ExpoSwiftUI.View {
         geometry.size.height
       },
       action: { height in
-        model.reportHeight(height, dispatcher: props.onComposerHeightChange)
+        reportComposerHeight(height)
       }
     )
     .animation(.smooth(duration: 0.18), value: isExpanded)
@@ -202,8 +195,8 @@ struct NativeChatComposerView: ExpoSwiftUI.View {
 
       Spacer(minLength: 0)
 
-      Button(action: send) {
-        Image(systemName: "arrow.up")
+      Button(action: props.isGenerating ? stop : send) {
+        Image(systemName: props.isGenerating ? "stop.fill" : "arrow.up")
           .font(.system(size: 14, weight: .bold))
           .foregroundStyle(props.accentForegroundColor)
           .frame(width: 30, height: 30)
@@ -212,19 +205,19 @@ struct NativeChatComposerView: ExpoSwiftUI.View {
           .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
-      .disabled(isSendDisabled)
-      .opacity(isSendDisabled ? 0.6 : 1)
+      .disabled(props.isGenerating ? props.isStopping : isSendDisabled)
+      .opacity((props.isGenerating ? props.isStopping : isSendDisabled) ? 0.6 : 1)
       .animation(.easeInOut(duration: 0.1), value: isSendDisabled)
-      .accessibilityLabel("Send message")
+      .accessibilityLabel(props.isGenerating ? (props.isStopping ? "Stopping" : "Stop") : "Send message")
     }
     .frame(maxWidth: .infinity)
   }
 
   private var textBinding: Binding<String> {
     Binding(
-      get: { model.text },
+      get: { props.value },
       set: { value in
-        model.text = value
+        props.onChangeText(["value": value])
         if value.isEmpty {
           isExpanded = false
         }
@@ -233,17 +226,17 @@ struct NativeChatComposerView: ExpoSwiftUI.View {
   }
 
   private var isSendDisabled: Bool {
-    props.disabled || model.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    props.disabled
+      || (props.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        && !props.hasAttachments)
   }
 
   private var horizontalInset: CGFloat {
-    if isComposerExpanded {
+    if isComposerExpanded || isInputFocused {
       return ComposerMetrics.openHorizontalInset
     }
 
-    return isKeyboardVisible
-      ? ComposerMetrics.openHorizontalInset
-      : ComposerMetrics.closedHorizontalInset
+    return ComposerMetrics.closedHorizontalInset
   }
 
   private var isComposerExpanded: Bool {
@@ -273,7 +266,7 @@ struct NativeChatComposerView: ExpoSwiftUI.View {
   }
 
   private var measurementText: String {
-    model.text.isEmpty ? "M" : "\(model.text)\u{200B}"
+    props.value.isEmpty ? "M" : "\(props.value)\u{200B}"
   }
 
   private func lineProbe(
@@ -299,11 +292,11 @@ struct NativeChatComposerView: ExpoSwiftUI.View {
   }
 
   private func updateExpandedState() {
-    guard !model.text.isEmpty,
+    guard !props.value.isEmpty,
       let singleLineHeight,
       let measuredCollapsedContentHeight
     else {
-      if model.text.isEmpty {
+      if props.value.isEmpty {
         isExpanded = false
       }
       return
@@ -315,48 +308,27 @@ struct NativeChatComposerView: ExpoSwiftUI.View {
   }
 
   private func send() {
-    let draft = model.text.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !props.disabled, !draft.isEmpty else {
+    let draft = props.value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !props.disabled, !draft.isEmpty || props.hasAttachments else {
       return
     }
 
-    model.text = ""
-    isExpanded = false
     props.onSend(["value": draft])
   }
 
-  private func updateKeyboardVisibility(from notification: Notification) {
-    guard let userInfo = notification.userInfo,
-      let endFrameValue = userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue,
-      let screen = notification.object as? UIScreen
-    else {
+  private func stop() {
+    guard props.isGenerating, !props.isStopping else {
+      return
+    }
+    props.onStop()
+  }
+
+  private func reportComposerHeight(_ height: CGFloat) {
+    if let lastReportedHeight, abs(lastReportedHeight - height) < 0.25 {
       return
     }
 
-    let endFrame = endFrameValue.cgRectValue
-    let nextIsKeyboardVisible = endFrame.minY < screen.bounds.height - 1
-    guard nextIsKeyboardVisible != isKeyboardVisible else {
-      return
-    }
-
-    // Keyboard presentation starts inside the TextField focus transaction, which can
-    // suppress SwiftUI layout animations. Apply the visibility change on the next run
-    // loop so the horizontal inset receives its own animation transaction.
-    DispatchQueue.main.async {
-      guard nextIsKeyboardVisible != isKeyboardVisible else {
-        return
-      }
-
-      var transaction = Transaction(
-        animation: .spring(
-          duration: ComposerMetrics.keyboardWidthAnimationDuration,
-          bounce: 0
-        )
-      )
-      transaction.disablesAnimations = false
-      withTransaction(transaction) {
-        isKeyboardVisible = nextIsKeyboardVisible
-      }
-    }
+    lastReportedHeight = height
+    props.onComposerHeightChange(["height": height])
   }
 }

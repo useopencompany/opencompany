@@ -2958,6 +2958,8 @@ export const ResolveApprovalBodySchema = z
   )
   .openapi("ResolveApprovalBody");
 
+export type ResolveApprovalBody = z.input<typeof ResolveApprovalBodySchema>;
+
 export const ResolveApprovalEnvelopeSchema = z
   .object({
     data: z
@@ -4098,6 +4100,7 @@ export const InfisicalAuthFlowEnvelopeSchema = z
 
 export type ConversationDto = z.infer<typeof ConversationSchema>;
 export type ConversationRuntimeDto = z.infer<typeof ConversationRuntimeSchema>;
+export type AttachmentDto = z.infer<typeof AttachmentSchema>;
 export type ConversationShareDto = z.infer<typeof ConversationShareSchema>;
 export type PublicChatMessageDto = z.infer<typeof PublicChatMessageSchema>;
 export type PublicChatShareDto = z.infer<typeof PublicChatShareSchema>;

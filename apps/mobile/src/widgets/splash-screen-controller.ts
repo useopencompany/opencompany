@@ -6,13 +6,13 @@ import { useAuth } from "@/features/auth";
 void SplashScreen.preventAutoHideAsync();
 
 export function SplashScreenController() {
-  const { isLoading } = useAuth();
+  const { isSessionLoading } = useAuth();
 
   useEffect(() => {
-    if (!isLoading) {
+    if (!isSessionLoading) {
       void SplashScreen.hideAsync();
     }
-  }, [isLoading]);
+  }, [isSessionLoading]);
 
   return null;
 }

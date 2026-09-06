@@ -16,9 +16,17 @@
       "types": "./src/events.ts",
       "default": "./src/events.ts"
     },
+    "./run-stream": {
+      "types": "./src/run-stream.ts",
+      "default": "./src/run-stream.ts"
+    },
     "./schemas": {
       "types": "./src/schemas.ts",
       "default": "./src/schemas.ts"
+    },
+    "./version": {
+      "types": "./src/version.ts",
+      "default": "./src/version.ts"
     },
     "./openapi": "./openapi/openapi.v1.json"
   },

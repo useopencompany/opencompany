@@ -21,7 +21,7 @@ const getInitials = (firstName: string | null, lastName: string | null, email: s
 
 export default function SettingsSheet() {
   const { isSigningOut, profile, signOut } = useAuth();
-  const { showToast } = useToast();
+  const { showErrorToast } = useToast();
   const name = [profile?.firstName, profile?.lastName]
     .map((part) => part?.trim())
     .filter(Boolean)
@@ -90,7 +90,7 @@ export default function SettingsSheet() {
                 onPress: async () => {
                   router.dismiss();
                   const [error] = await until(signOut);
-                  if (error) showToast(error.message);
+                  if (error) showErrorToast(error.message, error, "auth.sign-out");
                 },
               },
             ]);

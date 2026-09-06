@@ -6,9 +6,12 @@ import { FullWindowOverlay } from "react-native-screens";
 
 import { Toast } from "./Toast";
 
-const ToastContext = createContext<{
+interface ToastContextValue {
   showToast: (message: string, options?: { duration?: number }) => void;
-} | null>(null);
+  showErrorToast: (message: string, error: unknown, context?: string) => void;
+}
+
+const ToastContext = createContext<ToastContextValue | null>(null);
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const safeAreaInsets = useSafeAreaInsets();
@@ -26,12 +29,17 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     ]);
   };
 
+  const showErrorToast = (message: string, error: unknown, context?: string) => {
+    console.error(context ? `[${context}] ${message}` : message, error);
+    showToast(message);
+  };
+
   const handleExitComplete = () => {
     setQueue((currentQueue) => currentQueue.slice(1));
   };
 
   return (
-    <ToastContext.Provider value={{ showToast }}>
+    <ToastContext.Provider value={{ showToast, showErrorToast }}>
       {children}
       {visibleToast ? (
         <FullWindowOverlay unstable_accessibilityContainerViewIsModal={false}>
@@ -55,12 +63,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   );
 }
 
-export function useToast(): {
-  showToast: (message: string, options?: { duration?: number }) => void;
-} {
+export function useToast(): ToastContextValue {
   const context = use(ToastContext);
   if (!context) {
     throw new Error("useToast must be used within a ToastProvider");
   }
-  return { showToast: context.showToast };
+  return { showToast: context.showToast, showErrorToast: context.showErrorToast };
 }

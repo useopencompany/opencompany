@@ -138,22 +138,36 @@ const persistSession = async (session: StoredSession): Promise<void> => {
   await SecureStore.setItemAsync(KEYS.SESSION, JSON.stringify(session));
 };
 
+let refreshInFlight: { organizationId?: string; promise: Promise<StoredSession> } | null = null;
+
 const refreshStoredSession = async (organizationId?: string): Promise<StoredSession> => {
-  const session = await readStoredSession();
-  if (!session) throw new Error("No active session found.");
+  while (refreshInFlight) {
+    if (refreshInFlight.organizationId === organizationId) return refreshInFlight.promise;
+    await refreshInFlight.promise;
+  }
 
-  const refreshed = await workos.userManagement.authenticateWithRefreshToken({
-    refreshToken: session.refreshToken,
-    ...(organizationId ? { organizationId } : {}),
-  });
+  const promise = (async () => {
+    const session = await readStoredSession();
+    if (!session) throw new Error("No active session found.");
 
-  const newSession: StoredSession = {
-    accessToken: refreshed.accessToken,
-    refreshToken: refreshed.refreshToken,
-    user: toUser(refreshed.user),
-  };
-  await persistSession(newSession);
-  return newSession;
+    const refreshed = await workos.userManagement.authenticateWithRefreshToken({
+      refreshToken: session.refreshToken,
+      ...(organizationId ? { organizationId } : {}),
+    });
+    const newSession: StoredSession = {
+      accessToken: refreshed.accessToken,
+      refreshToken: refreshed.refreshToken,
+      user: toUser(refreshed.user),
+    };
+    await persistSession(newSession);
+    return newSession;
+  })();
+  refreshInFlight = { organizationId, promise };
+  try {
+    return await promise;
+  } finally {
+    if (refreshInFlight?.promise === promise) refreshInFlight = null;
+  }
 };
 
 /** Read the WorkOS user without making a network request. */

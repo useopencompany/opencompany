@@ -1,4 +1,5 @@
 import { type CameraType, CameraView, useCameraPermissions } from "expo-camera";
+import { File } from "expo-file-system";
 import { router } from "expo-router";
 import { useIsFocused } from "expo-router/react-navigation";
 import { useEffect, useRef, useState } from "react";
@@ -8,6 +9,7 @@ import { until } from "until-async";
 
 import { StyledCameraView } from "@/shared/ui/styled-camera-view";
 import { StyledSymbolView } from "@/shared/ui/styled-symbol-view";
+import { validateComposerAttachments } from "../model/attachment-validation";
 import { useChatComposer } from "../model/chat-composer-context";
 
 export default function CameraScreen() {
@@ -18,7 +20,7 @@ export default function CameraScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const [facing, setFacing] = useState<CameraType>("back");
   const [isTakingPhoto, setIsTakingPhoto] = useState(false);
-  const { addAttachments } = useChatComposer();
+  const { addAttachments, attachments } = useChatComposer();
 
   useEffect(() => {
     if (
@@ -53,17 +55,30 @@ export default function CameraScreen() {
       return;
     }
 
-    addAttachments([
+    const file = new File(photo.uri);
+    const validation = validateComposerAttachments(attachments.length, [
       {
         id: `camera-${Date.now()}-${photo.uri}`,
         kind: "image",
         uri: photo.uri,
         name: `Photo ${new Date().toLocaleTimeString()}.jpg`,
         mimeType: "image/jpeg",
+        size: file.size ?? undefined,
         width: photo.width,
         height: photo.height,
       },
     ]);
+    if (validation.error) {
+      setIsTakingPhoto(false);
+      Alert.alert("Photo Not Added", validation.error);
+      return;
+    }
+    const [saveError] = await until(() => addAttachments(validation.valid));
+    if (saveError) {
+      setIsTakingPhoto(false);
+      Alert.alert("Photo Not Added", "opencompany could not save this photo on the device.");
+      return;
+    }
     router.back();
   };
 

@@ -27,6 +27,10 @@
     "./wiki-commands": {
       "types": "./src/wiki-commands.ts",
       "default": "./src/wiki-commands.ts"
+    },
+    "./attachments": {
+      "types": "./src/attachments.ts",
+      "default": "./src/attachments.ts"
     }
   },
   "scripts": {

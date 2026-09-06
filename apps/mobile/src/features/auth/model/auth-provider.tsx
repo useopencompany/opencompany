@@ -3,6 +3,7 @@ import { hashKey, useMutation, useQuery } from "@tanstack/react-query";
 import * as Linking from "expo-linking";
 import * as WebBrowser from "expo-web-browser";
 import { createContext, type ReactNode, use, useEffect } from "react";
+import { Alert } from "react-native";
 import { until } from "until-async";
 import {
   type AuthenticatedApi,
@@ -11,6 +12,12 @@ import {
   isUnauthorizedApiError,
 } from "@/shared/api/opencompany-api";
 import { queryClient } from "@/shared/lib/query-client";
+import { abortChatActivity, resumeChatActivity } from "@/widgets/chat/model/chat-lifecycle";
+import {
+  hasPendingWorkspaceWork,
+  purgeAllChatData,
+  purgePartition,
+} from "@/widgets/chat/model/chat-store";
 import {
   clearSession,
   getAccessToken,
@@ -37,6 +44,7 @@ export interface AuthContextValue {
   accountUnavailableReason: AccountUnavailableReason | null;
   api: AuthenticatedApi;
   isLoading: boolean;
+  isSessionLoading: boolean;
   errorMessage: string | null;
   isSigningIn: boolean;
   isSigningOut: boolean;
@@ -91,15 +99,31 @@ const requireCachedUser = (): User => {
 };
 
 const clearAuthentication = async (): Promise<void> => {
+  abortChatActivity();
+  await queryClient.cancelQueries();
+  const [purgeError] = await until(purgeAllChatData);
+  if (purgeError) console.error("Failed to purge local chat data:", purgeError);
   const [clearError] = await until(clearSession);
   if (clearError) console.error("Failed to clear the stored session:", clearError);
 
   queryClient.setQueryData(SESSION_QUERY_KEY, null);
-  await queryClient.cancelQueries();
   // Drop everything the previous user could still see. The session query is kept so the provider
   // reports "signed out" instead of dropping back into its initial loading state.
   queryClient.removeQueries({ predicate: (query) => query.queryHash !== SESSION_QUERY_HASH });
 };
+
+const confirmWorkspaceDiscard = (): Promise<boolean> =>
+  new Promise((resolve) => {
+    Alert.alert(
+      "Discard local chat work?",
+      "This workspace has a draft, pending attachment, or queued action. Accepted runs will continue on the server.",
+      [
+        { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+        { text: "Discard & Switch", style: "destructive", onPress: () => resolve(true) },
+      ],
+      { cancelable: true, onDismiss: () => resolve(false) },
+    );
+  });
 
 const api = createAuthenticatedApi({
   getAccessToken,
@@ -246,7 +270,19 @@ const runAuthAction = async (action: AuthAction): Promise<void> => {
         throw new Error("That workspace is no longer available.");
       }
 
-      await activateWorkspace(userId, action.workspaceId);
+      const currentPartition =
+        identity.activeWorkspaceId && identity.activeWorkspaceId !== action.workspaceId
+          ? { userId, workspaceId: identity.activeWorkspaceId }
+          : null;
+      const discard = currentPartition ? await hasPendingWorkspaceWork(currentPartition) : false;
+      if (discard && !(await confirmWorkspaceDiscard())) throw new AuthCancellationError();
+      abortChatActivity();
+      try {
+        if (discard && currentPartition) await purgePartition(currentPartition);
+        await activateWorkspace(userId, action.workspaceId);
+      } finally {
+        resumeChatActivity();
+      }
       return;
     }
   }
@@ -290,7 +326,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const [error] = await until(async () => {
         const sessionId = await getSessionId();
         if (!sessionId) throw new Error("No active session found");
-        await WebBrowser.openBrowserAsync(getLogoutUrl(sessionId));
+        const logoutUrl = getLogoutUrl(sessionId);
+        await clearAuthentication();
+        await WebBrowser.openBrowserAsync(logoutUrl);
       });
       if (error) throw normalizeAuthError(error);
     },
@@ -334,6 +372,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           identityQuery.isLoading ||
           isSigningIn ||
           pendingAction?.type === "clear-session",
+        isSessionLoading: sessionQuery.isLoading,
         errorMessage:
           toDisplayMessage(authMutation.error) ??
           toDisplayMessage(sessionQuery.error ?? identityQuery.error),

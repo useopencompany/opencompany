@@ -33,6 +33,69 @@ const presentation = (cursor: string, delta = "Hi") => ({
 describe("protocol SSE client", () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it.each([
+    { cursor: "bad", cursorKind: "durable" },
+    { presentationCursor: "bad", cursorKind: "presentation" },
+  ] as const)(
+    "identifies an invalid $cursorKind cursor before connecting",
+    async ({ cursorKind, ...cursors }) => {
+      const fetchMock = vi.fn();
+      const stream = streamRunEvents({
+        baseUrl: "https://api.example.test",
+        runId: "run_1",
+        ...cursors,
+        fetch: fetchMock,
+      });
+      await expect(stream.next()).rejects.toMatchObject({
+        name: "RunEventCursorError",
+        cursorKind,
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("reports reconnecting and connected states while recovering a stream", async () => {
+    const states: string[] = [];
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError("Offline"))
+      .mockResolvedValueOnce(
+        new Response(`data: ${JSON.stringify(event(1, "run.completed"))}\n\n`),
+      );
+    const received = [];
+    for await (const value of streamRunEvents({
+      baseUrl: "https://api.example.test",
+      runId: "run_1",
+      fetch: fetchMock,
+      reconnectDelayMs: 0,
+      onReconnect: () => states.push("reconnecting"),
+      onConnected: () => states.push("connected"),
+    }))
+      received.push(value.type);
+    expect(received).toEqual(["run.completed"]);
+    expect(states).toEqual(["reconnecting", "connected"]);
+  });
+
+  it("lets a custom transport classify its retryable connection errors", async () => {
+    const nativeError = new Error("Native transport disconnected");
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(nativeError)
+      .mockResolvedValueOnce(
+        new Response(`data: ${JSON.stringify(event(1, "run.completed"))}\n\n`),
+      );
+    const received = [];
+    for await (const value of streamRunEvents({
+      baseUrl: "https://api.example.test",
+      runId: "run_1",
+      fetch: fetchMock,
+      reconnectDelayMs: 0,
+      isRetryableError: (error) => error === nativeError,
+    }))
+      received.push(value.type);
+    expect(received).toEqual(["run.completed"]);
+  });
+
   it("parses chunked, multiline SSE data while ignoring heartbeats", async () => {
     const encoder = new TextEncoder();
     const body = new ReadableStream<Uint8Array>({
