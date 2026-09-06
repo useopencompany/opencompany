@@ -186,7 +186,7 @@ function mintState(provider: McpOAuthProvider, overrides: Record<string, unknown
     provider,
     userWorkosId: "user_1",
     integrationId: "gint_mcp_1",
-    returnTo: "/settings/integrations",
+    returnTo: `/settings/plugins/${provider}`,
     expiresAt: Date.now() + 600_000,
     nonce: "nonce_1",
     ...overrides,
@@ -217,7 +217,7 @@ describe("remote MCP OAuth ingress", () => {
       const response = await ingress().start(
         provider,
         new Request(
-          `https://api.example.com/integrations/${provider}/start?returnTo=/settings/integrations`,
+          `https://api.example.com/integrations/${provider}/start?returnTo=/settings/plugins/${provider}`,
         ),
       );
       expect(response.status, provider).toBe(302);
@@ -226,7 +226,7 @@ describe("remote MCP OAuth ingress", () => {
       );
       expect(flowMocks[provider].start).toHaveBeenCalledWith({
         userWorkosId: "user_1",
-        returnTo: "/settings/integrations",
+        returnTo: `/settings/plugins/${provider}`,
         db: sentinelDb,
       });
     }
@@ -241,11 +241,11 @@ describe("remote MCP OAuth ingress", () => {
       const response = await ingress().start(
         provider,
         new Request(
-          `https://api.example.com/integrations/${provider}/start?returnTo=/settings/integrations`,
+          `https://api.example.com/integrations/${provider}/start?returnTo=/settings/plugins/${provider}`,
         ),
       );
       expect(response.headers.get("location"), provider).toBe(
-        `https://opencompany.example.com/settings/integrations?integration=${provider}&setup=connected`,
+        `https://opencompany.example.com/settings/plugins/${provider}?integration=${provider}&setup=connected`,
       );
     }
   });
@@ -257,7 +257,7 @@ describe("remote MCP OAuth ingress", () => {
       new Request("https://api.example.com/integrations/neon/start"),
     );
     expect(response.headers.get("location")).toBe(
-      "https://opencompany.example.com/settings?integration=neon&setup=error&reason=start_failed",
+      "https://opencompany.example.com/settings/plugins/neon?integration=neon&setup=error&reason=start_failed",
     );
   });
 
@@ -290,21 +290,8 @@ describe("remote MCP OAuth ingress", () => {
           `https://api.example.com/integrations/${provider}/callback?state=garbage&code=abc`,
         ),
       );
-      const expectedPath =
-        provider === "linear"
-          ? "/settings"
-          : provider === "attio" ||
-              provider === "betterstack" ||
-              provider === "fathom" ||
-              provider === "signoz" ||
-              provider === "hubspot" ||
-              provider === "jamie" ||
-              provider === "granola" ||
-              provider === "vercel"
-            ? `/settings/plugins/${provider}`
-            : "/settings/integrations";
       expect(response.headers.get("location"), provider).toBe(
-        `https://opencompany.example.com${expectedPath}?integration=${provider}&setup=error&reason=invalid_state`,
+        `https://opencompany.example.com/settings/plugins/${provider}?integration=${provider}&setup=error&reason=invalid_state`,
       );
       expect(flowMocks[provider].complete).not.toHaveBeenCalled();
     }
@@ -319,7 +306,7 @@ describe("remote MCP OAuth ingress", () => {
       ),
     );
     expect(response.headers.get("location")).toBe(
-      "https://opencompany.example.com/settings/integrations?integration=posthog&setup=error&reason=session_mismatch",
+      "https://opencompany.example.com/settings/plugins/posthog?integration=posthog&setup=error&reason=session_mismatch",
     );
     expect(completePostHogMcpOAuth).not.toHaveBeenCalled();
   });
@@ -358,7 +345,7 @@ describe("remote MCP OAuth ingress", () => {
       ),
     );
     expect(response.headers.get("location")).toBe(
-      "https://opencompany.example.com/settings/integrations?integration=latitude&setup=connected",
+      "https://opencompany.example.com/settings/plugins/latitude?integration=latitude&setup=connected",
     );
     expect(completeLatitudeMcpOAuth).toHaveBeenCalledWith({
       userWorkosId: "user_1",
@@ -398,7 +385,7 @@ describe("remote MCP OAuth ingress", () => {
       ),
     );
     expect(response.headers.get("location")).toBe(
-      "https://opencompany.example.com/settings/integrations?integration=linear&setup=error&reason=token_exchange_failed",
+      "https://opencompany.example.com/settings/plugins/linear?integration=linear&setup=error&reason=token_exchange_failed",
     );
   });
 });

@@ -10,6 +10,7 @@ import {
   InferenceSettingsRoute,
   McpSettingsRoute,
   PreferencesSettingsRoute,
+  SettingsRoute,
   SkillBundleRoute,
   SkillsSettingsRoute,
   WorkflowsRoute,
@@ -138,6 +139,10 @@ vi.mock("@/components/FathomIntegrationSetup", () => ({
   FathomIntegrationSetup: () => null,
 }));
 
+vi.mock("@/components/BrowserProfilesSettings", () => ({
+  BrowserProfilesSettings: () => <div>Browser profiles</div>,
+}));
+
 vi.mock("@/components/McpSetupGuide", () => ({
   McpSetupGuide: () => <div data-testid="mcp-setup-guide" />,
 }));
@@ -148,10 +153,6 @@ vi.mock("@/components/TaskDetailPanel", () => ({
 
 vi.mock("@/components/AppDataProvider", () => ({
   useAppData: () => appDataMock.value,
-}));
-
-vi.mock("@/components/SettingsIntegrationsPanel", () => ({
-  SettingsIntegrationsPanel: () => <div>Integrations</div>,
 }));
 
 vi.mock("@/components/InferenceSettingsPanel", () => ({
@@ -284,6 +285,13 @@ describe("SettingsRoute", () => {
     userPreferencesMock.updateAutoModelRoutingAction.mockClear();
     appDataMock.value.featureFlags.taskSpawning = false;
     appDataMock.value.featureFlags.autoModelRouting = false;
+  });
+
+  it("keeps authenticated browser profiles in personal account settings", () => {
+    render(<SettingsRoute browserProfilesEnabled />);
+
+    expect(screen.getByRole("heading", { name: "Account" })).toBeInTheDocument();
+    expect(screen.getByText("Browser profiles")).toBeInTheDocument();
   });
 
   it("shows the appearance theme selector and updates the selected theme", async () => {

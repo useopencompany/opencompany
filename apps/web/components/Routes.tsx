@@ -45,12 +45,12 @@ import {
 import { type BrainSummaryView, useAppData } from "@/components/AppDataProvider";
 import { BrainSettings } from "@/components/BrainSettings";
 import { BrainView } from "@/components/BrainView";
+import { BrowserProfilesSettings } from "@/components/BrowserProfilesSettings";
 import { FathomIntegrationSetup } from "@/components/FathomIntegrationSetup";
 import { InferenceSettingsPanel } from "@/components/InferenceSettingsPanel";
 import { McpSetupGuide } from "@/components/McpSetupGuide";
 import { RepositorySettings } from "@/components/RepositorySettings";
 import { SettingsContent } from "@/components/SettingsChrome";
-import { SettingsIntegrationsPanel } from "@/components/SettingsIntegrationsPanel";
 import { Surface } from "@/components/Surface";
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
 import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
@@ -72,7 +72,6 @@ import {
 import type { BrainOverviewStats, BrainSnapshot } from "@/lib/headless-knowledge-types";
 import { legacyTaskDtoToRow, taskReadModelToRow } from "@/lib/headless-task-collections";
 import { getHeadlessTask, getLegacyTaskCompatibilityHistory } from "@/lib/headless-task-commands";
-import type { IntegrationState } from "@/lib/integration-state";
 import { DEFAULT_MODEL } from "@/lib/model-options";
 import type { RepoConfigView, WorkspaceRepository } from "@/lib/repo-config-actions";
 import { buildHarnessRun, type HarnessRunViewModel } from "@/lib/task-harness-run";
@@ -131,7 +130,11 @@ export function HomeRoute({
   );
 }
 
-export function SettingsRoute() {
+export function SettingsRoute({
+  browserProfilesEnabled = false,
+}: {
+  browserProfilesEnabled?: boolean;
+}) {
   const { user } = useAppData();
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
   const displayName = name || user.email;
@@ -177,28 +180,8 @@ export function SettingsRoute() {
           value={user.lastName?.trim() || "Not set"}
         />
       </section>
-    </SettingsContent>
-  );
-}
 
-export function IntegrationsSettingsRoute({
-  browserProfilesEnabled = false,
-}: {
-  browserProfilesEnabled?: boolean;
-}) {
-  const { integrations, workspace } = useAppData();
-
-  return (
-    <SettingsContent
-      title="Integrations"
-      description="Connect the tools opencompany can read from and act on."
-    >
-      <IntegrationRows
-        integrations={integrations}
-        isWorkspaceAdmin={workspace.role === "admin"}
-        workspaceId={workspace.id}
-        browserProfilesEnabled={browserProfilesEnabled}
-      />
+      {browserProfilesEnabled ? <BrowserProfilesSettings /> : null}
     </SettingsContent>
   );
 }
@@ -683,27 +666,6 @@ function BetaFeatureSwitch({
         {error ? <div className="text-[12px] leading-4 text-warning">{error}</div> : null}
       </div>
     </div>
-  );
-}
-
-function IntegrationRows({
-  integrations,
-  isWorkspaceAdmin,
-  workspaceId,
-  browserProfilesEnabled,
-}: {
-  integrations: IntegrationState;
-  isWorkspaceAdmin: boolean;
-  workspaceId: string;
-  browserProfilesEnabled: boolean;
-}) {
-  return (
-    <SettingsIntegrationsPanel
-      initialIntegrations={integrations}
-      isWorkspaceAdmin={isWorkspaceAdmin}
-      scopeKey={workspaceId}
-      browserProfilesEnabled={browserProfilesEnabled}
-    />
   );
 }
 

@@ -35,6 +35,7 @@ describe("SettingsSidebar", () => {
     expect(
       within(workspaceGroup as HTMLElement).getByRole("link", { name: "Plugins" }),
     ).toHaveAttribute("href", "/settings/plugins");
+    expect(screen.queryByRole("link", { name: "Integrations" })).not.toBeInTheDocument();
     expect(
       within(workspaceGroup as HTMLElement).getByRole("link", { name: "Inference" }),
     ).toHaveAttribute("href", "/settings/workspace/inference");

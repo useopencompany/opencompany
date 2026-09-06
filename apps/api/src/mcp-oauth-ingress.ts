@@ -108,10 +108,6 @@ type McpProviderFlow = {
   verifyState: typeof verifyLinearMcpState;
   appendStatus: typeof appendLinearMcpStatus;
   deniedReason: string;
-  // The retired web routes hard-coded the invalid-state redirect before the
-  // state's returnTo was trusted; Linear predates the /settings/integrations
-  // surface and kept the older target.
-  invalidStatePath: string;
   unavailableReason?: string;
 };
 
@@ -122,7 +118,6 @@ const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
     verifyState: verifyAttioMcpState,
     appendStatus: appendAttioMcpStatus,
     deniedReason: "attio_mcp_denied",
-    invalidStatePath: "/settings/plugins/attio?integration=attio&setup=error&reason=invalid_state",
   },
   betterstack: {
     start: startBetterStackMcpOAuth,
@@ -130,8 +125,6 @@ const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
     verifyState: verifyBetterStackMcpState,
     appendStatus: appendBetterStackMcpStatus,
     deniedReason: "betterstack_denied",
-    invalidStatePath:
-      "/settings/plugins/betterstack?integration=betterstack&setup=error&reason=invalid_state",
   },
   fathom: {
     start: startFathomMcpOAuth,
@@ -139,8 +132,6 @@ const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
     verifyState: verifyFathomMcpState,
     appendStatus: appendFathomMcpStatus,
     deniedReason: "fathom_denied",
-    invalidStatePath:
-      "/settings/plugins/fathom?integration=fathom&setup=error&reason=invalid_state",
   },
   signoz: {
     start: startSigNozMcpOAuth,
@@ -148,8 +139,6 @@ const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
     verifyState: verifySigNozMcpState,
     appendStatus: appendSigNozMcpStatus,
     deniedReason: "signoz_denied",
-    invalidStatePath:
-      "/settings/plugins/signoz?integration=signoz&setup=error&reason=invalid_state",
   },
   vercel: {
     start: startVercelMcpOAuth,
@@ -157,8 +146,6 @@ const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
     verifyState: verifyVercelMcpState,
     appendStatus: appendVercelMcpStatus,
     deniedReason: "vercel_denied",
-    invalidStatePath:
-      "/settings/plugins/vercel?integration=vercel&setup=error&reason=invalid_state",
     unavailableReason: "provider_approval_required",
   },
   linear: {
@@ -167,7 +154,6 @@ const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
     verifyState: verifyLinearMcpState,
     appendStatus: appendLinearMcpStatus,
     deniedReason: "linear_denied",
-    invalidStatePath: "/settings?integration=linear&setup=error&reason=invalid_state",
   },
   hubspot: {
     start: startHubSpotMcpOAuth,
@@ -175,8 +161,6 @@ const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
     verifyState: verifyHubSpotMcpState,
     appendStatus: appendHubSpotMcpStatus,
     deniedReason: "hubspot_mcp_denied",
-    invalidStatePath:
-      "/settings/plugins/hubspot?integration=hubspot&setup=error&reason=invalid_state",
   },
   granola: {
     start: startGranolaMcpOAuth,
@@ -184,8 +168,6 @@ const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
     verifyState: verifyGranolaMcpState,
     appendStatus: appendGranolaMcpStatus,
     deniedReason: "granola_denied",
-    invalidStatePath:
-      "/settings/plugins/granola?integration=granola&setup=error&reason=invalid_state",
   },
   posthog: {
     start: startPostHogMcpOAuth,
@@ -193,7 +175,6 @@ const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
     verifyState: verifyPostHogMcpState,
     appendStatus: appendPostHogMcpStatus,
     deniedReason: "posthog_denied",
-    invalidStatePath: "/settings/integrations?integration=posthog&setup=error&reason=invalid_state",
   },
   neon: {
     start: startNeonMcpOAuth,
@@ -201,7 +182,6 @@ const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
     verifyState: verifyNeonMcpState,
     appendStatus: appendNeonMcpStatus,
     deniedReason: "neon_denied",
-    invalidStatePath: "/settings/integrations?integration=neon&setup=error&reason=invalid_state",
   },
   latitude: {
     start: startLatitudeMcpOAuth,
@@ -209,8 +189,6 @@ const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
     verifyState: verifyLatitudeMcpState,
     appendStatus: appendLatitudeMcpStatus,
     deniedReason: "latitude_denied",
-    invalidStatePath:
-      "/settings/integrations?integration=latitude&setup=error&reason=invalid_state",
   },
   jamie: {
     start: startJamieMcpOAuth,
@@ -218,7 +196,6 @@ const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
     verifyState: verifyJamieMcpState,
     appendStatus: appendJamieMcpStatus,
     deniedReason: "jamie_denied",
-    invalidStatePath: "/settings/plugins/jamie?integration=jamie&setup=error&reason=invalid_state",
   },
 };
 
@@ -253,7 +230,7 @@ async function handleStart(
   const session = await resolveIngressSession(input, request);
   if (session.kind === "redirect") return session.response;
   const url = new URL(request.url);
-  const returnTo = url.searchParams.get("returnTo") ?? "/settings";
+  const returnTo = url.searchParams.get("returnTo") ?? pluginSettingsPath(provider);
   const flow = MCP_PROVIDER_FLOWS[provider];
 
   if (flow.unavailableReason) {
@@ -296,7 +273,7 @@ async function handleCallback(
   try {
     state = flow.verifyState(stateValue);
   } catch {
-    return sessionRedirect(session, new URL(flow.invalidStatePath, getAppUrl()));
+    return statusRedirect(session, flow, pluginSettingsPath(provider), "error", "invalid_state");
   }
 
   if (state.userWorkosId !== session.userId) {
@@ -362,4 +339,8 @@ function statusRedirect(
     session,
     new URL(flow.appendStatus(returnTo, status, reason), getAppUrl()),
   );
+}
+
+function pluginSettingsPath(provider: McpOAuthProvider) {
+  return `/settings/plugins/${provider}`;
 }

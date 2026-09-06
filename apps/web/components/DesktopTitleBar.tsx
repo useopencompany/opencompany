@@ -23,14 +23,12 @@ const SETTINGS_TITLES: Record<string, string> = {
   "/settings/preferences": "Preferences",
   "/settings/workspace": "Workspace",
   "/settings/usage": "Usage",
-  "/settings/integrations": "Integrations",
   "/settings/workspace/inference": "Inference",
   "/settings/repositories": "Repositories",
   "/settings/skills": "Skills",
   "/settings/mcp": "MCP",
   "/settings/attio": "Attio",
   "/settings/fathom": "Fathom ingestion",
-  "/settings/granola": "Granola",
 };
 
 function pathSegmentLabel(value: string | undefined, fallback: string) {

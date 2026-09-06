@@ -13,7 +13,7 @@ describe("sensitive callback request logging", () => {
   it.each([
     "/api/integrations/linear/start",
     "/api/integrations/linear/callback-details",
-    "/settings/integrations",
+    "/settings/plugins",
   ])("keeps ordinary request logging for %s", (url) => {
     expect(SENSITIVE_CALLBACK_REQUEST_PATTERN.test(url)).toBe(false);
   });
