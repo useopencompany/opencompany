@@ -122,6 +122,7 @@ import {
   descriptionFromAdHocTaskPrompt,
   hasAdHocTaskToken,
 } from "@/lib/ad-hoc-task";
+import { isRecentChatActivity } from "@/lib/chat-activity";
 import { CHAT_ATTACHMENT_ACCEPT } from "@/lib/chat-attachment-formats";
 import { AUTO_MODEL_ATTACHMENT_CAPABILITIES, AUTO_MODEL_SELECTION } from "@/lib/chat-auto-model";
 import {
@@ -209,7 +210,6 @@ import {
   createHeadlessTaskComment,
   newHeadlessTaskCommentId,
 } from "@/lib/headless-task-commands";
-import { isRecentChatActivity, isRecentHomeActivity } from "@/lib/home-activity";
 import { alwaysAllowChatActionAction } from "@/lib/integration-account-actions";
 import {
   CLAUDE_CODE_MODELS,
@@ -4852,12 +4852,7 @@ function visibleHomeTasks(input: {
   optimisticallyArchivedTaskIds: ReadonlySet<string>;
 }): TaskView[] {
   return input.tasks
-    .filter(
-      (task) =>
-        !input.optimisticallyArchivedTaskIds.has(task.id) &&
-        !task.archivedAt &&
-        (isBackgroundTaskActive(task) || isRecentHomeActivity(task.createdAt)),
-    )
+    .filter((task) => !input.optimisticallyArchivedTaskIds.has(task.id) && !task.archivedAt)
     .toSorted((left, right) => {
       const activeDifference =
         Number(isBackgroundTaskActive(right)) - Number(isBackgroundTaskActive(left));

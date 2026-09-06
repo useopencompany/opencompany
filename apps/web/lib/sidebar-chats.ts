@@ -1,5 +1,5 @@
+import { isRecentChatActivity } from "@/lib/chat-activity";
 import { PINNED_CHAT_LIMIT } from "@/lib/chat-ui";
-import { isRecentChatActivity } from "@/lib/home-activity";
 
 export const RECENT_SIDEBAR_CHAT_LIMIT = 8;
 
