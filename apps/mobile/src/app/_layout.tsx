@@ -21,7 +21,8 @@ export default function RootLayout() {
         <QueryClientProvider client={queryClient}>
           <AuthProvider>
             <ChatCoordinatorProvider>
-              <KeyboardProvider>
+              {/* Preloading focuses a hidden input and can interrupt composer autofocus. */}
+              <KeyboardProvider preload={false}>
                 <SplashScreenController />
                 <RootNavigator />
               </KeyboardProvider>

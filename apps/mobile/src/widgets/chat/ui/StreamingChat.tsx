@@ -7,7 +7,6 @@ import { Alert, Linking, Text, View } from "react-native";
 import { useSharedValue } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useCSSVariable, useResolveClassNames, useUniwind } from "uniwind";
-import { useAuth } from "@/features/auth";
 import { StyledKeyboardGestureArea } from "@/shared/ui/styled-keyboard-gesture-area";
 import { StyledKeyboardStickyView } from "@/shared/ui/styled-keyboard-sticky-view";
 import { StyledLinearGradient } from "@/shared/ui/styled-linear-gradient";
@@ -55,7 +54,6 @@ function useChatComposerInset(listRef: RefObject<LegendListRef | null>, initialH
 export function StreamingChat({ chatId }: { chatId: string }) {
   const insets = useSafeAreaInsets();
   const isFocused = useIsFocused();
-  const { user } = useAuth();
   const { theme } = useUniwind();
   const [gradientStart, gradientEnd] = useCSSVariable([
     "--color-background-transparent",
@@ -201,7 +199,8 @@ export function StreamingChat({ chatId }: { chatId: string }) {
           pointerEvents="none"
         />
         <ChatComposer
-          autoFocus={chatId === NEW_CHAT_ID && isFocused && Boolean(user)}
+          // Wait for the workspace session so startup remounts cannot interrupt focus.
+          autoFocus={chatId === NEW_CHAT_ID && isFocused && Boolean(coordinator.partition)}
           bottomInset={insets.bottom}
           conversationId={chatId}
           disabled={!coordinator.partition || Boolean(pendingMessageQuery.data)}
