@@ -119,5 +119,5 @@ components, helpers, and fixture styles over new abstractions.
 
 External pull requests require the `PR gate`, CodeQL, and resolved review conversations. Reviews are
 encouraged but are not a merge requirement. The main rules apply to administrators; do not bypass
-them. Mandatory critical-path CODEOWNER approval remains deferred until a second active
-maintainer is assigned.
+them. [CODEOWNERS](./.github/CODEOWNERS) identifies the active maintainers and routes review
+requests; whether CODEOWNER approval becomes mandatory remains a separate launch-policy decision.

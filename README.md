@@ -11,7 +11,7 @@ execution service deployed on Render. Data lives in branch-isolated Neon Postgre
 through Drizzle by the API and runner. WorkOS provides authentication, Electric provides authorized
 live read models, and Vercel AI Gateway fronts model providers.
 
-## Quick start
+## Maintainer quick start
 
 ```bash
 bun install
@@ -27,6 +27,11 @@ forwarding, Electric, and the local HTTPS/tunnel support needed by integrations.
 The tracked `.infisical.json` selects opencompany's Infisical project; it contains no credentials,
 so an authenticated CLI session with project access is still required. The Vercel project binding
 remains local, gitignored state, with a tracked example documenting its shape.
+
+This setup path is currently maintainer-oriented. Community contributors can install dependencies
+and run the repository checks without OpenCompany-managed credentials, but a credential-independent
+core local-development path is not yet documented. Better community setup instructions are a
+planned follow-up; optional provider-backed features will continue to require personal credentials.
 
 See [Getting started](./docs/getting-started.md) for prerequisites and troubleshooting.
 
