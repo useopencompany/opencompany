@@ -245,7 +245,9 @@ describe("Plugin settings", () => {
     expect(installedFilter).toHaveAttribute("aria-pressed", "true");
     const installedSection = screen.getByRole("region", { name: "Installed" });
     expect(within(installedSection).getByRole("link", { name: /linear/i })).toBeInTheDocument();
-    expect(within(installedSection).queryByRole("link", { name: /gmail/i })).not.toBeInTheDocument();
+    expect(
+      within(installedSection).queryByRole("link", { name: /gmail/i }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Featured" })).not.toBeInTheDocument();
   });
 
