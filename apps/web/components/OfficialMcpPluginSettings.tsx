@@ -41,6 +41,7 @@ import { useAppData } from "@/components/AppDataProvider";
 import { CapabilityModeToggle } from "@/components/CapabilityModeToggle";
 import { GitHubRepositoryAccessSection } from "@/components/GitHubRepositoryAccess";
 import { InfisicalPluginConnectionForm } from "@/components/InfisicalPluginConnectionForm";
+import { PluginAccountRow, PluginConnectionFeedback } from "@/components/PluginConnectionSettings";
 import {
   installOfficialMcpPlugin,
   OFFICIAL_MCP_PLUGINS,
@@ -48,10 +49,6 @@ import {
 } from "@/components/PluginSettings";
 import { RenderApiKeyConnectionForm } from "@/components/RenderApiKeyConnectionForm";
 import { SettingsContent } from "@/components/SettingsChrome";
-import {
-  IntegrationAccountRow,
-  IntegrationSetupFeedback,
-} from "@/components/SettingsIntegrationsPanel";
 import { StripeRestrictedKeyConnectionForm } from "@/components/StripeRestrictedKeyConnectionForm";
 import {
   type CapabilityId,
@@ -771,7 +768,7 @@ function OfficialMcpPluginDetailView({
 
   return (
     <>
-      <IntegrationSetupFeedback />
+      <PluginConnectionFeedback />
       <SettingsContent
         title={config.label}
         description={plugin?.manifest.description || config.description}
@@ -1124,7 +1121,7 @@ function AccountsSection({
       ) : (
         <div className="flex flex-col gap-2">
           {displayedAccounts.map(({ account }) => (
-            <IntegrationAccountRow
+            <PluginAccountRow
               key={account.integrationId}
               account={account as IntegrationAccountView<PersonalAccountProvider | "posthog">}
               purposeLabel={
@@ -1142,7 +1139,6 @@ function AccountsSection({
               {...(config.connectionUnavailableReason
                 ? { reconnectUnavailableReason: config.connectionUnavailableReason }
                 : {})}
-              showCapabilityModes={false}
             />
           ))}
         </div>

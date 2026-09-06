@@ -33,6 +33,26 @@ const nextConfig = {
   async redirects() {
     return [
       {
+        source: "/settings/integrations",
+        destination: "/settings/plugins",
+        permanent: false,
+      },
+      {
+        source: "/settings/granola",
+        destination: "/wiki/sources",
+        permanent: false,
+      },
+      {
+        source: "/settings/jamie",
+        destination: "/settings/plugins/jamie",
+        permanent: false,
+      },
+      {
+        source: "/settings/stripe",
+        destination: "/settings/plugins/stripe",
+        permanent: false,
+      },
+      {
         source: "/docs/:path*",
         destination: "https://docs.opencompany.cloud/docs/:path*",
         permanent: false,

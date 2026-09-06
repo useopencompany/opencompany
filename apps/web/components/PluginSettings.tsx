@@ -50,6 +50,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState, useTransition } from "react";
+import { PluginConnectionFeedback } from "@/components/PluginConnectionSettings";
 import { SettingsContent } from "@/components/SettingsChrome";
 import {
   approveHeadlessPluginMcp,
@@ -490,6 +491,7 @@ export function PluginsSettings({
       description="Add trusted tools and expertise to your workspace."
       contentClassName="max-w-[960px]"
     >
+      <PluginConnectionFeedback />
       <div className="flex flex-col gap-7">
         {installedConfigs.length > 0 ? (
           <Button

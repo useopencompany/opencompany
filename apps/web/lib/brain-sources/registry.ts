@@ -48,7 +48,7 @@ export const BRAIN_SOURCE_PROVIDERS: BrainSourceProviderDef[] = [
     icon: Mail,
     connectionKind: "oauth",
     available: true,
-    connectHref: "/api/integrations/gmail/start?returnTo=/settings/integrations",
+    connectHref: "/api/integrations/gmail/start?returnTo=/wiki/sources",
   },
   {
     id: "google_drive",
@@ -57,7 +57,7 @@ export const BRAIN_SOURCE_PROVIDERS: BrainSourceProviderDef[] = [
     icon: Files,
     connectionKind: "oauth",
     available: true,
-    connectHref: "/api/integrations/google-drive/start?returnTo=/settings/integrations",
+    connectHref: "/api/integrations/google-drive/start?returnTo=/wiki/sources",
   },
   {
     id: "linear",
@@ -66,7 +66,7 @@ export const BRAIN_SOURCE_PROVIDERS: BrainSourceProviderDef[] = [
     icon: ListTodo,
     connectionKind: "oauth",
     available: true,
-    connectHref: "/api/integrations/linear-ingest/start?returnTo=/settings/integrations",
+    connectHref: "/api/integrations/linear-ingest/start?returnTo=/wiki/sources",
   },
   {
     id: "hubspot",
@@ -75,7 +75,7 @@ export const BRAIN_SOURCE_PROVIDERS: BrainSourceProviderDef[] = [
     icon: Handshake,
     connectionKind: "oauth",
     available: true,
-    connectHref: "/api/integrations/hubspot/start?returnTo=/settings/integrations",
+    connectHref: "/api/integrations/hubspot/start?returnTo=/wiki/sources",
   },
   {
     id: "attio",

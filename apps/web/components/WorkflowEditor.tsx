@@ -743,7 +743,7 @@ function LinearEventTriggerEditor({
       {accounts.length === 0 ? (
         <p className="text-[12px] text-warning">
           This Linear account is disconnected.{" "}
-          <Link href="/settings/integrations" className="underline underline-offset-2">
+          <Link href="/settings/plugins/linear" className="underline underline-offset-2">
             Reconnect Linear
           </Link>
           .

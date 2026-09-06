@@ -42,7 +42,7 @@ describe("opencompany X account OAuth", () => {
   it("keeps the signed state within X's 500-character limit", () => {
     const state = createXAccountIntegrationState({
       userWorkosId: "user_01H8XG7Z3K9QRSTUVWXYZ01234",
-      returnTo: "/settings/integrations",
+      returnTo: "/settings/plugins/x",
     });
     expect(state.length).toBeLessThanOrEqual(500);
   });
