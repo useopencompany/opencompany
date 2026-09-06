@@ -1,6 +1,6 @@
 ---
 name: pre-merge-check
-description: Audit the current branch before merging a PR. Checks committed and local workspace changes, schema migrations, env docs, workflow docs, CI-equivalent checks, and secret scans. Use when the user says "ready to merge", "pre-merge check", "before I merge", or "PR check".
+description: Audit the current branch before merging a PR. Checks committed and local workspace changes, schema migrations, env docs, workflow docs, CI-equivalent checks, and CI secret scan results. Use when the user says "ready to merge", "pre-merge check", "before I merge", or "PR check".
 ---
 
 # Pre-merge check
@@ -39,11 +39,15 @@ bun run build
 bun run test
 ```
 
-If `trufflehog` is installed, also run:
+Verify the secret scan in GitHub Actions for the current branch's PR:
 
 ```bash
-bun run secrets:check
+gh pr view --json headRefOid,statusCheckRollup,url
 ```
+
+Require `Verify pull request / Secret scan` to have completed with `SUCCESS` for the current PR head. Use the linked Actions run to inspect a failure. CI runs TruffleHog; no local installation or scan is required.
+
+If the scan is missing, pending, skipped, cancelled, failing, or inaccessible, report secret scanning as unverified or failed and withhold `Ready to merge`. If there is no PR or there are unpushed commits or local changes, report that those changes need a successful CI scan after commit/push. A passing scan on an earlier head does not cover them.
 
 If any command fails, report the failing command and the relevant error. If Turbo reports cached results, that is acceptable for a quick pre-merge pass, but prefer direct package commands when debugging a failure.
 
@@ -99,7 +103,7 @@ Produce a punch list, grouped as:
 - **Should fix** — out-of-date docs, missing `.env.example` entries for optional vars.
 - **FYI** — dashboard-config reminders, destructive migrations to call out in the PR description.
 
-End with a one-line verdict: `Ready to merge` or `Address blockers first`. If changes are only local, use `Ready after commit/push` rather than `Ready to merge`.
+End with a one-line verdict: `Ready to merge` or `Address blockers first`. If local checks pass but CI secret scanning remains unverified, use `Awaiting CI secret scan`. If changes still need publishing, use `Ready for commit/push, then CI verification`.
 
 ## Don't
 
