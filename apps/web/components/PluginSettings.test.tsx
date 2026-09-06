@@ -200,7 +200,8 @@ describe("Plugin settings", () => {
     });
   });
 
-  it("shows the installed Linear card", () => {
+  it("shows and filters to installed plugins", async () => {
+    const user = userEvent.setup();
     render(
       <PluginsSettings
         plugins={[
@@ -235,6 +236,19 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/linear",
     );
+
+    const installedFilter = screen.getByRole("button", { name: "Show 1 installed plugin" });
+    expect(installedFilter).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(installedFilter);
+
+    expect(installedFilter).toHaveAttribute("aria-pressed", "true");
+    const installedSection = screen.getByRole("region", { name: "Installed" });
+    expect(within(installedSection).getByRole("link", { name: /linear/i })).toBeInTheDocument();
+    expect(
+      within(installedSection).queryByRole("link", { name: /gmail/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Featured" })).not.toBeInTheDocument();
   });
 
   it("offers one-click installation for every uninstalled official package", async () => {
