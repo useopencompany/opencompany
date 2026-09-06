@@ -32,6 +32,7 @@ import {
   Archive,
   AudioLines,
   ChevronDown,
+  ChevronRight,
   ExternalLink,
   FileArchive,
   KeyRound,
@@ -378,7 +379,7 @@ export function installOfficialStripePlugin(preview?: PluginImportPreviewDto) {
   return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.stripe, preview);
 }
 
-type PluginCatalogFilter = "all" | "featured" | OfficialPluginCategory;
+type PluginCatalogFilter = "all" | "installed" | "featured" | OfficialPluginCategory;
 
 const CATALOG_PREVIEW_SIZE = 4;
 const PLUGIN_CATEGORY_FILTERS = (
@@ -391,6 +392,7 @@ const PLUGIN_CATALOG_FILTERS: { id: PluginCatalogFilter; label: string }[] = [
 ];
 
 function pluginCatalogFilterLabel(filter: Exclude<PluginCatalogFilter, "all">) {
+  if (filter === "installed") return "Installed";
   return filter === "featured" ? "Featured" : OFFICIAL_PLUGIN_CATEGORIES[filter];
 }
 
@@ -414,6 +416,7 @@ export function PluginsSettings({
   const installedPlugins = new Map(
     plugins.map((plugin) => [plugin.name.toLocaleLowerCase(), plugin] as const),
   );
+  const installedConfigs = configs.filter((config) => installedPlugins.has(config.name));
 
   useEffect(() => {
     if (catalogViewCaptured.current) return;
@@ -439,7 +442,11 @@ export function PluginsSettings({
 
   const matchesActiveFilter = (config: OfficialPluginConfig) =>
     activeFilter === "all" ||
-    (activeFilter === "featured" ? config.featured === true : config.category === activeFilter);
+    (activeFilter === "installed"
+      ? installedPlugins.has(config.name)
+      : activeFilter === "featured"
+        ? config.featured === true
+        : config.category === activeFilter);
   const matchesQuery = (config: OfficialPluginConfig) =>
     normalizedQuery.length === 0 ||
     `${config.label} ${config.description} ${OFFICIAL_PLUGIN_CATEGORIES[config.category]}`
@@ -484,6 +491,36 @@ export function PluginsSettings({
       contentClassName="max-w-[960px]"
     >
       <div className="flex flex-col gap-7">
+        {installedConfigs.length > 0 ? (
+          <Button
+            variant={activeFilter === "installed" ? "secondary" : "ghost"}
+            size="sm"
+            aria-label={`Show ${installedConfigs.length} installed ${installedConfigs.length === 1 ? "plugin" : "plugins"}`}
+            aria-pressed={activeFilter === "installed"}
+            onClick={() => {
+              setQuery("");
+              setActiveFilter(activeFilter === "installed" ? "all" : "installed");
+            }}
+            className="h-9 w-fit rounded-lg px-1.5 pr-2.5 text-[12.5px] font-normal text-ink-subtle shadow-none"
+          >
+            <span className="flex -space-x-1.5" aria-hidden="true">
+              {installedConfigs.slice(0, 3).map((config) => (
+                <span
+                  key={config.name}
+                  className={cn(
+                    "flex size-7 items-center justify-center rounded-lg border-2 border-canvas",
+                    config.iconClassName,
+                  )}
+                >
+                  <config.Icon className="size-3.5" />
+                </span>
+              ))}
+            </span>
+            <span>{installedConfigs.length} installed</span>
+            <ChevronRight size={14} strokeWidth={1.8} aria-hidden="true" />
+          </Button>
+        ) : null}
+
         <div className="flex flex-col gap-3">
           <div className="relative">
             <Search
