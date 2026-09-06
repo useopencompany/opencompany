@@ -1,7 +1,7 @@
 # Getting started
 
 > **Current support boundary:** This guide documents the maintainer setup and requires access to
-> OpenCompany-managed development services. A credential-independent path for core local
+> opencompany-managed development services. A credential-independent path for core local
 > development is planned but not yet available. Community contributors can still install
 > dependencies and run the checks documented in [CONTRIBUTING.md](../CONTRIBUTING.md).
 

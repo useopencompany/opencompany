@@ -29,7 +29,7 @@ so an authenticated CLI session with project access is still required. The Verce
 remains local, gitignored state, with a tracked example documenting its shape.
 
 This setup path is currently maintainer-oriented. Community contributors can install dependencies
-and run the repository checks without OpenCompany-managed credentials, but a credential-independent
+and run the repository checks without opencompany-managed credentials, but a credential-independent
 core local-development path is not yet documented. Better community setup instructions are a
 planned follow-up; optional provider-backed features will continue to require personal credentials.
 

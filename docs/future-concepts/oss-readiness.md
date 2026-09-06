@@ -25,7 +25,7 @@ company-only environment bindings remain outside the repository.
 The initial launch promise is contribution support, not production-grade self-hosting. Contributors
 can install dependencies, understand the runtime boundaries, and execute the repository's core
 checks. The current full-stack setup remains maintainer-oriented because it depends on
-OpenCompany-managed services. A credential-independent path for core local development is a planned
+opencompany-managed services. A credential-independent path for core local development is a planned
 follow-up, and provider-backed features may still require personal credentials.
 
 ## Remaining release gates
@@ -67,7 +67,7 @@ follow-up, and provider-backed features may still require personal credentials.
 
 - Document and exercise a credential-independent core local-development path from clean macOS and
   Linux clones. Until then, the README and getting-started guide must continue to state that the
-  full-stack setup requires access to OpenCompany-managed services.
+  full-stack setup requires access to opencompany-managed services.
 
 These decisions do not close the separate provenance and redistribution audit for tracked source,
 assets, fixtures, or generated material.
