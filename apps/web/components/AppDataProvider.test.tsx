@@ -322,7 +322,7 @@ describe("AppDataProvider", () => {
     expect(screen.getByTestId("recent").getAttribute("data-runtime-status")).toBe("idle");
   });
 
-  it("keeps archived and older tasks available to global navigation", async () => {
+  it("keeps all unarchived tasks on home and archived tasks only in global navigation", async () => {
     const taskRows = [
       taskRow({
         id: "task_archived",
@@ -364,7 +364,7 @@ describe("AppDataProvider", () => {
         "task_archived,task_old",
       ),
     );
-    expect(screen.getByTestId("task-history").getAttribute("data-home-task-ids")).toBe("");
+    expect(screen.getByTestId("task-history").getAttribute("data-home-task-ids")).toBe("task_old");
   });
 
   it("keeps multiple API-projected working chats without a second live query", () => {
