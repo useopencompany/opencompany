@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { readGoogleDriveAllFiles, readGoogleDriveResources } from "./google-drive";
+import {
+  claimNextGoogleDriveFile,
+  claimNextGoogleDriveSyncCursor,
+  readGoogleDriveAllFiles,
+  readGoogleDriveResources,
+} from "./google-drive";
 
 describe("Google Drive source configuration", () => {
   it("sanitizes resources, timestamps, corpus keys, and duplicate ids", () => {
@@ -57,5 +62,43 @@ describe("Google Drive source configuration", () => {
     ).toEqual({ selectedAt: "2026-07-13T08:00:00.000Z" });
 
     expect(readGoogleDriveAllFiles({ allFiles: { selectedAt: "not-a-date" } })).toBeNull();
+  });
+});
+
+describe("Google Drive claims", () => {
+  it("normalizes timestamps returned as strings by raw database drivers", async () => {
+    const firstObservedAt = "2026-09-06T15:00:00.000Z";
+    const lastObservedAt = "2026-09-06T16:00:00.000Z";
+    const file = await claimNextGoogleDriveFile({
+      leaseId: "file_lease",
+      leaseOwner: "worker",
+      leaseExpiresAt: new Date("2026-09-06T17:00:00.000Z"),
+      now: new Date("2026-09-06T16:30:00.000Z"),
+      db: {
+        execute: async () => ({
+          rows: [{ id: "file_state", firstObservedAt, lastObservedAt }],
+        }),
+      },
+    });
+
+    expect(file?.firstObservedAt).toEqual(new Date(firstObservedAt));
+    expect(file?.lastObservedAt).toEqual(new Date(lastObservedAt));
+
+    const wakeRequestedAt = "2026-09-06T16:15:00.000Z";
+    const cursor = await claimNextGoogleDriveSyncCursor({
+      leaseId: "cursor_lease",
+      leaseOwner: "worker",
+      leaseExpiresAt: new Date("2026-09-06T17:00:00.000Z"),
+      reconcileBefore: new Date("2026-09-06T16:00:00.000Z"),
+      now: new Date("2026-09-06T16:30:00.000Z"),
+      db: {
+        execute: async () => ({
+          rows: [{ id: "cursor", wakeRequestedAt, lastPolledAt: null }],
+        }),
+      },
+    });
+
+    expect(cursor?.wakeRequestedAt).toEqual(new Date(wakeRequestedAt));
+    expect(cursor?.lastPolledAt).toBeNull();
   });
 });

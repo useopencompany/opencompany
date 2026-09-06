@@ -14,6 +14,8 @@ export const GOOGLE_DRIVE_FOLDER_MIME_TYPE = "application/vnd.google-apps.folder
 export const GOOGLE_DRIVE_QUIET_MS = 5 * 60_000;
 export const GOOGLE_DRIVE_FORCE_MS = 30 * 60_000;
 export const GOOGLE_DRIVE_MAX_FILE_ATTEMPTS = 5;
+const GOOGLE_DRIVE_RAW_TIMESTAMP_FAILURE =
+  "observedAt.getTime is not a function. (In 'observedAt.getTime()', 'observedAt.getTime' is undefined)";
 
 export type GoogleDriveCorpusKey = "user" | `drive:${string}`;
 export type GoogleDriveResourceKind = "file" | "folder";
@@ -35,6 +37,34 @@ export type GoogleDriveAllFilesRef = {
 export type GoogleDriveSourceConfig = {
   allFiles?: GoogleDriveAllFilesRef;
   resources: GoogleDriveResourceRef[];
+};
+
+export type ClaimedGoogleDriveSyncCursor = {
+  id: string;
+  integrationId: string;
+  userWorkosId: string;
+  corpusKey: string;
+  driveId: string | null;
+  pageToken: string;
+  webhookAddress: string;
+  wakeRequestedAt: Date | null;
+  leaseId: string;
+  lastPolledAt: Date | null;
+};
+
+export type ClaimedGoogleDriveFile = {
+  id: string;
+  integrationId: string;
+  userWorkosId: string;
+  fileId: string;
+  driveId: string | null;
+  observedVersion: string;
+  ingestedVersion: string | null;
+  metadata: Record<string, unknown>;
+  firstObservedAt: Date;
+  lastObservedAt: Date;
+  leaseId: string;
+  attempts: number;
 };
 
 export function readGoogleDriveAllFiles(config: unknown): GoogleDriveAllFilesRef | null {
@@ -137,7 +167,7 @@ export async function claimNextGoogleDriveSyncCursor(input: {
   reconcileBefore: Date;
   now?: Date;
   db?: DbLike;
-}) {
+}): Promise<ClaimedGoogleDriveSyncCursor | null> {
   const db = input.db ?? getDb();
   const now = input.now ?? new Date();
   const result = await db.execute(sql`
@@ -179,7 +209,19 @@ export async function claimNextGoogleDriveSyncCursor(input: {
       cursor.lease_id AS "leaseId",
       cursor.last_polled_at AS "lastPolledAt"
   `);
-  return rowsFromExecute<Record<string, unknown>>(result)[0] ?? null;
+  const row = rowsFromExecute<
+    Omit<ClaimedGoogleDriveSyncCursor, "wakeRequestedAt" | "lastPolledAt"> & {
+      wakeRequestedAt: Date | string | null;
+      lastPolledAt: Date | string | null;
+    }
+  >(result)[0];
+  return row
+    ? {
+        ...row,
+        wakeRequestedAt: optionalDbDate(row.wakeRequestedAt, "wakeRequestedAt"),
+        lastPolledAt: optionalDbDate(row.lastPolledAt, "lastPolledAt"),
+      }
+    : null;
 }
 
 export async function releaseGoogleDriveSyncCursor(input: {
@@ -428,7 +470,7 @@ export async function claimNextGoogleDriveFile(input: {
   leaseExpiresAt: Date;
   now?: Date;
   db?: DbLike;
-}) {
+}): Promise<ClaimedGoogleDriveFile | null> {
   const db = input.db ?? getDb();
   const now = input.now ?? new Date();
   const result = await db.execute(sql`
@@ -436,10 +478,21 @@ export async function claimNextGoogleDriveFile(input: {
       SELECT id
       FROM goat.google_drive_file_states
       WHERE observed_version <> COALESCE(ingested_version, '')
-        AND attempts < ${GOOGLE_DRIVE_MAX_FILE_ATTEMPTS}
+        AND (
+          attempts < ${GOOGLE_DRIVE_MAX_FILE_ATTEMPTS}
+          -- Rows exhausted by the timestamp decoding defect get one recovery claim after this
+          -- repair. Claiming increments them past the cap, so a persistent defect cannot loop.
+          OR (
+            attempts = ${GOOGLE_DRIVE_MAX_FILE_ATTEMPTS}
+            AND last_error = ${GOOGLE_DRIVE_RAW_TIMESTAMP_FAILURE}
+          )
+        )
         AND (next_ingest_at <= ${now} OR force_ingest_at <= ${now})
         AND (lease_expires_at IS NULL OR lease_expires_at <= ${now})
-      ORDER BY LEAST(next_ingest_at, force_ingest_at), created_at
+      ORDER BY
+        (attempts = ${GOOGLE_DRIVE_MAX_FILE_ATTEMPTS}) ASC,
+        LEAST(next_ingest_at, force_ingest_at),
+        created_at
       FOR UPDATE SKIP LOCKED
       LIMIT 1
     )
@@ -465,7 +518,19 @@ export async function claimNextGoogleDriveFile(input: {
       state.lease_id AS "leaseId",
       state.attempts
   `);
-  return rowsFromExecute<Record<string, unknown>>(result)[0] ?? null;
+  const row = rowsFromExecute<
+    Omit<ClaimedGoogleDriveFile, "firstObservedAt" | "lastObservedAt"> & {
+      firstObservedAt: Date | string;
+      lastObservedAt: Date | string;
+    }
+  >(result)[0];
+  return row
+    ? {
+        ...row,
+        firstObservedAt: requiredDbDate(row.firstObservedAt, "firstObservedAt"),
+        lastObservedAt: requiredDbDate(row.lastObservedAt, "lastObservedAt"),
+      }
+    : null;
 }
 
 export async function completeGoogleDriveFile(input: {
@@ -586,6 +651,18 @@ function rowsFromExecute<T>(result: unknown): T[] {
     return Array.isArray(rows) ? (rows as T[]) : [];
   }
   return [];
+}
+
+function requiredDbDate(value: unknown, field: string) {
+  const date = value instanceof Date ? value : new Date(value as string);
+  if (!Number.isFinite(date.getTime())) {
+    throw new Error(`Claimed Google Drive row has an invalid ${field} timestamp.`);
+  }
+  return date;
+}
+
+function optionalDbDate(value: unknown, field: string) {
+  return value === null ? null : requiredDbDate(value, field);
 }
 
 export function newGoogleDriveCursorId() {

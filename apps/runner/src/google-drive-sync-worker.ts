@@ -8,6 +8,8 @@ import {
 import {
   activateGoogleDriveWatchChannel,
   advanceGoogleDriveSyncCursor,
+  type ClaimedGoogleDriveSyncCursor as ClaimedCursor,
+  type ClaimedGoogleDriveFile as ClaimedFile,
   claimNextGoogleDriveFile,
   claimNextGoogleDriveSyncCursor,
   completeGoogleDriveFile,
@@ -58,29 +60,6 @@ const MAX_FILE_CLAIMS_PER_TICK = 20;
 const MAX_ANCESTRY_DEPTH = 100;
 const MAX_DISCOVERED_DESCENDANTS = 5_000;
 
-type ClaimedCursor = {
-  id: string;
-  integrationId: string;
-  userWorkosId: string;
-  driveId: string | null;
-  pageToken: string;
-  webhookAddress: string;
-  wakeRequestedAt: Date | null;
-  leaseId: string;
-};
-
-type ClaimedFile = {
-  id: string;
-  integrationId: string;
-  userWorkosId: string;
-  fileId: string;
-  observedVersion: string;
-  metadata: Record<string, unknown>;
-  lastObservedAt: Date;
-  leaseId: string;
-  attempts: number;
-};
-
 type DriveRoute = {
   brainRef: string;
   allFiles: GoogleDriveAllFilesRef | null;
@@ -128,7 +107,7 @@ async function runGoogleDriveTick(env: RunnerEnv, signal: AbortSignal) {
       db: getDb(),
     });
     if (!row) break;
-    await syncClaimedCursor(env, row as ClaimedCursor, signal);
+    await syncClaimedCursor(env, row, signal);
   }
 
   for (let count = 0; count < MAX_FILE_CLAIMS_PER_TICK; count += 1) {
@@ -142,7 +121,7 @@ async function runGoogleDriveTick(env: RunnerEnv, signal: AbortSignal) {
       db: getDb(),
     });
     if (!row) break;
-    await processClaimedFile(env, row as ClaimedFile, signal);
+    await processClaimedFile(env, row, signal);
   }
 }
 
