@@ -1189,7 +1189,7 @@ const gmailPlugin = {
   source: {
     ...plugin.source,
     path: "gmail",
-    resolvedCommit: "587fb06ae2a4e4bed7532e216f8712979ca35e7b",
+    resolvedCommit: "ff6f34b42796129c2a125a32b3a78e8cae353df6",
   },
   skills: [],
   remoteMcpServers: [
@@ -2502,7 +2502,7 @@ describe("Linear plugin settings", () => {
         { id: "write", defaultMode: "ask", tools: [{ readOnly: false }] },
       ],
     });
-    expect(GMAIL_PLUGIN_SOURCE).toContain("/tree/587fb06ae2a4e4bed7532e216f8712979ca35e7b/gmail");
+    expect(GMAIL_PLUGIN_SOURCE).toContain("/tree/ff6f34b42796129c2a125a32b3a78e8cae353df6/gmail");
   });
 
   it("edits the same Gmail account selected by the MCP gateway", async () => {

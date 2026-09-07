@@ -402,7 +402,7 @@ describe("Plugin settings", () => {
       "https://github.com/useopencompany/plugins/tree/21060c09d1bbe70df85519cc3ad74cd5d097fbb6/x",
     );
     expect(GMAIL_PLUGIN_SOURCE).toBe(
-      "https://github.com/useopencompany/plugins/tree/587fb06ae2a4e4bed7532e216f8712979ca35e7b/gmail",
+      "https://github.com/useopencompany/plugins/tree/ff6f34b42796129c2a125a32b3a78e8cae353df6/gmail",
     );
     expect(GRANOLA_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/cf036c82fc5186f5187e4da59b040ce92e492df3/granola",
