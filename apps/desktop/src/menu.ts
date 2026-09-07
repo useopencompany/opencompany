@@ -70,7 +70,8 @@ export function buildApplicationMenu(getWindow: () => BrowserWindow | null): Men
               { type: "separator" },
               {
                 label: "Paste callback URL…",
-                click: () => handleAuthDeepLink(clipboard.readText().trim(), getWindow()),
+                click: async () =>
+                  handleAuthDeepLink((await clipboard.readText()).trim(), getWindow()),
               },
               { role: "toggleDevTools" },
             ] satisfies MenuItemConstructorOptions[])),
