@@ -38,7 +38,6 @@ import {
   taskReadModelToRow,
 } from "@/lib/headless-task-collections";
 import { listLegacyTaskCompatibility } from "@/lib/headless-task-commands";
-import { isRecentHomeActivity } from "@/lib/home-activity";
 import { type IntegrationState, integrationStateFromRows } from "@/lib/integration-state";
 import type { McpClient } from "@/lib/mcp-setup";
 import {
@@ -108,8 +107,7 @@ export type AppInitialData = {
 type AppData = AppInitialData & {
   taskRows: TaskRow[];
   tasksReady: boolean;
-  // Full task history for global navigation. Home continues to use the
-  // intentionally smaller recent/active subset exposed as `tasks`.
+  // Full task history for global navigation, including archived Tasks.
   allTasks: TaskView[];
   // Closed (archived) chats, surfaced in the command palette so the user can
   // search and restore them. Derived from the same live query as recentChats —
@@ -269,13 +267,7 @@ function AppLiveDataSubscriptions({
 
   const tasks = useMemo(() => {
     return allTasks
-      .filter(
-        (task) =>
-          !task.archivedAt &&
-          (task.status === "queued" ||
-            task.status === "running" ||
-            isRecentHomeActivity(task.createdAt)),
-      )
+      .filter((task) => !task.archivedAt)
       .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
   }, [allTasks]);
 

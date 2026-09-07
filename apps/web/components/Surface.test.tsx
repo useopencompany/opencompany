@@ -3965,7 +3965,7 @@ describe("Surface chat streaming UI", () => {
     expect(screen.queryByRole("button", { name: "Archive Legacy result" })).not.toBeInTheDocument();
   });
 
-  it("hides home chats older than seven days and results older than one day", () => {
+  it("hides old home chats but shows all unarchived tasks regardless of age", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-04T17:44:00.000Z"));
     try {
@@ -3986,6 +3986,12 @@ describe("Surface chat streaming UI", () => {
               name: "Old result",
               createdAt: "2026-07-02T10:00:00.000Z",
               updatedAt: "2026-07-02T10:00:00.000Z",
+            }),
+            taskView({
+              id: "archived_task",
+              displayId: "TASK-3",
+              name: "Archived result",
+              archivedAt: "2026-07-04T12:00:00.000Z",
             }),
           ]}
           defaultModel={DEFAULT_MODEL}
@@ -4012,7 +4018,8 @@ describe("Surface chat streaming UI", () => {
       expect(screen.getByText("Recent chat")).toBeInTheDocument();
       expect(screen.queryByText("Old chat")).not.toBeInTheDocument();
       expect(screen.getByText("Recent result")).toBeInTheDocument();
-      expect(screen.queryByText("Old result")).not.toBeInTheDocument();
+      expect(screen.getByText("Old result")).toBeInTheDocument();
+      expect(screen.queryByText("Archived result")).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
