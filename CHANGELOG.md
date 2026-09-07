@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Google Docs rewritten from Markdown now keep headings, lists, checkboxes, and inline formatting instead of displaying raw Markdown as plain text (#1594) — @louis.
+- GPT-6 Astra Codex sessions now start successfully instead of failing before the first response because the sandbox runtime did not yet recognize the model.
 
 ## [1.23.0] - 2026-09-04
 
