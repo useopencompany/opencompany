@@ -23,23 +23,26 @@ describe("engine message model admission", () => {
     });
   });
 
-  it("keeps a persisted Codex session runnable through the safe replacement", async () => {
-    const admitted = await admitEngineMessage({
-      actor: {} as never,
-      engine: {
-        type: "codex",
-        schemaVersion: 1,
-        settings: { reasoningEffort: "medium" },
-      },
-      model: "openai/gpt-6-astra",
-      defaultProductModel: "moonshotai/kimi-k3",
-      auth: connectedAuth as never,
-    });
+  it.each([undefined, "openai/gpt-6-astra"])(
+    "uses Astra for Codex with model %s",
+    async (model) => {
+      const admitted = await admitEngineMessage({
+        actor: {} as never,
+        engine: {
+          type: "codex",
+          schemaVersion: 1,
+          settings: { reasoningEffort: "medium" },
+        },
+        ...(model ? { model } : {}),
+        defaultProductModel: "moonshotai/kimi-k3",
+        auth: connectedAuth as never,
+      });
 
-    expect(admitted).toMatchObject({
-      engine: "codex",
-      model: "openai/gpt-5.6-sol",
-      runtimeModel: "gpt-5.6-sol",
-    });
-  });
+      expect(admitted).toMatchObject({
+        engine: "codex",
+        model: "openai/gpt-6-astra",
+        runtimeModel: "gpt-6-astra",
+      });
+    },
+  );
 });
