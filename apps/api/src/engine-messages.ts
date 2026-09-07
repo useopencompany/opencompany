@@ -43,8 +43,7 @@ export async function admitEngineMessage(input: {
     if (status.status !== "connected") {
       throw new ApiError(409, "conflict", CODEX_DISCONNECTED_MESSAGE);
     }
-    const requestedModel = input.model ?? CODEX_DEFAULT_MODEL_ID;
-    const model = resolveAvailableAgentModelId(requestedModel as AgentModelId);
+    const model = input.model ?? CODEX_DEFAULT_MODEL_ID;
     if (!isCodexModelId(model)) {
       throw new ApiError(400, "invalid_request", "Select a supported Codex model.");
     }

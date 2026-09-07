@@ -478,7 +478,7 @@ describe("planHarness", () => {
       }),
     ).resolves.toMatchObject({
       engine: "codex",
-      model: gptModel,
+      model: "openai/gpt-6-astra",
       codex: {
         createPullRequest: false,
       },

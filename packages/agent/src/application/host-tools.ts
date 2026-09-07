@@ -339,9 +339,9 @@ async function executeOperation(
     }
     case "start_task": {
       assertTaskTools(context);
-      const model = requiredModel(toolInput.model);
-      const name = optionalString(toolInput.name);
       const engine = optionalEngine(toolInput.engine);
+      const model = requiredModel(toolInput.model, engine);
+      const name = optionalString(toolInput.name);
       assertModelSupportsEngine(model, engine);
       const created = await dependencies.createTask({
         actorId: context.actorId,
@@ -631,8 +631,9 @@ export function workspaceSkillIdempotencyKey(turnId: string, toolCallId?: string
   return `agent-skill:${invocationHash}`;
 }
 
-function requiredModel(value: unknown): AgentModelId {
+function requiredModel(value: unknown, engine: ReturnType<typeof optionalEngine>): AgentModelId {
   const model = requiredString(value, "model");
+  if (engine === "codex" && isCodexModelId(model)) return model;
   if (!isAvailableAgentModelId(model)) {
     throw new Error(`Unsupported model "${model}".`);
   }
