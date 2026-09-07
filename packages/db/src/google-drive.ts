@@ -3,9 +3,11 @@ import { and, asc, eq, or, sql } from "drizzle-orm";
 import { getDb } from "./client";
 import {
   brainSources,
+  brains,
   googleDriveFileStates,
   googleDriveSyncCursors,
   googleDriveWatchChannels,
+  workspaces,
 } from "./product-schema";
 
 type DbLike = any;
@@ -182,9 +184,12 @@ export async function claimNextGoogleDriveSyncCursor(input: {
         AND EXISTS (
           SELECT 1
           FROM goat.brain_sources source
+          JOIN goat.brains brain ON brain.id = source.brain_id
+          JOIN goat.workspaces workspace ON workspace.id = brain.workspace_id
           WHERE source.integration_id = cursor.integration_id
             AND source.provider = 'google_drive'
             AND source.enabled = true
+            AND workspace.legacy_brain_enabled = true
         )
       ORDER BY cursor.wake_requested_at NULLS LAST, cursor.last_polled_at NULLS FIRST, cursor.created_at
       FOR UPDATE OF cursor SKIP LOCKED
@@ -614,11 +619,14 @@ export async function listEnabledGoogleDriveSources(integrationId: string, db: D
   const rows = await db
     .select({ brainRef: brainSources.brainId, config: brainSources.config })
     .from(brainSources)
+    .innerJoin(brains, eq(brains.id, brainSources.brainId))
+    .innerJoin(workspaces, eq(workspaces.id, brains.workspaceId))
     .where(
       and(
         eq(brainSources.integrationId, integrationId),
         eq(brainSources.provider, "google_drive"),
         eq(brainSources.enabled, true),
+        eq(workspaces.legacyBrainEnabled, true),
       ),
     );
   return rows.map((row: { brainRef: string; config: unknown }) => ({
