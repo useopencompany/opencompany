@@ -126,3 +126,8 @@ after every required check passes. GitHub applies bypass permission to the perso
 merge rather than the pull-request author, so maintainers must not use that bypass to merge an
 unreviewed external contribution. The separate status-check, force-push, and deletion ruleset has no
 bypass actors.
+
+GitHub CLI does not select the review bypass automatically. After verifying that the exact PR head
+has passed every required check, an eligible maintainer may invoke the configured PR-only bypass
+with `gh pr merge --admin`. Never use that flag to merge an external contribution without its
+required CODEOWNER approval.
