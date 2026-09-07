@@ -29,6 +29,8 @@ async function main() {
   validateProject(surface, project, {
     projectId,
     webProjectId: process.env.OPENCOMPANY_VERCEL_PROJECT_ID?.trim(),
+    marketingProjectId: process.env.MARKETING_VERCEL_PROJECT_ID?.trim(),
+    docsProjectId: process.env.DOCS_VERCEL_PROJECT_ID?.trim(),
   });
 
   const { envs } = await vercelRequest(
@@ -138,7 +140,7 @@ function runVercel(args, projectId, extraEnv = {}) {
 
 function parseSurface(args) {
   if (args.length !== 2 || args[0] !== "--surface") {
-    throw new Error("Usage: release-vercel-prepare.mjs --surface <web|marketing>.");
+    throw new Error("Usage: release-vercel-prepare.mjs --surface <web|marketing|docs>.");
   }
   surfaceConfig(args[1]);
   return args[1];

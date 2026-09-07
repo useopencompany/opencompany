@@ -1,6 +1,6 @@
 # Deployment
 
-Production releases are defined by `.github/workflows/release-production.yml` and target four
+Production releases are defined by `.github/workflows/release-production.yml` and target five
 surfaces:
 
 | Surface     | Host   | Responsibility                                                                                                       |
@@ -9,9 +9,12 @@ surfaces:
 | Product API | Render | authenticated `/v1` resources, provider ingress, OpenAPI, SSE, attachment commands, and authorized read models       |
 | Runner      | Render | durable Run execution, schedules, ingestion, integration workers, sandboxes, internal transports, and the LLM broker |
 | Marketing   | Vercel | public marketing site                                                                                                |
+| Docs        | Vercel | public product and API documentation                                                                                 |
 
-The Vercel web project root is `apps/web`; the marketing project root is `apps/marketing`. Release
-automation verifies both values before building. The API and runner are separate Render services.
+The Vercel project roots are `apps/web`, `apps/marketing`, and `apps/docs`. Release automation
+verifies every value and requires a distinct project ID for each surface before building. Vercel Git
+deployments are disabled for all three projects; verified production releases are owned by CI. The
+API and runner are separate Render services.
 
 ## Release flow
 
@@ -23,10 +26,10 @@ and secret-scan jobs.
 
 After verification, the workflow calculates each surface from its own last successful GitHub
 deployment. This means an API success remains recorded even when the runner fails, and the next run
-retries only the runner and any downstream web release that was blocked. The five deployment-state
-environments are `production-database`, `production-api`, `production-runner`, `production-web`, and
-`production-marketing`. They are state records created inside the protected `production` job; they
-do not hold production credentials.
+retries only the runner and any downstream web release that was blocked. The six deployment-state
+environments are `production-database`, `production-api`, `production-runner`,
+`production-web`, `production-marketing`, and `production-docs`. They are state records created
+inside the protected `production` job; they do not hold production credentials.
 
 The credential-free PR verifier cannot call production-authenticated providers. After the protected
 release job loads its credentials, it verifies every live managed-capability contract before making
@@ -37,11 +40,12 @@ The workflow loads release credentials from Infisical `prod` `/release`, validat
 web/API/runner configuration, and builds selected Vercel artifacts in runner-local storage before
 changing production. It then rechecks the current `main` SHA, runs production migrations once when
 needed, rechecks `main` again, and deploys the API and runner concurrently. Web waits for selected
-backend dependencies; marketing is independent. Every deployed surface is marked successful only
-after its own release-aware health check. Before triggering Render, release automation also verifies
-that the live API and runner shutdown delays match `render.yaml` (60 seconds and 300 seconds,
-respectively), so a dashboard or service-config drift cannot silently shorten graceful draining. A
-superseded run leaves unattempted surfaces inactive and cannot publish stale code.
+backend dependencies; marketing and docs are independent. Every deployed surface is marked
+successful only after its own smoke or release-aware health check. Before triggering Render, release
+automation also verifies that the live API and runner shutdown delays match `render.yaml` (60 seconds
+and 300 seconds, respectively), so a dashboard or service-config drift cannot silently shorten
+graceful draining. A superseded run leaves unattempted surfaces inactive and cannot publish stale
+code.
 
 Manual dispatch from `main` forces the requested surfaces through the same verification, preflight,
 deployment, and health checks. Do not bypass preflight or branch protection.
@@ -49,6 +53,8 @@ deployment, and health checks. Do not bypass preflight or branch protection.
 ## Configuration ownership
 
 - Web: Infisical deployment path `prod` `/web`, synced to the existing Vercel project.
+- Docs: no runtime secrets; CI identifies the existing Vercel project through
+  `DOCS_VERCEL_PROJECT_ID` in `prod` `/release`.
 - API: Infisical `prod` `/api`, synced to the `opencompany-api` Render service.
 - Runner: Infisical `prod` `/runner`, synced to the runner Render service.
 - Release: Infisical `prod` `/release`, containing deployment credentials, service/project IDs,
