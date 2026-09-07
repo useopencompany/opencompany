@@ -130,7 +130,7 @@ jobs:
     env:
       RELEASE_SHA: ${{ github.sha }}
       GITHUB_TOKEN: ${{ github.token }}
-      INFISICAL_MACHINE_IDENTITY_ID: "c3122ac7-94f4-4df2-8090-e98de41fb27d"
+      INFISICAL_MACHINE_IDENTITY_ID: "251c74b2-32d5-490a-abfa-12d83f59ed7b"
       INFISICAL_ENV_SLUG: ${{ vars.INFISICAL_ENV_SLUG || secrets.INFISICAL_ENV_SLUG || 'prod' }}
       INFISICAL_DOMAIN: ${{ vars.INFISICAL_DOMAIN || secrets.INFISICAL_DOMAIN || 'https://eu.infisical.com' }}
       RENDER_DEPLOY_TIMEOUT_MS: "1200000"
