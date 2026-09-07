@@ -2,7 +2,7 @@
 
 - Status: Ready
 - Last verified: 2026-09-07
-- Repository: `useopencompany/opencompany-experimental`
+- Repository: `useopencompany/opencompany`
 - Scope: visibility change only; do not rename the repository
 
 ## Purpose
@@ -44,7 +44,7 @@ Do not announce the launch yet.
 Run these commands immediately after GitHub reports the repository as public:
 
 ```bash
-launch_repo=useopencompany/opencompany-experimental
+launch_repo=useopencompany/opencompany
 
 gh api --method PUT \
   "repos/$launch_repo/actions/permissions/fork-pr-contributor-approval" \
@@ -63,7 +63,7 @@ maintainer explicitly approves it. No workflow job executes before that approval
 Run:
 
 ```bash
-launch_repo=useopencompany/opencompany-experimental
+launch_repo=useopencompany/opencompany
 
 gh api "repos/$launch_repo" --jq '{visibility,private}'
 gh api "repos/$launch_repo/actions/permissions/fork-pr-contributor-approval"

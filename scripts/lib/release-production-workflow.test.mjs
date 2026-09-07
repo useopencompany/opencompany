@@ -89,6 +89,20 @@ test("production credentials are scoped to the release job", async () => {
   assert.match(release, /deployments: write/u);
 });
 
+test("pins production secret access to the audited Infisical identity", async () => {
+  const workflow = await readFile(workflowUrl, "utf8");
+
+  assert.match(workflow, /INFISICAL_MACHINE_IDENTITY_ID: "251c74b2-32d5-490a-abfa-12d83f59ed7b"/u);
+  assert.equal(
+    workflow.match(/identity-id: \$\{\{ env\.INFISICAL_MACHINE_IDENTITY_ID \}\}/gu)?.length,
+    3,
+  );
+  assert.doesNotMatch(
+    workflow,
+    /vars\.INFISICAL_MACHINE_IDENTITY_ID|secrets\.INFISICAL_MACHINE_IDENTITY_ID/u,
+  );
+});
+
 function assertStepOrder(workflow, markers) {
   let previousIndex = -1;
   for (const marker of markers) {

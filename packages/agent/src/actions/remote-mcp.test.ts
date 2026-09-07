@@ -572,15 +572,12 @@ describe("resolveRemoteMcpActions", () => {
     await expect(
       catalog?.actions
         .find((action) => action.id.endsWith(".list_pull_requests"))
-        ?.execute({ owner: "useopencompany", repo: "opencompany-experimental" }, context),
+        ?.execute({ owner: "useopencompany", repo: "opencompany" }, context),
     ).resolves.toEqual({ ok: true });
     await expect(
       catalog?.actions
         .find((action) => action.id.endsWith(".get_file_contents"))
-        ?.execute(
-          { owner: "useopencompany", repo: "opencompany-experimental", path: "README.md" },
-          context,
-        ),
+        ?.execute({ owner: "useopencompany", repo: "opencompany", path: "README.md" }, context),
     ).resolves.toEqual({ ok: true });
 
     const toolCalls = requests.filter(({ message }) => message.method === "tools/call");
@@ -588,7 +585,7 @@ describe("resolveRemoteMcpActions", () => {
     for (const { headers } of toolCalls) {
       expect(headers.get("Mcp-Method")).toBe("tools/call");
       expect(headers.get("Mcp-Param-owner")).toBe("useopencompany");
-      expect(headers.get("Mcp-Param-repo")).toBe("opencompany-experimental");
+      expect(headers.get("Mcp-Param-repo")).toBe("opencompany");
       expect(headers.get("Mcp-Param-path")).toBeNull();
     }
     expect(toolCalls.map(({ headers }) => headers.get("Mcp-Name"))).toEqual([

@@ -74,7 +74,7 @@ PR-only bypass preserves a pull-request and audit trail, but GitHub evaluates it
 performing the merge rather than the pull-request author. The project policy therefore limits bypass
 use to maintainer-authored work; an external contribution must receive one CODEOWNER approval.
 
-[PR #1620](https://github.com/useopencompany/opencompany-experimental/pull/1620) verified the
+[PR #1620](https://github.com/useopencompany/opencompany/pull/1620) verified the
 app-backed `louismorgner` path end to end: GitHub reported `REVIEW_REQUIRED`, the exact head passed
 the then-required checks, and the PR merged with zero reviews through the configured bypass. GitHub
 CLI requires `--admin` to select that bypass explicitly. Maintainers may use it only after verifying
@@ -118,11 +118,11 @@ public:
 
 ```bash
 gh api --method PUT \
-  repos/useopencompany/opencompany-experimental/actions/permissions/fork-pr-contributor-approval \
+  repos/useopencompany/opencompany/actions/permissions/fork-pr-contributor-approval \
   -f approval_policy=all_external_contributors
 
 gh api \
-  repos/useopencompany/opencompany-experimental/actions/permissions/fork-pr-contributor-approval
+  repos/useopencompany/opencompany/actions/permissions/fork-pr-contributor-approval
 ```
 
 The returned `approval_policy` must be `all_external_contributors`. Treat a visibility change as
