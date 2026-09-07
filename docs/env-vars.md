@@ -3,6 +3,10 @@
 `.env.example` is the complete local template. This document records ownership rather than
 duplicating every optional provider variable.
 
+Codex sandboxes default to `gpt-6-astra` and also offer GPT 5.6 Sol, Terra, and Luna.
+`RUNNER_CODEX_MODEL` overrides the runner's fallback model; an explicit session or task selection
+takes precedence. Codex availability is separate from the opencompany engine's Gateway catalog.
+
 ## Infisical paths
 
 | Environment/path | Consumers | Contents |
