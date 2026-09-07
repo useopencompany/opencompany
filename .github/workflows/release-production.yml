@@ -130,6 +130,7 @@ jobs:
     env:
       RELEASE_SHA: ${{ github.sha }}
       GITHUB_TOKEN: ${{ github.token }}
+      INFISICAL_MACHINE_IDENTITY_ID: "c3122ac7-94f4-4df2-8090-e98de41fb27d"
       INFISICAL_ENV_SLUG: ${{ vars.INFISICAL_ENV_SLUG || secrets.INFISICAL_ENV_SLUG || 'prod' }}
       INFISICAL_DOMAIN: ${{ vars.INFISICAL_DOMAIN || secrets.INFISICAL_DOMAIN || 'https://eu.infisical.com' }}
       RENDER_DEPLOY_TIMEOUT_MS: "1200000"
@@ -155,7 +156,7 @@ jobs:
         uses: Infisical/secrets-action@6cd3f7c0e4cc0d2395ee4ef414eb6eeb5d3e73db # v1.0.17
         with:
           method: oidc
-          identity-id: ${{ vars.INFISICAL_MACHINE_IDENTITY_ID || secrets.INFISICAL_MACHINE_IDENTITY_ID }}
+          identity-id: ${{ env.INFISICAL_MACHINE_IDENTITY_ID }}
           project-slug: ${{ vars.INFISICAL_PROJECT_SLUG || secrets.INFISICAL_PROJECT_SLUG }}
           env-slug: ${{ env.INFISICAL_ENV_SLUG }}
           domain: ${{ env.INFISICAL_DOMAIN }}
@@ -169,7 +170,7 @@ jobs:
         uses: Infisical/secrets-action@6cd3f7c0e4cc0d2395ee4ef414eb6eeb5d3e73db # v1.0.17
         with:
           method: oidc
-          identity-id: ${{ vars.INFISICAL_MACHINE_IDENTITY_ID || secrets.INFISICAL_MACHINE_IDENTITY_ID }}
+          identity-id: ${{ env.INFISICAL_MACHINE_IDENTITY_ID }}
           project-slug: ${{ vars.INFISICAL_PROJECT_SLUG || secrets.INFISICAL_PROJECT_SLUG }}
           env-slug: ${{ env.INFISICAL_ENV_SLUG }}
           domain: ${{ env.INFISICAL_DOMAIN }}
@@ -184,7 +185,7 @@ jobs:
         uses: Infisical/secrets-action@6cd3f7c0e4cc0d2395ee4ef414eb6eeb5d3e73db # v1.0.17
         with:
           method: oidc
-          identity-id: ${{ vars.INFISICAL_MACHINE_IDENTITY_ID || secrets.INFISICAL_MACHINE_IDENTITY_ID }}
+          identity-id: ${{ env.INFISICAL_MACHINE_IDENTITY_ID }}
           project-slug: ${{ vars.INFISICAL_PROJECT_SLUG || secrets.INFISICAL_PROJECT_SLUG }}
           env-slug: ${{ env.INFISICAL_ENV_SLUG }}
           domain: ${{ env.INFISICAL_DOMAIN }}
