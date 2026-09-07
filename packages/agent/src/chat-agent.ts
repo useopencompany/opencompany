@@ -739,7 +739,7 @@ export function createProductChatToolContext(input: {
           normalizeStartTaskEngine(args.engine) ??
           inferStartTaskEngine(input.latestUserMessage) ??
           inferStartTaskEngine([name, prompt, reason].join("\n"));
-        const requestedModel = normalizeStartTaskModel(args.model);
+        const requestedModel = normalizeStartTaskModel(args.model, engine);
         const model = modelForStartTaskEngine(engine, input.model, requestedModel);
         const toolCallId =
           executionContext &&
@@ -1758,8 +1758,12 @@ function normalizeStartTaskEngine(value: unknown): HarnessEngine | undefined {
     : undefined;
 }
 
-function normalizeStartTaskModel(value: unknown): AgentModelId | undefined {
+function normalizeStartTaskModel(
+  value: unknown,
+  engine: HarnessEngine | undefined,
+): AgentModelId | undefined {
   if (value === undefined) return undefined;
+  if (engine === "codex" && typeof value === "string" && isCodexModelId(value)) return value;
   if (
     typeof value !== "string" ||
     !AVAILABLE_AGENT_MODEL_CATALOG.some((model) => model.id === value)

@@ -24,17 +24,18 @@ reviewed API definition.
 ## Hosting
 
 The canonical site is [docs.opencompany.cloud](https://docs.opencompany.cloud). Vercel project
-`acta-9a62816e/opencompany-docs` deploys this app from
-`useopencompany/opencompany-experimental` with:
+`acta-9a62816e/opencompany-docs` hosts this app with:
 
 - production branch: `main`;
 - root directory: `apps/docs`;
 - install command: `bun install --frozen-lockfile`; and
 - build command: `bun run build`.
 
-Vercel Git integration creates a preview for pull requests that affect this app and deploys `main`
-independently of the product release workflow. The same commands are checked into `vercel.json` so
-the deployment contract does not depend only on dashboard state.
+Vercel Git deployments are disabled in `vercel.json`. Pull requests verify affected docs code in the
+credential-free CI workflow, and verified merges to `main` deploy the project through the protected
+production release workflow. The release requires `DOCS_VERCEL_PROJECT_ID` in Infisical `prod`
+`/release`, validates that the project root is `apps/docs`, builds a precompiled Vercel artifact, and
+smoke-checks its immutable URL before promotion and before recording `production-docs` as successful.
 
 After a production deployment, verify the homepage, search, and at least one generated endpoint
 under `/docs/api-reference/endpoints/`. The generated endpoint filenames come from the protocol

@@ -28,6 +28,7 @@ const MARKETING_REQUIRED_ENV = [
   "NEXT_PUBLIC_OPENCOMPANY_POSTHOG_TOKEN",
   "NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST",
 ];
+const DOCS_REQUIRED_ENV = [];
 
 export function surfaceConfig(surface) {
   if (surface === "web") {
@@ -46,10 +47,22 @@ export function surfaceConfig(surface) {
       minimumSkewProtectionMaxAge: 0,
     };
   }
+  if (surface === "docs") {
+    return {
+      projectEnv: "DOCS_VERCEL_PROJECT_ID",
+      rootDirectory: "apps/docs",
+      requiredEnv: DOCS_REQUIRED_ENV,
+      minimumSkewProtectionMaxAge: 0,
+    };
+  }
   throw new Error(`Unknown Vercel surface: ${surface}`);
 }
 
-export function validateProject(surface, project, { projectId, webProjectId = "" }) {
+export function validateProject(
+  surface,
+  project,
+  { projectId, webProjectId = "", marketingProjectId = "", docsProjectId = "" },
+) {
   const config = surfaceConfig(surface);
   if (project?.id !== projectId) {
     throw new Error(`Fetched ${surface} Vercel project id does not match ${config.projectEnv}.`);
@@ -61,8 +74,17 @@ export function validateProject(surface, project, { projectId, webProjectId = ""
       }.`,
     );
   }
-  if (surface === "marketing" && projectId === webProjectId) {
-    throw new Error("Marketing must use a separate Vercel project from web.");
+  const projectIdsBySurface = {
+    web: webProjectId,
+    marketing: marketingProjectId,
+    docs: docsProjectId,
+  };
+  const reusedBy = Object.entries(projectIdsBySurface).find(
+    ([candidateSurface, candidateProjectId]) =>
+      candidateSurface !== surface && candidateProjectId === projectId,
+  );
+  if (reusedBy) {
+    throw new Error(`${surface} must use a separate Vercel project from ${reusedBy[0]}.`);
   }
   if ((project.skewProtectionMaxAge ?? 0) < config.minimumSkewProtectionMaxAge) {
     throw new Error(

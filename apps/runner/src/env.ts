@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
+import { CODEX_DEFAULT_MODEL_ID } from "@opencompany/agent-runtime";
 import { loadEncryptionKey } from "@opencompany/crypto";
 import { DEFAULT_CODING_AGENT_TURN_TIMEOUT_MS } from "./coding-sandbox-lifecycle";
 
@@ -103,7 +104,8 @@ export function loadEnv(): RunnerEnv {
       "RUNNER_CODEX_TIMEOUT_MS",
       DEFAULT_CODING_AGENT_TURN_TIMEOUT_MS,
     ),
-    codexModel: optionalEnv("RUNNER_CODEX_MODEL") ?? "gpt-5.6-sol",
+    codexModel:
+      optionalEnv("RUNNER_CODEX_MODEL") ?? CODEX_DEFAULT_MODEL_ID.replace(/^openai\//, ""),
     codexChatIdleTimeoutMs: optionalPositiveIntegerEnv(
       "RUNNER_OPENCOMPANY_CODEX_CHAT_IDLE_TIMEOUT_MS",
       5 * 60_000,

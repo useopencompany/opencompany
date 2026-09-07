@@ -43,16 +43,17 @@ export const GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS = {
   },
 } satisfies ModelProviderOptions;
 
-export const CODEX_DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.6-sol";
+export const CODEX_DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-6-astra";
 export const CODEX_AGENT_MODEL_IDS = [
+  "openai/gpt-6-astra",
   "openai/gpt-5.6-sol",
   "openai/gpt-5.6-terra",
   "openai/gpt-5.6-luna",
 ] as const satisfies readonly AgentModelId[];
-// Keep rollout-gated ids in AgentModelId and the catalog so persisted sessions remain readable,
-// but translate them to a known-available model until the upstream account rollout is verified.
+// Codex sandbox availability is independent of the opencompany model provider rollout.
+// Keep the opencompany replacement until that provider's Astra access is verified.
 const ROLLOUT_GATED_MODEL_REPLACEMENTS: Partial<Record<AgentModelId, AgentModelId>> = {
-  "openai/gpt-6-astra": CODEX_DEFAULT_MODEL_ID,
+  "openai/gpt-6-astra": "openai/gpt-5.6-sol",
 };
 
 export function resolveAvailableAgentModelId(modelId: AgentModelId): AgentModelId {
@@ -89,10 +90,7 @@ export function isCodexReasoningEffort(value: string): value is CodexReasoningEf
 }
 
 export function codexCliModelNameForModelId(modelId: string): string | null {
-  const availableModelId = ROLLOUT_GATED_MODEL_REPLACEMENTS[modelId as AgentModelId] ?? modelId;
-  return CODEX_RUNTIME_MODEL_ID_SET.has(availableModelId)
-    ? availableModelId.replace(/^openai\//, "")
-    : null;
+  return CODEX_RUNTIME_MODEL_ID_SET.has(modelId) ? modelId.replace(/^openai\//, "") : null;
 }
 
 // Sonnet is the default because it is fully covered by Claude subscription limits on

@@ -141,11 +141,12 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     name: "gmail",
     kind: "mcp",
     label: "Gmail",
-    description: "Search and read Gmail, create drafts, and organize messages with approval.",
+    description:
+      "Search and read Gmail, download attachments, create drafts, and organize messages with approval.",
     category: "communication",
     featured: true,
     source:
-      "https://github.com/useopencompany/plugins/tree/587fb06ae2a4e4bed7532e216f8712979ca35e7b/gmail",
+      "https://github.com/useopencompany/plugins/tree/ff6f34b42796129c2a125a32b3a78e8cae353df6/gmail",
     connectionProvider: "gmail",
     connectHref: "/api/integrations/gmail/start?access=mcp&returnTo=/settings/plugins/gmail",
     accountDescription: "The most recently connected Gmail account powers Gmail tools.",
