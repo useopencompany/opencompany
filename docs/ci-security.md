@@ -68,6 +68,12 @@ PR-only bypass preserves a pull-request and audit trail, but GitHub evaluates it
 performing the merge rather than the pull-request author. The project policy therefore limits bypass
 use to maintainer-authored work; an external contribution must receive one CODEOWNER approval.
 
+[PR #1620](https://github.com/useopencompany/opencompany-experimental/pull/1620) verified the
+app-backed `louismorgner` path end to end: GitHub reported `REVIEW_REQUIRED`, every required check
+passed, and the PR merged with zero reviews through the configured bypass. GitHub CLI requires
+`--admin` to select that bypass explicitly. Maintainers may use it only after verifying the exact
+head and every required check, and never for an external contribution.
+
 The production environment has no redundant manual reviewer. It accepts deployments only from
 `main`, and administrators cannot bypass that branch policy. Production remains automatic after a
 permitted merge because the release workflow independently verifies the selected `main` commit
