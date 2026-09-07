@@ -117,7 +117,12 @@ the full gate before review.
 Biome owns formatting and import ordering. ESLint owns lint rules. Tests use Vitest. Prefer existing
 components, helpers, and fixture styles over new abstractions.
 
-External pull requests require the `PR gate`, CodeQL, and resolved review conversations. Reviews are
-encouraged but are not a merge requirement. The main rules apply to administrators; do not bypass
-them. [CODEOWNERS](./.github/CODEOWNERS) identifies the active maintainers and routes review
-requests; whether CODEOWNER approval becomes mandatory remains a separate launch-policy decision.
+External pull requests require the `PR gate`, both CodeQL checks, resolved review conversations, and
+one approving review from a maintainer named in [CODEOWNERS](./.github/CODEOWNERS). New reviewable
+commits dismiss stale approvals.
+
+The two named maintainers have PR-only review bypass so they can self-merge maintainer-authored work
+after every required check passes. GitHub applies bypass permission to the person performing the
+merge rather than the pull-request author, so maintainers must not use that bypass to merge an
+unreviewed external contribution. The separate status-check, force-push, and deletion ruleset has no
+bypass actors.

@@ -1,7 +1,7 @@
 # Open-source release readiness
 
 - Status: Proposed
-- Last reviewed: 2026-09-06
+- Last reviewed: 2026-09-07
 
 ## Current state
 
@@ -37,8 +37,6 @@ follow-up, and provider-backed features may still require personal credentials.
   privately notify contributors whose history contains personal or otherwise non-public addresses,
   and resolve objections before deciding whether the coordinated history-rewrite exception is
   necessary.
-- Confirm public-release operational coverage for the active maintainers named in
-  [CODEOWNERS](../../.github/CODEOWNERS).
 - Apply and verify the public-repository `all_external_contributors` workflow approval policy during
   the visibility change. The versioned PR isolation and private fail-closed settings are documented
   in [CI security](../ci-security.md).
@@ -60,6 +58,11 @@ follow-up, and provider-backed features may still require personal credentials.
 - **Contributions (resolved 2026-09-04):** contributions are inbound=outbound under MIT. No CLA or
   DCO sign-off is required; contributors represent that they have the right to submit their work.
   See [CONTRIBUTING.md](../../CONTRIBUTING.md).
+- **Review and production (resolved 2026-09-07):** external contributions require one CODEOWNER
+  approval. The two active maintainers have PR-only review bypass for maintainer-authored work, but
+  required CI, force-push, and deletion rules have no bypass. Production deploys verified `main`
+  automatically, accepts no other branch, and disallows administrator bypass. See
+  [CI security](../ci-security.md).
 - **Community policies:** [SECURITY.md](../../SECURITY.md) and
   [CODE_OF_CONDUCT.md](../../CODE_OF_CONDUCT.md) define the current reporting and conduct paths.
 
