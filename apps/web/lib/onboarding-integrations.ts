@@ -26,6 +26,8 @@ export function integrationConnectionError(provider: string | null, reason: stri
       return `${name} isn't available right now. Please try again later.`;
     case "session_mismatch":
       return `Sign in with the same account that started the ${name} connection, then try again.`;
+    case "provider_approval_required":
+      return `${name} requires provider approval before it can connect. It isn't available yet.`;
     case "github_user_denied":
     case "gmail_denied":
     case "slack_denied":
@@ -40,6 +42,7 @@ export function integrationConnectionError(provider: string | null, reason: stri
     case "betterstack_denied":
     case "fathom_denied":
     case "signoz_denied":
+    case "vercel_denied":
     case "x_account_denied":
       return `${name} authorization was cancelled.`;
     case "missing_code":
@@ -99,6 +102,8 @@ function providerName(provider: string | null) {
       return "Better Stack";
     case "render":
       return "Render";
+    case "vercel":
+      return "Vercel";
     case "signoz":
       return "SigNoz";
     case "x_account":

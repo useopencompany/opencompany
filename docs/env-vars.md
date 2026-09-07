@@ -3,6 +3,10 @@
 `.env.example` is the complete local template. This document records ownership rather than
 duplicating every optional provider variable.
 
+Codex sandboxes default to `gpt-6-astra` and also offer GPT 5.6 Sol, Terra, and Luna.
+`RUNNER_CODEX_MODEL` overrides the runner's fallback model; an explicit session or task selection
+takes precedence. Codex availability is separate from the opencompany engine's Gateway catalog.
+
 ## Infisical paths
 
 | Environment/path | Consumers | Contents |
@@ -20,7 +24,7 @@ product backend. Values are scoped: API database, Electric, model, billing, inte
 provider-ingress secrets belong in `/api`; runner execution secrets belong in `/runner`. Do not
 mirror an API-owned secret into `/web` unless a current thin relay actually consumes it.
 
-The names-only production audit is recorded in [#1243](https://github.com/useopencompany/opencompany-experimental/issues/1243).
+The names-only production audit is recorded in [#1243](https://github.com/useopencompany/opencompany/issues/1243).
 Two web exceptions remain deliberately classified as suspects rather than prune candidates:
 `BLOB_READ_WRITE_TOKEN` backs the cached-client Brain upload adapter. The runner also uses its
 `/runner` value for private, bounded durable Plugin data archives; it never places that token in a
@@ -56,8 +60,8 @@ contracts include:
   E2B, Blob (including Plugin data archives), model providers,
   GitHub/Google/X integration credentials, opencompany PostHog, and Redis values; capability
   controls and provider-specific tuning remain optional.
-- Release: production DB URL, Vercel/Render credentials and project/service IDs, opencompany/API/runner
-  URLs.
+- Release: production DB URL, Vercel/Render credentials and project/service IDs (including
+  `DOCS_VERCEL_PROJECT_ID`), and opencompany/API/runner URLs.
 
 Browser clients call the non-secret `NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN` directly for commands and
 authorized read models. Server Components use the server-only `OPENCOMPANY_API_ORIGIN`. Configure both
@@ -117,6 +121,24 @@ owning runtimes.
 The marketing Vercel project uses `NEXT_PUBLIC_OPENCOMPANY_POSTHOG_TOKEN` and
 `NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST` for basic page and conversion analytics in the same PostHog project
 as the product. Both variables are required in production and optional for local marketing work.
+
+The docs Vercel project has no runtime secrets. CI resolves it through `DOCS_VERCEL_PROJECT_ID` in
+Infisical `prod` `/release` and rejects a project whose root is not `apps/docs` or whose ID is shared
+with another Vercel surface.
+
+## Authenticated browser profiles
+
+Browser profiles use one Browserbase project across the canonical API and runner. Store
+`OPENCOMPANY_BROWSER_PROFILES_ENABLED`, `OPENCOMPANY_BROWSER_PROFILES_KILL_SWITCH`,
+`BROWSERBASE_API_KEY`, and `BROWSERBASE_PROJECT_ID` in Infisical `prod` `/api` and `/runner`.
+The API creates profiles and resolves owner-checked live-view redirects; the runner drives sessions,
+releases orphaned keep-alive sessions, and settles final provider timing and proxy usage. Release
+preflight requires both Browserbase credentials on both services when the enabled flag is `true`.
+
+Roll out with the enabled flag left `false`, verify the credentials and Browserbase paid plan, then
+enable both services together. Setting `OPENCOMPANY_BROWSER_PROFILES_KILL_SWITCH=true` blocks new
+profile use and closes an active profile before the next browser command; leave the enabled flag on
+so the runner reconciler can continue releasing and settling already-created sessions.
 
 ## Experimental Revolut Business connector
 

@@ -9,6 +9,9 @@ const ACP_STDERR_TAIL_LIMIT = 4_000;
 const ACP_FAILURE_DIAGNOSTIC_LIMIT = 2_000;
 const ACP_COMMAND_STREAM_RECONNECT_ATTEMPTS = 3;
 
+export const ACP_EMPTY_RESULT_REPAIR_PROMPT =
+  "The previous turn completed successfully but produced no final assistant response. Do not repeat any completed actions. Inspect the work and current external state only as needed, then provide a concise final response summarizing what was done and its outcome.";
+
 export type AcpMcpServer =
   | {
       name: string;
@@ -114,6 +117,11 @@ export type AcpHarnessTurnInput = {
   collaborationMode?: "default" | "plan";
   goal?: { objective: string; tokenBudget?: number | null } | null;
   steering?: AsyncIterable<AcpPromptBlock[]>;
+  emptyResultRepair?: {
+    shouldRepair: () => boolean;
+    prompt?: string;
+    onRepair?: () => void | Promise<void>;
+  };
 };
 
 export type AcpHarnessTurnResult = {
@@ -160,7 +168,7 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
 
     await client.start();
     try {
-      const initialized = await client.request("initialize", {
+      const initialized = await client.requestBeforeExecution("initialize", {
         protocolVersion: 1,
         clientInfo: {
           name: "opencompany-runner",
@@ -179,7 +187,7 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
       const capabilities = readRecord(initializedRecord?.agentCapabilities) ?? {};
       const goalControlMethod = readGoalControlMethod(initializedRecord);
       for (const request of input.extensionRequests ?? []) {
-        await client.request(request.method, request.params);
+        await client.requestBeforeExecution(request.method, request.params);
       }
       const preparedSession = input.adapter.prepareSession?.({ mcpServers: input.mcpServers });
       const sessionParams = {
@@ -196,7 +204,7 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
       if (sessionId && capabilities.loadSession === true) {
         try {
           sessionResponse = readRecord(
-            await client.request("session/load", { ...sessionParams, sessionId }),
+            await client.requestBeforeExecution("session/load", { ...sessionParams, sessionId }),
           );
           loadedSession = true;
         } catch (error) {
@@ -221,7 +229,9 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
       }
 
       if (!sessionId) {
-        const created = readRecord(await client.request("session/new", sessionParams));
+        const created = readRecord(
+          await client.requestBeforeExecution("session/new", sessionParams),
+        );
         sessionId = readString(created?.sessionId);
         if (!sessionId) throw new Error("ACP session/new returned no session id.");
         sessionResponse = created;
@@ -252,7 +262,7 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
           goal: input.goal,
         });
       }
-      const promptResponse = await requestPromptWithAbort({
+      let promptResponse = await requestPromptWithAbort({
         client,
         input,
         sessionId,
@@ -260,16 +270,22 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
         deadline: executionDeadline,
       });
       await client.flush();
-      await input.onRuntimeEvents([
-        {
-          method: "session/prompt_result",
-          params: {
-            sessionId,
-            stopReason: readString(promptResponse.stopReason) ?? "end_turn",
-            ...(promptResponse.usage !== undefined ? { usage: promptResponse.usage } : {}),
-          },
-        },
-      ]);
+      await input.onRuntimeEvents([promptResultEvent(sessionId, promptResponse)]);
+      if (
+        readString(promptResponse.stopReason) === "end_turn" &&
+        input.emptyResultRepair?.shouldRepair()
+      ) {
+        await input.emptyResultRepair.onRepair?.();
+        promptResponse = await requestPromptWithAbort({
+          client,
+          input,
+          sessionId,
+          prompt: textPrompt(input.emptyResultRepair.prompt ?? ACP_EMPTY_RESULT_REPAIR_PROMPT),
+          deadline: executionDeadline,
+        });
+        await client.flush();
+        await input.onRuntimeEvents([promptResultEvent(sessionId, promptResponse)]);
+      }
       return {
         sessionId,
         loadedSession,
@@ -284,6 +300,20 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
       }
     }
   }
+}
+
+function promptResultEvent(
+  sessionId: string,
+  promptResponse: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    method: "session/prompt_result",
+    params: {
+      sessionId,
+      stopReason: readString(promptResponse.stopReason) ?? "end_turn",
+      ...(promptResponse.usage !== undefined ? { usage: promptResponse.usage } : {}),
+    },
+  };
 }
 
 async function configureSession(
@@ -333,7 +363,7 @@ async function configureSession(
   ];
   for (const option of requested) {
     if (!option.configId || !option.value || !optionIds.has(option.configId)) continue;
-    await client.request("session/set_config_option", {
+    await client.requestBeforeExecution("session/set_config_option", {
       sessionId,
       configId: option.configId,
       value: option.value,
@@ -576,6 +606,30 @@ class AcpJsonRpcClient {
     return response;
   }
 
+  async requestBeforeExecution(method: string, params: Record<string, unknown>) {
+    try {
+      return await this.request(method, params);
+    } catch (error) {
+      // JSON-RPC errors are deterministic adapter/application responses and must retain their
+      // existing handling (for example, session/load invalidates a stale checkpoint). A missing
+      // response is a transport/setup failure before the model can execute anything, so preserving
+      // and retrying the durable turn is both safe and materially more reliable than showing a
+      // terminal empty assistant message.
+      if (error instanceof AcpRpcError || error instanceof CodexChatRetryableInfrastructureError) {
+        throw error;
+      }
+      const cause = asError(error);
+      throw new CodexChatRetryableInfrastructureError(
+        `${this.input.adapterName} ACP request "${method}" failed before execution started.`,
+        cause,
+        `[acp_${diagnosticMethod(method)}] ${cause.name}: ${this.input.redact(cause.message)}`.slice(
+          0,
+          ACP_FAILURE_DIAGNOSTIC_LIMIT,
+        ),
+      );
+    }
+  }
+
   notify(method: string, params: Record<string, unknown>) {
     return this.send({ jsonrpc: "2.0", method, params });
   }
@@ -788,6 +842,10 @@ function asError(value: unknown) {
 
 function lastLine(value: string) {
   return value.split(/\r?\n/).filter(Boolean).at(-1) ?? value;
+}
+
+function diagnosticMethod(method: string) {
+  return method.replaceAll(/[^a-z0-9]+/giu, "_").replaceAll(/^_+|_+$/gu, "") || "request";
 }
 
 function readRecord(value: unknown): Record<string, unknown> | null {

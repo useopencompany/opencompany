@@ -13,6 +13,6 @@ export function baseOptions(): BaseLayoutProps {
         external: true,
       },
     ],
-    githubUrl: "https://github.com/useopencompany/opencompany-experimental",
+    githubUrl: "https://github.com/useopencompany/opencompany",
   };
 }

@@ -15,6 +15,7 @@ import {
   googleApiMultipartUpload,
 } from "./google-access-token";
 import { loadGoogleDriveIntegration } from "./google-data";
+import { compileGoogleDocsMarkdown } from "./google-docs-markdown";
 import {
   type GoogleDriveMcpTicketPayload,
   verifyGoogleDriveMcpTicket,
@@ -208,8 +209,16 @@ const replaceDocumentContentsSchema = {
   text: z
     .string()
     .max(MAX_REPLACEMENT_TEXT_CHARS)
+    .optional()
     .describe(
-      "Complete new plain-text contents for the selected tab. Existing formatting and embedded content are removed.",
+      "Legacy complete plain-text contents. Use markdown instead when the document should retain headings, lists, checkboxes, or inline formatting. Exactly one of text or markdown is required.",
+    ),
+  markdown: z
+    .string()
+    .max(MAX_REPLACEMENT_TEXT_CHARS)
+    .optional()
+    .describe(
+      "Complete new Markdown contents, converted to native Google Docs headings, lists, checkboxes, bold, italic, strikethrough, links, and code formatting. Exactly one of markdown or text is required.",
     ),
   tabId: z
     .string()
@@ -378,7 +387,7 @@ export function createGoogleDriveMcpService(input: {
             {
               title: "Replace Google Doc contents",
               description:
-                "Replace all body content in one Google Docs tab with plain text, removing existing formatting and embedded content. Use only when the user explicitly requested a full replacement.",
+                "Replace all body content in one Google Docs tab. Prefer markdown to create native Docs formatting; use legacy text only for deliberately unformatted content. Embedded content is removed. Use only when the user explicitly requested a full replacement.",
               inputSchema: replaceDocumentContentsSchema,
               annotations: REPLACE_CONTENTS_ANNOTATIONS,
             },
@@ -387,9 +396,9 @@ export function createGoogleDriveMcpService(input: {
           );
         },
         {
-          serverInfo: { name: "opencompany-google-drive", version: "0.1.0" },
+          serverInfo: { name: "opencompany-google-drive", version: "0.2.0" },
           instructions:
-            "Use search_files or list_recent_files to find file ids, read_file_content for bounded natural-language content, and write tools only after the user requested a Drive change. Prefer replace_document_text for focused Google Doc edits; replace_document_contents intentionally removes existing body formatting and embedded content.",
+            "Use search_files or list_recent_files to find file ids, read_file_content for bounded natural-language content, and write tools only after the user requested a Drive change. Prefer replace_document_text for focused edits because it preserves the surrounding Google Docs formatting. For a requested full rewrite, use replace_document_contents with markdown so headings, lists, checkboxes, and inline styles become native Docs formatting; use its legacy text field only when the user wants unformatted text. Full replacement removes existing body formatting and embedded content before applying the requested Markdown structure.",
         },
         {
           streamableHttpEndpoint: "/mcp/plugins/google-drive",
@@ -774,6 +783,9 @@ async function replaceDocumentContents(
   args: z.infer<z.ZodObject<typeof replaceDocumentContentsSchema>>,
   signal: AbortSignal,
 ) {
+  if ((args.text === undefined) === (args.markdown === undefined)) {
+    throw new Error('Exactly one of "markdown" or "text" is required.');
+  }
   const getUrl = new URL(`${DOCS_BASE}/documents/${encodeURIComponent(args.fileId)}`);
   getUrl.searchParams.set("includeTabsContent", "true");
   getUrl.searchParams.set("suggestionsViewMode", "SUGGESTIONS_INLINE");
@@ -783,6 +795,10 @@ async function replaceDocumentContents(
   const endIndex = documentBodyEndIndex(tab.documentTab);
   const revisionId = boundedString(current.revisionId, MAX_REVISION_ID_CHARS);
   if (!revisionId) throw new Error("Google Docs did not return a revision id for this document.");
+  const compiled =
+    args.markdown !== undefined
+      ? compileGoogleDocsMarkdown(args.markdown, tab.tabId)
+      : { text: args.text ?? "", requests: [] };
 
   const requests: Record<string, unknown>[] = [];
   if (endIndex > 2) {
@@ -792,13 +808,14 @@ async function replaceDocumentContents(
       },
     });
   }
-  if (args.text) {
+  if (compiled.text) {
     requests.push({
       insertText: {
         location: { index: 1, tabId: tab.tabId },
-        text: args.text,
+        text: compiled.text,
       },
     });
+    requests.push(...compiled.requests);
   }
 
   if (requests.length === 0) {
@@ -826,6 +843,7 @@ async function replaceDocumentContents(
       viewUrl: googleDocumentUrl(documentId, tab.tabId),
       tabId: tab.tabId,
       changed: true,
+      format: args.markdown !== undefined ? "markdown" : "plain_text",
       ...responseRevision(response),
     },
   };

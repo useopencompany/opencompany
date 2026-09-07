@@ -21,6 +21,7 @@ import {
   defaultPostHogToolsState,
   defaultSigNozToolsState,
   defaultStripeToolsState,
+  defaultVercelToolsState,
   FathomPluginDetail,
   GitHubPluginDetail,
   GitHubPluginDetailView,
@@ -34,6 +35,7 @@ import {
   googleCalendarToolsStateFromPlugin,
   googleDriveToolsStateFromPlugin,
   HubSpotPluginDetail,
+  InfisicalPluginDetail,
   JamiePluginDetail,
   LatitudePluginDetail,
   type LinearAccountsState,
@@ -49,6 +51,7 @@ import {
   StripePluginDetail,
   slackToolsStateFromPlugin,
   uncuratedPluginToolGroups,
+  VercelPluginDetail,
   XPluginDetail,
 } from "./OfficialMcpPluginSettings";
 import {
@@ -61,6 +64,7 @@ import {
   GOOGLE_DRIVE_PLUGIN_SOURCE,
   GRANOLA_PLUGIN_SOURCE,
   HUBSPOT_PLUGIN_SOURCE,
+  INFISICAL_PLUGIN_SOURCE,
   JAMIE_PLUGIN_SOURCE,
   LATITUDE_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
@@ -68,6 +72,7 @@ import {
   POSTHOG_PLUGIN_SOURCE,
   SLACK_PLUGIN_SOURCE,
   STRIPE_PLUGIN_SOURCE,
+  VERCEL_PLUGIN_SOURCE,
   X_PLUGIN_SOURCE,
 } from "./PluginSettings";
 
@@ -83,6 +88,7 @@ const commands = vi.hoisted(() => ({
   previewHeadlessPluginImport: vi.fn(),
   refreshHeadlessPluginMcp: vi.fn(),
   revokeHeadlessPluginMcp: vi.fn(),
+  setHeadlessPluginEventEnabled: vi.fn(),
 }));
 const accountActions = vi.hoisted(() => ({
   disconnectIntegrationAccountAction: vi.fn(async () => ({ ok: true as const })),
@@ -92,8 +98,22 @@ const accountActions = vi.hoisted(() => ({
   })),
   setIntegrationCapabilityModeAction: vi.fn(async () => ({ ok: true as const })),
 }));
+const infisicalAuth = vi.hoisted(() => ({
+  completeInfisicalAuth: vi.fn(),
+  disconnectInfisicalAuth: vi.fn(),
+  startInfisicalAuth: vi.fn(),
+}));
 const appData = vi.hoisted(() => ({
   integrations: {
+    infisical: {
+      provider: "infisical",
+      connected: true,
+      status: "connected",
+      statusReason: null,
+      accountEmail: "developer@example.com",
+      host: "https://app.infisical.com",
+      lastValidatedAt: "2026-08-26T12:00:00.000Z",
+    },
     gmail: {
       connected: true,
       status: "connected",
@@ -323,6 +343,20 @@ const appData = vi.hoisted(() => ({
           capabilityModes: { read: "on", query: "ask", write: "ask" },
         },
       ],
+      vercel: [
+        {
+          integrationId: "gint_vercel",
+          provider: "vercel",
+          status: "needs_reauth",
+          connected: false,
+          accountEmail: null,
+          accountName: "Vercel",
+          connectionLabel: "Vercel",
+          statusReason: "Vercel MCP authorization started.",
+          scopes: ["openid"],
+          capabilityModes: { read: "on", query: "ask", draft: "ask", write: "off" },
+        },
+      ],
       slack: [
         {
           integrationId: "gint_slack",
@@ -388,6 +422,11 @@ vi.mock("@/components/AppDataProvider", () => ({
   useAppDataOptional: () => null,
 }));
 vi.mock("@/lib/headless-knowledge-commands", () => commands);
+vi.mock("@/lib/infisical-auth", () => ({
+  completeInfisicalAuth: infisicalAuth.completeInfisicalAuth,
+  disconnectInfisicalAuth: infisicalAuth.disconnectInfisicalAuth,
+  startInfisicalAuth: infisicalAuth.startInfisicalAuth,
+}));
 vi.mock("@/lib/integration-account-actions", () => accountActions);
 
 const plugin = {
@@ -452,6 +491,24 @@ const plugin = {
       lastDiscoveryError: null,
     },
   ],
+  events: [
+    {
+      id: "issue.created",
+      label: "Issue created",
+      description: "Starts a workflow when a Linear issue is created.",
+      delivery: "webhook",
+      filters: [
+        {
+          id: "team",
+          label: "Team",
+          kind: "integration_resource",
+          resourceType: "team",
+          required: true,
+        },
+      ],
+    },
+  ],
+  eventModes: {},
   installReport: {
     ignoredManifestFields: [],
     skills: [],
@@ -462,6 +519,75 @@ const plugin = {
   createdAt: "2026-08-26T12:00:00.000Z",
   updatedAt: "2026-08-26T12:00:00.000Z",
   archivedAt: null,
+} as const satisfies PluginInstallationDto;
+
+const infisicalPlugin = {
+  ...plugin,
+  id: "plugin_infisical",
+  name: "infisical",
+  manifest: {
+    name: "infisical",
+    description: "Search Infisical docs and safely use secrets from coding sandboxes.",
+  },
+  source: { ...plugin.source, path: "infisical" },
+  skills: [
+    {
+      name: "infisical-sandbox-secrets",
+      path: "skills/infisical-sandbox-secrets",
+      bundleId: "bundle_infisical_sandbox_secrets",
+      integrity: `sha256:${"e".repeat(64)}`,
+      description: "Use Infisical secrets without returning their values to the model.",
+    },
+  ],
+  remoteMcpServers: [
+    {
+      name: "infisical",
+      type: "streamable-http",
+      connectionProvider: "infisical",
+      capabilities: [
+        {
+          id: "read",
+          label: "Read Infisical docs",
+          defaultMode: "on",
+          tools: ["search_infisical", "query_docs_filesystem_infisical"],
+        },
+        {
+          id: "write",
+          label: "Send docs feedback",
+          defaultMode: "off",
+          tools: ["submit_feedback"],
+        },
+      ],
+      tools: [
+        {
+          name: "search_infisical",
+          description: "Search Infisical documentation.",
+          classification: {
+            capabilityId: "read",
+            capabilityLabel: "Read Infisical docs",
+            defaultMode: "on",
+            bucket: "read",
+            curated: true,
+          },
+        },
+        {
+          name: "submit_feedback",
+          description: "Send documentation feedback.",
+          classification: {
+            capabilityId: "write",
+            capabilityLabel: "Send docs feedback",
+            defaultMode: "off",
+            bucket: "write",
+            curated: true,
+          },
+        },
+      ],
+      discoveryStatus: "ready",
+      discoveredAt: "2026-08-26T12:00:00.000Z",
+      refreshAfter: "2026-08-26T13:00:00.000Z",
+      lastDiscoveryError: null,
+    },
+  ],
 } as const satisfies PluginInstallationDto;
 
 const officialPreview = {
@@ -490,6 +616,7 @@ const officialPreview = {
       capabilities,
     }),
   ),
+  events: plugin.events,
   report: {
     ignoredManifestFields: [],
     skills: [],
@@ -1062,7 +1189,7 @@ const gmailPlugin = {
   source: {
     ...plugin.source,
     path: "gmail",
-    resolvedCommit: "587fb06ae2a4e4bed7532e216f8712979ca35e7b",
+    resolvedCommit: "ff6f34b42796129c2a125a32b3a78e8cae353df6",
   },
   skills: [],
   remoteMcpServers: [
@@ -1128,12 +1255,14 @@ describe("Linear plugin settings", () => {
     commands.importHeadlessPlugin.mockResolvedValue({ plugin, replayed: false });
     commands.previewHeadlessPluginImport.mockResolvedValue(officialPreview);
     commands.refreshHeadlessPluginMcp.mockResolvedValue(plugin);
+    commands.setHeadlessPluginEventEnabled.mockResolvedValue(plugin);
     toasts.error.mockReset();
     toasts.success.mockReset();
     accountActions.disconnectIntegrationAccountAction.mockClear();
     accountActions.getIntegrationAccountUsageAction.mockClear();
     accountActions.setIntegrationCapabilityModeAction.mockReset();
     accountActions.setIntegrationCapabilityModeAction.mockResolvedValue({ ok: true });
+    for (const action of Object.values(infisicalAuth)) action.mockReset();
     useLiveQuery.mockClear();
     window.history.replaceState({}, "", "/settings/plugins/linear");
   });
@@ -1153,6 +1282,78 @@ describe("Linear plugin settings", () => {
 
     expect(html).toContain("Linear tool access");
     expect(useLiveQuery).not.toHaveBeenCalled();
+  });
+
+  it("moves the workspace Infisical connection and fixed permissions onto the plugin page", () => {
+    render(
+      <InfisicalPluginDetail pluginState={{ status: "ready", plugin: infisicalPlugin }} canEdit />,
+    );
+
+    expect(screen.getByRole("heading", { level: 1, name: "Infisical" })).toBeInTheDocument();
+    expect(screen.getByText("developer@example.com · US")).toBeInTheDocument();
+    expect(screen.getByText("Connected")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reconnect Infisical account" })).toBeInTheDocument();
+    expect(
+      screen.queryByText("Give workspace coding agents access to the real Infisical CLI."),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("infisical-sandbox-secrets")).toBeInTheDocument();
+    expect(screen.getByText("Search infisical")).toBeInTheDocument();
+    expect(screen.getByText("Submit feedback")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Documentation reads stay On and documentation feedback stays Off/u),
+    ).toBeInTheDocument();
+    expect(INFISICAL_PLUGIN_SOURCE).toContain("f283f509c195464f90f5f78f7e30a9a472b6393b/infisical");
+  });
+
+  it("keeps the Infisical token handoff inside the standard plugin account section", async () => {
+    const user = userEvent.setup();
+    infisicalAuth.startInfisicalAuth.mockResolvedValue({
+      ok: true,
+      flow: {
+        id: "ginff_eu",
+        status: "link_ready",
+        loginUrl: "https://eu.infisical.com/login?callback_port=23456",
+        statusReason: null,
+        expiresAt: "2026-09-05T17:00:00.000Z",
+      },
+    });
+    infisicalAuth.completeInfisicalAuth.mockResolvedValue({
+      ok: true,
+      flow: {
+        id: "ginff_eu",
+        status: "completed",
+        loginUrl: "https://eu.infisical.com/login?callback_port=23456",
+        statusReason: null,
+        expiresAt: "2026-09-05T17:00:00.000Z",
+      },
+    });
+
+    render(
+      <InfisicalPluginDetail pluginState={{ status: "ready", plugin: infisicalPlugin }} canEdit />,
+    );
+    await user.click(screen.getByRole("button", { name: "EU" }));
+    await user.click(screen.getByRole("button", { name: "Reconnect Infisical account" }));
+
+    await waitFor(() => {
+      expect(infisicalAuth.startInfisicalAuth).toHaveBeenCalledWith({
+        host: "https://eu.infisical.com",
+      });
+    });
+    expect(screen.getByRole("link", { name: /Open Infisical sign-in/ })).toHaveAttribute(
+      "href",
+      "https://eu.infisical.com/login?callback_port=23456",
+    );
+
+    await user.type(screen.getByLabelText("Browser token"), "browser-token");
+    await user.click(screen.getByRole("button", { name: "Finish connection" }));
+
+    await waitFor(() => {
+      expect(infisicalAuth.completeInfisicalAuth).toHaveBeenCalledWith({
+        flowId: "ginff_eu",
+        browserToken: "browser-token",
+      });
+      expect(router.refresh).toHaveBeenCalled();
+    });
   });
 
   it("maps the personal github_user connection onto the GitHub plugin surface", () => {
@@ -1276,6 +1477,48 @@ describe("Linear plugin settings", () => {
     expect(html).toContain("Configure legacy Fathom ingestion in Wiki sources");
     expect(FATHOM_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/444dd4dbfaaed6abd2c7c8000024c5be0ff4fa48/fathom",
+    );
+  });
+
+  it("maps Vercel with purchase and CLI actions disabled by default", () => {
+    const vercelPlugin = {
+      ...plugin,
+      id: "plugin_vercel",
+      name: "vercel",
+      manifest: { name: "vercel", description: "Operate Vercel projects." },
+      source: { ...plugin.source, path: "vercel" },
+    } satisfies PluginInstallationDto;
+    const toolsState = defaultVercelToolsState();
+    const html = renderToString(
+      <VercelPluginDetail
+        pluginState={{ status: "ready", plugin: vercelPlugin }}
+        toolsState={toolsState}
+        canEdit
+      />,
+    );
+
+    expect(html).toContain("Vercel");
+    expect(html).toContain("Connection unavailable");
+    expect(html).toContain("Unavailable");
+    expect(html).not.toContain("Needs reconnect");
+    expect(html).toContain("opencompany is awaiting that approval");
+    expect(html).not.toContain("Connect Vercel account");
+    expect(html).not.toContain("Reconnect");
+    expect(html).toContain("Inspect Vercel projects");
+    expect(html).toContain("Read operational data");
+    expect(html).toContain("Deploy, share, and collaborate");
+    expect(html).toContain("Purchase and administer");
+    expect(toolsState).toMatchObject({
+      status: "ready",
+      groups: [
+        { id: "read", defaultMode: "on" },
+        { id: "query", defaultMode: "ask" },
+        { id: "draft", defaultMode: "ask" },
+        { id: "write", defaultMode: "off" },
+      ],
+    });
+    expect(VERCEL_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/14e7f6d3e978103c5427c725229ae93bc3e47f8c/vercel",
     );
   });
 
@@ -1503,6 +1746,7 @@ describe("Linear plugin settings", () => {
     );
 
     expect(screen.getByRole("heading", { name: "Accounts" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Events" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Tools" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Skills" })).toBeInTheDocument();
     expect(screen.queryByText("gint_linear_tools")).not.toBeInTheDocument();
@@ -1533,6 +1777,26 @@ describe("Linear plugin settings", () => {
         "gint_linear_tools",
         "read",
         "ask",
+      ),
+    );
+  });
+
+  it("enables a declared event for the workspace", async () => {
+    render(
+      <LinearPluginDetailView
+        pluginState={{ status: "ready", plugin }}
+        accountsState={accountsState}
+        toolsState={toolsState}
+        canEdit
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Issue created: Off" }));
+    await waitFor(() =>
+      expect(commands.setHeadlessPluginEventEnabled).toHaveBeenCalledWith(
+        "linear",
+        "issue.created",
+        true,
       ),
     );
   });
@@ -1782,8 +2046,10 @@ describe("Linear plugin settings", () => {
   it("renders GitHub connection, discovery, and permission controls against github_user", async () => {
     const state = githubToolsStateFromPlugin(githubPlugin);
     window.history.replaceState({}, "", "/settings/plugins/github");
-    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) =>
-      Response.json({
+    let accessRequestCount = 0;
+    const fetchMock = vi.fn(async () => {
+      accessRequestCount += 1;
+      return Response.json({
         checkedAt: "2026-09-02T12:00:00.000Z",
         target: null,
         installations: [
@@ -1808,7 +2074,7 @@ describe("Linear plugin settings", () => {
                 private: true,
                 htmlUrl: "https://github.com/opencompany/private-repo",
               },
-              ...(init?.method === "POST"
+              ...(accessRequestCount > 1
                 ? [
                     {
                       id: "789",
@@ -1822,8 +2088,8 @@ describe("Linear plugin settings", () => {
             ],
           },
         ],
-      }),
-    );
+      });
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     render(
@@ -1866,7 +2132,7 @@ describe("Linear plugin settings", () => {
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/integrations/github-user/installations",
-        expect.objectContaining({ method: "POST" }),
+        expect.objectContaining({ method: "GET" }),
       ),
     );
     expect(await screen.findByTestId("github-installation-approved")).toHaveTextContent(
@@ -2236,7 +2502,7 @@ describe("Linear plugin settings", () => {
         { id: "write", defaultMode: "ask", tools: [{ readOnly: false }] },
       ],
     });
-    expect(GMAIL_PLUGIN_SOURCE).toContain("/tree/587fb06ae2a4e4bed7532e216f8712979ca35e7b/gmail");
+    expect(GMAIL_PLUGIN_SOURCE).toContain("/tree/ff6f34b42796129c2a125a32b3a78e8cae353df6/gmail");
   });
 
   it("edits the same Gmail account selected by the MCP gateway", async () => {

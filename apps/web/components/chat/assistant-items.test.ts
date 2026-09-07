@@ -64,7 +64,7 @@ describe("coding transcript tool presentations", () => {
         title: "Read the chat renderer",
         arguments: {
           file_path:
-            "/home/user/opencompany-goat/codex-chat/opencompany-experimental/apps/web/components/chat/ToolCallItem.tsx",
+            "/home/user/opencompany-goat/codex-chat/opencompany/apps/web/components/chat/ToolCallItem.tsx",
         },
       },
       output: {
@@ -81,8 +81,7 @@ describe("coding transcript tool presentations", () => {
         toolName: "Write",
         kind: "edit",
         arguments: {
-          file_path:
-            "/home/user/opencompany-goat/codex-chat/opencompany-experimental/apps/web/lib/labels.ts",
+          file_path: "/home/user/opencompany-goat/codex-chat/opencompany/apps/web/lib/labels.ts",
           content: "first\nsecond",
         },
       },

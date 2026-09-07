@@ -54,6 +54,24 @@ The project does not require a contributor license agreement or Developer Certif
 sign-off. Opening a pull request does not transfer copyright or grant rights to the opencompany
 name or logos; see [OPEN_SOURCE.md](./OPEN_SOURCE.md) and [TRADEMARKS.md](./TRADEMARKS.md).
 
+## External Pull Requests and CI Approval
+
+Pull requests from maintainers with write access and trusted automation start CI normally. For
+public contributions, GitHub holds every workflow run opened from an outside contributor's fork
+until a maintainer reviews the proposed commit and explicitly approves that run. Opening a pull
+request is not CI approval, and approving CI is not approval to merge.
+
+Before approving a run, maintainers inspect the complete diff, with particular care around
+`.github/workflows/`, install and lifecycle scripts, dependency files, and code executed during the
+build. Contributors should expect CI to remain pending until that review is complete. New commits
+may require another approval.
+
+The PR workflow deliberately has no secrets, OIDC, deployment environment, write permission,
+self-hosted runner, or cache-save path. Production release automation only runs from `main`. The
+repository-level controls and the visibility-change procedure are documented in
+[CI security](./docs/ci-security.md); those settings are part of the contribution boundary and must
+not be relaxed to make a pull request pass.
+
 ## Local Checks
 
 Use Bun `1.3.2` and Node `20.20.0` or newer. Install exactly the committed dependency graph:
@@ -99,7 +117,19 @@ the full gate before review.
 Biome owns formatting and import ordering. ESLint owns lint rules. Tests use Vitest. Prefer existing
 components, helpers, and fixture styles over new abstractions.
 
-External pull requests require the `PR gate`, CodeQL, and resolved review conversations. Reviews are
-encouraged but are not a merge requirement. The main rules apply to administrators; do not bypass
-them. Mandatory critical-path CODEOWNER approval remains deferred until a second active
-maintainer is assigned.
+External pull requests require an approved and passing `PR gate`, resolved review conversations,
+and one approving review from a maintainer named in [CODEOWNERS](./.github/CODEOWNERS). New
+reviewable commits dismiss stale approvals. GitHub's default CodeQL setup remains enabled for
+trusted pull requests and `main`, but it is not a required merge check because GitHub excludes fork
+pull requests from default-setup analysis.
+
+The two named maintainers have PR-only review bypass so they can self-merge maintainer-authored work
+after the required `PR gate` passes. GitHub applies bypass permission to the person performing the
+merge rather than the pull-request author, so maintainers must not use that bypass to merge an
+unreviewed external contribution. The separate status-check, force-push, and deletion ruleset has no
+bypass actors.
+
+GitHub CLI does not select the review bypass automatically. After verifying that the exact PR head
+has passed every required check, an eligible maintainer may invoke the configured PR-only bypass
+with `gh pr merge --admin`. Never use that flag to merge an external contribution without its
+required CODEOWNER approval.

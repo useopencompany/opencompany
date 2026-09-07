@@ -1935,7 +1935,7 @@ describe("Surface chat streaming UI", () => {
     expect(screen.queryByText("Capability / Speed / Cost")).not.toBeInTheDocument();
     expect(screen.getAllByText("Claude Sonnet 5").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Claude Opus 4.8")).toBeInTheDocument();
-    expect(screen.getByText("GPT 6 Astra")).toBeInTheDocument();
+    expect(screen.queryByText("GPT 6 Astra")).not.toBeInTheDocument();
     expect(screen.getByText("GPT 5.6 Sol")).toBeInTheDocument();
     expect(screen.getByText("GPT 5.6 Terra")).toBeInTheDocument();
     expect(screen.getByText("GPT 5.5")).toBeInTheDocument();
@@ -2143,11 +2143,11 @@ describe("Surface chat streaming UI", () => {
 
     await user.click(screen.getByRole("button", { name: "Model" }));
     await user.click(screen.getByText("Cloud Codex sandbox"));
-    const codexModelPicker = screen.getByRole("button", { name: "Codex model: GPT 5.6 Sol" });
+    const codexModelPicker = screen.getByRole("button", { name: "Codex model: GPT 6 Astra" });
     expect(codexModelPicker).toBeInTheDocument();
     await user.click(codexModelPicker);
-    await user.click(screen.getByText("GPT 6 Astra"));
-    expect(screen.getByRole("button", { name: "Codex model: GPT 6 Astra" })).toBeInTheDocument();
+    await user.click(screen.getByText("GPT 5.6 Terra"));
+    expect(screen.getByRole("button", { name: "Codex model: GPT 5.6 Terra" })).toBeInTheDocument();
     await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Clone my repo");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
@@ -2160,7 +2160,7 @@ describe("Surface chat streaming UI", () => {
         schemaVersion: 1,
         settings: { reasoningEffort: "xhigh" },
       },
-      model: "openai/gpt-6-astra",
+      model: "openai/gpt-5.6-terra",
     });
     expect(historyMock.replaceState).not.toHaveBeenCalled();
     expect(routerMock.replace).not.toHaveBeenCalled();
@@ -2192,7 +2192,7 @@ describe("Surface chat streaming UI", () => {
         message_id: "assistant_accepted_1",
         engine: "codex",
         model: CODEX_CHAT_DEFAULT_MODEL_ID,
-        selected_model: "openai/gpt-6-astra",
+        selected_model: "openai/gpt-5.6-terra",
         is_new_session: true,
         sandbox_status_at_send: "not_created",
         send_source: "composer",
@@ -2944,7 +2944,7 @@ describe("Surface chat streaming UI", () => {
     expect(overlay).toHaveTextContent("@codex");
     expect(textarea).toHaveClass("text-transparent");
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Codex");
-    expect(screen.getByRole("button", { name: "Codex model: GPT 5.6 Sol" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Codex model: GPT 6 Astra" })).toBeInTheDocument();
 
     await user.type(textarea, "check repo access");
     await user.click(screen.getByRole("button", { name: "Send message" }));
@@ -2955,7 +2955,7 @@ describe("Surface chat streaming UI", () => {
     const body = chatMock.preparedRequestBodies.at(-1) as { newSessionId: string };
     expect(body).toMatchObject({
       newSessionId: expect.stringMatching(/^goat_chat_/),
-      model: "openai/gpt-5.6-sol",
+      model: "openai/gpt-6-astra",
       engine: { type: "codex", schemaVersion: 1 },
     });
     expect(screen.getByTestId("optimistic-chat-summaries")).toHaveTextContent(
@@ -3965,7 +3965,7 @@ describe("Surface chat streaming UI", () => {
     expect(screen.queryByRole("button", { name: "Archive Legacy result" })).not.toBeInTheDocument();
   });
 
-  it("hides home chats older than seven days and results older than one day", () => {
+  it("hides old home chats but shows all unarchived tasks regardless of age", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-04T17:44:00.000Z"));
     try {
@@ -3986,6 +3986,12 @@ describe("Surface chat streaming UI", () => {
               name: "Old result",
               createdAt: "2026-07-02T10:00:00.000Z",
               updatedAt: "2026-07-02T10:00:00.000Z",
+            }),
+            taskView({
+              id: "archived_task",
+              displayId: "TASK-3",
+              name: "Archived result",
+              archivedAt: "2026-07-04T12:00:00.000Z",
             }),
           ]}
           defaultModel={DEFAULT_MODEL}
@@ -4012,7 +4018,8 @@ describe("Surface chat streaming UI", () => {
       expect(screen.getByText("Recent chat")).toBeInTheDocument();
       expect(screen.queryByText("Old chat")).not.toBeInTheDocument();
       expect(screen.getByText("Recent result")).toBeInTheDocument();
-      expect(screen.queryByText("Old result")).not.toBeInTheDocument();
+      expect(screen.getByText("Old result")).toBeInTheDocument();
+      expect(screen.queryByText("Archived result")).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }

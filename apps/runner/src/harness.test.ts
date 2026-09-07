@@ -459,8 +459,7 @@ describe("planHarness", () => {
         engine: "opencompany",
         model: claudeModel,
         systemPrompt: "Inspect the repository and report readiness.",
-        initialUserMessage:
-          "Check out opencompany-experimental and report whether development work can start.",
+        initialUserMessage: "Check out opencompany and report whether development work can start.",
         tools: ["github_clone_repository", "github_shell"],
         skills: [],
         maxModelSteps: 8,
@@ -470,7 +469,7 @@ describe("planHarness", () => {
 
     await expect(
       planHarness({
-        prompt: "Check out opencompany-experimental and report whether development work can start.",
+        prompt: "Check out opencompany and report whether development work can start.",
         model,
         requestedEngine: "codex",
         availableTools: ["github_clone_repository", "github_shell"],
@@ -478,7 +477,7 @@ describe("planHarness", () => {
       }),
     ).resolves.toMatchObject({
       engine: "codex",
-      model: gptModel,
+      model: "openai/gpt-6-astra",
       codex: {
         createPullRequest: false,
       },

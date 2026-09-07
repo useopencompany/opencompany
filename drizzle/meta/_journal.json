@@ -1765,6 +1765,34 @@
       "when": 1788523200000,
       "tag": "0251_goat_task_time_range",
       "breakpoints": true
+    },
+    {
+      "idx": 252,
+      "version": "7",
+      "when": 1788529500000,
+      "tag": "0252_opencompany_vercel_integration",
+      "breakpoints": true
+    },
+    {
+      "idx": 253,
+      "version": "7",
+      "when": 1788609000000,
+      "tag": "0253_browser_profile_session_settlement",
+      "breakpoints": true
+    },
+    {
+      "idx": 254,
+      "version": "7",
+      "when": 1788610000000,
+      "tag": "0254_opencompany_plugin_event_subscriptions",
+      "breakpoints": true
+    },
+    {
+      "idx": 255,
+      "version": "7",
+      "when": 1788772062000,
+      "tag": "0255_goat_task_waiting_projection",
+      "breakpoints": true
     }
   ]
 }

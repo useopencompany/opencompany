@@ -102,7 +102,6 @@ async function handleInstallations(
       userWorkosId: session.userId,
       ...(owner ? { owner } : {}),
       ...(repo ? { repo } : {}),
-      forceRefresh: request.method === "POST",
       db: input.db,
       signal: request.signal,
     });

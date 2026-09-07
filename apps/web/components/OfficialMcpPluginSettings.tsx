@@ -1,6 +1,7 @@
 "use client";
 
 import type {
+  PluginEventDefinitionDto,
   PluginImportPreviewDto,
   PluginInstallationDto,
   PluginRemoteMcpServerDto,
@@ -30,6 +31,7 @@ import {
   Sparkles,
   Unplug,
   Users,
+  Webhook,
   Wrench,
 } from "lucide-react";
 import Link from "next/link";
@@ -38,6 +40,8 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import { useAppData } from "@/components/AppDataProvider";
 import { CapabilityModeToggle } from "@/components/CapabilityModeToggle";
 import { GitHubRepositoryAccessSection } from "@/components/GitHubRepositoryAccess";
+import { InfisicalPluginConnectionForm } from "@/components/InfisicalPluginConnectionForm";
+import { PluginAccountRow, PluginConnectionFeedback } from "@/components/PluginConnectionSettings";
 import {
   installOfficialMcpPlugin,
   OFFICIAL_MCP_PLUGINS,
@@ -45,10 +49,6 @@ import {
 } from "@/components/PluginSettings";
 import { RenderApiKeyConnectionForm } from "@/components/RenderApiKeyConnectionForm";
 import { SettingsContent } from "@/components/SettingsChrome";
-import {
-  IntegrationAccountRow,
-  IntegrationSetupFeedback,
-} from "@/components/SettingsIntegrationsPanel";
 import { StripeRestrictedKeyConnectionForm } from "@/components/StripeRestrictedKeyConnectionForm";
 import {
   type CapabilityId,
@@ -61,9 +61,11 @@ import {
   enableHeadlessPlugin,
   previewHeadlessPluginImport,
   refreshHeadlessPluginMcp,
+  setHeadlessPluginEventEnabled,
 } from "@/lib/headless-knowledge-commands";
 import { setIntegrationCapabilityModeAction } from "@/lib/integration-account-actions";
 import {
+  type InfisicalProviderState,
   type IntegrationAccountView,
   type IntegrationState,
   type PersonalAccountProvider,
@@ -116,6 +118,10 @@ export type PluginToolsState =
 
 type PluginConnectionProvider = PersonalAccountProvider | "posthog" | "stripe";
 type PluginAccount = { account: IntegrationAccountView<PluginConnectionProvider> };
+type ManagedPluginConnection = {
+  provider: "infisical";
+  integration: InfisicalProviderState;
+};
 
 type PluginSkill = {
   id: string;
@@ -135,6 +141,7 @@ export type PluginAccountsState =
       status: "ready";
       accounts: PluginAccount[];
       permissionConnection: IntegrationAccountView<PluginConnectionProvider> | null;
+      managedConnection?: ManagedPluginConnection;
     };
 
 export type LinearAccountsState = PluginAccountsState;
@@ -310,6 +317,25 @@ export function HubSpotPluginDetail({
   );
 }
 
+export function InfisicalPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.infisical}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
 export function LatitudePluginDetail({
   pluginState,
   canEdit,
@@ -398,6 +424,25 @@ export function RenderPluginDetail({
   return (
     <OfficialMcpPluginDetail
       config={OFFICIAL_MCP_PLUGINS.render}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
+export function VercelPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.vercel}
       pluginState={pluginState}
       canEdit={canEdit}
       {...(toolsState ? { toolsState } : {})}
@@ -723,7 +768,7 @@ function OfficialMcpPluginDetailView({
 
   return (
     <>
-      <IntegrationSetupFeedback />
+      <PluginConnectionFeedback />
       <SettingsContent
         title={config.label}
         description={plugin?.manifest.description || config.description}
@@ -738,6 +783,7 @@ function OfficialMcpPluginDetailView({
         {plugin ? (
           <AccountsSection config={config} state={accountsState} canEdit={canEdit} />
         ) : null}
+        {plugin?.events.length ? <EventsSection plugin={plugin} canEdit={canEdit} /> : null}
         {plugin &&
         config.name === "github" &&
         accountsState.status === "ready" &&
@@ -757,6 +803,67 @@ function OfficialMcpPluginDetailView({
         <SkillsSection config={config} state={pluginState} previewState={previewState} />
       </SettingsContent>
     </>
+  );
+}
+
+function EventsSection({ plugin, canEdit }: { plugin: PluginInstallationDto; canEdit: boolean }) {
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+  const [pendingEventId, setPendingEventId] = useState<string | null>(null);
+
+  const toggle = (eventId: string, enabled: boolean) => {
+    setError(null);
+    setPendingEventId(eventId);
+    void setHeadlessPluginEventEnabled(plugin.name, eventId, enabled)
+      .then(() => router.refresh())
+      .catch((cause) => setError(errorMessage(cause)))
+      .finally(() => setPendingEventId(null));
+  };
+
+  return (
+    <section aria-labelledby={`${plugin.name}-events-heading`} className="flex flex-col gap-3">
+      <SectionHeading
+        id={`${plugin.name}-events-heading`}
+        icon={Webhook}
+        title="Events"
+        description="Choose which provider events may start workflows in this workspace. Events are off by default."
+      />
+      <ul className="overflow-hidden rounded-lg border border-border bg-surface">
+        {plugin.events.map((event: PluginEventDefinitionDto) => {
+          const enabled = plugin.eventModes[event.id] === true;
+          const pending = pendingEventId === event.id;
+          return (
+            <li
+              key={event.id}
+              className="flex items-center gap-3 border-b border-border px-3 py-2.5 last:border-b-0"
+            >
+              <div className="min-w-0 flex-1">
+                <p className="text-[13px] font-medium text-ink">{event.label}</p>
+                <p className="mt-0.5 text-[12px] leading-4 text-ink-subtle">{event.description}</p>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant={enabled ? "default" : "outline"}
+                disabled={!canEdit || pending}
+                aria-pressed={enabled}
+                aria-label={`${event.label}: ${enabled ? "On" : "Off"}`}
+                onClick={() => toggle(event.id, !enabled)}
+              >
+                {pending ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                {enabled ? "On" : "Off"}
+              </Button>
+            </li>
+          );
+        })}
+      </ul>
+      {!canEdit ? (
+        <p className="text-[12px] leading-4 text-ink-subtle">
+          Only workspace admins can change event subscriptions.
+        </p>
+      ) : null}
+      {error ? <SectionError title="Event setting failed" message={error} /> : null}
+    </section>
   );
 }
 
@@ -966,6 +1073,7 @@ function AccountsSection({
   canEdit: boolean;
 }) {
   const permissionConnection = state.status === "ready" ? state.permissionConnection : null;
+  const managedConnection = state.status === "ready" ? state.managedConnection : undefined;
   const displayedAccounts =
     state.status !== "ready"
       ? []
@@ -985,27 +1093,35 @@ function AccountsSection({
         title="Accounts"
         description={config.accountDescription}
       />
+      {config.connectionUnavailableReason ? (
+        <Alert>
+          <AlertCircle />
+          <AlertTitle>Connection unavailable</AlertTitle>
+          <AlertDescription>{config.connectionUnavailableReason}</AlertDescription>
+        </Alert>
+      ) : null}
       {state.status === "loading" ? (
         <SectionSkeleton label={`Loading ${accountLabel} accounts`} rows={2} compact />
       ) : state.status === "error" ? (
         <SectionError title="Accounts unavailable" message={state.message} />
+      ) : managedConnection ? (
+        <ManagedConnectionStatusRow connection={managedConnection} />
       ) : displayedAccounts.length === 0 ? (
         <SectionEmpty icon={Users}>{`No ${accountLabel} accounts are connected.`}</SectionEmpty>
-      ) : config.name === "stripe" ? (
-        <div className="flex min-w-0 items-center gap-2 rounded-lg border border-border/70 px-3 py-2">
-          <span className="min-w-0 flex-1 truncate text-[12px] leading-4 text-ink-subtle">
-            {permissionConnection?.connectionLabel ||
-              permissionConnection?.accountName ||
-              permissionConnection?.integrationId}
-          </span>
-          <span className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle">
-            {permissionConnection?.connected ? "Connected" : "Needs reconnect"}
-          </span>
-        </div>
+      ) : config.connectionProvider === "stripe" ? (
+        <PluginConnectionStatusRow
+          identity={
+            permissionConnection?.connectionLabel ||
+            permissionConnection?.accountName ||
+            permissionConnection?.integrationId ||
+            accountLabel
+          }
+          status={permissionConnection?.connected ? "Connected" : "Needs reconnect"}
+        />
       ) : (
         <div className="flex flex-col gap-2">
           {displayedAccounts.map(({ account }) => (
-            <IntegrationAccountRow
+            <PluginAccountRow
               key={account.integrationId}
               account={account as IntegrationAccountView<PersonalAccountProvider | "posthog">}
               purposeLabel={
@@ -1020,27 +1136,20 @@ function AccountsSection({
                     : accountLabel
               }
               reconnectHref={config.connectHref}
-              showCapabilityModes={false}
+              {...(config.connectionUnavailableReason
+                ? { reconnectUnavailableReason: config.connectionUnavailableReason }
+                : {})}
             />
           ))}
         </div>
       )}
       <div className="flex flex-wrap items-center gap-3">
-        {config.name === "render" ? (
-          <RenderApiKeyConnectionForm connected={Boolean(permissionConnection?.connected)} />
-        ) : config.name === "stripe" ? (
-          <StripeRestrictedKeyConnectionForm
-            connected={Boolean(permissionConnection?.connected)}
-            canManage={canEdit}
-          />
-        ) : (
-          <a
-            href={config.connectHref}
-            className={buttonVariants({ variant: "outline", size: "sm" })}
-          >
-            Connect {accountLabel} account
-          </a>
-        )}
+        <PluginConnectionControls
+          config={config}
+          permissionConnection={permissionConnection}
+          managedConnection={managedConnection}
+          canEdit={canEdit}
+        />
         {config.ingestionHref && config.ingestionLabel ? (
           <Link
             href={config.ingestionHref}
@@ -1051,6 +1160,72 @@ function AccountsSection({
         ) : null}
       </div>
     </section>
+  );
+}
+
+function ManagedConnectionStatusRow({ connection }: { connection: ManagedPluginConnection }) {
+  const { integration } = connection;
+  if (!integration.connected) {
+    return <SectionEmpty icon={Users}>No Infisical account is connected.</SectionEmpty>;
+  }
+
+  const region = integration.host === "https://eu.infisical.com" ? "EU" : "US";
+  return (
+    <PluginConnectionStatusRow
+      identity={[integration.accountEmail, region].filter(Boolean).join(" · ")}
+      status="Connected"
+    />
+  );
+}
+
+function PluginConnectionStatusRow({ identity, status }: { identity: string; status: string }) {
+  return (
+    <div className="flex min-w-0 items-center gap-2 rounded-lg border border-border/70 px-3 py-2">
+      <span className="min-w-0 flex-1 truncate text-[12px] leading-4 text-ink-subtle">
+        {identity}
+      </span>
+      <span className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle">
+        {status}
+      </span>
+    </div>
+  );
+}
+
+function PluginConnectionControls({
+  config,
+  permissionConnection,
+  managedConnection,
+  canEdit,
+}: {
+  config: OfficialMcpPluginConfig;
+  permissionConnection: IntegrationAccountView<PluginConnectionProvider> | null;
+  managedConnection: ManagedPluginConnection | undefined;
+  canEdit: boolean;
+}) {
+  if (config.connectionUnavailableReason) return null;
+  if (config.connectionProvider === "infisical") {
+    return managedConnection?.provider === "infisical" ? (
+      <InfisicalPluginConnectionForm
+        integration={managedConnection.integration}
+        canManage={canEdit}
+      />
+    ) : null;
+  }
+  if (config.connectionProvider === "render") {
+    return <RenderApiKeyConnectionForm connected={Boolean(permissionConnection?.connected)} />;
+  }
+  if (config.connectionProvider === "stripe") {
+    return (
+      <StripeRestrictedKeyConnectionForm
+        connected={Boolean(permissionConnection?.connected)}
+        canManage={canEdit}
+      />
+    );
+  }
+  return (
+    <a href={config.connectHref} className={buttonVariants({ variant: "outline", size: "sm" })}>
+      Connect {config.accountLabel ?? config.label} account
+    </a>
   );
 }
 
@@ -1184,7 +1359,9 @@ function ToolsSection({
           </div>
           {plugin && !permissionConnection ? (
             <p className="text-[12px] leading-4 text-ink-subtle">
-              Connect a {config.label} account to change permission modes.
+              {config.connectionProvider === "infisical"
+                ? "Documentation reads stay On and documentation feedback stays Off. Secret access uses the permission-gated sandbox CLI workflow."
+                : `Connect a ${config.label} account to change permission modes.`}
             </p>
           ) : null}
         </>
@@ -1486,7 +1663,15 @@ function pluginAccountsFromState(
 ): {
   accounts: PluginAccount[];
   permissionConnection: IntegrationAccountView<PluginConnectionProvider> | null;
+  managedConnection?: ManagedPluginConnection;
 } {
+  if (config.connectionProvider === "infisical") {
+    return {
+      accounts: [],
+      permissionConnection: null,
+      managedConnection: { provider: "infisical", integration: state.infisical },
+    };
+  }
   if (config.connectionProvider === "granola") {
     const connection = state.granola_mcp;
     const permissionConnection: IntegrationAccountView<"granola"> | null = connection.integrationId
@@ -1521,6 +1706,7 @@ function pluginAccountsFromState(
     config.connectionProvider === "neon" ||
     config.connectionProvider === "posthog" ||
     config.connectionProvider === "render" ||
+    config.connectionProvider === "vercel" ||
     config.connectionProvider === "signoz" ||
     config.connectionProvider === "slack" ||
     config.connectionProvider === "stripe" ||
@@ -1670,6 +1856,10 @@ export function defaultHubSpotToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("hubspot");
 }
 
+export function defaultInfisicalToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("infisical");
+}
+
 export function defaultLatitudeToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("latitude");
 }
@@ -1700,6 +1890,10 @@ export function defaultStripeToolsState(): PluginToolsState {
 
 export function defaultSigNozToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("signoz");
+}
+
+export function defaultVercelToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("vercel");
 }
 
 function defaultOfficialPluginToolsState(provider: OfficialMcpPluginName): PluginToolsState {

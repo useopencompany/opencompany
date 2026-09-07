@@ -35,6 +35,7 @@ const migrationPaths = [
   "0245_goat_task_activities.sql",
   "0246_goat_task_waiting_status.sql",
   "0248_goat_chat_attachment_upload_idempotency.sql",
+  "0255_goat_task_waiting_projection.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -54,6 +55,8 @@ describe("Postgres Task repository", () => {
     crossWorkspaceLinkRejected: boolean;
     crossWorkspaceRunRejected: boolean;
     projectionWipedBeforeRepair: boolean;
+    waitingStatusMisprojectedBeforeRepair: boolean;
+    waitingStatusProjectedAfterRepair: boolean;
   };
 
   beforeEach(async () => {
@@ -152,6 +155,7 @@ describe("Postgres Task repository", () => {
         );
     `);
     let projectionWipedBeforeRepair = false;
+    let waitingStatusMisprojectedBeforeRepair = false;
     for (const migrationPath of migrationPaths) {
       if (migrationPath.endsWith("0205_goat_task_history_projection_repair.sql")) {
         // Reproduce the production gap: valid physical Task history whose projection row is absent.
@@ -173,6 +177,19 @@ describe("Postgres Task repository", () => {
           WHERE conversation_id = 'migration_task_conversation'
         `);
         projectionWipedBeforeRepair = wiped.rows[0]?.remaining === 0;
+      }
+      if (migrationPath.endsWith("0255_goat_task_waiting_projection.sql")) {
+        // Migration 0246 added the physical waiting status without teaching the canonical read
+        // model projection about it, so the fallback silently presented waiting Tasks as failed.
+        await database.exec(`
+          UPDATE goat.tasks SET status = 'waiting', stage = 'completed'
+          WHERE id = 'migration_canonical_task';
+        `);
+        const projected = await database.query<{ status: string }>(`
+          SELECT status FROM goat.task_read_model_v1
+          WHERE id = 'migration_canonical_task'
+        `);
+        waitingStatusMisprojectedBeforeRepair = projected.rows[0]?.status === "failed";
       }
       const migration = await readFile(migrationPath, "utf8");
       const statements = migration.split("--> statement-breakpoint");
@@ -196,6 +213,7 @@ describe("Postgres Task repository", () => {
       normal_chat_task_card_untouched: boolean;
       cross_workspace_link_rejected: boolean;
       cross_workspace_run_rejected: boolean;
+      waiting_status_projected: boolean;
     }>(`
       SELECT
         EXISTS (
@@ -251,7 +269,13 @@ describe("Postgres Task repository", () => {
           WHERE id = 'migration_cross_workspace_run'
             AND conversation_id = 'migration_other_workspace_task_conversation'
             AND workspace_id = 'migration_other_workspace'
-        ) AS cross_workspace_run_rejected
+        ) AS cross_workspace_run_rejected,
+        EXISTS (
+          SELECT 1
+          FROM goat.task_read_model_v1
+          WHERE id = 'migration_canonical_task'
+            AND status = 'waiting'
+        ) AS waiting_status_projected
     `);
     const migrationRow = migrationRows.rows[0];
     migrationEvidence = {
@@ -266,6 +290,8 @@ describe("Postgres Task repository", () => {
       crossWorkspaceLinkRejected: migrationRow?.cross_workspace_link_rejected ?? false,
       crossWorkspaceRunRejected: migrationRow?.cross_workspace_run_rejected ?? false,
       projectionWipedBeforeRepair,
+      waitingStatusMisprojectedBeforeRepair,
+      waitingStatusProjectedAfterRepair: migrationRow?.waiting_status_projected ?? false,
     };
 
     await database.exec(`
@@ -337,6 +363,8 @@ describe("Postgres Task repository", () => {
       crossWorkspaceLinkRejected: true,
       crossWorkspaceRunRejected: true,
       projectionWipedBeforeRepair: true,
+      waitingStatusMisprojectedBeforeRepair: true,
+      waitingStatusProjectedAfterRepair: true,
     });
   });
 
@@ -584,26 +612,34 @@ describe("Postgres Task repository", () => {
     });
   });
 
-  it("stamps external-engine Tasks with the action host-tool contract", async () => {
-    const created = await service.createTask(actor(), {
-      idempotencyKey: "codex-task-host-contract",
-      goal: "Review the repository",
-      engine: "codex",
-      model: "openai/gpt-5.6-sol",
-      source: "manual",
-    });
+  it.each(["openai/gpt-6-astra", "openai/gpt-5.6-sol"])(
+    "preserves %s and stamps the external-engine host-tool contract",
+    async (model) => {
+      const created = await service.createTask(actor(), {
+        idempotencyKey: "codex-task-host-contract",
+        goal: "Review the repository",
+        engine: "codex",
+        model,
+        source: "manual",
+      });
 
-    await expect(
-      database.query<{ host_tool_contract_version: string }>(
-        `SELECT host_tool_contract_version
-         FROM goat.codex_chat_sessions
-         WHERE chat_session_id = $1`,
-        [created.task.conversationId],
-      ),
-    ).resolves.toMatchObject({
-      rows: [{ host_tool_contract_version: ACTION_HOST_TOOL_CONTRACT_VERSION }],
-    });
-  });
+      await expect(
+        database.query<{ host_tool_contract_version: string; model: string }>(
+          `SELECT host_tool_contract_version, model
+           FROM goat.codex_chat_sessions
+           WHERE chat_session_id = $1`,
+          [created.task.conversationId],
+        ),
+      ).resolves.toMatchObject({
+        rows: [
+          {
+            host_tool_contract_version: ACTION_HOST_TOOL_CONTRACT_VERSION,
+            model: model.replace(/^openai\//, ""),
+          },
+        ],
+      });
+    },
+  );
 
   it("snapshots currently enabled Plugin IDs into the Workflow Harness at Task creation", async () => {
     await database.exec(`

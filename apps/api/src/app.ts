@@ -1463,6 +1463,18 @@ export function createApiApp(input: CreateApiAppInput) {
       const result = await input.pluginImports.deleteData(actor, name);
       return c.json({ data: { name, deleted: result.deleted }, meta }, 200);
     },
+    setPluginEventEnabled: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const params = c.req.valid("param");
+      const plugin = await input.pluginImports.setEventEnabled(
+        actor,
+        params.name,
+        params.eventId,
+        c.req.valid("json").enabled,
+      );
+      return c.json({ data: publicPluginInstallation(plugin), meta }, 200);
+    },
     listConversations: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);
@@ -1737,6 +1749,13 @@ export function createApiApp(input: CreateApiAppInput) {
       const artifactId = c.req.valid("param").artifactId;
       await chatResourcesFrom(input).deleteArtifact(actor, artifactId);
       return c.json({ data: { artifactId, state: "deleted" as const }, meta }, 200);
+    },
+    listChatArtifactVersions: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const artifactId = c.req.valid("param").artifactId;
+      const data = await chatResourcesFrom(input).listArtifactVersions(actor, artifactId);
+      return c.json({ data, meta }, 200);
     },
     downloadChatArtifact: async (c) => {
       const actor = actorFrom(c);
@@ -2647,6 +2666,9 @@ export function createApiApp(input: CreateApiAppInput) {
   }
   if (input.gmailMcp) {
     app.post("/mcp/plugins/gmail", (c) => input.gmailMcp!.handle(c.req.raw));
+    app.get("/mcp/plugins/gmail/attachments/download", (c) =>
+      input.gmailMcp!.downloadAttachment(c.req.raw),
+    );
   }
   if (input.googleCalendarMcp) {
     app.post("/mcp/plugins/google-calendar", (c) => input.googleCalendarMcp!.handle(c.req.raw));
@@ -2814,6 +2836,8 @@ export function createApiApp(input: CreateApiAppInput) {
     app.get("/integrations/fathom-mcp/callback", (c) => ingress.callback("fathom", c.req.raw));
     app.get("/integrations/signoz/start", (c) => ingress.start("signoz", c.req.raw));
     app.get("/integrations/signoz/callback", (c) => ingress.callback("signoz", c.req.raw));
+    app.get("/integrations/vercel/start", (c) => ingress.start("vercel", c.req.raw));
+    app.get("/integrations/vercel/callback", (c) => ingress.callback("vercel", c.req.raw));
     app.get("/integrations/linear/start", (c) => ingress.start("linear", c.req.raw));
     app.get("/integrations/linear/callback", (c) => ingress.callback("linear", c.req.raw));
     app.get("/integrations/hubspot-mcp/start", (c) => ingress.start("hubspot", c.req.raw));

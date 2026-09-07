@@ -82,6 +82,7 @@ jobs:
       runner: ${{ steps.plan.outputs.runner }}
       web: ${{ steps.plan.outputs.web }}
       marketing: ${{ steps.plan.outputs.marketing }}
+      docs: ${{ steps.plan.outputs.docs }}
     env:
       RELEASE_SHA: ${{ github.sha }}
     steps:
@@ -129,6 +130,7 @@ jobs:
     env:
       RELEASE_SHA: ${{ github.sha }}
       GITHUB_TOKEN: ${{ github.token }}
+      INFISICAL_MACHINE_IDENTITY_ID: "251c74b2-32d5-490a-abfa-12d83f59ed7b"
       INFISICAL_ENV_SLUG: ${{ vars.INFISICAL_ENV_SLUG || secrets.INFISICAL_ENV_SLUG || 'prod' }}
       INFISICAL_DOMAIN: ${{ vars.INFISICAL_DOMAIN || secrets.INFISICAL_DOMAIN || 'https://eu.infisical.com' }}
       RENDER_DEPLOY_TIMEOUT_MS: "1200000"
@@ -154,7 +156,7 @@ jobs:
         uses: Infisical/secrets-action@6cd3f7c0e4cc0d2395ee4ef414eb6eeb5d3e73db # v1.0.17
         with:
           method: oidc
-          identity-id: ${{ vars.INFISICAL_MACHINE_IDENTITY_ID || secrets.INFISICAL_MACHINE_IDENTITY_ID }}
+          identity-id: ${{ env.INFISICAL_MACHINE_IDENTITY_ID }}
           project-slug: ${{ vars.INFISICAL_PROJECT_SLUG || secrets.INFISICAL_PROJECT_SLUG }}
           env-slug: ${{ env.INFISICAL_ENV_SLUG }}
           domain: ${{ env.INFISICAL_DOMAIN }}
@@ -168,7 +170,7 @@ jobs:
         uses: Infisical/secrets-action@6cd3f7c0e4cc0d2395ee4ef414eb6eeb5d3e73db # v1.0.17
         with:
           method: oidc
-          identity-id: ${{ vars.INFISICAL_MACHINE_IDENTITY_ID || secrets.INFISICAL_MACHINE_IDENTITY_ID }}
+          identity-id: ${{ env.INFISICAL_MACHINE_IDENTITY_ID }}
           project-slug: ${{ vars.INFISICAL_PROJECT_SLUG || secrets.INFISICAL_PROJECT_SLUG }}
           env-slug: ${{ env.INFISICAL_ENV_SLUG }}
           domain: ${{ env.INFISICAL_DOMAIN }}
@@ -183,7 +185,7 @@ jobs:
         uses: Infisical/secrets-action@6cd3f7c0e4cc0d2395ee4ef414eb6eeb5d3e73db # v1.0.17
         with:
           method: oidc
-          identity-id: ${{ vars.INFISICAL_MACHINE_IDENTITY_ID || secrets.INFISICAL_MACHINE_IDENTITY_ID }}
+          identity-id: ${{ env.INFISICAL_MACHINE_IDENTITY_ID }}
           project-slug: ${{ vars.INFISICAL_PROJECT_SLUG || secrets.INFISICAL_PROJECT_SLUG }}
           env-slug: ${{ env.INFISICAL_ENV_SLUG }}
           domain: ${{ env.INFISICAL_DOMAIN }}
@@ -224,6 +226,11 @@ jobs:
         if: ${{ needs.plan.outputs.marketing == 'true' }}
         run: node scripts/release-vercel-prepare.mjs --surface marketing
 
+      - name: Prepare docs deployment
+        id: prepare-docs
+        if: ${{ needs.plan.outputs.docs == 'true' }}
+        run: node scripts/release-vercel-prepare.mjs --surface docs
+
       - name: Confirm release is current before production changes
         id: current-before-migration
         run: node scripts/check-release-current.mjs
@@ -258,6 +265,12 @@ jobs:
         continue-on-error: true
         run: node scripts/release-deployment.mjs create --surface marketing
 
+      - name: Create docs deployment
+        id: deployment-docs
+        if: ${{ steps.current-before-migration.outputs.should_release == 'true' && needs.plan.outputs.docs == 'true' }}
+        continue-on-error: true
+        run: node scripts/release-deployment.mjs create --surface docs
+
       - name: Run production migrations
         id: migrate
         if: ${{ steps.current-before-migration.outputs.should_release == 'true' && needs.plan.outputs.database == 'true' && steps.deployment-database.outputs.deployment_id != '' }}
@@ -281,6 +294,16 @@ jobs:
           --label marketing
           --project-env MARKETING_VERCEL_PROJECT_ID
           --prepared-dir "${{ steps.prepare-marketing.outputs.prepared_dir }}"
+          --smoke-path /
+
+      - name: Deploy and smoke docs
+        id: deploy-docs
+        if: ${{ always() && !cancelled() && steps.current-before-deploy.outputs.should_release == 'true' && needs.plan.outputs.docs == 'true' && steps.deployment-docs.outputs.deployment_id != '' }}
+        run: >-
+          node scripts/release-vercel-deploy.mjs
+          --label docs
+          --project-env DOCS_VERCEL_PROJECT_ID
+          --prepared-dir "${{ steps.prepare-docs.outputs.prepared_dir }}"
           --smoke-path /
 
       - name: Deploy and smoke Render services
@@ -377,6 +400,20 @@ jobs:
           if [[ -n "$DEPLOYMENT_URL" ]]; then args+=(--environment-url "$DEPLOYMENT_URL"); fi
           node scripts/release-deployment.mjs "${args[@]}"
 
+      - name: Finalize docs deployment
+        if: ${{ always() && steps.deployment-docs.outputs.deployment_id != '' }}
+        env:
+          DEPLOYMENT_ID: ${{ steps.deployment-docs.outputs.deployment_id }}
+          DEPLOY_OUTCOME: ${{ steps.deploy-docs.outcome }}
+          DEPLOYMENT_URL: ${{ steps.deploy-docs.outputs.url }}
+        run: |
+          state=inactive
+          if [[ "$DEPLOY_OUTCOME" == "success" ]]; then state=success; fi
+          if [[ "$DEPLOY_OUTCOME" == "failure" ]]; then state=failure; fi
+          args=(finalize --surface docs --deployment-id "$DEPLOYMENT_ID" --state "$state")
+          if [[ -n "$DEPLOYMENT_URL" ]]; then args+=(--environment-url "$DEPLOYMENT_URL"); fi
+          node scripts/release-deployment.mjs "${args[@]}"
+
       - name: Require every selected surface to succeed
         if: ${{ always() && !cancelled() && steps.current-before-deploy.outputs.should_release == 'true' }}
         env:
@@ -395,4 +432,7 @@ jobs:
           MARKETING_SELECTED: ${{ needs.plan.outputs.marketing }}
           MARKETING_DEPLOYMENT_ID: ${{ steps.deployment-marketing.outputs.deployment_id }}
           MARKETING_RESULT: ${{ steps.deploy-marketing.outcome }}
+          DOCS_SELECTED: ${{ needs.plan.outputs.docs }}
+          DOCS_DEPLOYMENT_ID: ${{ steps.deployment-docs.outputs.deployment_id }}
+          DOCS_RESULT: ${{ steps.deploy-docs.outcome }}
         run: node scripts/check-release-results.mjs

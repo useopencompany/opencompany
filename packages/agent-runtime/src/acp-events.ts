@@ -112,7 +112,7 @@ export function createAcpEventNormalizer(input: { engineName?: string } = {}) {
         status: success ? "success" : "failure",
         result: result || null,
         error,
-        usage,
+        usage: addUsage(summary?.usage ?? null, usage),
         sessionId: currentSessionId,
         goal,
       };
@@ -221,6 +221,29 @@ export function createAcpEventNormalizer(input: { engineName?: string } = {}) {
     sessionId: () => currentSessionId,
     summary: () => summary,
   };
+}
+
+function addUsage(
+  prior: AcpTurnSummary["usage"],
+  next: AcpTurnSummary["usage"],
+): AcpTurnSummary["usage"] {
+  if (!prior) return next;
+  if (!next) return prior;
+  const cacheRead = addOptionalNumbers(prior.cache_read_input_tokens, next.cache_read_input_tokens);
+  const cacheCreation = addOptionalNumbers(
+    prior.cache_creation_input_tokens,
+    next.cache_creation_input_tokens,
+  );
+  return {
+    input_tokens: prior.input_tokens + next.input_tokens,
+    output_tokens: prior.output_tokens + next.output_tokens,
+    ...(cacheRead === undefined ? {} : { cache_read_input_tokens: cacheRead }),
+    ...(cacheCreation === undefined ? {} : { cache_creation_input_tokens: cacheCreation }),
+  };
+}
+
+function addOptionalNumbers(left: number | undefined, right: number | undefined) {
+  return left === undefined && right === undefined ? undefined : (left ?? 0) + (right ?? 0);
 }
 
 function normalizeToolCall(

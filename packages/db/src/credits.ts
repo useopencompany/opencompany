@@ -80,7 +80,7 @@ export type CreditDebitInput = {
   // ./billing, never through this function.
   source: Extract<
     CreditLedgerSource,
-    "chat_model_usage" | "ingest_model_usage" | "capability_usage"
+    "chat_model_usage" | "ingest_model_usage" | "sandbox_usage" | "capability_usage"
   >;
   idempotencyKey: string;
   providerCostUsdMicros: number;

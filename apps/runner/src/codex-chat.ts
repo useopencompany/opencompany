@@ -75,6 +75,7 @@ import {
   GITHUB_RECONNECT_NOTICE,
   GITHUB_UNAVAILABLE_NOTICE,
   type GitHubCommandAuth,
+  githubSandboxTokenMinimumValidityMs,
   loadGitHubAuthForUser,
   shouldAppendGitHubAuthNotice,
 } from "./coding-agent-shared";
@@ -401,7 +402,9 @@ export async function runCodexChatTurn(input: {
     let github: GitHubCommandAuth | null = null;
     let githubNotice: string | null = null;
     try {
-      github = await loadGitHubAuthForUser(turn.userWorkosId);
+      github = await loadGitHubAuthForUser(turn.userWorkosId, {
+        minimumValidityMs: githubSandboxTokenMinimumValidityMs(env.codexTimeoutMs),
+      });
     } catch (error) {
       const needsReconnect = error instanceof GitHubUserAccessAuthError;
       logger.warn("GitHub sandbox auth unavailable; continuing the chat turn", {
@@ -752,6 +755,25 @@ export async function runCodexChatTurn(input: {
       // lifecycle is stabilized. Ignore already-persisted task Goal specs as well, so queued
       // tasks fall back to the proven prompt path instead of retaining the broken behavior.
       goal: taskContext ? null : settings.goalMode,
+      ...(taskContext
+        ? {
+            emptyResultRepair: {
+              shouldRepair: () => {
+                const current = acpNormalizer.summary();
+                return current?.status === "success" && !current.result?.trim();
+              },
+              onRepair: () => {
+                logger.warn("Codex completed a task turn without an assistant result; repairing", {
+                  event: "opencompany.goat_acp_empty_result_repair",
+                  engine: "codex",
+                  turn_id: turn.id,
+                  codex_chat_session_id: session.id,
+                  attempt: turn.attempts,
+                });
+              },
+            },
+          }
+        : {}),
       timeoutMs: env.codexTimeoutMs,
       redact,
       checkAbort: checkRuntimeAbort,

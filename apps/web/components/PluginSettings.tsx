@@ -32,8 +32,10 @@ import {
   Archive,
   AudioLines,
   ChevronDown,
+  ChevronRight,
   ExternalLink,
   FileArchive,
+  KeyRound,
   Link2,
   Loader2,
   PackageOpen,
@@ -43,10 +45,12 @@ import {
   ShieldCheck,
   Sparkles,
   Trash2,
+  Triangle,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState, useTransition } from "react";
+import { PluginConnectionFeedback } from "@/components/PluginConnectionSettings";
 import { SettingsContent } from "@/components/SettingsChrome";
 import {
   approveHeadlessPluginMcp,
@@ -113,6 +117,10 @@ type PluginReportView = {
     | { status: "absent" }
     | { present: true; status: "ignored"; reason: string }
     | { present: true; status: "parsed"; issues: string[] };
+  events?:
+    | { status: "absent" }
+    | { present: true; status: "ignored"; reason: string }
+    | { present: true; status: "parsed"; issues: string[] };
   collisions: PluginCollisionView[];
 };
 
@@ -171,6 +179,11 @@ export const OFFICIAL_MCP_PLUGINS = {
     Icon: HubSpotIcon,
     iconClassName: "bg-[#FF7A59] text-white",
   },
+  infisical: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.infisical,
+    Icon: KeyRound,
+    iconClassName: "bg-[#6C47FF] text-white",
+  },
   jamie: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.jamie,
     Icon: AudioLines,
@@ -200,6 +213,11 @@ export const OFFICIAL_MCP_PLUGINS = {
     ...OFFICIAL_MCP_PLUGIN_METADATA.render,
     Icon: ServerCog,
     iconClassName: "bg-[#0B0D0E] text-white",
+  },
+  vercel: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.vercel,
+    Icon: Triangle,
+    iconClassName: "bg-black text-white",
   },
   signoz: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.signoz,
@@ -248,6 +266,8 @@ export const GOOGLE_DRIVE_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS["google-drive"].nam
 export const GOOGLE_DRIVE_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS["google-drive"].source;
 export const HUBSPOT_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.hubspot.name;
 export const HUBSPOT_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.hubspot.source;
+export const INFISICAL_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.infisical.name;
+export const INFISICAL_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.infisical.source;
 export const JAMIE_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.jamie.name;
 export const JAMIE_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.jamie.source;
 export const ATTIO_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.attio.name;
@@ -262,6 +282,8 @@ export const POSTHOG_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.posthog.name;
 export const POSTHOG_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.posthog.source;
 export const RENDER_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.render.name;
 export const RENDER_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.render.source;
+export const VERCEL_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.vercel.name;
+export const VERCEL_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.vercel.source;
 export const BETTERSTACK_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.betterstack.name;
 export const BETTERSTACK_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.betterstack.source;
 export const FATHOM_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.fathom.name;
@@ -358,7 +380,7 @@ export function installOfficialStripePlugin(preview?: PluginImportPreviewDto) {
   return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.stripe, preview);
 }
 
-type PluginCatalogFilter = "all" | "featured" | OfficialPluginCategory;
+type PluginCatalogFilter = "all" | "installed" | "featured" | OfficialPluginCategory;
 
 const CATALOG_PREVIEW_SIZE = 4;
 const PLUGIN_CATEGORY_FILTERS = (
@@ -371,6 +393,7 @@ const PLUGIN_CATALOG_FILTERS: { id: PluginCatalogFilter; label: string }[] = [
 ];
 
 function pluginCatalogFilterLabel(filter: Exclude<PluginCatalogFilter, "all">) {
+  if (filter === "installed") return "Installed";
   return filter === "featured" ? "Featured" : OFFICIAL_PLUGIN_CATEGORIES[filter];
 }
 
@@ -394,6 +417,7 @@ export function PluginsSettings({
   const installedPlugins = new Map(
     plugins.map((plugin) => [plugin.name.toLocaleLowerCase(), plugin] as const),
   );
+  const installedConfigs = configs.filter((config) => installedPlugins.has(config.name));
 
   useEffect(() => {
     if (catalogViewCaptured.current) return;
@@ -419,7 +443,11 @@ export function PluginsSettings({
 
   const matchesActiveFilter = (config: OfficialPluginConfig) =>
     activeFilter === "all" ||
-    (activeFilter === "featured" ? config.featured === true : config.category === activeFilter);
+    (activeFilter === "installed"
+      ? installedPlugins.has(config.name)
+      : activeFilter === "featured"
+        ? config.featured === true
+        : config.category === activeFilter);
   const matchesQuery = (config: OfficialPluginConfig) =>
     normalizedQuery.length === 0 ||
     `${config.label} ${config.description} ${OFFICIAL_PLUGIN_CATEGORIES[config.category]}`
@@ -463,7 +491,38 @@ export function PluginsSettings({
       description="Add trusted tools and expertise to your workspace."
       contentClassName="max-w-[960px]"
     >
+      <PluginConnectionFeedback />
       <div className="flex flex-col gap-7">
+        {installedConfigs.length > 0 ? (
+          <Button
+            variant={activeFilter === "installed" ? "secondary" : "ghost"}
+            size="sm"
+            aria-label={`Show ${installedConfigs.length} installed ${installedConfigs.length === 1 ? "plugin" : "plugins"}`}
+            aria-pressed={activeFilter === "installed"}
+            onClick={() => {
+              setQuery("");
+              setActiveFilter(activeFilter === "installed" ? "all" : "installed");
+            }}
+            className="h-9 w-fit rounded-lg px-1.5 pr-2.5 text-[12.5px] font-normal text-ink-subtle shadow-none"
+          >
+            <span className="flex -space-x-1.5" aria-hidden="true">
+              {installedConfigs.slice(0, 3).map((config) => (
+                <span
+                  key={config.name}
+                  className={cn(
+                    "flex size-7 items-center justify-center rounded-lg border-2 border-canvas",
+                    config.iconClassName,
+                  )}
+                >
+                  <config.Icon className="size-3.5" />
+                </span>
+              ))}
+            </span>
+            <span>{installedConfigs.length} installed</span>
+            <ChevronRight size={14} strokeWidth={1.8} aria-hidden="true" />
+          </Button>
+        ) : null}
+
         <div className="flex flex-col gap-3">
           <div className="relative">
             <Search
@@ -1334,13 +1393,16 @@ function ValidationReport({ report }: { report: PluginReportView }) {
       : [];
   const capabilityIssues =
     report.capabilities?.status === "parsed" ? report.capabilities.issues : [];
+  const eventIssues = report.events?.status === "parsed" ? report.events.issues : [];
   const hasMessages =
     report.ignoredManifestFields.length > 0 ||
     skipped.length > 0 ||
     report.mcp.status === "disabled" ||
     mcpIssues.length > 0 ||
     report.capabilities?.status === "ignored" ||
-    capabilityIssues.length > 0;
+    capabilityIssues.length > 0 ||
+    report.events?.status === "ignored" ||
+    eventIssues.length > 0;
   return (
     <section className="flex flex-col gap-2">
       <SectionLabel>Validation report</SectionLabel>
@@ -1373,6 +1435,12 @@ function ValidationReport({ report }: { report: PluginReportView }) {
           ) : null}
           {capabilityIssues.map((issue) => (
             <ReportRow key={`capability-${issue}`} label={`Capabilities: ${issue}`} />
+          ))}
+          {report.events?.status === "ignored" ? (
+            <ReportRow label={`Events ignored: ${report.events.reason}`} />
+          ) : null}
+          {eventIssues.map((issue) => (
+            <ReportRow key={`event-${issue}`} label={`Events: ${issue}`} />
           ))}
         </ul>
       )}

@@ -2,7 +2,7 @@
 
 import { unsuccessfulSelectedSurfaces } from "./lib/release-orchestration.mjs";
 
-const surfaces = ["database", "api", "runner", "web", "marketing"];
+const surfaces = ["database", "api", "runner", "web", "marketing", "docs"];
 const results = Object.fromEntries(
   surfaces.map((surface) => {
     const prefix = surface.toUpperCase();

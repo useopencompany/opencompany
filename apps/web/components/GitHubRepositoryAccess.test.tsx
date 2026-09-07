@@ -12,7 +12,7 @@ describe("GitHub repository access polling", () => {
     vi.unstubAllGlobals();
   });
 
-  it("uses bounded, backoff GET polling and force-refreshes at most once on re-check", async () => {
+  it("uses bounded, backoff GET polling and re-checks without rotating OAuth tokens", async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn<typeof globalThis.fetch>(async () => Response.json(accessResponse()));
     vi.stubGlobal("fetch", fetchMock);
@@ -47,7 +47,7 @@ describe("GitHub repository access polling", () => {
     fireEvent.click(screen.getByRole("button", { name: "Re-check" }));
     await flushPromises();
 
-    expect(fetchMock.mock.calls.at(-2)?.[1]?.method).toBe("POST");
+    expect(fetchMock.mock.calls.at(-2)?.[1]?.method).toBe("GET");
     expect(fetchMock.mock.calls.at(-1)?.[1]?.method).toBe("GET");
   });
 

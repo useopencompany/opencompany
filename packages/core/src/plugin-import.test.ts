@@ -47,6 +47,7 @@ const plugin: ResolvedPluginPackage = {
   ],
   remoteServers: [],
   capabilities: [],
+  events: [],
   report: {
     ignoredManifestFields: [],
     skills: [],
@@ -173,6 +174,7 @@ function repository(overrides: Partial<PluginRepository> = {}): PluginRepository
     list: vi.fn(async () => []),
     get: vi.fn(async () => null),
     setStatus: vi.fn(async () => ({}) as never),
+    setEventEnabled: vi.fn(async () => ({}) as never),
     approveMcp: vi.fn(async () => ({}) as never),
     revokeMcp: vi.fn(async () => ({}) as never),
     archive: vi.fn(async () => undefined),

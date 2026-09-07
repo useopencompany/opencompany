@@ -44,6 +44,7 @@ import {
   CapabilityApprovalEnvelopeSchema,
   CapabilitySessionBudgetEnvelopeSchema,
   ChatArtifactDeleteEnvelopeSchema,
+  ChatArtifactVersionListEnvelopeSchema,
   ChatShareIdSchema,
   CheckOnboardingWorkspaceSlugBodySchema,
   ClaudeCodeAuthStatusEnvelopeSchema,
@@ -139,6 +140,7 @@ import {
   SetBrainSourceBodySchema,
   SetCapabilitySessionBudgetBodySchema,
   SetIntegrationCapabilityModeBodySchema,
+  SetPluginEventEnabledBodySchema,
   SetRepoConfigEnvBodySchema,
   SetRepoConfigSetupBodySchema,
   SetSlackBotDestinationBodySchema,
@@ -1652,6 +1654,27 @@ export const deletePluginDataRoute = createRoute({
   },
 });
 
+export const setPluginEventEnabledRoute = createRoute({
+  method: "post",
+  path: "/v1/plugins/{name}/events/{eventId}",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ name: ResourceIdSchema, eventId: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: SetPluginEventEnabledBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Plugin event subscription setting updated for the workspace.",
+      content: { "application/json": { schema: PluginInstallationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const listConversationsRoute = createRoute({
   method: "get",
   path: "/v1/conversations",
@@ -1878,6 +1901,21 @@ export const downloadChatArtifactRoute = createRoute({
     query: z.object({ download: z.enum(["0", "1"]).optional() }),
   },
   responses: { 200: binaryResponse, default: errorResponse },
+});
+
+export const listChatArtifactVersionsRoute = createRoute({
+  method: "get",
+  path: "/v1/chat-artifacts/{artifactId}/versions",
+  tags: ["Chat"],
+  security: actorSecurity,
+  request: { params: z.object({ artifactId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Authorized metadata for every immutable version of a Chat artifact.",
+      content: { "application/json": { schema: ChatArtifactVersionListEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
 });
 
 export const downloadChatAttachmentRoute = createRoute({
@@ -3569,6 +3607,7 @@ export type V1RouteHandlers = {
   revokePluginMcp: RouteHandler<typeof revokePluginMcpRoute>;
   refreshPluginMcp: RouteHandler<typeof refreshPluginMcpRoute>;
   deletePluginData: RouteHandler<typeof deletePluginDataRoute>;
+  setPluginEventEnabled: RouteHandler<typeof setPluginEventEnabledRoute>;
   listConversations: RouteHandler<typeof listConversationsRoute>;
   getConversation: RouteHandler<typeof getConversationRoute>;
   updateConversation: RouteHandler<typeof updateConversationRoute>;
@@ -3580,6 +3619,7 @@ export type V1RouteHandlers = {
   createMessage: RouteHandler<typeof createMessageRoute>;
   uploadAttachment: RouteHandler<typeof uploadAttachmentRoute>;
   deleteChatArtifact: RouteHandler<typeof deleteChatArtifactRoute>;
+  listChatArtifactVersions: RouteHandler<typeof listChatArtifactVersionsRoute>;
   downloadChatArtifact: RouteHandler<typeof downloadChatArtifactRoute>;
   downloadChatAttachment: RouteHandler<typeof downloadChatAttachmentRoute>;
   getMessagePresentation: RouteHandler<typeof getMessagePresentationRoute>;
@@ -3766,6 +3806,7 @@ export function createV1Router(
       .openapi(createMessageRoute, handlers.createMessage)
       .openapi(uploadAttachmentRoute, handlers.uploadAttachment)
       .openapi(deleteChatArtifactRoute, handlers.deleteChatArtifact)
+      .openapi(listChatArtifactVersionsRoute, handlers.listChatArtifactVersions)
       .openapi(downloadChatArtifactRoute, handlers.downloadChatArtifact)
       .openapi(downloadChatAttachmentRoute, handlers.downloadChatAttachment)
       .openapi(getMessagePresentationRoute, handlers.getMessagePresentation)
@@ -3841,6 +3882,7 @@ export function createV1Router(
       .openapi(revokePluginMcpRoute, handlers.revokePluginMcp)
       .openapi(refreshPluginMcpRoute, handlers.refreshPluginMcp)
       .openapi(deletePluginDataRoute, handlers.deletePluginData)
+      .openapi(setPluginEventEnabledRoute, handlers.setPluginEventEnabled)
   );
 }
 
@@ -4090,6 +4132,8 @@ const placeholderPlugin = {
       envKeys: ["CONTRACT_TOKEN"],
     },
   ],
+  events: [],
+  eventModes: {},
   installReport: {
     ignoredManifestFields: [],
     skills: [
@@ -4784,6 +4828,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
             },
           ],
           stdioServers: placeholderPlugin.stdioServers,
+          events: placeholderPlugin.events,
           report: {
             ignoredManifestFields: [],
             skills: placeholderPlugin.installReport.skills,
@@ -4812,6 +4857,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
   refreshPluginMcp: (c) => c.json({ data: placeholderPlugin, meta }, 200),
   deletePluginData: (c) =>
     c.json({ data: { name: placeholderPlugin.name, deleted: true }, meta }, 200),
+  setPluginEventEnabled: (c) => c.json({ data: placeholderPlugin, meta }, 200),
   listConversations: (c) => c.json({ data: [], nextCursor: null, meta }, 200),
   getConversation: (c) => c.json({ data: placeholderConversation, meta }, 200),
   updateConversation: (c) =>
@@ -4874,6 +4920,28 @@ const contractDocumentHandlers: V1RouteHandlers = {
     ),
   deleteChatArtifact: (c) =>
     c.json({ data: { artifactId: "artifact_contract", state: "deleted" as const }, meta }, 200),
+  listChatArtifactVersions: (c) =>
+    c.json(
+      {
+        data: {
+          artifactId: "artifact_contract",
+          currentVersion: 1,
+          versions: [
+            {
+              artifactVersionId: "artifact_version_contract",
+              version: 1,
+              title: "Artifact",
+              filename: "artifact.md",
+              mediaType: "text/markdown",
+              sizeBytes: 8,
+              createdAt: placeholderTime,
+            },
+          ],
+        },
+        meta,
+      },
+      200,
+    ),
   downloadChatArtifact: (c) =>
     c.body("contract", 200, { "Content-Type": "application/octet-stream" }),
   downloadChatAttachment: (c) =>

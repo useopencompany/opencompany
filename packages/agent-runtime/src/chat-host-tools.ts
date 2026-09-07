@@ -12,7 +12,8 @@ export type ChatHostToolOperation =
   | "browser_use_profile"
   | "browser_end_profile"
   | "browser"
-  | "wiki";
+  | "wiki"
+  | "write_artifact";
 
 export type ChatHostToolGatewayRequest = {
   operation: ChatHostToolOperation;

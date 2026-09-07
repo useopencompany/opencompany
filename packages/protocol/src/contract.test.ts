@@ -277,6 +277,7 @@ describe("v1 protocol contract", () => {
       "/v1/messages",
       "/v1/attachments",
       "/v1/chat-artifacts/{artifactId}",
+      "/v1/chat-artifacts/{artifactId}/versions",
       "/v1/chat-artifacts/{artifactId}/versions/{versionId}",
       "/v1/chat-attachments/{messageId}/{attachmentId}",
       "/v1/conversations/{conversationId}/messages/{messageId}/presentation",
@@ -339,6 +340,7 @@ describe("v1 protocol contract", () => {
       "/v1/plugins/{name}/mcp/revoke",
       "/v1/plugins/{name}/mcp/refresh",
       "/v1/plugins/{name}/data/delete",
+      "/v1/plugins/{name}/events/{eventId}",
     ]);
     expect(document.paths?.["/v1/skills"]).toHaveProperty("get");
     expect(document.paths?.["/v1/skills"]).toHaveProperty("post");

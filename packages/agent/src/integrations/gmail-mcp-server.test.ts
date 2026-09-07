@@ -25,6 +25,7 @@ const TOOL_NAMES = [
   "search_threads",
   "get_thread",
   "get_message",
+  "download_attachment",
   "list_labels",
   "create_draft",
   "label_thread",
@@ -89,6 +90,7 @@ async function responseJson(response: Response) {
 describe("opencompany Gmail MCP server", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.apiCall.mockReset();
     mocks.isActive.mockResolvedValue(true);
     mocks.loadIntegration.mockResolvedValue(connectedRow);
     mocks.apiCall.mockResolvedValue({});
@@ -256,6 +258,170 @@ describe("opencompany Gmail MCP server", () => {
     );
     expect(mocks.apiCall.mock.calls[4]?.[2].toString()).toContain("/users/me/labels");
     expect(results[2].result.content[0].text).toContain("Untrusted email content");
+  });
+
+  it("creates a short-lived URL and downloads the original attachment bytes", async () => {
+    const message = {
+      id: "message_1",
+      payload: {
+        parts: [
+          {
+            partId: "2",
+            filename: 'Q3 plan über "final".pdf',
+            mimeType: "application/pdf",
+            body: { attachmentId: "attachment_1", size: 12 },
+          },
+        ],
+      },
+    };
+    mocks.apiCall
+      .mockResolvedValueOnce(message)
+      .mockResolvedValueOnce(message)
+      .mockResolvedValueOnce({ data: Buffer.from("pdf contents").toString("base64url") });
+
+    const gmailMcp = service();
+    const toolResponse = await gmailMcp.handle(
+      request(
+        { type: "tools/call", tool: "download_attachment", capability: "query" },
+        "tools/call",
+        {
+          name: "download_attachment",
+          arguments: { messageId: "message_1", partId: "2" },
+        },
+      ),
+    );
+    expect(toolResponse.status).toBe(200);
+    const toolBody = await responseJson(toolResponse);
+    const result = JSON.parse(toolBody.result.content[0].text) as {
+      filename: string;
+      downloadUrl: string;
+      expiresAt: string;
+    };
+    expect(result.filename).toBe('Q3 plan über "final".pdf');
+    expect(
+      result.downloadUrl.startsWith(
+        "https://api.opencompany.chat/mcp/plugins/gmail/attachments/download?",
+      ),
+    ).toBe(true);
+    expect(Date.parse(result.expiresAt)).toBeGreaterThan(Date.now());
+
+    const tamperedUrl = new URL(result.downloadUrl);
+    tamperedUrl.searchParams.set("partId", "3");
+    expect(await gmailMcp.downloadAttachment(new Request(tamperedUrl))).toMatchObject({
+      status: 401,
+    });
+    expect(mocks.apiCall).toHaveBeenCalledOnce();
+
+    const download = await gmailMcp.downloadAttachment(new Request(result.downloadUrl));
+    expect(download.status).toBe(200);
+    expect(download.headers.get("content-type")).toBe("application/pdf");
+    expect(download.headers.get("content-disposition")).toContain("attachment;");
+    expect(download.headers.get("content-disposition")).toContain(
+      "filename*=UTF-8''Q3%20plan%20%C3%BCber%20_final_.pdf",
+    );
+    expect(download.headers.get("cache-control")).toBe("private, no-store");
+    expect(await download.text()).toBe("pdf contents");
+    expect(mocks.apiCall.mock.calls[2]?.[2].toString()).toContain(
+      "/messages/message_1/attachments/attachment_1",
+    );
+  });
+
+  it("lists attachment part ids and rejects oversized downloads before fetching bytes", async () => {
+    const message = {
+      id: "message_1",
+      payload: {
+        parts: [
+          {
+            partId: "2",
+            filename: "archive.zip",
+            mimeType: "application/zip",
+            body: { attachmentId: "attachment_1", size: 21 * 1024 * 1024 },
+          },
+        ],
+      },
+    };
+    mocks.apiCall.mockResolvedValue(message);
+
+    const gmailMcp = service();
+    const messageResponse = await gmailMcp.handle(
+      request({ type: "tools/call", tool: "get_message", capability: "query" }, "tools/call", {
+        name: "get_message",
+        arguments: { messageId: "message_1" },
+      }),
+    );
+    const messageBody = await responseJson(messageResponse);
+    expect(JSON.parse(messageBody.result.content[0].text).attachments).toEqual([
+      {
+        partId: "2",
+        filename: "archive.zip",
+        mimeType: "application/zip",
+        attachmentId: "attachment_1",
+        size: 21 * 1024 * 1024,
+      },
+    ]);
+
+    const downloadResponse = await gmailMcp.handle(
+      request(
+        { type: "tools/call", tool: "download_attachment", capability: "query" },
+        "tools/call",
+        {
+          name: "download_attachment",
+          arguments: { messageId: "message_1", partId: "2" },
+        },
+      ),
+    );
+    expect((await responseJson(downloadResponse)).result).toMatchObject({ isError: true });
+    expect(mocks.apiCall).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects attachment download URLs without a matching narrow ticket", async () => {
+    const { ticket } = createGmailMcpTicket({
+      userWorkosId: "user_1",
+      workspaceId: "workspace_1",
+      integrationId: "integration_1",
+      registrationId: "registration_1",
+      operation: { type: "tools/call", tool: "get_message", capability: "query" },
+      secret: SECRET,
+    });
+    const url = new URL("https://api.opencompany.chat/mcp/plugins/gmail/attachments/download");
+    url.searchParams.set("ticket", ticket);
+    url.searchParams.set("messageId", "message_1");
+    url.searchParams.set("partId", "2");
+
+    const response = await service().downloadAttachment(new Request(url));
+    expect(response.status).toBe(401);
+    expect(mocks.isActive).not.toHaveBeenCalled();
+    expect(mocks.apiCall).not.toHaveBeenCalled();
+  });
+
+  it("accepts the generic read classification from existing Gmail 1.1 installations", async () => {
+    mocks.apiCall.mockResolvedValue({
+      id: "message_1",
+      payload: {
+        parts: [
+          {
+            partId: "2",
+            filename: "plan.pdf",
+            mimeType: "application/pdf",
+            body: { attachmentId: "attachment_1", size: 12 },
+          },
+        ],
+      },
+    });
+    const response = await service().handle(
+      request(
+        { type: "tools/call", tool: "download_attachment", capability: "read" },
+        "tools/call",
+        {
+          name: "download_attachment",
+          arguments: { messageId: "message_1", partId: "2" },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect((await responseJson(response)).result.isError).not.toBe(true);
+    expect(mocks.apiCall).toHaveBeenCalledOnce();
   });
 
   it("maps label, trash, and create-label writes without permanent deletion", async () => {

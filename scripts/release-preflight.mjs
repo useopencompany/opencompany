@@ -126,7 +126,7 @@ const groups = {
       {
         when: "OPENCOMPANY_BROWSER_PROFILES_ENABLED",
         equals: "true",
-        require: ["BROWSERBASE_API_KEY"],
+        require: ["BROWSERBASE_API_KEY", "BROWSERBASE_PROJECT_ID"],
       },
     ],
     optional: [
@@ -216,6 +216,15 @@ const groups = {
       "RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED",
       "RUNNER_SANDBOX_NAMESPACE",
     ],
+    // Agent turns and the crash reconciler both call Browserbase from the
+    // runner when browser profiles are enabled.
+    conditional: [
+      {
+        when: "OPENCOMPANY_BROWSER_PROFILES_ENABLED",
+        equals: "true",
+        require: ["BROWSERBASE_API_KEY", "BROWSERBASE_PROJECT_ID"],
+      },
+    ],
     optional: [
       "EXA_API_KEY",
       "APIFY_API_TOKEN",
@@ -231,6 +240,10 @@ const groups = {
       "RUNNER_OPENCOMPANY_CODEX_CHAT_IDLE_TIMEOUT_MS",
       "RUNNER_OPENCOMPANY_CODEX_CHAT_LEASE_TTL_MS",
       "RUNNER_OPENCOMPANY_BROWSER_ENABLED",
+      "OPENCOMPANY_BROWSER_PROFILES_ENABLED",
+      "OPENCOMPANY_BROWSER_PROFILES_KILL_SWITCH",
+      "BROWSERBASE_API_KEY",
+      "BROWSERBASE_PROJECT_ID",
       "RUNNER_INSTANCE_ID",
       "RUNNER_PREVIEW_BASE_DOMAIN",
       "RUNNER_PREVIEW_PROTOCOL",
@@ -280,6 +293,7 @@ const groups = {
       "VERCEL_ORG_ID",
       "OPENCOMPANY_VERCEL_PROJECT_ID",
       "MARKETING_VERCEL_PROJECT_ID",
+      "DOCS_VERCEL_PROJECT_ID",
       "RENDER_SERVICE_ID",
       "RENDER_API_SERVICE_ID",
       "RENDER_API_KEY",

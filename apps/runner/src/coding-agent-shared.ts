@@ -17,6 +17,13 @@ export const GITHUB_RECONNECT_NOTICE =
   "GitHub needs reconnecting. This turn continued without GitHub access. Reconnect GitHub in Settings.";
 export const GITHUB_UNAVAILABLE_NOTICE =
   "GitHub access is temporarily unavailable. This turn continued without GitHub access.";
+const GITHUB_SANDBOX_TOKEN_VALIDITY_BUFFER_MS = 10 * 60_000;
+
+export function githubSandboxTokenMinimumValidityMs(turnTimeoutMs: number) {
+  // Auth is loaded before sandbox preparation finishes, so keep a buffer beyond the engine's
+  // maximum run time. Refresh-token rotation invalidates the previous GitHub access token.
+  return turnTimeoutMs + GITHUB_SANDBOX_TOKEN_VALIDITY_BUFFER_MS;
+}
 
 export function shouldAppendGitHubAuthNotice(history: CodingChatHistory, notice: string) {
   if (notice !== GITHUB_RECONNECT_NOTICE) return true;
@@ -51,6 +58,10 @@ export type GitHubCommandAuth = {
   gitAuthorEmail?: string;
 };
 
+type GitHubSandboxAuthOptions = {
+  minimumValidityMs?: number;
+};
+
 // A connected personal account is the identity the user explicitly chose for the GitHub plugin.
 // Refresh immediately before the
 // token enters a sandbox; getGitHubUserAccessToken delegates to the shared expiring-OAuth helper,
@@ -58,25 +69,32 @@ export type GitHubCommandAuth = {
 // runner/gateway consumers.
 export async function loadGitHubUserAuthForUser(
   userWorkosId: string,
+  options: GitHubSandboxAuthOptions = {},
 ): Promise<GitHubCommandAuth | null> {
   const db = getDb();
   const integration = await loadGitHubUserIntegration({ userWorkosId, db });
   if (!integration || integration.status !== "connected") return null;
 
-  return loadConnectedGitHubUserAuth(userWorkosId, integration, db);
+  return loadConnectedGitHubUserAuth(userWorkosId, integration, db, options);
 }
 
 async function loadConnectedGitHubUserAuth(
   userWorkosId: string,
   integration: NonNullable<Awaited<ReturnType<typeof loadGitHubUserIntegration>>>,
   db: ReturnType<typeof getDb>,
+  options: GitHubSandboxAuthOptions,
 ): Promise<GitHubCommandAuth> {
   const githubToken = await getGitHubUserAccessToken(
     {
       userWorkosId,
       integrationId: integration.id,
     },
-    { db },
+    {
+      db,
+      ...(options.minimumValidityMs !== undefined
+        ? { minimumValidityMs: options.minimumValidityMs }
+        : {}),
+    },
   );
   let credentialIdentity: Awaited<ReturnType<typeof loadGitHubUserCredentialIdentity>> = null;
   let gitAuthorEmail = gitIdentityEmail(integration.accountEmail);
@@ -114,6 +132,7 @@ async function loadConnectedGitHubUserAuth(
 // connected personal credential is different — refresh failures propagate.
 export async function loadGitHubAuthForUser(
   userWorkosId: string,
+  options: GitHubSandboxAuthOptions = {},
 ): Promise<GitHubCommandAuth | null> {
   const db = getDb();
   const personalIntegration = await loadGitHubUserIntegration({ userWorkosId, db });
@@ -122,7 +141,7 @@ export async function loadGitHubAuthForUser(
       throw new GitHubUserAccessAuthError("Reconnect GitHub in Settings.");
     }
     if (personalIntegration.status !== "connected") return null;
-    return loadConnectedGitHubUserAuth(userWorkosId, personalIntegration, db);
+    return loadConnectedGitHubUserAuth(userWorkosId, personalIntegration, db, options);
   }
   return null;
 }

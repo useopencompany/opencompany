@@ -1,6 +1,6 @@
 import {
   ACTION_TOOL_CONTRACT,
-  AGENT_MODEL_CATALOG,
+  AVAILABLE_AGENT_MODEL_CATALOG,
   CLAUDE_CODE_AGENT_MODEL_IDS,
   CLAUDE_CODE_DEFAULT_MODEL_ID,
   CODEX_AGENT_MODEL_IDS,
@@ -8,6 +8,11 @@ import {
   GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
   isClaudeCodeModelId,
   isCodexModelId,
+  WRITE_ARTIFACT_INPUT_JSON_SCHEMA,
+  WRITE_ARTIFACT_TOOL_DESCRIPTION,
+  WRITE_ARTIFACT_TOOL_NAME,
+  type WriteArtifactToolInput,
+  type WriteArtifactToolResponse,
 } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import {
@@ -263,6 +268,10 @@ type WikiToolRunner = (
   input: WikiToolInput,
   context: { toolCallId: string },
 ) => Promise<WikiToolOutput>;
+export type WriteArtifactRunner = (
+  input: WriteArtifactToolInput,
+  context: { toolCallId: string },
+) => Promise<WriteArtifactToolResponse>;
 type WebFetchRunner = (input: WebFetchToolInput) => Promise<WebFetchToolOutput>;
 type WebSearchRunner = (input: WebSearchToolInput) => Promise<WebSearchToolOutput>;
 export type BrowserToolRunner = (input: {
@@ -382,6 +391,7 @@ export async function runProductChatAgent(input: {
   runBrainCli?: BrainCliRunner;
   saveToBrain?: SaveToBrainRunner;
   runWiki?: WikiToolRunner;
+  writeArtifact?: WriteArtifactRunner;
   webFetch?: WebFetchRunner;
   webSearch?: WebSearchRunner;
   browserTools?: BrowserToolRunner;
@@ -438,6 +448,7 @@ export async function runProductChatAgent(input: {
     ...(input.runWiki
       ? { runWiki: input.runWiki, wikiToolReadOnly: Boolean(input.wikiToolReadOnly) }
       : {}),
+    ...(input.writeArtifact ? { writeArtifact: input.writeArtifact } : {}),
     ...(input.webFetch ? { webFetch: input.webFetch } : {}),
     ...(input.webSearch ? { webSearch: input.webSearch } : {}),
     ...(input.browserTools ? { browserTools: input.browserTools } : {}),
@@ -457,6 +468,7 @@ export async function runProductChatAgent(input: {
     ...(input.taskToolsEnabled !== undefined ? { taskToolsEnabled: input.taskToolsEnabled } : {}),
     wikiToolEnabled: Boolean(input.runWiki),
     wikiToolReadOnly: Boolean(input.wikiToolReadOnly),
+    artifactToolEnabled: Boolean(input.writeArtifact),
     ...(input.activeBrain !== undefined ? { activeBrain: input.activeBrain } : {}),
     ...(input.connectedIntegrations !== undefined
       ? { connectedIntegrations: input.connectedIntegrations }
@@ -568,6 +580,7 @@ export function createProductChatToolContext(input: {
   runBrainCli?: BrainCliRunner;
   saveToBrain?: SaveToBrainRunner;
   runWiki?: WikiToolRunner;
+  writeArtifact?: WriteArtifactRunner;
   wikiToolReadOnly?: boolean;
   webFetch?: WebFetchRunner;
   webSearch?: WebSearchRunner;
@@ -610,6 +623,7 @@ export function createProductChatToolContext(input: {
   let browserCallCount = 0;
   let internalActionInvocationSequence = 0;
   let internalWikiInvocationSequence = 0;
+  let internalArtifactInvocationSequence = 0;
   let internalWorkspaceSkillInvocationSequence = 0;
   const actionTurnGovernance = createInMemoryActionTurnGovernance({
     ...(input.actions?.prelistedSourceIds
@@ -670,7 +684,7 @@ export function createProductChatToolContext(input: {
         ? CODEX_AGENT_MODEL_IDS
         : taskEngineHint === "claude_code"
           ? CLAUDE_CODE_AGENT_MODEL_IDS
-          : AGENT_MODEL_CATALOG.map((model) => model.id);
+          : AVAILABLE_AGENT_MODEL_CATALOG.map((model) => model.id);
     tools[START_TASK_TOOL_NAME] = tool<
       StartTaskToolInput,
       StartTaskToolOutput,
@@ -725,7 +739,7 @@ export function createProductChatToolContext(input: {
           normalizeStartTaskEngine(args.engine) ??
           inferStartTaskEngine(input.latestUserMessage) ??
           inferStartTaskEngine([name, prompt, reason].join("\n"));
-        const requestedModel = normalizeStartTaskModel(args.model);
+        const requestedModel = normalizeStartTaskModel(args.model, engine);
         const model = modelForStartTaskEngine(engine, input.model, requestedModel);
         const toolCallId =
           executionContext &&
@@ -816,6 +830,31 @@ export function createProductChatToolContext(input: {
             ? executionContext.toolCallId
             : `ai-sdk:${++internalWikiInvocationSequence}`;
         return runWiki(args, { toolCallId });
+      },
+    });
+  }
+
+  const writeArtifact = input.writeArtifact;
+  if (writeArtifact) {
+    tools[WRITE_ARTIFACT_TOOL_NAME] = tool<
+      WriteArtifactToolInput,
+      WriteArtifactToolResponse,
+      Record<string, unknown>
+    >({
+      description: WRITE_ARTIFACT_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<WriteArtifactToolInput>(
+        WRITE_ARTIFACT_INPUT_JSON_SCHEMA as unknown as JSONSchema7,
+      ),
+      execute: async (args, executionContext) => {
+        visibleToolActivity = true;
+        const toolCallId =
+          executionContext &&
+          typeof executionContext === "object" &&
+          "toolCallId" in executionContext &&
+          typeof executionContext.toolCallId === "string"
+            ? executionContext.toolCallId
+            : `ai-sdk:write-artifact:${++internalArtifactInvocationSequence}`;
+        return writeArtifact(args, { toolCallId });
       },
     });
   }
@@ -1719,9 +1758,16 @@ function normalizeStartTaskEngine(value: unknown): HarnessEngine | undefined {
     : undefined;
 }
 
-function normalizeStartTaskModel(value: unknown): AgentModelId | undefined {
+function normalizeStartTaskModel(
+  value: unknown,
+  engine: HarnessEngine | undefined,
+): AgentModelId | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== "string" || !AGENT_MODEL_CATALOG.some((model) => model.id === value)) {
+  if (engine === "codex" && typeof value === "string" && isCodexModelId(value)) return value;
+  if (
+    typeof value !== "string" ||
+    !AVAILABLE_AGENT_MODEL_CATALOG.some((model) => model.id === value)
+  ) {
     throw new Error(`Unsupported task model "${String(value)}".`);
   }
   return value as AgentModelId;

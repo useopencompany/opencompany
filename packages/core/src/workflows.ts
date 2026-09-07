@@ -21,16 +21,25 @@ export type WorkflowStep = {
   instructions: string;
 };
 
+export type WorkflowEventFilterValue = {
+  id: string;
+  name: string;
+  key?: string;
+  metadata?: Record<string, string>;
+};
+
+export type WorkflowEventTrigger = {
+  type: "event";
+  provider: string;
+  event: string;
+  integrationId: string;
+  filters: Record<string, WorkflowEventFilterValue>;
+  prompt: string;
+};
+
 export type WorkflowTrigger =
   | { type: "manual" }
-  | {
-      type: "event";
-      provider: "linear";
-      event: "issue_enters_triage";
-      integrationId: string;
-      team: { id: string; name: string; key?: string; triageStateId: string };
-      prompt: string;
-    }
+  | WorkflowEventTrigger
   | {
       type: "schedule";
       cron: string;
@@ -43,14 +52,7 @@ export type WorkflowTrigger =
 
 export type WorkflowTriggerInput =
   | { type: "manual" }
-  | {
-      type: "event";
-      provider: "linear";
-      event: "issue_enters_triage";
-      integrationId: string;
-      team: { id: string; name: string; key?: string; triageStateId: string };
-      prompt?: string | null;
-    }
+  | (Omit<WorkflowEventTrigger, "prompt"> & { prompt?: string | null })
   | {
       type: "schedule";
       cron: string;
@@ -302,6 +304,10 @@ type WorkflowApplicationServiceOptions = {
   planner: AutomationExecutionPlanner;
   taskCreator: AutomationTaskCreator;
   validateDefinition?: WorkflowDefinitionValidator;
+  validateEventSubscription?: (input: {
+    actor: Actor;
+    trigger: WorkflowEventTrigger;
+  }) => Promise<string | null>;
   now?: () => Date;
   newStepId?: () => string;
 };
@@ -445,6 +451,11 @@ export class WorkflowApplicationService {
       }
     }
     if (normalized.trigger.type === "event") {
+      const subscriptionError = await this.options.validateEventSubscription?.({
+        actor,
+        trigger: normalized.trigger,
+      });
+      if (subscriptionError) throw new CoreError("invalid_argument", subscriptionError);
       event = {};
       if (normalized.status === "active") {
         if (normalized.steps.some((step) => !step.instructions.trim())) {
@@ -846,24 +857,23 @@ function workflowSteps(steps: WorkflowStep[]) {
 function workflowTrigger(trigger: WorkflowTriggerInput): NormalizedWorkflowTriggerInput {
   if (trigger.type === "manual") return { type: "manual" };
   if (trigger.type === "event") {
-    if (trigger.provider !== "linear" || trigger.event !== "issue_enters_triage") {
+    const provider = bounded(trigger.provider, 64, "Workflow event provider");
+    const event = bounded(trigger.event, 128, "Workflow event");
+    if (
+      !/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/u.test(provider) ||
+      !/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u.test(event)
+    ) {
       throw new CoreError("invalid_argument", "Workflow event trigger is invalid.");
     }
-    const key = trigger.team.key?.trim();
     return {
       type: "event",
-      provider: "linear",
-      event: "issue_enters_triage",
-      integrationId: bounded(trigger.integrationId, 256, "Linear integration ID"),
-      team: {
-        id: bounded(trigger.team.id, 256, "Linear team ID"),
-        name: bounded(trigger.team.name, 256, "Linear team name"),
-        triageStateId: bounded(trigger.team.triageStateId, 256, "Linear triage state ID"),
-        ...(key ? { key: bounded(key, 32, "Linear team key") } : {}),
-      },
+      provider,
+      event,
+      integrationId: bounded(trigger.integrationId, 256, "Workflow integration ID"),
+      filters: workflowEventFilters(trigger.filters),
       prompt:
         boundedOptional(
-          trigger.prompt ?? "Review and triage this Linear issue.",
+          trigger.prompt ?? "Handle this event.",
           MAX_PROMPT_LENGTH,
           "Workflow event prompt",
         ) || "Review and triage this Linear issue.",
@@ -882,6 +892,44 @@ function workflowTrigger(trigger: WorkflowTriggerInput): NormalizedWorkflowTrigg
       ) || "Run this workflow.",
     enabled: trigger.enabled ?? true,
   };
+}
+
+function workflowEventFilters(filters: Record<string, WorkflowEventFilterValue>) {
+  const entries = Object.entries(filters);
+  if (entries.length > 16) {
+    throw new CoreError("invalid_argument", "Workflow event triggers support at most 16 filters.");
+  }
+  return Object.fromEntries(
+    entries.map(([rawId, value]) => {
+      const id = bounded(rawId, 64, "Workflow event filter ID");
+      if (!/^[a-z][a-z0-9_]*$/u.test(id)) {
+        throw new CoreError("invalid_argument", "Workflow event filter ID is invalid.");
+      }
+      const key = value.key?.trim();
+      const metadataEntries = Object.entries(value.metadata ?? {});
+      if (metadataEntries.length > 16) {
+        throw new CoreError("invalid_argument", "Workflow event filter metadata is too large.");
+      }
+      return [
+        id,
+        {
+          id: bounded(value.id, 256, "Workflow event filter value"),
+          name: bounded(value.name, 256, "Workflow event filter name"),
+          ...(key ? { key: bounded(key, 64, "Workflow event filter key") } : {}),
+          ...(metadataEntries.length
+            ? {
+                metadata: Object.fromEntries(
+                  metadataEntries.map(([metadataKey, metadataValue]) => [
+                    bounded(metadataKey, 64, "Workflow event filter metadata key"),
+                    bounded(metadataValue, 256, "Workflow event filter metadata value"),
+                  ]),
+                ),
+              }
+            : {}),
+        },
+      ];
+    }),
+  );
 }
 
 function workflowStatus(status: WorkflowStatus) {

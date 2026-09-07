@@ -63,6 +63,11 @@ import {
   loadHubSpotMcpWorkerConnection,
 } from "./integrations/hubspot-mcp";
 import {
+  getInfisicalDocsMcpIntegrationState,
+  INFISICAL_DOCS_MCP_ENDPOINT_URL,
+  loadInfisicalDocsMcpWorkerConnection,
+} from "./integrations/infisical-docs-mcp";
+import {
   getJamieMcpIntegrationState,
   JAMIE_MCP_ENDPOINT_URL,
   loadJamieMcpWorkerConnection,
@@ -108,6 +113,11 @@ import {
   STRIPE_MCP_ENDPOINT_URL,
 } from "./integrations/stripe";
 import {
+  getVercelIntegrationState,
+  loadVercelMcpWorkerConnection,
+  VERCEL_MCP_ENDPOINT_URL,
+} from "./integrations/vercel-mcp";
+import {
   getXMcpIntegrationState,
   loadXMcpWorkerConnection,
   X_MCP_ENDPOINT_URL,
@@ -139,6 +149,12 @@ const providerBindings = {
     endpointUrl: GITHUB_USER_MCP_ENDPOINT_URL,
     getState: getGitHubUserMcpIntegrationState,
     loadConnection: loadGitHubUserMcpWorkerConnection,
+  },
+  infisical: {
+    provider: "infisical",
+    endpointUrl: INFISICAL_DOCS_MCP_ENDPOINT_URL,
+    getState: getInfisicalDocsMcpIntegrationState,
+    loadConnection: loadInfisicalDocsMcpWorkerConnection,
   },
   fathom: {
     provider: "fathom",
@@ -229,6 +245,12 @@ const providerBindings = {
     endpointUrl: STRIPE_MCP_ENDPOINT_URL,
     getState: getStripeMcpIntegrationState,
     loadConnection: loadStripeMcpWorkerConnection,
+  },
+  vercel: {
+    provider: "vercel",
+    endpointUrl: VERCEL_MCP_ENDPOINT_URL,
+    getState: getVercelIntegrationState,
+    loadConnection: loadVercelMcpWorkerConnection,
   },
   x: {
     provider: "x_account",

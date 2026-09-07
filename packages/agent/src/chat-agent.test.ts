@@ -2,6 +2,7 @@ import {
   CLAUDE_CODE_DEFAULT_MODEL_ID,
   CODEX_AGENT_MODEL_IDS,
   CODEX_DEFAULT_MODEL_ID,
+  WRITE_ARTIFACT_TOOL_NAME,
 } from "@opencompany/agent-runtime";
 import { WIKI_TOOL_NAME } from "@opencompany/wiki/tool";
 import { describe, expect, it, vi } from "vitest";
@@ -55,6 +56,44 @@ describe("knowledge tools", () => {
       "recent",
       "timeline",
     ]);
+  });
+});
+
+describe("write_artifact tool", () => {
+  it("is available only when the host injects its publisher", () => {
+    expect(WRITE_ARTIFACT_TOOL_NAME in createProductChatToolContext({ model }).tools).toBe(false);
+    expect(
+      WRITE_ARTIFACT_TOOL_NAME in
+        createProductChatToolContext({ model, writeArtifact: vi.fn() }).tools,
+    ).toBe(true);
+  });
+
+  it("passes complete Markdown and the stable tool-call id to the host", async () => {
+    const artifact = {
+      artifactId: "artifact_1",
+      artifactVersionId: "version_1",
+      version: 1,
+      title: "Report",
+      filename: "report.md",
+      mediaType: "text/markdown",
+      sizeBytes: 8,
+      state: "ready" as const,
+    };
+    const writeArtifact = vi.fn(async () => ({ ok: true as const, artifact }));
+    const artifactTool = createProductChatToolContext({ model, writeArtifact }).tools[
+      WRITE_ARTIFACT_TOOL_NAME
+    ] as { execute: (args: unknown, context: { toolCallId: string }) => Promise<unknown> };
+
+    await expect(
+      artifactTool.execute(
+        { filename: "report.md", title: "Report", content: "# Report" },
+        { toolCallId: "call_artifact_1" },
+      ),
+    ).resolves.toEqual({ ok: true, artifact });
+    expect(writeArtifact).toHaveBeenCalledWith(
+      { filename: "report.md", title: "Report", content: "# Report" },
+      { toolCallId: "call_artifact_1" },
+    );
   });
 });
 
@@ -205,37 +244,41 @@ describe("start_task tool", () => {
     );
   });
 
-  it("preserves an already Codex-compatible task model", async () => {
-    const startTask = vi.fn(async (task: { prompt: string; name?: string }) => ({
-      id: "task_1",
-      displayId: "TASK-1",
-      name: task.name ?? "Test repo access",
-      prompt: task.prompt,
-    }));
-    const context = createProductChatToolContext({
-      model: "openai/gpt-5.6-terra" as never,
-      requestedEngine: "codex",
-      startTask,
-    });
-    const startTaskTool = context.tools[START_TASK_TOOL_NAME] as {
-      execute: (args: unknown) => Promise<unknown>;
-    };
+  it.each(["openai/gpt-6-astra", "openai/gpt-5.6-terra"])(
+    "preserves Codex task model %s",
+    async (codexModel) => {
+      const startTask = vi.fn(async (task: { prompt: string; name?: string }) => ({
+        id: "task_1",
+        displayId: "TASK-1",
+        name: task.name ?? "Test repo access",
+        prompt: task.prompt,
+      }));
+      const context = createProductChatToolContext({
+        model: codexModel as never,
+        requestedEngine: "codex",
+        startTask,
+      });
+      const startTaskTool = context.tools[START_TASK_TOOL_NAME] as {
+        execute: (args: unknown) => Promise<unknown>;
+      };
 
-    await startTaskTool.execute({
-      name: "Test repo access",
-      prompt: "Check repo access and report whether development work can start.",
-    });
-
-    expect(startTask).toHaveBeenCalledWith(
-      {
+      await startTaskTool.execute({
         name: "Test repo access",
+        model: codexModel,
         prompt: "Check repo access and report whether development work can start.",
-        model: "openai/gpt-5.6-terra",
-        engine: "codex",
-      },
-      { toolCallId: expect.any(String) },
-    );
-  });
+      });
+
+      expect(startTask).toHaveBeenCalledWith(
+        {
+          name: "Test repo access",
+          prompt: "Check repo access and report whether development work can start.",
+          model: codexModel,
+          engine: "codex",
+        },
+        { toolCallId: expect.any(String) },
+      );
+    },
+  );
 
   it("uses the model explicitly requested for an opencompany task", async () => {
     const startTask = vi.fn(async (task: { prompt: string; name?: string }) => ({
@@ -332,6 +375,24 @@ describe("start_task tool", () => {
         model: "openai/gpt-5.5",
       }),
     ).rejects.toThrow("not available for the Codex engine");
+    expect(startTask).not.toHaveBeenCalled();
+  });
+
+  it("rejects a rollout-gated model for a new task", async () => {
+    const startTask = vi.fn();
+    const context = createProductChatToolContext({ model, startTask });
+    const startTaskTool = context.tools[START_TASK_TOOL_NAME] as {
+      execute: (args: unknown) => Promise<unknown>;
+    };
+
+    await expect(
+      startTaskTool.execute({
+        name: "Analyze launch",
+        prompt: "Analyze the launch.",
+        engine: "opencompany",
+        model: "openai/gpt-6-astra",
+      }),
+    ).rejects.toThrow('Unsupported task model "openai/gpt-6-astra"');
     expect(startTask).not.toHaveBeenCalled();
   });
 

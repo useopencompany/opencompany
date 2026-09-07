@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import {
-  AGENT_MODEL_CATALOG,
   type ChatHostBootstrap,
   type ChatHostSkillFileChunk,
   type ChatHostToolGatewayResponse,
   type ChatHostToolOperation,
+  isAvailableAgentModelId,
   isClaudeCodeModelId,
   isCodexModelId,
 } from "@opencompany/agent-runtime";
@@ -213,6 +213,13 @@ export type ChatHostToolServiceDependencies = {
     /** Stable per-tool-call key, e.g. `agent-wiki:<turnId>:<toolCallId>`. */
     idempotencyKey: string;
   }) => Promise<unknown>;
+  writeArtifact?: (input: {
+    context: ChatHostContext;
+    runId: string;
+    toolCallId: string;
+    toolInput: Record<string, unknown>;
+    signal: AbortSignal;
+  }) => Promise<unknown>;
   onRejected?: (command: ChatHostToolCommand) => void;
   onCompleted?: (command: ChatHostToolCommand, durationMs: number) => void;
   onFailed?: (command: ChatHostToolCommand, durationMs: number, error: unknown) => void;
@@ -332,9 +339,9 @@ async function executeOperation(
     }
     case "start_task": {
       assertTaskTools(context);
-      const model = requiredModel(toolInput.model);
-      const name = optionalString(toolInput.name);
       const engine = optionalEngine(toolInput.engine);
+      const model = requiredModel(toolInput.model, engine);
+      const name = optionalString(toolInput.name);
       assertModelSupportsEngine(model, engine);
       const created = await dependencies.createTask({
         actorId: context.actorId,
@@ -488,6 +495,19 @@ async function executeOperation(
         // two intentional wiki calls in one turn get different keys.
         idempotencyKey: `agent-wiki:${command.runId}:${command.toolCallId ?? command.sessionId}`,
       });
+    case "write_artifact": {
+      if (!command.toolCallId) throw new Error("write_artifact requires a stable tool call id.");
+      if (!dependencies.writeArtifact) {
+        throw new Error("Artifact publishing is not configured for this runtime.");
+      }
+      return dependencies.writeArtifact({
+        context,
+        runId: command.runId,
+        toolCallId: command.toolCallId,
+        toolInput,
+        signal,
+      });
+    }
   }
 }
 
@@ -611,12 +631,13 @@ export function workspaceSkillIdempotencyKey(turnId: string, toolCallId?: string
   return `agent-skill:${invocationHash}`;
 }
 
-function requiredModel(value: unknown): AgentModelId {
+function requiredModel(value: unknown, engine: ReturnType<typeof optionalEngine>): AgentModelId {
   const model = requiredString(value, "model");
-  if (!AGENT_MODEL_CATALOG.some((candidate) => candidate.id === model)) {
+  if (engine === "codex" && isCodexModelId(model)) return model;
+  if (!isAvailableAgentModelId(model)) {
     throw new Error(`Unsupported model "${model}".`);
   }
-  return model as AgentModelId;
+  return model;
 }
 
 function optionalEngine(value: unknown) {

@@ -113,6 +113,27 @@ export type PluginCapabilitiesReport =
   | { present: true; status: "ignored"; reason: string }
   | { present: true; status: "parsed"; issues: string[] };
 
+export type PluginEventFilterDefinition = {
+  id: string;
+  label: string;
+  kind: "integration_resource";
+  resourceType: string;
+  required: boolean;
+};
+
+export type PluginEventDefinition = {
+  id: string;
+  label: string;
+  description: string;
+  delivery: "webhook";
+  filters: PluginEventFilterDefinition[];
+};
+
+export type PluginEventsReport =
+  | { status: "absent" }
+  | { present: true; status: "ignored"; reason: string }
+  | { present: true; status: "parsed"; issues: string[] };
+
 export type PluginSkillReport =
   | { path: string; name: string; status: "valid"; integrity: string }
   | { path: string; name: string; status: "skipped"; reason: string };
@@ -134,6 +155,7 @@ export type PluginInstallReport = {
   mcp: PluginMcpReport;
   // Optional for compatibility with installations created before capability extensions shipped.
   capabilities?: PluginCapabilitiesReport;
+  events?: PluginEventsReport;
   collisions: PluginSkillCollision[];
 };
 
@@ -153,6 +175,7 @@ export type ResolvedPluginPackage = {
   stdioServers: PluginStdioServer[];
   remoteServers: PluginRemoteServer[];
   capabilities: PluginCapabilityDefinition[];
+  events: PluginEventDefinition[];
   report: Omit<PluginInstallReport, "collisions">;
 };
 
@@ -178,6 +201,8 @@ export type PluginInstallation = {
   stdioServers: PluginStdioServer[];
   remoteMcpServers: PluginRemoteMcpServer[];
   installReport: PluginInstallReport;
+  events: PluginEventDefinition[];
+  eventModes: Record<string, boolean>;
   mcpApprovedIntegrity: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -210,6 +235,7 @@ export type PluginImportPreview = {
   }>;
   stdioServers: PluginStdioServerSummary[];
   remoteMcpServers: PluginRemoteMcpPreviewServer[];
+  events: PluginEventDefinition[];
   report: Omit<PluginInstallReport, "collisions">;
 };
 
@@ -237,6 +263,12 @@ export interface PluginRepository {
     actor: Actor;
     name: string;
     status: "enabled" | "disabled";
+  }): Promise<PluginInstallation>;
+  setEventEnabled(input: {
+    actor: Actor;
+    name: string;
+    eventId: string;
+    enabled: boolean;
   }): Promise<PluginInstallation>;
   approveMcp(input: { actor: Actor; name: string; integrity: string }): Promise<PluginInstallation>;
   revokeMcp(input: { actor: Actor; name: string }): Promise<PluginInstallation>;
@@ -326,6 +358,16 @@ export class PluginImportApplicationService {
     return plugin;
   }
 
+  setEventEnabled(actor: Actor, nameValue: string, eventIdValue: string, enabled: boolean) {
+    requirePluginWrite(actor);
+    return this.repository.setEventEnabled({
+      actor,
+      name: pluginName(nameValue),
+      eventId: bounded(eventIdValue, 128, "eventId"),
+      enabled,
+    });
+  }
+
   async refreshMcp(actor: Actor, nameValue: string) {
     requirePluginWrite(actor);
     const name = pluginName(nameValue);
@@ -404,6 +446,7 @@ function publicPreview(plugin: ResolvedPluginPackage): PluginImportPreview {
       connectionProvider: plugin.manifest.name,
       capabilities: plugin.capabilities,
     })),
+    events: plugin.events,
     report: plugin.report,
   };
 }

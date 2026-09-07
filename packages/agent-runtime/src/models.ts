@@ -43,13 +43,22 @@ export const GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS = {
   },
 } satisfies ModelProviderOptions;
 
-export const CODEX_DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.6-sol";
+export const CODEX_DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-6-astra";
 export const CODEX_AGENT_MODEL_IDS = [
   "openai/gpt-6-astra",
   "openai/gpt-5.6-sol",
   "openai/gpt-5.6-terra",
   "openai/gpt-5.6-luna",
 ] as const satisfies readonly AgentModelId[];
+// Codex sandbox availability is independent of the opencompany model provider rollout.
+// Keep the opencompany replacement until that provider's Astra access is verified.
+const ROLLOUT_GATED_MODEL_REPLACEMENTS: Partial<Record<AgentModelId, AgentModelId>> = {
+  "openai/gpt-6-astra": "openai/gpt-5.6-sol",
+};
+
+export function resolveAvailableAgentModelId(modelId: AgentModelId): AgentModelId {
+  return ROLLOUT_GATED_MODEL_REPLACEMENTS[modelId] ?? modelId;
+}
 // Retired selections remain runnable so persisted chats and in-flight tasks do not fail after a
 // catalog update. New Codex work must pass isCodexModelId and is limited to the current family.
 const LEGACY_CODEX_RUNTIME_MODEL_IDS = [
@@ -855,7 +864,18 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   },
 ];
 
+export const AVAILABLE_AGENT_MODEL_CATALOG = AGENT_MODEL_CATALOG.filter(
+  (model) => resolveAvailableAgentModelId(model.id) === model.id,
+);
+
 const MODEL_BY_ID = new Map(AGENT_MODEL_CATALOG.map((model) => [model.id, model]));
+
+export function isAvailableAgentModelId(value: string): value is AgentModelId {
+  return (
+    MODEL_BY_ID.has(value as AgentModelId) &&
+    resolveAvailableAgentModelId(value as AgentModelId) === value
+  );
+}
 
 export function getAgentModelDefinition(id: string) {
   return MODEL_BY_ID.get(id as AgentModelId) ?? null;

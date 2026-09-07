@@ -324,7 +324,6 @@ export async function listGitHubUserRepositoryAccess(input: {
   integrationId?: string;
   owner?: string;
   repo?: string;
-  forceRefresh?: boolean;
   db?: DbLike;
   signal?: AbortSignal;
   fetch?: typeof globalThis.fetch;
@@ -338,7 +337,6 @@ export async function listGitHubUserRepositoryAccess(input: {
   const accessToken = await getGitHubUserAccessToken(connection, {
     ...(input.db ? { db: input.db } : {}),
     ...(input.signal ? { signal: input.signal } : {}),
-    ...(input.forceRefresh ? { forceRefresh: true } : {}),
     ...(input.now ? { now: input.now } : {}),
   });
   const fetcher = input.fetch ?? globalThis.fetch;
@@ -399,7 +397,13 @@ export async function listGitHubUserRepositoryAccess(input: {
 // token.
 export async function getGitHubUserAccessToken(
   connection: GitHubUserAccessConnection,
-  options: { signal?: AbortSignal; forceRefresh?: boolean; db?: DbLike; now?: Date } = {},
+  options: {
+    signal?: AbortSignal;
+    forceRefresh?: boolean;
+    minimumValidityMs?: number;
+    db?: DbLike;
+    now?: Date;
+  } = {},
 ): Promise<string> {
   return getExpiringOAuthAccessToken({
     connection: { ...connection, provider: GITHUB_USER_PROVIDER },

@@ -33,6 +33,9 @@ describe("opencompany onboarding integrations", () => {
     expect(onboardingConnectionError("linear", "session_mismatch")).toContain(
       "Sign in with the same account",
     );
+    expect(onboardingConnectionError("vercel", "provider_approval_required")).toBe(
+      "Vercel requires provider approval before it can connect. It isn't available yet.",
+    );
     expect(onboardingConnectionError("posthog", "posthog_denied")).toBe(
       "PostHog authorization was cancelled.",
     );
@@ -53,6 +56,9 @@ describe("opencompany onboarding integrations", () => {
     );
     expect(onboardingConnectionError("fathom", "fathom_denied")).toBe(
       "Fathom authorization was cancelled.",
+    );
+    expect(onboardingConnectionError("vercel", "vercel_denied")).toBe(
+      "Vercel authorization was cancelled.",
     );
     expect(onboardingConnectionError("github_user", "missing_code")).toContain(
       "did not return a valid authorization",
@@ -82,6 +88,7 @@ describe("opencompany onboarding integrations", () => {
     expect(integrationConnectionSuccess("neon")).toBe("Neon connected.");
     expect(integrationConnectionSuccess("betterstack")).toBe("Better Stack connected.");
     expect(integrationConnectionSuccess("signoz")).toBe("SigNoz connected.");
+    expect(integrationConnectionSuccess("vercel")).toBe("Vercel connected.");
     expect(integrationConnectionSuccess("github_user")).toBe("GitHub connected.");
     expect(integrationConnectionSuccess(null)).toBe("Integration connected.");
   });

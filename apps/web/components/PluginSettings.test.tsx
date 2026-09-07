@@ -30,6 +30,7 @@ import {
   SIGNOZ_PLUGIN_SOURCE,
   SLACK_PLUGIN_SOURCE,
   STRIPE_PLUGIN_SOURCE,
+  VERCEL_PLUGIN_SOURCE,
   X_PLUGIN_SOURCE,
   YC_ADVISE_PLUGIN_SOURCE,
 } from "./PluginSettings";
@@ -199,7 +200,8 @@ describe("Plugin settings", () => {
     });
   });
 
-  it("shows the installed Linear card", () => {
+  it("shows and filters to installed plugins", async () => {
+    const user = userEvent.setup();
     render(
       <PluginsSettings
         plugins={[
@@ -234,6 +236,19 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/linear",
     );
+
+    const installedFilter = screen.getByRole("button", { name: "Show 1 installed plugin" });
+    expect(installedFilter).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(installedFilter);
+
+    expect(installedFilter).toHaveAttribute("aria-pressed", "true");
+    const installedSection = screen.getByRole("region", { name: "Installed" });
+    expect(within(installedSection).getByRole("link", { name: /linear/i })).toBeInTheDocument();
+    expect(
+      within(installedSection).queryByRole("link", { name: /gmail/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Featured" })).not.toBeInTheDocument();
   });
 
   it("offers one-click installation for every uninstalled official package", async () => {
@@ -289,9 +304,9 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/google-calendar",
     );
-    expect(screen.getByRole("link", { name: /render/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /infisical/i })).toHaveAttribute(
       "href",
-      "/settings/plugins/render",
+      "/settings/plugins/infisical",
     );
     expect(screen.getByRole("link", { name: /posthog/i })).toHaveAttribute(
       "href",
@@ -314,6 +329,12 @@ describe("Plugin settings", () => {
     expect(screen.getByRole("link", { name: /jamie/i })).toHaveAttribute(
       "href",
       "/settings/plugins/jamie",
+    );
+    await user.click(screen.getByRole("button", { name: "All" }));
+    await user.click(screen.getByRole("button", { name: "View all engineering plugins" }));
+    expect(screen.getByRole("link", { name: /vercel/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/vercel",
     );
     await user.click(screen.getByRole("button", { name: "All" }));
     await user.click(screen.getByRole("button", { name: "View all business plugins" }));
@@ -350,6 +371,9 @@ describe("Plugin settings", () => {
     expect(RENDER_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/569241125c96a07b9072d42aee404822a6950b26/render",
     );
+    expect(VERCEL_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/14e7f6d3e978103c5427c725229ae93bc3e47f8c/vercel",
+    );
     expect(POSTHOG_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/4ba32cd5a7618d9be3714ec0efd3c8784209046c/posthog",
     );
@@ -378,7 +402,7 @@ describe("Plugin settings", () => {
       "https://github.com/useopencompany/plugins/tree/21060c09d1bbe70df85519cc3ad74cd5d097fbb6/x",
     );
     expect(GMAIL_PLUGIN_SOURCE).toBe(
-      "https://github.com/useopencompany/plugins/tree/587fb06ae2a4e4bed7532e216f8712979ca35e7b/gmail",
+      "https://github.com/useopencompany/plugins/tree/ff6f34b42796129c2a125a32b3a78e8cae353df6/gmail",
     );
     expect(GRANOLA_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/cf036c82fc5186f5187e4da59b040ce92e492df3/granola",
@@ -426,8 +450,20 @@ describe("Plugin settings", () => {
     await user.click(screen.getByRole("button", { name: "View all engineering plugins" }));
 
     const engineering = screen.getByRole("region", { name: "Engineering" });
-    expect(within(engineering).getAllByRole("link")).toHaveLength(6);
+    expect(within(engineering).getAllByRole("link")).toHaveLength(8);
     expect(within(engineering).getByRole("link", { name: /github/i })).toBeInTheDocument();
+    expect(within(engineering).getByRole("link", { name: /signoz/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/signoz",
+    );
+    expect(within(engineering).getByRole("link", { name: /vercel/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/vercel",
+    );
+    expect(within(engineering).getByRole("link", { name: /infisical/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/infisical",
+    );
     expect(screen.getByRole("button", { name: "Engineering" })).toHaveAttribute(
       "aria-pressed",
       "true",

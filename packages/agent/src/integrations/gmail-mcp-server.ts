@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { isPluginGatewayRegistrationActive } from "@opencompany/db/plugin-gateway-repository";
 import { createMcpHandler } from "mcp-handler";
 import * as z from "zod";
@@ -8,7 +8,12 @@ import {
   isCapabilityMode,
 } from "../actions/capabilities";
 import { truncateText } from "../actions/types";
-import { type GmailMcpTicketPayload, verifyGmailMcpTicket } from "./gmail-mcp-ticket";
+import { gmailMcpRuntimeEndpointUrl } from "./gmail-mcp";
+import {
+  createGmailMcpTicket,
+  type GmailMcpTicketPayload,
+  verifyGmailMcpTicket,
+} from "./gmail-mcp-ticket";
 import { gmailMcpScopesSatisfied } from "./gmail-scopes";
 import { GoogleAccessAuthError, googleApiCall } from "./google-access-token";
 import { loadGmailIntegration } from "./google-data";
@@ -23,12 +28,16 @@ const MAX_ENCODED_BODY_CHARS = 200_000;
 const MAX_MESSAGE_PARTS = 100;
 const MAX_THREAD_MESSAGES = 100;
 const MAX_LABEL_RESULTS = 500;
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+const MAX_ENCODED_ATTACHMENT_CHARS = Math.ceil((MAX_ATTACHMENT_BYTES * 4) / 3) + 4;
+const ATTACHMENT_DOWNLOAD_TTL_MS = 5 * 60_000;
 
 const TOOL_CAPABILITIES = {
   list_drafts: "query",
   get_draft: "query",
   get_thread: "query",
   get_message: "query",
+  download_attachment: "query",
   search_threads: "query",
   list_labels: "query",
   create_draft: "draft",
@@ -52,6 +61,7 @@ type ExtractedMessageContent = {
   textChars: number;
   htmlChars: number;
   attachments: Array<{
+    partId?: string;
     filename?: string;
     mimeType?: string;
     attachmentId?: string;
@@ -62,6 +72,7 @@ type ExtractedMessageContent = {
 
 export type GmailMcpService = {
   handle(request: Request): Promise<Response>;
+  downloadAttachment(request: Request): Promise<Response>;
 };
 
 const resourceIdSchema = z.string().trim().min(1).max(MAX_ID_CHARS);
@@ -82,6 +93,12 @@ const listDraftsSchema = {
 const getDraftSchema = { draftId: resourceIdSchema };
 const getThreadSchema = { threadId: resourceIdSchema };
 const getMessageSchema = { messageId: resourceIdSchema };
+const downloadAttachmentSchema = {
+  messageId: resourceIdSchema.describe("Gmail message id containing the attachment."),
+  partId: resourceIdSchema.describe(
+    "MIME part id from the attachments list returned by get_message or get_thread.",
+  ),
+};
 
 const searchThreadsSchema = {
   query: z
@@ -218,6 +235,26 @@ export function createGmailMcpService(input: {
               annotations: READ_ANNOTATIONS,
             },
             async (args) => runTool(() => getMessage(gmailApiCall, payload, args, request.signal)),
+          );
+          server.registerTool(
+            "download_attachment",
+            {
+              title: "Download attachment",
+              description:
+                "Create a short-lived download URL for one Gmail attachment. Pass the message id and MIME part id from get_message or get_thread, then fetch the URL promptly to save the original file bytes.",
+              inputSchema: downloadAttachmentSchema,
+              annotations: READ_ANNOTATIONS,
+            },
+            async (args) =>
+              runTool(() =>
+                createAttachmentDownload(
+                  gmailApiCall,
+                  payload,
+                  args,
+                  input.internalSecret,
+                  request.signal,
+                ),
+              ),
           );
           server.registerTool(
             "list_labels",
@@ -362,6 +399,71 @@ export function createGmailMcpService(input: {
         throw error;
       }
     },
+    async downloadAttachment(request) {
+      if (request.method !== "GET") return methodNotAllowed("GET");
+      const url = new URL(request.url);
+      const ticket = url.searchParams.get("ticket") ?? "";
+      const messageId = url.searchParams.get("messageId") ?? "";
+      const partId = url.searchParams.get("partId") ?? "";
+      const signature = url.searchParams.get("signature") ?? "";
+      const payload = verifyGmailMcpTicket({ ticket, secret: input.internalSecret });
+      if (
+        !payload ||
+        payload.operation.type !== "tools/call" ||
+        payload.operation.tool !== "download_attachment" ||
+        payload.operation.capability !== "query" ||
+        !validAttachmentDownloadSignature({
+          ticket,
+          messageId,
+          partId,
+          signature,
+          secret: input.internalSecret,
+        })
+      ) {
+        return unauthorized("The Gmail attachment download ticket is invalid or expired.");
+      }
+      const authorization = await authorizeTicket(input.db, payload);
+      if (!authorization.ok) return authorization.response;
+      const parsed = z.object(downloadAttachmentSchema).safeParse({
+        messageId,
+        partId,
+      });
+      if (!parsed.success)
+        return badRequest("A valid Gmail message id and attachment part id are required.");
+
+      try {
+        const attachment = await loadAttachment(
+          gmailApiCall,
+          payload,
+          parsed.data,
+          request.signal,
+          true,
+        );
+        if (!attachment.bytes) throw new Error("Gmail returned no attachment bytes.");
+        return new Response(attachment.bytes, {
+          headers: {
+            "Content-Type": safeMediaType(attachment.mimeType),
+            "Content-Length": String(attachment.bytes.byteLength),
+            "Content-Disposition": contentDisposition(attachment.filename),
+            "Cache-Control": "private, no-store",
+            "Referrer-Policy": "no-referrer",
+            "X-Content-Type-Options": "nosniff",
+            "X-Robots-Tag": "noindex, nofollow, noarchive",
+          },
+        });
+      } catch (error) {
+        if (error instanceof GoogleAccessAuthError) {
+          return unauthorized("The connected Gmail account must be reauthorized.");
+        }
+        if (error instanceof GmailAttachmentTooLargeError) {
+          return Response.json({ error: error.message }, { status: 413 });
+        }
+        if (error instanceof GmailAttachmentNotFoundError) {
+          return Response.json({ error: error.message }, { status: 404 });
+        }
+        throw error;
+      }
+    },
   };
 }
 
@@ -387,7 +489,14 @@ async function authorizeTicket(db: DbLike, payload: GmailMcpTicketPayload) {
   }
   if (payload.operation.type === "tools/call") {
     const capability = TOOL_CAPABILITIES[payload.operation.tool as GmailMcpToolName];
-    if (!capability || capability !== payload.operation.capability) {
+    // Existing 1.1 installations discover this newly added read-only tool before their package is
+    // upgraded and classify it in the gateway's generic `read` bucket. Accept that conservative
+    // classification during rollout while still applying Gmail's canonical `query` permission.
+    const isLegacyAttachmentRead =
+      payload.operation.tool === "download_attachment" &&
+      capability === "query" &&
+      payload.operation.capability === "read";
+    if (!capability || (capability !== payload.operation.capability && !isLegacyAttachmentRead)) {
       return forbidden("The Gmail MCP ticket does not authorize this tool.");
     }
     const toolMode = row.toolModes?.[payload.operation.tool];
@@ -514,6 +623,165 @@ async function getMessage(
   const url = gmailUrl(`/messages/${encodeURIComponent(args.messageId)}`);
   url.searchParams.set("format", "full");
   return compactMessage(asRecord(await callGmail(apiCall, payload, "GET", url, signal)));
+}
+
+async function createAttachmentDownload(
+  apiCall: GmailApiCall,
+  payload: GmailMcpTicketPayload,
+  args: z.infer<z.ZodObject<typeof downloadAttachmentSchema>>,
+  internalSecret: string,
+  signal: AbortSignal,
+) {
+  const attachment = await loadAttachment(apiCall, payload, args, signal, false);
+  const { ticket, expiresAt } = createGmailMcpTicket({
+    userWorkosId: payload.userWorkosId,
+    workspaceId: payload.workspaceId,
+    integrationId: payload.integrationId,
+    registrationId: payload.registrationId,
+    operation: { type: "tools/call", tool: "download_attachment", capability: "query" },
+    secret: internalSecret,
+    ttlMs: ATTACHMENT_DOWNLOAD_TTL_MS,
+  });
+  const downloadUrl = new URL(
+    "/mcp/plugins/gmail/attachments/download",
+    gmailMcpRuntimeEndpointUrl(),
+  );
+  downloadUrl.searchParams.set("ticket", ticket);
+  downloadUrl.searchParams.set("messageId", args.messageId);
+  downloadUrl.searchParams.set("partId", args.partId);
+  downloadUrl.searchParams.set(
+    "signature",
+    attachmentDownloadSignature({
+      ticket,
+      messageId: args.messageId,
+      partId: args.partId,
+      secret: internalSecret,
+    }),
+  );
+  return {
+    messageId: args.messageId,
+    partId: args.partId,
+    filename: attachment.filename,
+    mimeType: attachment.mimeType,
+    size: attachment.size,
+    downloadUrl: downloadUrl.toString(),
+    expiresAt: new Date(expiresAt).toISOString(),
+  };
+}
+
+async function loadAttachment(
+  apiCall: GmailApiCall,
+  payload: GmailMcpTicketPayload,
+  args: z.infer<z.ZodObject<typeof downloadAttachmentSchema>>,
+  signal: AbortSignal,
+  includeBytes: boolean,
+) {
+  const messageUrl = gmailUrl(`/messages/${encodeURIComponent(args.messageId)}`);
+  messageUrl.searchParams.set("format", "full");
+  const message = asRecord(await callGmail(apiCall, payload, "GET", messageUrl, signal));
+  const part = findMessagePart(asRecord(message.payload), args.partId);
+  const filename = truncateText(string(part?.filename), 500);
+  if (!part || !filename) {
+    throw new GmailAttachmentNotFoundError(
+      `No attachment found at part ${JSON.stringify(args.partId)} in message ${JSON.stringify(args.messageId)}.`,
+    );
+  }
+  const body = asRecord(part.body);
+  const size = boundedNumber(body.size);
+  if (size !== undefined && size > MAX_ATTACHMENT_BYTES) {
+    throw new GmailAttachmentTooLargeError(
+      "Gmail attachments larger than 20 MB cannot be downloaded.",
+    );
+  }
+  const mimeType = boundedString(part.mimeType, 200);
+  if (!includeBytes) return { filename, mimeType, size };
+
+  let encoded = boundedAttachmentData(body.data);
+  if (encoded === undefined) {
+    const attachmentId = boundedString(body.attachmentId, MAX_ID_CHARS);
+    if (!attachmentId) {
+      throw new GmailAttachmentNotFoundError(
+        "That message part has no downloadable attachment content.",
+      );
+    }
+    const attachmentUrl = gmailUrl(
+      `/messages/${encodeURIComponent(args.messageId)}/attachments/${encodeURIComponent(attachmentId)}`,
+    );
+    const attachment = asRecord(await callGmail(apiCall, payload, "GET", attachmentUrl, signal));
+    encoded = boundedAttachmentData(attachment.data);
+  }
+  if (encoded === undefined) throw new Error("Gmail returned invalid attachment data.");
+  const bytes = Buffer.from(encoded, "base64url");
+  if (bytes.byteLength > MAX_ATTACHMENT_BYTES) {
+    throw new GmailAttachmentTooLargeError(
+      "Gmail attachments larger than 20 MB cannot be downloaded.",
+    );
+  }
+  return { filename, mimeType, size: size ?? bytes.byteLength, bytes };
+}
+
+function findMessagePart(payload: Record<string, unknown>, partId: string) {
+  const queue: Array<{ part: Record<string, unknown>; depth: number }> = [
+    { part: payload, depth: 0 },
+  ];
+  let visited = 0;
+  while (queue.length && visited < MAX_MESSAGE_PARTS) {
+    const current = queue.shift()!;
+    visited += 1;
+    if (boundedString(current.part.partId, MAX_ID_CHARS) === partId) return current.part;
+    if (current.depth >= 20) continue;
+    for (const part of asArray(current.part.parts)) {
+      if (queue.length + visited >= MAX_MESSAGE_PARTS) break;
+      queue.push({ part: asRecord(part), depth: current.depth + 1 });
+    }
+  }
+  return undefined;
+}
+
+function boundedAttachmentData(value: unknown) {
+  if (
+    typeof value !== "string" ||
+    value.length > MAX_ENCODED_ATTACHMENT_CHARS ||
+    (value.length > 0 && !/^[A-Za-z0-9_-]+={0,2}$/u.test(value))
+  ) {
+    return undefined;
+  }
+  const normalized = value.replace(/=+$/u, "");
+  try {
+    return Buffer.from(value, "base64url").toString("base64url") === normalized ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+class GmailAttachmentNotFoundError extends Error {}
+class GmailAttachmentTooLargeError extends Error {}
+
+// The MCP ticket authorizes the tool, while this second signature binds the bearer URL to the
+// exact message and MIME part so changing either query parameter invalidates the download.
+function attachmentDownloadSignature(input: {
+  ticket: string;
+  messageId: string;
+  partId: string;
+  secret: string;
+}) {
+  return createHmac("sha256", input.secret)
+    .update("opencompany-gmail-attachment-download")
+    .update("\0")
+    .update(input.ticket)
+    .update("\0")
+    .update(input.messageId)
+    .update("\0")
+    .update(input.partId)
+    .digest("base64url");
+}
+
+function validAttachmentDownloadSignature(
+  input: Parameters<typeof attachmentDownloadSignature>[0] & { signature: string },
+) {
+  const expected = Buffer.from(attachmentDownloadSignature(input));
+  const actual = Buffer.from(input.signature);
+  return expected.length === actual.length && timingSafeEqual(expected, actual);
 }
 
 async function listLabels(
@@ -850,12 +1118,14 @@ function extractMessageContent(payload: Record<string, unknown>) {
       continue;
     }
     const mimeType = boundedString(current.part.mimeType, 200);
+    const partId = boundedString(current.part.partId, MAX_ID_CHARS);
     const filename = truncateText(string(current.part.filename), 500);
     const body = asRecord(current.part.body);
     const attachmentId = boundedString(body.attachmentId, MAX_ID_CHARS);
     if (filename || attachmentId) {
       const size = boundedNumber(body.size);
       content.attachments.push({
+        ...(partId ? { partId } : {}),
         ...(filename ? { filename } : {}),
         ...(mimeType ? { mimeType } : {}),
         ...(attachmentId ? { attachmentId } : {}),
@@ -981,8 +1251,11 @@ function badRequest(message: string) {
   return Response.json({ error: message }, { status: 400 });
 }
 
-function methodNotAllowed() {
-  return Response.json({ error: "Only POST is supported." }, { status: 405 });
+function methodNotAllowed(method = "POST") {
+  return Response.json(
+    { error: `Only ${method} is supported.` },
+    { status: 405, headers: { Allow: method } },
+  );
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -1015,4 +1288,18 @@ function stringArray(value: unknown, maxItems: number, maxChars: number) {
       const result = boundedString(item, maxChars);
       return result ? [result] : [];
     });
+}
+
+function safeMediaType(value: string | undefined) {
+  return value && /^[\w.+-]+\/[\w.+-]+$/u.test(value) ? value : "application/octet-stream";
+}
+
+function contentDisposition(value: string) {
+  const filename = value.replace(/[\u0000-\u001f\u007f"\\]/gu, "_").trim() || "attachment";
+  const fallback = filename.replace(/[^\x20-\x7e]/gu, "_") || "attachment";
+  const encoded = encodeURIComponent(filename).replace(
+    /[!'()*]/gu,
+    (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
 }

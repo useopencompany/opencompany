@@ -187,6 +187,9 @@ export function executePersistedChatHostTool(input: {
       }
       return input.runtime.executeWikiCommand({ workspaceId, actorId, toolInput, idempotencyKey });
     },
+    writeArtifact: () => {
+      throw new Error("Artifact publishing is not configured for this runtime.");
+    },
     onRejected: (command) => {
       logger.warn("Headless Chat host tool rejected", {
         event: "opencompany.headless_chat_host_tool_rejected",

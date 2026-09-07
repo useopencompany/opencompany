@@ -3,6 +3,16 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const workflowUrl = new URL("../../.github/workflows/release-production.yml", import.meta.url);
+const vercelConfigUrls = ["web", "marketing", "docs"].map(
+  (surface) => new URL(`../../apps/${surface}/vercel.json`, import.meta.url),
+);
+
+test("disables Vercel Git deployments for every CI-owned project", async () => {
+  for (const configUrl of vercelConfigUrls) {
+    const config = JSON.parse(await readFile(configUrl, "utf8"));
+    assert.equal(config.git?.deploymentEnabled, false, `${configUrl} must be CI-owned`);
+  }
+});
 
 test("verifies the exact main commit before release planning and production", async () => {
   const workflow = await readFile(workflowUrl, "utf8");
@@ -21,11 +31,13 @@ test("builds Vercel outputs before migrations and rechecks main before deploys",
   assertStepOrder(workflow, [
     "Prepare web deployment",
     "Prepare marketing deployment",
+    "Prepare docs deployment",
     "Confirm release is current before production changes",
     "Run production migrations",
     "Canonicalize wiki path links",
     "Confirm release is current before provider deploys",
     "Deploy and smoke marketing",
+    "Deploy and smoke docs",
     "Deploy and smoke Render services",
     "Deploy web",
     "Smoke web release",
@@ -44,7 +56,7 @@ test("builds Vercel outputs before migrations and rechecks main before deploys",
 test("tracks and finalizes every production surface independently", async () => {
   const workflow = await readFile(workflowUrl, "utf8");
 
-  for (const surface of ["database", "api", "runner", "web", "marketing"]) {
+  for (const surface of ["database", "api", "runner", "web", "marketing", "docs"]) {
     assert.match(workflow, new RegExp(`create --surface ${surface}`, "u"));
     assert.match(workflow, new RegExp(`finalize --surface ${surface}`, "u"));
   }
@@ -75,6 +87,20 @@ test("production credentials are scoped to the release job", async () => {
   assert.match(release, /environment: production/u);
   assert.match(release, /id-token: write/u);
   assert.match(release, /deployments: write/u);
+});
+
+test("pins production secret access to the audited Infisical identity", async () => {
+  const workflow = await readFile(workflowUrl, "utf8");
+
+  assert.match(workflow, /INFISICAL_MACHINE_IDENTITY_ID: "251c74b2-32d5-490a-abfa-12d83f59ed7b"/u);
+  assert.equal(
+    workflow.match(/identity-id: \$\{\{ env\.INFISICAL_MACHINE_IDENTITY_ID \}\}/gu)?.length,
+    3,
+  );
+  assert.doesNotMatch(
+    workflow,
+    /vars\.INFISICAL_MACHINE_IDENTITY_ID|secrets\.INFISICAL_MACHINE_IDENTITY_ID/u,
+  );
 });
 
 function assertStepOrder(workflow, markers) {

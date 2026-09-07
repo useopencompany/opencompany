@@ -1,0 +1,28 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "infisical",
+  "version": "1.0.0",
+  "description": "Use current Infisical documentation and safely inject or update secrets through the authenticated sandbox CLI.",
+  "author": {
+    "name": "opencompany",
+    "url": "https://opencompany.com"
+  },
+  "homepage": "https://infisical.com/docs/ai/model-context-protocol",
+  "repository": "https://github.com/useopencompany/plugins/tree/main/infisical",
+  "license": "MIT",
+  "keywords": ["infisical", "secrets", "environment-variables", "documentation"],
+  "extensions": {
+    "so.opencompany.capabilities": {
+      "read": {
+        "label": "Read Infisical docs",
+        "defaultMode": "on",
+        "tools": ["search_infisical", "query_docs_filesystem_infisical"]
+      },
+      "write": {
+        "label": "Send docs feedback",
+        "defaultMode": "off",
+        "tools": ["submit_feedback"]
+      }
+    }
+  }
+}

@@ -1,12 +1,12 @@
 import { createHmac } from "node:crypto";
 import { createLinearIngestState } from "@opencompany/agent/integrations/linear-ingest";
 import {
-  enqueueLinearWorkflowEventRuns,
+  enqueueWorkflowEventRuns,
   insertLinearIssueEvents,
   listEnabledLinearBrainSourceRoutes,
   listEnabledLinearWikiSourceRoutes,
   listLinearIntegrationsForOrganization,
-  listLinearWorkflowTriggerRoutes,
+  listWorkflowEventTriggerRoutes,
 } from "@opencompany/db/linear";
 import { listWorkspacesForUser } from "@opencompany/db/workspaces";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,12 +17,12 @@ vi.mock("@opencompany/db/linear", async (importOriginal) => {
   const original = await importOriginal<typeof import("@opencompany/db/linear")>();
   return {
     ...original,
-    enqueueLinearWorkflowEventRuns: vi.fn(),
+    enqueueWorkflowEventRuns: vi.fn(),
     insertLinearIssueEvents: vi.fn(),
     listEnabledLinearBrainSourceRoutes: vi.fn(),
     listEnabledLinearWikiSourceRoutes: vi.fn(),
     listLinearIntegrationsForOrganization: vi.fn(),
-    listLinearWorkflowTriggerRoutes: vi.fn(),
+    listWorkflowEventTriggerRoutes: vi.fn(),
   };
 });
 vi.mock("@opencompany/db/workspaces", async (importOriginal) => ({
@@ -104,8 +104,8 @@ describe("Linear ingress", () => {
     ] as never);
     vi.mocked(listEnabledLinearWikiSourceRoutes).mockResolvedValue([]);
     vi.mocked(insertLinearIssueEvents).mockResolvedValue(1);
-    vi.mocked(listLinearWorkflowTriggerRoutes).mockResolvedValue([]);
-    vi.mocked(enqueueLinearWorkflowEventRuns).mockResolvedValue(0);
+    vi.mocked(listWorkflowEventTriggerRoutes).mockResolvedValue([]);
+    vi.mocked(enqueueWorkflowEventRuns).mockResolvedValue(0);
   });
 
   afterEach(() => {
@@ -210,7 +210,7 @@ describe("Linear ingress", () => {
 
     it("durably enqueues a matching issue that enters triage", async () => {
       vi.mocked(listEnabledLinearBrainSourceRoutes).mockResolvedValue([]);
-      vi.mocked(listLinearWorkflowTriggerRoutes).mockResolvedValue([
+      vi.mocked(listWorkflowEventTriggerRoutes).mockResolvedValue([
         {
           workflowId: "workflow_1",
           workspaceId: "workspace_1",
@@ -219,10 +219,13 @@ describe("Linear ingress", () => {
           workflowName: "Triage issues",
           prompt: "Assess this issue.",
           harnessSpec: { engine: "opencompany", model: "default" },
-          triageStateId: "state_triage",
+          provider: "linear",
+          event: "issue_enters_triage",
+          filters: { team: { id: "team_1" } },
+          legacyTriageStateId: "state_triage",
         },
       ] as never);
-      vi.mocked(enqueueLinearWorkflowEventRuns).mockResolvedValue(1);
+      vi.mocked(enqueueWorkflowEventRuns).mockResolvedValue(1);
 
       const response = await ingress().webhook(
         signedRequest(
@@ -238,10 +241,48 @@ describe("Linear ingress", () => {
       );
 
       expect(await response.json()).toMatchObject({ ok: true, workflowRuns: 1 });
-      expect(enqueueLinearWorkflowEventRuns).toHaveBeenCalledWith(
+      expect(enqueueWorkflowEventRuns).toHaveBeenCalledWith(
         expect.objectContaining({
           deliveryId: "delivery_1",
           routes: [expect.objectContaining({ workflowId: "workflow_1" })],
+        }),
+        expect.objectContaining({ sentinel: "db" }),
+      );
+    });
+
+    it("durably enqueues a matching issue.created subscription", async () => {
+      vi.mocked(listEnabledLinearBrainSourceRoutes).mockResolvedValue([]);
+      vi.mocked(listWorkflowEventTriggerRoutes).mockResolvedValue([
+        {
+          workflowId: "workflow_created",
+          workspaceId: "workspace_1",
+          userWorkosId: "user_1",
+          workflowSlug: "new-issues",
+          workflowName: "New issues",
+          prompt: "Assess this issue.",
+          harnessSpec: { engine: "opencompany", model: "default" },
+          provider: "linear",
+          event: "issue.created",
+          filters: { team: { id: "team_1" } },
+        },
+      ] as never);
+      vi.mocked(enqueueWorkflowEventRuns).mockResolvedValue(1);
+
+      const response = await ingress().webhook(
+        signedRequest(
+          issueEnvelope({
+            data: { id: "issue_1", teamId: "team_1", title: "Billing bug" },
+          }),
+        ),
+      );
+
+      expect(await response.json()).toMatchObject({ ok: true, workflowRuns: 1 });
+      expect(enqueueWorkflowEventRuns).toHaveBeenCalledWith(
+        expect.objectContaining({
+          deliveryId: "delivery_1",
+          routes: [
+            expect.objectContaining({ workflowId: "workflow_created", event: "issue.created" }),
+          ],
         }),
         expect.objectContaining({ sentinel: "db" }),
       );

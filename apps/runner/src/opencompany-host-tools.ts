@@ -28,11 +28,14 @@ import type {
   ChatHostBootstrap,
   ChatHostToolGatewayRequest,
   ChatHostToolGatewayResponse,
+  WriteArtifactToolInput,
+  WriteArtifactToolResponse,
 } from "@opencompany/agent-runtime";
 import { assertSafeRelativePath } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { HarnessEngine } from "@opencompany/db/product-schema";
 import { executeApiWikiCommand } from "./api-wiki-client";
+import { publishInBandChatArtifact } from "./chat-artifacts";
 import { wakeCodexChatWorker } from "./codex-chat-worker";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
@@ -44,7 +47,11 @@ type Context = {
   turnId: string;
   env: Pick<
     RunnerEnv,
-    "vercelAiGatewayApiKey" | "browserEnabled" | "apiOrigin" | "apiInternalToken"
+    | "vercelAiGatewayApiKey"
+    | "browserEnabled"
+    | "apiOrigin"
+    | "apiInternalToken"
+    | "blobReadWriteToken"
   >;
   signal: AbortSignal;
   mentionedSkillIds: string[];
@@ -71,6 +78,10 @@ export type HostTools = {
   createWorkspaceSkill?: CreateWorkspaceSkillRunner;
   editWorkspaceSkill?: EditWorkspaceSkillRunner;
   runWiki?: (input: Record<string, unknown>, context: { toolCallId: string }) => Promise<unknown>;
+  writeArtifact: (
+    input: WriteArtifactToolInput,
+    context: { toolCallId: string },
+  ) => Promise<WriteArtifactToolResponse>;
   skills?: SkillDispatcher;
   workflows?: WorkflowDispatcher;
   browserTools?: BrowserToolRunner;
@@ -139,6 +150,12 @@ export async function loadHostTools(
       : {}),
     runWiki: (input: Record<string, unknown>, wikiContext: { toolCallId: string }) =>
       call("wiki", input, wikiContext.toolCallId),
+    writeArtifact: (input, artifactContext) =>
+      call(
+        "write_artifact",
+        input,
+        artifactContext.toolCallId,
+      ) as Promise<WriteArtifactToolResponse>,
     ...(bootstrap.browserToolsEnabled
       ? {
           browserTools: ({ name, args }) =>
@@ -250,6 +267,15 @@ async function callGateway(
         readChatSkillFile({ ...input, chatSessionId: conversationId, db: getDb() }),
       createWorkspaceSkill: (input) => createWorkspaceSkillForActor({ ...input, db: getDb() }),
       updateWorkspaceSkill: (input) => updateWorkspaceSkillForActor({ ...input, db: getDb() }),
+      writeArtifact: ({ runId, toolCallId, toolInput, signal }) =>
+        publishInBandChatArtifact({
+          codexChatSessionId: context.sessionId,
+          codexChatTurnId: runId,
+          toolCallId,
+          arguments: toolInput,
+          env: { blobReadWriteToken: context.env.blobReadWriteToken },
+          signal,
+        }),
     },
     runtime: {
       wakeTaskWorker: wakeCodexChatWorker,

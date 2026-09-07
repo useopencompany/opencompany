@@ -8,12 +8,14 @@ export type OfficialMcpPluginName =
   | "google-calendar"
   | "google-drive"
   | "hubspot"
+  | "infisical"
   | "jamie"
   | "latitude"
   | "linear"
   | "neon"
   | "posthog"
   | "render"
+  | "vercel"
   | "signoz"
   | "slack"
   | "stripe"
@@ -51,17 +53,20 @@ export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
     | "google_calendar"
     | "google_drive"
     | "hubspot"
+    | "infisical"
     | "jamie"
     | "latitude"
     | "linear"
     | "neon"
     | "posthog"
     | "render"
+    | "vercel"
     | "signoz"
     | "slack"
     | "stripe"
     | "x_account";
   connectHref: string;
+  connectionUnavailableReason?: string;
   accountLabel?: string;
   accountDescription: string;
   ingestionHref?: string;
@@ -136,11 +141,12 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     name: "gmail",
     kind: "mcp",
     label: "Gmail",
-    description: "Search and read Gmail, create drafts, and organize messages with approval.",
+    description:
+      "Search and read Gmail, download attachments, create drafts, and organize messages with approval.",
     category: "communication",
     featured: true,
     source:
-      "https://github.com/useopencompany/plugins/tree/587fb06ae2a4e4bed7532e216f8712979ca35e7b/gmail",
+      "https://github.com/useopencompany/plugins/tree/ff6f34b42796129c2a125a32b3a78e8cae353df6/gmail",
     connectionProvider: "gmail",
     connectHref: "/api/integrations/gmail/start?access=mcp&returnTo=/settings/plugins/gmail",
     accountDescription: "The most recently connected Gmail account powers Gmail tools.",
@@ -204,6 +210,20 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     ingestionHref: "/wiki/sources",
     ingestionLabel: "Configure HubSpot ingestion in Wiki sources",
   },
+  infisical: {
+    name: "infisical",
+    kind: "mcp",
+    label: "Infisical",
+    description:
+      "Search current Infisical documentation and safely use workspace secrets in coding sandboxes.",
+    category: "engineering",
+    source:
+      "https://github.com/useopencompany/plugins/tree/f283f509c195464f90f5f78f7e30a9a472b6393b/infisical",
+    connectionProvider: "infisical",
+    connectHref: "/settings/plugins/infisical",
+    accountDescription:
+      "The workspace CLI connection restored into coding sandboxes. Its credentials are never sent to the documentation MCP.",
+  },
   jamie: {
     name: "jamie",
     kind: "mcp",
@@ -238,7 +258,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     category: "productivity",
     featured: true,
     source:
-      "https://github.com/useopencompany/plugins/tree/775df7a9a37f5585b9b87a26533ba6ed1035f1dc/linear",
+      "https://github.com/useopencompany/plugins/tree/9addd067ff8311fb3dcbc51285e4a3e671577838/linear",
     connectionProvider: "linear",
     connectHref: "/api/integrations/linear/start?returnTo=/settings/plugins/linear",
     accountDescription: "The account opencompany uses when you run Linear tools.",
@@ -283,6 +303,21 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectionProvider: "render",
     connectHref: "/settings/plugins/render#render-api-key",
     accountDescription: "The Render account opencompany uses when you run Render tools.",
+  },
+  vercel: {
+    name: "vercel",
+    kind: "mcp",
+    label: "Vercel",
+    description:
+      "Inspect Vercel projects and deployments, investigate operational data, and perform permission-gated deployment and account actions.",
+    category: "engineering",
+    source:
+      "https://github.com/useopencompany/plugins/tree/14e7f6d3e978103c5427c725229ae93bc3e47f8c/vercel",
+    connectionProvider: "vercel",
+    connectHref: "/api/integrations/vercel/start?returnTo=/settings/plugins/vercel",
+    connectionUnavailableReason:
+      "Vercel requires MCP clients and their production callback URLs to be approved before they can connect. opencompany is awaiting that approval.",
+    accountDescription: "The account opencompany uses when you run Vercel tools.",
   },
   signoz: {
     name: "signoz",

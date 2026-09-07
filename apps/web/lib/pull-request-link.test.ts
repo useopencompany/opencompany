@@ -6,12 +6,12 @@ describe("extractGitHubPullRequestUrl", () => {
     const result = [
       "Recovered and inspected the current state. The work is already finished and merged.",
       "",
-      "PR: https://github.com/useopencompany/opencompany-experimental/pull/1011",
+      "PR: https://github.com/useopencompany/opencompany/pull/1011",
       "Merge commit: `894576e3` on `main`",
     ].join("\n");
 
     expect(extractGitHubPullRequestUrl(result)).toBe(
-      "https://github.com/useopencompany/opencompany-experimental/pull/1011",
+      "https://github.com/useopencompany/opencompany/pull/1011",
     );
   });
 
@@ -30,9 +30,7 @@ describe("extractGitHubPullRequestUrl", () => {
 
   it("ignores non-pull-request GitHub links", () => {
     expect(
-      extractGitHubPullRequestUrl(
-        "repo: https://github.com/useopencompany/opencompany-experimental",
-      ),
+      extractGitHubPullRequestUrl("repo: https://github.com/useopencompany/opencompany"),
     ).toBeNull();
   });
 });

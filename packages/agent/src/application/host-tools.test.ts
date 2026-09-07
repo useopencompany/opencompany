@@ -256,7 +256,10 @@ describe("opencompany Chat Task host tools", () => {
     expect(updateWorkspaceSkill).not.toHaveBeenCalled();
   });
 
-  it("delegates an agent-created Task through the authenticated Task creator", async () => {
+  it.each([
+    { model: "moonshotai/kimi-k2.6", engine: "opencompany" },
+    { model: "openai/gpt-6-astra", engine: "codex" },
+  ])("delegates $model tasks through the authenticated Task creator", async ({ model, engine }) => {
     const createTask = vi.fn(async () => taskResult);
     const dependencies = testDependencies({ createTask });
 
@@ -269,8 +272,8 @@ describe("opencompany Chat Task host tools", () => {
           input: {
             name: "Market research",
             prompt: "Research the market.",
-            model: "moonshotai/kimi-k2.6",
-            engine: "opencompany",
+            model,
+            engine,
           },
         },
         dependencies,
@@ -283,8 +286,8 @@ describe("opencompany Chat Task host tools", () => {
       brainRef: null,
       name: "Market research",
       prompt: "Research the market.",
-      model: "moonshotai/kimi-k2.6",
-      engine: "opencompany",
+      model,
+      engine,
     });
   });
 
@@ -335,6 +338,32 @@ describe("opencompany Chat Task host tools", () => {
     ).resolves.toEqual({
       ok: false,
       error: 'Model "anthropic/claude-sonnet-5" is not available for the Codex engine.',
+    });
+    expect(createTask).not.toHaveBeenCalled();
+  });
+
+  it("rejects rollout-gated task models at the host boundary", async () => {
+    const createTask = vi.fn(async () => taskResult);
+    const dependencies = testDependencies({ createTask });
+
+    await expect(
+      executeChatHostToolService({
+        command: {
+          operation: "start_task",
+          sessionId: "runtime_1",
+          runId: "run_1",
+          input: {
+            name: "Analyze launch",
+            prompt: "Analyze the launch.",
+            model: "openai/gpt-6-astra",
+            engine: "opencompany",
+          },
+        },
+        dependencies,
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      error: 'Unsupported model "openai/gpt-6-astra".',
     });
     expect(createTask).not.toHaveBeenCalled();
   });
@@ -439,6 +468,30 @@ describe("opencompany Chat Task host tools", () => {
       ([call]) => call.idempotencyKey,
     );
     expect(keys).toEqual(["agent-wiki:turn_7:call_a", "agent-wiki:turn_7:call_b"]);
+  });
+
+  it("publishes an artifact with the authenticated context and stable tool-call id", async () => {
+    const writeArtifact = vi.fn(async () => ({ ok: true, artifact: { artifactId: "artifact_1" } }));
+    const dependencies = testDependencies({ writeArtifact });
+    const result = await executeChatHostToolService({
+      command: {
+        operation: "write_artifact",
+        sessionId: "runtime_1",
+        runId: "turn_7",
+        toolCallId: "call_42",
+        input: { filename: "report.md", title: "Report", content: "# Report" },
+      },
+      dependencies,
+    });
+
+    expect(result).toMatchObject({ ok: true, result: { ok: true } });
+    expect(writeArtifact).toHaveBeenCalledWith({
+      context,
+      runId: "turn_7",
+      toolCallId: "call_42",
+      toolInput: { filename: "report.md", title: "Report", content: "# Report" },
+      signal: expect.any(AbortSignal),
+    });
   });
 });
 

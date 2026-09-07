@@ -12,17 +12,17 @@ import {
 import { verifyLinearWebhookSignature } from "@opencompany/agent/integrations/linear-signature";
 import { connectLinearIngestIntegration } from "@opencompany/db/integrations";
 import {
-  enqueueLinearWorkflowEventRuns,
+  enqueueWorkflowEventRuns,
   insertLinearIssueEvents,
-  isLinearIssueEnteringTriage,
   type LinearIssueEventInsert,
   linearEventTypeFor,
   linearRouteMatchesEvent,
   linearSelectedTeamIds,
+  linearWorkflowRouteMatchesEvent,
   listEnabledLinearBrainSourceRoutes,
   listEnabledLinearWikiSourceRoutes,
   listLinearIntegrationsForOrganization,
-  listLinearWorkflowTriggerRoutes,
+  listWorkflowEventTriggerRoutes,
 } from "@opencompany/db/linear";
 import type { LinearEventAction, LinearEventEntityType } from "@opencompany/db/product-schema";
 import { createLogger } from "@opencompany/observability";
@@ -248,22 +248,20 @@ async function handleLinearEvent(
 
   let workflowRuns = 0;
   if (teamId && entityType === "issue") {
-    const workflowRoutes = await listLinearWorkflowTriggerRoutes(
-      { integrations: connected, teamId },
+    const workflowRoutes = await listWorkflowEventTriggerRoutes(
+      { provider: "linear", integrations: connected },
       db,
     );
     const matchedWorkflowRoutes = workflowRoutes.filter((route) =>
-      isLinearIssueEnteringTriage(
-        {
-          ...(envelope.type ? { type: envelope.type } : {}),
-          ...(envelope.action ? { action: envelope.action } : {}),
-          data,
-          ...(envelope.updatedFrom ? { updatedFrom: envelope.updatedFrom } : {}),
-        },
-        route.triageStateId,
-      ),
+      linearWorkflowRouteMatchesEvent(route, {
+        ...(envelope.type ? { type: envelope.type } : {}),
+        ...(envelope.action ? { action: envelope.action } : {}),
+        teamId,
+        data,
+        ...(envelope.updatedFrom ? { updatedFrom: envelope.updatedFrom } : {}),
+      }),
     );
-    workflowRuns = await enqueueLinearWorkflowEventRuns(
+    workflowRuns = await enqueueWorkflowEventRuns(
       {
         routes: matchedWorkflowRoutes,
         deliveryId,

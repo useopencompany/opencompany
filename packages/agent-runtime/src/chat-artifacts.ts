@@ -1,10 +1,14 @@
 export const PUBLISH_ARTIFACT_TOOL_NAME = "publish_artifact";
+export const WRITE_ARTIFACT_TOOL_NAME = "write_artifact";
 export const CHAT_ARTIFACT_DATA_PART_TYPE = "data-artifact-file" as const;
 export const CHAT_ARTIFACT_MAX_BYTES = 20 * 1024 * 1024;
 export const CHAT_ARTIFACT_MAX_PER_TURN = 5;
 
 export const PUBLISH_ARTIFACT_TOOL_DESCRIPTION =
   "Publish a finished file from the current sandbox into the chat as a durable user-visible file. Call this only for outputs the user should receive, not source files, repository diffs, logs, or temporary work.";
+
+export const WRITE_ARTIFACT_TOOL_DESCRIPTION =
+  "Create or revise a Markdown artifact in this chat. Use it for finished reports, briefs, plans, and other substantial documents the user should open and iterate on. Send the complete Markdown content on every call. To revise an existing artifact, reuse artifact_id and pass the version currently shown as expected_version.";
 
 export const PUBLISH_ARTIFACT_INPUT_JSON_SCHEMA = {
   type: "object",
@@ -35,6 +39,48 @@ export const PUBLISH_ARTIFACT_INPUT_JSON_SCHEMA = {
   required: ["path"],
 } as const;
 
+export const WRITE_ARTIFACT_INPUT_JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    filename: {
+      type: "string",
+      description: "A user-friendly Markdown filename ending in .md, without directory paths.",
+    },
+    title: {
+      type: "string",
+      description: "Short user-facing title for the artifact.",
+    },
+    description: {
+      type: "string",
+      description: "Optional one-sentence description of the artifact.",
+    },
+    content: {
+      type: "string",
+      description: "The complete Markdown document content for this version.",
+    },
+    artifact_id: {
+      type: "string",
+      description: "Stable artifact id when publishing a new version of an earlier artifact.",
+    },
+    expected_version: {
+      type: "integer",
+      description:
+        "Required with artifact_id. The current version number; prevents overwriting a newer publication.",
+    },
+  },
+  required: ["filename", "title", "content"],
+} as const;
+
+export type WriteArtifactToolInput = {
+  filename: string;
+  title: string;
+  description?: string;
+  content: string;
+  artifact_id?: string;
+  expected_version?: number;
+};
+
 export type PublishedChatArtifact = {
   artifactId: string;
   artifactVersionId: string;
@@ -50,6 +96,8 @@ export type PublishedChatArtifact = {
 export type PublishArtifactToolResponse =
   | { ok: true; artifact: PublishedChatArtifact }
   | { ok: false; error: string };
+
+export type WriteArtifactToolResponse = PublishArtifactToolResponse;
 
 export function parsePublishedChatArtifact(value: unknown): PublishedChatArtifact | null {
   const response = readRecord(value);

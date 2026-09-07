@@ -28,6 +28,7 @@ import {
   GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
   modelSupportsAttachments,
   parsePublishedChatArtifact,
+  resolveAvailableAgentModelId,
 } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { ChatPresentationPublisher } from "@opencompany/chat-presentation";
@@ -130,7 +131,18 @@ export async function runProductChatTurn(input: {
   presentationPublisher?: ChatPresentationPublisher;
   shouldAbort?: () => Error | null;
 }): Promise<"settled" | "handed_off"> {
-  const { turn, session, env } = input;
+  const { turn, env } = input;
+  const requestedModel = input.session.model as AgentModelId;
+  const availableModel = resolveAvailableAgentModelId(requestedModel);
+  const session =
+    availableModel === requestedModel ? input.session : { ...input.session, model: availableModel };
+  if (availableModel !== requestedModel) {
+    logger.warn("Durable opencompany chat model is rollout-gated; using the safe replacement", {
+      event: "opencompany.goat_opencompany_chat_model_rollout_gated",
+      requested_model: requestedModel,
+      runtime_model: availableModel,
+    });
+  }
   const leaseId = turn.leaseId;
   const leaseOwner = turn.leaseOwner;
   if (!leaseId || !leaseOwner) {
@@ -807,7 +819,9 @@ export async function consumeProductChatStream(input: {
 }
 
 function publishedArtifactFromActionResult(toolName: string, output: unknown) {
-  if (toolName !== "use_action" || !isRecord(output) || output.ok !== true) return null;
+  if (!isRecord(output) || output.ok !== true) return null;
+  if (toolName === "write_artifact") return parsePublishedChatArtifact(output);
+  if (toolName !== "use_action") return null;
   const result = isRecord(output.result) ? output.result : null;
   return result ? parsePublishedChatArtifact({ ok: true, artifact: result.artifact }) : null;
 }
@@ -1220,6 +1234,7 @@ async function resolveProductChatRuntime(input: {
       : {}),
     ...(hostTools?.editWorkspaceSkill ? { editWorkspaceSkill: hostTools.editWorkspaceSkill } : {}),
     ...(hostTools?.runWiki ? { runWiki: hostTools.runWiki as never } : {}),
+    ...(hostTools?.writeArtifact ? { writeArtifact: hostTools.writeArtifact } : {}),
     ...(hostTools?.browserTools ? { browserTools: hostTools.browserTools } : {}),
     ...(hostTools?.browserProfiles ? { browserProfiles: hostTools.browserProfiles } : {}),
     ...(hostTools?.skills ? { skills: hostTools.skills } : {}),
@@ -1276,6 +1291,7 @@ async function resolveProductChatRuntime(input: {
     taskToolsEnabled: Boolean(hostTools?.bootstrap.taskToolsEnabled),
     scheduleToolsEnabled: Boolean(hostTools?.bootstrap.taskToolsEnabled),
     wikiToolEnabled: Boolean(hostTools?.runWiki),
+    artifactToolEnabled: Boolean(hostTools?.writeArtifact),
     activeBrain: brain
       ? {
           name: brain.name,

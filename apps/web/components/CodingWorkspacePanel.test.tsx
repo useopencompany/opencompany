@@ -99,6 +99,63 @@ describe("CodingWorkspacePanel", () => {
     vi.unstubAllGlobals();
   });
 
+  it("opens artifacts without exposing or waking workspace tabs in plain chat", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/versions")) {
+          return Response.json({
+            data: {
+              artifactId: "artifact_1",
+              currentVersion: 1,
+              versions: [
+                {
+                  artifactVersionId: "version_1",
+                  version: 1,
+                  title: "Report",
+                  filename: "report.md",
+                  mediaType: "text/markdown",
+                  sizeBytes: 8,
+                  createdAt: "2026-09-05T10:00:00.000Z",
+                },
+              ],
+            },
+          });
+        }
+        return new Response("# Report");
+      }),
+    );
+
+    render(
+      <CodingWorkspacePanel
+        chatSessionId="chat_1"
+        sandboxStatus={null}
+        engineLabel="Chat"
+        workspaceEnabled={false}
+        artifactSelection={{
+          artifact: {
+            artifactId: "artifact_1",
+            artifactVersionId: "version_1",
+            version: 1,
+            title: "Report",
+            filename: "report.md",
+            mediaType: "text/markdown",
+            sizeBytes: 8,
+            state: "ready",
+          },
+          href: "/v1/chat-artifacts/artifact_1/versions/version_1",
+        }}
+      />,
+    );
+
+    expect(await screen.findByLabelText("Artifact viewer")).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Report", level: 1 })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Preview" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Terminal" })).not.toBeInTheDocument();
+    expect(MockWebSocket.instances).toHaveLength(0);
+  });
+
   it("starts collapsed and shows status without waking until the user chooses a tab", async () => {
     const user = userEvent.setup();
     render(<Harness chatSessionId="chat_1" sandboxStatus="sleeping" engineLabel="Codex" />);

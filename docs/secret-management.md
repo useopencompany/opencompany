@@ -16,6 +16,27 @@ or exported secrets. `vercel link` writes the local, gitignored `.vercel/project
 Vercel access is needed. Conductor uses `.worktreeinclude` to copy that Vercel binding into new local
 workspaces.
 
+## Coding sandboxes and the Infisical plugin
+
+Workspace admins install and connect Infisical under **Settings → Plugins → Infisical**. opencompany
+restores that CLI session into coding sandboxes, where agents should inject secrets directly into a
+child process:
+
+```sh
+infisical run --env=dev --path=/web -- <command>
+```
+
+The plugin's hosted MCP endpoint searches public Infisical documentation only. opencompany never
+sends the workspace CLI credentials or secret values to it. Documentation reads are enabled, while
+the endpoint's feedback mutation is disabled.
+
+If a process requires an env file, write it only to an ignored path with a restrictive umask, keep
+it for the shortest practical time, and never print it. Secret writes require an explicit request
+and an exact project, environment, path, and key. Use the authenticated CLI with a protected input
+file so the value does not enter the model transcript or shell history. If authentication expires,
+a workspace admin must reconnect Infisical from the plugin page before sandbox secret access can
+continue.
+
 ## Production
 
 Edit secrets in the runtime's Infisical path and verify the integration sync on the destination:

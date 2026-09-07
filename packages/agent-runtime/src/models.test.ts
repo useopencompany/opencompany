@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AGENT_MODEL_CATALOG,
+  AVAILABLE_AGENT_MODEL_CATALOG,
   CLAUDE_CODE_AGENT_MODEL_IDS,
   CODEX_AGENT_MODEL_IDS,
   CODEX_DEFAULT_MODEL_ID,
@@ -9,24 +10,26 @@ import {
   codexCliModelNameForModelId,
   getAgentModelRuntimeOptions,
   isCodexModelId,
+  resolveAvailableAgentModelId,
 } from "./models";
 
 describe("Codex model catalog", () => {
-  it("offers GPT 6 Astra and the latest GPT 5.6 family for new Codex work", () => {
+  it("offers Astra and the GPT 5.6 family for new Codex work", () => {
     expect(CODEX_AGENT_MODEL_IDS).toEqual([
       "openai/gpt-6-astra",
       "openai/gpt-5.6-sol",
       "openai/gpt-5.6-terra",
       "openai/gpt-5.6-luna",
     ]);
+    expect(isCodexModelId("openai/gpt-6-astra")).toBe(true);
     expect(isCodexModelId("openai/gpt-5.5")).toBe(false);
     expect(isCodexModelId("openai/gpt-5.4")).toBe(false);
     expect(isCodexModelId("openai/gpt-5.4-mini")).toBe(false);
   });
 
-  it("defaults Codex sandboxes to GPT 5.6 Sol", () => {
-    expect(CODEX_DEFAULT_MODEL_ID).toBe("openai/gpt-5.6-sol");
-    expect(codexCliModelNameForModelId(CODEX_DEFAULT_MODEL_ID)).toBe("gpt-5.6-sol");
+  it("defaults Codex sandboxes to GPT 6 Astra", () => {
+    expect(CODEX_DEFAULT_MODEL_ID).toBe("openai/gpt-6-astra");
+    expect(codexCliModelNameForModelId(CODEX_DEFAULT_MODEL_ID)).toBe("gpt-6-astra");
   });
 
   it.each([
@@ -37,6 +40,15 @@ describe("Codex model catalog", () => {
   ])("maps %s to its Codex CLI model name", (modelId, cliModel) => {
     expect(isCodexModelId(modelId)).toBe(true);
     expect(codexCliModelNameForModelId(modelId)).toBe(cliModel);
+  });
+
+  it("keeps the opencompany rollout gate independent of Codex availability", () => {
+    expect(resolveAvailableAgentModelId("openai/gpt-6-astra")).toBe("openai/gpt-5.6-sol");
+    expect(codexCliModelNameForModelId("openai/gpt-6-astra")).toBe("gpt-6-astra");
+    expect(AVAILABLE_AGENT_MODEL_CATALOG.map((model) => model.id)).not.toContain(
+      "openai/gpt-6-astra",
+    );
+    expect(AGENT_MODEL_CATALOG.map((model) => model.id)).toContain("openai/gpt-6-astra");
   });
 
   it("keeps retired Codex selections runnable for persisted work", () => {

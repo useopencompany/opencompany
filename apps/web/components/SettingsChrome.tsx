@@ -4,7 +4,6 @@ import { cn } from "@opencompany/ui/lib/utils";
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowLeft,
-  Blocks,
   BrainCircuit,
   CircleDollarSign,
   CreditCard,
@@ -47,12 +46,6 @@ const NAV_GROUPS: SettingsNavGroup[] = [
         icon: UserRound,
         label: "Account",
         isActive: (pathname) => pathname === "/settings",
-      },
-      {
-        href: "/settings/integrations",
-        icon: Blocks,
-        label: "Integrations",
-        isActive: (pathname) => pathname === "/settings/integrations",
       },
       {
         href: "/settings/mcp",

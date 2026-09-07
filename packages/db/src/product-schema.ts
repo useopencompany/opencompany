@@ -6,6 +6,7 @@ import {
   type ChatAttachmentFormat,
   type ConversationRuntimeStatus,
   type PluginCapabilityDefinition,
+  type PluginEventDefinition,
   type PluginGatewayDiscoveredTool,
   type PluginInstallReport,
   type PluginManifest,
@@ -81,10 +82,13 @@ export type TaskStatus = "queued" | "running" | "waiting" | "succeeded" | "faile
 export type WorkflowStatus = "draft" | "active";
 export type WorkflowTrigger = "manual" | "slack" | "linear" | "schedule" | "event";
 export type WorkflowEventConfig = {
-  provider: "linear";
-  event: "issue_enters_triage";
+  provider: string;
+  event: string;
   integrationId: string;
-  team: { id: string; name: string; key?: string; triageStateId: string };
+  filters: Record<
+    string,
+    { id: string; name: string; key?: string; metadata?: Record<string, string> }
+  >;
   prompt: string;
 };
 export type WorkflowEventRunStatus = "pending" | "created" | "ignored" | "failed";
@@ -166,6 +170,7 @@ export type IntegrationProvider =
   | "attio"
   | "betterstack"
   | "render"
+  | "vercel"
   | "signoz"
   | "stripe"
   | "latitude"
@@ -174,7 +179,7 @@ export type IntegrationProvider =
   | "x_account";
 // Ownership is a property of the integration's binding, not a per-connect
 // choice. Identity-bound connections (OAuth acting as a person: Gmail,
-// Calendar, Slack user token, Linear, GitHub user token, PostHog, Neon, Better Stack, Render, SigNoz, X) are always personal. Installation-bound
+// Calendar, Slack user token, Linear, GitHub user token, PostHog, Neon, Better Stack, Render, Vercel, SigNoz, X) are always personal. Installation-bound
 // connections (Jamie webhook secrets and the Slack answer-bot install) are
 // workspace plumbing: they carry no human identity,
 // must survive the connecting admin leaving, and are manageable by any
@@ -451,6 +456,7 @@ export type CreditLedgerSource =
   | "stripe_topup"
   | "chat_model_usage"
   | "subscription_covered"
+  | "sandbox_usage"
   | "capability_usage"
   | "frontier_ingest"
   | "ingest_overage"
@@ -1098,7 +1104,7 @@ export const creditLedger = productSchema.table(
       .where(sql`${table.source} = 'starter_grant'`),
     sourceCheck: check(
       "goat_credit_ledger_source_check",
-      sql`${table.source} IN ('starter_grant', 'seat_included_grant', 'seat_included_expiration', 'included_usage_grant', 'included_usage_expiration', 'stripe_topup', 'chat_model_usage', 'subscription_covered', 'capability_usage', 'frontier_ingest', 'ingest_overage', 'ingest_model_usage', 'ingest_fee', 'adjustment')`,
+      sql`${table.source} IN ('starter_grant', 'seat_included_grant', 'seat_included_expiration', 'included_usage_grant', 'included_usage_expiration', 'stripe_topup', 'chat_model_usage', 'subscription_covered', 'sandbox_usage', 'capability_usage', 'frontier_ingest', 'ingest_overage', 'ingest_model_usage', 'ingest_fee', 'adjustment')`,
     ),
   }),
 );
@@ -1646,7 +1652,7 @@ export const integrations = productSchema.table(
     ),
     providerCheck: check(
       "goat_integrations_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'render', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'x_account')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'render', 'vercel', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'x_account')`,
     ),
     statusCheck: check(
       "goat_integrations_status_check",
@@ -1696,7 +1702,7 @@ export const integrationCredentials = productSchema.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_credentials_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'render', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'x_account')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'render', 'vercel', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'x_account')`,
     ),
     kindCheck: check(
       "goat_integration_credentials_kind_check",
@@ -1746,7 +1752,7 @@ export const integrationResources = productSchema.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_resources_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'render', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'x_account')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'render', 'vercel', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'x_account')`,
     ),
     statusCheck: check(
       "goat_integration_resources_status_check",
@@ -3309,6 +3315,11 @@ export const plugins = productSchema.table(
       .$type<PluginStdioServer[]>()
       .notNull()
       .default(sql`'[]'::jsonb`),
+    events: jsonb("events").$type<PluginEventDefinition[]>().notNull().default(sql`'[]'::jsonb`),
+    eventModes: jsonb("event_modes")
+      .$type<Record<string, boolean>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
     installReport: jsonb("install_report").$type<PluginInstallReport>().notNull(),
     mcpApprovedIntegrity: text("mcp_approved_integrity"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -3354,6 +3365,11 @@ export const plugins = productSchema.table(
     stdioMcpServersCheck: check(
       "plugins_stdio_mcp_servers_check",
       sql`jsonb_typeof(${table.stdioMcpServers}) = 'array'`,
+    ),
+    eventsCheck: check("plugins_events_check", sql`jsonb_typeof(${table.events}) = 'array'`),
+    eventModesCheck: check(
+      "plugins_event_modes_check",
+      sql`jsonb_typeof(${table.eventModes}) = 'object'`,
     ),
     installReportCheck: check(
       "plugins_install_report_check",
@@ -3797,7 +3813,7 @@ export const workflowEventRuns = productSchema.table(
     taskIdx: index("opencompany_workflow_event_runs_task_idx").on(table.taskId),
     providerCheck: check(
       "opencompany_workflow_event_runs_provider_check",
-      sql`${table.provider} IN ('linear')`,
+      sql`${table.provider} ~ '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$' AND char_length(${table.provider}) <= 64`,
     ),
     statusCheck: check(
       "opencompany_workflow_event_runs_status_check",
@@ -4553,6 +4569,13 @@ export const browserProfileSessions = productSchema.table(
     startedAt: timestamp("started_at", { withTimezone: true }),
     endedAt: timestamp("ended_at", { withTimezone: true }),
     durationMs: integer("duration_ms").notNull().default(0),
+    providerCostUsdMicros: bigint("provider_cost_usd_micros", { mode: "number" })
+      .notNull()
+      .default(0),
+    platformFeeUsdMicros: bigint("platform_fee_usd_micros", { mode: "number" })
+      .notNull()
+      .default(0),
+    totalCostUsdMicros: bigint("total_cost_usd_micros", { mode: "number" }).notNull().default(0),
     rawMetrics: jsonb("raw_metrics")
       .$type<Record<string, unknown>>()
       .notNull()

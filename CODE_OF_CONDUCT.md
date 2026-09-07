@@ -23,12 +23,11 @@ represents opencompany in public or private interactions.
 
 ## Reporting and Enforcement
 
-Report conduct concerns privately to the current repository owner, `@louismorgner`. If you do not
-already have a private contact channel, open a minimal issue asking the owner to establish one; do
-not include incident details in that issue. For conduct hosted on GitHub, you may also use GitHub's
-content-reporting tools.
+Report conduct concerns privately to [team@opencompany.cloud](mailto:team@opencompany.cloud). Do
+not include incident details in a public issue. For conduct hosted on GitHub, you may also use
+GitHub's content-reporting tools.
 
-The repository owner will review reports as privately and impartially as practical. Depending on
+The maintainers will review reports as privately and impartially as practical. Depending on
 the context and severity, consequences may include a private correction, warning, temporary limits
 on participation, removal of content, or a permanent ban. Retaliation against a reporter or witness
 is itself a violation.

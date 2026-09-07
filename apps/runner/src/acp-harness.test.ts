@@ -1,6 +1,11 @@
+import { createAcpEventNormalizer } from "@opencompany/agent-runtime";
 import { describe, expect, it, vi } from "vitest";
 import { CLAUDE_ACP_ENGINE_ADAPTER, CODEX_ACP_ENGINE_ADAPTER } from "./acp-engine-adapters";
-import { AcpHarness, type AcpHarnessTurnInput } from "./acp-harness";
+import {
+  ACP_EMPTY_RESULT_REPAIR_PROMPT,
+  AcpHarness,
+  type AcpHarnessTurnInput,
+} from "./acp-harness";
 import { CodexChatRetryableInfrastructureError } from "./codex-chat-errors";
 import type { SandboxHandle } from "./sandbox";
 
@@ -63,6 +68,34 @@ function harnessInput(
 }
 
 describe("AcpHarness", () => {
+  it("retries an initialize timeout because no engine execution has started", async () => {
+    vi.useFakeTimers();
+    try {
+      const transport = fakeAcpSandbox(async () => {});
+      const run = new AcpHarness().runTurn(
+        harnessInput(transport.sandbox, {
+          adapter: CODEX_ACP_ENGINE_ADAPTER,
+        }),
+      );
+      const rejected = expect(run).rejects.toMatchObject({
+        name: CodexChatRetryableInfrastructureError.name,
+        message: 'Codex ACP request "initialize" failed before execution started.',
+        cause: expect.objectContaining({
+          message: 'ACP request "initialize" timed out.',
+        }),
+        diagnosticMessage: '[acp_initialize] Error: ACP request "initialize" timed out.',
+      });
+
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      await rejected;
+      expect(transport.requests).toContainEqual(expect.objectContaining({ method: "initialize" }));
+      expect(transport.kill).toHaveBeenCalledWith(41);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("starts Claude with core MCP tools ready while plugin MCP tools stay deferred", async () => {
     let resolvePermission: (() => void) | null = null;
     const permissionAnswered = new Promise<void>((resolve) => {
@@ -556,7 +589,11 @@ describe("AcpHarness", () => {
       onExistingSessionInvalidated,
     });
 
-    await expect(new AcpHarness().runTurn(input)).rejects.toThrow(/exited unexpectedly/);
+    await expect(new AcpHarness().runTurn(input)).rejects.toMatchObject({
+      name: CodexChatRetryableInfrastructureError.name,
+      message: 'Claude Code ACP request "session/load" failed before execution started.',
+      cause: expect.objectContaining({ message: expect.stringMatching(/exited unexpectedly/) }),
+    });
     expect(onExistingSessionInvalidated).not.toHaveBeenCalled();
     expect(requests.find((request) => request.method === "session/new")).toBeUndefined();
   });
@@ -830,6 +867,74 @@ describe("AcpHarness", () => {
     expect(result.loadedSession).toBe(true);
     expect(JSON.stringify(runtimeEvents)).not.toContain("Historical answer");
     expect(JSON.stringify(runtimeEvents)).toContain("Current answer");
+  });
+
+  it("asks once for a final summary when a successful prompt produces no assistant text", async () => {
+    let promptCount = 0;
+    const transport = fakeAcpSandbox(async (message, emit) => {
+      if (message.method === "initialize") {
+        await emit({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: { agentCapabilities: { loadSession: true } },
+        });
+      } else if (message.method === "session/new") {
+        await emit({ jsonrpc: "2.0", id: message.id, result: { sessionId: "session_repair" } });
+      } else if (message.method === "session/prompt") {
+        promptCount += 1;
+        if (promptCount === 2) {
+          await emit({
+            jsonrpc: "2.0",
+            method: "session/update",
+            params: {
+              sessionId: "session_repair",
+              update: {
+                sessionUpdate: "agent_message_chunk",
+                content: { type: "text", text: "Opened and merged PR #1578." },
+              },
+            },
+          });
+        }
+        await emit({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: {
+            stopReason: "end_turn",
+            usage: { inputTokens: promptCount, outputTokens: promptCount * 2 },
+          },
+        });
+      }
+    });
+    const normalizer = createAcpEventNormalizer();
+    const onRepair = vi.fn();
+    const input = harnessInput(transport.sandbox, {
+      adapter: CODEX_ACP_ENGINE_ADAPTER,
+      onEngineSessionId: vi.fn(async (sessionId) => normalizer.beginRun(sessionId)),
+      onRuntimeEvents: vi.fn(async (events) => {
+        for (const event of events) normalizer.normalize(event);
+      }),
+      emptyResultRepair: {
+        shouldRepair: () => !normalizer.summary()?.result?.trim(),
+        onRepair,
+      },
+    });
+
+    await new AcpHarness().runTurn(input);
+
+    const prompts = transport.requests.filter((request) => request.method === "session/prompt");
+    expect(prompts).toHaveLength(2);
+    expect(onRepair).toHaveBeenCalledOnce();
+    expect(prompts[1]).toMatchObject({
+      params: {
+        sessionId: "session_repair",
+        prompt: [{ type: "text", text: ACP_EMPTY_RESULT_REPAIR_PROMPT }],
+      },
+    });
+    expect(normalizer.summary()).toMatchObject({
+      status: "success",
+      result: "Opened and merged PR #1578.",
+      usage: { input_tokens: 3, output_tokens: 6 },
+    });
   });
 
   it("fails the active prompt when a notification observer rejects", async () => {

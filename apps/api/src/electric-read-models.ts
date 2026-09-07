@@ -76,6 +76,12 @@ const PREDECODED_READ_MODEL_FIELDS = new Set([
   "planPaused",
 ]);
 
+// Electric shape logs outlive individual table rows. Including the public provider contract in
+// the shape identity forces a fresh snapshot when providers are added or retired, so historical
+// inserts cannot be replayed against a newer, stricter protocol enum.
+const INTEGRATION_ACCOUNT_PROVIDER_CONTRACT =
+  IntegrationAccountReadModelSchema.shape.provider.options.join(",");
+
 export interface ReadModelService {
   stream(input: {
     actor: Actor;
@@ -423,8 +429,14 @@ function readModelShape(input: {
           "scopes",
           "capability_modes",
         ],
-        where: `("user_workos_id" = $1 AND "workspace_id" IS NULL) OR "workspace_id" = $2`,
-        params: [input.actor.userId, input.actor.workspaceId],
+        where:
+          `(("user_workos_id" = $1 AND "workspace_id" IS NULL) OR "workspace_id" = $2) ` +
+          `AND CAST($3 AS text) = CAST($3 AS text)`,
+        params: [
+          input.actor.userId,
+          input.actor.workspaceId,
+          INTEGRATION_ACCOUNT_PROVIDER_CONTRACT,
+        ],
       };
     case "brain-folders-v1":
       return brainShape(input, "goat.brain_folders", [
@@ -624,11 +636,31 @@ function conversationReadModelShape(
 function projectElectricEntry(readModel: ReadModel, entry: unknown) {
   if (!isRecord(entry) || !isRecord(entry.value)) return entry;
   const operation = isRecord(entry.headers) ? entry.headers.operation : undefined;
+  // Delete values can contain historical column data that is no longer valid under the current
+  // public contract (for example, a provider removed by the same migration that deleted its
+  // rows). A tombstone only needs its identity; forwarding old fields lets retained Electric
+  // history poison reconnecting clients after otherwise-safe enum retirement.
+  const value =
+    operation === "delete" ? electricDeleteIdentity(readModel, entry.value) : entry.value;
   return {
     key: entry.key,
     headers: entry.headers,
-    value: projectReadModelValue(readModel, entry.value, operation !== "insert"),
+    value: projectReadModelValue(readModel, value, operation !== "insert"),
   };
+}
+
+function electricDeleteIdentity(readModel: ReadModel, row: Record<string, unknown>) {
+  const columnNames = READ_MODEL_COLUMN_NAMES[
+    readModel as keyof typeof READ_MODEL_COLUMN_NAMES
+  ] as Record<string, string>;
+  // Engine sessions deliberately hide their physical primary key and collections key them by
+  // Conversation instead. Every other read model exposes its physical `id` as the public `id`.
+  const publicIdentity = readModel === "engine-sessions-v1" ? "conversationId" : "id";
+  const identityColumn = Object.entries(columnNames).find(
+    ([physicalName, publicName]) =>
+      publicName === publicIdentity && Object.hasOwn(row, physicalName),
+  );
+  return identityColumn ? { [identityColumn[0]]: row[identityColumn[0]] } : {};
 }
 
 function projectReadModelValue(

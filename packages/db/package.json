@@ -24,6 +24,10 @@
       "types": "./src/workflow-repository.ts",
       "default": "./src/workflow-repository.ts"
     },
+    "./workflow-event-subscriptions": {
+      "types": "./src/workflow-event-subscriptions.ts",
+      "default": "./src/workflow-event-subscriptions.ts"
+    },
     "./knowledge-repository": {
       "types": "./src/knowledge-repository.ts",
       "default": "./src/knowledge-repository.ts"

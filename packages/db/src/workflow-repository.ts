@@ -1036,23 +1036,53 @@ function workflowTrigger(row: WorkflowRow): WorkflowTrigger {
 }
 
 function workflowEventTrigger(value: unknown): Extract<WorkflowTrigger, { type: "event" }> {
-  if (!isRecord(value) || value.provider !== "linear" || value.event !== "issue_enters_triage") {
+  if (!isRecord(value)) {
     throw new Error("Workflow storage contains an invalid event trigger.");
   }
-  const team = isRecord(value.team) ? value.team : null;
-  const key = team ? stringValue(team.key) : null;
+  const provider = requiredString(value.provider, "provider");
+  const event = requiredString(value.event, "event");
+  const storedFilters = isRecord(value.filters)
+    ? value.filters
+    : legacyLinearEventFilters(provider, event, value.team);
+  if (!storedFilters) throw new Error("Workflow storage contains invalid event filters.");
   return {
     type: "event",
-    provider: "linear",
-    event: "issue_enters_triage",
+    provider,
+    event,
     integrationId: requiredString(value.integrationId, "integrationId"),
-    team: {
-      id: requiredString(team?.id, "team.id"),
-      name: requiredString(team?.name, "team.name"),
-      triageStateId: requiredString(team?.triageStateId, "team.triageStateId"),
-      ...(key ? { key } : {}),
-    },
+    filters: Object.fromEntries(
+      Object.entries(storedFilters).map(([id, filter]) => [id, workflowEventFilter(filter, id)]),
+    ),
     prompt: requiredString(value.prompt, "prompt"),
+  };
+}
+
+function legacyLinearEventFilters(provider: string, event: string, value: unknown) {
+  if (provider !== "linear" || event !== "issue_enters_triage" || !isRecord(value)) return null;
+  const key = stringValue(value.key);
+  return {
+    team: {
+      id: requiredString(value.id, "team.id"),
+      name: requiredString(value.name, "team.name"),
+      ...(key ? { key } : {}),
+      metadata: { triageStateId: requiredString(value.triageStateId, "team.triageStateId") },
+    },
+  };
+}
+
+function workflowEventFilter(value: unknown, filterId: string) {
+  if (!isRecord(value)) throw new Error(`Workflow event filter ${filterId} is invalid.`);
+  const key = stringValue(value.key);
+  const metadata = isRecord(value.metadata)
+    ? Object.fromEntries(
+        Object.entries(value.metadata).map(([id, item]) => [id, requiredString(item, id)]),
+      )
+    : undefined;
+  return {
+    id: requiredString(value.id, `${filterId}.id`),
+    name: requiredString(value.name, `${filterId}.name`),
+    ...(key ? { key } : {}),
+    ...(metadata ? { metadata } : {}),
   };
 }
 

@@ -15,10 +15,10 @@ simple condition: copies or substantial portions must retain the copyright and p
 in `LICENSE`. It matches the project's goal of broad adoption without imposing a reciprocal source
 release obligation.
 
-This decision applies only to material that opencompany has the right to license. It does not
-replace the repository's separate provenance and redistribution audit. Material identified in
-[THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md), package-manager dependencies, and any file with
-its own license remains subject to those terms.
+This decision applies only to material that opencompany has the right to license. The tracked
+publication inventory and copied-material terms are recorded in
+[THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md). Package-manager dependencies and any file with
+its own license remain subject to those terms.
 
 ## Notices
 

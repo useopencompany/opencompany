@@ -5,6 +5,7 @@ import {
   PLUGIN_LIMITS,
   parseMcpConfig,
   parsePluginCapabilities,
+  parsePluginEvents,
   parsePluginManifest,
 } from "@opencompany/agent-runtime";
 import {
@@ -20,7 +21,7 @@ import {
   type SkillBundleFileMetadata,
 } from "@opencompany/core";
 import { del } from "@vercel/blob";
-import { and, asc, desc, eq, inArray, ne } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import {
   pluginFiles,
   pluginGatewayRegistrations,
@@ -47,6 +48,8 @@ type PluginRow = {
   resolvedCommit: string;
   integrity: string;
   stdioMcpServers: PluginInstallation["stdioServers"];
+  events: PluginInstallation["events"];
+  eventModes: PluginInstallation["eventModes"];
   installReport: PluginInstallReport;
   mcpApprovedIntegrity: string | null;
   createdAt: Date;
@@ -67,6 +70,8 @@ const pluginSelection = {
   resolvedCommit: plugins.resolvedCommit,
   integrity: plugins.integrity,
   stdioMcpServers: plugins.stdioMcpServers,
+  events: plugins.events,
+  eventModes: plugins.eventModes,
   installReport: plugins.installReport,
   mcpApprovedIntegrity: plugins.mcpApprovedIntegrity,
   createdAt: plugins.createdAt,
@@ -121,6 +126,11 @@ export class PostgresPluginRepository implements PluginRepository {
           ...input.plugin.report,
           collisions: [],
         };
+        const previous = await pluginByName(
+          tx,
+          input.actor.workspaceId,
+          input.plugin.manifest.name,
+        );
         await tx.insert(plugins).values({
           id: pluginId,
           workspaceId: input.actor.workspaceId,
@@ -134,6 +144,8 @@ export class PostgresPluginRepository implements PluginRepository {
           resolvedCommit: input.plugin.source.resolvedCommit,
           integrity: input.plugin.integrity,
           stdioMcpServers: input.plugin.stdioServers,
+          events: input.plugin.events,
+          eventModes: previous?.eventModes ?? {},
           installReport: initialReport,
           mcpApprovedIntegrity: null,
         });
@@ -229,6 +241,37 @@ export class PostgresPluginRepository implements PluginRepository {
         and(
           eq(plugins.workspaceId, input.actor.workspaceId),
           eq(plugins.name, input.name),
+          inArray(plugins.status, ["enabled", "disabled"]),
+        ),
+      )
+      .returning({ id: plugins.id });
+    if (!updated) throw new CoreError("not_found", "Plugin not found.");
+    const row = await pluginById(this.db, input.actor.workspaceId, updated.id);
+    if (!row) throw new CoreError("not_found", "Plugin not found.");
+    return hydratePlugin(this.db, row);
+  }
+
+  async setEventEnabled(input: {
+    actor: Parameters<PluginRepository["setEventEnabled"]>[0]["actor"];
+    name: string;
+    eventId: string;
+    enabled: boolean;
+  }) {
+    const plugin = await livePlugin(this.db, input.actor.workspaceId, input.name);
+    if (!plugin) throw new CoreError("not_found", "Plugin not found.");
+    if (!plugin.events.some((event) => event.id === input.eventId)) {
+      throw new CoreError("invalid_argument", "That event is not declared by this Plugin.");
+    }
+    const [updated] = await this.db
+      .update(plugins)
+      .set({
+        eventModes: sql`jsonb_set(${plugins.eventModes}, ARRAY[${input.eventId}], ${JSON.stringify(input.enabled)}::jsonb, true)`,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(plugins.id, plugin.id),
+          eq(plugins.workspaceId, input.actor.workspaceId),
           inArray(plugins.status, ["enabled", "disabled"]),
         ),
       )
@@ -483,6 +526,8 @@ async function hydratePlugin(db: DbClient, row: PluginRow): Promise<PluginInstal
     files: files as SkillBundleFileMetadata[],
     skills,
     stdioServers: row.stdioMcpServers,
+    events: row.events,
+    eventModes: row.eventModes,
     remoteMcpServers: (remoteMcpServers as PluginRemoteMcpServerRow[]).map((server) => ({
       ...server,
       tools: server.tools.map(({ name, description, classification }) => ({
@@ -606,6 +651,16 @@ async function validateResolvedPlugin(plugin: ResolvedPluginPackage) {
     throw new CoreError(
       "invalid_argument",
       "The Plugin capability definitions do not match plugin.json.",
+    );
+  }
+  const parsedEvents =
+    plugin.report.events?.status === "parsed"
+      ? parsePluginEvents(parsedManifest.extensions, { trusted: true }).definitions
+      : [];
+  if (JSON.stringify(parsedEvents) !== JSON.stringify(plugin.events)) {
+    throw new CoreError(
+      "invalid_argument",
+      "The Plugin event definitions do not match plugin.json.",
     );
   }
 

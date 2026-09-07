@@ -32,6 +32,62 @@ afterEach(() => {
 });
 
 describe("MessageBubble historical presentation details", () => {
+  it("keeps expanded reasoning visible and loads detail when a live row becomes historical", async () => {
+    const liveMessage = {
+      id: "assistant_reasoning_transition",
+      role: "assistant",
+      metadata: { sessionId: "conversation_1" },
+      parts: [
+        { type: "reasoning", text: "Live reasoning detail", state: "streaming" },
+        { type: "text", text: "Done" },
+      ],
+    } as ChatUiMessage;
+    const summaryMessage = {
+      ...liveMessage,
+      metadata: {
+        sessionId: "conversation_1",
+        presentation: {
+          source: "summary" as const,
+          updatedAt: "2026-09-04T20:00:01.000Z",
+        },
+      },
+      parts: [
+        { type: "reasoning", text: "Bounded reasoning preview", state: "done" },
+        { type: "text", text: "Done" },
+      ],
+    } as ChatUiMessage;
+    let resolvePresentation!: (message: ChatUiMessage) => void;
+    presentationMocks.load.mockReturnValueOnce(
+      new Promise<ChatUiMessage>((resolve) => {
+        resolvePresentation = resolve;
+      }),
+    );
+
+    const { rerender } = render(
+      <MessageBubble message={liveMessage} taskLookup={emptyTaskLookup} turnActive />,
+    );
+    await userEvent.click(screen.getByTestId("chat-reasoning-item").querySelector("button")!);
+    expect(screen.getAllByText("Live reasoning detail")).toHaveLength(2);
+
+    rerender(<MessageBubble message={summaryMessage} taskLookup={emptyTaskLookup} turnActive />);
+
+    await waitFor(() => expect(presentationMocks.load).toHaveBeenCalledOnce());
+    expect(screen.getAllByText("Bounded reasoning preview")).toHaveLength(2);
+    expect(screen.getByText("Loading details…")).toBeVisible();
+
+    await act(async () =>
+      resolvePresentation({
+        ...summaryMessage,
+        parts: [
+          { type: "reasoning", text: "Full persisted reasoning detail", state: "done" },
+          { type: "text", text: "Done" },
+        ],
+      }),
+    );
+    expect(await screen.findAllByText("Full persisted reasoning detail")).toHaveLength(2);
+    expect(screen.queryByText("Loading details…")).not.toBeInTheDocument();
+  });
+
   it("renders a summary-backed pending use_action approval without loading historical detail", () => {
     const onActionApproval = vi.fn(async () => undefined);
     const summaryMessage = {
@@ -210,6 +266,28 @@ describe("MessageBubble generated files", () => {
       "href",
       "/v1/chat-artifacts/artifact_1/versions/version_1?download=1",
     );
+  });
+
+  it("opens an artifact in the host viewer when requested", async () => {
+    const user = userEvent.setup();
+    const onOpenArtifact = vi.fn();
+    render(
+      <MessageBubble
+        message={message}
+        taskLookup={emptyTaskLookup}
+        onOpenArtifact={onOpenArtifact}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Open Launch plan" }));
+
+    expect(onOpenArtifact).toHaveBeenCalledWith({
+      artifact: expect.objectContaining({
+        artifactId: "artifact_1",
+        artifactVersionId: "version_1",
+      }),
+      href: "/v1/chat-artifacts/artifact_1/versions/version_1",
+    });
   });
 
   it("deletes through the owner route and becomes a tombstone", async () => {
@@ -693,6 +771,97 @@ describe("MessageBubble assistant errors", () => {
     expect(
       screen.getByRole("img", { name: "Screenshot captured by opencompany's browser" }),
     ).toHaveAttribute("src", "/v1/chat-screenshots/goat_chat_1/1234-aabb.png");
+  });
+
+  it("renders an interactive authenticated browser live view through the owner-checked route", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const message: ChatUiMessage = {
+      id: "assistant_browser_profile",
+      role: "assistant",
+      metadata: { sessionId: "chat_profile_live_1" },
+      parts: [
+        {
+          type: "tool-browser_use_profile",
+          toolCallId: "tool_browser_profile_1",
+          state: "output-available",
+          input: { profile: "Notion", reason: "Open the user's workspace" },
+          output: {
+            ok: true,
+            profile: { id: "profile_1", name: "Notion", siteHost: "notion.so" },
+            liveViewUrl: "/api/browser-profiles/profile_1/live-view?sessionId=bb_1",
+            message: "Authenticated browser profile active for notion.so.",
+          },
+        },
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+    const frame = screen.getByTitle("Authenticated browser session on notion.so");
+    expect(frame).toHaveAttribute(
+      "src",
+      "/api/browser-profiles/profile_1/live-view?sessionId=bb_1",
+    );
+    expect(frame).toHaveAttribute("sandbox", "allow-same-origin allow-scripts");
+    expect(frame).toHaveAttribute("allow", "clipboard-read; clipboard-write");
+    expect(screen.getByText("Authenticated session active")).toBeVisible();
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/browser-profiles/profile_1/live-view?sessionId=bb_1&probe=1",
+        expect.objectContaining({ cache: "no-store" }),
+      ),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Collapse live browser" }));
+    expect(
+      screen.queryByTitle("Authenticated browser session on notion.so"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the clean ended state and rejects raw provider live-view URLs", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 410 })),
+    );
+    const message = (liveViewUrl: string): ChatUiMessage => ({
+      id: `assistant_browser_profile_${liveViewUrl}`,
+      role: "assistant",
+      metadata: { sessionId: "chat_profile_ended_1" },
+      parts: [
+        {
+          type: "tool-browser_use_profile",
+          toolCallId: "tool_browser_profile_1",
+          state: "output-available",
+          input: { profile: "Notion", reason: "Open the user's workspace" },
+          output: {
+            ok: true,
+            profile: { id: "profile_1", name: "Notion", siteHost: "notion.so" },
+            liveViewUrl,
+          },
+        },
+      ],
+    });
+
+    const { unmount } = render(
+      <MessageBubble
+        message={message("/api/browser-profiles/profile_1/live-view?sessionId=bb_1")}
+        taskLookup={emptyTaskLookup}
+      />,
+    );
+    expect(await screen.findByText("This authenticated browser session has ended.")).toBeVisible();
+    expect(
+      screen.queryByTitle("Authenticated browser session on notion.so"),
+    ).not.toBeInTheDocument();
+    unmount();
+
+    render(
+      <MessageBubble
+        message={message("https://live.browserbase.com/session/bb_1")}
+        taskLookup={emptyTaskLookup}
+      />,
+    );
+    expect(screen.queryByTestId("browser-profile-live-view")).not.toBeInTheDocument();
   });
 
   it("renders shared transcripts without approval requests or task navigation", () => {

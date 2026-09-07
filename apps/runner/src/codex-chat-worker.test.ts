@@ -135,8 +135,8 @@ describe("claimNextCodexChatTurn", () => {
     const params = sqlParamValues(dbMock.execute.mock.calls[0]?.[0]);
     expect(params).toEqual(
       expect.arrayContaining([
-        "goat-chat-host-tools.v2",
         "goat-chat-host-tools.v3",
+        "goat-chat-host-tools.v4",
         "goat-codex-host-tools.v2",
         "goat-codex-host-tools.v3",
       ]),

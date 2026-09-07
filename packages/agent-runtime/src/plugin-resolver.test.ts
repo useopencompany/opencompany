@@ -233,7 +233,7 @@ describe("resolvePlugin", () => {
     const plugin = await resolvePlugin({
       url: "example/plugins",
       fetcher: fetcher(files),
-      trustedCapabilitySources: ["useopencompany/opencompany-experimental"],
+      trustedCapabilitySources: ["useopencompany/opencompany"],
     });
 
     expect(plugin.capabilities).toEqual([]);
@@ -289,6 +289,10 @@ describe("resolvePlugin", () => {
       status: "parsed",
       issues: [],
     });
+    expect(plugin.events).toEqual([
+      expect.objectContaining({ id: "issue.created", delivery: "webhook" }),
+    ]);
+    expect(plugin.report.events).toEqual({ present: true, status: "parsed", issues: [] });
   });
 
   it("loads the official Granola package with sensitive meeting access behind Ask", async () => {
@@ -335,6 +339,62 @@ describe("resolvePlugin", () => {
     expect(plugin.report.mcp).toMatchObject({
       status: "parsed",
       reports: [{ name: "granola", status: "gateway-registered" }],
+    });
+    expect(plugin.report.capabilities).toEqual({
+      present: true,
+      status: "parsed",
+      issues: [],
+    });
+  });
+
+  it("loads the official Infisical package with docs-only MCP permissions", async () => {
+    const fixtureRoot = fileURLToPath(
+      new URL("./test-fixtures/plugins/infisical", import.meta.url),
+    );
+    const files = await fixtureFiles(fixtureRoot, "infisical");
+    const plugin = await resolvePlugin({
+      url: "useopencompany/plugins",
+      selectedPath: "infisical",
+      fetcher: fetcher(files),
+      trustedCapabilitySources: ["useopencompany/plugins"],
+    });
+
+    expect(plugin.manifest).toMatchObject({ name: "infisical", version: "1.0.0" });
+    expect(plugin.skills).toEqual([
+      expect.objectContaining({
+        name: "infisical-sandbox-secrets",
+        path: "skills/infisical-sandbox-secrets",
+      }),
+    ]);
+    expect(plugin.stdioServers).toEqual([]);
+    expect(plugin.remoteServers).toEqual([
+      {
+        name: "infisical",
+        type: "streamable-http",
+        url: "https://infisical.com/docs/mcp",
+        headers: {},
+      },
+    ]);
+    expect(plugin.capabilities).toEqual([
+      {
+        id: "read",
+        label: "Read Infisical docs",
+        defaultMode: "on",
+        tools: ["search_infisical", "query_docs_filesystem_infisical"],
+      },
+      {
+        id: "write",
+        label: "Send docs feedback",
+        defaultMode: "off",
+        tools: ["submit_feedback"],
+      },
+    ]);
+    expect(plugin.report.skills).toEqual([
+      expect.objectContaining({ name: "infisical-sandbox-secrets", status: "valid" }),
+    ]);
+    expect(plugin.report.mcp).toMatchObject({
+      status: "parsed",
+      reports: [{ name: "infisical", status: "gateway-registered" }],
     });
     expect(plugin.report.capabilities).toEqual({
       present: true,
@@ -390,6 +450,65 @@ describe("resolvePlugin", () => {
     expect(plugin.report.mcp).toMatchObject({
       status: "parsed",
       reports: [{ name: "betterstack", status: "gateway-registered" }],
+    });
+    expect(plugin.report.capabilities).toEqual({
+      present: true,
+      status: "parsed",
+      issues: [],
+    });
+  });
+
+  it("loads the official Vercel package with purchases and CLI access disabled", async () => {
+    const fixtureRoot = fileURLToPath(new URL("./test-fixtures/plugins/vercel", import.meta.url));
+    const files = await fixtureFiles(fixtureRoot, "vercel");
+    const plugin = await resolvePlugin({
+      url: "useopencompany/plugins",
+      selectedPath: "vercel",
+      fetcher: fetcher(files),
+      trustedCapabilitySources: ["useopencompany/plugins"],
+    });
+
+    expect(plugin.manifest).toMatchObject({ name: "vercel", version: "1.0.0" });
+    expect(plugin.skills).toEqual([]);
+    expect(plugin.stdioServers).toEqual([]);
+    expect(plugin.remoteServers).toEqual([
+      {
+        name: "vercel",
+        type: "streamable-http",
+        url: "https://mcp.vercel.com",
+        headers: {},
+      },
+    ]);
+    expect(plugin.capabilities).toEqual([
+      expect.objectContaining({
+        id: "read",
+        label: "Inspect Vercel projects",
+        defaultMode: "on",
+        tools: expect.arrayContaining(["list_projects", "get_deployment"]),
+      }),
+      expect.objectContaining({
+        id: "query",
+        label: "Read operational data",
+        defaultMode: "ask",
+        tools: expect.arrayContaining(["get_runtime_logs", "get_agent_run_trace"]),
+      }),
+      expect.objectContaining({
+        id: "draft",
+        label: "Deploy, share, and collaborate",
+        defaultMode: "ask",
+        tools: expect.arrayContaining(["deploy_to_vercel", "reply_to_toolbar_thread"]),
+      }),
+      expect.objectContaining({
+        id: "write",
+        label: "Purchase and administer",
+        defaultMode: "off",
+        tools: expect.arrayContaining(["buy_domain", "use_vercel_cli"]),
+      }),
+    ]);
+    expect(plugin.capabilities.flatMap((capability) => capability.tools)).toHaveLength(32);
+    expect(plugin.report.mcp).toMatchObject({
+      status: "parsed",
+      reports: [{ name: "vercel", status: "gateway-registered" }],
     });
     expect(plugin.report.capabilities).toEqual({
       present: true,

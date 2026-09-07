@@ -223,6 +223,32 @@ describe("Fathom integration state", () => {
   });
 });
 
+describe("Vercel integration state", () => {
+  it("surfaces its personal MCP account and permission modes", () => {
+    const state = integrationStateFromRows([
+      {
+        id: "gint_vercel",
+        provider: "vercel",
+        externalId: "vercel_mcp",
+        accountName: "Vercel",
+        status: "connected",
+        scopes: ["openid"],
+        capabilityModes: { read: "on", query: "ask", draft: "ask", write: "off" },
+      },
+    ]);
+
+    expect(state.personalAccounts.vercel).toEqual([
+      expect.objectContaining({
+        integrationId: "gint_vercel",
+        provider: "vercel",
+        connected: true,
+        scopes: ["openid"],
+        capabilityModes: { read: "on", query: "ask", draft: "ask", write: "off" },
+      }),
+    ]);
+  });
+});
+
 describe("HubSpot integration state", () => {
   it("keeps MCP tool authorization separate from Wiki ingestion accounts", () => {
     const state = integrationStateFromRows([

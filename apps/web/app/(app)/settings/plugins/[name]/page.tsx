@@ -8,6 +8,7 @@ import {
   GoogleDrivePluginDetail,
   GranolaPluginDetail,
   HubSpotPluginDetail,
+  InfisicalPluginDetail,
   JamiePluginDetail,
   LatitudePluginDetail,
   LinearPluginDetail,
@@ -18,6 +19,7 @@ import {
   SigNozPluginDetail,
   SlackPluginDetail,
   StripePluginDetail,
+  VercelPluginDetail,
   XPluginDetail,
 } from "@/components/OfficialMcpPluginSettings";
 import { OfficialSkillPluginDetail, PluginDetail } from "@/components/PluginSettings";
@@ -49,6 +51,7 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
       "google-drive": GoogleDrivePluginDetail,
       "google-calendar": GoogleCalendarPluginDetail,
       hubspot: HubSpotPluginDetail,
+      infisical: InfisicalPluginDetail,
       jamie: JamiePluginDetail,
       latitude: LatitudePluginDetail,
       linear: LinearPluginDetail,
@@ -58,6 +61,7 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
       signoz: SigNozPluginDetail,
       slack: SlackPluginDetail,
       stripe: StripePluginDetail,
+      vercel: VercelPluginDetail,
       x: XPluginDetail,
     }[normalizedName];
     return <Detail pluginState={pluginState} canEdit={context.role === "admin"} />;
