@@ -364,6 +364,32 @@ describe("extractAcpScheduleWakeup", () => {
     });
   });
 
+  it("recognizes ScheduleWakeup input delivered on the completed ACP tool update", () => {
+    expect(
+      extractAcpScheduleWakeup({
+        method: "session/update",
+        params: {
+          sessionId: "session_1",
+          update: {
+            sessionUpdate: "tool_call_update",
+            toolCallId: "tool_1",
+            status: "completed",
+            _meta: { claudeCode: { toolName: "ScheduleWakeup" } },
+            rawInput: {
+              delaySeconds: 1_200,
+              reason: "Wait for CI",
+              prompt: "Inspect PR #42 and merge it when checks pass.",
+            },
+          },
+        },
+      }),
+    ).toEqual({
+      delaySeconds: 1_200,
+      reason: "Wait for CI",
+      prompt: "Inspect PR #42 and merge it when checks pass.",
+    });
+  });
+
   it("ignores malformed tool input and unrelated raw events", () => {
     expect(
       extractAcpScheduleWakeup(
@@ -372,6 +398,19 @@ describe("extractAcpScheduleWakeup", () => {
           reason: "Wrong delay type",
         }),
       ),
+    ).toBeNull();
+    expect(
+      extractAcpScheduleWakeup({
+        method: "session/update",
+        params: {
+          update: {
+            sessionUpdate: "tool_call_update",
+            status: "in_progress",
+            _meta: { claudeCode: { toolName: "ScheduleWakeup" } },
+            rawInput: { delaySeconds: 60, reason: "Incomplete update" },
+          },
+        },
+      }),
     ).toBeNull();
     expect(extractAcpScheduleWakeup({ method: "session/prompt_result" })).toBeNull();
   });
@@ -1237,15 +1276,11 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       }) => {
         await input.onEngineSessionId("claude_thread_1");
         await input.onRuntimeEvents([
-          acpToolCallEvent("codex_mcp_tool", {
-            kind: "other",
-            tool: "ScheduleWakeup",
-            toolName: "ScheduleWakeup",
-            arguments: {
-              delay_seconds: 600,
-              reason: "Wait for CI",
-              prompt: "Inspect PR #42.",
-            },
+          acpToolCallEvent("ScheduleWakeup", {}),
+          acpToolCallUpdateEvent("ScheduleWakeup", {
+            delay_seconds: 600,
+            reason: "Wait for CI",
+            prompt: "Inspect PR #42.",
           }),
           ...successfulAcpEvents("PR opened; CI is running."),
         ]);
@@ -1316,6 +1351,22 @@ function acpToolCallEvent(name: string, rawInput: Record<string, unknown>) {
         toolCallId: `tool_${name}`,
         title: name,
         name,
+        rawInput,
+      },
+    },
+  };
+}
+
+function acpToolCallUpdateEvent(name: string, rawInput: Record<string, unknown>) {
+  return {
+    method: "session/update",
+    params: {
+      sessionId: "claude_thread_1",
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: `tool_${name}`,
+        status: "completed",
+        _meta: { claudeCode: { toolName: name } },
         rawInput,
       },
     },

@@ -1244,7 +1244,11 @@ export function extractAcpScheduleWakeup(
   if (event.method !== "session/update") return null;
   const params = recordFromUnknown(event.params);
   const update = recordFromUnknown(params?.update);
-  if (update?.sessionUpdate !== "tool_call") return null;
+  const sessionUpdate = update?.sessionUpdate;
+  if (sessionUpdate !== "tool_call" && sessionUpdate !== "tool_call_update") {
+    return null;
+  }
+  if (sessionUpdate === "tool_call_update" && update?.status !== "completed") return null;
   const claudeMeta = recordFromUnknown(recordFromUnknown(update._meta)?.claudeCode);
   const rawInput = recordFromUnknown(update.rawInput);
   const toolNames = [claudeMeta?.toolName, update.name, rawInput?.tool, rawInput?.toolName];
