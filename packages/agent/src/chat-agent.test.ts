@@ -244,37 +244,41 @@ describe("start_task tool", () => {
     );
   });
 
-  it("preserves an already Codex-compatible task model", async () => {
-    const startTask = vi.fn(async (task: { prompt: string; name?: string }) => ({
-      id: "task_1",
-      displayId: "TASK-1",
-      name: task.name ?? "Test repo access",
-      prompt: task.prompt,
-    }));
-    const context = createProductChatToolContext({
-      model: "openai/gpt-5.6-terra" as never,
-      requestedEngine: "codex",
-      startTask,
-    });
-    const startTaskTool = context.tools[START_TASK_TOOL_NAME] as {
-      execute: (args: unknown) => Promise<unknown>;
-    };
+  it.each(["openai/gpt-6-astra", "openai/gpt-5.6-terra"])(
+    "preserves Codex task model %s",
+    async (codexModel) => {
+      const startTask = vi.fn(async (task: { prompt: string; name?: string }) => ({
+        id: "task_1",
+        displayId: "TASK-1",
+        name: task.name ?? "Test repo access",
+        prompt: task.prompt,
+      }));
+      const context = createProductChatToolContext({
+        model: codexModel as never,
+        requestedEngine: "codex",
+        startTask,
+      });
+      const startTaskTool = context.tools[START_TASK_TOOL_NAME] as {
+        execute: (args: unknown) => Promise<unknown>;
+      };
 
-    await startTaskTool.execute({
-      name: "Test repo access",
-      prompt: "Check repo access and report whether development work can start.",
-    });
-
-    expect(startTask).toHaveBeenCalledWith(
-      {
+      await startTaskTool.execute({
         name: "Test repo access",
+        model: codexModel,
         prompt: "Check repo access and report whether development work can start.",
-        model: "openai/gpt-5.6-terra",
-        engine: "codex",
-      },
-      { toolCallId: expect.any(String) },
-    );
-  });
+      });
+
+      expect(startTask).toHaveBeenCalledWith(
+        {
+          name: "Test repo access",
+          prompt: "Check repo access and report whether development work can start.",
+          model: codexModel,
+          engine: "codex",
+        },
+        { toolCallId: expect.any(String) },
+      );
+    },
+  );
 
   it("uses the model explicitly requested for an opencompany task", async () => {
     const startTask = vi.fn(async (task: { prompt: string; name?: string }) => ({

@@ -256,7 +256,10 @@ describe("opencompany Chat Task host tools", () => {
     expect(updateWorkspaceSkill).not.toHaveBeenCalled();
   });
 
-  it("delegates an agent-created Task through the authenticated Task creator", async () => {
+  it.each([
+    { model: "moonshotai/kimi-k2.6", engine: "opencompany" },
+    { model: "openai/gpt-6-astra", engine: "codex" },
+  ])("delegates $model tasks through the authenticated Task creator", async ({ model, engine }) => {
     const createTask = vi.fn(async () => taskResult);
     const dependencies = testDependencies({ createTask });
 
@@ -269,8 +272,8 @@ describe("opencompany Chat Task host tools", () => {
           input: {
             name: "Market research",
             prompt: "Research the market.",
-            model: "moonshotai/kimi-k2.6",
-            engine: "opencompany",
+            model,
+            engine,
           },
         },
         dependencies,
@@ -283,8 +286,8 @@ describe("opencompany Chat Task host tools", () => {
       brainRef: null,
       name: "Market research",
       prompt: "Research the market.",
-      model: "moonshotai/kimi-k2.6",
-      engine: "opencompany",
+      model,
+      engine,
     });
   });
 

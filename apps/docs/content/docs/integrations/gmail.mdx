@@ -1,6 +1,6 @@
 ---
 title: Gmail
-description: Read and organize Gmail and create drafts through the official MCP plugin.
+description: Read and organize Gmail, download attachments, and create drafts through the official MCP plugin.
 ---
 
 ## Install and connect
@@ -20,7 +20,8 @@ shipped must reconnect once to grant the access needed by the full tool set.
 The plugin groups reviewed tools into three controls, all set to **Ask** by default because mailbox
 content is sensitive and every supported write changes the user's mailbox:
 
-- **Read Gmail — Ask:** search and read messages, threads, drafts, and labels.
+- **Read Gmail — Ask:** search and read messages, threads, drafts, and labels, and download
+  attachments.
 - **Create drafts — Ask:** create a draft for the user to review in Gmail.
 - **Organize Gmail — Ask:** add or remove labels, create labels, and move messages or threads to or
   from trash.
@@ -38,9 +39,12 @@ permission before calling Gmail.
 
 ## Safety and limitations
 
-The Gmail MCP server supports reading mail, creating drafts, applying or removing labels, moving
-mail to or from trash, and creating labels. It does not expose send, permanent-delete, spam, or
-attachment-download tools. Sending must be completed manually from Gmail after reviewing a draft.
+The Gmail MCP server supports reading mail, downloading attachments, creating drafts, applying or
+removing labels, moving mail to or from trash, and creating labels. Attachment downloads use a
+signed URL that expires after five minutes, are limited to 20 MB, and recheck the plugin, account,
+scope, and tool permission before returning the original bytes. It does not expose send,
+permanent-delete, or spam tools. Sending must be completed manually from Gmail after reviewing a
+draft.
 
 Email bodies are untrusted input and can contain indirect prompt-injection attempts. Keep Gmail
 permissions at **Ask** unless automatic access is intentional, and review any proposed mailbox
