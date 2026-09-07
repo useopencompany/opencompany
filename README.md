@@ -80,3 +80,5 @@ notice policy, and contribution terms are documented in [OPEN_SOURCE.md](./OPEN_
 - [Deployment](./docs/deployment.md)
 - [Environment variables](./docs/env-vars.md)
 - [Secret management](./docs/secret-management.md)
+
+<!-- external-contribution canary: docs-only change, will be closed without merging -->
