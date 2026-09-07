@@ -21,7 +21,7 @@
   "devDependencies": {
     "@todesktop/cli": "1.28.1",
     "@types/node": "^25.9.1",
-    "electron": "43.4.1",
+    "electron": "44.2.0",
     "esbuild": "0.28.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
