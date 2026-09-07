@@ -1,6 +1,6 @@
 # Open-source release readiness
 
-- Status: Proposed
+- Status: Ready for attended publication
 - Last reviewed: 2026-09-07
 
 ## Current state
@@ -30,24 +30,16 @@ follow-up, and provider-backed features may still require personal credentials.
 
 ## Remaining release gates
 
-- Follow the accepted [Git contributor email privacy](../contributor-email-privacy.md) decision:
-  rerun independent secret and personal-data scans over every Git ref intended for publication,
-  privately notify contributors whose history contains personal or otherwise non-public addresses,
-  and resolve objections before deciding whether the coordinated history-rewrite exception is
-  necessary.
-- Apply and verify the public-repository `all_external_contributors` workflow approval policy during
-  the visibility change. The versioned PR isolation and private fail-closed settings are documented
-  in [CI security](../ci-security.md).
-- Exercise one external-fork canary after publication: confirm that opening the pull request starts
-  no workflow, explicitly approve the held run, then confirm that the credential-free `PR gate`
-  completes and the contribution remains review-gated.
-- Enable private vulnerability reporting after publication and verify the private reporting path.
-- Audit tracked deployment metadata and one-off maintenance tools; retain only what is safe and
-  useful to forks.
-- Verify dependency, migration, documentation-link, secret, and build checks from the public CI
-  path.
-- Make repository visibility the final, explicit owner-approved operation with a rollback and
-  incident-response owner present.
+All pre-publication gates are resolved. The remaining operations require the repository to be
+public and are sequenced in the [public launch runbook](../public-launch-runbook.md):
+
+- the repository owner changes visibility without renaming the repository;
+- a maintainer immediately sets Actions approval to `all_external_contributors` and enables private
+  vulnerability reporting; and
+- a true external fork exercises the held-run, credential-free `PR gate`, and review requirement.
+
+If either public-only setting cannot be verified, return the repository to private before announcing
+the launch or accepting an external pull request.
 
 ## Resolved release policy
 
@@ -75,6 +67,20 @@ follow-up, and provider-backed features may still require personal credentials.
 - **Hosted fork controls (owner-confirmed 2026-09-07):** Infisical's OIDC boundary and Vercel Fork
   Protection are configured and working. This records the release owner's confirmation without
   storing hosted configuration or credential values in the repository.
+- **History and contributor privacy (resolved 2026-09-07):** the final scan covered every live
+  branch and pull-request head intended to remain reachable: 4,935 unique commits across eight
+  branches and 1,485 pull-request refs. The publication owner confirmed that the contributors whose
+  personal addresses remain in commit attribution are aware and consent; no objection requires a
+  history rewrite. Work and organization addresses remain ordinary Git attribution. See
+  [Git contributor email privacy](../contributor-email-privacy.md).
+- **Secrets (resolved 2026-09-07):** an independent TruffleHog scan over the same refs found no
+  verified credentials. Its four unverified findings all point to one documented dummy PostgreSQL
+  test fixture, not a live account.
+- **Deployment metadata and maintenance tools (resolved 2026-09-07):** tracked Render and Vercel
+  files contain topology, build commands, disabled deployment flags, placeholders, and environment
+  variable names rather than credentials or live project bindings. The Infisical selector is
+  non-secret. One-off maintenance scripts require explicit operator inputs and are not reachable
+  from the untrusted pull-request workflow. No launch-critical deletion is warranted.
 - **Community policies:** [SECURITY.md](../../SECURITY.md) and
   [CODE_OF_CONDUCT.md](../../CODE_OF_CONDUCT.md) define the current reporting and conduct paths.
 
@@ -95,5 +101,5 @@ before merge.
 - Publishing npm packages merely because the source repository becomes visible.
 - Changing the license as an incidental part of engineering cleanup.
 
-This proposal remains active until the owner either approves a publication runbook or explicitly
-retires the open-source release goal.
+The repository is ready for the attended visibility change and immediate public-only verification in
+the launch runbook. Readiness remains open until that sequence and its external-fork canary complete.
