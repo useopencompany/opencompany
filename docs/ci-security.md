@@ -44,7 +44,8 @@ revisit the policy separately after designing a credential-free, cache-safe publ
 - no production environment or self-hosted runner;
 - `persist-credentials: false` on every checkout;
 - cache restore for PRs, with cache save restricted to trusted `main` release runs;
-- third-party actions pinned to full commit SHAs; and
+- third-party actions pinned to full commit SHAs;
+- a full dependency audit with no ignored advisories, in addition to review of dependency changes; and
 - a single required `PR gate` result that fails unless every verification job succeeds.
 
 GitHub's default CodeQL setup separately scans trusted pull requests and the default branch. It is
@@ -59,26 +60,18 @@ deployment/OIDC permission to the production release job.
 
 ## Review and production policy
 
-The live `main` policy was verified on 2026-09-07 and is split across two active rulesets so review
-speed does not weaken repository integrity:
+The `main` policy uses two active rulesets:
 
-- `Protect main` blocks branch deletion and force pushes and requires an up-to-date `PR gate`. It
-  has no bypass actors.
+- `Protect main` blocks branch deletion and force pushes and requires an up-to-date `PR gate`.
 - `Require PR review` requires one approving CODEOWNER review, dismisses stale approvals after new
-  commits, and requires review conversations to be resolved. `louismorgner` and `MonsterDeveloper`
-  are its only bypass actors, both in PR-only mode.
-- The opencompany GitHub App is not a separate bypass actor. Its current user access tokens act as
-  the connected GitHub user, so agent work inherits that user's repository access and review bypass.
+  commits, and requires review conversations to be resolved.
+- Both rulesets have an empty `bypass_actors` list. Maintainers, GitHub Apps, and agents acting with
+  a maintainer's user access token must satisfy the same review requirement.
 
-PR-only bypass preserves a pull-request and audit trail, but GitHub evaluates it against the actor
-performing the merge rather than the pull-request author. The project policy therefore limits bypass
-use to maintainer-authored work; an external contribution must receive one CODEOWNER approval.
-
-[PR #1620](https://github.com/useopencompany/opencompany/pull/1620) verified the
-app-backed `louismorgner` path end to end: GitHub reported `REVIEW_REQUIRED`, the exact head passed
-the then-required checks, and the PR merged with zero reviews through the configured bypass. GitHub
-CLI requires `--admin` to select that bypass explicitly. Maintainers may use it only after verifying
-the exact head and the required `PR gate`, and never for an external contribution.
+Every pull request, including maintainer-authored and agent-authored work, needs approval from
+another maintainer in `CODEOWNERS`. Do not use `gh pr merge --admin`, change the rulesets, or switch
+credentials to work around a pending review. An agent can prepare the change, run verification,
+and open the pull request; it must wait for the independent review before merging.
 
 Repository web-editor commit sign-off is disabled. That matches the approved inbound-equals-outbound
 contribution terms and the explicit decision not to require DCO sign-off.
@@ -136,3 +129,19 @@ especially workflow, dependency, install-script, and build-script changes. Use *
 to run** only when executing that commit under the credential-free PR boundary is acceptable. Do
 not add secrets, write permissions, production environments, or privileged follow-up triggers to
 make an external run work.
+
+## Dependency maintenance
+
+Run `bun run dependencies:audit` to audit the entire committed dependency graph, including build and
+release tooling. The Policy job runs the same audit for PRs and production verification, and fails
+for any reported advisory or an unavailable advisory service. Dependency review separately rejects
+new high- and critical-severity vulnerabilities. Neither check replaces the other.
+
+Bun 1.4.2 is required for the version-scoped overrides in `package.json` and lockfile version 3.
+These overrides update vulnerable transitive copies while preserving compatible major versions for
+other consumers. OpenTelemetry's LangChain instrumentation is updated before its core dependency;
+`package-json` moves to its compatible CommonJS v7 API to pick up patched Got v11; UUID v11 retains
+CommonJS exports for the Google clients; and Vercel's Undici v5 copies move to patched v6.
+
+Keep the audit free of blanket ignores. When an upstream release removes a vulnerable pin, remove
+the corresponding override after verifying the full audit and affected CLI/runtime behavior.
