@@ -26,9 +26,9 @@
     "@opencompany/telemetry": "workspace:*",
     "@opencompany/observability": "workspace:*",
     "@opencompany/wiki": "workspace:*",
-    "@sentry/bun": "^10.70.0",
+    "@sentry/bun": "^10.73.0",
     "@vercel/blob": "^2.8.0",
-    "ai": "^7.0.84",
+    "ai": "^7.0.92",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
     "e2b": "^2.46.1",
@@ -39,7 +39,7 @@
     "@electric-sql/pglite": "^0.5.8",
     "@types/node": "^25.9.1",
     "@types/ws": "^8.18.1",
-    "tsx": "^4.23.12",
+    "tsx": "^4.23.13",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   }

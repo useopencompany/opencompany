@@ -21,8 +21,8 @@
   },
   "dependencies": {
     "@opencompany/observability": "workspace:*",
-    "posthog-js": "^1.422.1",
-    "posthog-node": "^5.51.4",
+    "posthog-js": "^1.426.2",
+    "posthog-node": "^5.51.6",
     "react": "19.2.8"
   },
   "devDependencies": {
@@ -30,7 +30,7 @@
     "@types/node": "^25.9.1",
     "@types/react": "19.2.18",
     "eslint": "9.39.4",
-    "eslint-config-next": "16.3.3",
+    "eslint-config-next": "16.3.4",
     "jsdom": "^29.1.1",
     "react-dom": "19.2.8",
     "typescript": "^6.0.3",

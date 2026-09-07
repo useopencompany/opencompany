@@ -18,8 +18,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "braintrust": "^3.29.0",
-    "zod": "^4.1.11"
+    "braintrust": "^3.30.0",
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",
