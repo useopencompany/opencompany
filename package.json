@@ -49,6 +49,7 @@
     "infisical:dev:runner": "infisical run --env=dev --path=/runner -- bun run dev:runner",
     "infisical:export": "node scripts/infisical-export-local.mjs",
     "infisical:release:preflight": "infisical run --env=prod --path=/release -- bun run release:preflight -- --release",
+    "infisical:electric:preflight": "infisical run --env=prod --path=/electric -- bun run release:preflight -- --electric",
     "release:preflight": "node scripts/release-preflight.mjs",
     "release:plan": "node scripts/release-plan.mjs",
     "release:deployment": "node scripts/release-deployment.mjs",

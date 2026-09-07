@@ -78,6 +78,8 @@ const groups = {
       "VERCEL_AI_GATEWAY_API_KEY",
       "BLOB_READ_WRITE_TOKEN",
       "ELECTRIC_URL",
+      "ELECTRIC_AUTH_MODE",
+      "BUN_CONFIG_MAX_HTTP_REQUESTS",
       "REDIS_URL",
       "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY",
       "OPENCOMPANY_NEXT_PUBLIC_APP_URL",
@@ -183,6 +185,16 @@ const groups = {
       // Optional internal-network override for runner control calls.
       "RUNNER_INTERNAL_URL",
     ],
+  },
+  electric: {
+    label: "Render Electric sync service",
+    required: [
+      "DATABASE_URL",
+      "ELECTRIC_SECRET",
+      "ELECTRIC_STORAGE_DIR",
+      "ELECTRIC_REPLICATION_STREAM_ID",
+    ],
+    optional: [],
   },
   runner: {
     label: "Render runner",
@@ -439,6 +451,37 @@ if (selected.includes("runner")) {
   if (process.env.RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED?.trim().toLowerCase() !== "true") {
     failed = true;
     console.log("\nRUNNER_OPENCOMPANY_TASK_WORKER_ENABLED must be true in the production runner.");
+  }
+}
+
+if (selected.includes("api")) {
+  const electricAuthMode = process.env.ELECTRIC_AUTH_MODE?.trim();
+  const electricAuthRequirements = {
+    cloud: ["ELECTRIC_SOURCE_ID", "ELECTRIC_SOURCE_SECRET"],
+    "self-hosted": ["ELECTRIC_SECRET"],
+    bearer: ["ELECTRIC_TOKEN"],
+  };
+  if (!electricAuthRequirements[electricAuthMode]) {
+    failed = true;
+    console.log(
+      "\nELECTRIC_AUTH_MODE must be cloud, self-hosted, or bearer in the production API.",
+    );
+  } else {
+    const missingElectricAuth = electricAuthRequirements[electricAuthMode].filter((key) =>
+      isUnset(process.env[key]),
+    );
+    if (missingElectricAuth.length > 0) {
+      failed = true;
+      console.log(
+        `\nELECTRIC_AUTH_MODE=${electricAuthMode} requires: ${missingElectricAuth.join(", ")}.`,
+      );
+    }
+  }
+
+  const maxHttpRequests = Number(process.env.BUN_CONFIG_MAX_HTTP_REQUESTS);
+  if (!Number.isInteger(maxHttpRequests) || maxHttpRequests < 256 || maxHttpRequests > 65_336) {
+    failed = true;
+    console.log("\nBUN_CONFIG_MAX_HTTP_REQUESTS must be an integer between 256 and 65336.");
   }
 }
 

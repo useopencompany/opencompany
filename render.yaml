@@ -1,4 +1,34 @@
 services:
+  # Electric is the durable browser read layer behind the API-owned read-model proxy. Keep it
+  # private: browsers call opencompany-api, which injects ELECTRIC_SECRET server-side. The disk and
+  # replication stream form one stateful unit; never change one without following the recovery
+  # procedure in docs/electric-sync.md.
+  - type: pserv
+    name: opencompany-electric
+    runtime: image
+    plan: standard
+    region: frankfurt
+    numInstances: 1
+    image:
+      url: docker.io/electricsql/electric@sha256:c9c666a59e12d7d10e0ff6c3619a3a39569ae15236b1023655c422d844da5fa7
+    disk:
+      name: opencompany-electric-data
+      mountPath: /var/electric
+      sizeGB: 20
+    envVars:
+      # Infisical prod `/electric` is authoritative for runtime secrets. The values are populated
+      # on the existing Render service because Blueprint updates ignore new `sync: false` values.
+      - key: DATABASE_URL
+        sync: false
+      - key: ELECTRIC_SECRET
+        sync: false
+      - key: ELECTRIC_STORAGE_DIR
+        value: /var/electric
+      # This unique suffix lets the self-hosted service warm alongside Electric Cloud without
+      # contending for its publication or replication slot.
+      - key: ELECTRIC_REPLICATION_STREAM_ID
+        value: opencompany_render_v1
+
   - type: web
     name: opencompany-api
     runtime: docker
@@ -195,6 +225,9 @@ services:
         sync: false
       - key: ELECTRIC_URL
         sync: false
+      # Explicit mode allows Cloud and self-hosted credentials to coexist for one-step rollback.
+      - key: ELECTRIC_AUTH_MODE
+        sync: false
       - key: ELECTRIC_SOURCE_ID
         sync: false
       - key: ELECTRIC_SOURCE_SECRET
@@ -202,6 +235,10 @@ services:
       - key: ELECTRIC_SECRET
         sync: false
       - key: ELECTRIC_TOKEN
+        sync: false
+      # Each live shape holds an upstream fetch open. Bun otherwise queues silently after 256
+      # concurrent fetches, so production follows Electric's documented proxy recommendation.
+      - key: BUN_CONFIG_MAX_HTTP_REQUESTS
         sync: false
       - key: REDIS_URL
         sync: false

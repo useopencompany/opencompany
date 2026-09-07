@@ -60,7 +60,7 @@ import { createBrainControlService } from "./brain-control";
 import { parseBrowserOrigins } from "./browser-origins";
 import { createChatResourceService } from "./chat-resources";
 import { createChatTitleService } from "./chat-title";
-import { ElectricReadModelProxy } from "./electric-read-models";
+import { ElectricReadModelProxy, parseElectricAuthMode } from "./electric-read-models";
 import { createEngineAuthService } from "./engine-auth";
 import { createEngineSessionService } from "./engine-sessions";
 import { createFeedbackService } from "./feedback";
@@ -441,8 +441,10 @@ function createWorkOSClient() {
 function createElectricReadModels() {
   const electricUrl = process.env.ELECTRIC_URL?.trim();
   if (!electricUrl) return null;
+  const authMode = parseElectricAuthMode(process.env.ELECTRIC_AUTH_MODE);
   return new ElectricReadModelProxy({
     electricUrl,
+    ...(authMode ? { authMode } : {}),
     ...(process.env.ELECTRIC_SOURCE_ID?.trim()
       ? { sourceId: process.env.ELECTRIC_SOURCE_ID.trim() }
       : {}),
