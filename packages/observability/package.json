@@ -19,7 +19,7 @@
   },
   "dependencies": {
     "braintrust": "^3.30.0",
-    "zod": "^4.5.4"
+    "zod": "^4.1.11"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",

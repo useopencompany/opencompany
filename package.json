@@ -80,8 +80,8 @@
     "@opencompany/wiki": "workspace:*",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
-    "eslint-config-next": "16.3.4",
-    "next": "16.3.4",
+    "eslint-config-next": "16.2.10",
+    "next": "16.2.11",
     "pg": "^8.23.0",
     "vercel": "^54.21.1"
   },
