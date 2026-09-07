@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Home now shows all your active tasks instead of quietly hiding some of them (#1605) — @louis.
 - Coding sessions keep their GitHub access through a full turn, fixing a case where authorization could drop mid-run (#1599) — @louis.
 - Tasks that are waiting on you now hold their "waiting" status instead of appearing to reset (#1626) — @louis.
+- GPT-6 Astra Codex sessions now start successfully instead of failing before the first response because the sandbox runtime did not yet recognize the model.
 
 ## [1.23.0] - 2026-09-04
 
