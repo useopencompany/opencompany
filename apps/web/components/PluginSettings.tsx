@@ -21,6 +21,7 @@ import {
   HubSpotIcon,
   LinearIcon,
   NeonIcon,
+  NotionIcon,
   PostHogIcon,
   SlackIcon,
   StripeIcon,
@@ -204,6 +205,11 @@ export const OFFICIAL_MCP_PLUGINS = {
     Icon: NeonIcon,
     iconClassName: "bg-[#00E599] text-[#0B0F14]",
   },
+  notion: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.notion,
+    Icon: NotionIcon,
+    iconClassName: "bg-white text-black",
+  },
   posthog: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.posthog,
     Icon: PostHogIcon,
@@ -278,6 +284,8 @@ export const LINEAR_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.linear.name;
 export const LINEAR_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.linear.source;
 export const NEON_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.neon.name;
 export const NEON_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.neon.source;
+export const NOTION_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.notion.name;
+export const NOTION_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.notion.source;
 export const POSTHOG_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.posthog.name;
 export const POSTHOG_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.posthog.source;
 export const RENDER_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.render.name;

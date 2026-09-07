@@ -2848,6 +2848,8 @@ export function createApiApp(input: CreateApiAppInput) {
     app.get("/integrations/posthog/callback", (c) => ingress.callback("posthog", c.req.raw));
     app.get("/integrations/neon/start", (c) => ingress.start("neon", c.req.raw));
     app.get("/integrations/neon/callback", (c) => ingress.callback("neon", c.req.raw));
+    app.get("/integrations/notion/start", (c) => ingress.start("notion", c.req.raw));
+    app.get("/integrations/notion/callback", (c) => ingress.callback("notion", c.req.raw));
     app.get("/integrations/latitude/start", (c) => ingress.start("latitude", c.req.raw));
     app.get("/integrations/latitude/callback", (c) => ingress.callback("latitude", c.req.raw));
     app.get("/integrations/jamie-mcp/start", (c) => ingress.start("jamie", c.req.raw));

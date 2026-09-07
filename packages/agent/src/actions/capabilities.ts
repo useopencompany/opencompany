@@ -136,6 +136,28 @@ export const PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
+  notion: [
+    {
+      id: "query",
+      label: "Search & read Notion",
+      description:
+        "Search and read pages, databases, files, comments, members, meeting notes, and agent sessions.",
+      defaultMode: "ask",
+    },
+    {
+      id: "draft",
+      label: "Work with Notion agents",
+      description: "Start, message, wait for, or stop Custom Agent sessions in Notion.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Change Notion",
+      description:
+        "Create or change pages, databases, views, comments, attachments, folders, and Skills.",
+      defaultMode: "ask",
+    },
+  ],
   jamie: [
     {
       id: "read",

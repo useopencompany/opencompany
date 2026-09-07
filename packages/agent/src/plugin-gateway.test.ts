@@ -34,6 +34,8 @@ const mocks = vi.hoisted(() => ({
   loadLatitudeConnection: vi.fn(),
   getNeonState: vi.fn(),
   loadNeonConnection: vi.fn(),
+  getNotionState: vi.fn(),
+  loadNotionConnection: vi.fn(),
   getBetterStackState: vi.fn(),
   loadBetterStackConnection: vi.fn(),
   getRenderState: vi.fn(),
@@ -149,6 +151,11 @@ vi.mock("./integrations/neon-mcp", () => ({
     "https://mcp.neon.tech/mcp?readonly=true&category=projects&category=branches&category=schema&category=querying",
   getNeonIntegrationState: mocks.getNeonState,
   loadNeonMcpWorkerConnection: mocks.loadNeonConnection,
+}));
+vi.mock("./integrations/notion-mcp", () => ({
+  NOTION_MCP_ENDPOINT_URL: "https://mcp.notion.com/mcp",
+  getNotionMcpIntegrationState: mocks.getNotionState,
+  loadNotionMcpWorkerConnection: mocks.loadNotionConnection,
 }));
 vi.mock("./integrations/latitude-mcp", () => ({
   LATITUDE_MCP_ENDPOINT_URL: "https://api.latitude.so/v1/mcp",
@@ -903,6 +910,40 @@ describe("plugin gateway registration cache", () => {
       {
         ...attioRecord,
         server: { ...attioRecord.server, url: "https://evil.example/mcp" },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
+  it("binds Notion credentials only to Notion's exact hosted MCP endpoint", async () => {
+    const notionRecord = record({
+      pluginName: "notion",
+      pluginLabel: "Notion",
+      pluginDescription: "Notion workspace tools.",
+      connectionProvider: "notion",
+      server: {
+        name: "notion",
+        type: "streamable-http",
+        url: "https://mcp.notion.com/mcp",
+        headers: {},
+      },
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([notionRecord]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:notion:notion",
+        connectionProvider: "notion",
+        getState: mocks.getNotionState,
+        loadConnection: mocks.loadNotionConnection,
+      }),
+    ]);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...notionRecord,
+        server: { ...notionRecord.server, url: "https://mcp.notion.com.evil.example/mcp" },
       },
     ]);
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
