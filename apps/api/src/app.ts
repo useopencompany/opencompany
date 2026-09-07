@@ -2666,6 +2666,9 @@ export function createApiApp(input: CreateApiAppInput) {
   }
   if (input.gmailMcp) {
     app.post("/mcp/plugins/gmail", (c) => input.gmailMcp!.handle(c.req.raw));
+    app.get("/mcp/plugins/gmail/attachments/download", (c) =>
+      input.gmailMcp!.downloadAttachment(c.req.raw),
+    );
   }
   if (input.googleCalendarMcp) {
     app.post("/mcp/plugins/google-calendar", (c) => input.googleCalendarMcp!.handle(c.req.raw));
