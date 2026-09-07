@@ -83,7 +83,7 @@
     "eslint-config-next": "16.2.10",
     "next": "16.2.11",
     "pg": "^8.23.0",
-    "vercel": "^54.21.1"
+    "vercel": "^59.11.2"
   },
   "overrides": {
     "@floating-ui/core": "1.8.0",
