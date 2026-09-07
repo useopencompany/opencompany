@@ -375,7 +375,7 @@ export function createGoogleDriveMcpService(input: {
             {
               title: "Replace text in Google Doc",
               description:
-                "Replace every exact occurrence of text in an existing Google Doc. Use only when the user explicitly requested this edit.",
+                "Replace every exact occurrence of text in an existing Google Doc. Use this for focused edits and additions: replace a unique nearby anchor with that same anchor plus the new text so surrounding formatting and interactive elements remain intact. Use only when the user explicitly requested this edit.",
               inputSchema: replaceDocumentTextSchema,
               annotations: EDIT_ANNOTATIONS,
             },
@@ -387,7 +387,7 @@ export function createGoogleDriveMcpService(input: {
             {
               title: "Replace Google Doc contents",
               description:
-                "Replace all body content in one Google Docs tab. Prefer markdown to create native Docs formatting; use legacy text only for deliberately unformatted content. Embedded content is removed. Use only when the user explicitly requested a full replacement.",
+                "Replace all body content in one Google Docs tab. Use only when the user explicitly requested a full rewrite, never for a focused addition, deletion, or update. Prefer markdown to create native Docs formatting; use legacy text only for deliberately unformatted content. Embedded content and interactive checkbox state cannot be preserved.",
               inputSchema: replaceDocumentContentsSchema,
               annotations: REPLACE_CONTENTS_ANNOTATIONS,
             },
@@ -398,7 +398,7 @@ export function createGoogleDriveMcpService(input: {
         {
           serverInfo: { name: "opencompany-google-drive", version: "0.2.0" },
           instructions:
-            "Use search_files or list_recent_files to find file ids, read_file_content for bounded natural-language content, and write tools only after the user requested a Drive change. Prefer replace_document_text for focused edits because it preserves the surrounding Google Docs formatting. For a requested full rewrite, use replace_document_contents with markdown so headings, lists, checkboxes, and inline styles become native Docs formatting; use its legacy text field only when the user wants unformatted text. Full replacement removes existing body formatting and embedded content before applying the requested Markdown structure.",
+            "Use search_files or list_recent_files to find file ids, read_file_content for bounded natural-language content, and write tools only after the user requested a Drive change. Use replace_document_text for every focused edit, including additions: replace a unique nearby anchor with that same anchor plus the new content. This preserves surrounding formatting and interactive state. Use replace_document_contents only when the user explicitly requested a full rewrite; use markdown so headings, lists, checkboxes, and inline styles become native Docs formatting, or legacy text only for deliberately unformatted content. Full replacement reconstructs the body and cannot preserve embedded content or interactive checkbox state.",
         },
         {
           streamableHttpEndpoint: "/mcp/plugins/google-drive",
@@ -808,6 +808,9 @@ async function replaceDocumentContents(
       },
     });
   }
+  if (endIndex > 2 || compiled.text) {
+    requests.push(...resetDocumentBodyParagraph(tab.tabId));
+  }
   if (compiled.text) {
     requests.push({
       insertText: {
@@ -973,6 +976,64 @@ function documentBodyEndIndex(documentTab: Record<string, unknown>) {
   const endIndex = indexes.length > 0 ? Math.max(...indexes) : undefined;
   if (!endIndex) throw new Error("Google Docs returned an invalid document body.");
   return endIndex;
+}
+
+function resetDocumentBodyParagraph(tabId: string): Record<string, unknown>[] {
+  const range = { startIndex: 1, endIndex: 2, tabId };
+  return [
+    // Google Docs does not let callers delete the body's final newline. After the old contents
+    // are removed, that surviving paragraph still owns its list and direct formatting. Text
+    // inserted into it inherits those styles across every new paragraph unless we clear them first.
+    { deleteParagraphBullets: { range } },
+    {
+      updateParagraphStyle: {
+        range,
+        paragraphStyle: { namedStyleType: "NORMAL_TEXT" },
+        fields: [
+          "namedStyleType",
+          "alignment",
+          "lineSpacing",
+          "direction",
+          "spacingMode",
+          "spaceAbove",
+          "spaceBelow",
+          "borderBetween",
+          "borderTop",
+          "borderBottom",
+          "borderLeft",
+          "borderRight",
+          "indentFirstLine",
+          "indentStart",
+          "indentEnd",
+          "tabStops",
+          "keepLinesTogether",
+          "keepWithNext",
+          "avoidWidowAndOrphan",
+          "shading",
+          "pageBreakBefore",
+        ].join(","),
+      },
+    },
+    {
+      updateTextStyle: {
+        range,
+        textStyle: {},
+        fields: [
+          "bold",
+          "italic",
+          "underline",
+          "strikethrough",
+          "smallCaps",
+          "backgroundColor",
+          "foregroundColor",
+          "fontSize",
+          "weightedFontFamily",
+          "baselineOffset",
+          "link",
+        ].join(","),
+      },
+    },
+  ];
 }
 
 function googleDocumentUrl(fileId: string, tabId?: string) {
