@@ -5,9 +5,11 @@ import type { ChatMessage, ChatMessageAttachment } from "@opencompany/db/product
 import { createGatewayAttribution } from "@opencompany/telemetry";
 import {
   generateText,
+  jsonSchema,
   type LanguageModelUsage,
   type ToolApprovalRequestOutput,
   type ToolSet,
+  tool,
 } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
@@ -655,17 +657,16 @@ describe("opencompanyModelMessagesFromStored", () => {
     expect(JSON.stringify(modelMessages)).toContain("Revenue was up 18% in Q2.");
   });
 
-  it("normalizes a legacy null approval reason before a paused Run continues", async () => {
+  it("orders an equal-timestamp assistant placeholder after its user before continuing approval", async () => {
+    const turnCreatedAt = new Date("2026-09-07T14:34:11.453Z");
     const messages = [
+      // The durable insert creates both rows at the same instant. The random assistant id can sort
+      // before the client message id at the database tie-breaker, as happened in production.
       storedMessage({
-        id: "user_approval",
-        role: "user",
-        content: "Look up the customer.",
-      }),
-      storedMessage({
-        id: "assistant_approval",
+        id: "message_assistant_approval",
         role: "assistant",
         content: "",
+        createdAt: turnCreatedAt,
         debugTrace: {
           schemaVersion: "opencompany.chat.debug.v1",
           model: "anthropic/claude-sonnet-5",
@@ -681,9 +682,16 @@ describe("opencompanyModelMessagesFromStored", () => {
         },
       }),
       storedMessage({
+        id: "user_approval",
+        role: "user",
+        content: "Look up the customer.",
+        createdAt: turnCreatedAt,
+      }),
+      storedMessage({
         id: "user_later",
         role: "user",
         content: "Do not include this queued turn.",
+        createdAt: new Date(turnCreatedAt.getTime() + 1_000),
       }),
     ];
 
@@ -696,6 +704,9 @@ describe("opencompanyModelMessagesFromStored", () => {
     expect(serialized).toContain('"approved":true');
     expect(serialized).not.toContain('"reason":null');
     expect(serialized).not.toContain("Do not include this queued turn.");
+    expect(modelMessages.map((message) => message.role)).toEqual(["user", "assistant", "tool"]);
+
+    const execute = vi.fn(async () => ({ ok: true, customer: "Acme" }));
 
     await expect(
       generateText({
@@ -711,8 +722,26 @@ describe("opencompanyModelMessagesFromStored", () => {
           }),
         }),
         messages: modelMessages,
+        tools: {
+          use_action: tool({
+            inputSchema: jsonSchema({
+              type: "object",
+              properties: {
+                action: { type: "string" },
+                params: { type: "object" },
+              },
+              required: ["action", "params"],
+              additionalProperties: false,
+            }),
+            execute,
+          }),
+        },
       }),
     ).resolves.toMatchObject({ text: "The approved action can continue." });
+    expect(execute).toHaveBeenCalledWith(
+      { action: "crm.lookup", params: { customer: "Acme" } },
+      expect.objectContaining({ toolCallId: "tool_call_approval" }),
+    );
   });
 
   it("replays a trusted denial response when a paused Run continues", async () => {
@@ -798,10 +827,19 @@ async function* streamParts(
   }
 }
 
+let storedMessageSequence = 0;
+
 function storedMessage(
   input: Pick<ChatMessage, "id" | "role" | "content"> &
-    Partial<Pick<ChatMessage, "debugTrace" | "attachments" | "attachmentTexts">>,
+    Partial<
+      Pick<
+        ChatMessage,
+        "debugTrace" | "attachments" | "attachmentTexts" | "createdAt" | "updatedAt"
+      >
+    >,
 ): StoredChatMessage {
+  const createdAt =
+    input.createdAt ?? new Date(Date.UTC(2026, 0, 1) + storedMessageSequence++ * 1_000);
   return {
     id: input.id,
     sessionId: "goat_chat_1",
@@ -811,8 +849,8 @@ function storedMessage(
     debugTrace: input.debugTrace ?? null,
     attachments: input.attachments ?? null,
     attachmentTexts: input.attachmentTexts ?? null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
+    createdAt,
+    updatedAt: input.updatedAt ?? createdAt,
     taskDisplayId: null,
     taskName: null,
     taskPrompt: null,
