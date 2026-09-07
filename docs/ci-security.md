@@ -47,6 +47,12 @@ revisit the policy separately after designing a credential-free, cache-safe publ
 - third-party actions pinned to full commit SHAs; and
 - a single required `PR gate` result that fails unless every verification job succeeds.
 
+GitHub's default CodeQL setup separately scans trusted pull requests and the default branch. It is
+not a required merge check because [default setup excludes pull requests from
+forks](https://docs.github.com/en/code-security/concepts/code-scanning/setup-types). Requiring its
+check contexts would leave an approved external pull request blocked on checks that GitHub never
+creates.
+
 `.github/workflows/release-production.yml` is a separate trusted path. It only accepts `push` to
 `main` or `workflow_dispatch`, verifies the selected commit before the privileged job, and scopes
 deployment/OIDC permission to the production release job.
@@ -56,8 +62,8 @@ deployment/OIDC permission to the production release job.
 The live `main` policy was verified on 2026-09-07 and is split across two active rulesets so review
 speed does not weaken repository integrity:
 
-- `Protect main` blocks branch deletion and force pushes and requires an up-to-date `PR gate` plus
-  both CodeQL checks. It has no bypass actors.
+- `Protect main` blocks branch deletion and force pushes and requires an up-to-date `PR gate`. It
+  has no bypass actors.
 - `Require PR review` requires one approving CODEOWNER review, dismisses stale approvals after new
   commits, and requires review conversations to be resolved. `louismorgner` and `MonsterDeveloper`
   are its only bypass actors, both in PR-only mode.
@@ -69,10 +75,13 @@ performing the merge rather than the pull-request author. The project policy the
 use to maintainer-authored work; an external contribution must receive one CODEOWNER approval.
 
 [PR #1620](https://github.com/useopencompany/opencompany-experimental/pull/1620) verified the
-app-backed `louismorgner` path end to end: GitHub reported `REVIEW_REQUIRED`, every required check
-passed, and the PR merged with zero reviews through the configured bypass. GitHub CLI requires
-`--admin` to select that bypass explicitly. Maintainers may use it only after verifying the exact
-head and every required check, and never for an external contribution.
+app-backed `louismorgner` path end to end: GitHub reported `REVIEW_REQUIRED`, the exact head passed
+the then-required checks, and the PR merged with zero reviews through the configured bypass. GitHub
+CLI requires `--admin` to select that bypass explicitly. Maintainers may use it only after verifying
+the exact head and the required `PR gate`, and never for an external contribution.
+
+Repository web-editor commit sign-off is disabled. That matches the approved inbound-equals-outbound
+contribution terms and the explicit decision not to require DCO sign-off.
 
 The production environment has no redundant manual reviewer. It accepts deployments only from
 `main`, and administrators cannot bypass that branch policy. Production remains automatic after a
