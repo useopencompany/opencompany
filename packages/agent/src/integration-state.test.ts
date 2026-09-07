@@ -355,6 +355,30 @@ describe("Attio integration state", () => {
   });
 });
 
+describe("Notion integration state", () => {
+  it("exposes the personal MCP connection to plugin settings", () => {
+    const state = integrationStateFromRows([
+      {
+        id: "gint_notion_mcp",
+        provider: "notion",
+        externalId: "notion_mcp",
+        accountName: "Notion",
+        connectionLabel: "Acme workspace",
+        status: "connected",
+        scopes: ["default"],
+        capabilityModes: { query: "ask", draft: "ask", write: "ask" },
+      },
+    ]);
+
+    expect(state.personalAccounts.notion).toEqual([
+      expect.objectContaining({
+        integrationId: "gint_notion_mcp",
+        connectionLabel: "Acme workspace",
+      }),
+    ]);
+  });
+});
+
 describe("Granola integration state", () => {
   it("keeps MCP tool authorization separate from legacy API ingestion", () => {
     const state = integrationStateFromRows([

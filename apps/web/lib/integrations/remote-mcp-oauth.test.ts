@@ -29,6 +29,7 @@ import {
   verifyLinearMcpState,
 } from "@/lib/integrations/linear-mcp";
 import { startNeonMcpOAuth, verifyNeonMcpState } from "@/lib/integrations/neon-mcp";
+import { startNotionMcpOAuth, verifyNotionMcpState } from "@/lib/integrations/notion-mcp";
 import { startPostHogMcpOAuth, verifyPostHogMcpState } from "@/lib/integrations/posthog-mcp";
 import { startSigNozMcpOAuth, verifySigNozMcpState } from "@/lib/integrations/signoz-mcp";
 import { startVercelMcpOAuth, verifyVercelMcpState } from "@/lib/integrations/vercel-mcp";
@@ -205,6 +206,31 @@ describe("opencompany remote MCP OAuth", () => {
       provider: "attio",
       userWorkosId: "user_1",
       returnTo: "/settings/plugins/attio",
+    });
+  });
+
+  it("connects Notion through dynamic OAuth with its documented endpoint and scope", async () => {
+    await startNotionMcpOAuth({
+      userWorkosId: "user_1",
+      returnTo: "/settings/plugins/notion",
+    });
+
+    expect(auth).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ serverUrl: "https://mcp.notion.com/mcp" }),
+    );
+    expect(observed.callbackUrl).toBe(
+      "https://opencompany.example/api/integrations/notion/callback",
+    );
+    expect(observed.clientMetadata).toMatchObject({
+      scope: "default",
+      grant_types: ["authorization_code", "refresh_token"],
+    });
+    expect(observed.clientInformation).toBeUndefined();
+    expect(verifyNotionMcpState(observed.state)).toMatchObject({
+      provider: "notion",
+      userWorkosId: "user_1",
+      returnTo: "/settings/plugins/notion",
     });
   });
 
