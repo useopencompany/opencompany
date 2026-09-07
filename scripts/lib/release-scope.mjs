@@ -1,9 +1,10 @@
-export const RELEASE_SURFACES = ["web", "marketing", "api", "runner"];
+export const RELEASE_SURFACES = ["web", "marketing", "docs", "api", "runner"];
 export const RELEASE_STATE_SURFACES = ["database", ...RELEASE_SURFACES];
 
 const PACKAGE_SURFACES = new Map([
   ["@opencompany/web", ["web"]],
   ["@opencompany/marketing", ["marketing"]],
+  ["@opencompany/docs", ["docs"]],
   ["@opencompany/api", ["api"]],
   ["@opencompany/runner", ["runner"]],
   ["@opencompany/db", ["web", "api", "runner"]],
@@ -11,7 +12,7 @@ const PACKAGE_SURFACES = new Map([
 ]);
 
 const ALL_SURFACES = RELEASE_SURFACES;
-const VERCEL_SURFACES = ["web", "marketing"];
+const VERCEL_SURFACES = ["web", "marketing", "docs"];
 
 const FORCE_RULES = [
   { files: [".github/workflows/release-production.yml"], surfaces: ALL_SURFACES },

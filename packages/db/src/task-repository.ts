@@ -441,7 +441,10 @@ export class PostgresTaskRepository implements TaskRepository {
     const initialMessageContent =
       this.options.compatibility?.initialMessageContent ?? input.command.goal;
     const requestedModel = getAgentModelDefinition(input.command.model)?.id;
-    const model = requestedModel ? resolveAvailableAgentModelId(requestedModel) : undefined;
+    const model =
+      requestedModel && input.command.engine === "opencompany"
+        ? resolveAvailableAgentModelId(requestedModel)
+        : requestedModel;
     const runtimeModel = model ? runtimeModelName(input.command.engine, model) : null;
     if (!runtimeModel || !model) {
       throw new CoreError("invalid_argument", `Unsupported ${input.command.engine} Task model.`);

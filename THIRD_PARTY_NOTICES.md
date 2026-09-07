@@ -46,12 +46,17 @@ The brand paths identified in `packages/ui/src/icons/service-icons.tsx` and
 not require attribution; this notice preserves source provenance. Brand names and logos may still
 be protected as trademarks despite the copyright dedication.
 
-## Brand assets and remaining provenance review
+## Brand assets and publication inventory
 
 Other third-party brand glyphs identify integrations or compatible services. All third-party marks
 belong to their respective owners and are subject to [TRADEMARKS.md](./TRADEMARKS.md).
 
-This inventory is not the repository-wide publication audit. Before making the repository public,
-the release owner must still verify the source and redistribution basis for every tracked font,
-image, screenshot, generated artifact, sample file, skill, and third-party example, and must remove
-or replace anything that cannot be verified.
+The initial publication inventory was reviewed on 2026-09-07. Tracked binary media outside the
+copied Firecrawl fixtures consists of opencompany icon derivatives, a founder profile image, a
+product screenshot, and small parser fixtures generated for this repository. There are no tracked
+font files. No additional third-party source markers requiring a separate copyright notice were
+found.
+
+Future copied material must include its source, redistribution basis, and any required notice before
+merge. Project-owned media must continue to have publication rights; unclear material must be
+removed or replaced.

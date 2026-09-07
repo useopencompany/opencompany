@@ -16,6 +16,12 @@ test("production preflight follows the deployed runtime boundaries", async () =>
   ]);
   const groups = readGroups(source);
 
+  assertIncludes(groups.release.required, [
+    "OPENCOMPANY_VERCEL_PROJECT_ID",
+    "MARKETING_VERCEL_PROJECT_ID",
+    "DOCS_VERCEL_PROJECT_ID",
+  ]);
+
   assert.match(
     source,
     /requested\.length > 0 \? requested : \["web", "api", "runner", "release"\]/u,

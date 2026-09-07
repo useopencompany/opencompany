@@ -3,6 +3,10 @@
 `.env.example` is the complete local template. This document records ownership rather than
 duplicating every optional provider variable.
 
+Codex sandboxes default to `gpt-6-astra` and also offer GPT 5.6 Sol, Terra, and Luna.
+`RUNNER_CODEX_MODEL` overrides the runner's fallback model; an explicit session or task selection
+takes precedence. Codex availability is separate from the opencompany engine's Gateway catalog.
+
 ## Infisical paths
 
 | Environment/path | Consumers | Contents |
@@ -56,8 +60,8 @@ contracts include:
   E2B, Blob (including Plugin data archives), model providers,
   GitHub/Google/X integration credentials, opencompany PostHog, and Redis values; capability
   controls and provider-specific tuning remain optional.
-- Release: production DB URL, Vercel/Render credentials and project/service IDs, opencompany/API/runner
-  URLs.
+- Release: production DB URL, Vercel/Render credentials and project/service IDs (including
+  `DOCS_VERCEL_PROJECT_ID`), and opencompany/API/runner URLs.
 
 Browser clients call the non-secret `NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN` directly for commands and
 authorized read models. Server Components use the server-only `OPENCOMPANY_API_ORIGIN`. Configure both
@@ -112,6 +116,10 @@ owning runtimes.
 The marketing Vercel project uses `NEXT_PUBLIC_OPENCOMPANY_POSTHOG_TOKEN` and
 `NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST` for basic page and conversion analytics in the same PostHog project
 as the product. Both variables are required in production and optional for local marketing work.
+
+The docs Vercel project has no runtime secrets. CI resolves it through `DOCS_VERCEL_PROJECT_ID` in
+Infisical `prod` `/release` and rejects a project whose root is not `apps/docs` or whose ID is shared
+with another Vercel surface.
 
 ## Authenticated browser profiles
 

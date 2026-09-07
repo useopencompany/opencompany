@@ -29,7 +29,7 @@ describe("opencompany model options", () => {
   });
 
   it("falls back within the conversation's engine model catalog", () => {
-    expect(normalizeConversationModel("codex", "openai/gpt-6-astra")).toBe(CODEX_DEFAULT_MODEL_ID);
+    expect(normalizeConversationModel("codex", "unknown/model")).toBe(CODEX_DEFAULT_MODEL_ID);
     expect(normalizeConversationModel("codex", "anthropic/claude-fable-5")).toBe(
       CODEX_DEFAULT_MODEL_ID,
     );
@@ -94,7 +94,7 @@ describe("opencompany model options", () => {
         supportsReasoning: true,
       }),
     );
-    expect(normalizeModel("openai/gpt-6-astra")).toBe(CODEX_DEFAULT_MODEL_ID);
+    expect(normalizeModel("openai/gpt-6-astra")).toBe("openai/gpt-5.6-sol");
     expect(normalizeModel("openai/gpt-5.6-sol")).toBe("openai/gpt-5.6-sol");
     expect(normalizeModel("openai/gpt-5.6-terra")).toBe("openai/gpt-5.6-terra");
     expect(modelContextWindowTokens("openai/gpt-6-astra")).toBe(1_050_000);
