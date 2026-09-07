@@ -17,6 +17,7 @@ import {
   productionEnvironmentEntries,
   restorePreparedVercelDirectory,
   savePreparedVercelDirectory,
+  surfaceConfig,
   validateProject,
   vercelCurlArgs,
 } from "./release-vercel.mjs";
@@ -49,6 +50,36 @@ test("requires marketing to use its own correctly rooted project", () => {
         { projectId: "same", webProjectId: "same" },
       ),
     /separate Vercel project/,
+  );
+});
+
+test("configures docs as a separate Vercel project with no runtime env", () => {
+  assert.deepEqual(surfaceConfig("docs"), {
+    projectEnv: "DOCS_VERCEL_PROJECT_ID",
+    rootDirectory: "apps/docs",
+    requiredEnv: [],
+    minimumSkewProtectionMaxAge: 0,
+  });
+  assert.doesNotThrow(() =>
+    validateProject(
+      "docs",
+      { id: "docs", rootDirectory: "apps/docs" },
+      {
+        projectId: "docs",
+        webProjectId: "web",
+        marketingProjectId: "marketing",
+        docsProjectId: "docs",
+      },
+    ),
+  );
+  assert.throws(
+    () =>
+      validateProject(
+        "docs",
+        { id: "web", rootDirectory: "apps/docs" },
+        { projectId: "web", webProjectId: "web", docsProjectId: "web" },
+      ),
+    /separate Vercel project from web/u,
   );
 });
 
