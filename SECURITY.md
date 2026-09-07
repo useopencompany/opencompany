@@ -11,7 +11,7 @@ commits and releases are not supported.
 
 ## Reporting a Vulnerability
 
-Use [GitHub private vulnerability reporting](https://github.com/useopencompany/opencompany-experimental/security/advisories/new).
+Use [GitHub private vulnerability reporting](https://github.com/useopencompany/opencompany/security/advisories/new).
 Include, where possible:
 
 - the affected component and commit or version;

@@ -24,7 +24,7 @@ product backend. Values are scoped: API database, Electric, model, billing, inte
 provider-ingress secrets belong in `/api`; runner execution secrets belong in `/runner`. Do not
 mirror an API-owned secret into `/web` unless a current thin relay actually consumes it.
 
-The names-only production audit is recorded in [#1243](https://github.com/useopencompany/opencompany-experimental/issues/1243).
+The names-only production audit is recorded in [#1243](https://github.com/useopencompany/opencompany/issues/1243).
 Two web exceptions remain deliberately classified as suspects rather than prune candidates:
 `BLOB_READ_WRITE_TOKEN` backs the cached-client Brain upload adapter. The runner also uses its
 `/runner` value for private, bounded durable Plugin data archives; it never places that token in a

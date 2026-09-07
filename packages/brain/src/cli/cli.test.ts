@@ -780,7 +780,7 @@ describe("opencompany-brain cli", () => {
         "--title",
         "opencompany Brain",
         "--truth",
-        "opencompany Brain ingestion now preserves live tracker provenance. [[source:github:useopencompany/opencompany-experimental:pull:123|PR #123]]",
+        "opencompany Brain ingestion now preserves live tracker provenance. [[source:github:useopencompany/opencompany:pull:123|PR #123]]",
       ]),
     ).resolves.toMatchObject({ exitCode: 0 });
 

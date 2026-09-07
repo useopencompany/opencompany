@@ -233,7 +233,7 @@ describe("resolvePlugin", () => {
     const plugin = await resolvePlugin({
       url: "example/plugins",
       fetcher: fetcher(files),
-      trustedCapabilitySources: ["useopencompany/opencompany-experimental"],
+      trustedCapabilitySources: ["useopencompany/opencompany"],
     });
 
     expect(plugin.capabilities).toEqual([]);
