@@ -1,6 +1,6 @@
 # Git contributor email privacy
 
-- Status: Accepted
+- Status: Resolved for initial publication
 - Date: 2026-09-04
 - Decision owner: Repository publication owner
 
@@ -39,6 +39,14 @@ tag intended for publication, have affected contributors approve the replacement
 the all-ref secret and personal-data scans. Treat force-pushing rewritten history and purging old
 objects from the host as an explicit publication operation; updating the default branch alone is not
 sufficient.
+
+## Initial publication record
+
+On 2026-09-07, the publication owner confirmed that the affected contributors are aware that their
+Git attribution will become public, consent to publication, and raised no objection. The final scan
+covered all live branches and pull-request heads intended to remain reachable. No history rewrite is
+required for the initial publication. Raw addresses and private responses are deliberately not
+recorded in the repository.
 
 ## Future commits
 

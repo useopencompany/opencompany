@@ -612,26 +612,34 @@ describe("Postgres Task repository", () => {
     });
   });
 
-  it("stamps external-engine Tasks with the action host-tool contract", async () => {
-    const created = await service.createTask(actor(), {
-      idempotencyKey: "codex-task-host-contract",
-      goal: "Review the repository",
-      engine: "codex",
-      model: "openai/gpt-5.6-sol",
-      source: "manual",
-    });
+  it.each(["openai/gpt-6-astra", "openai/gpt-5.6-sol"])(
+    "preserves %s and stamps the external-engine host-tool contract",
+    async (model) => {
+      const created = await service.createTask(actor(), {
+        idempotencyKey: "codex-task-host-contract",
+        goal: "Review the repository",
+        engine: "codex",
+        model,
+        source: "manual",
+      });
 
-    await expect(
-      database.query<{ host_tool_contract_version: string }>(
-        `SELECT host_tool_contract_version
-         FROM goat.codex_chat_sessions
-         WHERE chat_session_id = $1`,
-        [created.task.conversationId],
-      ),
-    ).resolves.toMatchObject({
-      rows: [{ host_tool_contract_version: ACTION_HOST_TOOL_CONTRACT_VERSION }],
-    });
-  });
+      await expect(
+        database.query<{ host_tool_contract_version: string; model: string }>(
+          `SELECT host_tool_contract_version, model
+           FROM goat.codex_chat_sessions
+           WHERE chat_session_id = $1`,
+          [created.task.conversationId],
+        ),
+      ).resolves.toMatchObject({
+        rows: [
+          {
+            host_tool_contract_version: ACTION_HOST_TOOL_CONTRACT_VERSION,
+            model: model.replace(/^openai\//, ""),
+          },
+        ],
+      });
+    },
+  );
 
   it("snapshots currently enabled Plugin IDs into the Workflow Harness at Task creation", async () => {
     await database.exec(`
