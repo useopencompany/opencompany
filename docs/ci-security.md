@@ -51,6 +51,28 @@ revisit the policy separately after designing a credential-free, cache-safe publ
 `main` or `workflow_dispatch`, verifies the selected commit before the privileged job, and scopes
 deployment/OIDC permission to the production release job.
 
+## Review and production policy
+
+The live `main` policy was verified on 2026-09-07 and is split across two active rulesets so review
+speed does not weaken repository integrity:
+
+- `Protect main` blocks branch deletion and force pushes and requires an up-to-date `PR gate` plus
+  both CodeQL checks. It has no bypass actors.
+- `Require PR review` requires one approving CODEOWNER review, dismisses stale approvals after new
+  commits, and requires review conversations to be resolved. `louismorgner` and `MonsterDeveloper`
+  are its only bypass actors, both in PR-only mode.
+- The opencompany GitHub App is not a separate bypass actor. Its current user access tokens act as
+  the connected GitHub user, so agent work inherits that user's repository access and review bypass.
+
+PR-only bypass preserves a pull-request and audit trail, but GitHub evaluates it against the actor
+performing the merge rather than the pull-request author. The project policy therefore limits bypass
+use to maintainer-authored work; an external contribution must receive one CODEOWNER approval.
+
+The production environment has no redundant manual reviewer. It accepts deployments only from
+`main`, and administrators cannot bypass that branch policy. Production remains automatic after a
+permitted merge because the release workflow independently verifies the selected `main` commit
+before the privileged deployment job receives OIDC or environment secrets.
+
 ## Repository settings contract
 
 The repository owner must keep these settings in **Settings → Actions → General**:
