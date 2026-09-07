@@ -39,13 +39,18 @@ bun run build
 bun run test
 ```
 
-Verify the secret scan in GitHub Actions for the current branch's PR:
+Verify the secret scan in GitHub Actions for the current branch's PR. Query the commit check runs
+through the REST API so this also works with GitHub App tokens that cannot read every status-rollup
+context:
 
 ```bash
-gh pr view --json headRefOid,statusCheckRollup,url
+head=$(gh pr view --json headRefOid --jq .headRefOid)
+gh api -H "Accept: application/vnd.github+json" \
+  "repos/{owner}/{repo}/commits/$head/check-runs" \
+  --jq '.check_runs[] | select(.name == "Verify pull request / Secret scan") | {head_sha, status, conclusion, html_url}'
 ```
 
-Require `Verify pull request / Secret scan` to have completed with `SUCCESS` for the current PR head. Use the linked Actions run to inspect a failure. CI runs TruffleHog; no local installation or scan is required.
+Require `Verify pull request / Secret scan` to have completed with `success` for the current PR head. Use the returned Actions URL to inspect a failure. CI runs TruffleHog; no local installation or scan is required.
 
 If the scan is missing, pending, skipped, cancelled, failing, or inaccessible, report secret scanning as unverified or failed and withhold `Ready to merge`. If there is no PR or there are unpushed commits or local changes, report that those changes need a successful CI scan after commit/push. A passing scan on an earlier head does not cover them.
 

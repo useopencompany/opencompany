@@ -5,13 +5,6 @@ tree; dependencies installed through a package manager carry their own license m
 
 ## MIT-licensed material
 
-### CodeRabbit agent skills
-
-- Files: `.agents/skills/autofix/**`, `.agents/skills/code-review/**`
-- Source: <https://github.com/coderabbitai/skills>
-- License: MIT
-- Copyright (c) 2026 CodeRabbit AI
-
 ### Firecrawl AnyDoc test fixtures
 
 - Files: `packages/file-extract/src/fixtures/sample.doc`, `sample.ppt`, `sample.pptx`, `sample.xls`,
