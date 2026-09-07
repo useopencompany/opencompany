@@ -57,10 +57,10 @@ the launch or accepting an external pull request.
   were inventoried. Required copied-material provenance remains in
   [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md); the file stays because the covered Vercel
   skill, Firecrawl fixtures, and Simple Icons paths remain in the tree.
-- **Review and production (resolved 2026-09-07):** every contribution requires one independent
-  CODEOWNER approval, including maintainer and agent work. External contributions execute no Actions
-  workflow until a maintainer approves the held run. Review, the required `PR gate`, force-push, and
-  deletion rules have no bypass actors. Default CodeQL remains enabled for trusted changes
+- **Review and production (resolved 2026-09-07):** external contributions require one CODEOWNER
+  approval and execute no Actions workflow until a maintainer approves the held run. The two active
+  maintainers have PR-only review bypass for maintainer-authored work, but the required `PR gate`,
+  force-push, and deletion rules have no bypass. Default CodeQL remains enabled for trusted changes
   but is not required because its default setup does not scan fork pull requests. Production deploys
   verified `main` automatically, accepts no other branch, and disallows administrator bypass. See
   [CI security](../ci-security.md).

@@ -24,8 +24,8 @@ These conditions were verified on 2026-09-07:
   and pull-request heads found no verified credentials;
 - the project license, third-party notices, trademark boundary, contribution terms, security policy,
   code of conduct, and contributor-email decision were resolved;
-- every pull request requires one independent CODEOWNER approval, including maintainer and agent
-  work, with no review bypass actors;
+- external work requires one CODEOWNER approval, while the two maintainers have PR-only review
+  bypass for their own work;
 - deletion, force-push, and the credential-free `PR gate` have no bypass;
 - Actions has read-only default permissions, cannot approve pull requests, permits only selected
   actions, and requires actions to be pinned to a full commit SHA;
@@ -86,7 +86,8 @@ Confirm:
 - private vulnerability reporting is enabled;
 - `Protect main` requires only `PR gate` and blocks deletion and non-fast-forward pushes, with no
   bypass actor;
-- `Require PR review` requires one CODEOWNER approval and has an empty `bypass_actors` list;
+- `Require PR review` requires one CODEOWNER approval and allows PR-only bypass only for the two
+  maintainers;
 - Actions remains selected-actions-only, full-SHA pinned, read-only by default, and unable to approve
   pull requests; and
 - production remains restricted to the exact `main` branch with no administrator bypass.

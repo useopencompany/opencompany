@@ -60,18 +60,26 @@ deployment/OIDC permission to the production release job.
 
 ## Review and production policy
 
-The `main` policy uses two active rulesets:
+The live `main` policy was verified on 2026-09-07 and is split across two active rulesets so review
+speed does not weaken repository integrity:
 
-- `Protect main` blocks branch deletion and force pushes and requires an up-to-date `PR gate`.
+- `Protect main` blocks branch deletion and force pushes and requires an up-to-date `PR gate`. It
+  has no bypass actors.
 - `Require PR review` requires one approving CODEOWNER review, dismisses stale approvals after new
-  commits, and requires review conversations to be resolved.
-- Both rulesets have an empty `bypass_actors` list. Maintainers, GitHub Apps, and agents acting with
-  a maintainer's user access token must satisfy the same review requirement.
+  commits, and requires review conversations to be resolved. `louismorgner` and `MonsterDeveloper`
+  are its only bypass actors, both in PR-only mode.
+- The opencompany GitHub App is not a separate bypass actor. Its current user access tokens act as
+  the connected GitHub user, so agent work inherits that user's repository access and review bypass.
 
-Every pull request, including maintainer-authored and agent-authored work, needs approval from
-another maintainer in `CODEOWNERS`. Do not use `gh pr merge --admin`, change the rulesets, or switch
-credentials to work around a pending review. An agent can prepare the change, run verification,
-and open the pull request; it must wait for the independent review before merging.
+PR-only bypass preserves a pull-request and audit trail, but GitHub evaluates it against the actor
+performing the merge rather than the pull-request author. The project policy therefore limits bypass
+use to maintainer-authored work; an external contribution must receive one CODEOWNER approval.
+
+[PR #1620](https://github.com/useopencompany/opencompany/pull/1620) verified the
+app-backed `louismorgner` path end to end: GitHub reported `REVIEW_REQUIRED`, the exact head passed
+the then-required checks, and the PR merged with zero reviews through the configured bypass. GitHub
+CLI requires `--admin` to select that bypass explicitly. Maintainers may use it only after verifying
+the exact head and the required `PR gate`, and never for an external contribution.
 
 Repository web-editor commit sign-off is disabled. That matches the approved inbound-equals-outbound
 contribution terms and the explicit decision not to require DCO sign-off.
@@ -142,6 +150,9 @@ These overrides update vulnerable transitive copies while preserving compatible 
 other consumers. OpenTelemetry's LangChain instrumentation is updated before its core dependency;
 `package-json` moves to its compatible CommonJS v7 API to pick up patched Got v11; UUID v11 retains
 CommonJS exports for the Google clients; and Vercel's Undici v5 copies move to patched v6.
+The Rolldown override keeps Vite's resolved bundler within its declared version range when the
+dependency graph is re-resolved. Compatibility tests check that range and the telemetry SDK's
+core dependency, along with the affected desktop and Vercel APIs.
 
 Keep the audit free of blanket ignores. When an upstream release removes a vulnerable pin, remove
 the corresponding override after verifying the full audit and affected CLI/runtime behavior.

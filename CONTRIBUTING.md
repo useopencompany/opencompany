@@ -125,7 +125,13 @@ reviewable commits dismiss stale approvals. GitHub's default CodeQL setup remain
 trusted pull requests and `main`, but it is not a required merge check because GitHub excludes fork
 pull requests from default-setup analysis.
 
-Both `main` rulesets have no bypass actors. Maintainer-authored and agent-authored pull requests
-also require approval from another CODEOWNER. Agents using a maintainer's GitHub credentials inherit
-that review requirement. Do not use `gh pr merge --admin` or change protection settings to work
-around a pending review.
+The two named maintainers have PR-only review bypass so they can self-merge maintainer-authored work
+after the required `PR gate` passes. GitHub applies bypass permission to the person performing the
+merge rather than the pull-request author, so maintainers must not use that bypass to merge an
+unreviewed external contribution. The separate status-check, force-push, and deletion ruleset has no
+bypass actors.
+
+GitHub CLI does not select the review bypass automatically. After verifying that the exact PR head
+has passed every required check, an eligible maintainer may invoke the configured PR-only bypass
+with `gh pr merge --admin`. Never use that flag to merge an external contribution without its
+required CODEOWNER approval.
