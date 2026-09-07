@@ -6,6 +6,7 @@ import { deploymentEnvironment, latestSuccessfulDeploymentSha } from "./release-
 test("uses a distinct GitHub deployment environment for each surface", () => {
   assert.equal(deploymentEnvironment("database"), "production-database");
   assert.equal(deploymentEnvironment("runner"), "production-runner");
+  assert.equal(deploymentEnvironment("docs"), "production-docs");
   assert.throws(() => deploymentEnvironment("unknown"), /Unknown production surface/);
 });
 

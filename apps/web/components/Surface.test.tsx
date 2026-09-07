@@ -2143,7 +2143,7 @@ describe("Surface chat streaming UI", () => {
 
     await user.click(screen.getByRole("button", { name: "Model" }));
     await user.click(screen.getByText("Cloud Codex sandbox"));
-    const codexModelPicker = screen.getByRole("button", { name: "Codex model: GPT 5.6 Sol" });
+    const codexModelPicker = screen.getByRole("button", { name: "Codex model: GPT 6 Astra" });
     expect(codexModelPicker).toBeInTheDocument();
     await user.click(codexModelPicker);
     await user.click(screen.getByText("GPT 5.6 Terra"));
@@ -2944,7 +2944,7 @@ describe("Surface chat streaming UI", () => {
     expect(overlay).toHaveTextContent("@codex");
     expect(textarea).toHaveClass("text-transparent");
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Codex");
-    expect(screen.getByRole("button", { name: "Codex model: GPT 5.6 Sol" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Codex model: GPT 6 Astra" })).toBeInTheDocument();
 
     await user.type(textarea, "check repo access");
     await user.click(screen.getByRole("button", { name: "Send message" }));
@@ -2955,7 +2955,7 @@ describe("Surface chat streaming UI", () => {
     const body = chatMock.preparedRequestBodies.at(-1) as { newSessionId: string };
     expect(body).toMatchObject({
       newSessionId: expect.stringMatching(/^goat_chat_/),
-      model: "openai/gpt-5.6-sol",
+      model: "openai/gpt-6-astra",
       engine: { type: "codex", schemaVersion: 1 },
     });
     expect(screen.getByTestId("optimistic-chat-summaries")).toHaveTextContent(

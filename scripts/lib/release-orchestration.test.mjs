@@ -56,6 +56,7 @@ test("reports only selected surfaces without a deployment record or success", ()
       runner: { selected: true, deploymentId: "3", result: "failure" },
       web: { selected: true, deploymentId: "", result: "skipped" },
       marketing: { selected: false, deploymentId: "", result: "skipped" },
+      docs: { selected: false, deploymentId: "", result: "skipped" },
     }),
     ["runner", "web"],
   );
