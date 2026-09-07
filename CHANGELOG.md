@@ -7,8 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.24.0] - 2026-09-07
+
+### Added
+- Chat can now put a document or draft it writes into a side panel — resize it, open it full-screen, and come back to it later — instead of leaving it buried in the conversation (#1600, #1606) — @louis.
+- Workflows can now be triggered by plugin events: turn on the events you care about, per workspace, and the right workflow kicks off on its own — starting with a new Linear issue (#1602) — @louis.
+- The Gmail plugin can now download an email's attachments — pull the original file into a coding session or hand it straight to you, instead of only reading the message (#1622) — @louis.
+- Watch a connected browser profile as it works: authenticated browser sessions now show a live view right in chat while opencompany researches a page that needs you signed in (#1601) — @louis.
+
+### Changed
+- New Codex coding sessions now default to GPT-6 Astra, with Sol, Terra, and Luna still one pick away (#1627) — @louis.
+- Infisical is now an official plugin: connect it once from its plugin page and choose exactly what it can do, instead of the old Integrations card (#1595, #1598) — @louis.
+- Provider connections now live entirely in Plugins — the separate Integrations settings page is gone, and your authenticated browser profiles moved to Account settings (#1607) — @louis.
+- Filter the plugin catalog down to just what you've installed, so your connected tools are one click away (#1604) — @louis.
+
 ### Fixed
 - Google Docs rewritten from Markdown now keep headings, lists, checkboxes, and inline formatting instead of displaying raw Markdown as plain text (#1594) — @louis.
+- Reasoning you've expanded in a chat now stays open as the conversation updates, instead of collapsing on you (#1593) — @louis.
+- Home now shows all your active tasks instead of quietly hiding some of them (#1605) — @louis.
+- Coding sessions keep their GitHub access through a full turn, fixing a case where authorization could drop mid-run (#1599) — @louis.
+- Tasks that are waiting on you now hold their "waiting" status instead of appearing to reset (#1626) — @louis.
 
 ## [1.23.0] - 2026-09-04
 
