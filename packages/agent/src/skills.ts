@@ -2,6 +2,7 @@ import { assertSafeRelativePath, createWorkspaceSkillArtifact } from "@opencompa
 import { isValidBrainId } from "@opencompany/brain";
 import {
   type Actor,
+  CoreError,
   createSkillFileChunk,
   type SkillAuthoringInput,
   type SkillFileChunk,
@@ -16,6 +17,7 @@ import {
 } from "@opencompany/db/skill-bundle-repository";
 import { resolveWorkspaceSkillCatalog } from "@opencompany/db/skill-catalog";
 import { createSkillImportResolver } from "./skill-import";
+import type { WorkspaceSkillToolName } from "./workspace-skill-tools";
 
 export const MAX_CHAT_SKILLS = 16;
 export const MAX_CHAT_SKILL_BYTES = 1024 * 1024;
@@ -121,7 +123,7 @@ export async function createWorkspaceSkillForActor(input: {
 export async function updateWorkspaceSkillForActor(input: {
   actor: Actor;
   name: string;
-  skill: Omit<SkillAuthoringInput, "name">;
+  skill: Omit<SkillAuthoringInput, "name"> & { expectedBundleId?: string };
   db?: Db;
 }): Promise<UpdatedWorkspaceSkill> {
   const service = new SkillImportApplicationService(
@@ -135,6 +137,92 @@ export async function updateWorkspaceSkillForActor(input: {
     name: installation.name,
     command: `/${installation.name}`,
     bundleId: installation.bundle.id,
+  };
+}
+
+export async function executeWorkspaceSkillToolForActor(input: {
+  actor: Actor;
+  tool: WorkspaceSkillToolName;
+  args: Record<string, unknown>;
+  idempotencyKey: string;
+  db?: Db;
+}) {
+  const field = (name: string) => {
+    const value = input.args[name];
+    if (typeof value !== "string" || !value.trim()) {
+      throw new CoreError("invalid_argument", `${name} is required.`);
+    }
+    return value;
+  };
+  if (input.tool === "workspace_skills") {
+    return manageWorkspaceSkillsForActor({
+      ...input,
+      command: field("command"),
+      ...(input.args.name !== undefined ? { name: field("name") } : {}),
+    });
+  }
+  const skill = {
+    name: field("name"),
+    description: field("description"),
+    instructions: field("instructions"),
+  };
+  if (input.tool === "create_workspace_skill") {
+    return createWorkspaceSkillForActor({ ...input, skill });
+  }
+  return updateWorkspaceSkillForActor({
+    ...input,
+    name: skill.name,
+    skill: {
+      ...skill,
+      ...(input.args.expectedBundleId !== undefined
+        ? { expectedBundleId: field("expectedBundleId") }
+        : {}),
+    },
+  });
+}
+
+export async function manageWorkspaceSkillsForActor(input: {
+  actor: Actor;
+  command: string;
+  name?: string;
+  db?: Db;
+}) {
+  const service = new SkillImportApplicationService(
+    new PostgresSkillBundleRepository(input.db ?? getDb()),
+    createSkillImportResolver(),
+    { create: createWorkspaceSkillArtifact },
+  );
+  if (input.command === "list") {
+    const installations = await service.list(input.actor);
+    return {
+      skills: installations.map(({ name, enabled, bundle }) => ({
+        name,
+        description: bundle.description,
+        enabled,
+        source: bundle.source.type,
+        editable: bundle.source.type === "workspace",
+      })),
+    };
+  }
+  if (input.command !== "read" && input.command !== "archive") {
+    throw new CoreError("invalid_argument", "Use list, read, or archive for workspace Skills.");
+  }
+  if (!input.name?.trim()) {
+    throw new CoreError("invalid_argument", "An exact Skill name is required.");
+  }
+  if (input.command === "archive") {
+    await service.archive(input.actor, input.name);
+    return { archived: true, name: input.name.trim() };
+  }
+  const installation = await service.inspect(input.actor, input.name);
+  return {
+    name: installation.name,
+    description: installation.bundle.description,
+    instructions: installation.bundle.body,
+    bundleId: installation.bundle.id,
+    enabled: installation.enabled,
+    source: installation.bundle.source.type,
+    editable: installation.bundle.source.type === "workspace",
   };
 }
 

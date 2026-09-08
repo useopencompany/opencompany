@@ -32,12 +32,14 @@ export type ExternalEngineToolAuthorityState = {
   turnLeaseExpiresAt: Date | null;
   interruptRequestedAt: Date | null;
   membershipId: string;
+  workspaceRole: string;
   brainRef: string | null;
   userMessageId: string;
   assistantMessageId: string;
 };
 
 export type ExternalEngineToolAuthorizedContext = {
+  skillToolsEnabled: boolean;
   actorId: string;
   workspaceId: string;
   workspaceName: string;
@@ -87,6 +89,7 @@ export function authorizeExternalEngineToolCapability(input: {
     return null;
   }
   return {
+    skillToolsEnabled: state.workspaceRole === "admin",
     actorId: state.actorId,
     workspaceId: state.workspaceId,
     workspaceName: state.workspaceName,
