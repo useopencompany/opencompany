@@ -1,4 +1,4 @@
-import type { RunAttempt, RunEvent, RunExecutionRepository } from "@opencompany/core";
+import type { RunEvent, RunExecutionRepository } from "@opencompany/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CodexChatLeaseLostError } from "./codex-chat-errors";
 import { createProductChatProjector } from "./opencompany-chat-projector";
@@ -14,13 +14,14 @@ const usageMocks = vi.hoisted(() => ({
   recordModelUsageTokens: vi.fn(),
 }));
 const startAttempt = vi.fn(
-  async (): Promise<RunAttempt | null> => ({
+  async (): ReturnType<RunExecutionRepository["startAttempt"]> => ({
     id: "attempt_1",
     runId: "turn_1",
     number: 1,
     status: "running",
     workerId: "runner_1",
     deployVersion: null,
+    previousInfrastructureFailures: 0,
     startedAt: new Date("2026-07-30T10:00:00.000Z"),
     completedAt: null,
     errorCode: null,
