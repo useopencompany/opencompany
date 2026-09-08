@@ -62,7 +62,8 @@ describe("Infisical docs MCP connection", () => {
       ok: true,
       integrationId: "infisical:workspace_1:generation_1",
     });
-    if (!connection.ok) throw new Error("Expected a usable Infisical docs connection.");
+    if (!connection.ok || !connection.authProvider)
+      throw new Error("Expected a usable Infisical docs connection.");
     expect(await connection.authProvider.tokens()).toBeUndefined();
     expect(authorizationRequired).not.toHaveBeenCalled();
     expect(mocks.loadMetadata).toHaveBeenCalledWith({

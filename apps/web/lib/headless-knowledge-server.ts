@@ -116,3 +116,14 @@ async function serverResponseError(response: Response, fallback: string) {
     `${message ?? `${fallback} with HTTP ${response.status}.`}${requestId ? ` (request ${requestId})` : ""}`,
   );
 }
+
+export async function getHeadlessCustomMcp(
+  name: string,
+): Promise<import("@opencompany/protocol").CustomMcpStatusDto> {
+  const response = await (await serverKnowledgeClient()).v1.plugins[":name"]["custom-mcp"].$get({
+    param: { name },
+  });
+  if (!response.ok)
+    throw await serverResponseError(response, "Custom MCP connection loading failed");
+  return (await response.json()).data;
+}

@@ -45,6 +45,7 @@ export async function registerActionApproval(input: {
   capabilityId: string;
   params: Record<string, unknown>;
   decision?: "pending" | "denied";
+  approvalContext?: string;
   now?: Date;
   db?: DbLike;
 }): Promise<ActionApprovalRecord | null> {
@@ -55,7 +56,7 @@ export async function registerActionApproval(input: {
     actionId: input.actionId,
     sourceId: input.sourceId,
     capabilityId: input.capabilityId,
-    inputHash: actionApprovalInputHash(input.params),
+    inputHash: actionApprovalInputHash(input.params, input.approvalContext),
     status: input.decision ?? "pending",
     requestedAt: now.toISOString(),
     ...(input.decision === "denied" ? { resolvedAt: now.toISOString() } : {}),
@@ -166,8 +167,10 @@ export async function resolveActionApproval(input: {
     : { ok: false, reason: "conflict" };
 }
 
-export function actionApprovalInputHash(params: Record<string, unknown>) {
-  return createHash("sha256").update(stableJson(params)).digest("hex");
+export function actionApprovalInputHash(params: Record<string, unknown>, approvalContext?: string) {
+  return createHash("sha256")
+    .update(stableJson(approvalContext ? { params, approvalContext } : params))
+    .digest("hex");
 }
 
 export async function recordActionSourceDiscovery(input: {

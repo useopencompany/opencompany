@@ -1,3 +1,4 @@
+import { CustomMcpPluginDetail } from "@/components/CustomMcpPluginSettings";
 import {
   AttioPluginDetail,
   BetterStackPluginDetail,
@@ -27,7 +28,7 @@ import {
 import { OfficialSkillPluginDetail, PluginDetail } from "@/components/PluginSettings";
 import { SettingsContent } from "@/components/SettingsChrome";
 import { currentUser } from "@/lib/auth";
-import { getHeadlessPlugin } from "@/lib/headless-knowledge-server";
+import { getHeadlessCustomMcp, getHeadlessPlugin } from "@/lib/headless-knowledge-server";
 import {
   isOfficialMcpPluginName,
   isOfficialSkillPluginName,
@@ -94,6 +95,15 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
       >
         <div />
       </SettingsContent>
+    );
+  }
+  if (plugin.source.type === "custom_mcp") {
+    return (
+      <CustomMcpPluginDetail
+        plugin={plugin}
+        initialStatus={await getHeadlessCustomMcp(name)}
+        canEdit={context.role === "admin"}
+      />
     );
   }
   return <PluginDetail plugin={plugin} canEdit={context.role === "admin"} />;

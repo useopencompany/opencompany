@@ -396,7 +396,7 @@ function ActionApprovalCard({
         >
           {submitting === "accept" ? "Running..." : "Accept"}
         </button>
-        {allowAlways ? (
+        {allowAlways && !/^plugin:custom-[a-f0-9]{24}:/.test(action) ? (
           <button
             type="button"
             disabled={submitting !== null}

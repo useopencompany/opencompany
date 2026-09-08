@@ -431,6 +431,15 @@ export function PluginsSettings({
     plugins.map((plugin) => [plugin.name.toLocaleLowerCase(), plugin] as const),
   );
   const installedConfigs = configs.filter((config) => installedPlugins.has(config.name));
+  const customPlugins = plugins.filter((plugin) => plugin.source.type === "custom_mcp");
+  const installedCount = installedConfigs.length + customPlugins.length;
+  const visibleCustomPlugins = customPlugins.filter(
+    (plugin) =>
+      (activeFilter === "all" || activeFilter === "installed") &&
+      `${plugin.manifest.description ?? plugin.name} ${plugin.source.url}`
+        .toLocaleLowerCase()
+        .includes(normalizedQuery),
+  );
 
   useEffect(() => {
     if (catalogViewCaptured.current) return;
@@ -505,12 +514,23 @@ export function PluginsSettings({
       contentClassName="max-w-[960px]"
     >
       <PluginConnectionFeedback />
+      {canEdit ? (
+        <div className="mb-5 flex justify-end">
+          <Link
+            href="/settings/plugins/add-mcp"
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+          >
+            <ServerCog className="mr-2 size-4" />
+            Add custom MCP
+          </Link>
+        </div>
+      ) : null}
       <div className="flex flex-col gap-7">
-        {installedConfigs.length > 0 ? (
+        {installedCount > 0 ? (
           <Button
             variant={activeFilter === "installed" ? "secondary" : "ghost"}
             size="sm"
-            aria-label={`Show ${installedConfigs.length} installed ${installedConfigs.length === 1 ? "plugin" : "plugins"}`}
+            aria-label={`Show ${installedCount} installed ${installedCount === 1 ? "plugin" : "plugins"}`}
             aria-pressed={activeFilter === "installed"}
             onClick={() => {
               setQuery("");
@@ -531,7 +551,7 @@ export function PluginsSettings({
                 </span>
               ))}
             </span>
-            <span>{installedConfigs.length} installed</span>
+            <span>{installedCount} installed</span>
             <ChevronRight size={14} strokeWidth={1.8} aria-hidden="true" />
           </Button>
         ) : null}
@@ -570,10 +590,36 @@ export function PluginsSettings({
         </div>
 
         <div className="flex flex-col gap-8">
+          {visibleCustomPlugins.length ? (
+            <section className="space-y-3" aria-label="Custom MCP plugins">
+              <h2 className="text-sm font-semibold text-ink">Custom MCP</h2>
+              <div className="divide-y divide-border rounded-lg border border-border">
+                {visibleCustomPlugins.map((plugin) => (
+                  <Link
+                    key={plugin.id}
+                    href={`/settings/plugins/${plugin.name}`}
+                    className="flex items-center gap-3 p-4 hover:bg-surface-hover"
+                  >
+                    <ServerCog className="size-5 shrink-0 text-ink-subtle" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-ink">
+                        {plugin.manifest.description ?? plugin.name}
+                      </p>
+                      <p className="truncate text-xs text-ink-subtle">{plugin.source.url}</p>
+                    </div>
+                    <span className="text-xs text-ink-subtle">
+                      {plugin.status === "disabled" ? "Disabled" : "Installed"}
+                    </span>
+                    <ChevronRight className="size-4 text-ink-subtle" />
+                  </Link>
+                ))}
+              </div>
+            </section>
+          ) : null}
           {normalizedQuery ? (
             filteredConfigs.length > 0 ? (
               renderSection("Search results", filteredConfigs)
-            ) : (
+            ) : visibleCustomPlugins.length ? null : (
               <PluginCatalogEmptyState onReset={() => setQuery("")} />
             )
           ) : activeFilter === "all" ? (
@@ -595,7 +641,7 @@ export function PluginsSettings({
             </>
           ) : filteredConfigs.length > 0 ? (
             renderSection(pluginCatalogFilterLabel(activeFilter), filteredConfigs)
-          ) : (
+          ) : visibleCustomPlugins.length ? null : (
             <PluginCatalogEmptyState onReset={() => setActiveFilter("all")} />
           )}
         </div>

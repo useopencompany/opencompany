@@ -22,6 +22,9 @@ export async function alwaysAllowAction(input: {
     { resolveManagedCapabilities: resolveManagedCapabilities },
   );
   const action = catalog.actions.find((entry) => entry.id === input.actionId);
+  if (action?.permission?.provider === "custom_mcp") {
+    throw new Error("Set standing permissions for individual custom MCP tools in Plugins.");
+  }
   const permission = action?.permission;
   if (!permission || permission.integrationIds.length === 0) {
     // The action may already be allowed or may have disappeared between the

@@ -40,13 +40,20 @@ export type RemoteMcpConnectionState = {
 
 export type RemoteMcpWorkerConnection =
   | { ok: false; reason: "not_connected" | "needs_reauth" }
-  | { ok: true; integrationId: string; authProvider: OAuthClientProvider };
+  | {
+      ok: true;
+      integrationId: string;
+      authProvider?: OAuthClientProvider;
+      createClient?: RemoteMcpGatewayDependencies["createClient"];
+      sanitizeResult?: (value: unknown) => unknown;
+    };
 
 export type RemoteMcpOperation =
   | { type: "tools/list" }
   | { type: "tools/call"; tool: string; capability: CapabilityId };
 
 export type RemoteMcpGatewayRegistration = {
+  approvalContext?: string;
   pluginName: string;
   source: ActionSourceId;
   connectionProvider: ActionProviderId;
@@ -121,7 +128,7 @@ export type RemoteMcpGatewayDependencies = {
       type: "http" | "sse";
       url: string;
       headers?: Record<string, string>;
-      authProvider: OAuthClientProvider;
+      authProvider?: OAuthClientProvider;
     };
   }) => Promise<RemoteMcpClient>;
   recordDispatch: (audit: RemoteMcpDispatchAudit) => Promise<void>;
@@ -184,8 +191,12 @@ export async function resolveRemoteMcpActions(
         id: `${registration.source}.${definition.name}`,
         provider: registration.source,
         capability: classification.capability.id,
-        effects: classification.bucket === "read" ? ACTION_EFFECTS_READ : ACTION_EFFECTS_WRITE,
+        effects:
+          registration.connectionProvider !== "custom_mcp" && classification.bucket === "read"
+            ? ACTION_EFFECTS_READ
+            : ACTION_EFFECTS_WRITE,
         permissionMode,
+        ...(registration.approvalContext ? { approvalContext: registration.approvalContext } : {}),
         ...(permission ? { permission } : {}),
         description:
           definition.description?.trim() || `Call ${definition.name} on ${registration.label}.`,
@@ -234,7 +245,7 @@ export async function discoverRemoteMcpSnapshot(
   });
   if (!connection.ok || connection.integrationId !== state.integrationId) return null;
 
-  const client = await deps.createClient(
+  const client = await (connection.createClient ?? deps.createClient)(
     clientConfig(registration.server, connection.authProvider),
   );
   try {
@@ -436,12 +447,12 @@ async function executeRemoteMcpTool(input: {
     );
   }
 
-  const client = await input.dependencies.createClient(
+  const client = await (connection.createClient ?? input.dependencies.createClient)(
     clientConfig(input.registration.server, connection.authProvider),
   );
   try {
-    // Execution clients do not call tools/list because the gateway serves its persisted discovery
-    // snapshot. Preload the selected definition so @ai-sdk/mcp can honor transport metadata such
+    // Preload the selected definition from the persisted discovery snapshot. Custom servers
+    // additionally verify live definitions before dispatch. This lets the SDK honor the definition so @ai-sdk/mcp can honor transport metadata such
     // as x-mcp-header and mirror structured arguments into request-specific Mcp-Param-* headers.
     client.toolsFromDefinitions({ tools: [input.definition] });
     await input.dependencies.recordDispatch({
@@ -464,7 +475,10 @@ async function executeRemoteMcpTool(input: {
         arguments: input.params,
         options: { signal: input.context.signal },
       });
-      const output = unwrapRemoteMcpResult(result, input.registration);
+      const output = unwrapRemoteMcpResult(
+        connection.sanitizeResult ? connection.sanitizeResult(result) : result,
+        input.registration,
+      );
       outcome = "success";
       return output;
     } finally {
@@ -499,7 +513,7 @@ function storedClassification(
   };
 }
 
-function clientConfig(server: RemoteMcpServer, authProvider: OAuthClientProvider) {
+function clientConfig(server: RemoteMcpServer, authProvider?: OAuthClientProvider) {
   return {
     clientName: "opencompany-action-gateway",
     version: "0.1.0",
@@ -511,7 +525,7 @@ function clientConfig(server: RemoteMcpServer, authProvider: OAuthClientProvider
       type: server.type === "streamable-http" ? ("http" as const) : ("sse" as const),
       url: server.url,
       ...(Object.keys(server.headers).length > 0 ? { headers: server.headers } : {}),
-      authProvider,
+      ...(authProvider ? { authProvider } : {}),
     },
   };
 }

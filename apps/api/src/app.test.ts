@@ -13,6 +13,7 @@ import {
   type CreateMessageCommand,
   type CreateTaskCommand,
   type CreateTaskCommentCommand,
+  type CustomMcpApplicationService,
   KnowledgeApplicationService,
   type KnowledgeRepository,
   type PluginGatewayLifecycle,
@@ -4370,6 +4371,89 @@ describe("canonical Hono API", () => {
     } finally {
       setExceptionReporter(undefined);
     }
+  });
+
+  it("routes custom MCP setup through the actor and strips private discovery metadata", async () => {
+    const tool = {
+      name: "send",
+      description: "Send a message",
+      inputSchema: { type: "object", private: "synthetic-secret-canary" },
+      annotations: { private: "synthetic-secret-canary" },
+      classification: {
+        capabilityId: "write",
+        capabilityLabel: "Write",
+        defaultMode: "ask",
+        bucket: "write",
+        curated: false,
+      },
+    };
+    const probe = { tools: [tool], fingerprint: "f".repeat(64) };
+    const plugin = {
+      ...fakePluginInstallation(),
+      source: {
+        type: "custom_mcp" as const,
+        url: "https://tools.example.com/mcp",
+        path: "",
+        ref: "",
+        resolvedCommit: "",
+      },
+    };
+    const preview = vi.fn(async () => probe);
+    const create = vi.fn(async () => ({ plugin, idempotentReplay: true }));
+    const status = vi.fn(async () => ({
+      label: "Company tools",
+      url: plugin.source.url,
+      enabled: true,
+      account: {
+        integrationId: "account",
+        revision: "revision",
+        connected: true,
+        tools: [tool],
+        toolModes: {},
+        checkedAt: createdAt,
+        error: null,
+      },
+    }));
+    const customMcp = { preview, create, status } as unknown as CustomMcpApplicationService;
+    const app = testApp(fakeRepository(), { customMcp });
+    const body = {
+      label: "Company tools",
+      url: plugin.source.url,
+      headers: { authorization: "synthetic-secret-canary" },
+    };
+    const tested = await app.request("/v1/plugins/custom/preview", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    expect(tested.status).toBe(200);
+    expect(await tested.text()).not.toContain("synthetic-secret-canary");
+    expect(preview).toHaveBeenCalledWith(actor, body);
+    const created = await app.request("/v1/plugins/custom", {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": "custom-key" },
+      body: JSON.stringify({ ...body, fingerprint: probe.fingerprint }),
+    });
+    expect(created.status).toBe(201);
+    expect(await created.json()).toMatchObject({
+      data: { replayed: true, plugin: { source: { type: "custom_mcp", resolvedCommit: "" } } },
+    });
+    expect(create).toHaveBeenCalledWith(actor, {
+      ...body,
+      fingerprint: probe.fingerprint,
+      idempotencyKey: "custom-key",
+    });
+    const details = await app.request("/v1/plugins/custom-test/custom-mcp");
+    expect(details.status).toBe(200);
+    expect(await details.text()).not.toContain("synthetic-secret-canary");
+    expect(status).toHaveBeenCalledWith(actor, "custom-test");
+    const invalid = await app.request("/v1/plugins/custom", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    expect(invalid.status).toBe(400);
+    expect(create).toHaveBeenCalledTimes(1);
   });
 
   it("forwards the required idempotency key to billing commands", async () => {

@@ -1477,7 +1477,20 @@ export const PluginManifestSchema = z
   .strict()
   .openapi("PluginManifest");
 
-export const PluginSourceSchema = ExternalSkillSourceSchema.openapi("PluginSource");
+export const PluginSourceSchema = z
+  .union([
+    ExternalSkillSourceSchema,
+    z
+      .object({
+        type: z.literal("custom_mcp"),
+        url: z.string().url().max(2048),
+        ref: z.literal(""),
+        path: z.literal(""),
+        resolvedCommit: z.literal(""),
+      })
+      .strict(),
+  ])
+  .openapi("PluginSource");
 
 export const PluginFileMetadataSchema = z
   .object({
@@ -1679,6 +1692,57 @@ export const PluginDiscoveredToolSchema = z
   })
   .strict()
   .openapi("PluginDiscoveredTool");
+
+export const CustomMcpCredentialsSchema = z
+  .object({
+    headers: z.record(z.string().min(1).max(100), z.string().min(1).max(8192)).default({}),
+  })
+  .strict();
+export const CustomMcpDefinitionBodySchema = CustomMcpCredentialsSchema.extend({
+  label: z.string().trim().min(1).max(100),
+  url: z.string().trim().url().max(2048),
+}).strict();
+export const CustomMcpCreateBodySchema = CustomMcpDefinitionBodySchema.extend({
+  fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+}).strict();
+export const CustomMcpPermissionBodySchema = z
+  .object({
+    tool: z.string().min(1).max(128),
+    mode: z.enum(["on", "ask", "off"]),
+    revision: z.string().uuid(),
+  })
+  .strict();
+export const CustomMcpProbeSchema = z
+  .object({ tools: z.array(PluginDiscoveredToolSchema).max(500), fingerprint: z.string() })
+  .strict();
+export const CustomMcpStatusSchema = z
+  .object({
+    label: z.string(),
+    url: z.string(),
+    enabled: z.boolean(),
+    account: z
+      .object({
+        integrationId: ResourceIdSchema,
+        revision: z.string(),
+        connected: z.boolean(),
+        tools: z.array(PluginDiscoveredToolSchema).max(500),
+        toolModes: z.record(z.string(), z.enum(["on", "ask", "off"])),
+        checkedAt: TimestampSchema,
+        error: z.string().nullable(),
+      })
+      .strict()
+      .nullable(),
+  })
+  .strict();
+export const CustomMcpProbeEnvelopeSchema = z
+  .object({ data: CustomMcpProbeSchema, meta: ProtocolMetadataSchema })
+  .strict();
+export const CustomMcpStatusEnvelopeSchema = z
+  .object({ data: CustomMcpStatusSchema, meta: ProtocolMetadataSchema })
+  .strict();
+export type CustomMcpStatusDto = z.infer<typeof CustomMcpStatusSchema>;
+export type CustomMcpProbeDto = z.infer<typeof CustomMcpProbeSchema>;
+export type CustomMcpDefinitionBody = z.infer<typeof CustomMcpDefinitionBodySchema>;
 
 export const PluginRemoteMcpServerSchema = z
   .object({

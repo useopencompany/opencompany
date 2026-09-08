@@ -23,6 +23,8 @@ import {
 import { del } from "@vercel/blob";
 import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import {
+  customMcpAccounts,
+  integrations,
   pluginFiles,
   pluginGatewayRegistrations,
   pluginSkills,
@@ -41,7 +43,7 @@ type PluginRow = {
   name: string;
   status: "enabled" | "disabled" | "archived";
   manifest: PluginInstallation["manifest"];
-  sourceType: "github" | "skills.sh";
+  sourceType: "github" | "skills.sh" | "custom_mcp";
   sourceUrl: string;
   sourcePath: string;
   sourceRef: string;
@@ -357,8 +359,26 @@ export class PostgresPluginRepository implements PluginRepository {
             inArray(plugins.status, ["enabled", "disabled"]),
           ),
         )
-        .returning({ id: plugins.id });
+        .returning({ id: plugins.id, sourceType: plugins.sourceType });
       if (rows.length === 0) throw new CoreError("not_found", "Plugin not found.");
+      if (rows.some((row: { sourceType: string }) => row.sourceType === "custom_mcp")) {
+        // A URL installation cannot be reimported by name. Remove its dedicated accounts and
+        // encrypted credentials with it so no owner is left with an unreachable connection.
+        await tx.delete(integrations).where(
+          inArray(
+            integrations.id,
+            tx
+              .select({ id: customMcpAccounts.integrationId })
+              .from(customMcpAccounts)
+              .where(
+                and(
+                  eq(customMcpAccounts.workspaceId, input.actor.workspaceId),
+                  eq(customMcpAccounts.pluginName, input.name),
+                ),
+              ),
+          ),
+        );
+      }
       await tx.delete(pluginGatewayRegistrations).where(
         and(
           eq(pluginGatewayRegistrations.workspaceId, input.actor.workspaceId),
@@ -566,7 +586,11 @@ async function validateResolvedPlugin(plugin: ResolvedPluginPackage) {
   if (!/^sha256:[0-9a-f]{64}$/u.test(plugin.integrity)) {
     throw new CoreError("invalid_argument", "The Plugin package integrity is invalid.");
   }
-  if (!/^[0-9a-f]{40}$/u.test(plugin.source.resolvedCommit)) {
+  if (
+    plugin.source.type === "custom_mcp"
+      ? plugin.source.resolvedCommit !== "" || plugin.source.ref !== "" || plugin.source.path !== ""
+      : !/^[0-9a-f]{40}$/u.test(plugin.source.resolvedCommit)
+  ) {
     throw new CoreError("invalid_argument", "The Plugin source commit is invalid.");
   }
   if (plugin.source.path) assertSafePluginPath(plugin.source.path);

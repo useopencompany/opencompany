@@ -12312,41 +12312,53 @@
         "additionalProperties": false
       },
       "PluginSource": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "enum": [
-              "github",
-              "skills.sh"
-            ]
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/ExternalSkillSource"
           },
-          "url": {
-            "type": "string",
-            "maxLength": 2048,
-            "format": "uri"
-          },
-          "ref": {
-            "type": "string",
-            "maxLength": 256
-          },
-          "path": {
-            "type": "string",
-            "maxLength": 512
-          },
-          "resolvedCommit": {
-            "type": "string",
-            "pattern": "^[0-9a-f]{40}$/u"
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "custom_mcp"
+                ]
+              },
+              "url": {
+                "type": "string",
+                "maxLength": 2048,
+                "format": "uri"
+              },
+              "ref": {
+                "type": "string",
+                "enum": [
+                  ""
+                ]
+              },
+              "path": {
+                "type": "string",
+                "enum": [
+                  ""
+                ]
+              },
+              "resolvedCommit": {
+                "type": "string",
+                "enum": [
+                  ""
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "url",
+              "ref",
+              "path",
+              "resolvedCommit"
+            ],
+            "additionalProperties": false
           }
-        },
-        "required": [
-          "type",
-          "url",
-          "ref",
-          "path",
-          "resolvedCommit"
-        ],
-        "additionalProperties": false
+        ]
       },
       "PluginInstallReport": {
         "type": "object",
@@ -12847,467 +12859,67 @@
         ],
         "additionalProperties": false
       },
-      "PluginImportPreviewEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/PluginImportPreview"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/ProtocolMetadata"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "PluginImportPreview": {
-        "type": "object",
-        "properties": {
-          "manifest": {
-            "$ref": "#/components/schemas/PluginManifest"
-          },
-          "source": {
-            "$ref": "#/components/schemas/PluginSource"
-          },
-          "integrity": {
-            "type": "string",
-            "pattern": "^sha256:[0-9a-f]{64}$/u"
-          },
-          "files": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PluginImportFileMetadata"
-            },
-            "minItems": 1,
-            "maxItems": 512
-          },
-          "fileCount": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 512
-          },
-          "totalBytes": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 16777216
-          },
-          "skills": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "path": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 1024
-                },
-                "name": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 64
-                },
-                "description": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 1024
-                },
-                "integrity": {
-                  "type": "string",
-                  "pattern": "^sha256:[0-9a-f]{64}$/u"
-                },
-                "fileCount": {
-                  "type": "integer",
-                  "minimum": 1,
-                  "maximum": 512
-                },
-                "totalBytes": {
-                  "type": "integer",
-                  "minimum": 0,
-                  "maximum": 1048576
-                }
-              },
-              "required": [
-                "path",
-                "name",
-                "description",
-                "integrity",
-                "fileCount",
-                "totalBytes"
-              ],
-              "additionalProperties": false
-            }
-          },
-          "stdioServers": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PluginStdioServer"
-            }
-          },
-          "remoteMcpServers": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PluginRemoteMcpPreviewServer"
-            }
-          },
-          "events": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PluginEventDefinition"
-            },
-            "maxItems": 64
-          },
-          "report": {
-            "$ref": "#/components/schemas/PluginValidationReport"
-          }
-        },
-        "required": [
-          "manifest",
-          "source",
-          "integrity",
-          "files",
-          "fileCount",
-          "totalBytes",
-          "skills",
-          "stdioServers",
-          "remoteMcpServers",
-          "events",
-          "report"
-        ],
-        "additionalProperties": false
-      },
-      "PluginImportFileMetadata": {
-        "type": "object",
-        "properties": {
-          "path": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 1024
-          },
-          "sizeBytes": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 2097152
-          }
-        },
-        "required": [
-          "path",
-          "sizeBytes"
-        ],
-        "additionalProperties": false
-      },
-      "PluginStdioServer": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string",
-            "minLength": 1
-          },
-          "type": {
-            "type": "string",
-            "enum": [
-              "stdio"
-            ]
-          },
-          "command": {
-            "type": "string",
-            "minLength": 1
-          },
-          "args": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "envKeys": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "cwd": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "type",
-          "command",
-          "args",
-          "envKeys"
-        ],
-        "additionalProperties": false
-      },
-      "PluginRemoteMcpPreviewServer": {
+      "PluginDiscoveredTool": {
         "type": "object",
         "properties": {
           "name": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 128
+            "maxLength": 256
           },
-          "type": {
+          "description": {
             "type": "string",
-            "enum": [
-              "streamable-http",
-              "sse"
-            ]
+            "maxLength": 4096
           },
-          "connectionProvider": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 64
-          },
-          "capabilities": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PluginCapabilityDefinition"
+          "classification": {
+            "type": "object",
+            "properties": {
+              "capabilityId": {
+                "type": "string",
+                "enum": [
+                  "read",
+                  "query",
+                  "draft",
+                  "write"
+                ]
+              },
+              "capabilityLabel": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "defaultMode": {
+                "type": "string",
+                "enum": [
+                  "on",
+                  "ask",
+                  "off"
+                ]
+              },
+              "bucket": {
+                "type": "string",
+                "enum": [
+                  "read",
+                  "write"
+                ]
+              },
+              "curated": {
+                "type": "boolean"
+              }
             },
-            "maxItems": 64
+            "required": [
+              "capabilityId",
+              "capabilityLabel",
+              "defaultMode",
+              "bucket",
+              "curated"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [
           "name",
-          "type",
-          "connectionProvider",
-          "capabilities"
-        ],
-        "additionalProperties": false
-      },
-      "PluginCapabilityDefinition": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "enum": [
-              "read",
-              "query",
-              "draft",
-              "write"
-            ]
-          },
-          "label": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          },
-          "defaultMode": {
-            "type": "string",
-            "enum": [
-              "on",
-              "ask",
-              "off"
-            ]
-          },
-          "tools": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "maxItems": 512
-          }
-        },
-        "required": [
-          "id",
-          "label",
-          "defaultMode",
-          "tools"
-        ],
-        "additionalProperties": false
-      },
-      "PluginValidationReport": {
-        "type": "object",
-        "properties": {
-          "ignoredManifestFields": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "skills": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PluginSkillReport"
-            }
-          },
-          "mcp": {
-            "$ref": "#/components/schemas/PluginMcpReport"
-          },
-          "capabilities": {
-            "oneOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "status": {
-                    "type": "string",
-                    "enum": [
-                      "absent"
-                    ]
-                  }
-                },
-                "required": [
-                  "status"
-                ],
-                "additionalProperties": false
-              },
-              {
-                "type": "object",
-                "properties": {
-                  "present": {
-                    "type": "boolean",
-                    "enum": [
-                      true
-                    ]
-                  },
-                  "status": {
-                    "type": "string",
-                    "enum": [
-                      "ignored"
-                    ]
-                  },
-                  "reason": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "present",
-                  "status",
-                  "reason"
-                ],
-                "additionalProperties": false
-              },
-              {
-                "type": "object",
-                "properties": {
-                  "present": {
-                    "type": "boolean",
-                    "enum": [
-                      true
-                    ]
-                  },
-                  "status": {
-                    "type": "string",
-                    "enum": [
-                      "parsed"
-                    ]
-                  },
-                  "issues": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "required": [
-                  "present",
-                  "status",
-                  "issues"
-                ],
-                "additionalProperties": false
-              }
-            ]
-          },
-          "events": {
-            "oneOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "status": {
-                    "type": "string",
-                    "enum": [
-                      "absent"
-                    ]
-                  }
-                },
-                "required": [
-                  "status"
-                ],
-                "additionalProperties": false
-              },
-              {
-                "type": "object",
-                "properties": {
-                  "present": {
-                    "type": "boolean",
-                    "enum": [
-                      true
-                    ]
-                  },
-                  "status": {
-                    "type": "string",
-                    "enum": [
-                      "ignored"
-                    ]
-                  },
-                  "reason": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "present",
-                  "status",
-                  "reason"
-                ],
-                "additionalProperties": false
-              },
-              {
-                "type": "object",
-                "properties": {
-                  "present": {
-                    "type": "boolean",
-                    "enum": [
-                      true
-                    ]
-                  },
-                  "status": {
-                    "type": "string",
-                    "enum": [
-                      "parsed"
-                    ]
-                  },
-                  "issues": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "required": [
-                  "present",
-                  "status",
-                  "issues"
-                ],
-                "additionalProperties": false
-              }
-            ]
-          }
-        },
-        "required": [
-          "ignoredManifestFields",
-          "skills",
-          "mcp"
-        ],
-        "additionalProperties": false
-      },
-      "PluginImportPreviewBody": {
-        "type": "object",
-        "properties": {
-          "url": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 2048
-          },
-          "selectedPath": {
-            "type": "string",
-            "maxLength": 512
-          }
-        },
-        "required": [
-          "url"
+          "classification"
         ],
         "additionalProperties": false
       },
@@ -13516,6 +13128,48 @@
         ],
         "additionalProperties": false
       },
+      "PluginStdioServer": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "stdio"
+            ]
+          },
+          "command": {
+            "type": "string",
+            "minLength": 1
+          },
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "envKeys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cwd": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "type",
+          "command",
+          "args",
+          "envKeys"
+        ],
+        "additionalProperties": false
+      },
       "PluginRemoteMcpServer": {
         "type": "object",
         "properties": {
@@ -13587,67 +13241,425 @@
         ],
         "additionalProperties": false
       },
-      "PluginDiscoveredTool": {
+      "PluginCapabilityDefinition": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": [
+              "read",
+              "query",
+              "draft",
+              "write"
+            ]
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "defaultMode": {
+            "type": "string",
+            "enum": [
+              "on",
+              "ask",
+              "off"
+            ]
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "maxItems": 512
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "defaultMode",
+          "tools"
+        ],
+        "additionalProperties": false
+      },
+      "PluginImportPreviewEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PluginImportPreview"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "PluginImportPreview": {
+        "type": "object",
+        "properties": {
+          "manifest": {
+            "$ref": "#/components/schemas/PluginManifest"
+          },
+          "source": {
+            "$ref": "#/components/schemas/PluginSource"
+          },
+          "integrity": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$/u"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginImportFileMetadata"
+            },
+            "minItems": 1,
+            "maxItems": 512
+          },
+          "fileCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 512
+          },
+          "totalBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 16777216
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1024
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                "description": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1024
+                },
+                "integrity": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$/u"
+                },
+                "fileCount": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 512
+                },
+                "totalBytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1048576
+                }
+              },
+              "required": [
+                "path",
+                "name",
+                "description",
+                "integrity",
+                "fileCount",
+                "totalBytes"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "stdioServers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginStdioServer"
+            }
+          },
+          "remoteMcpServers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginRemoteMcpPreviewServer"
+            }
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginEventDefinition"
+            },
+            "maxItems": 64
+          },
+          "report": {
+            "$ref": "#/components/schemas/PluginValidationReport"
+          }
+        },
+        "required": [
+          "manifest",
+          "source",
+          "integrity",
+          "files",
+          "fileCount",
+          "totalBytes",
+          "skills",
+          "stdioServers",
+          "remoteMcpServers",
+          "events",
+          "report"
+        ],
+        "additionalProperties": false
+      },
+      "PluginImportFileMetadata": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2097152
+          }
+        },
+        "required": [
+          "path",
+          "sizeBytes"
+        ],
+        "additionalProperties": false
+      },
+      "PluginRemoteMcpPreviewServer": {
         "type": "object",
         "properties": {
           "name": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 256
+            "maxLength": 128
           },
-          "description": {
+          "type": {
             "type": "string",
-            "maxLength": 4096
+            "enum": [
+              "streamable-http",
+              "sse"
+            ]
           },
-          "classification": {
-            "type": "object",
-            "properties": {
-              "capabilityId": {
-                "type": "string",
-                "enum": [
-                  "read",
-                  "query",
-                  "draft",
-                  "write"
-                ]
-              },
-              "capabilityLabel": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 128
-              },
-              "defaultMode": {
-                "type": "string",
-                "enum": [
-                  "on",
-                  "ask",
-                  "off"
-                ]
-              },
-              "bucket": {
-                "type": "string",
-                "enum": [
-                  "read",
-                  "write"
-                ]
-              },
-              "curated": {
-                "type": "boolean"
-              }
+          "connectionProvider": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginCapabilityDefinition"
             },
-            "required": [
-              "capabilityId",
-              "capabilityLabel",
-              "defaultMode",
-              "bucket",
-              "curated"
-            ],
-            "additionalProperties": false
+            "maxItems": 64
           }
         },
         "required": [
           "name",
-          "classification"
+          "type",
+          "connectionProvider",
+          "capabilities"
+        ],
+        "additionalProperties": false
+      },
+      "PluginValidationReport": {
+        "type": "object",
+        "properties": {
+          "ignoredManifestFields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginSkillReport"
+            }
+          },
+          "mcp": {
+            "$ref": "#/components/schemas/PluginMcpReport"
+          },
+          "capabilities": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "absent"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "present": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "ignored"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "present",
+                  "status",
+                  "reason"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "present": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "parsed"
+                    ]
+                  },
+                  "issues": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "present",
+                  "status",
+                  "issues"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "events": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "absent"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "present": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "ignored"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "present",
+                  "status",
+                  "reason"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "present": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "parsed"
+                    ]
+                  },
+                  "issues": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "present",
+                  "status",
+                  "issues"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "required": [
+          "ignoredManifestFields",
+          "skills",
+          "mcp"
+        ],
+        "additionalProperties": false
+      },
+      "PluginImportPreviewBody": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "selectedPath": {
+            "type": "string",
+            "maxLength": 512
+          }
+        },
+        "required": [
+          "url"
         ],
         "additionalProperties": false
       },
@@ -23067,6 +23079,931 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PluginListEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/plugins/custom/preview": {
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "headers": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 8192
+                    },
+                    "default": {}
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "url": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "format": "uri"
+                  }
+                },
+                "required": [
+                  "label",
+                  "url"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Custom MCP connection and tools for the acting user.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "tools": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/PluginDiscoveredTool"
+                          },
+                          "maxItems": 500
+                        },
+                        "fingerprint": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "tools",
+                        "fingerprint"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ProtocolMetadata"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/plugins/custom": {
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "headers": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 8192
+                    },
+                    "default": {}
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "url": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "format": "uri"
+                  },
+                  "fingerprint": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  }
+                },
+                "required": [
+                  "label",
+                  "url",
+                  "fingerprint"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Custom MCP connection and tools for the acting user.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginImportEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/plugins/{name}/custom-mcp": {
+      "get": {
+        "tags": [
+          "Plugins"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Custom MCP connection and tools for the acting user.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        },
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "account": {
+                          "type": "object",
+                          "nullable": true,
+                          "properties": {
+                            "integrationId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 256,
+                              "example": "run_019fed53"
+                            },
+                            "revision": {
+                              "type": "string"
+                            },
+                            "connected": {
+                              "type": "boolean"
+                            },
+                            "tools": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/components/schemas/PluginDiscoveredTool"
+                              },
+                              "maxItems": 500
+                            },
+                            "toolModes": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string",
+                                "enum": [
+                                  "on",
+                                  "ask",
+                                  "off"
+                                ]
+                              }
+                            },
+                            "checkedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "error": {
+                              "type": "string",
+                              "nullable": true
+                            }
+                          },
+                          "required": [
+                            "integrationId",
+                            "revision",
+                            "connected",
+                            "tools",
+                            "toolModes",
+                            "checkedAt",
+                            "error"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "url",
+                        "enabled",
+                        "account"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ProtocolMetadata"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/plugins/{name}/custom-mcp/connect": {
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "headers": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 8192
+                    },
+                    "default": {}
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Custom MCP connection and tools for the acting user.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        },
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "account": {
+                          "type": "object",
+                          "nullable": true,
+                          "properties": {
+                            "integrationId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 256,
+                              "example": "run_019fed53"
+                            },
+                            "revision": {
+                              "type": "string"
+                            },
+                            "connected": {
+                              "type": "boolean"
+                            },
+                            "tools": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/components/schemas/PluginDiscoveredTool"
+                              },
+                              "maxItems": 500
+                            },
+                            "toolModes": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string",
+                                "enum": [
+                                  "on",
+                                  "ask",
+                                  "off"
+                                ]
+                              }
+                            },
+                            "checkedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "error": {
+                              "type": "string",
+                              "nullable": true
+                            }
+                          },
+                          "required": [
+                            "integrationId",
+                            "revision",
+                            "connected",
+                            "tools",
+                            "toolModes",
+                            "checkedAt",
+                            "error"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "url",
+                        "enabled",
+                        "account"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ProtocolMetadata"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/plugins/{name}/custom-mcp/refresh": {
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Custom MCP connection and tools for the acting user.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        },
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "account": {
+                          "type": "object",
+                          "nullable": true,
+                          "properties": {
+                            "integrationId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 256,
+                              "example": "run_019fed53"
+                            },
+                            "revision": {
+                              "type": "string"
+                            },
+                            "connected": {
+                              "type": "boolean"
+                            },
+                            "tools": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/components/schemas/PluginDiscoveredTool"
+                              },
+                              "maxItems": 500
+                            },
+                            "toolModes": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string",
+                                "enum": [
+                                  "on",
+                                  "ask",
+                                  "off"
+                                ]
+                              }
+                            },
+                            "checkedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "error": {
+                              "type": "string",
+                              "nullable": true
+                            }
+                          },
+                          "required": [
+                            "integrationId",
+                            "revision",
+                            "connected",
+                            "tools",
+                            "toolModes",
+                            "checkedAt",
+                            "error"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "url",
+                        "enabled",
+                        "account"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ProtocolMetadata"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/plugins/{name}/custom-mcp/disconnect": {
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Custom MCP connection and tools for the acting user.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        },
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "account": {
+                          "type": "object",
+                          "nullable": true,
+                          "properties": {
+                            "integrationId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 256,
+                              "example": "run_019fed53"
+                            },
+                            "revision": {
+                              "type": "string"
+                            },
+                            "connected": {
+                              "type": "boolean"
+                            },
+                            "tools": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/components/schemas/PluginDiscoveredTool"
+                              },
+                              "maxItems": 500
+                            },
+                            "toolModes": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string",
+                                "enum": [
+                                  "on",
+                                  "ask",
+                                  "off"
+                                ]
+                              }
+                            },
+                            "checkedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "error": {
+                              "type": "string",
+                              "nullable": true
+                            }
+                          },
+                          "required": [
+                            "integrationId",
+                            "revision",
+                            "connected",
+                            "tools",
+                            "toolModes",
+                            "checkedAt",
+                            "error"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "url",
+                        "enabled",
+                        "account"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ProtocolMetadata"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/plugins/{name}/custom-mcp/permissions": {
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "tool": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "on",
+                      "ask",
+                      "off"
+                    ]
+                  },
+                  "revision": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                },
+                "required": [
+                  "tool",
+                  "mode",
+                  "revision"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Custom MCP connection and tools for the acting user.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        },
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "account": {
+                          "type": "object",
+                          "nullable": true,
+                          "properties": {
+                            "integrationId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 256,
+                              "example": "run_019fed53"
+                            },
+                            "revision": {
+                              "type": "string"
+                            },
+                            "connected": {
+                              "type": "boolean"
+                            },
+                            "tools": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/components/schemas/PluginDiscoveredTool"
+                              },
+                              "maxItems": 500
+                            },
+                            "toolModes": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string",
+                                "enum": [
+                                  "on",
+                                  "ask",
+                                  "off"
+                                ]
+                              }
+                            },
+                            "checkedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "error": {
+                              "type": "string",
+                              "nullable": true
+                            }
+                          },
+                          "required": [
+                            "integrationId",
+                            "revision",
+                            "connected",
+                            "tools",
+                            "toolModes",
+                            "checkedAt",
+                            "error"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "url",
+                        "enabled",
+                        "account"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ProtocolMetadata"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "additionalProperties": false
                 }
               }
             }
