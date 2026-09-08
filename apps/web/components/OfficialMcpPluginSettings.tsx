@@ -36,7 +36,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useOptimistic, useState, useTransition } from "react";
 import { useAppData } from "@/components/AppDataProvider";
 import { CapabilityModeToggle } from "@/components/CapabilityModeToggle";
 import { GitHubRepositoryAccessSection } from "@/components/GitHubRepositoryAccess";
@@ -1512,7 +1512,6 @@ function PluginCapabilityModeRow({
   connection: IntegrationAccountView<PluginConnectionProvider> | null;
 }) {
   const router = useRouter();
-  const [pendingMode, setPendingMode] = useState<CapabilityMode | null>(null);
   const [isPending, startTransition] = useTransition();
   const storedModes = connection?.capabilityModes;
   const hasStoredMode =
@@ -1520,25 +1519,23 @@ function PluginCapabilityModeRow({
     typeof storedModes === "object" &&
     !Array.isArray(storedModes) &&
     Object.hasOwn(storedModes, group.modeKey);
-  const mode =
-    pendingMode ??
-    effectiveCapabilityMode(
-      connection?.provider ?? provider,
-      group.modeKey,
-      hasStoredMode ? storedModes : { [group.modeKey]: group.defaultMode },
-    );
+  const storedMode = effectiveCapabilityMode(
+    connection?.provider ?? provider,
+    group.modeKey,
+    hasStoredMode ? storedModes : { [group.modeKey]: group.defaultMode },
+  );
+  const [mode, setOptimisticMode] = useOptimistic(storedMode);
 
   const select = (nextMode: CapabilityMode) => {
     if (!connection || isPending || nextMode === mode) return;
-    setPendingMode(nextMode);
     startTransition(async () => {
+      setOptimisticMode(nextMode);
       const result = await setIntegrationCapabilityModeAction(
         connection.integrationId,
         group.modeKey,
         nextMode,
       );
       if (!result.ok) {
-        setPendingMode(null);
         toast.error(result.error);
         return;
       }
