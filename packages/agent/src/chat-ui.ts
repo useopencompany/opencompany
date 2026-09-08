@@ -27,6 +27,7 @@ import type {
 } from "./actions/types";
 import { finiteDurationMs } from "./chat-timing";
 import type { CodexComposerSettingsView } from "./codex-chat-settings";
+import type { WorkspaceSkillsInput } from "./workspace-skill-tools";
 
 export {
   CODEX_APPROVAL_TOOL_NAME,
@@ -602,6 +603,10 @@ export type ChatTools = {
   read_skill_file: {
     input: ReadSkillFileToolInput;
     output: ReadSkillFileToolOutput;
+  };
+  workspace_skills: {
+    input: WorkspaceSkillsInput;
+    output: unknown;
   };
   create_workspace_skill: {
     input: CreateWorkspaceSkillToolInput;
