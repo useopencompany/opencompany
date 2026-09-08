@@ -13,6 +13,7 @@ import type {
   WebSearchToolOutput,
 } from "@opencompany/agent/chat-ui";
 import {
+  compareChatMessageOrder,
   listedActionSourceIdsFromMessages,
   replaceChatUiMessageText,
   textFromChatUiMessage,
@@ -854,14 +855,15 @@ function replayMessagesThroughCurrent(
   currentUserMessageId: string,
   includeCurrentAssistantMessage: boolean,
 ) {
-  const currentIndex = storedMessages.findIndex(
+  const orderedMessages = storedMessages.toSorted(compareChatMessageOrder);
+  const currentIndex = orderedMessages.findIndex(
     (message) => message.id === currentUserMessageId && message.role === "user",
   );
   if (currentIndex < 0) {
     throw new Error(`opencompany chat user message ${currentUserMessageId} was not found.`);
   }
-  const nextMessage = storedMessages[currentIndex + 1];
-  return storedMessages.slice(
+  const nextMessage = orderedMessages[currentIndex + 1];
+  return orderedMessages.slice(
     0,
     currentIndex + (includeCurrentAssistantMessage && nextMessage?.role === "assistant" ? 2 : 1),
   );

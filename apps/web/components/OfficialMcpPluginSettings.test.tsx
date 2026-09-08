@@ -43,6 +43,7 @@ import {
   LinearPluginDetailView,
   linearToolsStateFromPlugin,
   NeonPluginDetailView,
+  NotionPluginDetail,
   neonToolsStateFromPlugin,
   type PluginToolsState,
   PostHogPluginDetail,
@@ -69,6 +70,7 @@ import {
   LATITUDE_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
+  NOTION_PLUGIN_SOURCE,
   POSTHOG_PLUGIN_SOURCE,
   SLACK_PLUGIN_SOURCE,
   STRIPE_PLUGIN_SOURCE,
@@ -329,6 +331,20 @@ const appData = vi.hoisted(() => ({
         },
       ],
       neon: [],
+      notion: [
+        {
+          integrationId: "gint_notion_mcp",
+          provider: "notion",
+          status: "connected",
+          connected: true,
+          accountEmail: null,
+          accountName: "Notion",
+          connectionLabel: "Acme workspace",
+          statusReason: null,
+          scopes: ["default"],
+          capabilityModes: { query: "ask", draft: "ask", write: "ask" },
+        },
+      ],
       signoz: [
         {
           integrationId: "gint_signoz",
@@ -1157,6 +1173,87 @@ const googleCalendarPlugin = {
       discoveryStatus: "ready",
       discoveredAt: "2026-09-03T08:00:00.000Z",
       refreshAfter: "2026-09-03T09:00:00.000Z",
+      lastDiscoveryError: null,
+    },
+  ],
+} as const satisfies PluginInstallationDto;
+
+const notionPlugin = {
+  ...googleCalendarPlugin,
+  id: "plugin_notion",
+  name: "notion",
+  manifest: {
+    name: "notion",
+    description: "Search, read, and change Notion workspace content.",
+  },
+  source: {
+    ...plugin.source,
+    path: "notion",
+    resolvedCommit: "fb207086016a74e2e5724386c524d275771e5db6",
+  },
+  remoteMcpServers: [
+    {
+      name: "notion",
+      type: "streamable-http",
+      connectionProvider: "notion",
+      capabilities: [
+        {
+          id: "query",
+          label: "Search & read Notion",
+          defaultMode: "ask",
+          tools: ["notion-search"],
+        },
+        {
+          id: "draft",
+          label: "Work with Notion agents",
+          defaultMode: "ask",
+          tools: ["notion-spawn-session"],
+        },
+        {
+          id: "write",
+          label: "Change Notion",
+          defaultMode: "ask",
+          tools: ["notion-update-page"],
+        },
+      ],
+      tools: [
+        {
+          name: "notion-search",
+          description: "Search workspace content.",
+          classification: {
+            capabilityId: "query",
+            capabilityLabel: "Search & read Notion",
+            defaultMode: "ask",
+            bucket: "read",
+            curated: true,
+          },
+        },
+        {
+          name: "notion-spawn-session",
+          description: "Start a Custom Agent session.",
+          classification: {
+            capabilityId: "draft",
+            capabilityLabel: "Work with Notion agents",
+            defaultMode: "ask",
+            bucket: "write",
+            curated: true,
+          },
+        },
+        {
+          name: "notion-update-page",
+          description: "Update a page.",
+          classification: {
+            capabilityId: "write",
+            capabilityLabel: "Change Notion",
+            defaultMode: "ask",
+            bucket: "write",
+            curated: true,
+          },
+        },
+      ],
+      discoveryStatus: "ready",
+      discoveredAt: "2026-09-07T08:00:00.000Z",
+      refreshAfter: "2026-09-07T09:00:00.000Z",
       lastDiscoveryError: null,
     },
   ],
@@ -2450,6 +2547,25 @@ describe("Linear plugin settings", () => {
         { id: "write", defaultMode: "ask" },
       ],
     });
+  });
+
+  it("presents Notion with personal OAuth and every capability gated on Ask", () => {
+    render(<NotionPluginDetail pluginState={{ status: "ready", plugin: notionPlugin }} canEdit />);
+
+    expect(screen.getByRole("heading", { level: 1, name: "Notion" })).toBeInTheDocument();
+    expect(screen.getByText("Acme workspace")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Connect Notion account" })).toHaveAttribute(
+      "href",
+      "/api/integrations/notion/start?returnTo=/settings/plugins/notion",
+    );
+    for (const label of ["Search & read Notion", "Work with Notion agents", "Change Notion"]) {
+      expect(
+        within(screen.getByRole("group", { name: `${label} permission` })).getByRole("button", {
+          name: "Ask",
+        }),
+      ).toHaveAttribute("aria-pressed", "true");
+    }
+    expect(NOTION_PLUGIN_SOURCE).toContain("/tree/fb207086016a74e2e5724386c524d275771e5db6/notion");
   });
 
   it("reviews and installs Slack from the pinned package on its detail page", async () => {

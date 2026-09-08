@@ -19,6 +19,7 @@ export type ActionProviderId =
   | "revolut"
   | "latitude"
   | "neon"
+  | "notion"
   | "betterstack"
   | "render"
   | "vercel"
