@@ -97,6 +97,7 @@ export class PostgresTaskActionApprovalRepository {
 
   async complete(input: TaskActionLease & { invocationId: string; result: ActionGatewayResponse }) {
     const rows = await this.rows(sql`
+      WITH completed AS (
       UPDATE goat.action_turns AS action_turn
       SET approval_records = jsonb_set(approval_records, ARRAY[${input.invocationId}, 'taskRequest'],
             (approval_records -> ${input.invocationId} -> 'taskRequest') ||
@@ -108,7 +109,21 @@ export class PostgresTaskActionApprovalRepository {
           SELECT 1 FROM goat.codex_chat_turns AS run
           WHERE run.id = action_turn.turn_id AND run.lease_id = ${input.leaseId} AND run.status = 'running'
         )
-      RETURNING action_turn.id
+      RETURNING action_turn.id, action_turn.turn_id
+      ), projected AS (
+        UPDATE goat.chat_messages AS message
+        SET debug_trace = jsonb_set(message.debug_trace, '{uiMessageParts}', (
+              SELECT jsonb_agg(CASE WHEN part.value ->> 'toolCallId' = ${input.invocationId}
+                THEN (part.value - 'approval') || jsonb_build_object('state', 'output-available',
+                  'output', ${stringifyPostgresJson({ ...input.result, status: input.result.ok ? "completed" : "failed" })}::jsonb)
+                ELSE part.value END ORDER BY part.ordinality)
+              FROM jsonb_array_elements(message.debug_trace -> 'uiMessageParts') WITH ORDINALITY AS part(value, ordinality)
+            )), updated_at = now()
+        FROM goat.codex_chat_turns AS run
+        WHERE run.id IN (SELECT turn_id FROM completed) AND message.id = run.assistant_message_id
+        RETURNING message.id
+      )
+      SELECT id FROM completed WHERE EXISTS (SELECT 1 FROM projected)
     `);
     return rows.length === 1;
   }

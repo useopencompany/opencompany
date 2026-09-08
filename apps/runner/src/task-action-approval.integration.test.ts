@@ -204,6 +204,13 @@ it.each(["approved", "denied"] as const)(
       });
       expect(resumed).toContain(resolution === "approved" ? "draft_1" : "The user denied");
       expect(provider).toHaveBeenCalledTimes(resolution === "approved" ? 1 : 0);
+      const persisted = (
+        await pg.query<{ debug_trace: { uiMessageParts: { output: { ok: boolean } }[] } }>(
+          "SELECT debug_trace FROM goat.chat_messages WHERE id='assistant_1'",
+        )
+      ).rows[0];
+      expect(persisted?.debug_trace.uiMessageParts[0]?.output.ok).toBe(resolution === "approved");
+
       if (resolution === "approved")
         expect(provider).toHaveBeenCalledWith(expect.objectContaining({ params }));
       await resumeTaskActionApprovals(turn, {

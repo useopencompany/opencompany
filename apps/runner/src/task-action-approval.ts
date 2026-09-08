@@ -92,6 +92,22 @@ export async function resumeTaskActionApprovals(
       if (!(await dependencies.repository.complete({ ...claim, result })))
         throw new CodexChatLeaseLostError();
     }
+    if (!result && request.executionStatus === "executing") {
+      result = actionError(
+        request,
+        "The worker stopped after claiming this action and its outcome is uncertain. Inspect the provider to determine whether it ran. Do not repeat this write automatically.",
+      );
+      if (
+        !(await dependencies.repository.complete({
+          runId: turn.id,
+          leaseId: turn.leaseId,
+          invocationId: request.invocationId,
+          result,
+        }))
+      ) {
+        throw new CodexChatLeaseLostError();
+      }
+    }
     results.push({
       action: request.action,
       result:
