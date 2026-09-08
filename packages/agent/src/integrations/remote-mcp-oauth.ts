@@ -347,7 +347,7 @@ export function createRemoteMcpIntegration<const TProvider extends IntegrationPr
   }
 
   async function markConnected(integrationId: string, userWorkosId: string, db?: DbLike) {
-    await (db ?? getDb())
+    const [connection] = await (db ?? getDb())
       .update(integrations)
       .set({
         status: "connected",
@@ -365,7 +365,11 @@ export function createRemoteMcpIntegration<const TProvider extends IntegrationPr
           eq(integrations.userWorkosId, userWorkosId),
           eq(integrations.provider, config.provider),
         ),
-      );
+      )
+      .returning({ id: integrations.id });
+    if (!connection) {
+      throw new Error(`${config.displayName} connection no longer exists.`);
+    }
     await captureConnectionAddedAnalytics({
       connectionId: integrationId,
       userWorkosId,
