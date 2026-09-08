@@ -1,7 +1,27 @@
 import { describe, expect, it, vi } from "vitest";
 import { type Actor, TASK_READ_PERMISSION, TASK_WRITE_PERMISSION } from "./actor";
 import { CoreError } from "./chat";
-import { type CreateTaskCommand, TaskApplicationService, type TaskRepository } from "./tasks";
+import {
+  type CreateTaskCommand,
+  isSettledTaskStatus,
+  TaskApplicationService,
+  type TaskRepository,
+} from "./tasks";
+
+describe("isSettledTaskStatus", () => {
+  it.each([
+    ["waiting", true],
+    ["succeeded", true],
+    ["failed", true],
+    ["canceled", true],
+    ["queued", false],
+    ["running", false],
+    ["blocked", false],
+    ["archived", false],
+  ] as const)("classifies %s as settled: %s", (status, expected) => {
+    expect(isSettledTaskStatus(status)).toBe(expected);
+  });
+});
 
 describe("TaskApplicationService", () => {
   it("normalizes a Task command and passes only the authenticated Actor to persistence", async () => {

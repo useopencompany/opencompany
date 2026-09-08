@@ -3965,6 +3965,49 @@ describe("Surface chat streaming UI", () => {
     expect(screen.queryByRole("button", { name: "Archive Legacy result" })).not.toBeInTheDocument();
   });
 
+  it.each(["waiting", "failed", "succeeded", "canceled"] as const)(
+    "archives a %s task from the home list",
+    async (status) => {
+      const user = userEvent.setup();
+      render(
+        <Surface
+          taskSpawningEnabled
+          tasks={[
+            taskView({
+              id: "settled_task",
+              name: "Review deployment",
+              sessionId: "task_conversation",
+              status,
+              stage: status === "failed" ? "failed" : "completed",
+              reportedOutcome: "needs_attention",
+            }),
+          ]}
+          defaultModel={DEFAULT_MODEL}
+          initialChat={null}
+        />,
+      );
+
+      await user.click(screen.getByRole("button", { name: "Archive Review deployment" }));
+
+      expect(taskCommandMocks.archive).toHaveBeenCalledWith("settled_task", { scopeKey: "" });
+      expect(screen.queryByRole("link", { name: /Review deployment/ })).not.toBeInTheDocument();
+    },
+  );
+
+  it.each(["queued", "running"] as const)("does not offer to archive a %s task", (status) => {
+    render(
+      <Surface
+        taskSpawningEnabled
+        tasks={[taskView({ name: "Active task", sessionId: "task_conversation", status })]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={null}
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: /Active task/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Archive Active task" })).not.toBeInTheDocument();
+  });
+
   it("hides old home chats but shows all unarchived tasks regardless of age", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-04T17:44:00.000Z"));
