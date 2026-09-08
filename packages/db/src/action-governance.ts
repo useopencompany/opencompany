@@ -26,6 +26,7 @@ export type ActionCapabilityQuoteRecord = {
 };
 
 export type ActionApprovalRecord = {
+  paramsHash?: string;
   actionId: string;
   sourceId: string;
   capabilityId: string;
@@ -57,6 +58,8 @@ export async function registerActionApproval(input: {
     sourceId: input.sourceId,
     capabilityId: input.capabilityId,
     inputHash: actionApprovalInputHash(input.params, input.approvalContext),
+    // Task staging matches parameters; dispatch still checks the full revision-bound hash.
+    ...(input.approvalContext ? { paramsHash: actionApprovalInputHash(input.params) } : {}),
     status: input.decision ?? "pending",
     requestedAt: now.toISOString(),
     ...(input.decision === "denied" ? { resolvedAt: now.toISOString() } : {}),
@@ -479,6 +482,7 @@ function actionApprovalRecord(value: unknown): ActionApprovalRecord | null {
     sourceId: record.sourceId,
     capabilityId: record.capabilityId,
     inputHash: record.inputHash,
+    ...(typeof record.paramsHash === "string" ? { paramsHash: record.paramsHash } : {}),
     status: record.status,
     requestedAt: record.requestedAt,
     ...(typeof record.resolvedAt === "string" ? { resolvedAt: record.resolvedAt } : {}),

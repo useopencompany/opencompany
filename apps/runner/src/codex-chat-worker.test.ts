@@ -4,6 +4,7 @@ import {
   CodexChatHandoffError,
   CodexChatLeaseLostError,
   CodexChatRetryableInfrastructureError,
+  TaskActionApprovalPauseError,
 } from "./codex-chat-errors";
 import {
   CODEX_CHAT_MAX_INFRASTRUCTURE_ATTEMPTS,
@@ -18,6 +19,13 @@ import {
   sweepTerminalCodexChatSandboxes,
 } from "./codex-chat-worker";
 import type { RunnerEnv } from "./env";
+
+const taskApprovalMocks = vi.hoisted(() => ({
+  fenceTaskApprovalEngine: vi.fn(async () => undefined),
+  resumeTaskActionApprovals: vi.fn(async () => ""),
+  pauseTaskActionApprovals: vi.fn(async () => undefined),
+}));
+vi.mock("./task-action-approval", () => taskApprovalMocks);
 
 const sessionRows = vi.hoisted(() => [] as CodexChatSession[]);
 const claimedTaskContext = vi.hoisted(() => ({
@@ -139,6 +147,7 @@ describe("claimNextCodexChatTurn", () => {
         "goat-chat-host-tools.v4",
         "goat-codex-host-tools.v2",
         "goat-codex-host-tools.v3",
+        "goat-codex-host-tools.v4",
       ]),
     );
   });
@@ -512,6 +521,16 @@ describe("runClaimedTurn", () => {
     dbMock.execute.mockResolvedValue({
       rows: [{ id: "updated", previous_infrastructure_failures: 0 }],
     });
+  });
+
+  it("parks an engine stopped for approval without settling or failing the task", async () => {
+    chatMocks.runCodexChatTurn.mockRejectedValueOnce(new TaskActionApprovalPauseError());
+    await runClaimedTurn(turn(), env());
+    expect(taskApprovalMocks.pauseTaskActionApprovals).toHaveBeenCalledExactlyOnceWith(
+      turn(),
+      "updated",
+    );
+    expect(eventMocks.fail).not.toHaveBeenCalled();
   });
 
   it("runs first attempts normally", async () => {

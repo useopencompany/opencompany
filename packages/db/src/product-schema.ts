@@ -676,6 +676,7 @@ export const CODEX_CHAT_EVENT_TYPES: readonly CodexChatEventType[] =
   );
 
 export type CodexChatTurnSettings = {
+  taskActionApprovalPending?: true;
   approvalContinuation?: boolean;
   mentions?: Array<{ kind: "skill"; id: string }>;
   taskResultMode?: TaskResultMode;

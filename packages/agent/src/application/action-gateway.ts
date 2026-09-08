@@ -12,6 +12,7 @@ import type { CapabilityTurnState, ResolvedActionCatalog } from "../actions/type
 const logger = createLogger({ service: "opencompany-agent", runtime: "action-gateway" });
 
 export type ActionPrincipal = {
+  durableTaskApprovals?: boolean;
   actorId: string;
   workspaceId: string;
   conversationId: string;
@@ -131,6 +132,7 @@ export async function executeActionHostGatewayService(input: {
   }
 
   const run = actionRunRef(input.request, context);
+  const denyHeadlessApproval = run.policy === "headless" && !context.durableTaskApprovals;
   try {
     const serviceCatalog = {
       sources: catalog.providers.map(({ id, kind, label, description }) => ({
@@ -168,7 +170,7 @@ export async function executeActionHostGatewayService(input: {
           capabilityId: action.capability,
           params: approvalRequest.params,
           ...(action.approvalContext ? { approvalContext: action.approvalContext } : {}),
-          ...(run.policy === "headless" ? { decision: "denied" as const } : {}),
+          ...(denyHeadlessApproval ? { decision: "denied" as const } : {}),
         });
         if (!approval) {
           return gatewayError(
@@ -178,7 +180,7 @@ export async function executeActionHostGatewayService(input: {
         }
         return {
           ok: true,
-          needsApproval: run.policy !== "headless" && approval.status === "pending",
+          needsApproval: !denyHeadlessApproval && approval.status === "pending",
         };
       }
       await dependencies.recordSourceDiscovery({ run, sourceId: action.provider });
@@ -204,7 +206,7 @@ export async function executeActionHostGatewayService(input: {
           capabilityId: action.capability,
           params: executeRequest.params,
           ...(action.approvalContext ? { approvalContext: action.approvalContext } : {}),
-          ...(run.policy === "headless" ? { decision: "denied" as const } : {}),
+          ...(denyHeadlessApproval ? { decision: "denied" as const } : {}),
         });
         if (!approval) {
           return gatewayError(
@@ -230,10 +232,9 @@ export async function executeActionHostGatewayService(input: {
             error: {
               code: "not_permitted",
               source: action.provider,
-              message:
-                run.policy === "headless"
-                  ? `Headless turns cannot approve ${JSON.stringify(action.id)}, so it was denied.`
-                  : `The user denied approval for ${JSON.stringify(action.id)}.`,
+              message: denyHeadlessApproval
+                ? `Headless turns cannot approve ${JSON.stringify(action.id)}, so it was denied.`
+                : `The user denied approval for ${JSON.stringify(action.id)}.`,
             },
           };
         }

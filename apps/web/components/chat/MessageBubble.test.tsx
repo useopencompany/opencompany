@@ -31,6 +31,55 @@ afterEach(() => {
   presentationMocks.load.mockReset();
 });
 
+it.each(["accept", "decline"] as const)(
+  "reviews a persisted task Gmail draft with a one-time %s decision",
+  async (decision) => {
+    const onActionApproval = vi.fn(async () => undefined);
+    const message: ChatUiMessage = {
+      id: "assistant_task_approval",
+      role: "assistant",
+      parts: [
+        {
+          type: "dynamic-tool",
+          toolName: "codex_approval",
+          toolCallId: "task_action_draft",
+          state: "approval-requested",
+          approval: { id: "approval_task_action_draft" },
+          input: {
+            action: "plugin:gmail:gmail.create_draft",
+            params: {
+              to: "recipient@example.com",
+              subject: "Ready to launch",
+              body: "The feature is live.",
+            },
+          },
+        },
+      ],
+    };
+    render(
+      <MessageBubble
+        message={message}
+        taskLookup={emptyTaskLookup}
+        allowActionApproval
+        onActionApproval={onActionApproval}
+      />,
+    );
+    expect(screen.getByText("recipient@example.com")).toBeVisible();
+    expect(screen.getByText("Ready to launch")).toBeVisible();
+    expect(screen.getByText("The feature is live.")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Always allow" })).not.toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole("button", { name: decision === "accept" ? "Approve once" : "Deny" }),
+    );
+    expect(onActionApproval).toHaveBeenCalledExactlyOnceWith({
+      approvalId: "approval_task_action_draft",
+      action: "plugin:gmail:gmail.create_draft",
+      decision,
+    });
+    expect(screen.getByRole("button", { name: "Deny" })).toBeDisabled();
+  },
+);
+
 describe("MessageBubble historical presentation details", () => {
   it("keeps expanded reasoning visible and loads detail when a live row becomes historical", async () => {
     const liveMessage = {

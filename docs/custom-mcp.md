@@ -25,6 +25,7 @@ except Off. Every execution verifies the server's live discovery fingerprint bef
 a mismatch stops dispatch and asks the user to refresh and review permissions. Durable approval
 hashes also include the installation/account/revision, so an old approval cannot authorize a
 rotated account or changed snapshot. Other engines continue through the same action gateway.
+Codex and Claude Code Tasks pause for one-time approval and resume through that revision check.
 
 Outbound requests validate public IP ranges after every DNS lookup and pin the checked address
 to the TLS connection. Redirects and requests to any other endpoint are rejected. DNS, request,

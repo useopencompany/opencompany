@@ -19,6 +19,7 @@ import {
   CodexChatHandoffError,
   CodexChatLeaseLostError,
   CodexChatRetryableInfrastructureError,
+  TaskActionApprovalPauseError,
 } from "./codex-chat-errors";
 import {
   createExternalEngineProjector,
@@ -31,6 +32,11 @@ import type { RunnerEnv } from "./env";
 import { recoveryReasonForDeployVersions, runnerDeployVersion } from "./runner-deploy-version";
 import { armSandboxActiveTimeoutById, armSandboxIdleTimeoutById } from "./sandbox";
 import { rowsFromExecute } from "./sql-exec";
+import {
+  fenceTaskApprovalEngine,
+  pauseTaskActionApprovals,
+  resumeTaskActionApprovals,
+} from "./task-action-approval";
 import { orchestrateTaskFailure, resolveTaskTurnContext, type TaskTurnContext } from "./task-turn";
 
 const logger = createLogger({
@@ -102,6 +108,8 @@ type ClaimedTurnRow = {
   updated_at: Date | string;
 };
 
+// Approval resolution may come from an older API during a rolling deploy. A queued
+// approval continuation also wakes its waiting task atomically with the worker claim.
 // Claims the next runnable codex chat turn. Four predicates shape the queue:
 //  - claimable: freshly queued, or a running turn whose lease expired (worker crash);
 //  - one active turn per session: skip while a sibling holds a live running lease;
@@ -142,7 +150,10 @@ export async function claimNextCodexChatTurn(input: {
                 SELECT 1
                 FROM goat.tasks AS task
                 WHERE task.session_id = chat.id
-                  AND task.status IN ('queued', 'running')
+                  AND task.archived_at IS NULL
+                  AND (task.status IN ('queued', 'running') OR (
+                    task.status = 'waiting' AND turn.settings ->> 'approvalContinuation' = 'true'
+                  ))
               )
             )
             AND (
@@ -186,6 +197,14 @@ export async function claimNextCodexChatTurn(input: {
       FROM candidate
       WHERE turn.id = candidate.id
       RETURNING turn.*
+    ), resumed_task AS (
+      UPDATE goat.tasks AS task
+      SET status = 'queued', stage = 'queued', reported_outcome = NULL,
+          outcome_comment = NULL, updated_at = ${now}
+      FROM claimed
+      WHERE task.session_id = claimed.chat_session_id AND task.status = 'waiting'
+        AND task.archived_at IS NULL AND claimed.settings ->> 'approvalContinuation' = 'true'
+      RETURNING task.id
     ), started_session AS (
       UPDATE goat.codex_chat_sessions AS session
       SET status = 'starting',
@@ -420,8 +439,16 @@ export async function runClaimedTurn(
   > | null = null;
   try {
     runPromise = (async () => {
+      const approvalContext =
+        taskContext && session.engine !== "opencompany" && !turn.interruptRequestedAt
+          ? await resumeTaskActionApprovals(turn, undefined, async () => {
+              await fenceTaskApprovalEngine(session);
+              if (options.handoffSignal?.aborted) throw new CodexChatHandoffError();
+              if (heartbeatAbort) throw heartbeatAbort;
+            })
+          : "";
       const turnInput = {
-        turn,
+        turn: approvalContext ? { ...turn, prompt: `${turn.prompt}\n\n${approvalContext}` } : turn,
         session,
         env,
         canonicalAttemptId,
@@ -435,7 +462,11 @@ export async function runClaimedTurn(
       };
       const outcome = await runCodingEngineTurn(turnInput);
       return outcome;
-    })().catch((error) => {
+    })().catch(async (error) => {
+      if (error instanceof TaskActionApprovalPauseError) {
+        await pauseTaskActionApprovals(turn, canonicalAttemptId);
+        return "settled" as const;
+      }
       if (error instanceof CodexChatHandoffError) {
         return "handed_off" as const;
       } else if (error instanceof CodexChatRetryableInfrastructureError) {

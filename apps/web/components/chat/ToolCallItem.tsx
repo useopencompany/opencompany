@@ -348,6 +348,7 @@ function ActionApprovalCard({
   const [submitting, setSubmitting] = useState<ActionApprovalDecision | null>(null);
   const [error, setError] = useState<string | null>(null);
   const appData = useAppDataOptional();
+  const taskApproval = tool.toolCallId.startsWith("task_action_");
   const summary = actionApprovalSummary(tool.input);
   const approvalId = tool.approvalId;
   const action =
@@ -394,9 +395,9 @@ function ActionApprovalCard({
           onClick={() => decide("accept")}
           className="rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-canvas transition-opacity hover:opacity-90 disabled:opacity-50"
         >
-          {submitting === "accept" ? "Running..." : "Accept"}
+          {submitting === "accept" ? "Approving..." : taskApproval ? "Approve once" : "Accept"}
         </button>
-        {allowAlways && !/^plugin:custom-[a-f0-9]{24}:/.test(action) ? (
+        {allowAlways && !taskApproval && !/^plugin:custom-[a-f0-9]{24}:/.test(action) ? (
           <button
             type="button"
             disabled={submitting !== null}
@@ -412,7 +413,7 @@ function ActionApprovalCard({
           onClick={() => decide("decline")}
           className="rounded-lg border border-border px-3 py-1.5 text-[12px] font-medium text-ink-muted hover:bg-surface-hover disabled:opacity-50"
         >
-          Decline
+          {taskApproval ? "Deny" : "Decline"}
         </button>
       </div>
       {error ? (

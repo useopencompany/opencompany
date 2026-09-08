@@ -53,8 +53,19 @@ function state(
 const now = new Date("2026-08-11T12:00:00.000Z");
 
 describe("External engine tool capability authority", () => {
+  it("derives task approvals from persisted conversation kind", () => {
+    expect(
+      authorizeExternalEngineToolCapability({
+        capability,
+        state: state({ conversationKind: "task" }),
+        now,
+      }),
+    ).toMatchObject({ taskConversation: true });
+  });
+
   it("authorizes only the active persisted external-engine attempt", () => {
     expect(authorizeExternalEngineToolCapability({ capability, state: state(), now })).toEqual({
+      taskConversation: false,
       skillToolsEnabled: true,
       actorId: "user_1",
       workspaceId: "workspace_1",

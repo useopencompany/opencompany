@@ -227,6 +227,10 @@
     "./custom-mcp-repository": {
       "types": "./src/custom-mcp-repository.ts",
       "default": "./src/custom-mcp-repository.ts"
+    },
+    "./task-action-approvals": {
+      "types": "./src/task-action-approvals.ts",
+      "default": "./src/task-action-approvals.ts"
     }
   },
   "scripts": {
