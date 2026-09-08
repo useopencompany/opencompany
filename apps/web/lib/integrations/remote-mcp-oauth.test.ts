@@ -418,7 +418,7 @@ describe("opencompany remote MCP OAuth", () => {
       state: observed.state,
       db: {
         update: () => ({
-          set: () => ({ where: async () => [] }),
+          set: () => ({ where: () => ({ returning: async () => [{ id: "gint_remote_mcp" }] }) }),
         }),
       },
     });
