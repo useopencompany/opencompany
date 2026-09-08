@@ -88,6 +88,11 @@ import {
   NEON_MCP_ENDPOINT_URL,
 } from "./integrations/neon-mcp";
 import {
+  getNotionMcpIntegrationState,
+  loadNotionMcpWorkerConnection,
+  NOTION_MCP_ENDPOINT_URL,
+} from "./integrations/notion-mcp";
+import {
   getPostHogIntegrationState,
   loadPostHogMcpWorkerConnection,
   POSTHOG_MCP_ENDPOINT_URL,
@@ -215,6 +220,12 @@ const providerBindings = {
     endpointUrl: NEON_MCP_ENDPOINT_URL,
     getState: getNeonIntegrationState,
     loadConnection: loadNeonMcpWorkerConnection,
+  },
+  notion: {
+    provider: "notion",
+    endpointUrl: NOTION_MCP_ENDPOINT_URL,
+    getState: getNotionMcpIntegrationState,
+    loadConnection: loadNotionMcpWorkerConnection,
   },
   latitude: {
     provider: "latitude",

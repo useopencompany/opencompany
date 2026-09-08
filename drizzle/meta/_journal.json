@@ -1793,6 +1793,13 @@
       "when": 1788772062000,
       "tag": "0255_goat_task_waiting_projection",
       "breakpoints": true
+    },
+    {
+      "idx": 256,
+      "version": "7",
+      "when": 1788813089391,
+      "tag": "0256_opencompany_notion_integration",
+      "breakpoints": true
     }
   ]
 }

@@ -74,7 +74,7 @@ not be relaxed to make a pull request pass.
 
 ## Local Checks
 
-Use Bun `1.3.2` and Node `20.20.0` or newer. Install exactly the committed dependency graph:
+Use Bun `1.4.2` and Node `20.20.0` or newer. Install exactly the committed dependency graph:
 
 ```bash
 bun install --frozen-lockfile
@@ -95,13 +95,15 @@ bun run build:docs
 bun run test
 node --test scripts/lib/*.test.mjs
 bun run secrets:check
+bun run dependencies:audit
 ```
 
 TruffleHog must be installed for the local secret scan. The pull request gate scans the exact PR
 commit range without repository credentials and reviews new high- or critical-severity dependency
-vulnerabilities. `boundary:check` enforces the permanent application and naming boundaries. For
-focused development, use Turborepo filters such as `bun run test --filter @opencompany/web`, but run
-the full gate before review.
+vulnerabilities. The full dependency audit also checks existing runtime, build, and release
+dependencies and fails on any advisory. `boundary:check` enforces the permanent application and
+naming boundaries. For focused development, use Turborepo filters such as
+`bun run test --filter @opencompany/web`, but run the full gate before review.
 
 ## Schema and Environment Changes
 

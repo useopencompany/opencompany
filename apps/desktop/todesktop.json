@@ -8,7 +8,7 @@
   "icon": "./assets/icon.png",
   "nodeVersion": "22.11.0",
   "packageManager": "bun",
-  "bunVersion": "1.3.2",
+  "bunVersion": "1.4.2",
   "mac": {
     "category": "public.app-category.productivity"
   }
