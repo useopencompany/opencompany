@@ -54,7 +54,9 @@ describe("official plugin release artifacts", () => {
   it("recognizes equivalent pinned URLs and an explicit selected directory", async () => {
     const commit = parseSkillUrl(OFFICIAL_PLUGIN_SOURCES.hubspot).ref!;
     for (const input of [
-      { url: `https://github.com/UseOpenCompany/Plugins/tree/${commit.toUpperCase()}/hubspot/` },
+      {
+        url: `https://github.com/${"useopencompany/plugins".toUpperCase()}/tree/${commit.toUpperCase()}/hubspot/`,
+      },
       { url: `useopencompany/plugins/hubspot#${commit}` },
       { url: `https://github.com/useopencompany/plugins/tree/${commit}`, selectedPath: "hubspot" },
     ]) {
