@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ElectricReadModelProxy } from "./electric-read-models";
+import { ElectricReadModelProxy, parseElectricAuthMode } from "./electric-read-models";
 
 const loggerMocks = vi.hoisted(() => ({
   debug: vi.fn(),
@@ -32,6 +32,40 @@ const actor = {
 describe("Electric read models", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("selects self-hosted auth while retaining cloud credentials for rollback", async () => {
+    let requestedUrl: URL | undefined;
+    let requestedHeaders: HeadersInit | undefined;
+    const proxy = new ElectricReadModelProxy({
+      electricUrl: "https://electric.example.test",
+      authMode: "self-hosted",
+      sourceId: "retained_cloud_source",
+      sourceSecret: "retained_cloud_secret",
+      electricSecret: "self_hosted_secret",
+      token: "retained_bearer_token",
+      fetch: vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+        requestedUrl = new URL(String(input));
+        requestedHeaders = init?.headers;
+        return Response.json([]);
+      }) as typeof fetch,
+    });
+
+    await proxy.stream({
+      actor,
+      readModel: "chat-conversations-v1",
+      requestUrl: new URL("https://api.example.test/v1/read-models/chat-conversations-v1"),
+    });
+
+    expect(requestedUrl?.searchParams.get("secret")).toBe("self_hosted_secret");
+    expect(requestedUrl?.searchParams.has("source_id")).toBe(false);
+    expect(requestedHeaders).toEqual({});
+  });
+
+  it("rejects an unknown Electric auth mode", () => {
+    expect(() => parseElectricAuthMode("automatic")).toThrow(
+      "ELECTRIC_AUTH_MODE must be one of: cloud, self-hosted, bearer, insecure.",
+    );
   });
 
   it("keeps the v1 Conversation shape stable for deployed clients", async () => {

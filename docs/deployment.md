@@ -1,7 +1,8 @@
 # Deployment
 
 Production releases are defined by `.github/workflows/release-production.yml` and target five
-surfaces:
+application surfaces. A sixth stateful infrastructure service, Electric, is managed by the Render
+Blueprint but is not redeployed for every application release:
 
 | Surface     | Host   | Responsibility                                                                                                       |
 | ----------- | ------ | -------------------------------------------------------------------------------------------------------------------- |
@@ -10,6 +11,7 @@ surfaces:
 | Runner      | Render | durable Run execution, schedules, ingestion, integration workers, sandboxes, internal transports, and the LLM broker |
 | Marketing   | Vercel | public marketing site                                                                                                |
 | Docs        | Vercel | public product and API documentation                                                                                 |
+| Electric    | Render | private Postgres shape sync for the API-owned authorized read-model proxy                                            |
 
 The Vercel project roots are `apps/web`, `apps/marketing`, and `apps/docs`. Release automation
 verifies every value and requires a distinct project ID for each surface before building. Vercel Git
@@ -56,6 +58,8 @@ deployment, and health checks. Do not bypass preflight or branch protection.
 - Docs: no runtime secrets; CI identifies the existing Vercel project through
   `DOCS_VERCEL_PROJECT_ID` in `prod` `/release`.
 - API: Infisical `prod` `/api`, synced to the `opencompany-api` Render service.
+- Electric: Infisical `prod` `/electric`, copied to the `opencompany-electric` Render service;
+  `render.yaml` owns the image, disk, region, and non-secret configuration.
 - Runner: Infisical `prod` `/runner`, synced to the runner Render service.
 - Release: Infisical `prod` `/release`, containing deployment credentials, service/project IDs,
   production URLs, and the migration database URL.
@@ -64,6 +68,9 @@ Run `bun run infisical:release:preflight` to validate the release group. The hos
 checks Vercel project metadata and required host values that cannot be verified through a normal
 environment pull. It creates `.vercel/project.json` from release credentials at runtime; the
 repository tracks only a placeholder example, never a live Vercel project or organization binding.
+
+Run `bun run infisical:electric:preflight` before changing or redeploying Electric. The service is
+image-backed and stateful, so routine application releases do not restart it.
 
 ## Migrations
 

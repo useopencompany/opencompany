@@ -58,7 +58,14 @@ test("production preflight follows the deployed runtime boundaries", async () =>
     "GITHUB_USER_APP_CLIENT_ID",
     "GITHUB_USER_APP_CLIENT_SECRET",
     "GITHUB_USER_APP_STATE_SECRET",
+    "ELECTRIC_AUTH_MODE",
+    "BUN_CONFIG_MAX_HTTP_REQUESTS",
   ]);
+
+  assert.deepEqual(
+    [...groups.electric.required],
+    ["DATABASE_URL", "ELECTRIC_SECRET", "ELECTRIC_STORAGE_DIR", "ELECTRIC_REPLICATION_STREAM_ID"],
+  );
 
   assertIncludes(groups.runner.required, [
     "BLOB_READ_WRITE_TOKEN",
@@ -97,6 +104,10 @@ test("production preflight follows the deployed runtime boundaries", async () =>
 
   assert.deepEqual([...surfaceConfig("web").requiredEnv].sort(), [...groups.web.required].sort());
   assert.deepEqual(readRenderKeys(render, "opencompany-api").sort(), groupKeys(groups.api).sort());
+  assert.deepEqual(
+    readRenderKeys(render, "opencompany-electric").sort(),
+    groupKeys(groups.electric).sort(),
+  );
   assert.deepEqual(
     readRenderKeys(render, "opencompany-runner").sort(),
     groupKeys(groups.runner)
