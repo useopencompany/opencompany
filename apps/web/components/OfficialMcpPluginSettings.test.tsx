@@ -2648,6 +2648,47 @@ describe("Linear plugin settings", () => {
     );
   });
 
+  it("reflects an Always allow update after editing the permission in settings", async () => {
+    const connection = account("gint_gmail", "ada@example.com", { query: "on" }, "gmail");
+    const view = (mode: string) => (
+      <GmailPluginDetailView
+        pluginState={{ status: "ready", plugin: gmailPlugin }}
+        accountsState={{
+          status: "ready",
+          accounts: [{ account: connection }],
+          permissionConnection: { ...connection, capabilityModes: { query: mode } },
+        }}
+        toolsState={gmailToolsStateFromPlugin(gmailPlugin)}
+        canEdit
+      />
+    );
+    const { rerender } = render(view("on"));
+    const modes = () => within(screen.getByRole("group", { name: "Read Gmail permission" }));
+    await userEvent.click(modes().getByRole("button", { name: "Ask" }));
+    await waitFor(() => expect(router.refresh).toHaveBeenCalled());
+    rerender(view("ask"));
+    expect(modes().getByRole("button", { name: "Ask" })).toHaveAttribute("aria-pressed", "true");
+
+    // The integration subscription receives the standing permission saved from chat.
+    rerender(view("on"));
+    expect(modes().getByRole("button", { name: "On" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("restores the persisted permission when saving an optimistic change fails", async () => {
+    accountActions.setIntegrationCapabilityModeAction.mockResolvedValueOnce({
+      ok: false,
+      error: "Permission could not be saved.",
+    } as never);
+    render(<GmailPluginDetail pluginState={{ status: "ready", plugin: gmailPlugin }} canEdit />);
+    const modes = within(screen.getByRole("group", { name: "Read Gmail permission" }));
+    await userEvent.click(modes.getByRole("button", { name: "On" }));
+    await waitFor(() =>
+      expect(toasts.error).toHaveBeenCalledWith("Permission could not be saved."),
+    );
+    expect(modes.getByRole("button", { name: "Ask" })).toHaveAttribute("aria-pressed", "true");
+    expect(router.refresh).not.toHaveBeenCalled();
+  });
+
   it("prompts older Gmail connections to grant the full MCP scope", () => {
     const oldGrant = {
       ...account("gint_gmail_old", "ada@example.com", {}, "gmail"),
