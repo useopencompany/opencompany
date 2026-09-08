@@ -304,9 +304,14 @@ export async function runCodexChatTurn(input: {
     const abort = shouldAbort?.();
     if (abort) throw abort;
     if (isRetryableSandboxAcquisitionError(error)) {
+      const redactAcquisitionError = createKnownSecretRedactor([
+        auth.kind === "api" ? auth.apiKeyValue : JSON.stringify(auth.authJson),
+        env.internalToken,
+      ]);
       throw new CodexChatRetryableInfrastructureError(
         "Codex sandbox capacity is temporarily unavailable.",
         error,
+        failureDiagnostic("connect_sandbox", error, redactAcquisitionError),
       );
     }
     const message = `Codex sandbox could not be started: ${errorMessage(error)}. Send your message again to retry.`;
