@@ -1,5 +1,6 @@
 "use client";
 
+import { isSettledTaskStatus } from "@opencompany/core/tasks";
 import {
   Dialog,
   DialogContent,
@@ -63,13 +64,6 @@ import {
   updateTaskViewModeAction,
 } from "@/lib/user-preferences";
 
-const TERMINAL_TASK_STATUSES = new Set<TaskView["status"]>(["succeeded", "failed", "canceled"]);
-const SETTLED_TASK_STATUSES = new Set<TaskView["status"]>([
-  "waiting",
-  "succeeded",
-  "failed",
-  "canceled",
-]);
 const CAPPED_TASK_BOARD_COLUMNS = new Set<TaskBoardColumn>(["done", "canceled"]);
 export const TASK_BOARD_COLUMN_CAP = 50;
 const ALL_TASKS_FILTER_VALUE = "all";
@@ -664,9 +658,8 @@ function TaskBoardSheet({
   const schedule = task.scheduleId
     ? (schedules.find((candidate) => candidate.id === task.scheduleId) ?? null)
     : null;
-  const terminal = TERMINAL_TASK_STATUSES.has(task.status);
-  const settled = SETTLED_TASK_STATUSES.has(task.status);
-  const archivable = terminal && Boolean(task.sessionId);
+  const settled = isSettledTaskStatus(task.status);
+  const archivable = settled && Boolean(task.sessionId);
   const { summary, error: summaryError } = useTaskSummary(task.id, settled);
   const durationLabel = !settled
     ? null

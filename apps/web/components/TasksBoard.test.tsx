@@ -201,6 +201,21 @@ describe("TasksBoardRoute", () => {
     expect(screen.queryByText("Archived task")).not.toBeInTheDocument();
   });
 
+  it.each(["waiting", "failed"] as const)(
+    "archives a %s task from its detail sheet",
+    async (status) => {
+      const user = userEvent.setup();
+      appDataMock.taskRows = [taskRow({ id: "review", name: "Review deployment", status })];
+      render(<TasksBoardRoute workflowNames={{}} />);
+
+      await user.click(screen.getByRole("link", { name: "Open Review deployment" }));
+      await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Archive" }));
+
+      expect(archiveTaskMock).toHaveBeenCalledWith("review", { scopeKey: "workspace_1" });
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    },
+  );
+
   it("opens a live detail sheet from a task link and archives terminal tasks", async () => {
     const user = userEvent.setup();
     appDataMock.taskRows = [

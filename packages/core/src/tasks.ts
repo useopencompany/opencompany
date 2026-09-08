@@ -19,6 +19,13 @@ export const TASK_STATUSES = [
 ] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
+// Waiting tasks have finished their run and can be archived without resuming them.
+export const SETTLED_TASK_STATUSES = ["waiting", "succeeded", "failed", "canceled"] as const;
+
+export function isSettledTaskStatus(status: TaskStatus): boolean {
+  return SETTLED_TASK_STATUSES.some((settledStatus) => settledStatus === status);
+}
+
 export const TASK_SOURCES = ["manual", "workflow", "schedule", "agent"] as const;
 export type TaskSource = (typeof TASK_SOURCES)[number];
 

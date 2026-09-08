@@ -15,8 +15,10 @@ import {
   type CreateTaskCommentCommand,
   type CreateTaskCommentResult,
   type CreateTaskResult,
+  isSettledTaskStatus,
   type LegacyTask,
   type LegacyTaskHistory,
+  SETTLED_TASK_STATUSES,
   type Task,
   type TaskPage,
   type TaskRepository,
@@ -1229,7 +1231,10 @@ export class PostgresTaskRepository implements TaskRepository {
             (${name}::text IS NOT NULL AND task.name IS DISTINCT FROM ${name}::text)
             OR (
               ${archived}::boolean IS NOT NULL
-              AND task.status IN ('succeeded', 'failed', 'canceled')
+              AND task.status IN (${sql.join(
+                SETTLED_TASK_STATUSES.map((status) => sql`${status}`),
+                sql`, `,
+              )})
               AND (
                 (${archived}::boolean AND task.archived_at IS NULL)
                 OR (NOT ${archived}::boolean AND task.archived_at IS NOT NULL)
@@ -1291,9 +1296,9 @@ export class PostgresTaskRepository implements TaskRepository {
       input.command.archived &&
       !row.changed &&
       row.archivedAt === null &&
-      !["succeeded", "failed", "canceled"].includes(row.status)
+      !isSettledTaskStatus(row.status)
     ) {
-      throw new CoreError("invalid_argument", "Only a terminal Task can be archived.");
+      throw new CoreError("invalid_argument", "Only a settled Task can be archived.");
     }
     const transactionId = validTransactionId(row.transactionId);
     return { task: mapTask(row), transactionId };
