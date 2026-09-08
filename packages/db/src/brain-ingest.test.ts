@@ -1,6 +1,6 @@
 import { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import { describe, expect, it, vi } from "vitest";
-import { brainIngestJobs, brainSourceItems, brains } from "./product-schema";
+import { brainIngestJobs, brainSourceItems, brains, workspaces } from "./product-schema";
 
 const { getDbMock, reserveWorkspaceIngestionMock } = vi.hoisted(() => ({
   getDbMock: vi.fn(),
@@ -65,6 +65,7 @@ describe("upsertBrainSourceItemAndEnqueue", () => {
   });
 
   it("propagates the import run id to newly enqueued jobs", async () => {
+    const workspaceId = "goat_workspace_123";
     let insertedJobValues: Array<Record<string, unknown>> = [];
     const db = {
       insert: (table: unknown) => ({
@@ -102,8 +103,11 @@ describe("upsertBrainSourceItemAndEnqueue", () => {
       select: () => ({
         from: (table: unknown) => ({
           where: async () => {
-            if (table !== brains) throw new Error("Unexpected select table.");
-            return [{ id: "goat_brain_123", workspaceId: "goat_workspace_123" }];
+            if (table === brains) {
+              return [{ id: "goat_brain_123", workspaceId }];
+            }
+            if (table === workspaces) return [{ id: workspaceId }];
+            throw new Error("Unexpected select table.");
           },
         }),
       }),
@@ -178,8 +182,11 @@ describe("upsertBrainSourceItemAndEnqueue", () => {
       select: () => ({
         from: (table: unknown) => ({
           where: async () => {
-            if (table !== brains) throw new Error("Unexpected select table.");
-            return targetBrains;
+            if (table === brains) return targetBrains;
+            if (table === workspaces) {
+              return [{ id: "workspace_one" }, { id: "workspace_two" }];
+            }
+            throw new Error("Unexpected select table.");
           },
         }),
       }),
@@ -283,6 +290,65 @@ describe("upsertBrainSourceItemAndEnqueue", () => {
     });
   });
 
+  it("does not enqueue or reserve usage when the target workspace disables legacy Brain", async () => {
+    reserveWorkspaceIngestionMock.mockClear();
+    let jobInsertAttempted = false;
+    const db = {
+      insert: (table: unknown) => {
+        if (table === brainIngestJobs) jobInsertAttempted = true;
+        return {
+          values: () => ({
+            onConflictDoUpdate: () => ({
+              returning: async () => [{ id: "gbsrc_disabled" }],
+            }),
+          }),
+        };
+      },
+      select: () => ({
+        from: (table: unknown) => ({
+          where: async () => {
+            if (table === brains) {
+              return [{ id: "disabled_brain", workspaceId: "disabled_workspace" }];
+            }
+            if (table === workspaces) return [];
+            throw new Error("Unexpected select table.");
+          },
+        }),
+      }),
+    };
+
+    const result = await upsertBrainSourceItemAndEnqueue({
+      userWorkosId: "user_123",
+      sourceConnectionId: "integration_123",
+      integrationId: "integration_123",
+      brainRefs: ["disabled_brain"],
+      item: {
+        sourceProvider: "google_drive",
+        sourceType: "document",
+        externalId: "file_123",
+        sourceRef: "google-drive:file_123",
+        title: "Disabled document",
+        occurredAt: "2026-09-07T10:00:00.000Z",
+        capturedAt: "2026-09-07T10:01:00.000Z",
+        contentHash: "hash_disabled",
+        contentHashInput: {},
+        content: {},
+      },
+      rawPayload: {},
+      db,
+    });
+
+    expect(jobInsertAttempted).toBe(false);
+    expect(reserveWorkspaceIngestionMock).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      sourceItemId: "gbsrc_disabled",
+      jobId: null,
+      jobIds: [],
+      enqueued: false,
+      skipped: false,
+    });
+  });
+
   it("runs sequentially instead of opening a transaction on the neon-http web client", async () => {
     // Regression: the web app's getDb() is neon-http, which throws on
     // db.transaction(). Callers that omit `db` (e.g. chat save_to_brain capture)
@@ -352,6 +418,7 @@ function brainIngestDbMock(input: {
     result: Record<string, unknown>;
   }>;
 }) {
+  const workspaceId = "goat_workspace_123";
   const db = {
     sourceItemUpdate: null as Record<string, unknown> | null,
     insert: (table: unknown) => ({
@@ -392,8 +459,9 @@ function brainIngestDbMock(input: {
       from: (table: unknown) => ({
         where: async () => {
           if (table === brains) {
-            return [{ id: "goat_brain_123", workspaceId: "goat_workspace_123" }];
+            return [{ id: "goat_brain_123", workspaceId }];
           }
+          if (table === workspaces) return [{ id: workspaceId }];
           if (table === brainIngestJobs) return input.jobs;
           throw new Error("Unexpected select table.");
         },
