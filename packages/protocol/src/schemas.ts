@@ -442,6 +442,7 @@ export const IntegrationAccountReadModelSchema = z
       "latitude",
       "posthog",
       "neon",
+      "notion",
       "supabase",
       "x_account",
     ]),
