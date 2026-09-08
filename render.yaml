@@ -11,6 +11,7 @@ services:
     numInstances: 1
     image:
       url: docker.io/electricsql/electric@sha256:c9c666a59e12d7d10e0ff6c3619a3a39569ae15236b1023655c422d844da5fa7
+    healthCheckPath: /v1/health
     disk:
       name: opencompany-electric-data
       mountPath: /var/electric
