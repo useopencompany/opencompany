@@ -75,17 +75,20 @@ describe("official plugin release artifacts", () => {
     },
     { url: OFFICIAL_PLUGIN_SOURCES.hubspot, selectedPath: "attio" },
     { url: OFFICIAL_PLUGIN_SOURCES.hubspot, selectedPath: "../hubspot" },
-    { url: OFFICIAL_PLUGIN_SOURCES.hubspot.replace("github.com", "example.com") },
   ])(
     "does not substitute a catalog artifact for a different source: $url $selectedPath",
     async (input) => {
-      if (input.url.includes("example.com")) {
-        await expect(createOfficialPluginFetcher(input)).rejects.toThrow("Only public github.com");
-      } else {
-        expect(await createOfficialPluginFetcher(input)).toBeNull();
-      }
+      expect(await createOfficialPluginFetcher(input)).toBeNull();
     },
   );
+
+  it("rejects an unsupported host before selecting a bundled artifact", async () => {
+    await expect(
+      createOfficialPluginFetcher({
+        url: OFFICIAL_PLUGIN_SOURCES.hubspot.replace("github.com", "example.com"),
+      }),
+    ).rejects.toThrow("Only public github.com");
+  });
 
   it("cannot reuse bundled bytes with another repository or commit", async () => {
     const url = OFFICIAL_PLUGIN_SOURCES.hubspot;
