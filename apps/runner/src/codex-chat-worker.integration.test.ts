@@ -4,7 +4,7 @@ import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CodexChatLeaseLostError } from "./codex-chat-errors";
-import { forceFailClaimedTurn } from "./codex-chat-worker";
+import { claimNextCodexChatTurn, forceFailClaimedTurn } from "./codex-chat-worker";
 import type { TaskTurnContext } from "./task-turn";
 
 // The forced settlement is the last line of defense against the lease-reclaim loop:
@@ -156,6 +156,38 @@ describe("forceFailClaimedTurn against real Postgres", () => {
   afterEach(async () => {
     dbHolder.execute = undefined;
     await pg.close();
+  });
+
+  it("claims an approved continuation left waiting by an older API, without waking other waiting or archived tasks", async () => {
+    await pg.exec(`
+      ALTER TABLE goat.chat_sessions ADD COLUMN closed_at timestamptz;
+      ALTER TABLE goat.tasks ADD COLUMN archived_at timestamptz, ADD COLUMN reported_outcome text, ADD COLUMN outcome_comment text;
+      ALTER TABLE goat.codex_chat_sessions ADD COLUMN host_tool_contract_version text, ADD COLUMN sandbox_timeout_armed_at timestamptz;
+      ALTER TABLE goat.codex_chat_turns
+        ADD COLUMN lease_expires_at timestamptz, ADD COLUMN run_after timestamptz,
+        ADD COLUMN settings jsonb DEFAULT '{}', ADD COLUMN created_at timestamptz DEFAULT now(),
+        ADD COLUMN attempts integer DEFAULT 1, ADD COLUMN recovery_attempts integer DEFAULT 0,
+        ADD COLUMN engine_recovery_required boolean DEFAULT false, ADD COLUMN engine_turn_baseline_ids jsonb,
+        ADD COLUMN event_sequence integer DEFAULT 0, ADD COLUMN interrupt_requested_at timestamptz,
+        ADD COLUMN user_message_id text, ADD COLUMN assistant_message_id text, ADD COLUMN codex_turn_id text;
+      UPDATE goat.tasks SET status='waiting';
+      UPDATE goat.codex_chat_turns SET status='queued';
+    `);
+    const claim = () => claimNextCodexChatTurn({ leaseOwner: "new_worker", leaseTtlMs: 60_000 });
+    expect(await claim()).toBeNull();
+    await pg.exec(
+      `UPDATE goat.codex_chat_turns SET settings='{"approvalContinuation":true}'; UPDATE goat.tasks SET archived_at=now();`,
+    );
+    expect(await claim()).toBeNull();
+    await pg.exec("UPDATE goat.tasks SET archived_at=NULL");
+    expect(await claim()).toMatchObject({
+      id: "turn_1",
+      status: "running",
+      leaseOwner: "new_worker",
+    });
+    expect((await pg.query("SELECT status,stage FROM goat.tasks WHERE id='task_1'")).rows).toEqual([
+      { status: "queued", stage: "queued" },
+    ]);
   });
 
   it("fails the turn, attempt, runtime, and task in one statement", async () => {

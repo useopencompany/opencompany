@@ -19,6 +19,7 @@ import { registerWikiTool } from "@opencompany/agent/mcp-server";
 import { executeWorkspaceSkillToolForActor } from "@opencompany/agent/skills";
 import {
   ACTION_HOST_TOOL_CONTRACT_VERSION,
+  ACTION_HOST_TOOL_CONTRACT_VERSION_V3,
   type ActionGatewayRequest,
   type ActionGatewayResponse,
   type ExternalEngineGatewayTicketPayload,
@@ -215,7 +216,8 @@ export function registerAcpToolsMcpRoute(
           authorizedContext,
           env,
           includeCapture:
-            authorizedContext.hostToolContractVersion === ACTION_HOST_TOOL_CONTRACT_VERSION,
+            authorizedContext.hostToolContractVersion === ACTION_HOST_TOOL_CONTRACT_VERSION ||
+            authorizedContext.hostToolContractVersion === ACTION_HOST_TOOL_CONTRACT_VERSION_V3,
           authorizeOperation,
           signal: request.signal,
         });

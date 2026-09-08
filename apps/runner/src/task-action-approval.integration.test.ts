@@ -233,7 +233,7 @@ it.each(["approved", "denied"] as const)(
 const SCHEMA = `
 CREATE SCHEMA goat;
 CREATE TABLE goat.chat_sessions (id text PRIMARY KEY, kind text, closed_at timestamptz, has_unseen boolean DEFAULT false, updated_at timestamptz);
-CREATE TABLE goat.codex_chat_sessions (id text PRIMARY KEY, workspace_id text, chat_session_id text, status text, active_turn_id text, error text, updated_at timestamptz);
+CREATE TABLE goat.codex_chat_sessions (id text PRIMARY KEY, workspace_id text, chat_session_id text, status text, active_turn_id text, error text, updated_at timestamptz, host_tool_contract_version text);
 CREATE TABLE goat.codex_chat_turns (id text PRIMARY KEY, user_workos_id text, chat_session_id text, codex_chat_session_id text, assistant_message_id text,
   status text, settings jsonb DEFAULT '{}', lease_id text, lease_owner text, lease_expires_at timestamptz, interrupt_requested_at timestamptz,
   event_sequence integer DEFAULT 0, updated_at timestamptz);

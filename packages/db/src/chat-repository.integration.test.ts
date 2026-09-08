@@ -1088,6 +1088,14 @@ describe("Postgres Chat repositories", () => {
           settledMessageParts: [],
         }),
       ).toHaveLength(1);
+      expect(
+        (
+          await database.query(
+            "SELECT host_tool_contract_version FROM goat.codex_chat_sessions WHERE chat_session_id=$1",
+            [created.conversationId],
+          )
+        ).rows,
+      ).toEqual([{ host_tool_contract_version: "goat-codex-host-tools.v4" }]);
       const paused = (
         await database.query(
           `SELECT run.status, run.lease_id, task.status AS task_status,

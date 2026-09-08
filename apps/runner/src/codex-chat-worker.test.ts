@@ -147,6 +147,7 @@ describe("claimNextCodexChatTurn", () => {
         "goat-chat-host-tools.v4",
         "goat-codex-host-tools.v2",
         "goat-codex-host-tools.v3",
+        "goat-codex-host-tools.v4",
       ]),
     );
   });

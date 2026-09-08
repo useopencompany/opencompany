@@ -1,5 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import { hostToolContractVersionForEngine } from "@opencompany/agent-runtime";
+import {
+  ACTION_HOST_TOOL_CONTRACT_VERSION,
+  hostToolContractVersionForEngine,
+} from "@opencompany/agent-runtime";
 import {
   type Actor,
   type ChatAttachmentFormat,
@@ -2326,7 +2329,9 @@ export class PostgresRunExecutionRepository implements RunExecutionRepository {
       ),
       idled_runtime AS MATERIALIZED (
         UPDATE goat.codex_chat_sessions AS runtime
-        SET status = 'idle', active_turn_id = NULL, updated_at = ${pausedAt}
+        SET status = 'idle', active_turn_id = NULL, updated_at = ${pausedAt},
+            host_tool_contract_version = CASE WHEN ${input.settledMessageParts !== undefined}::boolean
+              THEN ${ACTION_HOST_TOOL_CONTRACT_VERSION} ELSE runtime.host_tool_contract_version END
         FROM paused_run AS run
         WHERE runtime.id = run.codex_chat_session_id
         RETURNING runtime.id, runtime.chat_session_id

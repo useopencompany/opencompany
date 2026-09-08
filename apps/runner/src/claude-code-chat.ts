@@ -5,6 +5,7 @@ import {
 import { GitHubUserAccessAuthError } from "@opencompany/agent/integrations/github-user";
 import {
   ACTION_HOST_TOOL_CONTRACT_VERSION,
+  ACTION_HOST_TOOL_CONTRACT_VERSION_V3,
   type AcpTurnSummary,
   CLOUD_CODING_ENGINE_CONFIG,
   claudeCodeModelSupportsReasoningEffort,
@@ -552,7 +553,9 @@ export async function runClaudeCodeChatTurn(input: {
       : false;
     const brainToolsEnabled = hostGatewayEnabled && legacyBrainEnabled && Boolean(session.brainRef);
     const brainCaptureEnabled =
-      brainToolsEnabled && session.hostToolContractVersion === ACTION_HOST_TOOL_CONTRACT_VERSION;
+      brainToolsEnabled &&
+      (session.hostToolContractVersion === ACTION_HOST_TOOL_CONTRACT_VERSION ||
+        session.hostToolContractVersion === ACTION_HOST_TOOL_CONTRACT_VERSION_V3);
     // Minted before the redactor so a leaked ticket (e.g. the agent cats its own MCP
     // config) is scrubbed from logs the same way the other sandbox credentials are.
     const actionGatewayTicket =
