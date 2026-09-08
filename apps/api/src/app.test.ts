@@ -1,6 +1,8 @@
 import { once } from "node:events";
 import { request as requestHttp } from "node:http";
 import { serve } from "@hono/node-server";
+import { createPluginImportResolver } from "@opencompany/agent/plugin-import";
+import { OFFICIAL_PLUGIN_SOURCES } from "@opencompany/agent-runtime/official-plugin-catalog";
 import { captureProductServerEvent } from "@opencompany/analytics/product/server";
 import type { ChatPresentationReader } from "@opencompany/chat-presentation";
 import {
@@ -1031,6 +1033,104 @@ describe("canonical Hono API", () => {
     ).resolves.toMatchObject({ status: 404 });
     expect(captureProductServerEvent).not.toHaveBeenCalled();
   });
+
+  it.each(["unavailable", "rate-limited"])(
+    "previews and installs official HubSpot while GitHub is %s",
+    async (failure) => {
+      const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+        if (failure === "unavailable") throw new TypeError("Network unavailable");
+        return Response.json(
+          { message: "API rate limit exceeded" },
+          {
+            status: 403,
+            headers: { "x-ratelimit-limit": "60", "x-ratelimit-remaining": "0" },
+          },
+        );
+      });
+      try {
+        const install = vi.fn<PluginRepository["install"]>(async ({ plugin }) => ({
+          plugin: {
+            ...fakePluginInstallation(),
+            name: plugin.manifest.name,
+            manifest: plugin.manifest,
+            source: plugin.source,
+            integrity: plugin.integrity,
+            files: plugin.files.map((file) => ({
+              path: file.path,
+              executable: file.executable,
+              sizeBytes: file.content.length,
+            })),
+            skills: [],
+            stdioServers: plugin.stdioServers,
+            remoteMcpServers: [],
+            events: plugin.events,
+            installReport: { ...plugin.report, collisions: [] },
+          },
+          idempotentReplay: false,
+        }));
+        const refresh = vi.fn(async () => undefined);
+        const app = testApp(fakeRepository(), {
+          pluginImports: fakePluginImportService({ install }, createPluginImportResolver(), {
+            refresh,
+          }),
+        });
+        const url = OFFICIAL_PLUGIN_SOURCES.hubspot;
+        const response = await app.request("/v1/plugins/imports/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url }),
+        });
+        expect(response.status).toBe(200);
+        const { data: preview } = await response.json();
+        expect(preview).toMatchObject({
+          manifest: { name: "hubspot" },
+          source: {
+            path: "hubspot",
+            ref: "6b4e00b71f7d1b388fe5aa225aa86c8d35ba2578",
+            resolvedCommit: "6b4e00b71f7d1b388fe5aa225aa86c8d35ba2578",
+          },
+          remoteMcpServers: [
+            { name: "hubspot", capabilities: [{ id: "read" }, { id: "query" }, { id: "write" }] },
+          ],
+        });
+        expect(preview.files.every((file: object) => !Object.hasOwn(file, "content"))).toBe(true);
+        const command = {
+          url,
+          expectedResolvedCommit: preview.source.resolvedCommit,
+          expectedIntegrity: preview.integrity,
+        };
+        for (const mismatch of [
+          { expectedResolvedCommit: "a".repeat(40) },
+          { expectedIntegrity: `sha256:${"b".repeat(64)}` },
+        ]) {
+          const rejected = await app.request("/v1/plugins/imports", {
+            method: "POST",
+            headers: messageHeaders("hubspot-mismatch"),
+            body: JSON.stringify({ ...command, ...mismatch }),
+          });
+          expect(rejected.status).toBe(409);
+        }
+        expect(install).not.toHaveBeenCalled();
+        const installed = await app.request("/v1/plugins/imports", {
+          method: "POST",
+          headers: messageHeaders("hubspot-install"),
+          body: JSON.stringify(command),
+        });
+        expect(installed.status).toBe(201);
+        expect(await installed.json()).toMatchObject({
+          data: { plugin: { name: "hubspot", integrity: preview.integrity } },
+        });
+        expect(install).toHaveBeenCalledOnce();
+        expect(install.mock.calls[0]?.[0].plugin.remoteServers).toEqual([
+          { name: "hubspot", type: "streamable-http", url: "https://mcp.hubspot.com", headers: {} },
+        ]);
+        expect(refresh).toHaveBeenCalledWith({ actor, pluginName: "hubspot", reason: "install" });
+        expect(fetch).not.toHaveBeenCalled();
+      } finally {
+        fetch.mockRestore();
+      }
+    },
+  );
 
   it("previews and manages Plugins without exposing package bytes or MCP environment values", async () => {
     vi.mocked(captureProductServerEvent).mockClear();

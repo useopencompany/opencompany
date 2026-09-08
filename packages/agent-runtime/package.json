@@ -11,6 +11,14 @@
     "./types": {
       "types": "./src/types.ts",
       "default": "./src/types.ts"
+    },
+    "./official-plugin-catalog": {
+      "types": "./src/official-plugin-catalog.ts",
+      "default": "./src/official-plugin-catalog.ts"
+    },
+    "./official-plugin-artifacts": {
+      "types": "./src/official-plugin-artifacts.ts",
+      "default": "./src/official-plugin-artifacts.ts"
     }
   },
   "scripts": {

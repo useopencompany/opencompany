@@ -140,6 +140,25 @@ tickets bound to one plugin registration, integration, operation, and tool; the 
 ticket and rechecks the installation, connection scopes, and current permission before calling a
 stable Google REST API. Google access and refresh tokens are never used as MCP bearer credentials.
 
+## Official plugin packages
+
+Official catalog packages ship with the application as immutable release artifacts. Their reviewed
+public commit pins live in `packages/agent-runtime/src/official-plugin-catalog.ts`; the web catalog
+uses that same source. Preview and installation of those exact pins read the packaged bytes without
+contacting GitHub, including on a cold process. Other public sources, refs, and directories continue
+through the existing GitHub fetcher.
+
+To update official packages, edit the catalog pins and run `bun scripts/package-official-plugins.ts`
+with an authenticated GitHub CLI. The explicit maintenance command fetches and validates the pinned
+packages before writing `packages/agent-runtime/src/official-plugin-artifacts/`. Commit the pins and
+generated artifacts together. Builds and releases use those checked-in files and need no GitHub
+artifact credentials or package download step.
+
+At runtime, a packaged source or integrity mismatch fails closed. Bundled bytes go through the same
+manifest, path, size, Skill, MCP, capability, and event validators as public imports. Installation
+still requires the exact commit and integrity returned by preview. Tests check every catalog pin and
+artifact offline and exercise HubSpot preview and installation through the API with GitHub disabled.
+
 ## Stripe production endpoint
 
 Stripe calls `${PRODUCTION_OPENCOMPANY_URL}/api/stripe/webhook`. The web route streams the signed raw body
