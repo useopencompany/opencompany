@@ -4,6 +4,7 @@ import {
   PluginResolverError,
   resolvePlugin,
 } from "@opencompany/agent-runtime";
+import { createOfficialPluginFetcher } from "@opencompany/agent-runtime/official-plugin-artifacts";
 import {
   CoreError,
   type PluginImportResolver,
@@ -23,7 +24,7 @@ export async function resolvePluginImport(input: {
   try {
     const plugin = await resolvePlugin({
       url: input.url,
-      fetcher: createGitHubPluginFetcher(),
+      fetcher: (await createOfficialPluginFetcher(input)) ?? createGitHubPluginFetcher(),
       trustedCapabilitySources: TRUSTED_CAPABILITY_SOURCES,
       ...(input.selectedPath !== undefined ? { selectedPath: input.selectedPath } : {}),
     });
