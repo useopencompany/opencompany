@@ -34,13 +34,12 @@ meeting transcript after resolving its recording ID when you need details that d
 summary. Availability and result scope still follow the connected account's Fathom plan and sharing
 permissions.
 
-## Legacy Brain ingestion
+## Knowledge ingestion
 
-Existing API-key connections continue to poll completed meetings into Wiki/Brain as a fallback.
-Installing the Plugin does not reuse or replace that API key: MCP OAuth tokens are audience-bound
-and cannot power ingestion. Configure the legacy source from **Wiki → Sources** only if you need
-automatic meeting ingestion; the old Fathom card is no longer shown in general Integration settings.
+Fathom isn't offered by the current **Wiki → Sources** picker. Existing legacy API-key ingestion
+connections are separate from the Plugin's OAuth account; installing the Plugin doesn't configure
+or replace them.
 
-Live polling does not automatically import meetings from before the API-key connection. Use
-**Import company context** to seed recent history. If a completed meeting is missing, confirm the
-legacy source is enabled and allow time for Fathom to finish its summary and transcript.
+For current Wiki work, ask the agent to read a meeting and save a reviewed summary with its source
+link. If a meeting isn't available to the Plugin, check the connected account's access and whether
+Fathom has finished processing the summary or transcript.

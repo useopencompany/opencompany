@@ -1,30 +1,61 @@
 ---
-title: Integrations
-description: Understand connections, agent actions, Brain sources, and provider-owned scope.
+title: Permissions
+description: Understand which account an agent uses and when an action can run.
 ---
 
-An integration is a saved relationship between opencompany and an external service or engine. One
-connection can support more than one product behavior:
+A connected tool is usable only when the Plugin is available, an account is connected, and the
+action is allowed. The provider's permissions remain the limit on what that account can access.
 
-- **Agent actions** let an engine read or change provider data on your behalf.
-- **Brain sources** ingest selected provider activity into durable knowledge.
-- **Provider ingress** accepts verified webhooks or OAuth callbacks.
-- **Engine connections** authorize Codex or Claude Code cloud coding sessions.
-- **Workspace capabilities** make tools such as Infisical available inside coding environments.
+## On, Ask, and Off
 
-These behaviors are configured separately. Connecting the Slack plugin makes Slack tools available,
-but does not feed channels into Brain or Wiki. Providers that support ingestion start only after a
-specific source is selected and enabled.
+Open the Plugin's page to review the permission groups for its tools.
 
-## Permissions
+| Mode | Interactive built-in Chat | Persistent coding sessions |
+| --- | --- | --- |
+| **On** | The agent can call the tool without per-call approval. | The tool can be exposed to the session. |
+| **Ask** | The call pauses for your approval. | The Plugin tool isn't exposed as an automatically callable tool. |
+| **Off** | The tool is unavailable. | The tool is unavailable. |
 
-Agent actions can be **On**, **Ask**, or **Off**. **Ask** requires confirmation before the action.
-The provider's own OAuth scopes or API-key permissions remain the outer boundary: changing an action
-to **On** cannot grant a capability the provider credential does not have.
+Defaults differ by provider and action. Read the displayed group labels and proposed inputs before
+approving a call. Newly discovered tools that haven't been classified require confirmation.
 
-Workspace and personal connections also have different owners. Workspace admins manage shared
-connections; each person manages accounts that act as them. Review the provider identity shown in
-Settings before enabling actions or ingestion.
+Permission settings narrow the provider grant. They can't give your account access to a private
+repository, mailbox, or document that it doesn't already have.
 
-See [Integrations](/docs/integrations) for the provider index and the documentation status of each
-connection.
+## Background and coding work
+
+Background Tasks and scheduled Workflows cannot depend on live approval prompts. The built-in
+background agent denies actions that require live confirmation. Codex and Claude Code sessions
+receive Plugin tools enabled for automatic use.
+
+Before automating an interactive process, check the tools it needs. Enable only the actions you
+intend to allow unattended. If a step needs a decision or approval, have the Task prepare a
+concrete draft and ask for input. Open the Task to review its result and continue when ready.
+
+For example, a reporting Workflow may need read access to issues and PRs while returning a draft
+for you to publish. A prompt asking the agent to “use Linear” doesn't override a disabled tool.
+
+Some provider operations have additional approval requirements. See the relevant
+[provider guide](/docs/integrations). These Plugin modes also don't describe every command a coding
+engine can run in its sandbox; repository, CLI, and environment access have their own setup.
+
+## Personal and workspace connections
+
+Check the identity shown on the connection before using it. A personal connection acts as that
+person. Installing a Plugin for the workspace doesn't mean teammates inherit the same account.
+
+Workspace-managed connections are administered separately. See
+[Workspaces](/docs/getting-started/workspaces) and the provider page for who can manage each account.
+
+## Tools and knowledge sources
+
+Live tool access and Wiki ingestion are separate:
+
+- Changing a tool permission controls future tool use.
+- Disabling a Wiki source stops future ingestion from that source.
+- Existing Wiki pages remain until they're edited or removed.
+
+Review both settings when stopping a provider from being used. Disconnecting an account or changing
+permissions doesn't roll back writes the agent already completed.
+
+For setup, follow [Connect your tools](/docs/getting-started/connecting-sources).

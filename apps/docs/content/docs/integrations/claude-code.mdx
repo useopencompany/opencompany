@@ -1,20 +1,41 @@
 ---
 title: Claude Code
-description: Connect a Claude subscription for persistent cloud coding Chats.
+description: Connect your personal Claude subscription and work in a persistent cloud sandbox.
 ---
 
-## What connecting does
+Claude Code runs coding and file work in a persistent cloud session. Its subscription connection
+belongs to the signed-in person.
 
-The Claude Code connection authorizes the Claude Code engine used by cloud coding Chats. It is a
-personal engine connection rather than a workspace-shared Anthropic API key.
-Connect or manage it under **Settings → Inference → Coding subscriptions**.
+## Connect
 
-## Scopes and permissions
+1. Open **Settings → Inference → Coding subscriptions**.
+2. Select **Connect** on the Claude Code card.
+3. On your own machine with Claude Code installed, run the command shown in the form:
 
-Claude Code uses its own subscription authentication flow. Detailed login, expiration, and
-reauthorization troubleshooting is coming soon. Repository and secret access remains governed by
-the separate connections available to the coding workspace.
+   ```bash
+   claude setup-token
+   ```
 
-## Brain ingestion
+4. Complete the browser authorization.
+5. Paste the resulting token into the password field in Settings and select **Save token**.
+6. Wait for validation, then start a new Chat and choose Claude Code.
 
-Claude Code is not a Brain source and its Conversation is not ingested automatically.
+Use the token field in Settings rather than putting the token in a conversation. If the connection
+fails validation or later requires reauthorization, repeat the setup-token flow and save the new
+token on the same card.
+
+## Work with a repository
+
+Connect [GitHub](/docs/integrations/github) separately and name the repository in your request.
+Workspace admins can save its environment and setup instructions under **Settings → Repositories**.
+
+Follow [Cloud coding](/docs/guides/cloud-coding) to make and verify a first change.
+
+## Context and tools
+
+Continue in the same Chat to keep working with its files and session when available. Claude Code
+can use workspace Wiki tools and installed Skills. Supported Plugin tools must be set to **On** to
+be exposed to the coding session.
+
+The conversation isn't automatically ingested into Wiki. Ask the agent to save a reviewed decision
+or result when you want it available to future work.

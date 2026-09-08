@@ -1,28 +1,41 @@
 ---
 title: Linear
-description: Work with Linear issues and ingest selected team activity.
+description: Work with issues, trigger Workflows, and separately select activity for Wiki.
 ---
 
-## What connecting does
+Use the Linear Plugin to read issues, projects, teams, and comments, or to create and update issues
+when permitted. Wiki ingestion and Workflow event settings are separate from tool permissions.
 
-opencompany uses Linear for issue, project, and comment actions and also supports a separate
-source-ingestion connection. Current agent actions include creating or updating issues and adding
-comments when the corresponding action is allowed.
+## Connect the Plugin
 
-## Scopes and permissions
+1. Open **Settings → Plugins → Linear** and have a workspace admin install it.
+2. Connect the Linear account you want the agent to use.
+3. Review the **Read Linear** and **Manage issues** permission groups.
+4. Test a request against a specific team or issue.
 
-Agent actions follow their **On**, **Ask**, or **Off** modes. The action connector and ingestion
-connector have distinct provider flows even though both appear as Linear in the product. A complete
-OAuth scope and action matrix is coming soon.
+```text
+Read ENG-123 and its comments in Linear.
+Summarize the reported behavior, missing reproduction details, and next action.
+```
 
-## Brain ingestion
+Replace `ENG-123` with an accessible issue. The installed Plugin defaults reads to **On** and
+issue management to **Ask**. Check the current settings before using it in unattended work.
 
-Choose the Linear teams and issue or comment event types in the destination Brain's Sources
-settings. Authorizing Linear without that selection does not feed issue activity into Brain.
+## Trigger a Workflow
 
-## Workflow triggers
+On the Linear Plugin page, enable a supported event for the workspace. Then open a Workflow, choose
+**On an event**, and select the event, connected account, and team.
 
-The same ingestion connection can trigger a Workflow when an issue for a selected team enters
-Triage. Configure this from the Workflow's **Trigger** section. The team must have Linear Triage
-enabled; opencompany uses that team's provider-native Triage state ID so ordinary status edits do
-not retrigger the Workflow.
+The current Plugin supports **Issue created**. Event options depend on the installed Plugin version
+and which events are enabled. Existing **issue enters triage** triggers require a team with Triage
+enabled. Follow [Workflows and schedules](/docs/core-concepts/workflows-and-schedules) to test a run.
+
+## Feed Wiki
+
+Open **Wiki → Sources → Linear** and connect the separate ingestion account. Select the teams and
+issue or comment event types that should contribute knowledge, then enable the source.
+
+The MCP tool connection isn't used as a Wiki ingestion connection. Connecting the Plugin or
+enabling a Workflow event alone doesn't feed issue activity into Wiki.
+
+If an event or source stops working, check the account status, selected team, and enabled settings.

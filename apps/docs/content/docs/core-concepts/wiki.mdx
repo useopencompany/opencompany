@@ -1,0 +1,82 @@
+---
+title: Wiki
+description: Give your team and its agents shared, editable company knowledge.
+---
+
+Wiki holds the knowledge you want to reuse across conversations: project context, decisions,
+people, processes, and reference material. Pages belong to the workspace and can be read and edited
+by its members. The built-in agent, Codex, and Claude Code can use the same Wiki tools.
+
+## Start with one useful page
+
+Open **Wiki** and choose **New page**. Give the page a clear title, add its content, and wait for
+**Saved**. Use folders to organize related pages.
+
+A useful first page is a project brief containing its purpose, current state, owner, source links,
+and open questions. Include dates for facts that can become stale.
+
+You can also ask the agent to create or update a page from reviewed work:
+
+```text
+Save the release decisions we just agreed on in the Wiki at
+engineering/releases/september.
+Read any existing page first, preserve earlier decisions, and link the source PRs.
+```
+
+Open the resulting page to check what was saved. Chat history and Wiki are separate; a conversation
+doesn't automatically become a Wiki page.
+
+## Use Wiki in a conversation
+
+Name the page or path and explain what you need from it:
+
+```text
+Read engineering/releases/september in our Wiki.
+Summarize the unresolved questions and tell me which ones need new evidence.
+```
+
+Agents can browse the tree, search pages, read content, and write updates. You can edit the same
+pages directly in Wiki. Use the page's **Timeline** to read recorded activity where available.
+
+## Organize and link pages
+
+Use full paths in Wiki links, such as `[[engineering/releases/september]]`. The editor offers page
+suggestions so you can link related people, projects, and decisions. Full paths help distinguish
+pages with similar names in different folders.
+
+Keep enduring context in the main page and link to source material for evidence. Ask the agent to
+update an existing page when a decision changes so future work has one current reference.
+
+## Connect sources
+
+Open **Wiki → Sources** to turn selected provider activity into Wiki knowledge. The current picker
+offers:
+
+| Source | Setup and scope |
+| --- | --- |
+| **Gmail** | Connect your account, choose supported sent or received events, and add ingestion instructions. |
+| **Linear** | Connect the ingestion account, choose teams, and select issue or comment events. This is separate from the Linear MCP tool connection. |
+| **Granola** | Save a personal API key on its source card and enable ingestion of completed meeting material. The Granola MCP connection is separate. |
+
+Choose the scope before enabling a source. Check the card's connection state, whether it is
+**Feeding**, and the ingestion activity below the cards. A saved account can still need
+reauthorization or have a sync failure.
+
+Source setup uses personal accounts, but the resulting pages are shared workspace knowledge.
+Select only material intended for that workspace.
+
+Turning off a source stops future ingestion. It doesn't remove pages already written. Live Plugin
+tools have their own permissions, so stopping ingestion doesn't disable the agent's tool access.
+
+## Import existing context
+
+Use **Import company context** from Wiki when you want to seed knowledge from the available
+connections. Review the sources and scope offered by the import flow. Ongoing source ingestion and
+an initial import serve different purposes; enabling a source doesn't promise a full historical
+backfill.
+
+## If you're looking for Brain
+
+Wiki is the default knowledge surface. Workspaces with legacy Brain enabled may also show
+[Brain](/docs/core-concepts/brain), which has separate pages, source configuration, and access rules.
+Wiki pages don't inherit Brain's per-Brain visibility settings.

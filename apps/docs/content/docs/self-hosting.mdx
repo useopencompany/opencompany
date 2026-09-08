@@ -1,13 +1,27 @@
 ---
 title: Self-hosting
-description: Current status of opencompany self-hosting documentation.
+description: Understand the available source and the limits of the current setup documentation.
 ---
 
-Complete self-hosting instructions are coming soon. The repository currently contains separate web,
-API, runner, and database-backed runtime surfaces, but it does not yet publish a supported
-single-command installation, production sizing guide, upgrade policy, or compatibility promise for
-self-hosted operators.
+opencompany's source is available in the
+[repository](https://github.com/useopencompany/opencompany). The hosted product at
+[opencompany.chat](https://opencompany.chat) is the path covered by these user guides.
 
-Until that contract is defined, do not treat the contributor development setup as a production
-deployment guide. The opencompany open-source planning work owns the deeper installation, security,
-operations, and upgrade documentation that will replace this placeholder.
+## Run the project for development
+
+Use the repository's
+[getting-started guide](https://github.com/useopencompany/opencompany/blob/main/docs/getting-started.md)
+and [contribution instructions](https://github.com/useopencompany/opencompany/blob/main/CONTRIBUTING.md)
+for local setup and verification. The project includes separate web, API, runner, and database-backed
+services.
+
+## Production self-hosting status
+
+The project doesn't currently publish a supported single-command production installation, sizing
+guide, or self-hosted upgrade policy. Contributor setup is a development environment and doesn't
+establish those production guarantees.
+
+The repository's
+[deployment documentation](https://github.com/useopencompany/opencompany/blob/main/docs/deployment.md)
+describes the project's release infrastructure. Review it to understand the services involved, and
+establish the support and operating requirements before planning a self-hosted deployment.

@@ -1,43 +1,49 @@
 ---
 title: Workspaces
-description: Learn how opencompany scopes people, work, integrations, and knowledge.
+description: Know where work is shared and which settings belong to you or your team.
 ---
 
-A workspace is the main collaboration and access boundary in opencompany. Conversations, Tasks,
-Workflows, schedules, Skills, connected workspace services, billing, and workspace-visible Brains
-belong to one workspace.
+A workspace groups your team's Wiki, installed Skills and Plugins, Workflows, and shared settings.
+Choose the workspace where the work belongs before starting a job or saving company knowledge.
 
-If you belong to more than one workspace, use the workspace switcher in the sidebar before starting
-work or connecting an account. opencompany derives the active workspace from your signed-in session;
-you do not choose it by sending an arbitrary workspace ID from the browser.
+## Switch workspaces
+
+Use the workspace switcher in the sidebar. Connections and knowledge available to the agent depend
+on the active workspace and signed-in account. Switching workspaces doesn't merge their content.
 
 ## Admins and members
 
-Workspace roles are **admin** and **member**.
+| Action | Who can do it |
+| --- | --- |
+| Work in Chat and read or edit Wiki pages | Workspace members |
+| Use Tasks, Workflows, and schedules | Members who have enabled **Tasks & Workflows** in Preferences |
+| Create or edit workspace Skills and install or manage Plugins | Workspace admins |
+| Manage shared repository setup, model access, billing, and membership | Workspace admins |
+| Connect a personal provider account or coding subscription | The person using that account |
 
-- Admins manage membership and invitations, workspace settings, Workflows, Skills, billing, and
-  workspace-owned integrations.
-- Members use the shared workspace surfaces and manage the personal connections available to their
-  own account.
+Tasks & Workflows is a personal beta preference. If a teammate doesn't see it, they can enable it
+under **Settings → Preferences → Beta features**.
 
-Some UI controls are hidden or read-only for members. If a setting is owned by the workspace, ask an
-admin to change it rather than connecting a second personal copy.
+## Installed Plugin versus connected account
 
-## Workspace and personal connections
+A Plugin is installed once for the workspace. Many providers then ask each teammate to connect a
+personal account. For example, the GitHub Plugin acts through the GitHub identity you authorize;
+installing it doesn't give every member access to your private repositories.
 
-The Integrations screen groups connections by how they are presented in the product:
+Some connections are workspace-managed. Infisical and shared model access have admin controls.
+Follow the provider's setup page and check the displayed account identity.
 
-- **Workspace** connections provide shared company tooling or are managed for the workspace.
-- **Personal** connections act as the signed-in person. Only that person can manage the account and
-  decide how it is wired into a Brain.
+Use [Connect your tools](/docs/getting-started/connecting-sources) to set up the accounts a job needs.
 
-Some providers support multiple personal accounts. A second OAuth connection adds another account
-instead of silently replacing the first; use the connection label and provider account identity to
-choose the right one.
+## Shared knowledge
 
-## Brain visibility
+Wiki pages are shared with workspace members. A personal source can contribute to that shared
+knowledge, so choose its scope with the destination workspace in mind.
 
-A Brain can be visible to the whole workspace or restricted to selected members. Access is checked
-again for reads, edits, source configuration, MCP calls, ingestion jobs, and file downloads. Moving
-to another workspace or Brain changes the knowledge boundary for later work; it does not merge the
-underlying content.
+Legacy Brain, where enabled, has its own visibility settings for individual Brains. Those settings
+don't restrict Wiki pages. See [Wiki](/docs/core-concepts/wiki) and [Brain](/docs/core-concepts/brain).
+
+## Invite teammates
+
+Open **Settings → Members** as an admin to manage membership and invitations. If your plan's member
+limit prevents an invitation, review the upgrade option in Billing.
