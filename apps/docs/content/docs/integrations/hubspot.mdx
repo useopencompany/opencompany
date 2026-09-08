@@ -1,38 +1,46 @@
 ---
 title: HubSpot
-description: Use HubSpot tools and optionally ingest selected CRM activity into Wiki.
+description: Inspect CRM structure and work with HubSpot records through a connected account.
 ---
 
-## Connect HubSpot tools
+The HubSpot Plugin provides live tools through HubSpot's hosted MCP server. Its account connection
+is separate from any legacy ingestion connection.
 
-Install HubSpot from **Settings → Plugins**, then connect the HubSpot account opencompany should use.
-The plugin uses HubSpot's hosted MCP server at `https://mcp.hubspot.com`. Its tool connection is
-separate from the HubSpot connection used for Wiki ingestion.
+## Connect HubSpot
 
-HubSpot requires an MCP auth app and OAuth 2.1 with PKCE. An administrator for the HubSpot account
-must authorize the app before other users in that account can connect it.
+1. Ask a workspace admin to install **Settings → Plugins → HubSpot**.
+2. Connect the HubSpot account you want opencompany to use.
+3. Complete the provider authorization and return to the Plugin page.
+4. Review the connected identity and tool permissions.
 
-## Tool permissions
+An administrator of the HubSpot account must authorize the MCP auth app before other users in that
+account can connect it.
 
-HubSpot tools are grouped by effect:
+## Try it
 
-- **Inspect HubSpot structure** defaults to **On** and covers user access, schemas, properties, and
-  tool guidance without reading CRM records.
-- **Read CRM & marketing data** defaults to **Ask** because records, conversations, owners,
-  campaigns, and analytics can contain sensitive business or customer data.
-- **Change HubSpot** defaults to **Ask** for record, campaign, email, landing-page, blog, onboarding,
-  and feedback mutations.
+```text
+Find the company record for Acme in HubSpot.
+Summarize its current CRM information and link the records you used.
+Identify missing information for me to review.
+```
 
-New or unclassified tools always require confirmation until opencompany reviews them. HubSpot also
-enforces the connected user's own permissions. If HubSpot Sensitive Data is enabled, its MCP server
-blocks activity objects and conversation data.
+Replace the company name with a record your account can access.
 
-HubSpot determines OAuth grants from the MCP server's current tools and the permissions accepted at
-installation. If HubSpot adds scopes later, reconnect the plugin account to grant them.
+## Permissions
 
-## Brain ingestion
+| Group | What it allows | Default |
+| --- | --- | --- |
+| **Inspect HubSpot structure** | Access information, schemas, properties, and tool guidance | On |
+| **Read CRM & marketing data** | Records, conversations, owners, campaigns, and analytics | Ask |
+| **Change HubSpot** | Supported record and marketing-content changes | Ask |
 
-HubSpot can separately ingest selected activity for contacts, companies, and deals. Configure that
-connection in **Wiki → Sources**, then choose the allowed objects and event types. Connecting the
-plugin alone does not enable Wiki ingestion, and configuring ingestion does not authorize plugin
-tools.
+New or unclassified tools require confirmation. HubSpot also enforces the connected user's own
+permissions. If HubSpot Sensitive Data is enabled, its MCP server blocks activity objects and
+conversation data. If the provider adds required scopes, reconnect the account to grant them.
+
+## Knowledge ingestion
+
+HubSpot isn't offered by the current **Wiki → Sources** picker. Legacy ingestion configurations,
+where available, have separate credentials and scope; Plugin installation doesn't enable them.
+
+To reuse a finding, ask the agent to save a reviewed summary with HubSpot source links in Wiki.

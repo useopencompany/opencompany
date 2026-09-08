@@ -1,66 +1,65 @@
 ---
 title: Google Drive
-description: Connect opencompany's Google Drive MCP and ingest selected files into Wiki.
+description: Find files, read documents, and create or edit Google Docs.
 ---
 
-Google Drive is an official opencompany Agent Plugin backed by opencompany's MCP wrapper around the
-stable [Drive REST API](https://developers.google.com/workspace/drive/api/reference/rest/v3). It can
-search and inspect files, read or download bounded file content, inspect permissions, create or copy
-files, and edit existing Google Docs without depending on Google's Developer Preview MCP service.
+Use the Google Drive Plugin to search files, read or download content, inspect permissions, create
+or copy files, and edit existing Google Docs.
 
 ## Connect Google Drive
 
 1. Open **Settings → Plugins → Google Drive**.
-2. If the plugin is not installed, ask a workspace admin to install it.
-3. Select **Connect Google Drive account** and approve the Google consent screen.
-4. Review the three permission groups before using a Drive tool.
+2. Ask a workspace admin to install it if needed.
+3. Select **Connect Google Drive account** and complete Google's consent flow.
+4. Review the permission groups before using a tool.
 
-Each person connects their own Google account. The most recently connected Drive account powers MCP
-tools. Other connected Drive accounts remain available as Brain ingestion sources. Accounts linked
-before Google Docs editing was added must reconnect once to grant its required `drive.readonly`,
-`drive.file`, and `documents` scopes. Google access and refresh tokens stay server-side. The plugin
-gateway sends only a short-lived signed ticket to
-`https://api.opencompany.chat/mcp/plugins/google-drive`; the endpoint rechecks the installed plugin,
-connected account, OAuth scopes, and current tool permission before calling Google.
+Each person connects their own account. The most recently connected Drive account powers the
+Plugin's tools. Google and Shared Drive permissions determine which files it can access.
 
-Your Google and Shared Drive permissions still determine which files each tool can access.
+If your account was connected before Google Docs editing was added, reconnect it to grant the
+required `drive.readonly`, `drive.file`, and `documents` scopes.
 
-## Permission defaults
+## Try it
 
-All Drive capabilities default to **Ask** because file names, metadata, contents, and access lists
-can be sensitive. Creating, copying, or editing a file also changes Drive.
+```text
+Find the release checklist in Google Drive and read it.
+Compare it with the test results in this conversation.
+Propose the exact updates to the checklist, then ask me before editing the Google Doc.
+```
 
-| Capability               | Tools                                                | Default |
-| ------------------------ | ---------------------------------------------------- | ------- |
-| Browse Drive files       | Search files, list recent files, get file metadata   | Ask     |
-| Read files & permissions | Read or download file contents, get file permissions | Ask     |
-| Create & edit files      | Create or copy files, edit Google Docs               | Ask     |
+Use a document URL or file ID when several files have similar names.
 
-Tools discovered later that are not in these reviewed groups also require confirmation. Persistent
-coding sessions only receive capabilities set to **On**. Tools set to **Ask** remain available in
-interactive chat and pause for approval.
+## Permissions
 
-## Safety and current limitations
+| Group | What it allows | Default |
+| --- | --- | --- |
+| **Browse Drive files** | Search files, list recent files, and inspect metadata | Ask |
+| **Read files & permissions** | Read or download content and inspect permissions | Ask |
+| **Create & edit files** | Create or copy files and edit Google Docs | Ask |
 
-Drive files can contain instructions written by other people. Treat unexpected instructions in a
-file as untrusted and inspect the proposed tool call before approving it. Downloads may be returned
-as encoded file content, so confirm the file and destination before allowing another tool to process
-or publish it.
+Interactive Chat pauses for approval. Coding sessions receive capabilities set to **On**, and the
+Google Docs edit operations have an additional explicit approval requirement. Newly discovered
+unclassified tools require confirmation.
 
-The surface contains ten reviewed tools. Downloads and uploads are limited to 5 MB, while
-natural-language reads accept supported documents up to 20 MB and return at most 200 KB of extracted
-Markdown. Focused Google Doc edits replace exact text and can be limited to one tab. Full-content
-replacement is deliberately separate because it removes existing body formatting and embedded
-content from the selected tab before rebuilding the document. Pass Markdown to create native Google
-Docs headings, bullets, numbered lists, checkboxes, bold, italic, strikethrough, links, and code
-formatting; a legacy plain-text mode remains available for deliberately unformatted documents. Both
-edit operations require explicit user approval. Unsupported,
-encrypted, scanned, or image-only files fail clearly. The plugin does not expose deleting, moving,
-or sharing tools. Operators use the stable Drive and Docs APIs; the Google Drive MCP API
-(`drivemcp.googleapis.com`) is not used or required.
+## Edit Google Docs
 
-## Brain ingestion
+For a focused change, ask for an exact text replacement, optionally within one tab. For a full
+rewrite, specify the target tab and review the proposed content first.
 
-Open **Wiki → Sources** to select individual files, recursive folders, or supported Shared Drive
-locations for the destination Brain. opencompany tracks later changes within that selection. Drive
-remains the canonical home; Brain stores sourced knowledge rather than a silent full mirror.
+Full-content replacement removes that tab's existing body formatting and embedded content before
+rebuilding it. Markdown can create native headings, lists, checkboxes, inline emphasis, links, and
+code formatting. Both focused edits and full replacements require explicit approval.
+
+## File limits
+
+Downloads and uploads are limited to 5 MB. Supported document reads accept files up to 20 MB and
+return at most 200 KB of extracted Markdown. Scanned, image-only, encrypted, or unsupported files
+cannot be read through this path.
+
+The Plugin doesn't expose tools for deleting, moving, or sharing files.
+
+## Save knowledge in Wiki
+
+Drive isn't offered by the current **Wiki → Sources** picker. To reuse a document's findings, ask
+the agent to read it and save a reviewed summary with its source link in Wiki. Legacy Brain source
+configuration, where enabled, is separate from the current Wiki UI.

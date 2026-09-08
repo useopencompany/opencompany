@@ -1,20 +1,38 @@
 ---
 title: Browser profiles
-description: Save a site-specific login session for authenticated browser tasks.
+description: Save a site login for authenticated browser work.
 ---
 
-## What connecting does
+Browser profiles let you save a personal login session for a specific site. This feature is
+available only when enabled for your account.
 
-Browser profiles are feature-gated personal connections. Create a named profile for a site, complete
-the login in the live handoff view, and reuse that saved session for authenticated browser tasks.
+## Connect a profile
 
-## Scopes and permissions
+1. Open **Settings → Account** and find **Browser profiles**.
+2. Enter a profile name and the site's URL.
+3. Select **Connect**.
+4. Complete the site's login in the **Login handoff** view. Use **Open** if you need a separate tab.
+5. Select **I'm logged in** to save the session.
 
-The site session carries whatever access the signed-in site account has. It is not a general OAuth
-scope that opencompany can narrow. Use a dedicated least-privilege account where practical. Detailed
-session lifetime, supported tasks, and recovery guidance are coming soon.
+Check the site's account identity during login. The browser session carries that account's access
+to the site.
 
-## Brain ingestion
+## Use it
 
-Browser profiles are not Brain sources. Browser output is not saved as durable knowledge unless an
-explicit capture path is used.
+Ask the agent to use the named profile for a bounded browser task:
+
+```text
+Use my saved Support portal browser profile to read the release ticket.
+Summarize its current status and unresolved questions.
+```
+
+Authenticated browser work can show a live view in Chat so you can see the active session.
+
+## Reconnect or remove
+
+If a profile loses its login, open the profile in Account settings and use **Reconnect** when shown.
+Complete the login handoff again. Use the delete control to remove a saved profile you no longer
+need.
+
+A profile doesn't continuously ingest site content into Wiki. Ask the agent to save a result
+explicitly when it should become shared knowledge.

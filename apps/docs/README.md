@@ -40,3 +40,33 @@ smoke-checks its immutable URL before promotion and before recording `production
 After a production deployment, verify the homepage, search, and at least one generated endpoint
 under `/docs/api-reference/endpoints/`. The generated endpoint filenames come from the protocol
 contract and are intentionally not hand-maintained.
+
+## Writing and maintaining user guides
+
+Write for someone completing a job in the hosted product. Lead with what they can do, give the
+prerequisites and exact UI path, show a realistic prompt, explain the expected result, and finish
+with the next useful step or recovery path. Keep implementation and deployment details in the
+repository documentation unless they explain a user-visible constraint.
+
+The structure takes its cues from [Cursor's docs](https://cursor.com/docs) and
+[quickstart](https://cursor.com/docs/get-started/quickstart): a short first-success path, focused
+feature guides, concrete examples, and deeper reference material. Write original opencompany
+instructions from verified product behavior; Cursor is an editorial reference, not a feature spec.
+
+Before changing a claim, check its implementation:
+
+- UI labels and settings paths: `apps/web/components/SettingsChrome.tsx`, `Routes.tsx`, and the
+  relevant feature component.
+- Wiki source availability: `apps/web/lib/wiki-sources/registry.ts` and `WikiSourcesPanel.tsx`.
+- Roles and feature availability: `apps/api/src/auth.ts` and the relevant application service.
+- Skills and Plugins: their Settings components, package manifests, and runtime permission checks.
+- Tasks and Workflows: the task board, Workflow editor, application services, and runner behavior.
+- Recent changes: root `CHANGELOG.md`, followed by the relevant code to confirm current behavior.
+
+Preserve published page paths when reorganizing navigation. Keep source ingestion, live tools,
+engine subscriptions, and legacy Brain distinct. Don't promise a picker, connection, or approval
+flow that the current UI doesn't offer. Avoid hardcoding model catalogs and prices that already
+have a live settings surface.
+
+After content changes, run the docs build, lint, typecheck, and repository link checker. Verify
+navigation, search, in-page links, mobile reading, and a generated API endpoint in the rendered site.

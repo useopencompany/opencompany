@@ -1,45 +1,62 @@
 ---
-title: Connecting sources
-description: Connect provider accounts and separately choose what should feed Brain.
+title: Connect your tools
+description: Install a Plugin, connect your account, and verify the agent can use it.
 ---
 
-opencompany separates **connecting an account** from **using it as a Brain source**. That distinction
-is important: authorizing a provider can make agent actions available without automatically copying
-provider content into workspace knowledge.
+Plugins give opencompany access to external tools. Install the provider's Plugin in your workspace,
+connect your account, and choose which actions the agent can perform.
 
-## Connect an account
+## Install and connect
 
-Open **Settings → Integrations**, choose the Workspace or Personal group, and select a provider. The
-connection flow may use OAuth, an API key, a provider webhook, a CLI subscription login, or a
-verified phone pairing, depending on the provider.
+1. Open **Plugins** in the sidebar, or **Settings → Plugins**.
+2. Search for a provider. The **Installed** filter shows Plugins already in your workspace.
+3. If the Plugin isn't installed, a workspace admin can select **Install**.
+4. Open its page and complete the connection flow. Depending on the provider, you'll authorize
+   an account in the browser or enter an API key in the settings form.
+5. Check the connected account's identity and status. Installing a Plugin alone doesn't authorize
+   an account.
+6. Review its tool permission groups, then start a Chat with a small request.
 
-After the connection returns, check its displayed account identity and status. A provider can report
-**Needs reauthorization** or **Sync failed** even though a saved connection row still exists.
+For GitHub, a useful first check is:
 
-## Choose what feeds Brain
+```text
+Using GitHub, list the open pull requests in OWNER/REPO.
+Include the author, title, and link for each one.
+```
 
-Open the destination Brain and then **Sources**. For providers with selectable scope, choose the
-specific material opencompany may ingest:
+Replace `OWNER/REPO` with a repository the connected account can access. If access is missing,
+follow the [GitHub setup guide](/docs/integrations/github).
 
-- Linear teams and issue/comment events;
-- Gmail event types and any ingestion instructions;
-- Google Drive files or recursive folders;
-- HubSpot or Attio CRM objects and events.
+## Choose permissions for the work
 
-Connecting these accounts is not enough on its own: Brain ingestion starts only after a source is
-configured and enabled. Meeting-note providers such as Granola and Fathom do not have a
-second item picker; once connected and enabled for a Brain, completed meeting material can flow in.
+| Mode | Effect |
+| --- | --- |
+| **On** | The agent may use the action without a separate approval for each call. |
+| **Ask** | Interactive Chat requests approval before the action runs. |
+| **Off** | The action is unavailable to the agent. |
 
-## Agent permissions are separate
+Coding sessions receive Plugin tools set to **On**. Background work cannot depend on you responding
+to a live approval. Check [Permissions](/docs/core-concepts/integrations) before moving a successful
+interactive task into automation.
 
-Agent actions have their own modes. **On** allows the action, **Ask** pauses for confirmation, and
-**Off** removes it from later turns. A provider's OAuth grant is the outer limit; opencompany's action
-mode can narrow what the agent may do within that grant.
+The provider account still determines which resources you can access. Turning a permission **On**
+doesn't grant access to a repository, document, or workspace that the account cannot use.
 
-Changing an action permission does not retroactively change Brain source selection, and disabling a
-Brain source does not disconnect the provider account. Review both settings when you want to stop a
-provider from being used.
+## Connect knowledge sources separately
 
-Provider-specific scope and ingestion details are being documented under
-[Integrations](/docs/integrations). Until a provider page is complete, treat the provider consent
-screen and the scopes shown on the saved connection as authoritative.
+Use **Wiki → Sources** when you want selected provider activity to become shared Wiki knowledge.
+This is a separate setup from making live tools available in Chat.
+
+The current source picker offers **Gmail**, **Linear**, and **Granola**. Gmail and Linear require
+scope selection; Granola uses a separate API-key connection for ingestion. Installing a Plugin for
+another service doesn't add it to this picker. See [Wiki sources](/docs/core-concepts/wiki#connect-sources).
+
+## Other connection settings
+
+- Connect personal Codex or Claude Code subscriptions under **Settings → Inference → Coding
+  subscriptions**. See [Cloud coding](/docs/guides/cloud-coding).
+- Configure repository environments and setup instructions under **Settings → Repositories**.
+- When enabled for your account, manage [Browser profiles](/docs/integrations/browser-profiles)
+  under **Settings → Account**.
+
+Browse the [provider guides](/docs/integrations) for account setup, examples, and limitations.
