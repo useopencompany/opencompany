@@ -135,7 +135,7 @@ export async function executeActionHostGatewayService(input: {
     const serviceCatalog = {
       sources: catalog.providers.map(({ id, kind, label, description }) => ({
         id,
-        kind,
+        kind: kind ?? "integration",
         label,
         description,
       })),
