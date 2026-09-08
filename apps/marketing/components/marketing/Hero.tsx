@@ -38,11 +38,11 @@ export function Hero() {
       <div className="relative mx-auto max-w-4xl px-6 pt-16 pb-20 text-center sm:pt-24">
         <div className="relative flex flex-col items-center">
           <a
-            href="https://my.opencompany.chat/changelog#release-1.23.0"
+            href="https://my.opencompany.chat/changelog#release-1.24.0"
             className="mb-8 inline-flex items-center gap-2 rounded-full border border-border bg-background px-3.5 py-1.5 font-medium font-sans text-[13px] text-foreground shadow-sm transition-colors hover:bg-accent"
           >
             <span aria-hidden="true" className="size-2 rounded-full bg-violet-500" />
-            See what's new in 1.23.0
+            See what's new in 1.24.0
           </a>
 
           <h1 className="text-balance font-medium font-mono text-3xl text-ink leading-[1.1] tracking-[-0.05em] sm:text-5xl">

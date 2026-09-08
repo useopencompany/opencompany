@@ -37,7 +37,7 @@ export const CODEX_TOOLBOX_TEMPLATE_ALIAS = "opencompany-codex-toolbox";
 export const CODEX_TOOLBOX_CPU_COUNT = 8;
 export const CODEX_TOOLBOX_MEMORY_MB = 8192;
 export const PLAYWRIGHT_PACKAGE = "playwright@1.60.0";
-export const BUN_VERSION = "1.3.2";
+export const BUN_VERSION = "1.4.2";
 
 const root = { user: "root" } as const;
 const user = { user: "user" } as const;

@@ -13,6 +13,7 @@ export type OfficialMcpPluginName =
   | "latitude"
   | "linear"
   | "neon"
+  | "notion"
   | "posthog"
   | "render"
   | "vercel"
@@ -58,6 +59,7 @@ export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
     | "latitude"
     | "linear"
     | "neon"
+    | "notion"
     | "posthog"
     | "render"
     | "vercel"
@@ -277,6 +279,20 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectionProvider: "neon",
     connectHref: "/api/integrations/neon/start?returnTo=/settings/plugins/neon",
     accountDescription: "The account opencompany uses when you run Neon tools.",
+  },
+  notion: {
+    name: "notion",
+    kind: "mcp",
+    label: "Notion",
+    description:
+      "Search workspace knowledge, work with Custom Agents, and make approved content changes.",
+    category: "productivity",
+    featured: true,
+    source:
+      "https://github.com/useopencompany/plugins/tree/fb207086016a74e2e5724386c524d275771e5db6/notion",
+    connectionProvider: "notion",
+    connectHref: "/api/integrations/notion/start?returnTo=/settings/plugins/notion",
+    accountDescription: "The Notion account opencompany uses when you work with workspace content.",
   },
   posthog: {
     name: "posthog",

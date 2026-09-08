@@ -22,6 +22,7 @@ import {
   LATITUDE_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
+  NOTION_PLUGIN_SOURCE,
   OfficialSkillPluginDetail,
   PluginDetail,
   PluginsSettings,
@@ -272,6 +273,10 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/neon",
     );
+    expect(screen.getByRole("link", { name: /notion/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/notion",
+    );
     expect(screen.getByRole("link", { name: /better stack/i })).toHaveAttribute(
       "href",
       "/settings/plugins/betterstack",
@@ -296,10 +301,12 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/google-drive",
     );
+    await user.click(screen.getByRole("button", { name: "View all featured plugins" }));
     expect(screen.getByRole("link", { name: /slack/i })).toHaveAttribute(
       "href",
       "/settings/plugins/slack",
     );
+    await user.click(screen.getByRole("button", { name: "All" }));
     expect(screen.getByRole("link", { name: /google calendar/i })).toHaveAttribute(
       "href",
       "/settings/plugins/google-calendar",
@@ -361,6 +368,9 @@ describe("Plugin settings", () => {
     );
     expect(NEON_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/neon$/u,
+    );
+    expect(NOTION_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/fb207086016a74e2e5724386c524d275771e5db6/notion",
     );
     expect(BETTERSTACK_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/betterstack$/u,

@@ -69,7 +69,8 @@ export function PluginAccountRow({
         account.integrationId
       : account.provider === "linear" ||
           account.provider === "hubspot" ||
-          account.provider === "attio"
+          account.provider === "attio" ||
+          account.provider === "notion"
         ? account.connectionLabel ||
           account.accountName ||
           account.accountEmail ||

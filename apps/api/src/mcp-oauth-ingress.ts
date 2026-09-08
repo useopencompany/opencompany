@@ -54,6 +54,12 @@ import {
   verifyNeonMcpState,
 } from "@opencompany/agent/integrations/neon-mcp";
 import {
+  appendNotionMcpStatus,
+  completeNotionMcpOAuth,
+  startNotionMcpOAuth,
+  verifyNotionMcpState,
+} from "@opencompany/agent/integrations/notion-mcp";
+import {
   appendPostHogMcpStatus,
   completePostHogMcpOAuth,
   startPostHogMcpOAuth,
@@ -86,6 +92,7 @@ export type McpOAuthProvider =
   | "granola"
   | "posthog"
   | "neon"
+  | "notion"
   | "latitude"
   | "jamie"
   | "betterstack"
@@ -182,6 +189,13 @@ const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
     verifyState: verifyNeonMcpState,
     appendStatus: appendNeonMcpStatus,
     deniedReason: "neon_denied",
+  },
+  notion: {
+    start: startNotionMcpOAuth,
+    complete: completeNotionMcpOAuth,
+    verifyState: verifyNotionMcpState,
+    appendStatus: appendNotionMcpStatus,
+    deniedReason: "notion_denied",
   },
   latitude: {
     start: startLatitudeMcpOAuth,

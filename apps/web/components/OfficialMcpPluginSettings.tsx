@@ -412,6 +412,25 @@ export function NeonPluginDetail({
   );
 }
 
+export function NotionPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.notion}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
 export function RenderPluginDetail({
   pluginState,
   canEdit,
@@ -1704,6 +1723,7 @@ function pluginAccountsFromState(
     config.connectionProvider === "hubspot" ||
     config.connectionProvider === "jamie" ||
     config.connectionProvider === "neon" ||
+    config.connectionProvider === "notion" ||
     config.connectionProvider === "posthog" ||
     config.connectionProvider === "render" ||
     config.connectionProvider === "vercel" ||

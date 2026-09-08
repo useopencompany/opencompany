@@ -58,6 +58,7 @@ test("the pull request path remains credential-free", async () => {
 
   for (const command of [
     "bun install --frozen-lockfile",
+    "bun run dependencies:audit",
     "node scripts/check-schema-migration.mjs",
     "bun run db:migrations:check",
     "node --check scripts/setup.mjs",

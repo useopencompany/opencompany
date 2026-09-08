@@ -33,6 +33,10 @@ import {
 } from "@opencompany/agent/integrations/linear-mcp";
 import { completeNeonMcpOAuth, startNeonMcpOAuth } from "@opencompany/agent/integrations/neon-mcp";
 import {
+  completeNotionMcpOAuth,
+  startNotionMcpOAuth,
+} from "@opencompany/agent/integrations/notion-mcp";
+import {
   completePostHogMcpOAuth,
   startPostHogMcpOAuth,
 } from "@opencompany/agent/integrations/posthog-mcp";
@@ -108,6 +112,11 @@ vi.mock("@opencompany/agent/integrations/neon-mcp", async (importOriginal) => ({
   startNeonMcpOAuth: vi.fn(),
   completeNeonMcpOAuth: vi.fn(),
 }));
+vi.mock("@opencompany/agent/integrations/notion-mcp", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  startNotionMcpOAuth: vi.fn(),
+  completeNotionMcpOAuth: vi.fn(),
+}));
 vi.mock("@opencompany/agent/integrations/latitude-mcp", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   startLatitudeMcpOAuth: vi.fn(),
@@ -123,6 +132,7 @@ const PROVIDERS: McpOAuthProvider[] = [
   "granola",
   "posthog",
   "neon",
+  "notion",
   "latitude",
   "betterstack",
   "fathom",
@@ -139,6 +149,7 @@ const flowMocks = {
   granola: { start: startGranolaMcpOAuth, complete: completeGranolaMcpOAuth },
   posthog: { start: startPostHogMcpOAuth, complete: completePostHogMcpOAuth },
   neon: { start: startNeonMcpOAuth, complete: completeNeonMcpOAuth },
+  notion: { start: startNotionMcpOAuth, complete: completeNotionMcpOAuth },
   latitude: { start: startLatitudeMcpOAuth, complete: completeLatitudeMcpOAuth },
   betterstack: { start: startBetterStackMcpOAuth, complete: completeBetterStackMcpOAuth },
   fathom: { start: startFathomMcpOAuth, complete: completeFathomMcpOAuth },
