@@ -87,6 +87,21 @@ describe("official plugin release artifacts", () => {
     },
   );
 
+  it("cannot reuse bundled bytes with another repository or commit", async () => {
+    const url = OFFICIAL_PLUGIN_SOURCES.hubspot;
+    const fetcher = (await createOfficialPluginFetcher({ url }))!;
+    const commit = parseSkillUrl(url).ref!;
+    await expect(fetcher.resolveCommit("example", "plugins", commit)).rejects.toThrow(
+      "different source",
+    );
+    await expect(fetcher.fetchTree("useopencompany", "other", commit)).rejects.toThrow(
+      "different source",
+    );
+    await expect(
+      fetcher.fetchBlob("useopencompany", "plugins", "a".repeat(40), "hubspot/plugin.json"),
+    ).rejects.toThrow("different source");
+  });
+
   it("rejects a packaged source that drifts from the catalog without fetching GitHub", async () => {
     const artifact = OFFICIAL_PLUGIN_ARTIFACTS.hubspot;
     const source = artifact.source;

@@ -53,17 +53,29 @@ export async function createOfficialPluginFetcher(input: {
     size: file.content.length,
   }));
   const blobs = new Map(entries.map((entry, index) => [entry.path, files[index]!.content]));
+  function assertSource(owner: string, repo: string, commit: string) {
+    if (
+      owner.toLowerCase() !== parsed.owner.toLowerCase() ||
+      repo.toLowerCase() !== parsed.repo.toLowerCase() ||
+      commit.toLowerCase() !== artifact.resolvedCommit
+    ) {
+      throw new Error(`Official plugin ${name} fetcher cannot resolve a different source.`);
+    }
+  }
   return {
     async defaultBranch() {
       throw new Error("Official plugins require a commit pin.");
     },
-    async resolveCommit() {
+    async resolveCommit(owner, repo, ref) {
+      assertSource(owner, repo, ref);
       return artifact.resolvedCommit;
     },
-    async fetchTree() {
+    async fetchTree(owner, repo, commit) {
+      assertSource(owner, repo, commit);
       return { entries, truncated: false };
     },
-    async fetchBlob(_owner, _repo, _commit, path) {
+    async fetchBlob(owner, repo, commit, path) {
+      assertSource(owner, repo, commit);
       const content = blobs.get(path);
       if (!content) throw new Error(`Official plugin ${name} is missing a packaged file.`);
       return content;
