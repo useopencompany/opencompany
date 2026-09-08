@@ -775,18 +775,33 @@ export const MANAGED_CAPABILITY_ACTIONS: readonly ManagedCapabilityActionSpec[] 
     field: "itemId",
     platform: "tiktok_video",
   }),
-  idListAction({
+  {
     id: "tiktok.list_comments",
     source: "tiktok",
     description: "List public comments on a TikTok video.",
-    endpoint: "/api/v1/tiktok/web/fetch_post_comment",
-    field: "aweme_id",
-    platform: "tiktok_video",
-    cursorField: "cursor",
-    countField: "count",
-    defaultLimit: 20,
-    maxLimit: 20,
-  }),
+    params: CONTENT_LIST_PARAMS,
+    provider: TIKHUB,
+    endpoint: "/api/v1/tiktok/app/v3/fetch_video_comments",
+    inputLocation: "queryParams",
+    priceType: "PER_CALL",
+    executionMode: "sync",
+    mapInput: (raw) => {
+      const params = checkedParams(raw, ["url", "cursor", "limit"]);
+      const identity = parseContentIdentity(requiredText(params, "url", 1_000), "tiktok_video");
+      const limit = limitParam(params, 20, 20);
+      const cursor = Number(cursorParam(params) ?? "0");
+      if (!Number.isSafeInteger(cursor) || cursor < 0) {
+        throw new ActionInvalidParamsError(
+          '"cursor" must be the numeric cursor returned by TikTok.',
+        );
+      }
+      return {
+        providerInput: { aweme_id: identity.id, cursor, count: limit },
+        resultLimit: limit,
+        canonicalLinks: [identity.url],
+      };
+    },
+  },
   noInputAction(
     "tiktok.get_search_trends",
     "tiktok",

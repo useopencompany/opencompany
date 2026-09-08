@@ -3,8 +3,11 @@ import { ActionInvalidParamsError } from "@/lib/actions/types";
 import {
   MANAGED_CAPABILITY_ACTIONS,
   MANAGED_CAPABILITY_SOURCE_DETAILS,
+  type ManagedCapabilityMonidActionSpec,
   managedCapabilityContractProbeParams,
 } from "@/lib/capabilities/catalog";
+import { assertManagedCapabilityInspection } from "@/lib/capabilities/contract";
+import type { MonidInspection } from "@/lib/capabilities/monid";
 import { MAX_CAPABILITY_PAYLOAD_STRING_CHARS } from "@/lib/capabilities/sanitize";
 
 describe("managed capability catalog", () => {
@@ -28,6 +31,7 @@ describe("managed capability catalog", () => {
       "youtube.get_transcript": "apify:/starvibe/youtube-video-transcript",
       "youtube.find_in_transcript": "apify:/starvibe/youtube-video-transcript",
       "instagram.search_reels": "tikhub:/api/v1/instagram/v2/search_reels",
+      "tiktok.list_comments": "tikhub:/api/v1/tiktok/app/v3/fetch_video_comments",
       "tiktok.get_search_trends": "tikhub:/api/v1/tiktok/web/fetch_trending_searchwords",
       "lead.find_person_email": "pdl:/v5/person/enrich",
       "lead.get_linkedin_contact": "apify:/dev_fusion/linkedin-profile-scraper",
@@ -195,6 +199,57 @@ describe("managed capability catalog", () => {
       (action("linkedin.list_person_posts").params.properties as Record<string, unknown>).cursor,
     ).toBeUndefined();
   });
+
+  it.each([
+    { params: {}, cursor: 0, count: 20 },
+    { params: { cursor: "20", limit: 5 }, cursor: 20, count: 5 },
+  ])(
+    "maps TikTok comments to the inspected query contract: $params",
+    ({ params, cursor, count }) => {
+      const spec = action("tiktok.list_comments") as ManagedCapabilityMonidActionSpec;
+      const url = "https://www.tiktok.com/@openai/video/7331234567890123456";
+      const mapped = spec.mapInput({ url, ...params });
+      expect(spec.inputLocation).toBe("queryParams");
+      expect(mapped).toEqual({
+        providerInput: { aweme_id: "7331234567890123456", cursor, count },
+        resultLimit: count,
+        canonicalLinks: [url],
+      });
+      // Input schema and price type returned by Monid inspection on 2026-09-08.
+      const inspection: MonidInspection = {
+        id: "tikhub:/api/v1/tiktok/app/v3/fetch_video_comments",
+        provider: "tikhub",
+        endpoint: "/api/v1/tiktok/app/v3/fetch_video_comments",
+        input: {
+          queryParams: {
+            type: "object",
+            additionalProperties: true,
+            properties: {
+              aweme_id: { type: "string" },
+              cursor: { type: "integer", default: 0 },
+              count: { type: "integer", default: 20 },
+            },
+            required: ["aweme_id"],
+          },
+        },
+        price: { type: "PER_CALL", amount: 0.0015, currency: "USD" },
+        tags: [],
+      };
+      expect(() => assertManagedCapabilityInspection(spec, mapped, inspection)).not.toThrow();
+    },
+  );
+
+  it.each(["opaque-cursor", "-1", "1.5", "9007199254740992"])(
+    "rejects an invalid TikTok comments cursor: %s",
+    (cursor) => {
+      expect(() =>
+        action("tiktok.list_comments").mapInput({
+          url: "https://www.tiktok.com/@openai/video/7331234567890123456",
+          cursor,
+        }),
+      ).toThrow(/numeric cursor/i);
+    },
+  );
 
   it("maps live provider-specific identifiers and reviewed enum values", () => {
     expect(
