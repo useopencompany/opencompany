@@ -42,6 +42,7 @@ function state(
     turnLeaseExpiresAt: new Date("2026-08-11T12:01:00.000Z"),
     interruptRequestedAt: null,
     membershipId: "member_1",
+    workspaceRole: "admin",
     brainRef: null,
     userMessageId: "message_user_1",
     assistantMessageId: "message_assistant_1",
@@ -54,6 +55,7 @@ const now = new Date("2026-08-11T12:00:00.000Z");
 describe("External engine tool capability authority", () => {
   it("authorizes only the active persisted external-engine attempt", () => {
     expect(authorizeExternalEngineToolCapability({ capability, state: state(), now })).toEqual({
+      skillToolsEnabled: true,
       actorId: "user_1",
       workspaceId: "workspace_1",
       workspaceName: "Acme",
@@ -114,4 +116,14 @@ describe("External engine tool capability authority", () => {
       authorizeExternalEngineToolCapability({ capability, state: state(overrides), now }),
     ).toBeNull();
   });
+});
+
+it("exposes skill writes only for current workspace admins", () => {
+  expect(
+    authorizeExternalEngineToolCapability({
+      capability,
+      state: state({ workspaceRole: "member" }),
+      now,
+    }),
+  ).toMatchObject({ skillToolsEnabled: false });
 });

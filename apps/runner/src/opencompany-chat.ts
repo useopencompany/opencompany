@@ -1231,6 +1231,7 @@ async function resolveProductChatRuntime(input: {
     ...(hostTools?.scheduleTask ? { scheduleTask: hostTools.scheduleTask } : {}),
     ...(hostTools?.editTaskSchedule ? { editTaskSchedule: hostTools.editTaskSchedule } : {}),
     ...(hostTools?.deleteTaskSchedule ? { deleteTaskSchedule: hostTools.deleteTaskSchedule } : {}),
+    ...(hostTools?.workspaceSkills ? { workspaceSkills: hostTools.workspaceSkills } : {}),
     ...(hostTools?.createWorkspaceSkill
       ? { createWorkspaceSkill: hostTools.createWorkspaceSkill }
       : {}),

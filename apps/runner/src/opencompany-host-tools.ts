@@ -6,6 +6,7 @@ import type {
   SkillDispatcher,
   StartedTask,
   WorkflowDispatcher,
+  WorkspaceSkillsRunner,
 } from "@opencompany/agent/chat-agent";
 import type {
   BrowserUseProfileToolOutput,
@@ -20,6 +21,7 @@ import {
   activateAndListChatSessionSkills,
   createWorkspaceSkillForActor,
   listSkillCatalog,
+  manageWorkspaceSkillsForActor,
   readChatSkillFile,
   resolveSkillMentions,
   updateWorkspaceSkillForActor,
@@ -75,6 +77,7 @@ export type HostTools = {
   deleteTaskSchedule?: (
     input: DeleteTaskScheduleToolInput,
   ) => Promise<DeleteTaskScheduleToolOutput>;
+  workspaceSkills?: WorkspaceSkillsRunner;
   createWorkspaceSkill?: CreateWorkspaceSkillRunner;
   editWorkspaceSkill?: EditWorkspaceSkillRunner;
   runWiki?: (input: Record<string, unknown>, context: { toolCallId: string }) => Promise<unknown>;
@@ -134,6 +137,7 @@ export async function loadHostTools(
       : {}),
     ...(bootstrap.skillToolsEnabled
       ? {
+          workspaceSkills: (input) => call("workspace_skills", input),
           createWorkspaceSkill: (input, toolContext) =>
             call(
               "create_workspace_skill",
@@ -265,6 +269,7 @@ async function callGateway(
         }),
       readSkillFile: ({ conversationId, ...input }) =>
         readChatSkillFile({ ...input, chatSessionId: conversationId, db: getDb() }),
+      manageWorkspaceSkills: (input) => manageWorkspaceSkillsForActor({ ...input, db: getDb() }),
       createWorkspaceSkill: (input) => createWorkspaceSkillForActor({ ...input, db: getDb() }),
       updateWorkspaceSkill: (input) => updateWorkspaceSkillForActor({ ...input, db: getDb() }),
       writeArtifact: ({ runId, toolCallId, toolInput, signal }) =>

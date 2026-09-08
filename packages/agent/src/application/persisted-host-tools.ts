@@ -28,6 +28,7 @@ import {
   activateAndListChatSessionSkills,
   createWorkspaceSkillForActor,
   listSkillCatalog,
+  manageWorkspaceSkillsForActor,
   readChatSkillFile,
   resolveSkillMentions,
   updateWorkspaceSkillForActor,
@@ -108,6 +109,7 @@ export function executePersistedChatHostTool(input: {
     readSkillFile: ({ conversationId, ...skillFile }) =>
       readChatSkillFile({ chatSessionId: conversationId, ...skillFile }),
     createWorkspaceSkill: createWorkspaceSkillForActor,
+    manageWorkspaceSkills: manageWorkspaceSkillsForActor,
     updateWorkspaceSkill: updateWorkspaceSkillForActor,
     createTask: (task) =>
       createTaskForActor(

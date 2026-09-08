@@ -176,6 +176,40 @@ describe("Postgres immutable Skill bundle repository", () => {
     ).resolves.toMatchObject({ rows: [{ count: 2 }] });
   });
 
+  it("rejects stale edits and permits a retry of an already saved version", async () => {
+    const first = await repository.install({
+      actor: actor(),
+      idempotencyKey: "stale-edit",
+      bundle: await resolvedBundle("my-skill", "First."),
+    });
+    const secondBundle = await resolvedBundle("my-skill", "Second.");
+    const second = await repository.replace({
+      actor: actor(),
+      name: "my-skill",
+      bundle: secondBundle,
+      expectedBundleId: first.installation.bundle.id,
+    });
+    await expect(
+      repository.replace({
+        actor: actor(),
+        name: "my-skill",
+        bundle: await resolvedBundle("my-skill", "Stale overwrite."),
+        expectedBundleId: first.installation.bundle.id,
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      repository.replace({
+        actor: actor(),
+        name: "my-skill",
+        bundle: secondBundle,
+        expectedBundleId: first.installation.bundle.id,
+      }),
+    ).resolves.toMatchObject({ bundle: { id: second.bundle.id } });
+    expect((await repository.get({ actor: actor(), name: "my-skill" }))?.bundle.body).toBe(
+      secondBundle.body,
+    );
+  });
+
   it("stores workspace provenance without fabricating remote source metadata", async () => {
     const bundle = await createWorkspaceSkillArtifact({
       name: "investigate-bug",

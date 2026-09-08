@@ -165,6 +165,7 @@ export interface SkillBundleRepository {
     actor: Actor;
     name: string;
     bundle: ResolvedSkillBundle;
+    expectedBundleId?: string;
   }): Promise<SkillInstallation>;
   list(input: { actor: Actor }): Promise<SkillInstallationListItem[]>;
   listCatalog(input: { actor: Actor }): Promise<InstalledSkillCatalogItem[]>;
@@ -191,11 +192,22 @@ export class SkillImportApplicationService {
     });
   }
 
-  async update(actor: Actor, nameValue: string, input: Omit<SkillAuthoringInput, "name">) {
+  async update(
+    actor: Actor,
+    nameValue: string,
+    input: Omit<SkillAuthoringInput, "name"> & { expectedBundleId?: string },
+  ) {
     requireSkillWrite(actor);
     const name = resourceName(nameValue);
     const bundle = await this.author.create(authoringInput({ name, ...input }));
-    return this.repository.replace({ actor, name, bundle });
+    return this.repository.replace({
+      actor,
+      name,
+      bundle,
+      ...(input.expectedBundleId
+        ? { expectedBundleId: bounded(input.expectedBundleId, 200, "expectedBundleId") }
+        : {}),
+    });
   }
 
   async preview(

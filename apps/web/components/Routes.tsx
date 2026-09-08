@@ -944,7 +944,6 @@ export function SkillBundleRoute({
 }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
-  const [editing, setEditing] = useState(false);
   const [replacing, setReplacing] = useState(false);
   const [isMutating, startMutation] = useTransition();
   const bundle = installation.bundle;
@@ -977,57 +976,61 @@ export function SkillBundleRoute({
   return (
     <SettingsContent
       title={bundle.name}
-      description={`Invoke this immutable bundle with /${installation.name} in chat.`}
+      description={`Use /${installation.name} in chat.`}
       backLink={{ href: "/settings/skills", label: "Skills" }}
     >
-      <SkillSourceNotice source={bundle.source} />
+      {bundle.source.type !== "workspace" ? <SkillSourceNotice source={bundle.source} /> : null}
       {!canEdit ? (
         <p className="text-[13px] leading-5 text-ink-subtle">
           Only workspace admins can manage skill installations.
         </p>
       ) : null}
 
-      <div className="flex flex-col gap-5">
-        <EditorField label="Status">
-          <div className="flex items-center gap-2">
-            <InstallationStatusBadge enabled={installation.enabled} />
-            <span className="font-mono text-[11.5px] text-ink-subtle">{bundle.integrity}</span>
-          </div>
-        </EditorField>
+      {bundle.source.type === "workspace" ? (
+        <WorkspaceSkillEditor key={installation.id} installation={installation} canEdit={canEdit} />
+      ) : (
+        <div className="flex flex-col gap-5">
+          <EditorField label="Status">
+            <div className="flex items-center gap-2">
+              <InstallationStatusBadge enabled={installation.enabled} />
+              <span className="font-mono text-[11.5px] text-ink-subtle">{bundle.integrity}</span>
+            </div>
+          </EditorField>
 
-        <EditorField label="Description">
-          <div className="rounded-lg border border-border bg-surface px-3 py-2.5 text-[13px] leading-5 text-ink">
-            {bundle.description}
-          </div>
-        </EditorField>
+          <EditorField label="Description">
+            <div className="rounded-lg border border-border bg-surface px-3 py-2.5 text-[13px] leading-5 text-ink">
+              {bundle.description}
+            </div>
+          </EditorField>
 
-        <EditorField label="Instructions">
-          <div className="max-h-[360px] overflow-y-auto whitespace-pre-wrap rounded-lg border border-border bg-canvas px-3 py-2.5 font-mono text-[12.5px] leading-5 text-ink">
-            {bundle.body || <span className="text-ink-subtle">No Markdown body.</span>}
-          </div>
-        </EditorField>
+          <EditorField label="Instructions">
+            <div className="max-h-[360px] overflow-y-auto whitespace-pre-wrap rounded-lg border border-border bg-canvas px-3 py-2.5 font-mono text-[12.5px] leading-5 text-ink">
+              {bundle.body || <span className="text-ink-subtle">No Markdown body.</span>}
+            </div>
+          </EditorField>
 
-        <EditorField label={`Bundle files (${bundle.files.length})`}>
-          <ul className="overflow-hidden rounded-lg border border-border bg-surface">
-            {bundle.files.map((file: SkillBundleFileMetadataDto) => (
-              <li
-                key={file.path}
-                className="flex items-center gap-3 border-b border-border px-3 py-2.5 last:border-b-0"
-              >
-                <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-ink">
-                  {file.path}
-                </span>
-                {file.executable ? (
-                  <span className="text-[11px] text-ink-subtle">executable</span>
-                ) : null}
-                <span className="shrink-0 text-[11.5px] text-ink-subtle">
-                  {formatBytes(file.sizeBytes)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </EditorField>
-      </div>
+          <EditorField label={`Bundle files (${bundle.files.length})`}>
+            <ul className="overflow-hidden rounded-lg border border-border bg-surface">
+              {bundle.files.map((file: SkillBundleFileMetadataDto) => (
+                <li
+                  key={file.path}
+                  className="flex items-center gap-3 border-b border-border px-3 py-2.5 last:border-b-0"
+                >
+                  <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-ink">
+                    {file.path}
+                  </span>
+                  {file.executable ? (
+                    <span className="text-[11px] text-ink-subtle">executable</span>
+                  ) : null}
+                  <span className="shrink-0 text-[11.5px] text-ink-subtle">
+                    {formatBytes(file.sizeBytes)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </EditorField>
+        </div>
+      )}
 
       {error ? <div className="text-[12.5px] leading-5 text-warning">{error}</div> : null}
 
@@ -1041,16 +1044,7 @@ export function SkillBundleRoute({
           >
             {installation.enabled ? "Disable" : "Enable"}
           </button>
-          {bundle.source.type === "workspace" ? (
-            <button
-              type="button"
-              disabled={isMutating}
-              onClick={() => setEditing(true)}
-              className="inline-flex h-9 items-center rounded-md border border-border bg-surface px-3 text-[13px] font-medium text-ink transition-colors hover:bg-surface-hover disabled:opacity-60"
-            >
-              Edit skill
-            </button>
-          ) : (
+          {bundle.source.type !== "workspace" ? (
             <button
               type="button"
               disabled={isMutating}
@@ -1059,7 +1053,7 @@ export function SkillBundleRoute({
             >
               Replace bundle
             </button>
-          )}
+          ) : null}
           <button
             type="button"
             disabled={isMutating}
@@ -1084,31 +1078,157 @@ export function SkillBundleRoute({
           }}
         />
       ) : null}
-      {editing ? (
-        <WorkspaceSkillDialog
-          skillName={installation.name}
-          initialDescription={bundle.description}
-          initialInstructions={bundle.body}
-          onClose={() => setEditing(false)}
-          onSaved={() => {
-            setEditing(false);
-            router.refresh();
-          }}
-        />
-      ) : null}
     </SettingsContent>
   );
 }
 
-function SkillSourceNotice({ source }: { source: SkillSourceDto }) {
-  if (source.type === "workspace") {
-    return (
-      <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-muted px-3 py-2.5 text-[12.5px] leading-5 text-ink-subtle">
-        <Sparkles size={14} strokeWidth={2} className="shrink-0" />
-        Created in this workspace. Each save creates a new immutable standard Skill bundle.
+function WorkspaceSkillEditor({
+  installation,
+  canEdit,
+}: {
+  installation: SkillInstallationDto;
+  canEdit: boolean;
+}) {
+  const router = useRouter();
+  const initial = {
+    description: installation.bundle.description,
+    instructions: installation.bundle.body.trim(),
+  };
+  const [saved, setSaved] = useState(initial);
+  const [savedBundleId, setSavedBundleId] = useState(installation.bundle.id);
+  const [draft, setDraft] = useState(initial);
+  const [error, setError] = useState<string | null>(null);
+  const [savedNotice, setSavedNotice] = useState(false);
+  const [isSaving, startSaving] = useTransition();
+  const isDirty =
+    draft.description !== saved.description || draft.instructions !== saved.instructions;
+
+  useEffect(() => {
+    if (!isDirty) return;
+    const beforeUnload = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", beforeUnload);
+    return () => window.removeEventListener("beforeunload", beforeUnload);
+  }, [isDirty]);
+
+  const save = () => {
+    if (!isDirty || isSaving || !canEdit) return;
+    const next = { description: draft.description.trim(), instructions: draft.instructions.trim() };
+    if (!next.description || !next.instructions) {
+      setError("Add a description and instructions before saving.");
+      return;
+    }
+    setError(null);
+    startSaving(async () => {
+      try {
+        const updated = await updateHeadlessWorkspaceSkill(installation.name, {
+          ...next,
+          expectedBundleId: savedBundleId,
+        });
+        setSavedBundleId(updated.bundle.id);
+        setDraft(next);
+        setSaved(next);
+        setSavedNotice(true);
+        router.refresh();
+      } catch (cause) {
+        setError(errorMessage(cause));
+      }
+    });
+  };
+
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        save();
+      }}
+      className="flex flex-col gap-4"
+    >
+      <div className="flex items-center gap-2">
+        <InstallationStatusBadge enabled={installation.enabled} />
+        <span className="text-[12px] text-ink-subtle">Created in this workspace</span>
       </div>
-    );
-  }
+      <label className="flex flex-col gap-1.5">
+        <span className="text-[12px] font-medium text-ink-subtle">When to use this skill</span>
+        <input
+          value={draft.description}
+          readOnly={!canEdit}
+          disabled={isSaving}
+          maxLength={1024}
+          onChange={(event) => {
+            setDraft({ ...draft, description: event.target.value });
+            setSavedNotice(false);
+          }}
+          className={EDITOR_INPUT_CLASS}
+        />
+      </label>
+      <div className="overflow-hidden rounded-lg border border-border bg-surface">
+        <label
+          htmlFor="workspace-skill-instructions"
+          className="flex items-center justify-between border-b border-border bg-surface-muted px-3 py-2"
+        >
+          <span className="font-mono text-[12px] text-ink">SKILL.md</span>
+          <span className="text-[11.5px] text-ink-subtle">Markdown</span>
+        </label>
+        <textarea
+          id="workspace-skill-instructions"
+          aria-label="Skill instructions"
+          value={draft.instructions}
+          readOnly={!canEdit}
+          disabled={isSaving}
+          spellCheck={false}
+          maxLength={512 * 1024}
+          onChange={(event) => {
+            setDraft({ ...draft, instructions: event.target.value });
+            setSavedNotice(false);
+          }}
+          onKeyDown={(event) => {
+            if ((event.metaKey || event.ctrlKey) && event.key === "s") {
+              event.preventDefault();
+              save();
+            }
+          }}
+          placeholder="Write the instructions the agent should follow…"
+          className="block min-h-[420px] w-full resize-y bg-transparent p-4 font-mono text-[13px] leading-6 text-ink outline-none focus:ring-1 focus:ring-inset focus:ring-ink/20 disabled:opacity-60"
+        />
+      </div>
+      {error ? (
+        <p role="alert" className="text-[12.5px] text-warning">
+          {error}
+        </p>
+      ) : null}
+      {canEdit ? (
+        <div className="flex items-center gap-2">
+          <button
+            type="submit"
+            disabled={!isDirty || isSaving}
+            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-ink bg-ink px-3 text-[13px] font-medium text-canvas hover:bg-ink/90 disabled:opacity-50"
+          >
+            {isSaving ? <Loader2 size={14} className="animate-spin" /> : null}
+            {isSaving ? "Saving…" : "Save changes"}
+          </button>
+          {isDirty ? (
+            <button
+              type="button"
+              disabled={isSaving}
+              onClick={() => {
+                setDraft(saved);
+                setError(null);
+              }}
+              className="inline-flex h-9 items-center rounded-md px-3 text-[13px] text-ink-muted hover:bg-surface-hover disabled:opacity-50"
+            >
+              Discard changes
+            </button>
+          ) : null}
+          <span role="status" className="ml-auto text-[12px] text-ink-subtle">
+            {isSaving ? "Saving…" : isDirty ? "Unsaved changes" : savedNotice ? "Saved" : ""}
+          </span>
+        </div>
+      ) : null}
+    </form>
+  );
+}
+
+function SkillSourceNotice({ source }: { source: Exclude<SkillSourceDto, { type: "workspace" }> }) {
   const shortCommit = source.resolvedCommit ? source.resolvedCommit.slice(0, 7) : null;
   return (
     <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-muted px-3 py-2.5 text-[12.5px] leading-5 text-ink-subtle">
@@ -1375,22 +1495,15 @@ type ImportPreviewState = {
 function WorkspaceSkillDialog({
   onClose,
   onSaved,
-  skillName,
-  initialDescription = "",
-  initialInstructions = "",
 }: {
   onClose: () => void;
   onSaved: (name: string) => void;
-  skillName?: string;
-  initialDescription?: string;
-  initialInstructions?: string;
 }) {
-  const [name, setName] = useState(skillName ?? "");
-  const [description, setDescription] = useState(initialDescription);
-  const [instructions, setInstructions] = useState(initialInstructions.trim());
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [instructions, setInstructions] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSaving, startSaving] = useTransition();
-  const editing = skillName !== undefined;
 
   useEffect(() => {
     const onKey = (event: globalThis.KeyboardEvent) => {
@@ -1419,18 +1532,11 @@ function WorkspaceSkillDialog({
     setError(null);
     startSaving(async () => {
       try {
-        if (editing) {
-          await updateHeadlessWorkspaceSkill(skillName, {
-            description: normalizedDescription,
-            instructions: normalizedInstructions,
-          });
-        } else {
-          await createHeadlessWorkspaceSkill({
-            name: normalizedName,
-            description: normalizedDescription,
-            instructions: normalizedInstructions,
-          });
-        }
+        await createHeadlessWorkspaceSkill({
+          name: normalizedName,
+          description: normalizedDescription,
+          instructions: normalizedInstructions,
+        });
         onSaved(normalizedName);
       } catch (cause) {
         setError(errorMessage(cause));
@@ -1449,22 +1555,20 @@ function WorkspaceSkillDialog({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label={editing ? "Edit skill" : "New skill"}
+        aria-label="New skill"
         className="shadow-ring-xl relative flex max-h-[90vh] w-full max-w-[640px] flex-col overflow-hidden rounded-xl bg-surface p-5"
       >
-        <h2 className="text-[15px] font-semibold leading-tight text-ink">
-          {editing ? "Edit skill" : "New skill"}
-        </h2>
+        <h2 className="text-[15px] font-semibold leading-tight text-ink">New skill</h2>
         <p className="mt-1 text-[12.5px] leading-5 text-ink-subtle">
-          Creates a portable Agent Skills SKILL.md. Saving an edit publishes a new immutable bundle.
+          Give the skill a name and write instructions the agent can follow.
         </p>
         <div className="mt-4 flex flex-col gap-3 overflow-y-auto">
           <label className="flex flex-col gap-1.5">
             <span className="text-[12px] font-medium text-ink-subtle">Name</span>
             <input
-              autoFocus={!editing}
+              autoFocus
               value={name}
-              disabled={editing || isSaving}
+              disabled={isSaving}
               onChange={(event) => {
                 setName(event.target.value.toLowerCase().replace(/\s+/gu, "-"));
                 if (error) setError(null);
@@ -1522,7 +1626,7 @@ function WorkspaceSkillDialog({
             className="inline-flex h-8 items-center gap-1.5 rounded-md border border-ink bg-ink px-3 text-[13px] font-medium text-canvas transition-colors hover:bg-ink/90 disabled:opacity-60"
           >
             {isSaving ? <Loader2 size={13} strokeWidth={2} className="animate-spin" /> : null}
-            {editing ? "Save new version" : "Create skill"}
+            Create skill
           </button>
         </div>
       </div>

@@ -2082,6 +2082,7 @@ export const CreateWorkspaceSkillBodySchema = z
   .strict()
   .openapi("CreateWorkspaceSkillBody");
 export const UpdateWorkspaceSkillBodySchema = CreateWorkspaceSkillBodySchema.omit({ name: true })
+  .extend({ expectedBundleId: z.string().trim().min(1).max(200).optional() })
   .strict()
   .openapi("UpdateWorkspaceSkillBody");
 export const SkillImportEnvelopeSchema = z

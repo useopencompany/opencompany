@@ -167,6 +167,7 @@ export class PostgresSkillBundleRepository implements SkillBundleRepository {
     actor: Parameters<SkillBundleRepository["replace"]>[0]["actor"];
     name: string;
     bundle: ResolvedSkillBundle;
+    expectedBundleId?: string;
   }) {
     if (input.bundle.name !== input.name) {
       throw new CoreError(
@@ -184,6 +185,13 @@ export class PostgresSkillBundleRepository implements SkillBundleRepository {
             "A Skill cannot change between an imported and workspace-authored source.",
           );
         }
+        if (input.expectedBundleId && current.bundleId !== input.expectedBundleId) {
+          if (current.integrity === input.bundle.integrity) return hydrateInstallation(tx, current);
+          throw new CoreError(
+            "conflict",
+            "This skill changed since you opened it. Read the latest version before saving again.",
+          );
+        }
         const bundleId = await storeSkillBundle(tx, input.actor.workspaceId, input.bundle);
         const [updated] = await tx
           .update(skillInstallations)
@@ -191,12 +199,17 @@ export class PostgresSkillBundleRepository implements SkillBundleRepository {
           .where(
             and(
               eq(skillInstallations.id, current.installationId),
+              eq(skillInstallations.bundleId, current.bundleId),
               eq(skillInstallations.workspaceId, input.actor.workspaceId),
               isNull(skillInstallations.archivedAt),
             ),
           )
           .returning({ id: skillInstallations.id });
-        if (!updated) throw new CoreError("not_found", "Skill not found.");
+        if (!updated)
+          throw new CoreError(
+            "conflict",
+            "This skill changed while saving. Read the latest version before saving again.",
+          );
         const row = await installationById(tx, input.actor.workspaceId, updated.id);
         if (!row) throw new CoreError("not_found", "Skill not found.");
         return hydrateInstallation(tx, row);
