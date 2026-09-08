@@ -23,7 +23,7 @@ import {
   users,
   workspaceMembers,
 } from "@opencompany/db/product-schema";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { isChatActionsKilled, resolveActionCatalog } from "../actions/catalog";
 import { executeAction } from "../actions/execute";
 import type { CapabilityQuote, CapabilityTurnState } from "../actions/types";
@@ -241,6 +241,7 @@ async function loadCodexActionContext(
           ...CHAT_HOST_TOOL_CONTRACT_VERSIONS,
         ]),
         eq(codexChatTurns.status, "running"),
+        isNull(codexChatTurns.interruptRequestedAt),
       ),
     )
     .limit(1);
@@ -254,6 +255,7 @@ async function loadCodexActionContext(
     engine: row.engine,
     assistantMessageId: row.assistantMessageId,
     policy: row.chatKind === "task" ? "headless" : "foregroundInteractive",
+    durableTaskApprovals: row.chatKind === "task" && row.engine !== "opencompany",
   };
 }
 

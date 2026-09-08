@@ -19,7 +19,11 @@ import {
   runCodexChatTurn,
   summarizeCodexChatRecoveryProgress,
 } from "./codex-chat";
-import { CodexChatHandoffError, CodexChatRetryableInfrastructureError } from "./codex-chat-errors";
+import {
+  CodexChatHandoffError,
+  CodexChatRetryableInfrastructureError,
+  TaskActionApprovalPauseError,
+} from "./codex-chat-errors";
 import type { RunnerEnv } from "./env";
 
 const acpMocks = vi.hoisted(() => ({ runTurn: vi.fn() }));
@@ -212,6 +216,32 @@ vi.mock("./sandbox", () => ({
 describe("createTurnAbortCheck", () => {
   beforeEach(() => {
     dbMocks.selectRows.length = 0;
+  });
+
+  it("stops for a persisted task approval and lets cancellation take precedence", async () => {
+    const checkAbort = createTurnAbortCheck({
+      turnId: "turn_1",
+      leaseId: "lease_1",
+      leaseOwner: "runner_1",
+    });
+    dbMocks.selectRows.push([
+      {
+        interruptRequestedAt: null,
+        leaseId: "lease_1",
+        leaseOwner: "runner_1",
+        taskActionApprovalPending: true,
+      },
+    ]);
+    await expect(checkAbort(true)).rejects.toBeInstanceOf(TaskActionApprovalPauseError);
+    dbMocks.selectRows.push([
+      {
+        interruptRequestedAt: new Date(),
+        leaseId: "lease_1",
+        leaseOwner: "runner_1",
+        taskActionApprovalPending: true,
+      },
+    ]);
+    await expect(checkAbort(true)).rejects.toBeInstanceOf(CodexChatInterruptedError);
   });
 
   it("prioritizes a durable user interrupt over a concurrent runner handoff", async () => {

@@ -14,6 +14,7 @@ import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { actionApprovalInputHash } from "./action-governance";
 import {
   type ChatRepositoryIdFactory,
   PostgresChatAttachmentRepository,
@@ -22,6 +23,10 @@ import {
 } from "./chat-repository";
 import { loadChatSessionPluginRuntime } from "./plugin-runtime-repository";
 import { listChatSkillBundleActivations, readChatSkillBundleFile } from "./skill-bundle-repository";
+import {
+  PostgresTaskActionApprovalRepository,
+  taskActionInvocationId,
+} from "./task-action-approvals";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const migrationPaths = [
@@ -994,6 +999,171 @@ describe("Postgres Chat repositories", () => {
       }),
     ).rejects.toMatchObject({ code: "not_found" });
   });
+
+  it.each(["approved", "denied", "canceled"] as const)(
+    "durably pauses and resumes a task action: %s",
+    async (resolution) => {
+      const created = await service.createMessage(actor(), {
+        idempotencyKey: "task-approval",
+        content: "Create a Gmail draft",
+        engine: "opencompany",
+        model: "provider/model",
+      });
+      await database.query("UPDATE goat.chat_sessions SET kind = 'task' WHERE id = $1", [
+        created.conversationId,
+      ]);
+      await database.query(
+        `INSERT INTO goat.tasks (id, user_workos_id, workspace_id, session_id, status)
+      VALUES ('task_approval', 'user_1', 'workspace_1', $1, 'running')`,
+        [created.conversationId],
+      );
+      await database.query(
+        `UPDATE goat.codex_chat_turns SET status = 'running', attempts = 1,
+      lease_id = 'lease_approval', lease_owner = 'worker_approval' WHERE id = $1`,
+        [created.runId],
+      );
+      const action = "plugin:gmail:gmail.create_draft";
+      const params = {
+        to: "recipient@example.com",
+        subject: "Ready",
+        body: "The feature is live.",
+      };
+      const invocationId = taskActionInvocationId(created.runId, action, params);
+      expect(
+        taskActionInvocationId(created.runId, action, {
+          body: params.body,
+          subject: params.subject,
+          to: params.to,
+        }),
+      ).toBe(invocationId);
+      expect(
+        taskActionInvocationId(created.runId, action, { ...params, body: "Changed" }),
+      ).not.toBe(invocationId);
+      await database.query(
+        `INSERT INTO goat.action_turns (id, session_id, turn_id, user_workos_id, workspace_id, policy, approval_records, expires_at)
+      SELECT 'action_turn', codex_chat_session_id, id, 'user_1', 'workspace_1', 'foregroundInteractive', $2::jsonb, now() + interval '6 hours'
+      FROM goat.codex_chat_turns WHERE id = $1`,
+        [
+          created.runId,
+          JSON.stringify({
+            [invocationId]: {
+              actionId: action,
+              sourceId: "plugin:gmail:gmail",
+              capabilityId: "write",
+              status: "pending",
+              inputHash: actionApprovalInputHash(params),
+            },
+          }),
+        ],
+      );
+      let actions = new PostgresTaskActionApprovalRepository(execute);
+      const lease = { runId: created.runId, leaseId: "lease_approval", invocationId };
+      expect(await actions.stage({ ...lease, params: { ...params, body: "Changed" } })).toBe(false);
+      expect(await actions.stage({ ...lease, params })).toBe(true);
+      expect(await actions.stage({ ...lease, params })).toBe(false);
+      expect(await actions.claim(lease)).toBe(false);
+      const execution = new PostgresRunExecutionRepository(execute);
+      await execution.startAttempt({
+        worker: { workerId: "worker_approval" },
+        runId: created.runId,
+        attemptId: "attempt_approval",
+        leaseId: lease.leaseId,
+      });
+      const draft = {
+        id: `approval_${invocationId}`,
+        toolCallId: invocationId,
+        kind: "use_action",
+        action,
+        prompt: "Create Gmail draft?",
+        input: { action, params },
+        options: ["approved", "denied"],
+      };
+      expect(
+        await execution.pauseForApprovals({
+          worker: { workerId: "worker_approval" },
+          runId: created.runId,
+          attemptId: "attempt_approval",
+          leaseId: lease.leaseId,
+          approvals: [draft],
+          settledMessageParts: [],
+        }),
+      ).toHaveLength(1);
+      expect(
+        (
+          await database.query(
+            "SELECT host_tool_contract_version FROM goat.codex_chat_sessions WHERE chat_session_id=$1",
+            [created.conversationId],
+          )
+        ).rows,
+      ).toEqual([{ host_tool_contract_version: "goat-codex-host-tools.v4" }]);
+      const paused = (
+        await database.query(
+          `SELECT run.status, run.lease_id, task.status AS task_status,
+      message.debug_trace -> 'uiMessageParts' AS parts FROM goat.codex_chat_turns AS run
+      JOIN goat.tasks AS task ON task.session_id = run.chat_session_id
+      JOIN goat.chat_messages AS message ON message.id = run.assistant_message_id WHERE run.id = $1`,
+          [created.runId],
+        )
+      ).rows[0];
+      expect(paused).toMatchObject({
+        status: "paused",
+        lease_id: null,
+        task_status: "waiting",
+        parts: [
+          expect.objectContaining({ input: { action, params }, state: "approval-requested" }),
+        ],
+      });
+      // A new repository represents a restarted runner: the original inputs and approval survive.
+      actions = new PostgresTaskActionApprovalRepository(execute);
+      expect(await actions.requests(created.runId)).toMatchObject([
+        { params, decision: "pending" },
+      ]);
+      const command = { runId: created.runId, approvalId: draft.id, resolution };
+      await expect(
+        service.resolveApproval(actor({ userId: "user_2", workspaceId: "workspace_2" }), command),
+      ).rejects.toMatchObject({ code: "not_found" });
+      if (resolution === "canceled") {
+        await service.cancelRun(actor(), created.runId);
+        expect(await actions.claim(lease)).toBe(false);
+        await expect(
+          service.resolveApproval(actor(), { ...command, resolution: "approved" }),
+        ).rejects.toMatchObject({ code: "not_found" });
+        expect(
+          (await database.query("SELECT status FROM goat.tasks WHERE id = 'task_approval'")).rows,
+        ).toEqual([{ status: "canceled" }]);
+        return;
+      }
+      await expect(service.resolveApproval(actor(), command)).resolves.toMatchObject({
+        idempotentReplay: false,
+      });
+      await expect(service.resolveApproval(actor(), command)).resolves.toMatchObject({
+        idempotentReplay: true,
+      });
+      expect(
+        (await database.query("SELECT status FROM goat.tasks WHERE id = 'task_approval'")).rows,
+      ).toEqual([{ status: "queued" }]);
+      expect(await actions.requests(created.runId)).toMatchObject([
+        { decision: resolution, executionStatus: "pending" },
+      ]);
+      await database.query(
+        `UPDATE goat.codex_chat_turns SET status = 'running', lease_id = 'lease_resumed', lease_owner = 'worker_resumed' WHERE id = $1`,
+        [created.runId],
+      );
+      expect(await actions.claim(lease)).toBe(false);
+      const resumed = { ...lease, leaseId: "lease_resumed" };
+      expect(await actions.claim(resumed)).toBe(true);
+      expect(await new PostgresTaskActionApprovalRepository(execute).claim(resumed)).toBe(false);
+      const result =
+        resolution === "approved"
+          ? { ok: true as const, action, result: { draftId: "draft_1" } }
+          : { ok: false as const, action, error: { code: "not_permitted", message: "Denied" } };
+      expect(await actions.complete({ ...resumed, result })).toBe(true);
+      expect(await actions.requests(created.runId)).toMatchObject([
+        { executionStatus: "completed", result },
+      ]);
+      expect(await actions.claim(resumed)).toBe(false);
+    },
+  );
 
   it("resolves durable approvals once and appends their semantic event", async () => {
     const created = await service.createMessage(actor(), {

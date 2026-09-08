@@ -231,58 +231,65 @@ describe("executeActionGateway", () => {
     });
   });
 
-  it("persists ask approval before interactive execution and dispatches only after approval", async () => {
-    const action = createReadAction("gmail.send");
-    action.capability = "write";
-    action.effects = ACTION_EFFECTS_WRITE;
-    action.permissionMode = "ask";
-    const catalog: ResolvedActionCatalog = {
-      providers: [{ id: "gmail", kind: "integration", label: "Gmail", description: "Email" }],
-      actions: [action],
-    };
-    const registerApproval = vi
-      .fn()
-      .mockResolvedValueOnce({
-        actionId: action.id,
-        sourceId: action.provider,
-        capabilityId: action.capability,
-        inputHash: "input_hash",
-        status: "pending" as const,
-      })
-      .mockResolvedValueOnce({
-        actionId: action.id,
-        sourceId: action.provider,
-        capabilityId: action.capability,
-        inputHash: "input_hash",
-        status: "approved" as const,
-      });
-    const request = {
-      operation: "execute" as const,
-      sessionId: "session_approval",
-      turnId: "turn_approval",
-      action: action.id,
-      params: { to: "customer@example.com" },
-      invocationId: "call_approval",
-    };
-    const dependencies = {
-      loadContext: vi.fn(async () => interactiveContext),
-      resolveCatalog: vi.fn(async () => catalog),
-      registerApproval,
-      claimInvocation: admittedInvocation,
-    };
-    const gateway = createActionGateway(dependencies);
+  it.each([false, true])(
+    "persists ask approval and dispatches only after approval (durable task: %s)",
+    async (durableTaskApprovals) => {
+      const action = createReadAction("gmail.send");
+      action.capability = "write";
+      action.effects = ACTION_EFFECTS_WRITE;
+      action.permissionMode = "ask";
+      const catalog: ResolvedActionCatalog = {
+        providers: [{ id: "gmail", kind: "integration", label: "Gmail", description: "Email" }],
+        actions: [action],
+      };
+      const registerApproval = vi
+        .fn()
+        .mockResolvedValueOnce({
+          actionId: action.id,
+          sourceId: action.provider,
+          capabilityId: action.capability,
+          inputHash: "input_hash",
+          status: "pending" as const,
+        })
+        .mockResolvedValueOnce({
+          actionId: action.id,
+          sourceId: action.provider,
+          capabilityId: action.capability,
+          inputHash: "input_hash",
+          status: "approved" as const,
+        });
+      const request = {
+        operation: "execute" as const,
+        sessionId: "session_approval",
+        turnId: "turn_approval",
+        action: action.id,
+        params: { to: "customer@example.com" },
+        invocationId: "call_approval",
+      };
+      const dependencies = {
+        loadContext: vi.fn(async () => ({
+          ...interactiveContext,
+          policy: durableTaskApprovals ? ("headless" as const) : ("foregroundInteractive" as const),
+          durableTaskApprovals,
+        })),
+        resolveCatalog: vi.fn(async () => catalog),
+        registerApproval,
+        claimInvocation: admittedInvocation,
+      };
+      const gateway = createActionGateway(dependencies);
 
-    await expect(gateway({ request, signal: new AbortController().signal })).resolves.toMatchObject(
-      { ok: false, error: { code: "approval_required" } },
-    );
-    expect(action.execute).not.toHaveBeenCalled();
+      await expect(
+        gateway({ request, signal: new AbortController().signal }),
+      ).resolves.toMatchObject({ ok: false, error: { code: "approval_required" } });
+      expect(action.execute).not.toHaveBeenCalled();
 
-    await expect(gateway({ request, signal: new AbortController().signal })).resolves.toMatchObject(
-      { ok: true, action: action.id },
-    );
-    expect(action.execute).toHaveBeenCalledOnce();
-    expect(registerApproval).toHaveBeenCalledTimes(2);
-  });
+      await expect(
+        gateway({ request, signal: new AbortController().signal }),
+      ).resolves.toMatchObject({ ok: true, action: action.id });
+      expect(action.execute).toHaveBeenCalledOnce();
+      expect(registerApproval).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it("does not ask again when an invocation is already approved", async () => {
     const action = createReadAction("gmail.send");

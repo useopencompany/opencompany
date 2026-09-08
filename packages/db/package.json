@@ -223,6 +223,10 @@
     "./worker-admission": {
       "types": "./src/worker-admission.ts",
       "default": "./src/worker-admission.ts"
+    },
+    "./task-action-approvals": {
+      "types": "./src/task-action-approvals.ts",
+      "default": "./src/task-action-approvals.ts"
     }
   },
   "scripts": {
