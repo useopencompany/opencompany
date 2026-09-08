@@ -39,6 +39,9 @@ describe("legacy Brain ingestion cutover migration", () => {
     const source = await database.query(
       "SELECT enabled FROM goat.brain_sources WHERE id = 'disabled_source'",
     );
+    const reservations = await database.query(
+      "SELECT id, source_item_id, wiki_source_item_id FROM goat.workspace_ingestion_reservations WHERE workspace_id = 'disabled_workspace'",
+    );
 
     expect(importRun.rows).toEqual([{ status: "canceled" }]);
     expect(job.rows).toEqual([
@@ -60,6 +63,13 @@ describe("legacy Brain ingestion cutover migration", () => {
       },
     ]);
     expect(source.rows).toEqual([{ enabled: false }]);
+    expect(reservations.rows).toEqual([
+      {
+        id: "disabled_wiki_reservation",
+        source_item_id: null,
+        wiki_source_item_id: "wiki_item",
+      },
+    ]);
   });
 
   it("leaves enabled legacy Brain work untouched", async () => {
@@ -72,12 +82,16 @@ describe("legacy Brain ingestion cutover migration", () => {
     const source = await database.query(
       "SELECT enabled FROM goat.brain_sources WHERE id = 'enabled_source'",
     );
+    const reservations = await database.query(
+      "SELECT id, status FROM goat.workspace_ingestion_reservations WHERE workspace_id = 'enabled_workspace'",
+    );
 
     expect(importRun.rows).toEqual([{ status: "ingesting" }]);
     expect(job.rows).toEqual([
       { status: "running", plan_paused: false, lease_id: "lease_enabled", result: {} },
     ]);
     expect(source.rows).toEqual([{ enabled: true }]);
+    expect(reservations.rows).toEqual([{ id: "enabled_reservation", status: "pending" }]);
   });
 });
 
@@ -131,6 +145,13 @@ const BASE_SCHEMA = `
     enabled boolean NOT NULL,
     updated_at timestamptz NOT NULL
   );
+  CREATE TABLE goat.workspace_ingestion_reservations (
+    id text PRIMARY KEY,
+    workspace_id text NOT NULL,
+    source_item_id text,
+    wiki_source_item_id text,
+    status text NOT NULL
+  );
 `;
 
 const FIXTURE = `
@@ -158,4 +179,11 @@ const FIXTURE = `
   VALUES
     ('disabled_source', 'disabled_brain', true, CURRENT_TIMESTAMP),
     ('enabled_source', 'enabled_brain', true, CURRENT_TIMESTAMP);
+  INSERT INTO goat.workspace_ingestion_reservations (
+    id, workspace_id, source_item_id, wiki_source_item_id, status
+  )
+  VALUES
+    ('disabled_reservation', 'disabled_workspace', 'disabled_item', NULL, 'pending'),
+    ('disabled_wiki_reservation', 'disabled_workspace', NULL, 'wiki_item', 'pending'),
+    ('enabled_reservation', 'enabled_workspace', 'enabled_item', NULL, 'pending');
 `;

@@ -347,13 +347,16 @@ export function createDbBrainIngestStore(): BrainIngestStore {
             -- an intentional rollback can restore it, but it cannot authorize
             -- spend while the workspace has Brain disabled.
             AND (
-              (job.workspace_id IS NULL AND job.brain_ref IS NULL)
+              job.workspace_id IS NULL
               OR EXISTS (
                 SELECT 1
                 FROM goat.workspaces AS workspace
                 WHERE workspace.id = job.workspace_id
                   AND workspace.legacy_brain_enabled = true
               )
+            )
+            AND (
+              job.brain_ref IS NULL
               OR EXISTS (
                 SELECT 1
                 FROM goat.brains AS brain

@@ -61,6 +61,13 @@ WHERE source.id = job.source_item_id
       AND other.status IN ('queued', 'running')
   );
 --> statement-breakpoint
+DELETE FROM goat.workspace_ingestion_reservations AS reservation
+USING goat.workspaces AS workspace
+WHERE reservation.workspace_id = workspace.id
+  AND reservation.source_item_id IS NOT NULL
+  AND reservation.status = 'pending'
+  AND workspace.legacy_brain_enabled = false;
+--> statement-breakpoint
 UPDATE goat.brain_sources AS source
 SET enabled = false,
     updated_at = CURRENT_TIMESTAMP
