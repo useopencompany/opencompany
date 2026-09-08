@@ -15,6 +15,7 @@ import {
   brainIngestJobs,
   brainSourceItems,
   brains,
+  workspaces,
 } from "./product-schema";
 
 type DbLike = any;
@@ -277,16 +278,34 @@ export async function upsertBrainSourceItemAndEnqueue(input: {
       throw new Error(`Cannot enqueue opencompany ingestion for missing brain ${brainRef}.`);
     }
   }
+  const targetWorkspaceIds = Array.from(new Set(brainRows.map((row) => row.workspaceId)));
+  const legacyWorkspaceRows: Array<{ id: string }> =
+    targetWorkspaceIds.length === 0
+      ? []
+      : await db
+          .select({ id: workspaces.id })
+          .from(workspaces)
+          .where(
+            and(
+              inArray(workspaces.id, targetWorkspaceIds),
+              eq(workspaces.legacyBrainEnabled, true),
+            ),
+          );
+  const legacyWorkspaceIds = new Set(legacyWorkspaceRows.map((row) => row.id));
+  const eligibleBrainRefs = brainRefs.filter(
+    (brainRef) => brainRef === null || legacyWorkspaceIds.has(workspaceByBrain.get(brainRef) ?? ""),
+  );
+  const eligibleBrainRows = brainRows.filter((row) => legacyWorkspaceIds.has(row.workspaceId));
 
   // Dedup is enforced by partial unique indexes on (source_item_id, content_hash,
   // kind[, brain_ref]); the conflict target must stay unspecified so both apply.
   const jobs: PersistedBrainIngestJob[] =
-    brainRefs.length === 0
+    eligibleBrainRefs.length === 0
       ? []
       : await db
           .insert(brainIngestJobs)
           .values(
-            brainRefs.map((brainRef) => ({
+            eligibleBrainRefs.map((brainRef) => ({
               id: newBrainIngestJobId(),
               sourceItemId: sourceItem.id,
               userWorkosId: input.userWorkosId,
@@ -322,7 +341,7 @@ export async function upsertBrainSourceItemAndEnqueue(input: {
             lastError: brainIngestJobs.lastError,
           });
 
-  const workspaceIds = Array.from(new Set(brainRows.map((row) => row.workspaceId)));
+  const workspaceIds = Array.from(new Set(eligibleBrainRows.map((row) => row.workspaceId)));
   const reservations: Awaited<ReturnType<typeof reserveWorkspaceIngestion>>[] = [];
   if (!skipReason) {
     // A caller-provided db is often a live transaction. Keep its statements
@@ -332,7 +351,7 @@ export async function upsertBrainSourceItemAndEnqueue(input: {
       const workspaceRawEventCount = input.rawEventKeysByBrainRef
         ? rawEventCountForWorkspace({
             workspaceId,
-            brainRows,
+            brainRows: eligibleBrainRows,
             rawEventKeysByBrainRef: input.rawEventKeysByBrainRef,
           })
         : rawEventCount;
@@ -377,7 +396,7 @@ export async function upsertBrainSourceItemAndEnqueue(input: {
         sourceItemId: sourceItem.id,
         contentHash: input.item.contentHash,
         kind,
-        brainRefs,
+        brainRefs: eligibleBrainRefs,
         reason: skipReason,
         now,
       })

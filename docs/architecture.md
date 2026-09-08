@@ -80,11 +80,12 @@ recovery. The runner never calls the public API for execution persistence.
 
 Provider ingress validates and normalizes source events before polling providers or buffering
 activity windows. The Wiki is the default knowledge system and its source rows drive new ingestion.
-The retained Brain pipeline is a reversible legacy path: workspace UI and agent tools require
-`workspaces.legacy_brain_enabled`, while operations disable legacy `brain_sources` separately after
-cutover. A leased runner worker then cheaply triages Gmail items before the librarian applies page mutations
-through the same authorized Wiki tool used by interactive agents; job results retain the outcome and
-touched page paths for ingestion activity.
+The retained Brain pipeline is a reversible legacy path: workspace UI, agent tools, source routing,
+enqueueing, and worker claims require `workspaces.legacy_brain_enabled`. Source configuration stays
+separate so an intentional rollback can restore it, while operations disable legacy `brain_sources`
+after cutover to stop provider polling. A leased runner worker then cheaply triages Gmail items
+before the librarian applies page mutations through the same authorized Wiki tool used by
+interactive agents; job results retain the outcome and touched page paths for ingestion activity.
 
 ## Agent Skills and Plugins
 
