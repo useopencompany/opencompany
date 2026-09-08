@@ -38,6 +38,11 @@ release job loads its credentials, it verifies every live managed-capability con
 production changes. The probe retries bounded transport, rate-limit, malformed-success, and upstream
 server failures; authentication failures and deterministic contract mismatches remain fail-closed.
 
+For an endpoint-not-found response, inspect a supported replacement before updating its adapter in
+`packages/agent/src/capabilities/catalog.ts`. Verify the input location, pagination types, and pricing
+contract, then rerun `bun run web:capabilities:contract`. TikTok comments use the App V3
+`/api/v1/tiktok/app/v3/fetch_video_comments` endpoint with integer cursors in `queryParams`.
+
 The workflow loads release credentials from Infisical `prod` `/release`, validates selected
 web/API/runner configuration, and builds selected Vercel artifacts in runner-local storage before
 changing production. It then rechecks the current `main` SHA, runs production migrations once when

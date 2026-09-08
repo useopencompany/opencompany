@@ -49,6 +49,10 @@ and terminal settlement. An opencompany Task turn uses the same host-tool contra
 composition as an interactive opencompany turn; the Task context adds autonomous-run instructions,
 larger call budgets, and the headless action policy that denies operations requiring live approval.
 
+Canonical Tasks can be archived once their run has settled, including `waiting` ("Waiting for you"),
+`succeeded`, `failed`, and `canceled`. Archiving preserves the outcome and waiting state; it does not
+resume execution. The UI and archive repository share this status rule in `@opencompany/core`.
+
 The 35 known sessionless pre-cutover Tasks are intentionally separate. They remain readable through
 the actor-scoped compatibility API and cannot be replied to, canceled, or archived. ADR 0002 owns
 their retention gate.

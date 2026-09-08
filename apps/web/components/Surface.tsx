@@ -14,7 +14,8 @@ import {
 } from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import { captureProductEvent } from "@opencompany/analytics/product/client";
-import type { ChatEngine as ChatEngine } from "@opencompany/core";
+import type { ChatEngine } from "@opencompany/core";
+import { isSettledTaskStatus } from "@opencompany/core/tasks";
 import type { EngineRuntimeStatus, MessageEngine } from "@opencompany/protocol";
 import {
   Command,
@@ -6339,9 +6340,7 @@ function ResultRow({ task, onArchive }: { task: TaskView; onArchive: (task: Task
   const title = task.name;
   const href = `/tasks/${encodeURIComponent(task.displayId)}`;
   const prefetchTask = () => router.prefetch(href);
-  const canArchive =
-    Boolean(task.sessionId) &&
-    (task.status === "succeeded" || task.status === "failed" || task.status === "canceled");
+  const canArchive = Boolean(task.sessionId) && isSettledTaskStatus(task.status);
   return (
     <div className="group/result relative flex items-center rounded-lg px-2 py-1 transition-colors duration-150 hover:bg-surface-hover focus-within:bg-surface-hover">
       <Link
