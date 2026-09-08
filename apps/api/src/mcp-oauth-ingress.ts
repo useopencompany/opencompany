@@ -72,6 +72,12 @@ import {
   verifySigNozMcpState,
 } from "@opencompany/agent/integrations/signoz-mcp";
 import {
+  appendSupabaseMcpStatus,
+  completeSupabaseMcpOAuth,
+  startSupabaseMcpOAuth,
+  verifySupabaseMcpState,
+} from "@opencompany/agent/integrations/supabase-mcp";
+import {
   appendVercelMcpStatus,
   completeVercelMcpOAuth,
   startVercelMcpOAuth,
@@ -93,6 +99,7 @@ export type McpOAuthProvider =
   | "posthog"
   | "neon"
   | "notion"
+  | "supabase"
   | "latitude"
   | "jamie"
   | "betterstack"
@@ -196,6 +203,13 @@ const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
     verifyState: verifyNotionMcpState,
     appendStatus: appendNotionMcpStatus,
     deniedReason: "notion_denied",
+  },
+  supabase: {
+    start: startSupabaseMcpOAuth,
+    complete: completeSupabaseMcpOAuth,
+    verifyState: verifySupabaseMcpState,
+    appendStatus: appendSupabaseMcpStatus,
+    deniedReason: "supabase_denied",
   },
   latitude: {
     start: startLatitudeMcpOAuth,

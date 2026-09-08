@@ -20,6 +20,7 @@ export type ActionProviderId =
   | "latitude"
   | "neon"
   | "notion"
+  | "supabase"
   | "betterstack"
   | "render"
   | "vercel"

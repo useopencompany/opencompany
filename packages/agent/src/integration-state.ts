@@ -266,6 +266,7 @@ export type PersonalAccountProvider =
   | "latitude"
   | "neon"
   | "notion"
+  | "supabase"
   | "x_account";
 
 export type IntegrationState = {
@@ -346,6 +347,7 @@ export function personalAccountsFromRows(
     latitude: [],
     neon: [],
     notion: [],
+    supabase: [],
     x_account: [],
   };
   for (const row of rows) {
@@ -400,6 +402,7 @@ export function personalAccountsFromRows(
       row.provider === "latitude" ||
       row.provider === "neon" ||
       row.provider === "notion" ||
+      row.provider === "supabase" ||
       row.provider === "x_account"
     ) {
       personalAccounts[row.provider].push(accountViewFromRow(row.provider, row));

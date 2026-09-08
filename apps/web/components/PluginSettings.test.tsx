@@ -460,7 +460,12 @@ describe("Plugin settings", () => {
     await user.click(screen.getByRole("button", { name: "View all engineering plugins" }));
 
     const engineering = screen.getByRole("region", { name: "Engineering" });
-    expect(within(engineering).getAllByRole("link")).toHaveLength(8);
+    expect(within(engineering).getAllByRole("link")).toHaveLength(9);
+    expect(within(engineering).getByRole("link", { name: /supabase/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/supabase",
+    );
+
     expect(within(engineering).getByRole("link", { name: /github/i })).toBeInTheDocument();
     expect(within(engineering).getByRole("link", { name: /signoz/i })).toHaveAttribute(
       "href",

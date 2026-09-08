@@ -118,6 +118,11 @@ import {
   STRIPE_MCP_ENDPOINT_URL,
 } from "./integrations/stripe";
 import {
+  getSupabaseMcpIntegrationState,
+  loadSupabaseMcpWorkerConnection,
+  SUPABASE_MCP_ENDPOINT_URL,
+} from "./integrations/supabase-mcp";
+import {
   getVercelIntegrationState,
   loadVercelMcpWorkerConnection,
   VERCEL_MCP_ENDPOINT_URL,
@@ -226,6 +231,12 @@ const providerBindings = {
     endpointUrl: NOTION_MCP_ENDPOINT_URL,
     getState: getNotionMcpIntegrationState,
     loadConnection: loadNotionMcpWorkerConnection,
+  },
+  supabase: {
+    provider: "supabase",
+    endpointUrl: SUPABASE_MCP_ENDPOINT_URL,
+    getState: getSupabaseMcpIntegrationState,
+    loadConnection: loadSupabaseMcpWorkerConnection,
   },
   latitude: {
     provider: "latitude",

@@ -39,6 +39,7 @@ export function integrationConnectionError(provider: string | null, reason: stri
     case "latitude_denied":
     case "posthog_denied":
     case "neon_denied":
+    case "supabase_denied":
     case "betterstack_denied":
     case "fathom_denied":
     case "signoz_denied":
@@ -96,6 +97,8 @@ function providerName(provider: string | null) {
       return "Latitude";
     case "posthog":
       return "PostHog";
+    case "supabase":
+      return "Supabase";
     case "neon":
       return "Neon";
     case "betterstack":

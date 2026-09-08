@@ -225,6 +225,11 @@ export const OFFICIAL_MCP_PLUGINS = {
     Icon: Triangle,
     iconClassName: "bg-black text-white",
   },
+  supabase: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.supabase,
+    Icon: ServerCog,
+    iconClassName: "bg-[#003D2B] text-[#3ECF8E]",
+  },
   signoz: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.signoz,
     Icon: Activity,

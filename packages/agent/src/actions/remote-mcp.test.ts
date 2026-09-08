@@ -1,4 +1,7 @@
 import { createMCPClient, type OAuthClientProvider } from "@ai-sdk/mcp";
+import { resolvePlugin } from "@opencompany/agent-runtime";
+import { createOfficialPluginFetcher } from "@opencompany/agent-runtime/official-plugin-artifacts";
+import { OFFICIAL_PLUGIN_SOURCES } from "@opencompany/agent-runtime/official-plugin-catalog";
 import { captureProductServerEvent } from "@opencompany/analytics/product/server";
 import type { PluginGatewayDiscoveredTool } from "@opencompany/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -748,5 +751,81 @@ describe("plugin tool outcome analytics", () => {
       },
     );
     expect(execution.close).toHaveBeenCalledOnce();
+  });
+});
+
+describe("reviewed Supabase package permissions", () => {
+  it("imports the pinned package and gates sensitive reads, SQL, costs, and drift", async () => {
+    const url = OFFICIAL_PLUGIN_SOURCES.supabase;
+    const plugin = await resolvePlugin({
+      url,
+      fetcher: (await createOfficialPluginFetcher({ url }))!,
+      trustedCapabilitySources: ["useopencompany/plugins"],
+    });
+    expect(plugin.remoteServers).toEqual([
+      {
+        name: "supabase",
+        type: "streamable-http",
+        url: "https://mcp.supabase.com/mcp",
+        headers: {},
+      },
+    ]);
+    expect(plugin.report.capabilities).toMatchObject({ status: "parsed", issues: [] });
+    const tools = plugin.capabilities.flatMap((group) => group.tools);
+    expect(tools).toHaveLength(33);
+    expect(new Set(tools).size).toBe(tools.length);
+    for (const name of [
+      "search_docs",
+      "list_tables",
+      "list_projects",
+      "generate_typescript_types",
+    ]) {
+      expect(classifyRemoteTool({ name }, plugin.capabilities)).toMatchObject({
+        curated: true,
+        bucket: "read",
+        capability: { id: "read", defaultMode: "on" },
+      });
+    }
+    for (const name of [
+      "query_logs",
+      "get_logs",
+      "get_advisors",
+      "get_publishable_keys",
+      "get_edge_function",
+    ]) {
+      expect(classifyRemoteTool({ name }, plugin.capabilities)).toMatchObject({
+        curated: true,
+        bucket: "read",
+        capability: { id: "query", defaultMode: "ask" },
+      });
+    }
+    for (const name of [
+      "execute_sql",
+      "apply_migration",
+      "confirm_cost",
+      "create_project",
+      "create_branch",
+      "merge_branch",
+      "deploy_edge_function",
+      "update_storage_config",
+    ]) {
+      // Cost confirmation reports readOnlyHint but authorizes spending; the reviewed map wins.
+      expect(
+        classifyRemoteTool({ name, annotations: { readOnlyHint: true } }, plugin.capabilities),
+      ).toMatchObject({
+        curated: true,
+        bucket: "write",
+        capability: { id: "write", defaultMode: "ask" },
+      });
+    }
+    expect(
+      classifyRemoteTool(
+        { name: "new_reader", annotations: { readOnlyHint: true } },
+        plugin.capabilities,
+      ),
+    ).toMatchObject({
+      curated: false,
+      capability: { defaultMode: "ask" },
+    });
   });
 });

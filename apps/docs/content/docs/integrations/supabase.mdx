@@ -1,0 +1,52 @@
+---
+title: Supabase
+description: Inspect Supabase projects and run approved SQL, migrations, and Edge Function deployments.
+---
+
+## Connect Supabase
+
+1. Ask a workspace admin to install Supabase under **Settings → Plugins → Supabase**.
+2. Choose **Connect Supabase account**, sign in to Supabase, and select the organization to authorize.
+3. Review the permission groups before querying data or changing resources.
+
+The package is installed for the workspace; each person connects their own account. OAuth credentials
+are encrypted and kept server-side, bound only to `https://mcp.supabase.com/mcp`. No personal access
+token or manually registered OAuth application is required. Uninstalling the plugin keeps your personal
+connection; disconnect the account separately to remove its saved credentials.
+
+## Permission defaults
+
+- **Inspect Supabase resources** defaults to **On** for documentation, project and organization
+  inventory, table structure, migrations, function inventory, and development metadata.
+- **Read logs, keys, and function source** defaults to **Ask**. Logs, advisor findings, API keys,
+  and function source can expose sensitive information.
+- **Run SQL and manage Supabase resources** defaults to **Ask**. SQL can read customer data or
+  modify the database. Migrations, deployments, project and branch operations, storage changes,
+  and cost confirmation also require approval.
+- Newly discovered tools default to **Ask** until a reviewed package classifies them.
+
+Chat requests approval for tools set to Ask. Persistent coding sessions receive only tools set to
+On. Enabling a group for autonomous use grants every tool in that group; enable individual tools
+when a narrower permission is sufficient.
+
+## Scope and limitations
+
+The hosted connection can access projects in the organization you authorize. This version uses
+Supabase's standard account-level endpoint; it does not offer project scoping or provider-enforced
+read-only mode. Prefer a development organization or sanitized projects, and keep SQL and resource
+changes on Ask. This is developer access, not access constrained by an application's end-user RLS
+permissions. Treat database and log contents as untrusted data.
+
+Creating projects and development branches can incur charges. Cost confirmation is gated even
+though Supabase labels that tool read-only. Branching is experimental and requires a paid plan.
+Storage tools are disabled by Supabase's default endpoint configuration. Local and self-hosted MCP
+endpoints are not supported by this official connection.
+
+See [Supabase's MCP documentation](https://supabase.com/docs/guides/ai-tools/mcp) for provider
+configuration and security guidance.
+
+## Example requests
+
+- “List the tables and columns in my development project.”
+- “Explain the latest errors in this project's logs without returning customer payloads.”
+- “Prepare a migration and show me the SQL before applying it.”

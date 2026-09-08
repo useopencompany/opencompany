@@ -431,6 +431,25 @@ export function NotionPluginDetail({
   );
 }
 
+export function SupabasePluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.supabase}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
 export function RenderPluginDetail({
   pluginState,
   canEdit,
@@ -1724,6 +1743,7 @@ function pluginAccountsFromState(
     config.connectionProvider === "jamie" ||
     config.connectionProvider === "neon" ||
     config.connectionProvider === "notion" ||
+    config.connectionProvider === "supabase" ||
     config.connectionProvider === "posthog" ||
     config.connectionProvider === "render" ||
     config.connectionProvider === "vercel" ||
