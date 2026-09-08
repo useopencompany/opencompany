@@ -1725,6 +1725,68 @@ describe("Postgres Chat repositories", () => {
     ]);
   });
 
+  it("counts infrastructure failures independently from handoffs and expired lease reclaims", async () => {
+    const created = await service.createMessage(actor(), {
+      idempotencyKey: "send-infrastructure-retries",
+      content: "Recover this",
+      engine: "opencompany",
+      model: "provider/model",
+    });
+    const execution = new PostgresRunExecutionRepository(execute);
+    const claims = [
+      { expected: 0, status: "abandoned", errorCode: "worker_handoff" },
+      { expected: 0, status: null, errorCode: null },
+      { expected: 0, status: "failed", errorCode: "retryable_infrastructure" },
+      { expected: 1, status: "abandoned", errorCode: "worker_handoff" },
+      { expected: 1, status: "failed", errorCode: "retryable_infrastructure" },
+      { expected: 2, status: "failed", errorCode: "execution_failed" },
+      { expected: 2, status: null, errorCode: null },
+    ] as const;
+
+    for (const [index, claim] of claims.entries()) {
+      const number = index + 1;
+      const input = {
+        worker: { workerId: `worker_${number}` },
+        runId: created.runId,
+        attemptId: `attempt_${number}`,
+        leaseId: `lease_${number}`,
+      };
+      await database.query(
+        `UPDATE goat.codex_chat_turns
+         SET status = 'running', attempts = $2, lease_id = $3, lease_owner = $4
+         WHERE id = $1`,
+        [created.runId, number, input.leaseId, input.worker.workerId],
+      );
+      await expect(execution.startAttempt(input)).resolves.toMatchObject({
+        number,
+        previousInfrastructureFailures: claim.expected,
+      });
+      // Re-reading a claimed Attempt must return the same budget, without counting itself.
+      await expect(execution.startAttempt(input)).resolves.toMatchObject({
+        previousInfrastructureFailures: claim.expected,
+      });
+      if (claim.status) {
+        await execution.finishAttempt({
+          ...input,
+          status: claim.status,
+          errorCode: claim.errorCode,
+        });
+      }
+    }
+    expect(
+      (await database.query("SELECT error_code FROM goat.run_attempts WHERE id = 'attempt_2'"))
+        .rows,
+    ).toEqual([{ error_code: "lease_reclaimed" }]);
+    await expect(
+      execution.startAttempt({
+        worker: { workerId: "worker_stale" },
+        runId: created.runId,
+        attemptId: "attempt_stale",
+        leaseId: "lease_stale",
+      }),
+    ).resolves.toBeNull();
+  });
+
   it("projects queued cancellation to the assistant, runtime, and semantic log", async () => {
     const created = await service.createMessage(actor(), {
       idempotencyKey: "send-cancel",

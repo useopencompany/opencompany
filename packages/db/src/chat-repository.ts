@@ -2025,7 +2025,7 @@ export class PostgresRunExecutionRepository implements RunExecutionRepository {
 
   async startAttempt(input: Parameters<RunExecutionRepository["startAttempt"]>[0]) {
     const startedAt = this.now();
-    const [row] = await this.rows<RunAttemptRow>(sql`
+    const [row] = await this.rows<RunAttemptRow & { previous_infrastructure_failures: number }>(sql`
       WITH fenced_run AS MATERIALIZED (
         SELECT id, attempts
         FROM goat.codex_chat_turns
@@ -2041,6 +2041,14 @@ export class PostgresRunExecutionRepository implements RunExecutionRepository {
         WHERE attempt.lease_id IS DISTINCT FROM ${input.leaseId}
         ORDER BY attempt.number DESC
         LIMIT 1
+      ),
+      infrastructure_failures AS MATERIALIZED (
+        SELECT COUNT(*)::integer AS previous_infrastructure_failures
+        FROM goat.run_attempts AS attempt
+        INNER JOIN fenced_run ON fenced_run.id = attempt.run_id
+        WHERE attempt.status = 'failed'
+          AND attempt.error_code = 'retryable_infrastructure'
+          AND attempt.lease_id IS DISTINCT FROM ${input.leaseId}
       ),
       abandoned AS (
         UPDATE goat.run_attempts AS attempt
@@ -2066,19 +2074,28 @@ export class PostgresRunExecutionRepository implements RunExecutionRepository {
         ON CONFLICT DO NOTHING
         RETURNING *
       )
-      SELECT inserted.*, previous_attempt.deploy_version AS previous_deploy_version
+      SELECT inserted.*, previous_attempt.deploy_version AS previous_deploy_version,
+             infrastructure_failures.previous_infrastructure_failures
       FROM inserted
       LEFT JOIN previous_attempt ON true
+      CROSS JOIN infrastructure_failures
       UNION ALL
-      SELECT attempt.*, previous_attempt.deploy_version AS previous_deploy_version
+      SELECT attempt.*, previous_attempt.deploy_version AS previous_deploy_version,
+             infrastructure_failures.previous_infrastructure_failures
       FROM goat.run_attempts AS attempt
       JOIN fenced_run ON fenced_run.id = attempt.run_id
       LEFT JOIN previous_attempt ON true
+      CROSS JOIN infrastructure_failures
       WHERE attempt.lease_id = ${input.leaseId}
         AND NOT EXISTS (SELECT 1 FROM inserted)
       LIMIT 1
     `);
-    return row ? mapRunAttempt(row) : null;
+    return row
+      ? {
+          ...mapRunAttempt(row),
+          previousInfrastructureFailures: row.previous_infrastructure_failures,
+        }
+      : null;
   }
 
   async appendEvents(input: Parameters<RunExecutionRepository["appendEvents"]>[0]) {
