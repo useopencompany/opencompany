@@ -52,7 +52,7 @@ export const CODEX_CHAT_MAX_TOTAL_ATTEMPTS = 15;
 const CODEX_CHAT_UNEXPECTED_FAILURE_MESSAGE =
   "This chat run failed unexpectedly. Send your message again to retry.";
 const CODEX_CHAT_INFRASTRUCTURE_RETRY_EXHAUSTED_MESSAGE =
-  "This chat run could not start after several infrastructure retries. Send your message again to retry.";
+  "This chat run could not continue after repeated infrastructure failures. Send your message again to retry.";
 const CODEX_CHAT_ATTEMPT_BUDGET_EXHAUSTED_MESSAGE =
   "This chat run was retried too many times and has been stopped. Send your message again to retry.";
 
@@ -479,13 +479,17 @@ export async function runClaimedTurn(
     if (heartbeatAbort) void runPromise?.catch(() => undefined);
   }
   if (retryableError) {
-    if (turn.attempts >= CODEX_CHAT_MAX_INFRASTRUCTURE_ATTEMPTS) {
+    // Lease acquisitions include healthy deploy handoffs and approval resumes. Only failed
+    // infrastructure attempts consume this budget; the separate total-claim cap still applies.
+    const infrastructureFailures = attempt.previousInfrastructureFailures + 1;
+    if (infrastructureFailures >= CODEX_CHAT_MAX_INFRASTRUCTURE_ATTEMPTS) {
       logger.error("opencompany chat infrastructure retry budget exhausted", {
         event: "opencompany.goat_codex_chat_turn_retry_exhausted",
         turn_id: turn.id,
         codex_chat_session_id: session.id,
         engine: session.engine,
         attempt: turn.attempts,
+        infrastructure_failures: infrastructureFailures,
         error: retryableError.cause ?? retryableError,
       });
       await settleClaimedTurnFailure({
@@ -495,6 +499,9 @@ export async function runClaimedTurn(
         taskContext,
         env,
         message: CODEX_CHAT_INFRASTRUCTURE_RETRY_EXHAUSTED_MESSAGE,
+        ...(retryableError.diagnosticMessage
+          ? { failureDiagnostic: retryableError.diagnosticMessage }
+          : {}),
       });
       return;
     }
@@ -508,7 +515,7 @@ export async function runClaimedTurn(
       errorMessage: retryableError.diagnosticMessage ?? retryableError.message,
     });
     if (!failedAttempt) throw new CodexChatLeaseLostError();
-    const retryAt = codexChatRetryAt(new Date(), turn.attempts);
+    const retryAt = codexChatRetryAt(new Date(), infrastructureFailures);
     await deferCodexChatTurnForRetry({
       turnId: turn.id,
       codexChatSessionId: turn.codexChatSessionId,
@@ -522,6 +529,7 @@ export async function runClaimedTurn(
       turn_id: turn.id,
       codex_chat_session_id: session.id,
       attempt: turn.attempts,
+      infrastructure_failures: infrastructureFailures,
       retry_at: retryAt.toISOString(),
       error_name:
         retryableError.cause instanceof Error
@@ -563,6 +571,7 @@ async function settleClaimedTurnFailure(input: {
   taskContext: TaskTurnContext | null;
   env: RunnerEnv;
   message: string;
+  failureDiagnostic?: string;
 }) {
   try {
     await failClaimedTurn(input);
@@ -679,6 +688,7 @@ async function failClaimedTurn(input: {
   taskContext: TaskTurnContext | null;
   env: RunnerEnv;
   message: string;
+  failureDiagnostic?: string;
 }) {
   const { turn, session } = input;
   const leaseId = turn.leaseId;
@@ -717,6 +727,7 @@ async function failClaimedTurn(input: {
     : null;
   await projector.fail(input.message, {
     sessionStatus: "failed",
+    ...(input.failureDiagnostic ? { failureDiagnostic: input.failureDiagnostic } : {}),
     ...(taskCompletion ? { taskCompletion } : {}),
   });
 }

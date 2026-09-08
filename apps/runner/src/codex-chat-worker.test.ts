@@ -278,7 +278,7 @@ describe("opencompany Codex chat worker shutdown", () => {
         interruptHeartbeatObserved = true;
         return { rows: [] };
       }
-      return { rows: [{ id: "updated" }] };
+      return { rows: [{ id: "updated", previous_infrastructure_failures: 0 }] };
     });
     sessionRows.length = 0;
     sessionRows.push(session());
@@ -331,7 +331,7 @@ describe("opencompany Codex chat worker shutdown", () => {
         claimed = true;
         return { rows: [claimedTurnRow()] };
       }
-      return { rows: [{ id: "updated" }] };
+      return { rows: [{ id: "updated", previous_infrastructure_failures: 0 }] };
     });
     sessionRows.length = 0;
     sessionRows.push(session());
@@ -371,7 +371,7 @@ describe("opencompany Codex chat worker shutdown", () => {
         claimed = true;
         return { rows: [claimedTurnRow()] };
       }
-      return { rows: [{ id: "updated" }] };
+      return { rows: [{ id: "updated", previous_infrastructure_failures: 0 }] };
     });
     sessionRows.length = 0;
     sessionRows.push(session());
@@ -403,7 +403,7 @@ describe("opencompany Codex chat worker shutdown", () => {
         claimed = true;
         return { rows: [claimedTurnRow()] };
       }
-      return { rows: [{ id: "updated" }] };
+      return { rows: [{ id: "updated", previous_infrastructure_failures: 0 }] };
     });
     sessionRows.length = 0;
     sessionRows.push(session());
@@ -509,7 +509,9 @@ describe("runClaimedTurn", () => {
     sessionRows.push(session());
     chatMocks.runCodexChatTurn.mockResolvedValue(undefined);
     chatMocks.runProductChatTurn.mockResolvedValue(undefined);
-    dbMock.execute.mockResolvedValue({ rows: [{ id: "updated" }] });
+    dbMock.execute.mockResolvedValue({
+      rows: [{ id: "updated", previous_infrastructure_failures: 0 }],
+    });
   });
 
   it("runs first attempts normally", async () => {
@@ -600,7 +602,9 @@ describe("runClaimedTurn", () => {
     sessionRows.length = 0;
     sessionRows.push(session({ engine: "opencompany", model: "anthropic/claude-sonnet-5" }));
     dbMock.execute.mockImplementation(async (query) =>
-      sqlText(query).includes("WITH heartbeat AS") ? { rows: [] } : { rows: [{ id: "updated" }] },
+      sqlText(query).includes("WITH heartbeat AS")
+        ? { rows: [] }
+        : { rows: [{ id: "updated", previous_infrastructure_failures: 0 }] },
     );
     chatMocks.runProductChatTurn.mockImplementationOnce(
       (input) =>
@@ -756,10 +760,14 @@ describe("runClaimedTurn", () => {
   });
 
   it("terminally settles retryable infrastructure failures after the retry budget", async () => {
+    dbMock.execute.mockResolvedValue({
+      rows: [{ id: "updated", previous_infrastructure_failures: 3 }],
+    });
     chatMocks.runCodexChatTurn.mockRejectedValueOnce(
       new CodexChatRetryableInfrastructureError(
         "Temporary infrastructure failure.",
         new Error("provider unavailable"),
+        "[fence_previous_turn] Error: provider unavailable",
       ),
     );
 
@@ -768,12 +776,36 @@ describe("runClaimedTurn", () => {
     ).resolves.toBeUndefined();
 
     expect(eventMocks.fail).toHaveBeenCalledWith(
-      "This chat run could not start after several infrastructure retries. Send your message again to retry.",
-      { sessionStatus: "failed" },
+      "This chat run could not continue after repeated infrastructure failures. Send your message again to retry.",
+      {
+        sessionStatus: "failed",
+        failureDiagnostic: "[fence_previous_turn] Error: provider unavailable",
+      },
     );
     expect(
       dbMock.execute.mock.calls.some(([query]) => sqlText(query).includes("WITH deferred AS")),
     ).toBe(false);
+  });
+
+  it("does not charge deploy handoffs and lease reclaims to the infrastructure retry budget", async () => {
+    // The reported Run had two abandoned claims and one infrastructure failure before claim four.
+    dbMock.execute.mockResolvedValue({
+      rows: [{ id: "updated", previous_infrastructure_failures: 1 }],
+    });
+    chatMocks.runCodexChatTurn.mockRejectedValueOnce(
+      new CodexChatRetryableInfrastructureError(
+        "Codex could not fence the previous sandbox process before recovery.",
+        new Error("command timed out"),
+        "[fence_previous_turn] Error: command timed out",
+      ),
+    );
+
+    await runClaimedTurn(turn({ attempts: 4 }), env());
+
+    expect(eventMocks.fail).not.toHaveBeenCalled();
+    expect(
+      dbMock.execute.mock.calls.some(([query]) => sqlText(query).includes("WITH deferred AS")),
+    ).toBe(true);
   });
 
   it("settles turns past the total attempt budget without executing them", async () => {

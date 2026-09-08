@@ -240,7 +240,7 @@ export interface RunExecutionRepository {
     runId: string;
     attemptId: string;
     leaseId: string;
-  }): Promise<RunAttempt | null>;
+  }): Promise<(RunAttempt & { previousInfrastructureFailures: number }) | null>;
   appendEvents(input: {
     worker: WorkerIdentity;
     runId: string;
