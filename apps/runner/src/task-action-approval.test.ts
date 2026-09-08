@@ -68,6 +68,12 @@ describe("task action approval continuation", () => {
     expect(deps.execute).not.toHaveBeenCalled();
   });
 
+  it("preserves a denial when the worker stopped before saving its result", async () => {
+    const deps = dependencies({ decision: "denied", executionStatus: "executing" });
+    expect(await resumeTaskActionApprovals(turn, deps)).toContain("The user denied this action");
+    expect(deps.execute).not.toHaveBeenCalled();
+  });
+
   it("reuses a persisted result after a restart", async () => {
     const deps = dependencies({
       executionStatus: "completed",

@@ -95,7 +95,9 @@ export async function resumeTaskActionApprovals(
     if (!result && request.executionStatus === "executing") {
       result = actionError(
         request,
-        "The worker stopped after claiming this action and its outcome is uncertain. Inspect the provider to determine whether it ran. Do not repeat this write automatically.",
+        request.decision === "denied"
+          ? "The user denied this action. Do not retry it or change standing permissions."
+          : "The worker stopped after claiming this action and its outcome is uncertain. Inspect the provider to determine whether it ran. Do not repeat this write automatically.",
       );
       if (
         !(await dependencies.repository.complete({
