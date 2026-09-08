@@ -314,6 +314,7 @@ describe("Electric read models", () => {
       "latitude",
       "posthog",
       "neon",
+      "supabase",
       "x_account",
     ]);
     expect(requestedUrl?.searchParams.get("columns")).not.toContain("credential");
