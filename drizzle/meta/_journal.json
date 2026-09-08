@@ -1800,6 +1800,13 @@
       "when": 1788813089391,
       "tag": "0256_opencompany_notion_integration",
       "breakpoints": true
+    },
+    {
+      "idx": 257,
+      "version": "7",
+      "when": 1788814000000,
+      "tag": "0257_enforce_legacy_brain_ingestion_cutover",
+      "breakpoints": true
     }
   ]
 }

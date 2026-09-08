@@ -342,6 +342,29 @@ export function createDbBrainIngestStore(): BrainIngestStore {
               OR (job.status = 'running' AND job.lease_expires_at < ${input.now})
             )
             AND (${supportedJobsWhere})
+            -- The workspace feature flag is the final authority for legacy
+            -- Brain execution. Source configuration is retained separately so
+            -- an intentional rollback can restore it, but it cannot authorize
+            -- spend while the workspace has Brain disabled.
+            AND (
+              job.workspace_id IS NULL
+              OR EXISTS (
+                SELECT 1
+                FROM goat.workspaces AS workspace
+                WHERE workspace.id = job.workspace_id
+                  AND workspace.legacy_brain_enabled = true
+              )
+            )
+            AND (
+              job.brain_ref IS NULL
+              OR EXISTS (
+                SELECT 1
+                FROM goat.brains AS brain
+                JOIN goat.workspaces AS workspace ON workspace.id = brain.workspace_id
+                WHERE brain.id = job.brain_ref
+                  AND workspace.legacy_brain_enabled = true
+              )
+            )
             -- A queued integration job is no longer runnable after its source
             -- is disabled or removed. The source action also terminally skips
             -- existing work; this guard closes the concurrent claim race.
