@@ -1293,35 +1293,59 @@ describe("Postgres Task repository", () => {
     ).toMatchObject({ rows: [{ count: 0 }] });
   });
 
-  it("archives only terminal Tasks and reflects the lifecycle in the read model", async () => {
+  it.each(["queued", "running"])("rejects archiving %s Tasks", async (status) => {
     const created = await service.createTask(actor(), {
-      idempotencyKey: "task-archive",
+      idempotencyKey: "task-archive-active",
       goal: "Finish before archive",
       engine: "opencompany",
       model: "moonshotai/kimi-k3",
       source: "manual",
     });
+    await database.query("UPDATE goat.tasks SET status = $1 WHERE id = $2", [
+      status,
+      created.task.id,
+    ]);
+
     await expect(
       service.updateTask(actor(), created.task.id, { archived: true }),
     ).rejects.toMatchObject({ code: "invalid_argument" });
-    await database.query(
-      `UPDATE goat.tasks SET status = 'succeeded', stage = 'completed' WHERE id = $1`,
-      [created.task.id],
-    );
-    await expect(
-      service.updateTask(actor(), created.task.id, { archived: true }),
-    ).resolves.toMatchObject({
-      task: { id: created.task.id, status: "archived" },
-    });
-    expect(
-      (
-        await database.query<{ status: string }>(
-          "SELECT status FROM goat.task_read_model_v1 WHERE id = $1",
-          [created.task.id],
-        )
-      ).rows,
-    ).toEqual([{ status: "archived" }]);
+    expect((await service.getTask(actor(), created.task.id)).archivedAt).toBeNull();
   });
+
+  it.each(["waiting", "succeeded", "failed", "canceled"])(
+    "archives and restores %s Tasks without changing their outcome",
+    async (status) => {
+      const created = await service.createTask(actor(), {
+        idempotencyKey: "task-archive",
+        goal: "Review the deployment",
+        engine: "opencompany",
+        model: "moonshotai/kimi-k3",
+        source: "manual",
+      });
+      await database.query(
+        `UPDATE goat.tasks SET status = $1, stage = 'completed',
+          reported_outcome = 'needs_attention', outcome_comment = 'Review requested' WHERE id = $2`,
+        [status, created.task.id],
+      );
+      const outcome = (await service.getTask(actor(), created.task.id)).outcome;
+
+      for (const archived of [true, true, false]) {
+        await expect(
+          service.updateTask(actor(), created.task.id, { archived }),
+        ).resolves.toMatchObject({
+          task: { id: created.task.id, status: archived ? "archived" : status, outcome },
+        });
+        expect(
+          (
+            await database.query<{ status: string }>(
+              "SELECT status FROM goat.task_read_model_v1 WHERE id = $1",
+              [created.task.id],
+            )
+          ).rows,
+        ).toEqual([{ status: archived ? "archived" : status }]);
+      }
+    },
+  );
 
   it("renames Task metadata and its one canonical Conversation together", async () => {
     const created = await service.createTask(actor(), {
