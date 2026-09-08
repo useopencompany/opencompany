@@ -489,6 +489,7 @@ function bindRegistration(
     server = { ...record.server, url: gmailMcpRuntimeEndpointUrl() };
   }
   return {
+    pluginName: record.pluginName,
     source: `plugin:${record.pluginName}:${record.server.name}`,
     connectionProvider: binding.provider,
     label: displayName(record.pluginName),

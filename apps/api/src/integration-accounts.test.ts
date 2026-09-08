@@ -14,6 +14,7 @@ import {
   getStripeIntegrationState,
   validateStripeRestrictedApiKey,
 } from "@opencompany/agent/integrations/stripe";
+import { captureProductServerEvent } from "@opencompany/analytics/product/server";
 import type { Actor } from "@opencompany/core";
 import {
   applyIntegrationCapabilityMode,
@@ -76,7 +77,11 @@ vi.mock("@opencompany/agent/integrations/stripe", async (importOriginal) => ({
 }));
 
 vi.mock("@opencompany/agent/integrations/analytics", () => ({
-  captureIntegrationAddedAnalytics: vi.fn(async () => undefined),
+  captureConnectionAddedAnalytics: vi.fn(async () => undefined),
+}));
+
+vi.mock("@opencompany/analytics/product/server", () => ({
+  captureProductServerEvent: vi.fn(async () => undefined),
 }));
 
 const admin: Actor = {
@@ -259,19 +264,29 @@ describe("integration account service", () => {
 
   it("reports a non-owned disconnect with the retired owner-only copy", async () => {
     vi.mocked(disconnectPersonalIntegration).mockResolvedValueOnce(false);
-    const service = createIntegrationAccountService({ db: fakeDb() });
+    const service = createIntegrationAccountService({
+      db: fakeDb([[{ id: "gint_x", provider: "x_account" }]]),
+    });
     await expect(service.disconnect(member, "gint_x")).rejects.toMatchObject({
       status: 404,
       message: "Only the connection owner can manage this account.",
     });
+    expect(captureProductServerEvent).not.toHaveBeenCalled();
   });
 
   it("runs the shared disconnect for the owner", async () => {
-    const service = createIntegrationAccountService({ db: fakeDb() });
+    const service = createIntegrationAccountService({
+      db: fakeDb([[{ id: "gint_x", provider: "x_account" }]]),
+    });
     await expect(service.disconnect(member, "gint_x")).resolves.toBeUndefined();
     expect(disconnectPersonalIntegration).toHaveBeenCalledWith(
       expect.objectContaining({ userWorkosId: "user_1", integrationId: "gint_x" }),
     );
+    expect(captureProductServerEvent).toHaveBeenCalledWith("connection_removed", "user_1", {
+      workspace_id: "workspace_1",
+      provider: "x_account",
+      connection_id: "gint_x",
+    });
   });
 
   it("validates capability modes and ids before touching the connection", async () => {
@@ -520,6 +535,20 @@ describe("integration account service", () => {
       userWorkosId: "user_1",
       workspaceId: "workspace_1",
     });
+  });
+
+  it("reports successful workspace Stripe disconnection", async () => {
+    vi.mocked(disconnectStripeIntegration).mockResolvedValueOnce(true);
+    const service = createIntegrationAccountService({ db: fakeDb() });
+    await service.disconnectStripe(admin);
+    expect(captureProductServerEvent).toHaveBeenCalledExactlyOnceWith(
+      "connection_removed",
+      "user_1",
+      {
+        workspace_id: "workspace_1",
+        provider: "stripe",
+      },
+    );
   });
 
   it("keeps the retired Stripe key-format and not-connected copy", async () => {

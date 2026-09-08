@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { captureIntegrationAddedAnalytics } from "@opencompany/agent/integrations/analytics";
+import { captureConnectionAddedAnalytics } from "@opencompany/agent/integrations/analytics";
 import { createXAccountIntegrationState } from "@opencompany/agent/integrations/x-account";
 import { connectXAccountIntegration } from "@opencompany/db/integrations";
 import { listWorkspacesForUser } from "@opencompany/db/workspaces";
@@ -16,7 +16,7 @@ vi.mock("@opencompany/db/integrations", async (importOriginal) => ({
   connectXAccountIntegration: vi.fn(),
 }));
 vi.mock("@opencompany/agent/integrations/analytics", () => ({
-  captureIntegrationAddedAnalytics: vi.fn(),
+  captureConnectionAddedAnalytics: vi.fn(),
 }));
 
 const sentinelDb = { sentinel: "db" };
@@ -159,7 +159,8 @@ describe("X account ingress", () => {
       scopes: ["tweet.read", "tweet.write", "users.read", "offline.access"],
       db: sentinelDb,
     });
-    expect(captureIntegrationAddedAnalytics).toHaveBeenCalledWith({
+    expect(captureConnectionAddedAnalytics).toHaveBeenCalledWith({
+      connectionId: "gint_x_1",
       userWorkosId: "user_1",
       workspaceId: "workspace_1",
       provider: "x_account",

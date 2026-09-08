@@ -1003,6 +1003,35 @@ describe("canonical Hono API", () => {
     expect(archive).toHaveBeenCalledWith({ actor, name: "imported-skill" });
   });
 
+  it("does not report failed plugin previews or removals as successful activity", async () => {
+    vi.mocked(captureProductServerEvent).mockClear();
+    const app = testApp(fakeRepository(), {
+      pluginImports: fakePluginImportService(
+        {
+          archive: async () => {
+            throw new CoreError("not_found", "Plugin not found.");
+          },
+        },
+        {
+          resolve: async () => {
+            throw new CoreError("invalid_argument", "Invalid plugin.");
+          },
+        },
+      ),
+    });
+    await expect(
+      app.request("/v1/plugins/imports/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: "github.com/example/plugins" }),
+      }),
+    ).resolves.toMatchObject({ status: 400 });
+    await expect(
+      app.request("/v1/plugins/missing/archive", { method: "POST" }),
+    ).resolves.toMatchObject({ status: 404 });
+    expect(captureProductServerEvent).not.toHaveBeenCalled();
+  });
+
   it("previews and manages Plugins without exposing package bytes or MCP environment values", async () => {
     vi.mocked(captureProductServerEvent).mockClear();
     const installation = fakePluginInstallation();
@@ -1090,6 +1119,14 @@ describe("canonical Hono API", () => {
       body: JSON.stringify({ url: "github.com/example/plugins" }),
     });
     expect(preview.status).toBe(200);
+    expect(captureProductServerEvent).toHaveBeenCalledWith(
+      "plugin_import_previewed",
+      actor.userId,
+      {
+        workspace_id: actor.workspaceId,
+        plugin_name: "quality-tools",
+      },
+    );
     const previewBody = await preview.json();
     expect(previewBody).toMatchObject({
       data: {
@@ -1129,6 +1166,7 @@ describe("canonical Hono API", () => {
     expect(captureProductServerEvent).toHaveBeenCalledWith("plugin_installed", actor.userId, {
       workspace_id: actor.workspaceId,
       plugin_name: "quality-tools",
+      plugin_id: installation.id,
       plugin_kind: "mcp",
       skill_count: 0,
       mcp_server_count: 2,
@@ -1192,6 +1230,10 @@ describe("canonical Hono API", () => {
     await expect(
       app.request("/v1/plugins/quality-tools/archive", { method: "POST" }),
     ).resolves.toMatchObject({ status: 200 });
+    expect(captureProductServerEvent).toHaveBeenCalledWith("plugin_removed", actor.userId, {
+      workspace_id: actor.workspaceId,
+      plugin_name: "quality-tools",
+    });
 
     expect(setStatus).toHaveBeenCalledWith({ actor, name: "quality-tools", status: "disabled" });
     expect(setEventEnabled).toHaveBeenCalledWith({

@@ -73,7 +73,7 @@ vi.mock("@opencompany/db/integrations", () => ({
 }));
 
 vi.mock("@opencompany/agent/integrations/analytics", () => ({
-  captureIntegrationAddedAnalytics: vi.fn(async () => undefined),
+  captureConnectionAddedAnalytics: vi.fn(async () => undefined),
 }));
 
 vi.mock("@opencompany/agent/app-url", () => ({
@@ -418,7 +418,7 @@ describe("opencompany remote MCP OAuth", () => {
       state: observed.state,
       db: {
         update: () => ({
-          set: () => ({ where: async () => [] }),
+          set: () => ({ where: () => ({ returning: async () => [{ id: "gint_remote_mcp" }] }) }),
         }),
       },
     });
