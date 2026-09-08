@@ -52,7 +52,7 @@ import { createWorkOsApiAuthenticator } from "./auth";
 import type { BrainAssetService } from "./brain-assets";
 import type { ChatResourceService } from "./chat-resources";
 import { ApiError } from "./errors";
-import type { ApiRateLimiter } from "./rate-limit";
+import { type ApiRateLimiter, InMemoryApiRateLimiter } from "./rate-limit";
 
 vi.mock("@opencompany/analytics/product/server", () => ({
   captureProductServerEvent: vi.fn(async () => undefined),
@@ -3278,6 +3278,78 @@ describe("canonical Hono API", () => {
     expect(response.status).toBe(429);
     expect(response.headers.get("retry-after")).toBe("7");
   });
+
+  it.each(["plugins", "skills"] as const)(
+    "keeps %s previews and imports independent of workspace writes and each other",
+    async (kind) => {
+      let now = 0;
+      const resolve = vi.fn(async () => {
+        throw new CoreError("invalid_argument", "Test source rejected by resolver.");
+      });
+      const app = testApp(fakeRepository(), {
+        rateLimiter: new InMemoryApiRateLimiter(() => now),
+        pluginImports: fakePluginImportService({}, { resolve }),
+        skillImports: fakeSkillImportService({}, { resolve }),
+        userSettings: {
+          ...fakeUserSettings(),
+          updatePreferences: async () => ({
+            timezone: "Europe/Berlin",
+            taskSpawningEnabled: true,
+            wikiEnabled: true,
+            taskViewMode: "list",
+            taskTimeRange: "24h",
+            autoModelRoutingEnabled: true,
+          }),
+        },
+      });
+      for (let index = 0; index < 10; index += 1) {
+        const write = await app.request("/v1/me/preferences", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ timezone: "Europe/Berlin" }),
+        });
+        expect(write.status).toBe(200);
+      }
+
+      const preview = () =>
+        app.request(`/v1/${kind}/imports/preview`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: "https://github.com/example/plugins" }),
+        });
+      // A resolver rejection proves the import path was reached instead of the limiter.
+      for (let index = 0; index < 10; index += 1) {
+        expect((await preview()).status).toBe(400);
+      }
+      expect(resolve).toHaveBeenCalledTimes(10);
+      const limited = await preview();
+      expect(limited.status).toBe(429);
+      expect(limited.headers.get("retry-after")).toBe("60");
+      expect(resolve).toHaveBeenCalledTimes(10);
+
+      const install = () =>
+        app.request(`/v1/${kind}/imports`, {
+          method: "POST",
+          headers: messageHeaders("rate-limit-import"),
+          body: JSON.stringify({
+            url: "https://github.com/example/plugins",
+            expectedResolvedCommit: "a".repeat(40),
+            expectedIntegrity: `sha256:${"b".repeat(64)}`,
+          }),
+        });
+      for (let index = 0; index < 10; index += 1) {
+        expect((await install()).status).toBe(400);
+      }
+      expect(resolve).toHaveBeenCalledTimes(20);
+      expect((await install()).status).toBe(429);
+      expect(resolve).toHaveBeenCalledTimes(20);
+
+      now = 60_000;
+      expect((await preview()).status).toBe(400);
+      expect((await install()).status).toBe(400);
+      expect(resolve).toHaveBeenCalledTimes(22);
+    },
+  );
 
   it("updates user preferences through the typed settings command", async () => {
     const updatePreferences = vi.fn(async () => ({

@@ -1269,13 +1269,13 @@ export function createApiApp(input: CreateApiAppInput) {
     },
     previewSkillImport: async (c) => {
       const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      await enforceRateLimit(rateLimiter, actor, "artifact-preview", 10);
       const preview = await input.skillImports.preview(actor, c.req.valid("json"));
       return c.json({ data: preview, meta }, 200);
     },
     importSkill: async (c) => {
       const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      await enforceRateLimit(rateLimiter, actor, "artifact-import", 10);
       const result = await input.skillImports.install(actor, {
         idempotencyKey: c.req.valid("header")["idempotency-key"],
         ...c.req.valid("json"),
@@ -1341,7 +1341,7 @@ export function createApiApp(input: CreateApiAppInput) {
     },
     replaceSkill: async (c) => {
       const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      await enforceRateLimit(rateLimiter, actor, "artifact-import", 10);
       const installation = await input.skillImports.replace(
         actor,
         c.req.valid("param").slug,
@@ -1367,7 +1367,7 @@ export function createApiApp(input: CreateApiAppInput) {
     },
     previewPluginImport: async (c) => {
       const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      await enforceRateLimit(rateLimiter, actor, "artifact-preview", 10);
       const preview = await input.pluginImports.preview(actor, c.req.valid("json"));
       await captureProductServerEvent("plugin_import_previewed", actor.userId, {
         workspace_id: actor.workspaceId,
@@ -1377,7 +1377,7 @@ export function createApiApp(input: CreateApiAppInput) {
     },
     importPlugin: async (c) => {
       const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      await enforceRateLimit(rateLimiter, actor, "artifact-import", 10);
       const result = await input.pluginImports.install(actor, {
         idempotencyKey: c.req.valid("header")["idempotency-key"],
         ...c.req.valid("json"),
