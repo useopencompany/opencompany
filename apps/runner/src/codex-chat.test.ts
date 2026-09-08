@@ -112,13 +112,14 @@ vi.mock("./codex-cli", () => ({
   killLeftoverCodexTurnProcesses: cliMocks.killLeftoverCodexTurnProcesses,
 }));
 
-vi.mock("./coding-agent-shared", () => ({
+vi.mock("./coding-agent-shared", async (importOriginal) => ({
   GITHUB_RECONNECT_NOTICE:
     "GitHub needs reconnecting. This turn continued without GitHub access. Reconnect GitHub in Settings.",
   GITHUB_UNAVAILABLE_NOTICE:
     "GitHub access is temporarily unavailable. This turn continued without GitHub access.",
   buildGitHubCommandEnv: () => ({}),
-  createKnownSecretRedactor: () => (value: string) => value,
+  createKnownSecretRedactor: (await importOriginal<typeof import("./coding-agent-shared")>())
+    .createKnownSecretRedactor,
   gitAuthHeader: (token: string) => `Authorization: Basic ${token}`,
   githubSandboxTokenMinimumValidityMs: (turnTimeoutMs: number) => turnTimeoutMs + 600_000,
   loadGitHubAuthForUser: githubAuthMocks.loadGitHubAuthForUser,
@@ -602,6 +603,48 @@ describe("runCodexChatTurn over ACP", () => {
       attemptId: "attempt_1",
       leaseId: "lease_1",
     });
+  });
+
+  it.each([
+    [
+      "sbx_existing",
+      "504: Failed to place sandbox: placement timed out after 2 attempt(s), please retry",
+    ],
+    [null, "502: Server Error"],
+  ])("preserves sandbox acquisition diagnostics for sandbox %s", async (sandboxId, message) => {
+    const error = new Error(message);
+    error.name = "SandboxError";
+    sandboxMocks.createOrConnectSandbox.mockRejectedValueOnce(error);
+    sandboxMocks.isRetryableSandboxAcquisitionError.mockReturnValueOnce(true);
+
+    await expect(
+      runCodexChatTurn({ turn: codexTurn(), session: codexSession({ sandboxId }), env: env() }),
+    ).rejects.toMatchObject({
+      name: CodexChatRetryableInfrastructureError.name,
+      cause: error,
+      diagnosticMessage: `[acquire_sandbox] SandboxError: ${message}`,
+    });
+    expect(acpMocks.runTurn).not.toHaveBeenCalled();
+    expect(eventMocks.createExternalEngineProjector).not.toHaveBeenCalled();
+  });
+
+  it("redacts and bounds sandbox acquisition diagnostics", async () => {
+    const error = new Error(`502: codex_secret runner-secret ${"x".repeat(3_000)}`);
+    error.name = "SandboxError";
+    sandboxMocks.createOrConnectSandbox.mockRejectedValueOnce(error);
+    sandboxMocks.isRetryableSandboxAcquisitionError.mockReturnValueOnce(true);
+
+    const result = await runCodexChatTurn({
+      turn: codexTurn(),
+      session: codexSession(),
+      env: env({ internalToken: "runner-secret" }),
+    }).catch((failure: unknown) => failure);
+    expect(result).toBeInstanceOf(CodexChatRetryableInfrastructureError);
+    const diagnostic = (result as CodexChatRetryableInfrastructureError).diagnosticMessage;
+    expect(diagnostic).toHaveLength(2_000);
+    expect(diagnostic).toContain("502: [redacted] [redacted]");
+    expect(diagnostic).not.toContain("codex_secret");
+    expect(diagnostic).not.toContain("runner-secret");
   });
 
   it("retries a Codex ACP setup command timeout as infrastructure failure", async () => {
