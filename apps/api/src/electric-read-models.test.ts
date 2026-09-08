@@ -260,7 +260,7 @@ describe("Electric read models", () => {
               id: "integration_1",
               user_workos_id: "must-not-cross",
               workspace_id: "workspace_1",
-              provider: "jamie",
+              provider: "notion",
               external_id: "123456",
               connection_label: "opencompany",
               account_name: "opencompany",
@@ -314,13 +314,14 @@ describe("Electric read models", () => {
       "latitude",
       "posthog",
       "neon",
+      "notion",
       "supabase",
       "x_account",
     ]);
     expect(requestedUrl?.searchParams.get("columns")).not.toContain("credential");
     expect((await response.json())[0]?.value).toEqual({
       id: "integration_1",
-      provider: "jamie",
+      provider: "notion",
       workspaceId: "workspace_1",
       externalId: "123456",
       connectionLabel: "opencompany",
