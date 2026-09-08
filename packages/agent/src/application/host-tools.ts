@@ -10,7 +10,7 @@ import {
 } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { isBrowserToolName } from "@opencompany/browser-tools";
-import { type Actor, SKILL_WRITE_PERMISSION } from "@opencompany/core";
+import { type Actor, SKILL_READ_PERMISSION, SKILL_WRITE_PERMISSION } from "@opencompany/core";
 import type { DeleteTaskScheduleToolOutput, EditTaskScheduleToolOutput } from "../chat-ui";
 
 export type ChatHostContext = {
@@ -127,6 +127,11 @@ export type ChatHostToolServiceDependencies = {
     offset?: number;
     maxBytes?: number;
   }) => Promise<ChatHostSkillFileChunk>;
+  manageWorkspaceSkills: (input: {
+    actor: Actor;
+    command: string;
+    name?: string;
+  }) => Promise<unknown>;
   createWorkspaceSkill: (input: {
     actor: Actor;
     idempotencyKey: string;
@@ -135,7 +140,7 @@ export type ChatHostToolServiceDependencies = {
   updateWorkspaceSkill: (input: {
     actor: Actor;
     name: string;
-    skill: { description: string; instructions: string };
+    skill: { description: string; instructions: string; expectedBundleId?: string };
   }) => Promise<{ updated: true; name: string; command: string; bundleId: string }>;
   createTask: (input: {
     actorId: string;
@@ -302,6 +307,21 @@ async function executeOperation(
         ...(maxBytes !== undefined ? { maxBytes } : {}),
       });
     }
+    case "workspace_skills": {
+      assertSkillTools(context);
+      const name = optionalString(toolInput.name);
+      return dependencies.manageWorkspaceSkills({
+        actor: {
+          userId: context.actorId,
+          workspaceId: context.workspaceId,
+          role: "admin",
+          permissions: [SKILL_READ_PERMISSION, SKILL_WRITE_PERMISSION],
+          authenticationMethod: "service",
+        },
+        command: requiredString(toolInput.command, "command"),
+        ...(name ? { name } : {}),
+      });
+    }
     case "create_workspace_skill": {
       assertSkillTools(context);
       return dependencies.createWorkspaceSkill({
@@ -322,6 +342,7 @@ async function executeOperation(
     }
     case "edit_workspace_skill": {
       assertSkillTools(context);
+      const expectedBundleId = optionalString(toolInput.expectedBundleId);
       return dependencies.updateWorkspaceSkill({
         actor: {
           userId: context.actorId,
@@ -332,6 +353,7 @@ async function executeOperation(
         },
         name: requiredString(toolInput.name, "name"),
         skill: {
+          ...(expectedBundleId ? { expectedBundleId } : {}),
           description: requiredString(toolInput.description, "description"),
           instructions: requiredString(toolInput.instructions, "instructions"),
         },

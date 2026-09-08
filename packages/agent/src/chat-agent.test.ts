@@ -132,7 +132,7 @@ describe("create_workspace_skill tool", () => {
       ),
     ).resolves.toMatchObject({ created: true, command: "/customer-health-review" });
 
-    expect(skillTool.description).toContain("latest message explicitly asks");
+    expect(skillTool.description).toContain("the user has asked");
     expect(createWorkspaceSkill).toHaveBeenCalledWith(
       {
         name: "customer-health-review",
@@ -180,7 +180,7 @@ describe("edit_workspace_skill tool", () => {
     ).resolves.toMatchObject({ updated: true, command: "/add-mcp-provider-plugin" });
 
     expect(skillTool.description).toContain("existing workspace-authored Skill");
-    expect(skillTool.description).toContain("use_skill");
+    expect(skillTool.description).toContain("workspace_skills");
     expect(editWorkspaceSkill).toHaveBeenCalledWith(
       {
         name: "add-mcp-provider-plugin",
@@ -688,5 +688,20 @@ describe("prepareProductChatStep maxSteps", () => {
         forceApprovedAction: boolean;
       }),
     ).toEqual({});
+  });
+});
+
+describe("workspace_skills tool", () => {
+  it("exposes management only with an authorized runner and dispatches inspection and archive", async () => {
+    expect(createProductChatToolContext({ model }).tools).not.toHaveProperty("workspace_skills");
+    const workspaceSkills = vi.fn(async () => ({ skills: [] }));
+    const tool = createProductChatToolContext({ model, workspaceSkills }).tools
+      .workspace_skills as {
+      execute: (args: unknown) => Promise<unknown>;
+    };
+    for (const command of ["list", "read", "archive"]) {
+      await tool.execute({ command, name: "my-skill" });
+      expect(workspaceSkills).toHaveBeenLastCalledWith({ command, name: "my-skill" });
+    }
   });
 });

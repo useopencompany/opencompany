@@ -111,6 +111,36 @@ describe("opencompany Chat Task host tools", () => {
     });
   });
 
+  it.each([true, false])(
+    "gates Skill management on current admin authority (%s)",
+    async (enabled) => {
+      const manageWorkspaceSkills = vi.fn(async () => ({ archived: true }));
+      const dependencies = testDependencies({
+        manageWorkspaceSkills,
+        loadContext: vi.fn(async () => ({ ...context, skillToolsEnabled: enabled })),
+      });
+      const response = await executeChatHostToolService({
+        command: {
+          operation: "workspace_skills",
+          sessionId: "runtime_1",
+          runId: "run_1",
+          input: { command: "archive", name: "my-skill", workspaceId: "untrusted" },
+        },
+        dependencies,
+      });
+      expect(response.ok).toBe(enabled);
+      if (enabled) {
+        expect(manageWorkspaceSkills).toHaveBeenCalledWith(
+          expect.objectContaining({
+            actor: expect.objectContaining({ workspaceId: "workspace_1", userId: "user_1" }),
+            command: "archive",
+            name: "my-skill",
+          }),
+        );
+      } else expect(manageWorkspaceSkills).not.toHaveBeenCalled();
+    },
+  );
+
   it("creates a workspace Skill as the authenticated admin with a stable tool-call key", async () => {
     const createWorkspaceSkill = vi.fn(async () => ({
       created: true as const,
@@ -518,6 +548,7 @@ function testDependencies(
     listSkillCatalog: vi.fn(async () => []),
     activateAndListSkills: vi.fn(async () => []),
     readSkillFile: vi.fn(),
+    manageWorkspaceSkills: vi.fn(),
     createWorkspaceSkill: vi.fn(),
     updateWorkspaceSkill: vi.fn(),
     createTask: vi.fn(async () => taskResult),

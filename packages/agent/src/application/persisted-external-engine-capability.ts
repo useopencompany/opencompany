@@ -58,6 +58,7 @@ async function loadPersistedAuthorityState(
       turnLeaseExpiresAt: codexChatTurns.leaseExpiresAt,
       interruptRequestedAt: codexChatTurns.interruptRequestedAt,
       membershipId: workspaceMembers.id,
+      workspaceRole: workspaceMembers.role,
       brainRef: codexChatSessions.brainRef,
       userMessageId: codexChatTurns.userMessageId,
       assistantMessageId: codexChatTurns.assistantMessageId,

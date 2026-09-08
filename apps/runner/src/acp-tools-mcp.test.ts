@@ -35,6 +35,7 @@ const capability = {
 };
 const apps: ReturnType<typeof Fastify>[] = [];
 const authorized = {
+  skillToolsEnabled: false,
   actorId: "user_1",
   workspaceId: "workspace_1",
   workspaceName: "Acme",
@@ -143,6 +144,70 @@ describe("runner ACP tools MCP", () => {
       await client.close();
     }
   });
+
+  it.each(["codex", "claude_code"] as const)(
+    "exposes Skill management to %s admins and rechecks authority on execution",
+    async (engine) => {
+      const admin = { ...authorized, engine, skillToolsEnabled: true };
+      const authorize = vi.fn(async () => admin);
+      const executeSkillTool = vi.fn(async () => ({ archived: true, name: "my-skill" }));
+      const app = Fastify();
+      apps.push(app);
+      registerAcpToolsMcpRoute(app, env, { authorize, executeSkillTool });
+      await app.listen({ host: "127.0.0.1", port: 0 });
+      const address = app.server.address();
+      if (!address || typeof address === "string") throw new Error("Expected a TCP test server.");
+      const ticket = createExternalEngineGatewayTicket({
+        ...capability,
+        secret: env.internalToken,
+      }).ticket;
+      const client = new Client({ name: "skills-test", version: "1" });
+      const transport = new StreamableHTTPClientTransport(
+        new URL(`http://127.0.0.1:${address.port}/internal/goat/acp-tools`),
+        { requestInit: { headers: { "x-opencompany-tool-ticket": ticket } } },
+      );
+      try {
+        await client.connect(transport as Parameters<typeof client.connect>[0]);
+        expect((await client.listTools()).tools.map(({ name }) => name)).toEqual(
+          expect.arrayContaining([
+            "workspace_skills",
+            "create_workspace_skill",
+            "edit_workspace_skill",
+          ]),
+        );
+        const result = await client.callTool({
+          name: "workspace_skills",
+          arguments: { command: "archive", name: "my-skill" },
+        });
+        expect(result.isError).not.toBe(true);
+        expect(executeSkillTool).toHaveBeenCalledWith(
+          expect.objectContaining({
+            actor: {
+              userId: "user_1",
+              workspaceId: "workspace_1",
+              role: "admin",
+              permissions: ["skill:read", "skill:write"],
+              authenticationMethod: "service",
+            },
+            tool: "workspace_skills",
+            args: { command: "archive", name: "my-skill" },
+          }),
+        );
+        executeSkillTool.mockClear();
+        authorize
+          .mockResolvedValueOnce(admin)
+          .mockResolvedValueOnce({ ...admin, skillToolsEnabled: false });
+        const revoked = await client.callTool({
+          name: "workspace_skills",
+          arguments: { command: "archive", name: "my-skill" },
+        });
+        expect(revoked.isError).toBe(true);
+        expect(executeSkillTool).not.toHaveBeenCalled();
+      } finally {
+        await client.close();
+      }
+    },
+  );
 
   it("dispatches execute operations through the persisted action gateway", async () => {
     const catalog: ResolvedActionCatalog = {

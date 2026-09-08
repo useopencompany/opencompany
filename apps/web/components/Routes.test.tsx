@@ -90,7 +90,10 @@ const skillActionsMock = vi.hoisted(() => ({
     installation: { name: "investigate-bug" },
     replayed: false,
   })),
-  updateHeadlessWorkspaceSkill: vi.fn(async () => ({ name: "investigate-bug" })),
+  updateHeadlessWorkspaceSkill: vi.fn(async () => ({
+    name: "investigate-bug",
+    bundle: { id: "bundle_2" },
+  })),
 }));
 
 const themeMock = vi.hoisted(() => ({
@@ -465,6 +468,29 @@ describe("BrainRoute", () => {
   });
 });
 
+const workspaceSkillFixture: import("@opencompany/protocol").SkillInstallationDto = {
+  id: "installation_1",
+  name: "investigate-bug",
+  enabled: true,
+  archivedAt: null,
+  createdAt: "2026-08-25T05:00:00.000Z",
+  updatedAt: "2026-08-25T05:00:00.000Z",
+  bundle: {
+    id: "bundle_1",
+    name: "investigate-bug",
+    description: "Reproduce and diagnose reported bugs.",
+    body: "Reproduce the issue first.\n",
+    license: null,
+    compatibility: null,
+    metadata: null,
+    allowedTools: null,
+    integrity: `sha256:${"b".repeat(64)}`,
+    source: { type: "workspace" },
+    files: [{ path: "SKILL.md", executable: false, sizeBytes: 128 }],
+    createdAt: "2026-08-25T05:00:00.000Z",
+  },
+};
+
 describe("SkillBundleRoute", () => {
   beforeEach(() => {
     skillActionsMock.disableHeadlessSkill.mockClear();
@@ -519,42 +545,18 @@ describe("SkillBundleRoute", () => {
     );
   });
 
-  it("edits a workspace-authored Skill by publishing a new immutable version", async () => {
-    render(
-      <SkillBundleRoute
-        installation={{
-          id: "installation_1",
-          name: "investigate-bug",
-          enabled: true,
-          archivedAt: null,
-          createdAt: "2026-08-25T05:00:00.000Z",
-          updatedAt: "2026-08-25T05:00:00.000Z",
-          bundle: {
-            id: "bundle_1",
-            name: "investigate-bug",
-            description: "Reproduce and diagnose reported bugs.",
-            body: "Reproduce the issue first.\n",
-            license: null,
-            compatibility: null,
-            metadata: null,
-            allowedTools: null,
-            integrity: `sha256:${"b".repeat(64)}`,
-            source: { type: "workspace" },
-            files: [{ path: "SKILL.md", executable: false, sizeBytes: 128 }],
-            createdAt: "2026-08-25T05:00:00.000Z",
-          },
-        }}
-        canEdit
-      />,
-    );
+  it("edits workspace instructions directly and protects the saved version", async () => {
+    render(<SkillBundleRoute installation={workspaceSkillFixture} canEdit />);
 
     expect(screen.getByText(/Created in this workspace/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Replace bundle" })).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Edit skill" }));
-    const instructions = screen.getByLabelText("Instructions");
+    expect(screen.queryByRole("button", { name: "Edit skill" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/sha256:/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    const instructions = screen.getByRole("textbox", { name: "Skill instructions" });
     await userEvent.clear(instructions);
     await userEvent.type(instructions, "Reproduce, isolate, and explain the root cause.");
-    await userEvent.click(screen.getByRole("button", { name: "Save new version" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() =>
       expect(skillActionsMock.updateHeadlessWorkspaceSkill).toHaveBeenCalledWith(
@@ -562,10 +564,36 @@ describe("SkillBundleRoute", () => {
         {
           description: "Reproduce and diagnose reported bugs.",
           instructions: "Reproduce, isolate, and explain the root cause.",
+          expectedBundleId: "bundle_1",
         },
       ),
     );
     expect(routerMock.refresh).toHaveBeenCalled();
+  });
+  it("keeps a failed save editable, validates empty instructions, and discards a draft", async () => {
+    render(<SkillBundleRoute installation={workspaceSkillFixture} canEdit />);
+    const instructions = screen.getByRole("textbox", { name: "Skill instructions" });
+    await userEvent.clear(instructions);
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Add a description and instructions");
+    expect(skillActionsMock.updateHeadlessWorkspaceSkill).not.toHaveBeenCalled();
+    await userEvent.type(instructions, "Revised instructions.");
+    skillActionsMock.updateHeadlessWorkspaceSkill.mockRejectedValueOnce(
+      new Error("This skill changed since you opened it."),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("This skill changed");
+    expect(instructions).toHaveValue("Revised instructions.");
+    await userEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+    expect(instructions).toHaveValue("Reproduce the issue first.");
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  });
+
+  it("lets members read workspace Markdown without editing it", () => {
+    render(<SkillBundleRoute installation={workspaceSkillFixture} canEdit={false} />);
+    expect(screen.getByRole("textbox", { name: "Skill instructions" })).toHaveAttribute("readonly");
+    expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Archive" })).not.toBeInTheDocument();
   });
 });
 
