@@ -442,6 +442,7 @@ export const IntegrationAccountReadModelSchema = z
       "latitude",
       "posthog",
       "neon",
+      "supabase",
       "x_account",
     ]),
     workspaceId: z.string().min(1).max(128).nullable(),
@@ -3753,6 +3754,7 @@ export const PersonalIntegrationProviderSchema = z.enum([
   "signoz",
   "latitude",
   "neon",
+  "supabase",
   "x_account",
 ]);
 

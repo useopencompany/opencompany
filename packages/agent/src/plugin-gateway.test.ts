@@ -35,7 +35,9 @@ const mocks = vi.hoisted(() => ({
   getNeonState: vi.fn(),
   loadNeonConnection: vi.fn(),
   getNotionState: vi.fn(),
+  getSupabaseState: vi.fn(),
   loadNotionConnection: vi.fn(),
+  loadSupabaseConnection: vi.fn(),
   getBetterStackState: vi.fn(),
   loadBetterStackConnection: vi.fn(),
   getRenderState: vi.fn(),
@@ -156,6 +158,11 @@ vi.mock("./integrations/notion-mcp", () => ({
   NOTION_MCP_ENDPOINT_URL: "https://mcp.notion.com/mcp",
   getNotionMcpIntegrationState: mocks.getNotionState,
   loadNotionMcpWorkerConnection: mocks.loadNotionConnection,
+}));
+vi.mock("./integrations/supabase-mcp", () => ({
+  SUPABASE_MCP_ENDPOINT_URL: "https://mcp.supabase.com/mcp",
+  getSupabaseMcpIntegrationState: mocks.getSupabaseState,
+  loadSupabaseMcpWorkerConnection: mocks.loadSupabaseConnection,
 }));
 vi.mock("./integrations/latitude-mcp", () => ({
   LATITUDE_MCP_ENDPOINT_URL: "https://api.latitude.so/v1/mcp",
@@ -1049,6 +1056,46 @@ describe("plugin gateway registration cache", () => {
       },
     ]);
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
+  it("binds Supabase OAuth credentials only to Supabase's exact hosted MCP endpoint", async () => {
+    const supabaseRecord = record({
+      pluginName: "supabase",
+      pluginLabel: "supabase",
+      pluginDescription: "Supabase plugin tools.",
+      connectionProvider: "supabase",
+      server: {
+        name: "supabase",
+        type: "streamable-http",
+        url: "https://mcp.supabase.com/mcp",
+        headers: {},
+      },
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([supabaseRecord]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:supabase:supabase",
+        connectionProvider: "supabase",
+        getState: mocks.getSupabaseState,
+        loadConnection: mocks.loadSupabaseConnection,
+      }),
+    ]);
+
+    for (const url of [
+      "https://mcp.supabase.com.evil.example/mcp",
+      "https://evil.example/mcp",
+      "http://mcp.supabase.com/mcp",
+      "https://mcp.supabase.com/other",
+      "https://mcp.supabase.com/mcp?project_ref=unreviewed",
+      "https://attacker@mcp.supabase.com/mcp",
+    ]) {
+      mocks.listRegistrations.mockResolvedValueOnce([
+        { ...supabaseRecord, server: { ...supabaseRecord.server, url } },
+      ]);
+      await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+    }
   });
 
   it("binds Vercel credentials only to Vercel's exact MCP root endpoint", async () => {

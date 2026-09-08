@@ -10748,6 +10748,7 @@
               "signoz",
               "latitude",
               "neon",
+              "supabase",
               "x_account"
             ]
           },

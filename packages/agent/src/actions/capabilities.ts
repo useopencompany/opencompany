@@ -136,6 +136,27 @@ export const PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
+  supabase: [
+    {
+      id: "read",
+      label: "Inspect Supabase resources",
+      description: "Inspect documentation, projects, schema, and development metadata.",
+      defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Read logs, keys, and function source",
+      description: "Read sensitive diagnostics, publishable keys, and Edge Function source.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Run SQL and manage Supabase resources",
+      description:
+        "Execute SQL, apply migrations, deploy functions, and manage billable resources.",
+      defaultMode: "ask",
+    },
+  ],
   notion: [
     {
       id: "query",

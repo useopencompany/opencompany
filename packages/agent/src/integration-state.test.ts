@@ -379,6 +379,30 @@ describe("Notion integration state", () => {
   });
 });
 
+describe("Supabase integration state", () => {
+  it("exposes the personal MCP connection to plugin settings", () => {
+    const state = integrationStateFromRows([
+      {
+        id: "gint_supabase_mcp",
+        provider: "supabase",
+        externalId: "supabase_mcp",
+        accountName: "Supabase",
+        connectionLabel: "Acme workspace",
+        status: "connected",
+        scopes: [],
+        capabilityModes: { read: "on", query: "ask", write: "ask" },
+      },
+    ]);
+
+    expect(state.personalAccounts.supabase).toEqual([
+      expect.objectContaining({
+        integrationId: "gint_supabase_mcp",
+        connectionLabel: "Acme workspace",
+      }),
+    ]);
+  });
+});
+
 describe("Granola integration state", () => {
   it("keeps MCP tool authorization separate from legacy API ingestion", () => {
     const state = integrationStateFromRows([

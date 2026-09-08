@@ -338,6 +338,29 @@ describe("integration account service", () => {
     );
   });
 
+  it.each(["read", "query", "write"])(
+    "updates Supabase %s permission through account settings",
+    async (capabilityId) => {
+      const db = fakeDb([
+        [
+          {
+            id: "gint_x",
+            provider: "supabase",
+            userWorkosId: "user_1",
+            workspaceId: null,
+          },
+        ],
+      ]);
+      const service = createIntegrationAccountService({ db });
+      await expect(
+        service.setCapabilityMode(member, "gint_x", capabilityId, "ask"),
+      ).resolves.toBeUndefined();
+      expect(applyIntegrationCapabilityMode).toHaveBeenCalledWith(
+        expect.objectContaining({ integrationIds: ["gint_x"], capabilityId, mode: "ask" }),
+      );
+    },
+  );
+
   it("admin-gates permission changes for the workspace Stripe connection", async () => {
     const row = {
       id: "gint_stripe",

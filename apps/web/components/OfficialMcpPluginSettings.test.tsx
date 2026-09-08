@@ -50,6 +50,7 @@ import {
   SigNozPluginDetail,
   SlackPluginDetail,
   StripePluginDetail,
+  SupabasePluginDetail,
   slackToolsStateFromPlugin,
   uncuratedPluginToolGroups,
   VercelPluginDetail,
@@ -331,6 +332,7 @@ const appData = vi.hoisted(() => ({
         },
       ],
       neon: [],
+      supabase: [],
       notion: [
         {
           integrationId: "gint_notion_mcp",
@@ -2686,6 +2688,50 @@ describe("Linear plugin settings", () => {
         tools: [{ id: "mutate" }],
       },
     ]);
+  });
+  it("offers the shared account connection on its plugin page", () => {
+    const supabasePlugin = {
+      ...notionPlugin,
+      id: "plugin_supabase",
+      name: "supabase",
+      manifest: { name: "supabase" },
+      remoteMcpServers: [
+        {
+          ...notionPlugin.remoteMcpServers[0],
+          name: "supabase",
+          connectionProvider: "supabase",
+          capabilities: [
+            {
+              id: "read",
+              label: "Inspect Supabase resources",
+              defaultMode: "on",
+              tools: ["list_tables"],
+            },
+            {
+              id: "query",
+              label: "Read logs, keys, and function source",
+              defaultMode: "ask",
+              tools: ["query_logs"],
+            },
+            {
+              id: "write",
+              label: "Run SQL and manage Supabase resources",
+              defaultMode: "ask",
+              tools: ["execute_sql"],
+            },
+          ],
+          tools: [],
+        },
+      ],
+    } as const satisfies PluginInstallationDto;
+    render(
+      <SupabasePluginDetail pluginState={{ status: "ready", plugin: supabasePlugin }} canEdit />,
+    );
+    expect(screen.getByRole("link", { name: /connect supabase account/i })).toHaveAttribute(
+      "href",
+      "/api/integrations/supabase/start?returnTo=/settings/plugins/supabase",
+    );
+    expect(screen.getByText(/SQL can read or change data/)).toBeInTheDocument();
   });
 });
 

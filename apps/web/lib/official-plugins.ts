@@ -16,6 +16,7 @@ export type OfficialMcpPluginName =
   | "linear"
   | "neon"
   | "notion"
+  | "supabase"
   | "posthog"
   | "render"
   | "vercel"
@@ -62,6 +63,7 @@ export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
     | "linear"
     | "neon"
     | "notion"
+    | "supabase"
     | "posthog"
     | "render"
     | "vercel"
@@ -280,6 +282,19 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectionProvider: "notion",
     connectHref: "/api/integrations/notion/start?returnTo=/settings/plugins/notion",
     accountDescription: "The Notion account opencompany uses when you work with workspace content.",
+  },
+  supabase: {
+    name: "supabase",
+    kind: "mcp",
+    label: "Supabase",
+    description:
+      "Inspect projects, query databases, and manage migrations and Edge Functions with permission controls.",
+    category: "engineering",
+    source: OFFICIAL_PLUGIN_SOURCES["supabase"],
+    connectionProvider: "supabase",
+    connectHref: "/api/integrations/supabase/start?returnTo=/settings/plugins/supabase",
+    accountDescription:
+      "Choose the Supabase organization to authorize. SQL can read or change data; review permissions before use.",
   },
   posthog: {
     name: "posthog",

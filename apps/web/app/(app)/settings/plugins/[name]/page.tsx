@@ -20,6 +20,7 @@ import {
   SigNozPluginDetail,
   SlackPluginDetail,
   StripePluginDetail,
+  SupabasePluginDetail,
   VercelPluginDetail,
   XPluginDetail,
 } from "@/components/OfficialMcpPluginSettings";
@@ -58,6 +59,7 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
       linear: LinearPluginDetail,
       neon: NeonPluginDetail,
       notion: NotionPluginDetail,
+      supabase: SupabasePluginDetail,
       posthog: PostHogPluginDetail,
       render: RenderPluginDetail,
       signoz: SigNozPluginDetail,

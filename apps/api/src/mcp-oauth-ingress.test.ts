@@ -45,6 +45,10 @@ import {
   startSigNozMcpOAuth,
 } from "@opencompany/agent/integrations/signoz-mcp";
 import {
+  completeSupabaseMcpOAuth,
+  startSupabaseMcpOAuth,
+} from "@opencompany/agent/integrations/supabase-mcp";
+import {
   completeVercelMcpOAuth,
   startVercelMcpOAuth,
 } from "@opencompany/agent/integrations/vercel-mcp";
@@ -117,6 +121,11 @@ vi.mock("@opencompany/agent/integrations/notion-mcp", async (importOriginal) => 
   startNotionMcpOAuth: vi.fn(),
   completeNotionMcpOAuth: vi.fn(),
 }));
+vi.mock("@opencompany/agent/integrations/supabase-mcp", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  startSupabaseMcpOAuth: vi.fn(),
+  completeSupabaseMcpOAuth: vi.fn(),
+}));
 vi.mock("@opencompany/agent/integrations/latitude-mcp", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   startLatitudeMcpOAuth: vi.fn(),
@@ -133,6 +142,7 @@ const PROVIDERS: McpOAuthProvider[] = [
   "posthog",
   "neon",
   "notion",
+  "supabase",
   "latitude",
   "betterstack",
   "fathom",
@@ -150,6 +160,7 @@ const flowMocks = {
   posthog: { start: startPostHogMcpOAuth, complete: completePostHogMcpOAuth },
   neon: { start: startNeonMcpOAuth, complete: completeNeonMcpOAuth },
   notion: { start: startNotionMcpOAuth, complete: completeNotionMcpOAuth },
+  supabase: { start: startSupabaseMcpOAuth, complete: completeSupabaseMcpOAuth },
   latitude: { start: startLatitudeMcpOAuth, complete: completeLatitudeMcpOAuth },
   betterstack: { start: startBetterStackMcpOAuth, complete: completeBetterStackMcpOAuth },
   fathom: { start: startFathomMcpOAuth, complete: completeFathomMcpOAuth },
