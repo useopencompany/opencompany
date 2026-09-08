@@ -39,3 +39,11 @@ export class CodexChatHandoffError extends Error {
     this.name = "CodexChatHandoffError";
   }
 }
+
+// The MCP gateway has persisted the exact request. Stop the engine before parking the Run.
+export class TaskActionApprovalPauseError extends Error {
+  constructor() {
+    super("The task is pausing for action approval.");
+    this.name = "TaskActionApprovalPauseError";
+  }
+}

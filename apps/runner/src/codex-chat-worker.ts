@@ -19,6 +19,7 @@ import {
   CodexChatHandoffError,
   CodexChatLeaseLostError,
   CodexChatRetryableInfrastructureError,
+  TaskActionApprovalPauseError,
 } from "./codex-chat-errors";
 import {
   createExternalEngineProjector,
@@ -31,6 +32,11 @@ import type { RunnerEnv } from "./env";
 import { recoveryReasonForDeployVersions, runnerDeployVersion } from "./runner-deploy-version";
 import { armSandboxActiveTimeoutById, armSandboxIdleTimeoutById } from "./sandbox";
 import { rowsFromExecute } from "./sql-exec";
+import {
+  fenceTaskApprovalEngine,
+  pauseTaskActionApprovals,
+  resumeTaskActionApprovals,
+} from "./task-action-approval";
 import { orchestrateTaskFailure, resolveTaskTurnContext, type TaskTurnContext } from "./task-turn";
 
 const logger = createLogger({
@@ -420,8 +426,16 @@ export async function runClaimedTurn(
   > | null = null;
   try {
     runPromise = (async () => {
+      const approvalContext =
+        taskContext && session.engine !== "opencompany" && !turn.interruptRequestedAt
+          ? await resumeTaskActionApprovals(turn, undefined, async () => {
+              await fenceTaskApprovalEngine(session);
+              if (options.handoffSignal?.aborted) throw new CodexChatHandoffError();
+              if (heartbeatAbort) throw heartbeatAbort;
+            })
+          : "";
       const turnInput = {
-        turn,
+        turn: approvalContext ? { ...turn, prompt: `${turn.prompt}\n\n${approvalContext}` } : turn,
         session,
         env,
         canonicalAttemptId,
@@ -435,7 +449,11 @@ export async function runClaimedTurn(
       };
       const outcome = await runCodingEngineTurn(turnInput);
       return outcome;
-    })().catch((error) => {
+    })().catch(async (error) => {
+      if (error instanceof TaskActionApprovalPauseError) {
+        await pauseTaskActionApprovals(turn, canonicalAttemptId);
+        return "settled" as const;
+      }
       if (error instanceof CodexChatHandoffError) {
         return "handed_off" as const;
       } else if (error instanceof CodexChatRetryableInfrastructureError) {

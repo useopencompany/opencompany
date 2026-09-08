@@ -57,6 +57,7 @@ import {
   CodexChatHandoffError,
   CodexChatLeaseLostError,
   CodexChatRetryableInfrastructureError,
+  TaskActionApprovalPauseError,
   TaskTurnTerminalError,
 } from "./codex-chat-errors";
 import {
@@ -816,6 +817,7 @@ export async function runCodexChatTurn(input: {
           checkAbort,
         }),
     });
+    if (taskContext) await checkAbort(true);
     const acpSummary = acpNormalizer.summary();
     const summary = acpSummary
       ? {
@@ -971,7 +973,9 @@ export async function runCodexChatTurn(input: {
         }
       }
     }
-    if (effectiveError instanceof CodexChatHandoffError) {
+    if (effectiveError instanceof TaskActionApprovalPauseError) {
+      throw effectiveError;
+    } else if (effectiveError instanceof CodexChatHandoffError) {
       outcome = "handed_off";
       await (await activeProjector()).cancelPendingInteractions();
     } else if (effectiveError instanceof CodexChatInterruptedError) {
@@ -1772,16 +1776,17 @@ export function createTurnAbortCheck(input: {
   shouldAbort?: () => Error | null;
 }) {
   let lastCheckedAt = 0;
-  return async () => {
+  return async (force = false) => {
     const externalAbort = input.shouldAbort?.();
     const now = Date.now();
     // A shutdown handoff is local and recoverable, while a user interrupt is durable intent.
     // Force a database check when a local abort appears so a concurrent stop request wins instead
     // of waiting for the replacement runner to reclaim and settle the turn.
-    if (!externalAbort && now - lastCheckedAt < INTERRUPT_POLL_INTERVAL_MS) return;
+    if (!force && !externalAbort && now - lastCheckedAt < INTERRUPT_POLL_INTERVAL_MS) return;
     lastCheckedAt = now;
     let row:
       | {
+          taskActionApprovalPending?: boolean;
           interruptRequestedAt: Date | null;
           leaseId: string | null;
           leaseOwner: string | null;
@@ -1790,6 +1795,7 @@ export function createTurnAbortCheck(input: {
     try {
       [row] = await getDb()
         .select({
+          taskActionApprovalPending: sql<boolean>`${codexChatTurns.settings} ->> 'taskActionApprovalPending' = 'true'`,
           interruptRequestedAt: codexChatTurns.interruptRequestedAt,
           leaseId: codexChatTurns.leaseId,
           leaseOwner: codexChatTurns.leaseOwner,
@@ -1808,6 +1814,7 @@ export function createTurnAbortCheck(input: {
     }
     if (row.interruptRequestedAt) throw new CodexChatInterruptedError();
     if (externalAbort) throw externalAbort;
+    if (row.taskActionApprovalPending) throw new TaskActionApprovalPauseError();
   };
 }
 
@@ -1927,6 +1934,7 @@ function codexBackgroundTaskPromptLines(context: TaskTurnContext | undefined) {
   return [
     "",
     TASK_SYSTEM_BLOCK,
+    "Connected actions set to Ask pause this task for one-time approval. Call use_action with the intended inputs; the runner saves them, stops this turn, and resumes after approval. Do not ask the user to change standing permissions to On. Approved actions are executed by the runner, which supplies their results when you resume.",
     TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK,
     codex?.repository
       ? `The planner selected GitHub repository ${codex.repository}. Work in that repository unless the task itself clearly requires otherwise.`

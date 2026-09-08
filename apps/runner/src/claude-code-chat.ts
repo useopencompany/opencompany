@@ -62,6 +62,7 @@ import {
   CodexChatHandoffError,
   CodexChatLeaseLostError,
   CodexChatRetryableInfrastructureError,
+  TaskActionApprovalPauseError,
   TaskTurnTerminalError,
 } from "./codex-chat-errors";
 import {
@@ -985,6 +986,7 @@ export async function runClaudeCodeChatTurn(input: {
     }
     executionStage = "finalize";
     const engineSummary = toExternalEngineSummary(summary);
+    if (taskContext) await checkAbort(true);
     if (taskContext && summary.status === "success") {
       const rawResult = summary.result?.trim() ?? "";
       if (!rawResult) {
@@ -1116,7 +1118,9 @@ export async function runClaudeCodeChatTurn(input: {
         }
       }
     }
-    if (effectiveError instanceof CodexChatHandoffError) {
+    if (effectiveError instanceof TaskActionApprovalPauseError) {
+      throw effectiveError;
+    } else if (effectiveError instanceof CodexChatHandoffError) {
       // In-flight ACP prompts cannot be reattached; the replacement runner reclaims the turn and
       // loads the persisted session with the recovery prompt against the persisted sandbox.
       outcome = "handed_off";
@@ -1430,6 +1434,7 @@ function claudeBackgroundTaskPromptLines(context: TaskTurnContext | undefined) {
   return [
     "",
     TASK_SYSTEM_BLOCK,
+    "Connected actions set to Ask pause this task for one-time approval. Call use_action with the intended inputs; the runner saves them, stops this turn, and resumes after approval. Do not ask the user to change standing permissions to On. Approved actions are executed by the runner, which supplies their results when you resume.",
     TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK,
     codex?.repository
       ? `The planner selected GitHub repository ${codex.repository}. Work in that repository unless the task itself clearly requires otherwise.`

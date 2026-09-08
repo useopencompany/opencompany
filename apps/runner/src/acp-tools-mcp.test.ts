@@ -56,6 +56,45 @@ afterEach(async () => {
 });
 
 describe("runner ACP tools MCP", () => {
+  it.each(["codex", "claude_code"] as const)(
+    "saves a %s task approval without executing or holding an interactive waiter",
+    async (engine) => {
+      const deps = {
+        executeAction: vi.fn(),
+        evaluateApproval: vi.fn(async () => ({ ok: true as const, needsApproval: true })),
+        requestApproval: vi.fn(),
+        waitForApproval: vi.fn(),
+        resolveApproval: vi.fn(),
+        taskActions: { requests: vi.fn(async () => []), stage: vi.fn(async () => true) },
+      };
+      const result = await executeExternalActionWithApproval({
+        request: {
+          operation: "execute",
+          sessionId: capability.codexChatSessionId,
+          turnId: capability.codexChatTurnId,
+          invocationId: "http_request_7",
+          action: "plugin:gmail:gmail.create_draft",
+          params: { subject: "Ready" },
+        },
+        signal: new AbortController().signal,
+        capability: { ...capability, v: 2, expiresAt: Date.now() + 60_000 },
+        authorizedContext: { ...authorized, engine, taskConversation: true },
+        authorizeOperation: async () => authorized,
+        dependencies: deps,
+      });
+      expect(result).toMatchObject({ ok: false, error: { code: "approval_required" } });
+      expect(deps.taskActions.stage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          invocationId: expect.stringMatching(/^task_action_/),
+          params: { subject: "Ready" },
+        }),
+      );
+      expect(deps.executeAction).not.toHaveBeenCalled();
+      expect(deps.requestApproval).not.toHaveBeenCalled();
+      expect(deps.waitForApproval).not.toHaveBeenCalled();
+    },
+  );
+
   it("rejects a missing sandbox capability", async () => {
     const app = Fastify();
     apps.push(app);

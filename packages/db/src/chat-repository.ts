@@ -1456,7 +1456,7 @@ export class PostgresChatRepository implements ChatRepository {
         FROM authorized, changed
         WHERE authorized.id = changed.id
           AND task.id = authorized.task_id
-          AND task.status IN ('queued', 'running')
+          AND task.status IN ('queued', 'running', 'waiting')
         RETURNING task.id
       ),
       status_changed_activity AS MATERIALIZED (
@@ -1592,6 +1592,9 @@ export class PostgresChatRepository implements ChatRepository {
             )
           )
           AND chat.closed_at IS NULL
+          AND run.status IN ('running', 'paused', 'queued', 'completed')
+          AND run.interrupt_requested_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM goat.tasks AS task WHERE task.session_id = chat.id AND task.archived_at IS NOT NULL)
           AND EXISTS (
             SELECT 1 FROM goat.workspace_members AS member
             WHERE member.workspace_id = ${input.actor.workspaceId}
@@ -1607,6 +1610,7 @@ export class PostgresChatRepository implements ChatRepository {
             updated_at = ${now}
         WHERE approval.id IN (SELECT id FROM authorized)
           AND approval.status = 'pending'
+          AND EXISTS (SELECT 1 FROM goat.codex_chat_turns AS run WHERE run.id = approval.run_id AND run.status IN ('running', 'paused'))
         RETURNING approval.id, approval.run_id, approval.tool_call_id, approval.kind
       ),
       resolved_action_approval AS MATERIALIZED (
@@ -1748,6 +1752,16 @@ export class PostgresChatRepository implements ChatRepository {
         WHERE runtime.id = run.codex_chat_session_id
           AND run.status = 'queued'
         RETURNING runtime.id
+      ),
+      queued_task AS MATERIALIZED (
+        UPDATE goat.tasks AS task
+        SET status = 'queued', stage = 'queued', reported_outcome = NULL,
+            outcome_comment = NULL, updated_at = ${now}
+        FROM advanced_run AS advanced
+        JOIN goat.codex_chat_turns AS run ON run.id = advanced.id
+        WHERE task.session_id = run.chat_session_id AND advanced.status = 'queued'
+          AND task.status = 'waiting' AND task.archived_at IS NULL
+        RETURNING task.id
       ),
       inserted_event AS (
         INSERT INTO goat.run_events (
@@ -2180,6 +2194,7 @@ export class PostgresRunExecutionRepository implements RunExecutionRepository {
           kind: approval.kind,
           prompt: approval.prompt,
           ...(approval.action ? { action: approval.action } : {}),
+          ...(approval.input ? { input: approval.input } : {}),
           ...(approval.options ? { options: approval.options } : {}),
         },
       })),
@@ -2242,6 +2257,7 @@ export class PostgresRunExecutionRepository implements RunExecutionRepository {
       paused_run AS MATERIALIZED (
         UPDATE goat.codex_chat_turns AS run
         SET status = 'paused',
+            settings = settings - 'taskActionApprovalPending',
             lease_id = NULL,
             lease_owner = NULL,
             lease_expires_at = NULL,
@@ -2257,6 +2273,36 @@ export class PostgresRunExecutionRepository implements RunExecutionRepository {
           )
         RETURNING run.id, run.event_sequence - ${eventDrafts.length} AS base_sequence,
                   run.codex_chat_session_id
+      ),
+      waiting_task AS MATERIALIZED (
+        UPDATE goat.tasks AS task
+        SET status = 'waiting', stage = 'completed', reported_outcome = 'needs_attention',
+            outcome_comment = 'Needs approval. Review the requested action to continue.', updated_at = ${pausedAt}
+        FROM paused_run AS run
+        JOIN goat.codex_chat_turns AS source ON source.id = run.id
+        WHERE task.session_id = source.chat_session_id AND task.status IN ('queued', 'running')
+        RETURNING task.id
+      ),
+      approval_message AS MATERIALIZED (
+        UPDATE goat.chat_messages AS message
+        SET debug_trace = jsonb_set(COALESCE(message.debug_trace, '{}'::jsonb), '{uiMessageParts}',
+              COALESCE(${input.settledMessageParts ? stringifyPostgresJson(input.settledMessageParts) : null}::jsonb, message.debug_trace -> 'uiMessageParts', '[]'::jsonb) || ${stringifyPostgresJson(
+                input.approvals
+                  .filter((approval) => input.settledMessageParts !== undefined && approval.input)
+                  .map((approval) => ({
+                    type: "dynamic-tool",
+                    toolName: "codex_approval",
+                    toolCallId: approval.toolCallId,
+                    state: "approval-requested",
+                    input: approval.input,
+                    approval: { id: approval.id },
+                  })),
+              )}::jsonb), updated_at = ${pausedAt}
+        FROM paused_run AS run
+        JOIN goat.codex_chat_turns AS source ON source.id = run.id
+        WHERE message.id = source.assistant_message_id
+          AND ${input.settledMessageParts !== undefined}::boolean
+        RETURNING message.id
       ),
       event_input AS MATERIALIZED (
         SELECT

@@ -1,5 +1,6 @@
 import { getDb } from "@opencompany/db/client";
 import {
+  chatSessions,
   codexChatSessions,
   codexChatTurns,
   runAttempts,
@@ -34,6 +35,7 @@ async function loadPersistedAuthorityState(
 ): Promise<ExternalEngineToolAuthorityState | null> {
   const [row] = await getDb()
     .select({
+      conversationKind: chatSessions.kind,
       sessionId: codexChatSessions.id,
       turnId: codexChatTurns.id,
       attemptId: runAttempts.id,
@@ -64,6 +66,7 @@ async function loadPersistedAuthorityState(
       assistantMessageId: codexChatTurns.assistantMessageId,
     })
     .from(codexChatSessions)
+    .innerJoin(chatSessions, eq(chatSessions.id, codexChatSessions.chatSessionId))
     .innerJoin(
       codexChatTurns,
       and(

@@ -48,6 +48,13 @@ cancellation targets the active Run. The runner applies per-Conversation FIFO, f
 and terminal settlement. An opencompany Task turn uses the same host-tool contract and runtime tool
 composition as an interactive opencompany turn; the Task context adds autonomous-run instructions,
 larger call budgets, and the headless action policy that denies operations requiring live approval.
+Codex and Claude Code Tasks support one-time approval of connected actions set to Ask. The runner
+persists the exact inputs, stops the engine, and parks the Run and Task until the user approves or
+denies the request. Approval keeps the standing permission unchanged and queues the same Run.
+The runner claims and executes the saved invocation before resuming the engine with its result.
+Repeated requests for the same action and inputs reuse the result within that Run; changed inputs
+require a new approval. If a worker dies after claiming an external write but before recording its
+result, recovery reports an uncertain outcome for inspection and does not repeat the write.
 
 Canonical Tasks can be archived once their run has settled, including `waiting` ("Waiting for you"),
 `succeeded`, `failed`, and `canceled`. Archiving preserves the outcome and waiting state; it does not

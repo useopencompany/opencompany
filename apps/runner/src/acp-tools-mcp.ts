@@ -31,6 +31,10 @@ import { type ActionTurnRef, resolveActionApproval } from "@opencompany/db/actio
 import { RUN_EVENT_NOTIFY_CHANNEL } from "@opencompany/db/chat-repository";
 import { stringifyPostgresJson } from "@opencompany/db/postgres-json";
 import { runApprovals } from "@opencompany/db/product-schema";
+import {
+  PostgresTaskActionApprovalRepository,
+  taskActionInvocationId,
+} from "@opencompany/db/task-action-approvals";
 import { createLogger } from "@opencompany/observability";
 import { and, eq, sql } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -65,6 +69,7 @@ type AcpToolsMcpDependencies = {
   requestApproval: typeof requestGatewayActionApproval;
   waitForApproval: typeof waitForGatewayActionApproval;
   resolveApproval: typeof resolveActionApproval;
+  taskActions: Pick<PostgresTaskActionApprovalRepository, "requests" | "stage">;
   publishArtifact: typeof publishExternalEngineChatArtifact;
   executeSkillTool: typeof executeWorkspaceSkillToolForActor;
   executeWikiCommand: typeof executeApiWikiCommand;
@@ -74,9 +79,10 @@ type AcpToolsMcpDependencies = {
 type ActionApprovalDependencies = Pick<
   AcpToolsMcpDependencies,
   "executeAction" | "evaluateApproval" | "requestApproval" | "waitForApproval" | "resolveApproval"
->;
+> & { taskActions?: Pick<PostgresTaskActionApprovalRepository, "requests" | "stage"> };
 
 const defaultDependencies: AcpToolsMcpDependencies = {
+  taskActions: new PostgresTaskActionApprovalRepository((query) => getDb().execute(query)),
   authorize: authorizePersistedExternalEngineToolCapability,
   executeAction: executeActionGateway,
   evaluateApproval: executeActionHostGateway,
@@ -311,7 +317,34 @@ export async function executeExternalActionWithApproval(input: {
   authorizeOperation: () => ReturnType<typeof authorizePersistedExternalEngineToolCapability>;
   dependencies: ActionApprovalDependencies;
 }): Promise<ActionGatewayResponse> {
+  const originalRequest = input.request;
   if (input.signal.aborted) return canceledActionError(input.request);
+  if (input.authorizedContext.taskConversation && input.request.operation === "execute") {
+    input.request = {
+      ...input.request,
+      invocationId: taskActionInvocationId(
+        input.request.turnId,
+        input.request.action,
+        input.request.params,
+      ),
+    };
+    const request = input.request;
+    const existing = (
+      await (input.dependencies.taskActions ?? defaultDependencies.taskActions).requests(
+        request.turnId,
+      )
+    ).find((candidate) => candidate.invocationId === request.invocationId);
+    if (existing) {
+      if (existing.result) return existing.result;
+      return gatewayActionError(
+        request.action,
+        "not_permitted",
+        existing.executionStatus === "executing"
+          ? "The previous action outcome is uncertain. Inspect the provider before requesting another write."
+          : "This exact action is saved for task approval. The task runner will execute it after approval; do not retry it.",
+      );
+    }
+  }
   const dispatch = () =>
     input.dependencies.executeAction({
       request: input.request,
@@ -326,8 +359,26 @@ export async function executeExternalActionWithApproval(input: {
   });
   if (input.signal.aborted) return canceledActionError(input.request);
   if (!approval.ok || !("needsApproval" in approval)) return approval;
-  if (!approval.needsApproval) return dispatch();
+  if (!approval.needsApproval) {
+    input.request = originalRequest;
+    return dispatch();
+  }
 
+  if (input.authorizedContext.taskConversation) {
+    const staged = await (input.dependencies.taskActions ?? defaultDependencies.taskActions).stage({
+      runId: input.request.turnId,
+      leaseId: input.capability.leaseId,
+      invocationId: input.request.invocationId,
+      params: input.request.params,
+    });
+    return gatewayActionError(
+      input.request.action,
+      staged ? "approval_required" : "not_permitted",
+      staged
+        ? "The task is pausing for one-time approval. The exact action is saved and will run after approval."
+        : "The task approval could not be saved. The action has not run.",
+    );
+  }
   const approvalId = await input.dependencies.requestApproval({
     capability: input.capability,
     action: input.request.action,

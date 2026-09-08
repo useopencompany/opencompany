@@ -224,6 +224,7 @@ export type RunEventDraft = {
 };
 
 export type RunApprovalDraft = {
+  input?: Record<string, unknown>;
   id: string;
   toolCallId: string;
   kind: string;
@@ -254,6 +255,7 @@ export interface RunExecutionRepository {
     attemptId: string;
     leaseId: string;
     approvals: readonly RunApprovalDraft[];
+    settledMessageParts?: readonly unknown[];
   }): Promise<readonly RunApproval[]>;
   finishAttempt(input: {
     worker: WorkerIdentity;
