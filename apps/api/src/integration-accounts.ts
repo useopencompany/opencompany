@@ -49,6 +49,7 @@ import {
   isValidStripeRestrictedApiKey,
   validateStripeRestrictedApiKey,
 } from "@opencompany/agent/integrations/stripe";
+import { captureProductServerEvent } from "@opencompany/analytics/product/server";
 import type { Actor } from "@opencompany/core";
 import {
   ATTIO_CREDENTIAL_KIND,
@@ -408,6 +409,10 @@ export function createIntegrationAccountService(input: {
       if (!disconnected) {
         throw new ApiError(404, "not_found", "Stripe is not connected.");
       }
+      await captureProductServerEvent("connection_removed", actor.userId, {
+        workspace_id: actor.workspaceId,
+        provider: "stripe",
+      });
     },
   };
 }
@@ -460,6 +465,7 @@ async function requireManageableCapabilityIntegration(
 }
 
 async function disconnectOwnedPersonalIntegration(db: DbLike, actor: Actor, integrationId: string) {
+  const connection = await requireOwnPersonalIntegration(db, actor, integrationId);
   let deleted: boolean;
   try {
     deleted = await disconnectPersonalIntegration({
@@ -471,6 +477,11 @@ async function disconnectOwnedPersonalIntegration(db: DbLike, actor: Actor, inte
     throw commandFailure(error, "Could not disconnect this account.", "disconnect");
   }
   if (!deleted) throw new ApiError(404, "not_found", OWNER_ONLY_MESSAGE);
+  await captureProductServerEvent("connection_removed", actor.userId, {
+    workspace_id: actor.workspaceId,
+    provider: connection.provider,
+    connection_id: connection.id,
+  });
 }
 
 function requireAdmin(actor: Actor, message: string) {

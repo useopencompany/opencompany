@@ -73,7 +73,7 @@ vi.mock("@opencompany/db/integrations", () => ({
 }));
 
 vi.mock("@opencompany/agent/integrations/analytics", () => ({
-  captureIntegrationAddedAnalytics: vi.fn(async () => undefined),
+  captureConnectionAddedAnalytics: vi.fn(async () => undefined),
 }));
 
 vi.mock("@opencompany/agent/app-url", () => ({

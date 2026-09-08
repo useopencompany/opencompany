@@ -25,7 +25,7 @@ vi.mock("@opencompany/agent/integrations/github-user", async (importOriginal) =>
   verifyGitHubAppUserInstallation: vi.fn(async () => ({ id: 123 })),
 }));
 vi.mock("@opencompany/agent/integrations/analytics", () => ({
-  captureIntegrationAddedAnalytics: vi.fn(async () => undefined),
+  captureConnectionAddedAnalytics: vi.fn(async () => undefined),
 }));
 vi.mock("@opencompany/db/integrations", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),

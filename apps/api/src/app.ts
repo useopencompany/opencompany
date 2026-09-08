@@ -1369,6 +1369,10 @@ export function createApiApp(input: CreateApiAppInput) {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 10);
       const preview = await input.pluginImports.preview(actor, c.req.valid("json"));
+      await captureProductServerEvent("plugin_import_previewed", actor.userId, {
+        workspace_id: actor.workspaceId,
+        plugin_name: preview.manifest.name,
+      });
       return c.json({ data: preview, meta }, 200);
     },
     importPlugin: async (c) => {
@@ -1385,6 +1389,7 @@ export function createApiApp(input: CreateApiAppInput) {
         await captureProductServerEvent("plugin_installed", actor.userId, {
           workspace_id: actor.workspaceId,
           plugin_name: result.plugin.name,
+          plugin_id: result.plugin.id,
           plugin_kind:
             skillCount > 0 && mcpServerCount > 0
               ? "hybrid"
@@ -1419,6 +1424,10 @@ export function createApiApp(input: CreateApiAppInput) {
       await enforceRateLimit(rateLimiter, actor, "write", 60);
       const name = c.req.valid("param").name;
       await input.pluginImports.archive(actor, name);
+      await captureProductServerEvent("plugin_removed", actor.userId, {
+        workspace_id: actor.workspaceId,
+        plugin_name: name,
+      });
       return c.json({ data: { name }, meta }, 200);
     },
     enablePlugin: async (c) => {

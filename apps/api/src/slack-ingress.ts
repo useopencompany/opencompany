@@ -1,5 +1,5 @@
 import { getAppUrl } from "@opencompany/agent/app-url";
-import { captureIntegrationAddedAnalytics } from "@opencompany/agent/integrations/analytics";
+import { captureConnectionAddedAnalytics } from "@opencompany/agent/integrations/analytics";
 import {
   appendSlackIntegrationStatus,
   buildSlackAuthorizationUrl,
@@ -23,7 +23,7 @@ type SlackCallbackFailureStage =
   | "oauth_exchange"
   | "identity_lookup"
   | "connection_persistence"
-  | "integration_analytics";
+  | "connection_analytics";
 
 // OAuth boundary for the official Slack MCP plugin. Slack event ingestion was
 // retired; the separate workspace answer bot owns its own OAuth and webhook.
@@ -116,7 +116,7 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
     });
 
     failureStage = "connection_persistence";
-    await connectSlackIntegration({
+    const connection = await connectSlackIntegration({
       userWorkosId: session.userId,
       teamId: oauth.teamId,
       teamName: oauth.teamName,
@@ -128,8 +128,9 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
       scopes: oauth.scopes,
       db: input.db,
     });
-    failureStage = "integration_analytics";
-    await captureIntegrationAddedAnalytics({
+    failureStage = "connection_analytics";
+    await captureConnectionAddedAnalytics({
+      connectionId: connection.integrationId,
       userWorkosId: session.userId,
       workspaceId: session.workspaceId,
       provider: "slack",

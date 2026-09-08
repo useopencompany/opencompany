@@ -8,7 +8,7 @@ import {
 import { integrations } from "@opencompany/db/product-schema";
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { StripeProviderState } from "../integration-state";
-import { captureIntegrationAddedAnalytics } from "./analytics";
+import { captureConnectionAddedAnalytics } from "./analytics";
 import { createRemoteMcpStaticBearerAuthProvider } from "./remote-mcp-static-bearer";
 
 export const STRIPE_PROVIDER = "stripe" as const;
@@ -241,7 +241,8 @@ export async function connectStripeIntegration(input: {
     throw error;
   }
 
-  await captureIntegrationAddedAnalytics({
+  await captureConnectionAddedAnalytics({
+    connectionId: integration.id,
     userWorkosId: input.userWorkosId,
     workspaceId: input.workspaceId,
     provider: STRIPE_PROVIDER,

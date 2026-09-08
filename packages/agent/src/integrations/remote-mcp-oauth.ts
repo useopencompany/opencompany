@@ -20,7 +20,7 @@ import {
 } from "@opencompany/db/product-schema";
 import { and, desc, eq, isNull, ne, sql } from "drizzle-orm";
 import { getAppUrl } from "../app-url";
-import { captureIntegrationAddedAnalytics } from "./analytics";
+import { captureConnectionAddedAnalytics } from "./analytics";
 
 const STATE_TTL_MS = 10 * 60 * 1000;
 const CREDENTIAL_KIND = "oauth_token" as const;
@@ -366,7 +366,8 @@ export function createRemoteMcpIntegration<const TProvider extends IntegrationPr
           eq(integrations.provider, config.provider),
         ),
       );
-    await captureIntegrationAddedAnalytics({
+    await captureConnectionAddedAnalytics({
+      connectionId: integrationId,
       userWorkosId,
       provider: config.provider,
     });

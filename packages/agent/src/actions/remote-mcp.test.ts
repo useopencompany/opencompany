@@ -1,4 +1,5 @@
 import { createMCPClient, type OAuthClientProvider } from "@ai-sdk/mcp";
+import { captureProductServerEvent } from "@opencompany/analytics/product/server";
 import type { PluginGatewayDiscoveredTool } from "@opencompany/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createRemoteMcpStaticBearerAuthProvider } from "../integrations/remote-mcp-static-bearer";
@@ -10,6 +11,10 @@ import {
   resolveRemoteMcpActions,
 } from "./remote-mcp";
 import { ActionAuthError, type ActionExecuteContext, ActionPermissionError } from "./types";
+
+vi.mock("@opencompany/analytics/product/server", () => ({
+  captureProductServerEvent: vi.fn(async () => undefined),
+}));
 
 const authProvider = {} as OAuthClientProvider;
 const identity = { userWorkosId: "user_1", workspaceId: "workspace_1" };
@@ -62,6 +67,7 @@ function registration(
   overrides: Partial<RemoteMcpGatewayRegistration> = {},
 ): RemoteMcpGatewayRegistration {
   return {
+    pluginName: "linear",
     source: "plugin:linear:linear",
     connectionProvider: "linear",
     label: "Linear",
@@ -452,6 +458,20 @@ describe("resolveRemoteMcpActions", () => {
     await expect(action?.execute({ team: "Platform" }, context)).resolves.toEqual({
       issues: [{ id: "issue_1" }],
     });
+    expect(captureProductServerEvent).toHaveBeenCalledExactlyOnceWith(
+      "plugin_tool_call_completed",
+      "user_1",
+      {
+        workspace_id: "workspace_1",
+        plugin_name: "linear",
+        connection_id: "gint_linear_1",
+        provider: "linear",
+        capability: "read",
+        outcome: "success",
+        duration_ms: expect.any(Number),
+        engine: "codex",
+      },
+    );
     expect(loadConnection).toHaveBeenCalledOnce();
     expect(createClient).toHaveBeenCalledOnce();
     expect(execution.listTools).not.toHaveBeenCalled();
@@ -610,6 +630,7 @@ describe("resolveRemoteMcpActions", () => {
     await expect(catalog?.actions[0]?.execute({}, context)).rejects.toBeInstanceOf(
       ActionPermissionError,
     );
+    expect(captureProductServerEvent).not.toHaveBeenCalled();
     expect(loadConnection).not.toHaveBeenCalled();
     expect(createClient).not.toHaveBeenCalled();
 
@@ -695,5 +716,37 @@ describe("resolveRemoteMcpActions", () => {
     expect(withToolDisabled?.actions.map((action) => action.id)).toEqual([
       "plugin:linear:linear.other",
     ]);
+  });
+});
+
+describe("plugin tool outcome analytics", () => {
+  it.each(["provider", "transport"])("records %s errors once without payloads", async (failure) => {
+    const execution = client({
+      result: { isError: true, content: [{ type: "text", text: "private provider error" }] },
+    });
+    if (failure === "transport")
+      execution.callTool.mockRejectedValueOnce(new Error("private transport error"));
+    const catalog = await resolveRemoteMcpActions(identity, registration(), {
+      createClient: vi.fn(async () => execution),
+      recordDispatch: vi.fn(async () => {}),
+    });
+    await expect(
+      catalog?.actions[0]?.execute({ query: "private input" }, context),
+    ).rejects.toThrow();
+    expect(captureProductServerEvent).toHaveBeenCalledExactlyOnceWith(
+      "plugin_tool_call_completed",
+      "user_1",
+      {
+        workspace_id: "workspace_1",
+        plugin_name: "linear",
+        connection_id: "gint_linear_1",
+        provider: "linear",
+        capability: "read",
+        outcome: "error",
+        duration_ms: expect.any(Number),
+        engine: "codex",
+      },
+    );
+    expect(execution.close).toHaveBeenCalledOnce();
   });
 });

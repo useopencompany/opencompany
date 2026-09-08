@@ -1,5 +1,6 @@
 import { createMCPClient, type OAuthClientProvider } from "@ai-sdk/mcp";
 import type { RemoteMcpServer } from "@opencompany/agent-runtime";
+import { captureProductServerEvent } from "@opencompany/analytics/product/server";
 import type { PluginGatewayDiscoveredTool } from "@opencompany/core";
 import { createLogger } from "@opencompany/observability";
 import type { JSONSchema7 } from "ai";
@@ -46,6 +47,7 @@ export type RemoteMcpOperation =
   | { type: "tools/call"; tool: string; capability: CapabilityId };
 
 export type RemoteMcpGatewayRegistration = {
+  pluginName: string;
   source: ActionSourceId;
   connectionProvider: ActionProviderId;
   label: string;
@@ -454,12 +456,29 @@ async function executeRemoteMcpTool(input: {
       ...(input.context.sourceTurnId ? { turnId: input.context.sourceTurnId } : {}),
       ...(input.context.toolCallId ? { toolCallId: input.context.toolCallId } : {}),
     });
-    const result = await client.callTool({
-      name: input.definition.name,
-      arguments: input.params,
-      options: { signal: input.context.signal },
-    });
-    return unwrapRemoteMcpResult(result, input.registration);
+    const startedAt = Date.now();
+    let outcome: "success" | "error" = "error";
+    try {
+      const result = await client.callTool({
+        name: input.definition.name,
+        arguments: input.params,
+        options: { signal: input.context.signal },
+      });
+      const output = unwrapRemoteMcpResult(result, input.registration);
+      outcome = "success";
+      return output;
+    } finally {
+      await captureProductServerEvent("plugin_tool_call_completed", identity.userWorkosId, {
+        workspace_id: identity.workspaceId,
+        plugin_name: input.registration.pluginName,
+        connection_id: connection.integrationId,
+        provider: input.registration.connectionProvider,
+        capability: input.classification.capability.id,
+        outcome,
+        duration_ms: Math.max(0, Date.now() - startedAt),
+        engine: input.context.sourceEngine ?? "opencompany",
+      });
+    }
   } finally {
     await client.close().catch(() => {});
   }

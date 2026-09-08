@@ -1,5 +1,5 @@
 import { getAppUrl } from "@opencompany/agent/app-url";
-import { captureIntegrationAddedAnalytics } from "@opencompany/agent/integrations/analytics";
+import { captureConnectionAddedAnalytics } from "@opencompany/agent/integrations/analytics";
 import {
   appendXAccountIntegrationStatus,
   buildXAccountAuthorizationUrl,
@@ -118,7 +118,7 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
     const oauth = await exchangeXAccountCode(code, codeVerifier);
     const identity = await fetchXAccountIdentity(oauth.accessToken);
 
-    await connectXAccountIntegration({
+    const connection = await connectXAccountIntegration({
       userWorkosId: session.userId,
       xUserId: identity.id,
       username: identity.username,
@@ -129,7 +129,8 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
       scopes: oauth.scopes,
       db: input.db,
     });
-    await captureIntegrationAddedAnalytics({
+    await captureConnectionAddedAnalytics({
+      connectionId: connection.integrationId,
       userWorkosId: session.userId,
       workspaceId: session.workspaceId,
       provider: "x_account",

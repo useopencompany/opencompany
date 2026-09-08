@@ -209,7 +209,7 @@ describe("Google ingress", () => {
       email: "ada@example.com",
       name: "Ada",
     } as never);
-    vi.mocked(connectGoogleIntegration).mockResolvedValue(undefined as never);
+    vi.mocked(connectGoogleIntegration).mockResolvedValue({ integrationId: "gint_google" });
 
     const state = createGoogleIntegrationState({
       provider: "gmail",
@@ -270,7 +270,7 @@ describe("Google ingress", () => {
       email: "ada@example.com",
       name: "Ada",
     } as never);
-    vi.mocked(connectGoogleIntegration).mockResolvedValue(undefined as never);
+    vi.mocked(connectGoogleIntegration).mockResolvedValue({ integrationId: "gint_google" });
     const state = createGoogleIntegrationState({
       provider: "google_calendar",
       userWorkosId: "user_1",
@@ -308,7 +308,7 @@ describe("Google ingress", () => {
       email: "ada@example.com",
       name: "Ada",
     } as never);
-    vi.mocked(connectGoogleIntegration).mockResolvedValue(undefined as never);
+    vi.mocked(connectGoogleIntegration).mockResolvedValue({ integrationId: "gint_google" });
 
     const state = createGoogleIntegrationState({
       provider: "google_drive",
