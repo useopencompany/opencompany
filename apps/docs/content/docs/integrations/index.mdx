@@ -1,19 +1,35 @@
 ---
-title: Integrations
-description: Provider connections represented in the current opencompany settings UI.
+title: Provider guides
+description: Find setup instructions and limits for the tools you want opencompany to use.
 ---
 
-Open **Settings → Integrations** to manage connections. The UI separates shared workspace tooling
-from personal accounts that act as the signed-in person. Some personal provider accounts are shown
-in the Workspace group because they provide shared CRM, meeting, or issue-tracking context.
+Open **Plugins** in the sidebar to browse available packages. A workspace admin installs the Plugin;
+then connect the account it should use and review its permission groups.
 
-The pages in this section match the providers and connection surfaces in the current product UI.
-They record the behavior verified in the app today. Detailed provider scope matrices and complete
-ingestion examples are still being written; each provider page calls out that gap directly.
+Start with [Connect your tools](/docs/getting-started/connecting-sources) if this is your first
+connection. Use the guides below for provider-specific setup and limitations.
 
-Connecting an account and feeding Brain are separate operations. See
-[Connecting sources](/docs/getting-started/connecting-sources) before enabling ingestion.
+| Work | Providers |
+| --- | --- |
+| Code and project work | [GitHub](/docs/integrations/github), [Linear](/docs/integrations/linear) |
+| Email, calendar, and files | [Gmail](/docs/integrations/gmail), [Google Calendar](/docs/integrations/google-calendar), [Google Drive](/docs/integrations/google-drive) |
+| Messages and documents | [Slack](/docs/integrations/slack), [Notion](/docs/integrations/notion) |
+| Meetings | [Granola](/docs/integrations/granola), [Fathom](/docs/integrations/fathom), [Jamie](/docs/integrations/jamie) |
+| CRM | [HubSpot](/docs/integrations/hubspot), [Attio](/docs/integrations/attio) |
+| Analytics and payments | [PostHog](/docs/integrations/posthog), [Stripe](/docs/integrations/stripe) |
+| Infrastructure and operations | [Render](/docs/integrations/render), [Vercel](/docs/integrations/vercel), [Neon](/docs/integrations/neon), [Better Stack](/docs/integrations/betterstack), [SigNoz](/docs/integrations/signoz), [Infisical](/docs/integrations/infisical) |
+| AI development and social tools | [Latitude](/docs/integrations/latitude), [X](/docs/integrations/x) |
 
-The feature-gated Browser profiles page is included so the documentation matches the UI when that
-preference is enabled. Experimental connectors that are not represented in the current settings UI
-are not listed as generally available integrations.
+## Coding engines and browser access
+
+Connect [Codex](/docs/integrations/codex) or [Claude Code](/docs/integrations/claude-code) under
+**Settings → Inference**. These authorize coding engines and have separate setup from tool Plugins.
+
+[Browser profiles](/docs/integrations/browser-profiles), when enabled for your account, live under
+**Settings → Account**.
+
+## Knowledge sources
+
+Live tools and continuous knowledge ingestion are configured separately. The current **Wiki →
+Sources** picker offers Gmail, Linear, and Granola. Read [Wiki](/docs/core-concepts/wiki) before
+enabling a source; installing a Plugin doesn't automatically copy provider content into Wiki.

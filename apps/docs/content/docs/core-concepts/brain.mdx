@@ -1,51 +1,38 @@
 ---
-title: Brain
-description: Keep reusable workspace knowledge with provenance, controlled sources, and durable files.
+title: Brain (legacy)
+description: Understand the knowledge surface available in workspaces with legacy Brain enabled.
 ---
 
-Brain is opencompany's durable knowledge store. It contains Markdown knowledge pages, immutable
-evidence, uploaded files, provenance, and links between related subjects. It is not a copy of every
-Conversation and it is not a mirror of every connected provider.
+Wiki is opencompany's default knowledge surface. Brain remains available in workspaces with the
+legacy Brain setting enabled. If opening Brain takes you to Wiki, use the
+[Wiki guide](/docs/core-concepts/wiki).
 
-## Pages, evidence, and sources
+## What Brain stores
 
-Knowledge pages hold the current compiled understanding of a person, company, project, meeting,
-concept, source, analysis, or note. Evidence records preserve source material that has no dependable
-live home. Source links point back to systems such as GitHub, Linear, Gmail, or Google Drive when the
-provider should remain canonical.
+Brain contains compiled Markdown knowledge pages, evidence snapshots, uploaded files, provenance,
+and links between related subjects. Pages hold the current understanding; evidence preserves source
+material. Links point back to provider systems when those systems remain the canonical source.
 
-Curated active pages require provenance. Draft captures can land in `inbox/` immediately and be
-filed, merged, or promoted by the background curation path later.
+Brain is separate from both Chat history and Wiki. A conversation doesn't automatically become a
+Brain page, and Wiki pages don't inherit a Brain's visibility settings.
 
-Pages are mutable compiled knowledge; evidence is an immutable snapshot. A page can be a person,
-company, project, meeting, concept, source, analysis, or note, and can move through draft, active,
-archived, or merged states. Folders organize pages without changing what they represent.
+## Read and capture knowledge
 
-The optional Workspace Wiki is a separate, simpler tree of folders and Markdown pages. Wiki links
-use full paths such as `[[company/strategy/goals]]`. Brain is the provenance-aware knowledge store;
-Wiki is the lightweight collaborative writing surface.
+Where Brain is enabled and available to a conversation, the built-in agent can search and read it.
+An explicit request to save knowledge captures a draft for background curation. Coding sessions and
+authenticated MCP clients can receive scoped Brain tools when configured.
 
-## Reading and saving from Chat
+Check the destination Brain and resulting page after saving. Captured drafts may need curation
+before they become active knowledge.
 
-The opencompany engine can search and read the Brains available to the Conversation. When you
-explicitly ask it to remember or save something, `save_to_brain` captures a draft and queues durable
-curation. The model does not receive unrestricted document mutation access.
+## Sources and visibility
 
-Codex can receive Brain tools when a Brain is pinned to its coding Conversation. External MCP
-clients can use the authenticated Brain read surface and, for workspace admins, the same
-capture-to-curation path.
+Legacy Brain sources are configured for a specific Brain. The providers and scopes available there
+can differ from the current Wiki source picker. Pausing ingestion stops later work without silently
+deleting pages already curated.
 
-## Ingestion
+A Brain can be workspace-visible or restricted to selected members. Access checks apply to pages,
+source configuration, tools, and file downloads. Uploaded files require authenticated access.
 
-Provider ingestion is durable and scoped to one Brain. A configured source creates normalized source
-items and jobs; background workers validate, claim, and settle those jobs. Pausing a source stops
-later ingestion but does not silently delete knowledge that was already curated.
-
-Uploaded files are private. opencompany stores the bytes behind authenticated access and extracts
-supported text for search and curation.
-
-## Visibility
-
-A workspace-visible Brain is available to current workspace members. A restricted Brain requires an
-explicit membership. That rule is checked for UI reads, API commands, MCP, ingestion, and file
-downloads rather than being trusted from the browser.
+For new shared knowledge, start with [Wiki](/docs/core-concepts/wiki). To make provider tools
+available for live work, use [Plugins](/docs/core-concepts/plugins).

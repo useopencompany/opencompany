@@ -3,11 +3,21 @@ title: API reference
 description: Authentication, protocol conventions, and the generated opencompany v1 endpoint reference.
 ---
 
-The endpoint pages in this section are generated from
-`packages/protocol/openapi/openapi.v1.json`, the same OpenAPI 3.1 contract exported by the protocol
-package. The docs build regenerates one page per operation, grouped by API tag, before Fumadocs
-indexes or renders content. Endpoint additions and schema changes do not rely on a second
-hand-maintained reference.
+Use this reference to inspect opencompany's HTTP resources, request parameters, and response
+schemas. Endpoints are grouped by resource in the sidebar and generated from the product's OpenAPI
+contract.
+
+## Resource model
+
+| Resource | Purpose |
+| --- | --- |
+| Conversation | Holds the message history for a Chat or Task. |
+| Message | Records a user request or agent response in a Conversation. |
+| Run | Tracks accepted execution, events, approvals, and completion. |
+| Task | Adds a tracked job and outcome around a Conversation. |
+| Workflow | Defines reusable steps and a trigger; an invocation creates a Task. |
+
+For the product-level explanation, see [How opencompany fits together](/docs/core-concepts).
 
 ## Base URL
 
@@ -27,10 +37,9 @@ The contract represents two authentication mechanisms:
 - a WorkOS-backed browser session cookie used by the signed-in product;
 - a bearer JWT for authorized non-browser clients.
 
-Public token issuance, rotation, and service-account onboarding guidance is not complete yet. Do not
-copy a browser session cookie into scripts or build an integration around an undocumented token
-flow. Contact the opencompany team before treating the current bearer surface as a stable onboarding
-contract.
+There is currently no documented self-service token or service-account setup for public API
+integrations. Contact the opencompany team to establish supported client access before building
+against the bearer surface. Keep browser session cookies in the signed-in browser.
 
 ## Protocol conventions
 
@@ -45,6 +54,5 @@ shapes and avoid depending on physical database field names or internal runner r
 ## Generated endpoints
 
 Open **Endpoints** in the sidebar to browse the current contract grouped by tag. The interactive
-request playground is disabled until public credential handling and the documentation-host proxy
-policy are documented. Schemas, parameters, examples, and response types still render from the
-contract.
+request playground is disabled on this site. You can still inspect schemas, parameters,
+examples, and response types without sending a request.

@@ -1,0 +1,76 @@
+---
+title: Plugins
+description: Add tools, reusable Skills, and supported events to your workspace.
+---
+
+Plugins extend opencompany with reusable Skills, connections to external services, or events that
+can start Workflows. Some contain only Skills and need no account connection.
+
+## Find and install a Plugin
+
+Open **Plugins** in the sidebar. Search by name or browse categories; use **Installed** to return
+to packages your workspace already has.
+
+Workspace admins install and manage Plugins. After installation, open the Plugin page to see its
+Skills, tool connection, permissions, and any supported events. For a tool Plugin, connect the
+account you want it to use. Installation and account authorization are separate steps.
+
+Start with the [connection guide](/docs/getting-started/connecting-sources) or the
+[provider index](/docs/integrations).
+
+## Skills, tools, and events
+
+| Part | How you use it |
+| --- | --- |
+| **Skills** | Select the Plugin's instructions from the `/` menu or a Workflow step. |
+| **Tools** | Ask the agent to work with the connected provider; the account and permission settings determine what's available. |
+| **Events** | Enable a supported event for the workspace, then select it in a Workflow's event trigger. |
+
+Enabling a Plugin doesn't activate every Skill in every conversation. The agent applies relevant
+instructions, or you can select a Skill explicitly.
+
+If two installed Skills have the same name, a standalone Skill takes precedence over a Plugin
+Skill. Between Plugins, the alphabetically earlier Plugin name takes precedence. Settings reports
+these collisions so you can identify why a Skill is hidden.
+
+## Permissions and account ownership
+
+Many official Plugins use personal accounts. The Plugin is installed for the workspace, while
+each teammate connects their own identity. Some connections, such as Infisical, are managed by a
+workspace admin. Follow the provider page for the ownership model.
+
+Tool groups use **On**, **Ask**, and **Off**. Read
+[Permissions](/docs/core-concepts/integrations) for their effect in interactive, background, and
+coding work. Event enablement is separate from tool permissions.
+
+## Import a custom Plugin
+
+Admins can preview and import a supported Plugin package from Settings. Review its manifest,
+Skills, bundled files, and install report. A manifest error prevents installation; invalid child
+Skills can be skipped and reported, so check the report before relying on the package.
+
+Installed packages are pinned to an exact version. Replacing a package creates a new version;
+Chats and Tasks retain the package versions they captured.
+
+## MCP servers
+
+Model Context Protocol (MCP) is the interface many Plugins use to expose tools. You don't need to
+configure an MCP client for an official tool Plugin; its page handles the connection.
+
+Remote HTTP and SSE servers run through opencompany's server-side tool gateway. Provider
+credentials stay at that connection boundary.
+
+Custom Plugins can also declare **stdio** MCP servers, which start a process inside a coding
+sandbox. A workspace admin must approve the exact installed package version before these servers
+can run. Review the command, arguments, and declared environment variable names in the approval
+screen. This process support is available in Codex and Claude Code sandboxes. Replacing the
+package requires approval again.
+
+## Disable or archive
+
+Disabling or archiving a Plugin removes its availability for later work. It doesn't undo actions
+already completed in an external service.
+
+Plugins that use a writable `PLUGIN_DATA` directory can retain bounded data across sandbox and
+Plugin replacement. Archiving a Plugin doesn't implicitly erase this data. Manage the provider
+connection separately when you want to revoke account access.

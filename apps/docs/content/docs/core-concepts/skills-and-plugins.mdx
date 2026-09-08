@@ -1,74 +1,95 @@
 ---
-title: Agent Skills and Plugins
-description: Install immutable Agent Skills and Plugins, pin runtime versions, and approve coding-sandbox MCP.
+title: Skills
+description: Teach the agent a reusable method and invoke it with a slash command.
 ---
 
-## Agent Skills
+A Skill is a reusable set of instructions for a particular kind of work. Use one for your team's
+review method, document format, research process, or coding conventions. Skills can be used in Chat
+and selected for Workflow steps.
 
-Workspace admins manage Agent Skills in **Settings → Skills**. Choose **New skill** to author one
-for the workspace, or preview a supported public GitHub or skills.sh URL before importing it.
-Workspace-authored Skills use the same official Agent Skills document format as imported Skills;
-opencompany generates the `SKILL.md` frontmatter from the name and description and stores the
-instructions as its Markdown body. The slash command is always derived from the Skill name as
-`/<skill-name>` rather than stored in a separate `command` field.
+A Skill teaches the method. A [Plugin](/docs/core-concepts/plugins) can package Skills together with
+tools or events. A [Workflow](/docs/core-concepts/workflows-and-schedules) defines the job's steps and
+trigger.
 
-Workspace admins can also create one from a successful Chat. Explicitly ask Chat to “turn this
-into a Skill”; Chat synthesizes the reusable method from the conversation and immediately creates
-a standard workspace-authored Skill. This works in built-in Chat, Codex, and Claude Code sessions.
-Ask to update a named Skill to revise it, or to remove it to archive its installation. Only workspace
-admins can use these management tools, and imported or Plugin Skills cannot be edited this way.
+## Use a Skill
 
-Agents use `workspace_skills` to list installations (including disabled Skills), read the latest saved
-instructions without activating them, or archive a named installation. `create_workspace_skill`
-creates a new Skill; `edit_workspace_skill` updates an existing workspace-authored one. Before editing,
-read the latest version and pass its `bundleId` as `expectedBundleId` to prevent overwriting another
-edit. Files mounted in a coding sandbox and instructions activated in a Chat are versioned snapshots;
-editing those local files does not update the workspace Skill.
+Type `/` in Chat and choose an enabled Skill. Add the specific request after its command:
 
-Open a workspace-authored Skill in **Settings → Skills** to edit its Markdown instructions directly.
-The short “When to use this skill” field describes when the agent should apply it. Choose **Save
-changes** (or use Command/Ctrl+S) to save, or **Discard changes** to return to the saved text. Failed
-saves preserve your draft, and saving checks that another user or agent has not changed the Skill
-since you opened it.
+```text
+/release-review Review the release in OWNER/REPO from v1.2.0 to v1.3.0.
+Return the checks that passed, missing evidence, and open questions.
+```
 
-Imported Skills are validated for official frontmatter, canonical bundle name and directory
-alignment, every bundled file, and the resolved commit. A standalone Skill can be discovered in a
-differently named repository directory because opencompany installs the canonical bundle under its
-declared name and shows that normalization in the preview. Plugin Skill directory names remain part
-of the Plugin package and must match. Unknown fields such as the retired `command` extension are
-rejected.
+This example assumes you've created a Skill named `release-review`. The command comes from the
+Skill name. A Skill that requires a connected service still needs that service's Plugin, account,
+and permissions.
 
-Installed bundles are immutable. Editing a workspace-authored Skill or replacing an imported Skill
-creates a new bundle and moves the workspace installation to it. A Skill cannot switch between
-workspace-authored and imported provenance. Enable, disable, and archive control whether new Chats
-and Tasks can select it. Existing Chats and Tasks retain the exact bundle IDs they already
-captured. Type `/` in Chat and select a Skill to invoke it as `/<skill-name>`.
+## Create your own
+
+Workspace admins can create Skills in **Settings → Skills → New skill**. Enter a name, a
+description of when it applies, and the instructions.
+
+For a release-review Skill:
+
+- **Name:** `release-review`
+- **When to use this skill:** Review a proposed software release for test evidence and unresolved risks.
+- **Instructions:** Use the example below, then adapt it to your team's process.
+
+```markdown
+Read the release scope and linked pull requests before writing the review.
+Use the repository's existing release checklist when available.
+For each check, record its evidence and whether it passed, failed, or needs verification.
+Link to the original source for each finding.
+Return a concise recommendation followed by open questions.
+Ask for missing release identifiers rather than guessing them.
+```
+
+Keep reusable instructions in the Skill and put each job's repository, date range, and deliverable
+in the prompt. Describe observable results, such as linked evidence, instead of broad requests to
+“be thorough.”
+
+## Create a Skill from successful work
+
+In the same Chat, ask:
+
+```text
+Turn the release-review process we just used into a workspace Skill.
+Keep the method reusable and leave this release's names and dates out of the instructions.
+```
+
+This creates a Skill immediately when you're a workspace admin. It works in built-in Chat, Codex,
+and Claude Code. Open **Settings → Skills** to review the saved instructions.
+
+Ask the agent to update a named workspace-authored Skill to refine it, or open it in Settings.
+Use **Save changes** or Command/Ctrl+S to save, and **Discard changes** to return to the saved text.
+If another person or agent edited the Skill, reload its latest version before reapplying your edit.
+
+## Import a Skill
+
+Choose **Import skill** in **Settings → Skills**, paste a supported public GitHub or skills.sh URL,
+and review the preview. Check the selected Skill, instructions, bundled files, and resolved version
+before importing.
+
+Imports use the standard Agent Skills format with a `SKILL.md` file. The name and description are
+frontmatter; the body contains the instructions. Workspace authoring generates this structure for
+you. A separate `command` frontmatter field isn't supported.
+
+Imported and Plugin Skills cannot be rewritten through the workspace Skill editor or Chat editing
+tools. Update their source and replace the installed bundle, or author a separate workspace Skill.
+
+## Versions, disabling, and archiving
+
+A saved or imported Skill is an immutable bundle. Editing a workspace Skill creates a new bundle.
+Existing Chats and Tasks keep the versions they already captured, so a new edit doesn't silently
+change work in progress. Start a new Chat to verify a revised Skill.
+
+**Disable** prevents the Skill from being selected for new work. **Archive** removes its active
+installation. Neither action rewrites previous results.
+
+Editing a Skill file inside a coding sandbox changes that local snapshot only. Use Settings or ask
+Chat to update the workspace Skill when you want the change shared.
 
 ## Agent Plugins
 
-Workspace admins manage Agent Plugins in **Settings → Plugins**. A Plugin install stores the exact
-package, its valid immediate-child Skills, and an install report. An invalid Plugin manifest fails
-the install; invalid child Skills are skipped and reported. Standalone Skills win name collisions,
-then the alphabetically earlier Plugin name wins between Plugins. Settings shows hidden collisions.
-
-Plugin Skills are passive instructions. Installing or enabling a Plugin does not automatically
-connect an account. Remote HTTP and SSE MCP entries register with the server-side action gateway;
-their URLs and credentials are not passed to Main Chat or coding sandboxes.
-
-## MCP approval and Plugin data
-
-An admin must approve the exact installed Plugin version before its stdio MCP servers can start.
-Replacing the Plugin produces a new integrity and requires new approval. The approval UI shows the
-command, arguments, and declared environment variable names, never secret values. Main Chat does
-not start Plugin processes; approved MCP runs only in Codex and Claude coding sandboxes.
-
-Each Plugin receives a writable `PLUGIN_DATA` directory. opencompany restores and checkpoints a
-bounded workspace archive so data survives sandbox and Plugin replacement. Archiving a Plugin stops
-its Skills and MCP from entering new turns but does not implicitly erase Plugin data.
-
-## Historical Skills
-
-The former Brain-backed Skill editor, custom command frontmatter extension, and legacy activation
-replay have been removed. Workspace authoring now creates standard immutable Skill bundles instead
-of restoring that legacy data model. Old Chat messages remain readable, but their historical Skill
-activations are not executable and were not converted into new bundles.
+See [Plugins](/docs/core-concepts/plugins) for installing packages, connecting tools, approving MCP
+servers, and managing Plugin data.
