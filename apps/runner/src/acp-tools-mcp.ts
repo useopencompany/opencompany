@@ -72,7 +72,9 @@ type AcpToolsMcpDependencies = {
   resolveApproval: typeof resolveActionApproval;
   taskActions: Pick<PostgresTaskActionApprovalRepository, "requests" | "stage">;
   publishArtifact: typeof publishExternalEngineChatArtifact;
-  executeSkillTool: typeof executeWorkspaceSkillToolForActor;
+  executeSkillTool: (
+    input: Omit<Parameters<typeof executeWorkspaceSkillToolForActor>[0], "db">,
+  ) => ReturnType<typeof executeWorkspaceSkillToolForActor>;
   executeWikiCommand: typeof executeApiWikiCommand;
   rateLimitMax: number;
 };
@@ -91,7 +93,7 @@ const defaultDependencies: AcpToolsMcpDependencies = {
   waitForApproval: waitForGatewayActionApproval,
   resolveApproval: (input) => resolveActionApproval({ ...input, db: getDb() }),
   publishArtifact: publishExternalEngineChatArtifact,
-  executeSkillTool: executeWorkspaceSkillToolForActor,
+  executeSkillTool: (input) => executeWorkspaceSkillToolForActor({ ...input, db: getDb() }),
   executeWikiCommand: executeApiWikiCommand,
   rateLimitMax: DEFAULT_RATE_LIMIT_MAX,
 };
