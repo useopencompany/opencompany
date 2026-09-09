@@ -26,8 +26,10 @@ and permissions.
 
 ## Create your own
 
-Every workspace member can create Skills in **Settings → Skills → New skill**. Enter a name, a
-description of when it applies, and the instructions. New Skills default to **Personal**.
+Every workspace member can create Skills in **Settings → Skills**. Use **All / Company / Personal**
+to filter the list. **New personal skill** and **New company skill** follow the selected scope;
+**All** starts a Personal Skill. Enter a name, a description of when it applies, and the instructions.
+You can change visibility in the dialog before creating it.
 
 ## Personal and Company
 
@@ -93,7 +95,8 @@ If another person or agent edited the Skill, reload its latest version before re
 
 Choose **Import skill** in **Settings → Skills**, paste a supported public GitHub or skills.sh URL,
 and review the preview. Check the selected Skill, instructions, bundled files, and resolved version
-before importing. Imports also default to Personal; choose Company to share the imported files.
+before importing. Imports follow the selected list scope too, with Personal as the default in All.
+You can change visibility in the import dialog before installing.
 
 Imports use the standard Agent Skills format with a `SKILL.md` file. The name and description are
 frontmatter; the body contains the instructions. Workspace authoring generates this structure for

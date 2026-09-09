@@ -4,9 +4,11 @@ Status: accepted for PRO-235 (Skills only).
 
 ## Decision
 
-Each standalone Skill has a `personal` or `company` scope and a creator. Creation and imports default to Personal. The creator alone can discover, read, use, edit, disable, archive, or share a Personal Skill. Current workspace members can discover, read, use, edit, replace imported bundles, and enable/disable Company Skills. The creator and current admins can change Company visibility or archive it. Admin status does not grant access to another member's Personal Skills.
+Each standalone Skill has a `personal` or `company` scope and a creator. Creation and imports default to Personal when scope is not specified. The creator alone can discover, read, use, edit, disable, archive, or share a Personal Skill. Current workspace members can discover, read, use, edit, replace imported bundles, and enable/disable Company Skills. The creator and current admins can change Company visibility or archive it. Admin status does not grant access to another member's Personal Skills.
 
 Visibility is a setting on the same installation. Changing it preserves its ID, content and creator. Returning a Company Skill to Personal returns it to its creator, including when an admin performs the change. No copy, publishing state, approval flow, transfer UI, or per-member sharing is introduced. Plugins retain their existing administration and shared access rules. Workflow ownership and run identity are deferred.
+
+Settings has an All / Company / Personal filter for every member. New and Import start with the selected scope; All starts with Personal. The New button names the scope, and both dialogs let the member change it before submitting. API and agent creation still default to Personal when scope is omitted. Company collaborators see a locked visibility label with the management rule in a tooltip.
 
 ## Identity and authorization
 
