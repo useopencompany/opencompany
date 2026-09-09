@@ -22,6 +22,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -35,7 +36,7 @@ const CodingWorkspaceTerminal = dynamic(() => import("./CodingWorkspaceTerminal"
 });
 
 const MIN_PANEL_WIDTH = 340;
-const MAX_PANEL_WIDTH = 760;
+const MIN_CHAT_WIDTH = 400;
 const DEFAULT_PANEL_WIDTH = 440;
 const PANEL_WIDTH_KEY = "goat-coding-workspace-panel-width-v1";
 const PANEL_WIDTH_EVENT = "goat-coding-workspace-panel-width";
@@ -80,7 +81,8 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
     defaultPanelWidth,
   );
   const [dragWidth, setDragWidth] = useState<number | null>(null);
-  const width = dragWidth ?? persistedWidth;
+  const [maxPanelWidth, setMaxPanelWidth] = useState(DEFAULT_PANEL_WIDTH);
+  const width = Math.min(dragWidth ?? persistedWidth, maxPanelWidth);
   const isNarrow = useSyncExternalStore(
     subscribeNarrowLayout,
     readNarrowLayout,
@@ -105,6 +107,20 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
   const selectedPortRef = useRef<number | null>(null);
   const panelRef = useRef<HTMLElement>(null);
   const restoreFocusOnCollapseRef = useRef(false);
+
+  useLayoutEffect(() => {
+    if (!panelExpanded || isNarrow || fullscreen) return;
+    const container = panelRef.current?.parentElement;
+    if (!container) return;
+
+    const updateBounds = () => {
+      setMaxPanelWidth(Math.max(MIN_PANEL_WIDTH, container.clientWidth - MIN_CHAT_WIDTH));
+    };
+    updateBounds();
+    const observer = new ResizeObserver(updateBounds);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [panelExpanded, isNarrow, fullscreen]);
 
   const clearConnectionTimeout = useCallback(() => {
     if (connectionTimeoutRef.current === null) return;
@@ -349,7 +365,7 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
           aria-orientation="vertical"
           aria-label="Resize workspace panel"
           aria-valuemin={MIN_PANEL_WIDTH}
-          aria-valuemax={MAX_PANEL_WIDTH}
+          aria-valuemax={maxPanelWidth}
           aria-valuenow={width}
           className="absolute inset-y-0 left-0 z-20 w-1 cursor-col-resize hover:bg-ink/10 max-lg:hidden"
           onKeyDown={(event) => {
@@ -357,7 +373,7 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
             event.preventDefault();
             const direction = event.key === "ArrowLeft" ? 1 : -1;
             persistPanelWidth(
-              Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, width + direction * 20)),
+              Math.min(maxPanelWidth, Math.max(MIN_PANEL_WIDTH, width + direction * 20)),
             );
           }}
           onPointerDown={(event) => {
@@ -367,7 +383,7 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
             let nextWidth = startWidth;
             const onMove = (moveEvent: PointerEvent) => {
               nextWidth = Math.min(
-                MAX_PANEL_WIDTH,
+                maxPanelWidth,
                 Math.max(MIN_PANEL_WIDTH, startWidth + startX - moveEvent.clientX),
               );
               setDragWidth(nextWidth);
@@ -590,9 +606,7 @@ function readPersistedPanelWidth() {
   const storedValue = window.localStorage.getItem(PANEL_WIDTH_KEY);
   if (storedValue === null || storedValue.trim() === "") return DEFAULT_PANEL_WIDTH;
   const value = Number(storedValue);
-  return Number.isFinite(value)
-    ? Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, value))
-    : DEFAULT_PANEL_WIDTH;
+  return Number.isFinite(value) ? Math.max(MIN_PANEL_WIDTH, value) : DEFAULT_PANEL_WIDTH;
 }
 
 function defaultPanelWidth() {

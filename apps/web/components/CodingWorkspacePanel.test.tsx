@@ -73,7 +73,22 @@ class MockWebSocket extends EventTarget {
 }
 
 describe("CodingWorkspacePanel", () => {
+  let containerWidth: number;
+  let resizeContainer: () => void;
+
   beforeEach(() => {
+    containerWidth = 1600;
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(() => containerWidth);
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: () => void) {
+          resizeContainer = callback;
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
     MockWebSocket.instances = [];
     window.localStorage.clear();
     vi.stubGlobal("WebSocket", MockWebSocket);
@@ -97,6 +112,7 @@ describe("CodingWorkspacePanel", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   it("opens artifacts without exposing or waking workspace tabs in plain chat", async () => {
@@ -177,6 +193,63 @@ describe("CodingWorkspacePanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Toggle workspace" }));
     expect(screen.getByLabelText("Codex workspace")).toHaveStyle({ width: "440px" });
+  });
+
+  it("lets readers widen the panel beyond 760px with the keyboard and remembers it", () => {
+    window.localStorage.setItem("goat-coding-workspace-panel-width-v1", "760");
+    render(<Harness chatSessionId="chat_1" sandboxStatus="sleeping" engineLabel="Codex" />);
+    fireEvent.click(screen.getByRole("button", { name: "Toggle workspace" }));
+
+    fireEvent.keyDown(screen.getByRole("separator"), { key: "ArrowLeft" });
+
+    expect(screen.getByLabelText("Codex workspace")).toHaveStyle({ width: "780px" });
+    expect(window.localStorage.getItem("goat-coding-workspace-panel-width-v1")).toBe("780");
+  });
+
+  it("allows dragging wider while reserving room for chat and enforcing the minimum", () => {
+    vi.stubGlobal("PointerEvent", MouseEvent);
+    render(<Harness chatSessionId="chat_1" sandboxStatus="sleeping" engineLabel="Codex" />);
+    fireEvent.click(screen.getByRole("button", { name: "Toggle workspace" }));
+    const separator = screen.getByRole("separator");
+    separator.setPointerCapture = vi.fn();
+
+    fireEvent.pointerDown(separator, { clientX: 1160 });
+    fireEvent.pointerMove(window, { clientX: 600 });
+    expect(screen.getByLabelText("Codex workspace")).toHaveStyle({ width: "1000px" });
+    fireEvent.pointerMove(window, { clientX: 0 });
+    expect(separator).toHaveAttribute("aria-valuenow", "1200");
+    expect(separator).toHaveAttribute("aria-valuemax", "1200");
+    fireEvent.pointerUp(window);
+    expect(window.localStorage.getItem("goat-coding-workspace-panel-width-v1")).toBe("1200");
+    fireEvent.keyDown(separator, { key: "ArrowLeft" });
+    expect(separator).toHaveAttribute("aria-valuenow", "1200");
+
+    fireEvent.pointerDown(separator, { clientX: 400 });
+    fireEvent.pointerMove(window, { clientX: 2000 });
+    fireEvent.pointerUp(window);
+    fireEvent.keyDown(separator, { key: "ArrowRight" });
+    expect(separator).toHaveAttribute("aria-valuenow", "340");
+  });
+
+  it("fits the container after layout changes without losing the preferred width", () => {
+    window.localStorage.setItem("goat-coding-workspace-panel-width-v1", "1100");
+    render(<Harness chatSessionId="chat_1" sandboxStatus="sleeping" engineLabel="Codex" />);
+    fireEvent.click(screen.getByRole("button", { name: "Toggle workspace" }));
+    expect(screen.getByLabelText("Codex workspace")).toHaveStyle({ width: "1100px" });
+
+    containerWidth = 1000;
+    act(() => resizeContainer());
+    expect(screen.getByLabelText("Codex workspace")).toHaveStyle({ width: "600px" });
+    expect(screen.getByRole("separator")).toHaveAttribute("aria-valuemax", "600");
+    expect(window.localStorage.getItem("goat-coding-workspace-panel-width-v1")).toBe("1100");
+
+    containerWidth = 1800;
+    act(() => resizeContainer());
+    expect(screen.getByLabelText("Codex workspace")).toHaveStyle({ width: "1100px" });
+    fireEvent.click(screen.getByRole("button", { name: "Fullscreen workspace" }));
+    expect(screen.getByRole("dialog").style.width).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: "Exit fullscreen" }));
+    expect(screen.getByLabelText("Codex workspace")).toHaveStyle({ width: "1100px" });
   });
 
   it("uses the active engine label for accessibility and previews without an edit warning", async () => {
