@@ -27,12 +27,13 @@ import { useAppData } from "@/components/AppDataProvider";
 import { listBots, saveBot } from "@/lib/bots";
 
 const BotsContext = createContext<{
+  enabled: boolean;
   bots: BotDto[];
   loading: boolean;
   error: string | null;
   reload: () => void;
   saved: (bot: BotDto) => void;
-}>({ bots: [], loading: false, error: null, reload: () => {}, saved: () => {} });
+}>({ enabled: false, bots: [], loading: false, error: null, reload: () => {}, saved: () => {} });
 
 export function BotsProvider({ children }: { children: ReactNode }) {
   const { featureFlags, workspace } = useAppData();
@@ -82,7 +83,9 @@ export function BotsProvider({ children }: { children: ReactNode }) {
     setBots((current) => [bot, ...current.filter((item) => item.id !== bot.id)]);
   };
   return (
-    <BotsContext.Provider value={{ bots, loading, error, reload, saved }}>
+    <BotsContext.Provider
+      value={{ enabled: featureFlags.bots === true, bots, loading, error, reload, saved }}
+    >
       {children}
     </BotsContext.Provider>
   );
@@ -143,11 +146,10 @@ export function SidebarBots() {
 }
 
 export function BotSettingsButton({ conversationId }: { conversationId: string }) {
-  const { featureFlags } = useAppData();
-  const { bots } = useContext(BotsContext);
+  const { bots, enabled } = useContext(BotsContext);
   const bot = bots.find((item) => item.id === conversationId);
   const [open, setOpen] = useState(false);
-  if (!featureFlags.bots || !bot) return null;
+  if (!enabled || !bot) return null;
   return (
     <>
       <Button

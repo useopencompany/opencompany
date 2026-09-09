@@ -82,3 +82,8 @@ it("edits settings on the existing conversation", async () => {
   );
   expect(state.push).not.toHaveBeenCalled();
 });
+
+it("keeps the shared chat surface usable outside the authenticated bots provider", () => {
+  render(<BotSettingsButton conversationId="chat_1" />);
+  expect(screen.queryByRole("button", { name: "Bot settings" })).not.toBeInTheDocument();
+});
