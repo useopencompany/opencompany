@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { executeWorkspaceSkillToolForActor, manageWorkspaceSkillsForActor } from "./skills";
+import {
+  executeWorkspaceSkillToolForActor,
+  manageWorkspaceSkillsForActor,
+  readSkillMentionRefs,
+} from "./skills";
 
 const repository = vi.hoisted(() => ({
   list: vi.fn(),
@@ -25,6 +29,11 @@ const actor = {
   authenticationMethod: "service" as const,
 };
 const installation = {
+  id: "skill_installation_1",
+  scope: "personal",
+  createdByUserId: "user_1",
+  canEdit: true,
+  canManage: true,
   name: "my-skill",
   enabled: false,
   bundle: {
@@ -45,10 +54,23 @@ beforeEach(() => {
 });
 
 describe("workspace Skill management", () => {
+  it("retains stable installation IDs and legacy names in engine mentions", () => {
+    expect(
+      readSkillMentionRefs([
+        { kind: "skill", id: "skill_installation_abc123" },
+        { kind: "skill", id: "legacy-name" },
+      ]),
+    ).toEqual({ ok: true, mentions: [{ id: "skill_installation_abc123" }, { id: "legacy-name" }] });
+  });
+
   it("lists disabled installations and reads their current saved instructions without activation", async () => {
     await expect(manageWorkspaceSkillsForActor({ actor, command: "list", db })).resolves.toEqual({
       skills: [
         {
+          id: "skill_installation_1",
+          scope: "personal",
+          createdByUserId: "user_1",
+          canManage: true,
           name: "my-skill",
           description: "Current description.",
           enabled: false,

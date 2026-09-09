@@ -108,6 +108,7 @@ export type MessageAttachment = {
 export type MessageMention = {
   kind: "skill";
   id: string;
+  name?: string;
 };
 
 export type Run = {
@@ -427,6 +428,7 @@ export class ChatApplicationService {
     const mentions = (input.mentions ?? []).map((mention) => ({
       kind: mention.kind,
       id: resourceId(mention.id, "mention.id"),
+      ...(mention.name !== undefined ? { name: boundedValue(mention.name, "mention.name") } : {}),
     }));
     if (mentions.length > MAX_MESSAGE_MENTIONS) {
       throw new CoreError(

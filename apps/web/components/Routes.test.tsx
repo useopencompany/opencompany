@@ -61,6 +61,7 @@ const workflowLiveQueryMock = vi.hoisted(() => ({
 const surfaceMock = vi.hoisted(() => ({ props: null as Record<string, unknown> | null }));
 
 const skillActionsMock = vi.hoisted(() => ({
+  setHeadlessSkillScope: vi.fn(async () => ({ canEdit: true })),
   archiveHeadlessSkill: vi.fn(async () => ({ name: "test-skill" })),
   enableHeadlessSkill: vi.fn(async () => ({ name: "test-skill" })),
   disableHeadlessSkill: vi.fn(async () => ({ name: "test-skill" })),
@@ -85,11 +86,11 @@ const skillActionsMock = vi.hoisted(() => ({
     }),
   ),
   importHeadlessSkill: vi.fn(async () => ({
-    installation: { name: "imported-skill" },
+    installation: { id: "imported_id", name: "imported-skill" },
     replayed: false,
   })),
   createHeadlessWorkspaceSkill: vi.fn(async () => ({
-    installation: { name: "investigate-bug" },
+    installation: { id: "created_id", name: "investigate-bug" },
     replayed: false,
   })),
   updateHeadlessWorkspaceSkill: vi.fn(async () => ({
@@ -175,6 +176,7 @@ vi.mock("@/lib/headless-automation-commands", () => ({
 }));
 
 vi.mock("@/lib/headless-knowledge-commands", () => ({
+  setHeadlessSkillScope: skillActionsMock.setHeadlessSkillScope,
   archiveHeadlessSkill: skillActionsMock.archiveHeadlessSkill,
   enableHeadlessSkill: skillActionsMock.enableHeadlessSkill,
   disableHeadlessSkill: skillActionsMock.disableHeadlessSkill,
@@ -506,6 +508,10 @@ describe("BrainRoute", () => {
 
 const workspaceSkillFixture: import("@opencompany/protocol").SkillInstallationDto = {
   id: "installation_1",
+  scope: "company",
+  createdByUserId: "user_1",
+  canEdit: true,
+  canManage: true,
   name: "investigate-bug",
   enabled: true,
   archivedAt: null,
@@ -538,6 +544,10 @@ describe("SkillBundleRoute", () => {
       <SkillBundleRoute
         installation={{
           id: "installation_1",
+          scope: "company",
+          createdByUserId: "user_1",
+          canEdit: true,
+          canManage: true,
           name: "imported-skill",
           enabled: true,
           archivedAt: null,
@@ -577,8 +587,31 @@ describe("SkillBundleRoute", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Disable" }));
     await waitFor(() =>
-      expect(skillActionsMock.disableHeadlessSkill).toHaveBeenCalledWith("imported-skill"),
+      expect(skillActionsMock.disableHeadlessSkill).toHaveBeenCalledWith("installation_1"),
     );
+  });
+
+  it("changes visibility on the same skill using the last observed scope", async () => {
+    render(<SkillBundleRoute installation={workspaceSkillFixture} canEdit />);
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: /Visibility/ }), "personal");
+    await waitFor(() =>
+      expect(skillActionsMock.setHeadlessSkillScope).toHaveBeenCalledWith("installation_1", {
+        scope: "personal",
+        expectedScope: "company",
+      }),
+    );
+  });
+
+  it("lets teammates edit company instructions while reserving visibility and archive for managers", () => {
+    render(
+      <SkillBundleRoute installation={{ ...workspaceSkillFixture, canManage: false }} canEdit />,
+    );
+    expect(screen.getByRole("textbox", { name: "Skill instructions" })).not.toHaveAttribute(
+      "readonly",
+    );
+    expect(screen.getByRole("combobox", { name: /Visibility/ })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Archive" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Disable" })).toBeEnabled();
   });
 
   it("edits workspace instructions directly and protects the saved version", async () => {
@@ -595,14 +628,11 @@ describe("SkillBundleRoute", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() =>
-      expect(skillActionsMock.updateHeadlessWorkspaceSkill).toHaveBeenCalledWith(
-        "investigate-bug",
-        {
-          description: "Reproduce and diagnose reported bugs.",
-          instructions: "Reproduce, isolate, and explain the root cause.",
-          expectedBundleId: "bundle_1",
-        },
-      ),
+      expect(skillActionsMock.updateHeadlessWorkspaceSkill).toHaveBeenCalledWith("installation_1", {
+        description: "Reproduce and diagnose reported bugs.",
+        instructions: "Reproduce, isolate, and explain the root cause.",
+        expectedBundleId: "bundle_1",
+      }),
     );
     expect(routerMock.refresh).toHaveBeenCalled();
   });
@@ -625,7 +655,7 @@ describe("SkillBundleRoute", () => {
     expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
   });
 
-  it("lets members read workspace Markdown without editing it", () => {
+  it("respects an explicitly read-only skill view", () => {
     render(<SkillBundleRoute installation={workspaceSkillFixture} canEdit={false} />);
     expect(screen.getByRole("textbox", { name: "Skill instructions" })).toHaveAttribute("readonly");
     expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
@@ -659,13 +689,14 @@ describe("SkillsSettingsRoute", () => {
 
     await waitFor(() =>
       expect(skillActionsMock.importHeadlessSkill).toHaveBeenCalledWith({
+        scope: "personal",
         url: "github.com/o/r",
         expectedResolvedCommit: "a".repeat(40),
         expectedIntegrity: `sha256:${"b".repeat(64)}`,
       }),
     );
     await waitFor(() =>
-      expect(routerMock.push).toHaveBeenCalledWith("/settings/skills/imported-skill"),
+      expect(routerMock.push).toHaveBeenCalledWith("/settings/skills/imported_id"),
     );
   });
 
@@ -726,12 +757,13 @@ describe("SkillsSettingsRoute", () => {
 
     await waitFor(() =>
       expect(skillActionsMock.createHeadlessWorkspaceSkill).toHaveBeenCalledWith({
+        scope: "personal",
         name: "incident-review",
         description: "Review incidents and identify root causes.",
         instructions: "Reproduce the incident before proposing changes.",
       }),
     );
-    expect(routerMock.push).toHaveBeenCalledWith("/settings/skills/incident-review");
+    expect(routerMock.push).toHaveBeenCalledWith("/settings/skills/created_id");
   });
 });
 

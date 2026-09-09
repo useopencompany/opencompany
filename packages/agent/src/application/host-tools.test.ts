@@ -44,6 +44,7 @@ describe("opencompany Chat Task host tools", () => {
         description: "Research carefully.",
         instructions: "Current instructions.",
         sourceKind: "standalone" as const,
+        scope: "company" as const,
       },
     ]);
     const activateAndListSkills = vi.fn(async () => [
@@ -75,6 +76,7 @@ describe("opencompany Chat Task host tools", () => {
       messageId: "message_1",
       workspaceId: "workspace_1",
       skills: [expect.objectContaining({ id: "research" })],
+      userId: "user_1",
     });
   });
 
@@ -102,6 +104,7 @@ describe("opencompany Chat Task host tools", () => {
     });
 
     expect(readSkillFile).toHaveBeenCalledWith({
+      userId: "user_1",
       workspaceId: "workspace_1",
       conversationId: "conversation_1",
       skill: "research",
@@ -112,7 +115,7 @@ describe("opencompany Chat Task host tools", () => {
   });
 
   it.each([true, false])(
-    "gates Skill management on current admin authority (%s)",
+    "gates Skill management on current session authority (%s)",
     async (enabled) => {
       const manageWorkspaceSkills = vi.fn(async () => ({ archived: true }));
       const dependencies = testDependencies({
@@ -141,7 +144,7 @@ describe("opencompany Chat Task host tools", () => {
     },
   );
 
-  it("creates a workspace Skill as the authenticated admin with a stable tool-call key", async () => {
+  it("creates a workspace Skill as the authenticated member with a stable tool-call key", async () => {
     const createWorkspaceSkill = vi.fn(async () => ({
       created: true as const,
       name: "customer-health-review",
@@ -174,7 +177,7 @@ describe("opencompany Chat Task host tools", () => {
       actor: {
         userId: "user_1",
         workspaceId: "workspace_1",
-        role: "admin",
+        role: "member",
         permissions: ["skill:write"],
         authenticationMethod: "service",
       },
@@ -187,7 +190,7 @@ describe("opencompany Chat Task host tools", () => {
     });
   });
 
-  it("rejects workspace Skill creation when the authenticated member is not an admin", async () => {
+  it("rejects workspace Skill creation when Skill tools are unavailable", async () => {
     const createWorkspaceSkill = vi.fn();
     const dependencies = testDependencies({
       loadContext: vi.fn(async () => ({ ...context, skillToolsEnabled: false })),
@@ -207,12 +210,12 @@ describe("opencompany Chat Task host tools", () => {
       }),
     ).resolves.toEqual({
       ok: false,
-      error: "Only workspace admins can manage Skills from Chat.",
+      error: "Skill tools are unavailable for this user.",
     });
     expect(createWorkspaceSkill).not.toHaveBeenCalled();
   });
 
-  it("updates a workspace Skill as the authenticated admin", async () => {
+  it("updates a workspace Skill as the authenticated member", async () => {
     const updateWorkspaceSkill = vi.fn(async () => ({
       updated: true as const,
       name: "add-mcp-provider-plugin",
@@ -245,7 +248,7 @@ describe("opencompany Chat Task host tools", () => {
       actor: {
         userId: "user_1",
         workspaceId: "workspace_1",
-        role: "admin",
+        role: "member",
         permissions: ["skill:write"],
         authenticationMethod: "service",
       },
@@ -257,7 +260,7 @@ describe("opencompany Chat Task host tools", () => {
     });
   });
 
-  it("rejects workspace Skill editing when the authenticated member is not an admin", async () => {
+  it("rejects workspace Skill editing when Skill tools are unavailable", async () => {
     const updateWorkspaceSkill = vi.fn();
     const dependencies = testDependencies({
       loadContext: vi.fn(async () => ({ ...context, skillToolsEnabled: false })),
@@ -281,7 +284,7 @@ describe("opencompany Chat Task host tools", () => {
       }),
     ).resolves.toEqual({
       ok: false,
-      error: "Only workspace admins can manage Skills from Chat.",
+      error: "Skill tools are unavailable for this user.",
     });
     expect(updateWorkspaceSkill).not.toHaveBeenCalled();
   });

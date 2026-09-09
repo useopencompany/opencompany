@@ -27,6 +27,8 @@ describe("Postgres immutable Plugin repository", () => {
       CREATE SCHEMA goat;
       CREATE TABLE goat.workspaces (id text PRIMARY KEY);
       CREATE TABLE goat.chat_sessions (id text PRIMARY KEY);
+      CREATE TABLE goat.workspace_members (workspace_id text, user_workos_id text, role text);
+      INSERT INTO goat.workspace_members VALUES ('workspace_1', 'user_1', 'admin'), ('workspace_2', 'user_1', 'admin');
       CREATE TABLE goat.integrations (id text PRIMARY KEY);
       INSERT INTO goat.workspaces (id) VALUES ('workspace_1'), ('workspace_2');
       INSERT INTO goat.chat_sessions (id) VALUES ('chat_1');
@@ -36,6 +38,7 @@ describe("Postgres immutable Plugin repository", () => {
       "0228_goat_plugins.sql",
       "0232_workspace_authored_skills.sql",
       "0234_goat_plugin_gateway_registrations.sql",
+      "0262_personal_company_skills.sql",
     ]) {
       const migration = await readFile(
         path.resolve(import.meta.dirname, "../../..", `drizzle/${migrationName}`),
@@ -136,7 +139,7 @@ describe("Postgres immutable Plugin repository", () => {
       ],
     });
     await expect(skillRepository.listCatalog({ actor: actor() })).resolves.toEqual([
-      { id: "review", name: "review", description: "Review from plugin." },
+      { id: "review", name: "review", description: "Review from plugin.", scope: null },
     ]);
     await expect(skillRepository.get({ actor: actor(), name: "review" })).resolves.toMatchObject({
       name: "review",
@@ -171,16 +174,22 @@ describe("Postgres immutable Plugin repository", () => {
       },
     ]);
     await expect(skillRepository.listCatalog({ actor: actor() })).resolves.toEqual([
-      { id: "shared", name: "shared", description: "From dash." },
+      { id: "shared", name: "shared", description: "From dash.", scope: null },
     ]);
 
     const standalone = await skillRepository.install({
+      scope: "company",
       actor: actor(),
       idempotencyKey: "standalone",
       bundle: await resolvedSkill("shared", "Standalone wins."),
     });
     await expect(skillRepository.listCatalog({ actor: actor() })).resolves.toEqual([
-      { id: "shared", name: "shared", description: "Standalone wins." },
+      {
+        id: standalone.installation.id,
+        name: "shared",
+        description: "Standalone wins.",
+        scope: "company",
+      },
     ]);
     const inspected = await repository.get({ actor: actor(), name: "a-tools" });
     expect(inspected?.installReport.collisions).toEqual([
@@ -196,7 +205,7 @@ describe("Postgres immutable Plugin repository", () => {
       enabled: false,
     });
     await expect(skillRepository.listCatalog({ actor: actor() })).resolves.toEqual([
-      { id: "shared", name: "shared", description: "From dash." },
+      { id: "shared", name: "shared", description: "From dash.", scope: null },
     ]);
     await expect(skillRepository.get({ actor: actor(), name: "shared" })).resolves.toMatchObject({
       id: standalone.installation.id,

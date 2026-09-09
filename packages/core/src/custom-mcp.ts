@@ -181,7 +181,7 @@ export class CustomMcpApplicationService {
 }
 
 function requireWrite(actor: Actor) {
-  if (!actorHasPermission(actor, SKILL_WRITE_PERMISSION))
+  if (actor.role !== "admin" || !actorHasPermission(actor, SKILL_WRITE_PERMISSION))
     throw new CoreError("forbidden", "Only workspace admins can install plugins.");
 }
 function requireEnabled(plugin: PluginInstallation) {

@@ -92,7 +92,7 @@ export function authorizeExternalEngineToolCapability(input: {
   }
   return {
     taskConversation: state.conversationKind === "task",
-    skillToolsEnabled: state.workspaceRole === "admin",
+    skillToolsEnabled: true,
     actorId: state.actorId,
     workspaceId: state.workspaceId,
     workspaceName: state.workspaceName,

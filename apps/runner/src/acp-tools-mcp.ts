@@ -190,7 +190,8 @@ export function registerAcpToolsMcpRoute(
             actor: {
               userId: current.actorId,
               workspaceId: current.workspaceId,
-              role: "admin",
+              role: "member",
+              ...(current.taskConversation ? { skillAccess: "company" as const } : {}),
               permissions: [SKILL_READ_PERMISSION, SKILL_WRITE_PERMISSION],
               authenticationMethod: "service",
             },

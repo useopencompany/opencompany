@@ -18,6 +18,7 @@ import {
   type PluginImportPreviewBody,
   type RenameBrainDocumentBody,
   type RenameBrainFolderBody,
+  type SetSkillScopeBody,
   type SkillImportPreviewBody,
   type UpdateBrainDocumentBody,
   type UpdateWorkspaceSkillBody,
@@ -456,4 +457,16 @@ export async function setCustomMcpToolMode(
     }),
     "Could not update this tool permission",
   );
+}
+
+export async function setHeadlessSkillScope(
+  slug: string,
+  command: SetSkillScopeBody,
+  options: ClientOptions = {},
+) {
+  const response = await knowledgeClient(options).v1.skills[":slug"].scope.$post({
+    param: { slug },
+    json: command,
+  });
+  return responseData(response, "Skill visibility update failed");
 }

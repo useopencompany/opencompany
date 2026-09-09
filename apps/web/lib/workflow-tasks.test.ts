@@ -211,6 +211,7 @@ describe("compileWorkflowHarnessSpec", () => {
           description: "How to research",
           instructions: "Search broadly.",
           sourceKind: "standalone",
+          scope: "company",
         },
         {
           id: "coding-work",
@@ -219,6 +220,7 @@ describe("compileWorkflowHarnessSpec", () => {
           description: "How to implement",
           instructions: "Inspect, implement, and verify.",
           sourceKind: "plugin",
+          scope: null,
         },
       ],
       tools: ["exa_search"],
@@ -299,6 +301,7 @@ describe("compileWorkflowHarnessSpec", () => {
           description: "Ship product changes",
           instructions: "Implement and verify the feature.",
           sourceKind: "standalone",
+          scope: "company",
         },
         {
           id: "smooth-shadow-ring",
@@ -307,6 +310,7 @@ describe("compileWorkflowHarnessSpec", () => {
           description: "Polish elevation styles",
           instructions: "Use layered shadows and a crisp ring.",
           sourceKind: "standalone",
+          scope: "company",
         },
       ],
       invokedSkillIds: ["smooth-shadow-ring"],

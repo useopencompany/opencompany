@@ -145,9 +145,10 @@ export type ChatMention =
       id: "codex" | "claude";
     }
   | {
-      // `id` is the workspace-scoped skill slug (the @skill/<id> handle).
+      // Stable installation ID; name is display text, never an authorization input.
       kind: "skill";
       id: string;
+      name?: string;
     }
   | {
       // `id` is the workspace-scoped workflow slug (the # handle).
@@ -520,6 +521,7 @@ export type ReadSkillFileToolOutput = {
 };
 
 export type CreateWorkspaceSkillToolInput = {
+  scope?: "personal" | "company";
   name: string;
   description: string;
   instructions: string;

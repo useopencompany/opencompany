@@ -1320,6 +1320,16 @@ export function createApiApp(input: CreateApiAppInput) {
       );
       return c.json({ data: skillInstallationDto(installation), meta }, 200);
     },
+    setSkillScope: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const installation = await input.skillImports.setScope(
+        actor,
+        c.req.valid("param").slug,
+        c.req.valid("json"),
+      );
+      return c.json({ data: skillInstallationDto(installation), meta }, 200);
+    },
     archiveSkill: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 60);

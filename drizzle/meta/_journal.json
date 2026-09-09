@@ -1835,6 +1835,13 @@
       "when": 1788939784822,
       "tag": "0261_persistent_bots",
       "breakpoints": true
+    },
+    {
+      "idx": 262,
+      "version": "7",
+      "when": 1788941000000,
+      "tag": "0262_personal_company_skills",
+      "breakpoints": true
     }
   ]
 }

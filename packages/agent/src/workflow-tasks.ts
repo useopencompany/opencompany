@@ -50,7 +50,7 @@ const DEFAULT_WORKFLOW_SELECTION: WorkflowEngineSelection = workflowModelSelecti
 // The token must end alphanumeric so trailing punctuation ("run @sonnet-5.")
 // stays out of the capture while inner dots ("@kimi-k2.6") still match.
 const WORKFLOW_MENTION_TOKEN_PATTERN = /(^|\s)@([a-z0-9](?:[a-z0-9./-]*[a-z0-9])?)/gi;
-const WORKFLOW_SKILL_MENTION_PATTERN = /(^|\s)@skill\/([a-z0-9][a-z0-9-]{0,79})(?![a-z0-9-])/gi;
+const WORKFLOW_SKILL_MENTION_PATTERN = /(^|\s)@skill\/([a-z0-9][a-z0-9_-]{0,199})(?![a-z0-9_-])/gi;
 
 export function resolveWorkflowStepSelection(step: {
   model: string;
@@ -121,6 +121,10 @@ export function compileWorkflowHarnessSpec(input: {
   description: string;
 }): WorkflowHarnessSpec {
   const skillById = new Map(input.skills.map((skill) => [skill.id, skill]));
+  for (const skill of input.skills) {
+    if (input.skills.filter((candidate) => candidate.name === skill.name).length === 1)
+      skillById.set(skill.name, skill);
+  }
   const invokedSkillIds = new Set(input.invokedSkillIds ?? []);
   const steps = input.workflow.steps.map((step, index) => {
     const selection = resolveWorkflowStepSelection(step);

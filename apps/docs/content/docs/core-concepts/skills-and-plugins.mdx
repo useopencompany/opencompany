@@ -5,7 +5,7 @@ description: Teach the agent a reusable method and invoke it with a slash comman
 
 A Skill is a reusable set of instructions for a particular kind of work. Use one for your team's
 review method, document format, research process, or coding conventions. Skills can be used in Chat
-and selected for Workflow steps.
+and Company Skills can be selected for Workflow steps.
 
 A Skill teaches the method. A [Plugin](/docs/core-concepts/plugins) can package Skills together with
 tools or events. A [Workflow](/docs/core-concepts/workflows-and-schedules) defines the job's steps and
@@ -26,8 +26,33 @@ and permissions.
 
 ## Create your own
 
-Workspace admins can create Skills in **Settings → Skills → New skill**. Enter a name, a
-description of when it applies, and the instructions.
+Every workspace member can create Skills in **Settings → Skills → New skill**. Enter a name, a
+description of when it applies, and the instructions. New Skills default to **Personal**.
+
+## Personal and Company
+
+A Skill has one visibility setting:
+
+| Visibility | Who can see and use it | Who can edit or enable/disable it | Who can change visibility or archive it |
+| --- | --- | --- | --- |
+| **Personal** | Its creator | Its creator | Its creator |
+| **Company** | Every current workspace member | Every current workspace member | Its creator or a workspace admin |
+
+Admins cannot browse another person's Personal Skills. Choose **Company** when the instructions and
+included files should be available to your team. Change **Visibility** on the Skill page whenever
+needed; this changes the same Skill. Returning a Company Skill to Personal gives access back to its
+original creator. Skills created before these scopes were introduced remain Company Skills; admins
+manage their visibility and archiving, and an admin who makes one Personal becomes its creator.
+
+Your Personal Skills and the company can use the same name. The Chat picker labels each choice;
+select the intended Skill when names overlap. Once a Chat has captured one, start a new Chat to use
+a different Skill with that name. API clients and agents should use the stable Skill ID returned by
+list/read responses; a name is accepted only when it identifies one visible Skill.
+
+Personal Skills are available in your private Chats. Shared Task conversations and Workflow steps
+use Company or Plugin Skills. Workflow ownership and run identity are unchanged.
+
+## Example
 
 For a release-review Skill:
 
@@ -53,12 +78,12 @@ in the prompt. Describe observable results, such as linked evidence, instead of 
 In the same Chat, ask:
 
 ```text
-Turn the release-review process we just used into a workspace Skill.
+Turn the release-review process we just used into a Personal Skill.
 Keep the method reusable and leave this release's names and dates out of the instructions.
 ```
 
-This creates a Skill immediately when you're a workspace admin. It works in built-in Chat, Codex,
-and Claude Code. Open **Settings → Skills** to review the saved instructions.
+Every member can do this in built-in Chat, Codex, and Claude Code. Ask explicitly for a Company
+Skill to share it with your team. Open **Settings → Skills** to review the saved instructions.
 
 Ask the agent to update a named workspace-authored Skill to refine it, or open it in Settings.
 Use **Save changes** or Command/Ctrl+S to save, and **Discard changes** to return to the saved text.
@@ -68,7 +93,7 @@ If another person or agent edited the Skill, reload its latest version before re
 
 Choose **Import skill** in **Settings → Skills**, paste a supported public GitHub or skills.sh URL,
 and review the preview. Check the selected Skill, instructions, bundled files, and resolved version
-before importing.
+before importing. Imports also default to Personal; choose Company to share the imported files.
 
 Imports use the standard Agent Skills format with a `SKILL.md` file. The name and description are
 frontmatter; the body contains the instructions. Workspace authoring generates this structure for
@@ -82,6 +107,11 @@ tools. Update their source and replace the installed bundle, or author a separat
 A saved or imported Skill is an immutable bundle. Editing a workspace Skill creates a new bundle.
 Existing Chats and Tasks keep the versions they already captured, so a new edit doesn't silently
 change work in progress. Start a new Chat to verify a revised Skill.
+
+Making a Company Skill Personal removes it from other members' lists and new selections. It does
+not erase revisions already captured in their private Chats. Sharing a Personal Skill exposes its
+current revision; earlier private drafts stay private. Company-only execution cannot newly load a
+Skill after it becomes Personal.
 
 **Disable** prevents the Skill from being selected for new work. **Archive** removes its active
 installation. Neither action rewrites previous results.

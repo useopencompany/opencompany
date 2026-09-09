@@ -74,7 +74,11 @@ describe("SkillImportApplicationService", () => {
       }),
     );
     const service = new SkillImportApplicationService(
-      repository({ install, replace }),
+      repository({
+        install,
+        replace,
+        get: vi.fn(async () => ({ name: "investigate-bug" }) as never),
+      }),
       { resolve: vi.fn() },
       { create },
     );
@@ -97,6 +101,7 @@ describe("SkillImportApplicationService", () => {
     });
     expect(install).toHaveBeenCalledWith({
       actor,
+      scope: "personal",
       idempotencyKey: "workspace-skill-1",
       bundle: expect.objectContaining({ name: "investigate-bug", source: { type: "workspace" } }),
     });
@@ -162,6 +167,7 @@ describe("SkillImportApplicationService", () => {
 
     expect(install).toHaveBeenCalledWith({
       actor,
+      scope: "personal",
       idempotencyKey: "skill-install-1",
       bundle: resolved.bundle,
     });
@@ -234,6 +240,7 @@ function repository(overrides: Partial<SkillBundleRepository> = {}): SkillBundle
     readFile: vi.fn(async () => null),
     setEnabled: vi.fn(async () => ({}) as never),
     archive: vi.fn(async () => undefined),
+    setScope: vi.fn(async () => ({}) as never),
     ...overrides,
   };
 }

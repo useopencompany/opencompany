@@ -21,7 +21,9 @@ describe("Postgres immutable Skill bundle repository", () => {
     await database.exec(`
       CREATE SCHEMA goat;
       CREATE TABLE goat.workspaces (id text PRIMARY KEY);
-      CREATE TABLE goat.chat_sessions (id text PRIMARY KEY);
+      CREATE TABLE goat.chat_sessions (id text PRIMARY KEY, user_workos_id text NOT NULL DEFAULT 'user_1');
+      CREATE TABLE goat.workspace_members (workspace_id text, user_workos_id text, role text);
+      INSERT INTO goat.workspace_members VALUES ('workspace_1', 'user_1', 'admin'), ('workspace_1', 'member_a', 'member'), ('workspace_1', 'member_b', 'member'), ('workspace_2', 'user_1', 'admin');
       CREATE TABLE goat.chat_messages (
         id text PRIMARY KEY,
         session_id text NOT NULL REFERENCES goat.chat_sessions(id)
@@ -75,6 +77,12 @@ describe("Postgres immutable Skill bundle repository", () => {
     for (const statement of workspaceAuthoringMigration.split("--> statement-breakpoint")) {
       if (statement.trim()) await database.exec(statement);
     }
+    const scopeMigration = await readFile(
+      path.resolve(import.meta.dirname, "../../..", "drizzle/0262_personal_company_skills.sql"),
+      "utf8",
+    );
+    for (const statement of scopeMigration.split("--> statement-breakpoint"))
+      if (statement.trim()) await database.exec(statement);
     repository = new PostgresSkillBundleRepository(drizzle(database));
   });
 
@@ -90,6 +98,379 @@ describe("Postgres immutable Skill bundle repository", () => {
 
   afterAll(async () => {
     await database.close();
+  });
+
+  it("makes member-created Personal skills private across reads, files, catalogs, and bundle loads", async () => {
+    const owner = actor({ userId: "member_a", role: "member" });
+    const { installation } = await repository.install({
+      actor: owner,
+      idempotencyKey: "private",
+      bundle: await resolvedBundle("private-method", "Private instructions."),
+    });
+    expect(installation).toMatchObject({
+      scope: "personal",
+      createdByUserId: "member_a",
+      canEdit: true,
+      canManage: true,
+    });
+    for (const other of [actor(), actor({ userId: "member_b", role: "member" })]) {
+      expect(await repository.list({ actor: other })).toEqual([]);
+      expect(await repository.listCatalog({ actor: other })).toEqual([]);
+      for (const name of [installation.id, installation.name]) {
+        expect(await repository.get({ actor: other, name })).toBeNull();
+        expect(await repository.readFile({ actor: other, name, path: "SKILL.md" })).toBeNull();
+        await expect(
+          repository.setEnabled({ actor: other, name, enabled: false }),
+        ).rejects.toMatchObject({ code: "not_found" });
+        await expect(repository.archive({ actor: other, name })).rejects.toMatchObject({
+          code: "not_found",
+        });
+      }
+      await expect(
+        loadImmutableSkillBundles(drizzle(database), {
+          workspaceId: owner.workspaceId,
+          userId: other.userId,
+          bundleIds: [installation.bundle.id],
+        }),
+      ).rejects.toMatchObject({ code: "not_found" });
+    }
+    await expect(
+      loadImmutableSkillBundles(drizzle(database), {
+        workspaceId: owner.workspaceId,
+        bundleIds: [installation.bundle.id],
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it("lets every member edit Company skills while only creators and admins manage visibility and archiving", async () => {
+    const owner = actor({ userId: "member_a", role: "member" });
+    const teammate = actor({ userId: "member_b", role: "member" });
+    const { installation } = await repository.install({
+      actor: owner,
+      scope: "company",
+      idempotencyKey: "company",
+      bundle: await resolvedBundle("team-method", "Original."),
+    });
+    expect(await repository.get({ actor: teammate, name: installation.id })).toMatchObject({
+      canEdit: true,
+      canManage: false,
+    });
+    const edited = await repository.replace({
+      actor: teammate,
+      name: installation.id,
+      expectedBundleId: installation.bundle.id,
+      bundle: await resolvedBundle("team-method", "Teammate edit."),
+    });
+    expect(edited).toMatchObject({
+      id: installation.id,
+      createdByUserId: owner.userId,
+      bundle: { body: "Teammate edit." },
+    });
+    await expect(
+      repository.setEnabled({ actor: teammate, name: installation.id, enabled: false }),
+    ).resolves.toMatchObject({ enabled: false });
+    await expect(
+      repository.setScope({
+        actor: teammate,
+        name: installation.id,
+        scope: "personal",
+        expectedScope: "company",
+      }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    await expect(
+      repository.archive({ actor: teammate, name: installation.id }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    await repository.archive({ actor: actor(), name: installation.id });
+    expect(await repository.get({ actor: owner, name: installation.id })).toBeNull();
+  });
+
+  it("shares the same item and only the published revision, then returns it to its creator", async () => {
+    const owner = actor({ userId: "member_a", role: "member" });
+    const { installation } = await repository.install({
+      actor: owner,
+      idempotencyKey: "share",
+      bundle: await resolvedBundle("method", "Private draft."),
+    });
+    const current = await repository.replace({
+      actor: owner,
+      name: installation.id,
+      bundle: await resolvedBundle("method", "Ready to share."),
+    });
+    const shared = await repository.setScope({
+      actor: owner,
+      name: installation.id,
+      expectedScope: "personal",
+      scope: "company",
+    });
+    expect(shared).toMatchObject({
+      id: installation.id,
+      scope: "company",
+      createdByUserId: owner.userId,
+      bundle: { id: current.bundle.id },
+    });
+    expect(shared.bundle.files.length).toBeGreaterThan(0);
+    expect(await repository.get({ actor: actor(), name: installation.id })).toMatchObject({
+      bundle: { body: "Ready to share." },
+    });
+    await expect(
+      loadImmutableSkillBundles(drizzle(database), {
+        workspaceId: owner.workspaceId,
+        userId: "member_b",
+        bundleIds: [installation.bundle.id],
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      repository.setScope({
+        actor: owner,
+        name: installation.id,
+        expectedScope: "personal",
+        scope: "company",
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    const returned = await repository.setScope({
+      actor: actor(),
+      name: installation.id,
+      expectedScope: "company",
+      scope: "personal",
+    });
+    expect(returned).toMatchObject({
+      createdByUserId: owner.userId,
+      canEdit: false,
+      canManage: false,
+    });
+    expect(await repository.get({ actor: actor(), name: installation.id })).toBeNull();
+    expect(await repository.get({ actor: owner, name: installation.id })).toMatchObject({
+      scope: "personal",
+    });
+  });
+
+  it("separates identical names by person and scope, and resolves visible duplicates only by ID", async () => {
+    const owner = actor({ userId: "member_a", role: "member" });
+    const teammate = actor({ userId: "member_b", role: "member" });
+    const personal = await repository.install({
+      actor: owner,
+      idempotencyKey: "a",
+      bundle: await resolvedBundle("same-name", "A."),
+    });
+    const other = await repository.install({
+      actor: teammate,
+      idempotencyKey: "b",
+      bundle: await resolvedBundle("same-name", "B."),
+    });
+    const shared = await repository.install({
+      actor: actor(),
+      scope: "company",
+      idempotencyKey: "c",
+      bundle: await resolvedBundle("same-name", "Company."),
+    });
+    const catalog = await repository.listCatalog({ actor: owner });
+    expect(catalog.map((skill) => skill.id).sort()).toEqual(
+      [personal.installation.id, shared.installation.id].sort(),
+    );
+    expect(await repository.get({ actor: owner, name: other.installation.id })).toBeNull();
+    await expect(repository.get({ actor: owner, name: "same-name" })).rejects.toMatchObject({
+      code: "conflict",
+    });
+    await expect(
+      repository.setScope({
+        actor: owner,
+        name: personal.installation.id,
+        expectedScope: "personal",
+        scope: "company",
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(await repository.get({ actor: owner, name: personal.installation.id })).toMatchObject({
+      scope: "personal",
+    });
+  });
+
+  it("keeps an already captured Company revision in its owner's chat after it becomes Personal", async () => {
+    const owner = actor({ userId: "member_a", role: "member" });
+    const { installation } = await repository.install({
+      actor: owner,
+      scope: "company",
+      idempotencyKey: "captured",
+      bundle: await resolvedBundle("captured", "Previously shared."),
+    });
+    await database.exec(
+      "INSERT INTO goat.chat_sessions (id, user_workos_id) VALUES ('chat_b', 'member_b'); INSERT INTO goat.chat_messages (id, session_id) VALUES ('message_b', 'chat_b');",
+    );
+    await activateAndListChatSkillBundles(drizzle(database), {
+      workspaceId: owner.workspaceId,
+      userId: "member_b",
+      chatSessionId: "chat_b",
+      activatedMessageId: "message_b",
+      bundles: [{ bundleId: installation.bundle.id, sourceKind: "standalone" }],
+    });
+    await repository.setScope({
+      actor: owner,
+      name: installation.id,
+      expectedScope: "company",
+      scope: "personal",
+    });
+    const captured = {
+      workspaceId: owner.workspaceId,
+      userId: "member_b",
+      chatSessionId: "chat_b",
+      bundleIds: [installation.bundle.id],
+    };
+    await expect(loadImmutableSkillBundles(drizzle(database), captured)).resolves.toHaveLength(1);
+    await expect(
+      loadImmutableSkillBundles(drizzle(database), { ...captured, userId: "user_1" }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      loadImmutableSkillBundles(drizzle(database), {
+        workspaceId: captured.workspaceId,
+        userId: captured.userId,
+        bundleIds: captured.bundleIds,
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    // Returning to Personal also removes the definition from future workflow preparation.
+    await expect(
+      loadImmutableSkillBundles(drizzle(database), {
+        workspaceId: owner.workspaceId,
+        bundleIds: [installation.bundle.id],
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it("excludes the owner's Personal skills from shared Task tool access", async () => {
+    const owner = actor({ userId: "member_a", role: "member" });
+    const taskActor = { ...owner, skillAccess: "company" as const };
+    const { installation } = await repository.install({
+      actor: owner,
+      idempotencyKey: "task-private",
+      bundle: await resolvedBundle("task-private", "Private instructions."),
+    });
+    expect(await repository.listCatalog({ actor: taskActor })).toEqual([]);
+    expect(await repository.get({ actor: taskActor, name: installation.id })).toBeNull();
+    await expect(
+      repository.install({
+        actor: taskActor,
+        idempotencyKey: "new-private",
+        bundle: await resolvedBundle("new-private", "Private."),
+      }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    await expect(
+      repository.replace({
+        actor: taskActor,
+        name: installation.id,
+        bundle: await resolvedBundle("task-private", "Edit."),
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      loadImmutableSkillBundles(drizzle(database), {
+        workspaceId: owner.workspaceId,
+        userId: owner.userId,
+        skillAccess: "company",
+        bundleIds: [installation.bundle.id],
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      repository.install({
+        actor: taskActor,
+        scope: "company",
+        idempotencyKey: "task-company",
+        bundle: await resolvedBundle("task-company", "Shared."),
+      }),
+    ).resolves.toMatchObject({ installation: { scope: "company" } });
+  });
+
+  it("allows another current member to use Company skills in trusted shared Task contexts", async () => {
+    const { installation } = await repository.install({
+      actor: actor(),
+      scope: "company",
+      idempotencyKey: "shared-task",
+      bundle: await resolvedBundle("shared-task", "Team instructions."),
+    });
+    await database.exec(
+      "INSERT INTO goat.chat_sessions (id) VALUES ('shared_task'); INSERT INTO goat.chat_messages (id, session_id) VALUES ('shared_message', 'shared_task');",
+    );
+    await expect(
+      activateAndListChatSkillBundles(drizzle(database), {
+        workspaceId: "workspace_1",
+        userId: "member_b",
+        skillAccess: "company",
+        chatSessionId: "shared_task",
+        activatedMessageId: "shared_message",
+        bundles: [{ bundleId: installation.bundle.id, sourceKind: "standalone" }],
+      }),
+    ).resolves.toHaveLength(1);
+  });
+
+  it("rejects a different same-name skill after a Chat has pinned its selection", async () => {
+    const owner = actor();
+    const personal = await repository.install({
+      actor: owner,
+      idempotencyKey: "pin-personal",
+      bundle: await resolvedBundle("same", "Personal."),
+    });
+    const company = await repository.install({
+      actor: owner,
+      scope: "company",
+      idempotencyKey: "pin-company",
+      bundle: await resolvedBundle("same", "Company."),
+    });
+    await database.exec(
+      "INSERT INTO goat.chat_sessions (id) VALUES ('chat_same'); INSERT INTO goat.chat_messages (id, session_id) VALUES ('message_same', 'chat_same');",
+    );
+    const target = {
+      workspaceId: owner.workspaceId,
+      userId: owner.userId,
+      chatSessionId: "chat_same",
+      activatedMessageId: "message_same",
+    };
+    await activateAndListChatSkillBundles(drizzle(database), {
+      ...target,
+      bundles: [{ bundleId: personal.installation.bundle.id, sourceKind: "standalone" }],
+    });
+    await expect(
+      activateAndListChatSkillBundles(drizzle(database), {
+        ...target,
+        bundles: [{ bundleId: company.installation.bundle.id, sourceKind: "standalone" }],
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+  });
+
+  it("lets an admin adopt a legacy Company skill only when making it Personal", async () => {
+    const { installation } = await repository.install({
+      actor: actor(),
+      scope: "company",
+      idempotencyKey: "legacy",
+      bundle: await resolvedBundle("legacy", "Existing shared instructions."),
+    });
+    await database.query(
+      "UPDATE goat.skill_installations SET created_by_user_id = NULL WHERE id = $1",
+      [installation.id],
+    );
+    await expect(
+      repository.setScope({
+        actor: actor(),
+        name: installation.id,
+        scope: "company",
+        expectedScope: "company",
+      }),
+    ).resolves.toMatchObject({ createdByUserId: null });
+    await expect(
+      repository.setScope({
+        actor: actor(),
+        name: installation.id,
+        scope: "personal",
+        expectedScope: "company",
+      }),
+    ).resolves.toMatchObject({ createdByUserId: "user_1", scope: "personal", canManage: true });
+  });
+
+  it("rejects removed members even when their actor still carries an admin role", async () => {
+    const stale = actor({ userId: "removed_admin" });
+    await expect(
+      repository.install({
+        actor: stale,
+        idempotencyKey: "removed",
+        bundle: await resolvedBundle("removed", "No access."),
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    expect(await repository.list({ actor: stale })).toEqual([]);
   });
 
   it("persists a complete bundle and installation atomically with durable replay", async () => {
@@ -225,7 +606,8 @@ describe("Postgres immutable Skill bundle repository", () => {
     expect(installed.installation.bundle.source).toEqual({ type: "workspace" });
     await expect(repository.listCatalog({ actor: actor() })).resolves.toEqual([
       {
-        id: "investigate-bug",
+        id: installed.installation.id,
+        scope: "personal",
         name: "investigate-bug",
         description: "Reproduce and diagnose reported bugs.",
       },
@@ -329,6 +711,7 @@ describe("Postgres immutable Skill bundle repository", () => {
     const db = drizzle(database);
     const firstActivation = await activateAndListChatSkillBundles(db, {
       workspaceId: "workspace_1",
+      userId: "user_1",
       chatSessionId: "chat_1",
       activatedMessageId: "message_1",
       bundles: [{ bundleId: first.installation.bundle.id, sourceKind: "standalone" }],
@@ -343,16 +726,19 @@ describe("Postgres immutable Skill bundle repository", () => {
     await repository.archive({ actor: actor(), name: "my-skill" });
     const afterReplacement = await activateAndListChatSkillBundles(db, {
       workspaceId: "workspace_1",
+      userId: "user_1",
       chatSessionId: "chat_1",
       activatedMessageId: "message_2",
       bundles: [{ bundleId: replacement.bundle.id, sourceKind: "standalone" }],
     });
     const taskBundles = await loadImmutableSkillBundles(db, {
       workspaceId: "workspace_1",
+      userId: "user_1",
       bundleIds: taskBundleIds,
     });
     const snapshottedBinary = await readChatSkillBundleFile(db, {
       workspaceId: "workspace_1",
+      userId: "user_1",
       chatSessionId: "chat_1",
       skillName: "my-skill",
       path: "references/data.bin",
@@ -400,12 +786,14 @@ describe("Postgres immutable Skill bundle repository", () => {
     const activations = await Promise.all([
       activateAndListChatSkillBundles(db, {
         workspaceId: "workspace_1",
+        userId: "user_1",
         chatSessionId: "chat_1",
         activatedMessageId: "message_1",
         bundles: [{ bundleId: first.installation.bundle.id, sourceKind: "standalone" }],
       }),
       activateAndListChatSkillBundles(db, {
         workspaceId: "workspace_1",
+        userId: "user_1",
         chatSessionId: "chat_1",
         activatedMessageId: "message_2",
         bundles: [{ bundleId: replacement.bundle.id, sourceKind: "standalone" }],
@@ -494,3 +882,54 @@ function actor(overrides: Partial<Actor> = {}): Actor {
     ...overrides,
   };
 }
+
+describe("Personal and Company skill migration", () => {
+  it("keeps legacy active and archived installations Company-scoped with shared revision history", async () => {
+    const legacy = new PGlite();
+    try {
+      await legacy.exec(
+        "CREATE SCHEMA goat; CREATE TABLE goat.workspaces (id text PRIMARY KEY); INSERT INTO goat.workspaces VALUES ('legacy_workspace');",
+      );
+      const migrate = async (name: string) => {
+        const migration = await readFile(
+          path.resolve(import.meta.dirname, "../../..", "drizzle", name),
+          "utf8",
+        );
+        for (const statement of migration.split("--> statement-breakpoint"))
+          if (statement.trim()) await legacy.exec(statement);
+      };
+      await migrate("0226_goat_immutable_skill_bundles.sql");
+      await migrate("0232_workspace_authored_skills.sql");
+      await legacy.exec(`
+        INSERT INTO goat.skill_bundles (id, workspace_id, integrity, name, description, body, source_type)
+        VALUES ('legacy_old', 'legacy_workspace', 'sha256:${"a".repeat(64)}', 'legacy', 'Old', 'Old instructions', 'workspace'),
+               ('legacy_current', 'legacy_workspace', 'sha256:${"b".repeat(64)}', 'legacy', 'Current', 'Current instructions', 'workspace');
+        INSERT INTO goat.skill_installations (id, workspace_id, name, bundle_id, archived_at)
+        VALUES ('archived', 'legacy_workspace', 'legacy', 'legacy_old', now()),
+               ('active', 'legacy_workspace', 'legacy', 'legacy_current', null);
+      `);
+      await migrate("0262_personal_company_skills.sql");
+      expect(
+        (
+          await legacy.query(
+            "SELECT id, scope, created_by_user_id FROM goat.skill_installations ORDER BY id",
+          )
+        ).rows,
+      ).toEqual([
+        { id: "active", scope: "company", created_by_user_id: null },
+        { id: "archived", scope: "company", created_by_user_id: null },
+      ]);
+      expect(
+        (await legacy.query("SELECT company_shared FROM goat.skill_installation_versions")).rows,
+      ).toEqual(Array.from({ length: 4 }, () => ({ company_shared: true })));
+      await legacy.exec(
+        "INSERT INTO goat.skill_installations (id, workspace_id, name, bundle_id, created_by_user_id) VALUES ('new', 'legacy_workspace', 'legacy', 'legacy_current', 'creator');",
+      );
+      expect(
+        (await legacy.query("SELECT scope FROM goat.skill_installations WHERE id = 'new'")).rows,
+      ).toEqual([{ scope: "personal" }]);
+    } finally {
+      await legacy.close();
+    }
+  });
+});

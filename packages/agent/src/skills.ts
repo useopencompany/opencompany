@@ -1,5 +1,4 @@
 import { assertSafeRelativePath, createWorkspaceSkillArtifact } from "@opencompany/agent-runtime";
-import { isValidBrainId } from "@opencompany/brain";
 import {
   type Actor,
   CoreError,
@@ -7,6 +6,7 @@ import {
   type SkillAuthoringInput,
   type SkillFileChunk,
   SkillImportApplicationService,
+  type SkillScope,
 } from "@opencompany/core";
 import { getDb } from "@opencompany/db/client";
 import type { PooledDb } from "@opencompany/db/pool";
@@ -15,7 +15,7 @@ import {
   PostgresSkillBundleRepository,
   readChatSkillBundleFile,
 } from "@opencompany/db/skill-bundle-repository";
-import { resolveWorkspaceSkillCatalog } from "@opencompany/db/skill-catalog";
+import { resolveWorkspaceSkillCatalog, selectSkill } from "@opencompany/db/skill-catalog";
 import { createSkillImportResolver } from "./skill-import";
 import type { WorkspaceSkillToolName } from "./workspace-skill-tools";
 
@@ -33,9 +33,10 @@ export type WorkspaceSkill = {
   description: string;
   instructions: string;
   sourceKind: "standalone" | "plugin";
+  scope: SkillScope | null;
 };
 
-export type SkillCatalogItem = Pick<WorkspaceSkill, "id" | "name" | "description">;
+export type SkillCatalogItem = Pick<WorkspaceSkill, "id" | "name" | "description" | "scope">;
 export type SkillMentionRef = { id: string };
 
 export type ChatSessionSkillSnapshot = {
@@ -50,6 +51,8 @@ export type ChatSessionSkillSnapshot = {
 };
 
 export type CreatedWorkspaceSkill = {
+  id: string;
+  scope: SkillScope | null;
   created: true;
   name: string;
   command: string;
@@ -57,6 +60,8 @@ export type CreatedWorkspaceSkill = {
 };
 
 export type UpdatedWorkspaceSkill = {
+  id: string;
+  scope: SkillScope | null;
   updated: true;
   name: string;
   command: string;
@@ -81,7 +86,7 @@ export function readSkillMentionRefs(
     if (!mention || typeof mention !== "object" || Array.isArray(mention)) continue;
     const candidate = mention as Record<string, unknown>;
     if (candidate.kind !== "skill") continue;
-    if (typeof candidate.id !== "string" || !isValidBrainId(candidate.id)) {
+    if (typeof candidate.id !== "string" || !/^[a-z0-9][a-z0-9_-]{0,199}$/u.test(candidate.id)) {
       return { ok: false, error: "Invalid skill mention." };
     }
     mentions.push({ id: candidate.id });
@@ -92,15 +97,24 @@ export function readSkillMentionRefs(
 export async function listSkillCatalog(
   workspaceId: string,
   db: Db = getDb(),
+  userId?: string,
 ): Promise<SkillCatalogItem[]> {
-  const catalog = await resolveWorkspaceSkillCatalog(db, { workspaceId });
-  return catalog.skills.map(({ id, name, description }) => ({ id, name, description }));
+  const catalog = await resolveWorkspaceSkillCatalog(db, {
+    workspaceId,
+    ...(userId ? { userId } : {}),
+  });
+  return catalog.skills.map(({ id, name, description, scope }) => ({
+    id,
+    name,
+    description,
+    scope,
+  }));
 }
 
 export async function createWorkspaceSkillForActor(input: {
   actor: Actor;
   idempotencyKey: string;
-  skill: SkillAuthoringInput;
+  skill: SkillAuthoringInput & { scope?: SkillScope };
   db?: Db;
 }): Promise<CreatedWorkspaceSkill> {
   const service = new SkillImportApplicationService(
@@ -114,6 +128,8 @@ export async function createWorkspaceSkillForActor(input: {
   });
   return {
     created: true,
+    id: installation.id,
+    scope: installation.scope,
     name: installation.name,
     command: `/${installation.name}`,
     bundleId: installation.bundle.id,
@@ -134,6 +150,8 @@ export async function updateWorkspaceSkillForActor(input: {
   const installation = await service.update(input.actor, input.name, input.skill);
   return {
     updated: true,
+    id: installation.id,
+    scope: installation.scope,
     name: installation.name,
     command: `/${installation.name}`,
     bundleId: installation.bundle.id,
@@ -159,6 +177,10 @@ export async function executeWorkspaceSkillToolForActor(input: {
       ...input,
       command: field("command"),
       ...(input.args.name !== undefined ? { name: field("name") } : {}),
+      ...(input.args.scope !== undefined ? { scope: field("scope") as SkillScope } : {}),
+      ...(input.args.expectedScope !== undefined
+        ? { expectedScope: field("expectedScope") as SkillScope }
+        : {}),
     });
   }
   const skill = {
@@ -167,7 +189,13 @@ export async function executeWorkspaceSkillToolForActor(input: {
     instructions: field("instructions"),
   };
   if (input.tool === "create_workspace_skill") {
-    return createWorkspaceSkillForActor({ ...input, skill });
+    return createWorkspaceSkillForActor({
+      ...input,
+      skill: {
+        ...skill,
+        ...(input.args.scope !== undefined ? { scope: field("scope") as SkillScope } : {}),
+      },
+    });
   }
   return updateWorkspaceSkillForActor({
     ...input,
@@ -185,6 +213,8 @@ export async function manageWorkspaceSkillsForActor(input: {
   actor: Actor;
   command: string;
   name?: string;
+  scope?: SkillScope;
+  expectedScope?: SkillScope;
   db?: Db;
 }) {
   const service = new SkillImportApplicationService(
@@ -195,14 +225,29 @@ export async function manageWorkspaceSkillsForActor(input: {
   if (input.command === "list") {
     const installations = await service.list(input.actor);
     return {
-      skills: installations.map(({ name, enabled, bundle }) => ({
-        name,
-        description: bundle.description,
-        enabled,
-        source: bundle.source.type,
-        editable: bundle.source.type === "workspace",
-      })),
+      skills: installations.map(
+        ({ id, scope, createdByUserId, canEdit, canManage, name, enabled, bundle }) => ({
+          id,
+          scope,
+          createdByUserId,
+          canManage,
+          name,
+          description: bundle.description,
+          enabled,
+          source: bundle.source.type,
+          editable: canEdit && bundle.source.type === "workspace",
+        }),
+      ),
     };
+  }
+  if (input.command === "set_scope") {
+    if (!input.name || !input.scope || !input.expectedScope)
+      throw new CoreError("invalid_argument", "name, scope, and expectedScope are required.");
+    const skill = await service.setScope(input.actor, input.name, {
+      scope: input.scope,
+      expectedScope: input.expectedScope,
+    });
+    return { id: skill.id, name: skill.name, scope: skill.scope };
   }
   if (input.command !== "read" && input.command !== "archive") {
     throw new CoreError("invalid_argument", "Use list, read, or archive for workspace Skills.");
@@ -216,6 +261,10 @@ export async function manageWorkspaceSkillsForActor(input: {
   }
   const installation = await service.inspect(input.actor, input.name);
   return {
+    id: installation.id,
+    scope: installation.scope,
+    createdByUserId: installation.createdByUserId,
+    canManage: installation.canManage,
     name: installation.name,
     description: installation.bundle.description,
     instructions: installation.bundle.body,
@@ -228,6 +277,7 @@ export async function manageWorkspaceSkillsForActor(input: {
 
 export async function resolveSkillMentions(input: {
   workspaceId: string | null;
+  userId?: string;
   mentions: SkillMentionRef[];
   db?: Db;
 }): Promise<WorkspaceSkill[]> {
@@ -243,6 +293,7 @@ export async function resolveSkillMentions(input: {
 
   const catalog = await resolveWorkspaceSkillCatalog(input.db ?? getDb(), {
     workspaceId: input.workspaceId,
+    ...(input.userId ? { userId: input.userId } : {}),
   });
   const byId = new Map(
     catalog.skills.map((skill) => [
@@ -254,11 +305,13 @@ export async function resolveSkillMentions(input: {
         description: skill.description,
         instructions: skill.body,
         sourceKind: skill.sourceKind,
+        scope: skill.scope,
       },
     ]),
   );
   const resolvedSkills = unique.map((mention) => {
-    const skill = byId.get(mention.id);
+    const selected = selectSkill(catalog.skills, mention.id);
+    const skill = selected ? byId.get(selected.id) : undefined;
     if (!skill) {
       throw new SkillMentionError(`Skill "@skill/${mention.id}" is unavailable.`);
     }
@@ -280,11 +333,15 @@ export async function activateAndListChatSessionSkills(input: {
   activatedMessageId: string;
   workspaceId: string;
   skills: WorkspaceSkill[];
+  userId: string;
+  skillAccess?: "company";
   db?: Db;
 }): Promise<ChatSessionSkillSnapshot[]> {
   const db = input.db ?? getDb();
   const activations = await activateAndListChatSkillBundles(db, {
     workspaceId: input.workspaceId,
+    userId: input.userId,
+    ...(input.skillAccess ? { skillAccess: input.skillAccess } : {}),
     chatSessionId: input.chatSessionId,
     activatedMessageId: input.activatedMessageId,
     bundles: input.skills.map((skill) => ({
@@ -307,6 +364,8 @@ export async function activateAndListChatSessionSkills(input: {
 export async function readChatSkillFile(input: {
   workspaceId: string;
   chatSessionId: string;
+  userId: string;
+  skillAccess?: "company";
   skill: string;
   path: string;
   offset?: number;
@@ -322,6 +381,8 @@ export async function readChatSkillFile(input: {
   }
   const row = await readChatSkillBundleFile(input.db ?? getDb(), {
     workspaceId: input.workspaceId,
+    userId: input.userId,
+    ...(input.skillAccess ? { skillAccess: input.skillAccess } : {}),
     chatSessionId: input.chatSessionId,
     skillName: input.skill,
     path: input.path,

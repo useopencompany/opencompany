@@ -68,6 +68,7 @@ import {
   importHeadlessSkill,
   previewHeadlessSkillImport,
   replaceHeadlessSkill,
+  setHeadlessSkillScope,
   updateHeadlessWorkspaceSkill,
 } from "@/lib/headless-knowledge-commands";
 import type { BrainOverviewStats, BrainSnapshot } from "@/lib/headless-knowledge-types";
@@ -860,7 +861,7 @@ export function SkillsSettingsRoute({
   return (
     <SettingsContent
       title="Skills"
-      description="Portable Agent Skills created in this workspace or installed from a public source."
+      description="Your Personal skills and the Company skills everyone can use and edit."
     >
       {canEdit ? (
         <div className="-mt-2 flex gap-2">
@@ -889,8 +890,8 @@ export function SkillsSettingsRoute({
           title="No skills yet"
           description={
             canEdit
-              ? "Create a workspace Skill or import one from GitHub or skills.sh."
-              : "Workspace admins can create and install Agent Skills."
+              ? "Create a Personal skill or import one from GitHub or skills.sh."
+              : "Skills shared with you appear here."
           }
         />
       ) : (
@@ -922,7 +923,7 @@ export function SkillsSettingsRoute({
 function SkillListRow({ skill }: { skill: SkillListItemDto }) {
   return (
     <Link
-      href={`/settings/skills/${encodeURIComponent(skill.name)}`}
+      href={`/settings/skills/${encodeURIComponent(skill.id)}`}
       prefetch
       className="group flex items-center gap-3 rounded-lg border border-border bg-surface px-3.5 py-3 transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
     >
@@ -931,8 +932,9 @@ function SkillListRow({ skill }: { skill: SkillListItemDto }) {
           <span className="truncate text-[14px] font-medium leading-tight text-ink">
             {skill.bundle.name}
           </span>
+          <SkillScopeBadge scope={skill.scope} />
           <InstallationStatusBadge enabled={skill.enabled} />
-          {skill.bundle.source.type === "workspace" ? <WorkspaceBadge /> : <ImportedBadge />}
+          {skill.bundle.source.type !== "workspace" ? <ImportedBadge /> : null}
         </span>
         {skill.bundle.description.trim() ? (
           <span className="mt-0.5 block truncate text-[12.5px] leading-5 text-ink-subtle">
@@ -964,8 +966,8 @@ export function SkillBundleRoute({
     setError(null);
     startMutation(async () => {
       try {
-        if (enabled) await enableHeadlessSkill(installation.name);
-        else await disableHeadlessSkill(installation.name);
+        if (enabled) await enableHeadlessSkill(installation.id);
+        else await disableHeadlessSkill(installation.id);
         router.refresh();
       } catch (cause) {
         setError(errorMessage(cause));
@@ -977,7 +979,7 @@ export function SkillBundleRoute({
     setError(null);
     startMutation(async () => {
       try {
-        await archiveHeadlessSkill(installation.name);
+        await archiveHeadlessSkill(installation.id);
         router.push("/settings/skills");
       } catch (cause) {
         setError(errorMessage(cause));
@@ -992,9 +994,32 @@ export function SkillBundleRoute({
       backLink={{ href: "/settings/skills", label: "Skills" }}
     >
       {bundle.source.type !== "workspace" ? <SkillSourceNotice source={bundle.source} /> : null}
-      {!canEdit ? (
-        <p className="text-[13px] leading-5 text-ink-subtle">
-          Only workspace admins can manage skill installations.
+      {installation.scope ? (
+        <SkillScopeField
+          scope={installation.scope}
+          disabled={!installation.canManage || isMutating}
+          onChange={(scope) => {
+            setError(null);
+            startMutation(async () => {
+              try {
+                const updated = await setHeadlessSkillScope(installation.id, {
+                  scope,
+                  expectedScope: installation.scope!,
+                });
+                if (!updated.canEdit) router.push("/settings/skills");
+                else router.refresh();
+              } catch (cause) {
+                setError(errorMessage(cause));
+              }
+            });
+          }}
+        />
+      ) : (
+        <p className="text-[13px] text-ink-subtle">Managed by its plugin.</p>
+      )}
+      {installation.scope === "company" && !installation.canManage ? (
+        <p className="text-[12px] text-ink-subtle">
+          You can edit this skill. Its creator and company admins manage visibility and archiving.
         </p>
       ) : null}
 
@@ -1066,21 +1091,24 @@ export function SkillBundleRoute({
               Replace bundle
             </button>
           ) : null}
-          <button
-            type="button"
-            disabled={isMutating}
-            onClick={archive}
-            className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[13px] font-medium text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink disabled:opacity-60"
-          >
-            {isMutating ? <Loader2 size={14} className="animate-spin" /> : <Archive size={14} />}
-            Archive
-          </button>
+          {installation.canManage ? (
+            <button
+              type="button"
+              disabled={isMutating}
+              onClick={archive}
+              className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[13px] font-medium text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink disabled:opacity-60"
+            >
+              {isMutating ? <Loader2 size={14} className="animate-spin" /> : <Archive size={14} />}
+              Archive
+            </button>
+          ) : null}
         </div>
       ) : null}
 
       {replacing ? (
         <ImportSkillDialog
           replaceName={installation.name}
+          replaceId={installation.id}
           initialUrl={skillSourceInput(bundle.source, bundle.name)}
           initialSelectedPath={bundle.source.path}
           onClose={() => setReplacing(false)}
@@ -1132,7 +1160,7 @@ function WorkspaceSkillEditor({
     setError(null);
     startSaving(async () => {
       try {
-        const updated = await updateHeadlessWorkspaceSkill(installation.name, {
+        const updated = await updateHeadlessWorkspaceSkill(installation.id, {
           ...next,
           expectedBundleId: savedBundleId,
         });
@@ -1322,15 +1350,6 @@ function ImportedBadge() {
   );
 }
 
-function WorkspaceBadge() {
-  return (
-    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-surface-muted px-1.5 py-px text-[10.5px] font-medium leading-4 text-ink-subtle">
-      <Sparkles size={10} strokeWidth={2} />
-      Workspace
-    </span>
-  );
-}
-
 export function EmptyState({
   icon: Icon,
   title,
@@ -1512,6 +1531,7 @@ function WorkspaceSkillDialog({
   onSaved: (name: string) => void;
 }) {
   const [name, setName] = useState("");
+  const [scope, setScope] = useState<"personal" | "company">("personal");
   const [description, setDescription] = useState("");
   const [instructions, setInstructions] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -1544,12 +1564,13 @@ function WorkspaceSkillDialog({
     setError(null);
     startSaving(async () => {
       try {
-        await createHeadlessWorkspaceSkill({
+        const result = await createHeadlessWorkspaceSkill({
+          scope,
           name: normalizedName,
           description: normalizedDescription,
           instructions: normalizedInstructions,
         });
-        onSaved(normalizedName);
+        onSaved(result.installation.id);
       } catch (cause) {
         setError(errorMessage(cause));
       }
@@ -1575,6 +1596,7 @@ function WorkspaceSkillDialog({
           Give the skill a name and write instructions the agent can follow.
         </p>
         <div className="mt-4 flex flex-col gap-3 overflow-y-auto">
+          <SkillScopeField scope={scope} onChange={setScope} disabled={isSaving} />
           <label className="flex flex-col gap-1.5">
             <span className="text-[12px] font-medium text-ink-subtle">Name</span>
             <input
@@ -1650,15 +1672,18 @@ function ImportSkillDialog({
   onClose,
   onInstalled,
   replaceName,
+  replaceId,
   initialUrl = "",
   initialSelectedPath,
 }: {
   onClose: () => void;
   onInstalled: (name: string) => void;
   replaceName?: string;
+  replaceId?: string;
   initialUrl?: string;
   initialSelectedPath?: string;
 }) {
+  const [scope, setScope] = useState<"personal" | "company">("personal");
   const [url, setUrl] = useState(initialUrl);
   const [selectedPath, setSelectedPath] = useState<string | undefined>(initialSelectedPath);
   const [candidates, setCandidates] = useState<SkillImportCandidateDto[] | null>(null);
@@ -1733,11 +1758,11 @@ function ImportSkillDialog({
           expectedIntegrity: confirmedPreview.integrity,
         };
         if (replaceName) {
-          const result = await replaceHeadlessSkill(replaceName, command);
-          onInstalled(result.name);
+          const result = await replaceHeadlessSkill(replaceId ?? replaceName, command);
+          onInstalled(result.id);
         } else {
-          const result = await importHeadlessSkill(command);
-          onInstalled(result.installation.name);
+          const result = await importHeadlessSkill({ ...command, scope });
+          onInstalled(result.installation.id);
         }
       } catch (cause) {
         setError(errorMessage(cause));
@@ -1770,6 +1795,9 @@ function ImportSkillDialog({
         </p>
 
         <div className="mt-4 flex flex-col gap-3 overflow-y-auto">
+          {!replaceName ? (
+            <SkillScopeField scope={scope} onChange={setScope} disabled={pending} />
+          ) : null}
           <label className="flex flex-col gap-1.5">
             <span className="text-[12px] font-medium text-ink-subtle">URL</span>
             <div className="flex gap-2">
@@ -1935,4 +1963,42 @@ export function formatRelativeTime(value: Date | string) {
   const elapsedDays = Math.floor(elapsedHours / 24);
   if (elapsedDays < 7) return `${elapsedDays}d ago`;
   return new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(timestamp);
+}
+
+function SkillScopeBadge({ scope }: { scope: "personal" | "company" | null }) {
+  return (
+    <span className="rounded bg-surface-muted px-1.5 py-0.5 text-[11px] text-ink-subtle">
+      {scope === "personal" ? "Personal" : scope === "company" ? "Company" : "Plugin"}
+    </span>
+  );
+}
+
+function SkillScopeField({
+  scope,
+  onChange,
+  disabled,
+}: {
+  scope: "personal" | "company";
+  onChange: (scope: "personal" | "company") => void;
+  disabled?: boolean;
+}) {
+  return (
+    <label className="flex flex-col gap-1.5">
+      <span className="text-[12px] font-medium text-ink-subtle">Visibility</span>
+      <select
+        value={scope}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value as "personal" | "company")}
+        className={EDITOR_INPUT_CLASS}
+      >
+        <option value="personal">Personal</option>
+        <option value="company">Company</option>
+      </select>
+      <span className="text-[12px] leading-5 text-ink-subtle">
+        {scope === "personal"
+          ? "Only the creator can see and use this skill."
+          : "Everyone in your company can use and edit these instructions and included files."}
+      </span>
+    </label>
+  );
 }

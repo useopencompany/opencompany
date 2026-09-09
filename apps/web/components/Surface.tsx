@@ -5079,7 +5079,7 @@ function findActiveMentionToken(value: string, caret: number): ActiveMentionToke
 function chatMentionToken(mention: ChatMention) {
   if (mention.kind === "engine") return mention.id === "claude" ? "@claude" : "@codex";
   if (mention.kind === "workflow") return `#${mention.id}`;
-  return `/${mention.id}`;
+  return `/${mention.name ?? mention.id}`;
 }
 
 function chatMentionIsVisible(value: string, mention: ChatMention) {
@@ -5253,8 +5253,9 @@ function skillMentionsFromPastedText(input: {
   skills: SkillCatalogItem[];
 }): ChatMention[] {
   return input.skills.flatMap((skill) => {
-    if (!input.skillIds.has(skill.id)) return [];
-    const mention: ChatMention = { kind: "skill", id: skill.id };
+    if (!input.skillIds.has(skill.name) && !input.skillIds.has(skill.id)) return [];
+    if (input.skills.filter((candidate) => candidate.name === skill.name).length !== 1) return [];
+    const mention: ChatMention = { kind: "skill", id: skill.id, name: skill.name };
     return chatMentionIsVisible(input.pastedText, mention) &&
       chatMentionIsVisible(input.fullInput, mention)
       ? [mention]
@@ -5365,10 +5366,17 @@ function buildMentionOptions(input: {
       if (query && !haystack.includes(query)) continue;
       options.push({
         kind: "skill",
-        token: `/${skill.id}`,
+        token: `/${skill.name}`,
         label: skill.name,
-        description: skill.description,
-        mention: { kind: "skill", id: skill.id },
+        description: [
+          skill.scope === "personal"
+            ? "Personal"
+            : skill.scope === "company"
+              ? "Company"
+              : "Plugin",
+          skill.description,
+        ].join(" · "),
+        mention: { kind: "skill", id: skill.id, name: skill.name },
       });
     }
     return options;

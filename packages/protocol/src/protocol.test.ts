@@ -160,6 +160,7 @@ describe("headless protocol", () => {
       "/v1/skills/imports",
       "/v1/skills/catalog",
       "/v1/skills/{slug}",
+      "/v1/skills/{slug}/scope",
       "/v1/skills/{slug}/archive",
       "/v1/skills/{slug}/enable",
       "/v1/skills/{slug}/disable",
