@@ -2,6 +2,7 @@ import { CustomMcpPluginDetail } from "@/components/CustomMcpPluginSettings";
 import {
   AttioPluginDetail,
   BetterStackPluginDetail,
+  ConvexPluginDetail,
   FathomPluginDetail,
   GitHubPluginDetail,
   GmailPluginDetail,
@@ -64,6 +65,7 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
       supabase: SupabasePluginDetail,
       resend: ResendPluginDetail,
       posthog: PostHogPluginDetail,
+      convex: ConvexPluginDetail,
       render: RenderPluginDetail,
       signoz: SigNozPluginDetail,
       slack: SlackPluginDetail,

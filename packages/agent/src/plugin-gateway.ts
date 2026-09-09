@@ -26,6 +26,12 @@ import {
   loadBetterStackMcpWorkerConnection,
 } from "./integrations/betterstack-mcp";
 import {
+  CONVEX_MCP_ENDPOINT_URL,
+  convexMcpRuntimeEndpointUrl,
+  getConvexIntegrationState,
+  loadConvexMcpWorkerConnection,
+} from "./integrations/convex-mcp";
+import {
   FATHOM_MCP_ENDPOINT_URL,
   getFathomMcpIntegrationState,
   loadFathomMcpWorkerConnection,
@@ -195,6 +201,12 @@ const providerBindings = {
     endpointUrl: GOOGLE_CALENDAR_MCP_ENDPOINT_URL,
     getState: getGoogleCalendarMcpIntegrationState,
     loadConnection: loadGoogleCalendarMcpWorkerConnection,
+  },
+  convex: {
+    provider: "convex",
+    endpointUrl: CONVEX_MCP_ENDPOINT_URL,
+    getState: getConvexIntegrationState,
+    loadConnection: loadConvexMcpWorkerConnection,
   },
   "google-drive": {
     provider: "google_drive",
@@ -504,7 +516,11 @@ function bindRegistration(
   }
   let loadConnection = binding.loadConnection as RemoteMcpGatewayRegistration["loadConnection"];
   let server = record.server;
-  if (record.pluginName === "google-calendar") {
+  if (record.pluginName === "convex") {
+    loadConnection = (input) =>
+      loadConvexMcpWorkerConnection({ ...input, registrationId: record.id });
+    server = { ...record.server, url: convexMcpRuntimeEndpointUrl() };
+  } else if (record.pluginName === "google-calendar") {
     loadConnection = (input) =>
       loadGoogleCalendarMcpWorkerConnection({ ...input, registrationId: record.id });
     server = { ...record.server, url: googleCalendarMcpRuntimeEndpointUrl() };

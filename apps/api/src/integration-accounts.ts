@@ -24,6 +24,13 @@ import {
   validateAttioApiKey,
 } from "@opencompany/agent/integrations/attio";
 import {
+  type ConvexProviderState,
+  connectConvexMcpIntegration,
+  getConvexIntegrationState,
+  validateConvexApiKey,
+} from "@opencompany/agent/integrations/convex-mcp";
+import { parseConvexDeployKey } from "@opencompany/agent/integrations/convex-policy";
+import {
   connectFathomIntegration,
   getFathomIntegrationState,
   isValidFathomApiKey,
@@ -93,6 +100,7 @@ export type IntegrationAccountService = {
   disconnectAttio(actor: Actor, integrationId: string): Promise<void>;
   connectFathom(actor: Actor, apiKey: string): Promise<FathomProviderState>;
   connectGranola(actor: Actor, apiKey: string): Promise<GranolaProviderState>;
+  connectConvex(actor: Actor, apiKey: string): Promise<ConvexProviderState>;
   connectRender(actor: Actor, apiKey: string): Promise<RenderProviderState>;
   connectStripe(actor: Actor, apiKey: string): Promise<StripeProviderState>;
   disconnectStripe(actor: Actor): Promise<void>;
@@ -102,6 +110,10 @@ export function createIntegrationAccountService(input: {
   db: DbLike;
   now?: () => Date;
   runner?: RunnerClient;
+  refreshConvexPluginRegistrations?: (input: {
+    userWorkosId: string;
+    workspaceId: string;
+  }) => Promise<void>;
   refreshRenderPluginRegistrations?: (input: {
     userWorkosId: string;
     workspaceId: string;
@@ -319,6 +331,41 @@ export function createIntegrationAccountService(input: {
         return await getGranolaIntegrationState(actor.userId, db);
       } catch (error) {
         throw commandFailure(error, "Could not save the Granola API key.", "granola_connect");
+      }
+    },
+
+    async connectConvex(actor, apiKey) {
+      const trimmed = apiKey.trim();
+      if (!parseConvexDeployKey(trimmed)) {
+        throw new ApiError(
+          400,
+          "invalid_request",
+          "Use a deployment-scoped Convex key starting with dev: or prod:.",
+        );
+      }
+      try {
+        const validation = await validateConvexApiKey(trimmed);
+        if (!validation.ok) throw new ApiError(400, "invalid_request", validation.error);
+        await connectConvexMcpIntegration({
+          userWorkosId: actor.userId,
+          apiKey: trimmed,
+          deployment: validation.deployment,
+          db,
+        });
+        await input
+          .refreshConvexPluginRegistrations?.({
+            userWorkosId: actor.userId,
+            workspaceId: actor.workspaceId,
+          })
+          .catch((error) => {
+            logger.warn("Convex connected but plugin discovery refresh failed", {
+              event: "opencompany.convex_plugin_refresh_failed",
+              error_message: error instanceof Error ? error.message : String(error),
+            });
+          });
+        return await getConvexIntegrationState(actor.userId, db);
+      } catch (error) {
+        throw commandFailure(error, "Could not save the Convex API key.", "convex_connect");
       }
     },
 

@@ -21,6 +21,8 @@ const mocks = vi.hoisted(() => ({
   loadConnection: vi.fn(),
   loadGitHubConnection: vi.fn(),
   loadFathomConnection: vi.fn(),
+  getConvexState: vi.fn(),
+  loadConvexConnection: vi.fn(),
   getGoogleDriveState: vi.fn(),
   loadGoogleDriveConnection: vi.fn(),
   loadGoogleCalendarConnection: vi.fn(),
@@ -117,6 +119,12 @@ vi.mock("./integrations/google-calendar-mcp", () => ({
     "https://api.opencompany.chat/mcp/plugins/google-calendar",
   getGoogleCalendarMcpIntegrationState: mocks.getGoogleCalendarState,
   loadGoogleCalendarMcpWorkerConnection: mocks.loadGoogleCalendarConnection,
+}));
+vi.mock("./integrations/convex-mcp", () => ({
+  CONVEX_MCP_ENDPOINT_URL: "https://api.opencompany.chat/mcp/plugins/convex",
+  convexMcpRuntimeEndpointUrl: () => "https://api.opencompany.chat/mcp/plugins/convex",
+  getConvexIntegrationState: mocks.getConvexState,
+  loadConvexMcpWorkerConnection: mocks.loadConvexConnection,
 }));
 vi.mock("./integrations/google-drive-mcp", () => ({
   GOOGLE_DRIVE_MCP_ENDPOINT_URL: "https://api.opencompany.chat/mcp/plugins/google-drive",
@@ -618,6 +626,56 @@ describe("plugin gateway registration cache", () => {
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
   });
 
+  it("binds Convex credentials only to opencompany's exact Convex MCP endpoint", async () => {
+    const convexRecord = record({
+      pluginName: "convex",
+      pluginLabel: "convex",
+      pluginDescription: "Convex plugin tools.",
+      connectionProvider: "convex",
+      server: {
+        name: "convex",
+        type: "streamable-http",
+        url: "https://api.opencompany.chat/mcp/plugins/convex",
+        headers: {},
+      },
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([convexRecord]);
+
+    const registrations = await resolvePluginGatewayRegistrations(identity, { db, now });
+    expect(registrations).toEqual([
+      expect.objectContaining({
+        source: "plugin:convex:convex",
+        connectionProvider: "convex",
+        getState: mocks.getConvexState,
+      }),
+    ]);
+    await registrations[0]!.loadConnection({
+      ...identity,
+      operation: { type: "tools/list" },
+      onAuthorizationRequired: () => {
+        throw new Error("authorization required");
+      },
+    });
+    expect(mocks.loadConvexConnection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ...identity,
+        registrationId: "plugin_gateway_1",
+        operation: { type: "tools/list" },
+      }),
+    );
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...convexRecord,
+        server: {
+          ...convexRecord.server,
+          url: "https://api.opencompany.chat.evil.example/mcp/plugins/convex",
+        },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
   it("binds Google credentials only to opencompany's exact Drive MCP endpoint", async () => {
     const googleDriveRecord = record({
       pluginName: "google-drive",

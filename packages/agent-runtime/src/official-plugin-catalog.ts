@@ -1,5 +1,7 @@
 // Reviewed public package pins. Update artifacts with scripts/package-official-plugins.ts.
 export const OFFICIAL_PLUGIN_SOURCES = {
+  convex:
+    "https://github.com/useopencompany/plugins/tree/81b0f81319ad50ea4e03f20055560be4d814d3b8/convex",
   attio:
     "https://github.com/useopencompany/plugins/tree/0daeec4cff5d5f9925af2901410e1aa6c8baf0d8/attio",
   betterstack:

@@ -74,3 +74,27 @@ already completed in an external service.
 Plugins that use a writable `PLUGIN_DATA` directory can retain bounded data across sandbox and
 Plugin replacement. Archiving a Plugin doesn't implicitly erase this data. Manage the provider
 connection separately when you want to revoke account access.
+
+## Convex
+
+Install Convex from **Settings → Plugins**, then connect it using a deployment-scoped deploy key
+from your Convex deployment settings. Use a key beginning with `dev:` or `prod:` and grant
+function inspection so the connection can be validated. Project-wide tokens and self-hosted
+endpoints are not supported. You can replace or disconnect the key from the same plugin page.
+
+Convex uses the same On, Ask, and Off controls as other plugins:
+
+- **Inspect Convex deployment** starts On: deployment metadata, schemas, and function specifications.
+- **Read documents and logs** starts Ask: documents, read-only queries, and function logs.
+- **Run Convex functions** starts Ask: deployed queries, mutations, and actions, which may change data or call other services.
+- **Manage environment variables** starts Off: reading, setting, and removing variables, including secrets.
+
+A production connection supports only deployment metadata, schemas, and function specifications.
+Changing permissions does not enable production data access or writes. The insights tool is
+unavailable with deployment-key authentication. Tools always target the connected deployment;
+there is no project directory or deployment selector to configure in chat.
+
+opencompany encrypts the key and keeps it server-side. Its hosted bridge runs the pinned official
+Convex CLI MCP server. Requests have a 30-second execution limit and a bounded response size;
+use smaller pages or narrower queries for large datasets. Uninstalling the plugin disables tools;
+disconnect the account separately to revoke opencompany's saved connection.

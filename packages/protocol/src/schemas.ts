@@ -435,6 +435,7 @@ export const IntegrationAccountReadModelSchema = z
       "fathom",
       "attio",
       "betterstack",
+      "convex",
       "render",
       "vercel",
       "signoz",
@@ -3818,6 +3819,7 @@ export const PersonalIntegrationProviderSchema = z.enum([
   "fathom",
   "attio",
   "betterstack",
+  "convex",
   "render",
   "vercel",
   "signoz",
@@ -3983,6 +3985,28 @@ export const IntegrationApiKeyBodySchema = z
   .object({ apiKey: z.string().min(1).max(4_000) })
   .strict()
   .openapi("IntegrationApiKeyBody");
+
+export const ConvexAccountStateSchema = z
+  .object({
+    provider: z.literal("convex"),
+    connected: z.boolean(),
+    status: IntegrationAccountStatusSchema,
+    integrationId: IntegrationAccountIdSchema.nullable(),
+    accountName: z.string().nullable(),
+    statusReason: z.string().nullable(),
+    capabilityModes: z.record(z.string(), z.unknown()),
+    toolModes: z.record(z.string(), z.unknown()),
+  })
+  .strict()
+  .openapi("ConvexAccountState");
+
+export const ConvexAccountStateEnvelopeSchema = z
+  .object({
+    data: z.object({ state: ConvexAccountStateSchema }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("ConvexAccountStateEnvelope");
 
 export const RenderAccountStateSchema = z
   .object({

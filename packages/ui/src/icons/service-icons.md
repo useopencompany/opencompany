@@ -28,3 +28,11 @@ SVG attributes are translated to JSX. Gradients and filters use React `useId` to
 keep references local to each rendered instance, including when a sidebar row and
 a detail heading display the same logo together. Assets are bundled locally;
 rendering does not fetch from vendor websites.
+
+## Convex (verified 2026-09-09)
+
+Source: https://www.convex.dev/brand — official download https://www.convex.dev/resources/logos.zip,
+`Logos/SVG/symbol-color.svg`. The shared ConvexIcon preserves the vendor viewBox, paths,
+clear space, and three brand colors. Only sizing is delegated to component props. No IDs,
+gradients, masks, or clipping references occur in the source. This is Convex's database
+platform, not the unrelated Convex blockchain project.

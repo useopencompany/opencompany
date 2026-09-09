@@ -393,6 +393,35 @@ export const PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
+  convex: [
+    {
+      id: "read",
+      label: "Inspect Convex deployment",
+      description: "Read deployment metadata, table schemas, and function specifications.",
+      defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Read documents and logs",
+      description:
+        "Read database documents, run read-only queries, and inspect function logs in development deployments.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Run Convex functions",
+      description:
+        "Execute deployed queries, mutations, and actions in development deployments. Functions may change data or call external services.",
+      defaultMode: "ask",
+    },
+    {
+      id: "draft",
+      label: "Manage environment variables",
+      description:
+        "Read, set, or remove development deployment environment variables. Values may contain secrets.",
+      defaultMode: "off",
+    },
+  ],
   render: [
     {
       id: "read",

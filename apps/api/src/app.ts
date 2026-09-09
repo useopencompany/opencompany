@@ -15,6 +15,8 @@ import type {
   GranolaProviderState,
   StripeProviderState,
 } from "@opencompany/agent/integration-state";
+import type { ConvexProviderState } from "@opencompany/agent/integrations/convex-mcp";
+import type { ConvexMcpService } from "@opencompany/agent/integrations/convex-mcp-server";
 import type { GmailMcpService } from "@opencompany/agent/integrations/gmail-mcp-server";
 import type { GoogleCalendarMcpService } from "@opencompany/agent/integrations/google-calendar-mcp-server";
 import type { GoogleDriveMcpService } from "@opencompany/agent/integrations/google-drive-mcp-server";
@@ -210,6 +212,7 @@ export type CreateApiAppInput = {
   mcp?: McpService;
   gmailMcp?: GmailMcpService;
   googleCalendarMcp?: GoogleCalendarMcpService;
+  convexMcp?: ConvexMcpService;
   googleDriveMcp?: GoogleDriveMcpService;
   engineAuth: EngineAuthService;
   engineSessions: EngineSessionService;
@@ -2381,6 +2384,15 @@ export function createApiApp(input: CreateApiAppInput) {
       );
       return c.json({ data: { state: granolaStateDto(state) }, meta }, 200);
     },
+    connectConvexAccount: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const state = await input.integrationAccounts.connectConvex(
+        actor,
+        c.req.valid("json").apiKey,
+      );
+      return c.json({ data: { state: convexStateDto(state) }, meta }, 200);
+    },
     connectRenderAccount: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 60);
@@ -2808,6 +2820,9 @@ export function createApiApp(input: CreateApiAppInput) {
   }
   if (input.googleCalendarMcp) {
     app.post("/mcp/plugins/google-calendar", (c) => input.googleCalendarMcp!.handle(c.req.raw));
+  }
+  if (input.convexMcp) {
+    app.post("/mcp/plugins/convex", (c) => input.convexMcp!.handle(c.req.raw));
   }
   if (input.googleDriveMcp) {
     app.post("/mcp/plugins/google-drive", (c) => input.googleDriveMcp!.handle(c.req.raw));
@@ -3652,6 +3667,19 @@ function granolaStateDto(state: GranolaProviderState) {
     accountEmail: state.accountEmail,
     accountName: state.accountName,
     statusReason: state.statusReason,
+  };
+}
+
+function convexStateDto(state: ConvexProviderState) {
+  return {
+    provider: state.provider,
+    connected: state.connected,
+    status: integrationAccountStatusDto(state.status),
+    integrationId: state.integrationId,
+    accountName: state.accountName,
+    statusReason: state.statusReason,
+    capabilityModes: state.capabilityModes,
+    toolModes: state.toolModes,
   };
 }
 

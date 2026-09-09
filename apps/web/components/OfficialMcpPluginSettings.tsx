@@ -39,6 +39,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useOptimistic, useState, useTransition } from "react";
 import { useAppData } from "@/components/AppDataProvider";
 import { CapabilityModeToggle } from "@/components/CapabilityModeToggle";
+import { ConvexDeployKeyConnectionForm } from "@/components/ConvexDeployKeyConnectionForm";
 import { GitHubRepositoryAccessSection } from "@/components/GitHubRepositoryAccess";
 import { InfisicalPluginConnectionForm } from "@/components/InfisicalPluginConnectionForm";
 import { PluginAccountRow, PluginConnectionFeedback } from "@/components/PluginConnectionSettings";
@@ -462,6 +463,25 @@ export function ResendPluginDetail({
   return (
     <OfficialMcpPluginDetail
       config={OFFICIAL_MCP_PLUGINS.resend}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
+export function ConvexPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.convex}
       pluginState={pluginState}
       canEdit={canEdit}
       {...(toolsState ? { toolsState } : {})}
@@ -1268,6 +1288,9 @@ function PluginConnectionControls({
       />
     ) : null;
   }
+  if (config.connectionProvider === "convex") {
+    return <ConvexDeployKeyConnectionForm connected={Boolean(permissionConnection?.connected)} />;
+  }
   if (config.connectionProvider === "render") {
     return <RenderApiKeyConnectionForm connected={Boolean(permissionConnection?.connected)} />;
   }
@@ -1762,6 +1785,7 @@ function pluginAccountsFromState(
     config.connectionProvider === "supabase" ||
     config.connectionProvider === "resend" ||
     config.connectionProvider === "posthog" ||
+    config.connectionProvider === "convex" ||
     config.connectionProvider === "render" ||
     config.connectionProvider === "vercel" ||
     config.connectionProvider === "signoz" ||

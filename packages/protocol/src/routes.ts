@@ -59,6 +59,7 @@ import {
   ConversationEnvelopeSchema,
   ConversationPageSchema,
   ConversationShareEnvelopeSchema,
+  ConvexAccountStateEnvelopeSchema,
   CreateBillingTopUpBodySchema,
   CreateBrainBodySchema,
   CreateBrainDocumentBodySchema,
@@ -3148,6 +3149,27 @@ export const connectGranolaAccountRoute = createRoute({
   },
 });
 
+export const connectConvexAccountRoute = createRoute({
+  method: "put",
+  path: "/v1/integration-accounts/convex",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: IntegrationApiKeyBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description:
+        "Convex connected (or reconnected) for the acting user. The API key never appears in the response.",
+      content: { "application/json": { schema: ConvexAccountStateEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const connectRenderAccountRoute = createRoute({
   method: "put",
   path: "/v1/integration-accounts/render",
@@ -3850,6 +3872,7 @@ export type V1RouteHandlers = {
   disconnectAttioAccount: RouteHandler<typeof disconnectAttioAccountRoute>;
   connectFathomAccount: RouteHandler<typeof connectFathomAccountRoute>;
   connectGranolaAccount: RouteHandler<typeof connectGranolaAccountRoute>;
+  connectConvexAccount: RouteHandler<typeof connectConvexAccountRoute>;
   connectRenderAccount: RouteHandler<typeof connectRenderAccountRoute>;
   connectStripeAccount: RouteHandler<typeof connectStripeAccountRoute>;
   disconnectStripeAccount: RouteHandler<typeof disconnectStripeAccountRoute>;
@@ -4044,6 +4067,7 @@ export function createV1Router(
       .openapi(disconnectAttioAccountRoute, handlers.disconnectAttioAccount)
       .openapi(connectFathomAccountRoute, handlers.connectFathomAccount)
       .openapi(connectGranolaAccountRoute, handlers.connectGranolaAccount)
+      .openapi(connectConvexAccountRoute, handlers.connectConvexAccount)
       .openapi(connectRenderAccountRoute, handlers.connectRenderAccount)
       .openapi(connectStripeAccountRoute, handlers.connectStripeAccount)
       .openapi(disconnectStripeAccountRoute, handlers.disconnectStripeAccount)
@@ -5414,6 +5438,25 @@ const contractDocumentHandlers: V1RouteHandlers = {
             accountEmail: null,
             accountName: null,
             statusReason: null,
+          },
+        },
+        meta,
+      },
+      200,
+    ),
+  connectConvexAccount: (c) =>
+    c.json(
+      {
+        data: {
+          state: {
+            provider: "convex" as const,
+            connected: true,
+            status: "connected" as const,
+            integrationId: "gint_contract",
+            accountName: "Contract",
+            statusReason: null,
+            capabilityModes: {},
+            toolModes: {},
           },
         },
         meta,
