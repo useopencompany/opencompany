@@ -269,6 +269,8 @@ describe("v1 protocol contract", () => {
       "/v1/skills/{slug}/disable",
       "/v1/skills/{slug}/replace",
       "/v1/skills/{slug}/files/read",
+      "/v1/bots",
+      "/v1/bots/{botId}",
       "/v1/conversations",
       "/v1/conversations/{conversationId}",
       "/v1/conversations/{conversationId}/share",

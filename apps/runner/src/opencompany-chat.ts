@@ -62,6 +62,7 @@ import * as ai from "ai";
 import { convertToModelMessages, type LanguageModelUsage, parsePartialJson, stepCountIs } from "ai";
 import { asc, eq, sql } from "drizzle-orm";
 import { downloadBlobBytes } from "./attachment-hydration";
+import { loadBotIdentityPrompt } from "./bot-context";
 import { runTaskBrainRead } from "./codex-brain-tool";
 import {
   CodexChatHandoffError,
@@ -1183,6 +1184,9 @@ async function resolveProductChatRuntime(input: {
   }
 
   const actionDispatcher = await createActionDispatcher({
+    ...(session.hostToolContractVersion
+      ? { hostToolContractVersion: session.hostToolContractVersion }
+      : {}),
     sessionId: session.id,
     turnId: turn.id,
     signal,
@@ -1313,6 +1317,7 @@ async function resolveProductChatRuntime(input: {
     ...(actionDispatcher?.catalog.sources.length
       ? {
           actionSources: actionDispatcher.catalog.sources,
+          legacyActionDiscovery: actionDispatcher.legacyDiscovery ?? false,
           connectedIntegrations: actionDispatcher.catalog.sources,
         }
       : {}),
@@ -1340,7 +1345,13 @@ async function resolveProductChatRuntime(input: {
     brain,
     activeSkills: hostTools?.activeSkills ?? [],
     toolContext,
-    system: [baseSystem, ...taskSystemBlocks].join("\n\n"),
+    system: [
+      baseSystem,
+      await loadBotIdentityPrompt(session.chatSessionId, turn.userWorkosId),
+      ...taskSystemBlocks,
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
     maxSteps: taskContext
       ? Math.max(1, taskContext.harnessSpec.maxModelSteps || CHAT_MAX_STEPS)
       : hostTools?.browserTools

@@ -5,9 +5,12 @@ import {
   CLAUDE_CODE_DEFAULT_MODEL_ID,
   CODEX_AGENT_MODEL_IDS,
   CODEX_DEFAULT_MODEL_ID,
+  DESCRIBE_ACTIONS_INPUT_ERROR,
   GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
   isClaudeCodeModelId,
   isCodexModelId,
+  isDescribeActionsInput,
+  LEGACY_ACTION_TOOL_CONTRACT,
   WRITE_ARTIFACT_INPUT_JSON_SCHEMA,
   WRITE_ARTIFACT_TOOL_DESCRIPTION,
   WRITE_ARTIFACT_TOOL_NAME,
@@ -78,8 +81,11 @@ import {
   type CreateWorkspaceSkillToolInput,
   type CreateWorkspaceSkillToolOutput,
   DELETE_TASK_SCHEDULE_TOOL_NAME,
+  DESCRIBE_ACTIONS_TOOL_NAME,
   type DeleteTaskScheduleToolInput,
   type DeleteTaskScheduleToolOutput,
+  type DescribeActionsToolInput,
+  type DescribeActionsToolOutput,
   EDIT_TASK_SCHEDULE_TOOL_NAME,
   EDIT_WORKSPACE_SKILL_TOOL_NAME,
   type EditTaskScheduleToolInput,
@@ -302,6 +308,7 @@ export type ActionDispatcher = {
   // invoked by guessing.
   catalog: ChatActionCatalog;
   prelistedSourceIds?: readonly string[];
+  legacyDiscovery?: boolean;
   execute: (input: {
     action: string;
     params: Record<string, unknown>;
@@ -464,6 +471,7 @@ export async function runProductChatAgent(input: {
   });
 
   const systemPromptInput = {
+    legacyActionDiscovery: input.actions?.legacyDiscovery ?? false,
     webFetchEnabled: Boolean(input.webFetch),
     webSearchEnabled: Boolean(input.webSearch),
     browserToolsEnabled: Boolean(input.browserTools),
@@ -1491,7 +1499,9 @@ export function createProductChatToolContext(input: {
       ListActionsToolOutput,
       Record<string, unknown>
     >({
-      description: LIST_ACTIONS_TOOL_DESCRIPTION,
+      description: actions.legacyDiscovery
+        ? LEGACY_ACTION_TOOL_CONTRACT.list.description
+        : LIST_ACTIONS_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<ListActionsToolInput>({
         ...ACTION_TOOL_CONTRACT.list.inputSchema,
         properties: {
@@ -1513,6 +1523,7 @@ export function createProductChatToolContext(input: {
             ...(requestedSource ? { source: requestedSource } : {}),
           },
           catalog: actionServiceCatalog,
+          legacyDiscovery: actions.legacyDiscovery ?? false,
           governance: actionTurnGovernance,
           execute: async () => {
             throw new Error("list_actions cannot execute an action");
@@ -1521,12 +1532,51 @@ export function createProductChatToolContext(input: {
         }) as Promise<ListActionsToolOutput>;
       },
     });
+    if (!actions.legacyDiscovery) {
+      tools[DESCRIBE_ACTIONS_TOOL_NAME] = tool<
+        DescribeActionsToolInput,
+        DescribeActionsToolOutput,
+        Record<string, unknown>
+      >({
+        description: ACTION_TOOL_CONTRACT.describe.description,
+        inputSchema: jsonSchema<DescribeActionsToolInput>(
+          {
+            ...ACTION_TOOL_CONTRACT.describe.inputSchema,
+            required: [...ACTION_TOOL_CONTRACT.describe.inputSchema.required],
+          },
+          {
+            validate: (value) =>
+              isDescribeActionsInput(value)
+                ? { success: true, value }
+                : { success: false, error: new Error(DESCRIBE_ACTIONS_INPUT_ERROR) },
+          },
+        ),
+        execute: async (args) => {
+          visibleToolActivity = true;
+          return serveActionRequest({
+            request: {
+              operation: "describe",
+              sessionId: "foreground",
+              turnId: "foreground",
+              actions: args.actions,
+            },
+            catalog: actionServiceCatalog,
+            governance: actionTurnGovernance,
+            execute: async () => {
+              throw new Error("describe_actions cannot execute an action");
+            },
+          }) as Promise<DescribeActionsToolOutput>;
+        },
+      });
+    }
     tools[USE_ACTION_TOOL_NAME] = tool<
       UseActionToolInput,
       UseActionToolOutput,
       Record<string, unknown>
     >({
-      description: USE_ACTION_TOOL_DESCRIPTION,
+      description: actions.legacyDiscovery
+        ? LEGACY_ACTION_TOOL_CONTRACT.execute.description
+        : USE_ACTION_TOOL_DESCRIPTION,
       needsApproval: async (args, executionContext) => {
         const action = typeof args.action === "string" ? args.action : "";
         const resolvedAction = actions.catalog.actions.find((entry) => entry.id === action);
@@ -1594,6 +1644,7 @@ export function createProductChatToolContext(input: {
             invocationId: toolCallId,
           },
           catalog: actionServiceCatalog,
+          legacyDiscovery: actions.legacyDiscovery ?? false,
           governance: actionTurnGovernance,
           maxCalls: actionCap,
           ...(actionAbortSignal ? { signal: actionAbortSignal } : {}),

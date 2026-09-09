@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   updateAutoModelRoutingAction,
+  updateBotsAction,
   updateTaskTimeRangeAction,
   updateTaskViewModeAction,
   updateTimezoneAction,
@@ -13,6 +14,7 @@ vi.mock("next/headers", () => ({ headers: vi.fn() }));
 
 const preferences = {
   timezone: "Europe/Berlin",
+  botsEnabled: true,
   taskSpawningEnabled: false,
   wikiEnabled: true,
   taskViewMode: "list",
@@ -72,6 +74,22 @@ describe("user preference API actions", () => {
     expect(request.headers.get("cookie")).toBe("wos-session=sealed");
     expect(request.headers.get("authorization")).toBe("Bearer actor-token");
     expect(request.headers.get("origin")).toBe("https://my.opencompany.chat");
+    expect(revalidatePath).toHaveBeenCalledWith("/");
+    expect(revalidatePath).toHaveBeenCalledWith("/settings/preferences");
+  });
+
+  it.each([true, false])("persists Bots %s and revalidates the app", async (enabled) => {
+    const requests = stubApi(() =>
+      Response.json({
+        data: { ...preferences, botsEnabled: enabled },
+        meta: { apiVersion: "v1", protocolVersion: "1.0.0" },
+      }),
+    );
+
+    await expect(updateBotsAction(enabled)).resolves.toEqual({ ok: true, enabled });
+    expect(requests[0]?.method).toBe("PATCH");
+    expect(new URL((requests[0] as Request).url).pathname).toBe("/v1/me/preferences");
+    await expect((requests[0] as Request).json()).resolves.toEqual({ botsEnabled: enabled });
     expect(revalidatePath).toHaveBeenCalledWith("/");
     expect(revalidatePath).toHaveBeenCalledWith("/settings/preferences");
   });

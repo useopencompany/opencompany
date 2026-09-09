@@ -94,6 +94,51 @@ function messageHeaders(idempotencyKey: string) {
 }
 
 describe("canonical Hono API", () => {
+  it("serves bots through authenticated validated canonical routes", async () => {
+    const bot = { id: "bot_1", name: "Research", description: "Find customers" };
+    const create = vi.fn(async () => bot);
+    const update = vi.fn(async () => bot);
+    const app = testApp(fakeRepository(), {
+      bots: {
+        list: async () => [bot],
+        get: async () => bot,
+        create,
+        update,
+        authorizeConversation: async () => {},
+      },
+    });
+    expect((await (await app.request("/v1/bots")).json()).data).toEqual([bot]);
+    expect((await (await app.request("/v1/bots/bot_1")).json()).data).toEqual(bot);
+    const request = (body: unknown) =>
+      app.request("/v1/bots", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    expect((await request(bot)).status).toBe(200);
+    expect(create).toHaveBeenCalledWith(actor, bot);
+    for (const invalid of [
+      { ...bot, name: " " },
+      { ...bot, name: "x".repeat(81) },
+      { ...bot, description: "x".repeat(4001) },
+      { ...bot, id: "../chat" },
+      { ...bot, workspaceId: "another" },
+    ]) {
+      expect((await request(invalid)).status).toBe(400);
+    }
+    expect(create).toHaveBeenCalledOnce();
+    const patched = await app.request("/v1/bots/bot_1", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Research", description: "Find customers" }),
+    });
+    expect(patched.status).toBe(200);
+    expect(update).toHaveBeenCalledWith(actor, "bot_1", {
+      name: "Research",
+      description: "Find customers",
+    });
+    expect((await testApp(fakeRepository()).request("/v1/bots")).status).toBe(404);
+  });
   it("mounts the first-party Gmail MCP at its package endpoint", async () => {
     const handle = vi.fn(async (_request: Request) => Response.json({ ok: true }));
     const downloadAttachment = vi.fn(async (_request: Request) =>
@@ -1999,8 +2044,10 @@ describe("canonical Hono API", () => {
       ["GET", "/integrations/posthog/callback", "mcp.callback.posthog"],
       ["GET", "/integrations/neon/start", "mcp.start.neon"],
       ["GET", "/integrations/supabase/start", "mcp.start.supabase"],
+      ["GET", "/integrations/resend/start", "mcp.start.resend"],
       ["GET", "/integrations/neon/callback", "mcp.callback.neon"],
       ["GET", "/integrations/supabase/callback", "mcp.callback.supabase"],
+      ["GET", "/integrations/resend/callback", "mcp.callback.resend"],
       ["GET", "/integrations/latitude/start", "mcp.start.latitude"],
       ["GET", "/integrations/latitude/callback", "mcp.callback.latitude"],
       ["GET", "/integrations/signoz/start", "mcp.start.signoz"],
@@ -3397,6 +3444,7 @@ describe("canonical Hono API", () => {
           ...fakeUserSettings(),
           updatePreferences: async () => ({
             timezone: "Europe/Berlin",
+            botsEnabled: false,
             taskSpawningEnabled: true,
             wikiEnabled: true,
             taskViewMode: "list",
@@ -3454,9 +3502,38 @@ describe("canonical Hono API", () => {
     },
   );
 
+  it.each([true, false])(
+    "accepts the Bots preference %s through the public API",
+    async (botsEnabled) => {
+      const updatePreferences = vi.fn(async () => ({
+        timezone: "UTC",
+        botsEnabled,
+        taskSpawningEnabled: false,
+        wikiEnabled: true as const,
+        taskViewMode: "board" as const,
+        taskTimeRange: "7d" as const,
+        autoModelRoutingEnabled: false,
+      }));
+      const app = testApp(fakeRepository(), {
+        userSettings: { ...fakeUserSettings(), updatePreferences },
+      });
+
+      const response = await app.request("/v1/me/preferences", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ botsEnabled }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(updatePreferences).toHaveBeenCalledWith(actor, { botsEnabled });
+      await expect(response.json()).resolves.toMatchObject({ data: { botsEnabled } });
+    },
+  );
+
   it("updates user preferences through the typed settings command", async () => {
     const updatePreferences = vi.fn(async () => ({
       timezone: "Europe/Berlin",
+      botsEnabled: false,
       taskSpawningEnabled: true,
       wikiEnabled: true as const,
       taskViewMode: "list" as const,

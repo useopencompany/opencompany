@@ -162,6 +162,7 @@ export function createIdentityService(input: {
         lastName: user.lastName,
         avatarUrl: user.avatarUrl,
         timezone: user.timezone,
+        botsEnabled: user.botsEnabled === true,
         taskSpawningEnabled: user.taskSpawningEnabled,
         autoModelRoutingEnabled: user.autoModelRoutingEnabled,
         chatCapabilitiesBetaEnabled: user.chatCapabilitiesBetaEnabled,

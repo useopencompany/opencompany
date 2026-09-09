@@ -136,6 +136,34 @@ export const PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
+  resend: [
+    {
+      id: "read",
+      label: "Inspect email configuration",
+      description: "Inspect domains, segments, topics, and contact property definitions.",
+      defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Read email and contact data",
+      description: "Read messages, attachments, contacts, campaigns, logs, and account details.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Send emails and manage content",
+      description:
+        "Send and schedule emails, manage contacts and content, and trigger automations.",
+      defaultMode: "ask",
+    },
+    {
+      id: "draft",
+      label: "Administer access and destructive actions",
+      description:
+        "Manage credentials, webhooks, domain claims, public email links, and irreversible removals.",
+      defaultMode: "off",
+    },
+  ],
   supabase: [
     {
       id: "read",

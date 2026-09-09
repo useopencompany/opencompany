@@ -86,32 +86,35 @@ describe("resolveWorkflowStepSelection", () => {
     });
   });
 
-  it("uses configured coding model and effort for cloud coding steps", () => {
-    expect(
-      resolveWorkflowStepSelection({
-        model: "codex",
-        runtimeModel: "openai/gpt-5.6-luna",
+  it.each(["anthropic/claude-opus-4.8", "anthropic/claude-opus-5"])(
+    "uses configured coding model %s and effort for cloud coding steps",
+    (model) => {
+      expect(
+        resolveWorkflowStepSelection({
+          model: "codex",
+          runtimeModel: "openai/gpt-5.6-luna",
+          reasoningEffort: "medium",
+          instructions: "Fix the bug.",
+        }),
+      ).toEqual({
+        engine: "codex",
+        model: "openai/gpt-5.6-luna",
         reasoningEffort: "medium",
-        instructions: "Fix the bug.",
-      }),
-    ).toEqual({
-      engine: "codex",
-      model: "openai/gpt-5.6-luna",
-      reasoningEffort: "medium",
-    });
-    expect(
-      resolveWorkflowStepSelection({
-        model: "claude-code",
-        runtimeModel: "anthropic/claude-opus-4.8",
+      });
+      expect(
+        resolveWorkflowStepSelection({
+          model: "claude-code",
+          runtimeModel: model,
+          reasoningEffort: "xhigh",
+          instructions: "Fix the bug.",
+        }),
+      ).toEqual({
+        engine: "claude_code",
+        model,
         reasoningEffort: "xhigh",
-        instructions: "Fix the bug.",
-      }),
-    ).toEqual({
-      engine: "claude_code",
-      model: "anthropic/claude-opus-4.8",
-      reasoningEffort: "xhigh",
-    });
-  });
+      });
+    },
+  );
 
   it("rejects unavailable and ambiguous step models", () => {
     expect(() =>

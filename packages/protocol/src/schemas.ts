@@ -444,6 +444,7 @@ export const IntegrationAccountReadModelSchema = z
       "neon",
       "notion",
       "supabase",
+      "resend",
       "x_account",
     ]),
     workspaceId: z.string().min(1).max(128).nullable(),
@@ -3588,6 +3589,7 @@ export const IdentityUserSchema = z
     lastName: z.string().max(128).nullable(),
     avatarUrl: z.string().max(4_096).nullable(),
     timezone: z.string().min(1).max(100),
+    botsEnabled: z.boolean().optional(),
     taskSpawningEnabled: z.boolean(),
     autoModelRoutingEnabled: z.boolean(),
     chatCapabilitiesBetaEnabled: z.boolean(),
@@ -3647,6 +3649,7 @@ export const IdentityEnvelopeSchema = z
 
 export const UserPreferencesSchema = z
   .object({
+    botsEnabled: z.boolean(),
     timezone: z.string().min(1).max(100),
     taskSpawningEnabled: z.boolean(),
     /** @deprecated Wiki is always enabled. */
@@ -3660,6 +3663,7 @@ export const UserPreferencesSchema = z
 
 export const UpdateUserPreferencesBodySchema = z
   .object({
+    botsEnabled: z.boolean().optional(),
     timezone: z.string().min(1).max(100).optional(),
     taskSpawningEnabled: z.boolean().optional(),
     /** @deprecated Accepted for compatibility and ignored; Wiki is always enabled. */
@@ -3820,6 +3824,7 @@ export const PersonalIntegrationProviderSchema = z.enum([
   "latitude",
   "neon",
   "supabase",
+  "resend",
   "x_account",
 ]);
 
@@ -4494,3 +4499,18 @@ export type AttioAccountStateDto = z.infer<typeof AttioAccountStateSchema>;
 export type FathomAccountStateDto = z.infer<typeof FathomAccountStateSchema>;
 export type GranolaAccountStateDto = z.infer<typeof GranolaAccountStateSchema>;
 export type StripeAccountStateDto = z.infer<typeof StripeAccountStateSchema>;
+
+export const BotBodySchema = z
+  .object({
+    name: z.string().trim().min(1).max(80),
+    description: z.string().trim().max(4000),
+  })
+  .strict();
+export const BotSchema = BotBodySchema.extend({ id: ResourceIdSchema.regex(/^[a-zA-Z0-9_-]+$/) });
+export type BotDto = z.infer<typeof BotSchema>;
+export const BotEnvelopeSchema = z
+  .object({ data: BotSchema, meta: ProtocolMetadataSchema })
+  .strict();
+export const BotListEnvelopeSchema = z
+  .object({ data: z.array(BotSchema), meta: ProtocolMetadataSchema })
+  .strict();

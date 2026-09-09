@@ -56,6 +56,7 @@ import {
 } from "./auth";
 import { createAutomationServices } from "./automations";
 import { createBillingReconcileService } from "./billing-reconcile";
+import { createBotService } from "./bots";
 import { createBrainAssetService } from "./brain-assets";
 import { createBrainControlService } from "./brain-control";
 import { parseBrowserOrigins } from "./browser-origins";
@@ -207,6 +208,10 @@ const app = createApiApp({
     ),
   brainControl: createBrainControlService({ db: database.db }),
   attachments: createAttachmentUploadService({ repository: attachmentRepository }),
+  bots: createBotService({
+    db: database.db,
+    defaultModel: process.env.OPENCOMPANY_DEFAULT_CHAT_MODEL ?? "moonshotai/kimi-k3",
+  }),
   userSettings: createUserSettingsService({ db: database.db }),
   feedback: createFeedbackService({ db: database.db }),
   repoConfigs: createRepoConfigService({ db: database.db }),

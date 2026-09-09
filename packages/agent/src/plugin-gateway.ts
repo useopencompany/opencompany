@@ -104,6 +104,11 @@ import {
   RENDER_MCP_ENDPOINT_URL,
 } from "./integrations/render-mcp";
 import {
+  getResendMcpIntegrationState,
+  loadResendMcpWorkerConnection,
+  RESEND_MCP_ENDPOINT_URL,
+} from "./integrations/resend-mcp";
+import {
   getSigNozIntegrationState,
   loadSigNozMcpWorkerConnection,
   SIGNOZ_MCP_ENDPOINT_URL,
@@ -238,6 +243,12 @@ const providerBindings = {
     endpointUrl: SUPABASE_MCP_ENDPOINT_URL,
     getState: getSupabaseMcpIntegrationState,
     loadConnection: loadSupabaseMcpWorkerConnection,
+  },
+  resend: {
+    provider: "resend",
+    endpointUrl: RESEND_MCP_ENDPOINT_URL,
+    getState: getResendMcpIntegrationState,
+    loadConnection: loadResendMcpWorkerConnection,
   },
   latitude: {
     provider: "latitude",

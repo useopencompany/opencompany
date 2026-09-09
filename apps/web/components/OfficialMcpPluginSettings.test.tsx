@@ -47,6 +47,7 @@ import {
   neonToolsStateFromPlugin,
   type PluginToolsState,
   PostHogPluginDetail,
+  ResendPluginDetail,
   SigNozPluginDetail,
   SlackPluginDetail,
   StripePluginDetail,
@@ -333,6 +334,7 @@ const appData = vi.hoisted(() => ({
       ],
       neon: [],
       supabase: [],
+      resend: [],
       notion: [
         {
           integrationId: "gint_notion_mcp",
@@ -2773,6 +2775,54 @@ describe("Linear plugin settings", () => {
       "/api/integrations/supabase/start?returnTo=/settings/plugins/supabase",
     );
     expect(screen.getByText(/SQL can read or change data/)).toBeInTheDocument();
+  });
+  it("offers the shared Resend account connection and conservative permission groups", () => {
+    const resendPlugin = {
+      ...notionPlugin,
+      id: "plugin_resend",
+      name: "resend",
+      manifest: { name: "resend" },
+      remoteMcpServers: [
+        {
+          ...notionPlugin.remoteMcpServers[0],
+          name: "resend",
+          connectionProvider: "resend",
+          capabilities: [
+            {
+              id: "read",
+              label: "Inspect email configuration",
+              defaultMode: "on",
+              tools: ["list-domains"],
+            },
+            {
+              id: "query",
+              label: "Read email and contact data",
+              defaultMode: "ask",
+              tools: ["list-api-keys"],
+            },
+            {
+              id: "write",
+              label: "Send emails and manage content",
+              defaultMode: "ask",
+              tools: ["create-automation"],
+            },
+            {
+              id: "draft",
+              label: "Administer access and destructive actions",
+              defaultMode: "off",
+              tools: ["create-api-key"],
+            },
+          ],
+          tools: [],
+        },
+      ],
+    } as const satisfies PluginInstallationDto;
+    render(<ResendPluginDetail pluginState={{ status: "ready", plugin: resendPlugin }} canEdit />);
+    expect(screen.getByRole("link", { name: /connect resend account/i })).toHaveAttribute(
+      "href",
+      "/api/integrations/resend/start?returnTo=/settings/plugins/resend",
+    );
+    expect(screen.getByText(/Sending and sensitive reads require approval/)).toBeInTheDocument();
   });
 });
 

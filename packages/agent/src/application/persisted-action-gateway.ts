@@ -208,6 +208,7 @@ async function loadCodexActionContext(
   const [row] = await getDb()
     .select({
       userWorkosId: codexChatSessions.userWorkosId,
+      hostToolContractVersion: codexChatSessions.hostToolContractVersion,
       workspaceId: codexChatSessions.workspaceId,
       chatSessionId: codexChatSessions.chatSessionId,
       userTimezone: users.timezone,
@@ -249,6 +250,9 @@ async function loadCodexActionContext(
   if (!row?.workspaceId) return null;
   return {
     actorId: row.userWorkosId,
+    ...(row.hostToolContractVersion
+      ? { hostToolContractVersion: row.hostToolContractVersion }
+      : {}),
     workspaceId: row.workspaceId,
     conversationId: row.chatSessionId,
     userTimezone: row.userTimezone,
@@ -271,7 +275,7 @@ function actionTurnRef(run: ActionServiceRunRef) {
 
 function actionServiceRequest(
   request: ActionGatewayRequest,
-): Extract<ActionServiceRequest, { operation: "list" | "execute" }>;
+): Extract<ActionServiceRequest, { operation: "list" | "describe" | "execute" }>;
 function actionServiceRequest(request: ActionHostGatewayRequest): ActionServiceRequest;
 function actionServiceRequest(request: ActionHostGatewayRequest): ActionServiceRequest {
   const { turnId, ...input } = request;
