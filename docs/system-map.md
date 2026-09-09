@@ -142,8 +142,9 @@ characters). Creation takes a client-generated `id` retained across retries and 
 creates an empty Chat Conversation and its workspace-bound idle runtime. It does not start a Run.
 Bots belong to their creating user within the selected workspace, matching Chat ownership.
 
-The `goat.users.bots_enabled` feature flag defaults to false. Enable it for selected users through
-the existing database administration process; no environment variable is needed. The flag gates
+The `goat.users.bots_enabled` feature flag defaults to false. Users can enable or disable it in
+Preferences → Beta features → Bots. The switch saves `botsEnabled` through
+`PATCH /v1/me/preferences` and refreshes the app shell; no environment variable is needed. The flag gates
 bot API access and navigation. With it enabled, the sidebar shows Bots above recent chats, and
 bot conversations have a settings button that opens an editor on the right. Bot Conversations
 are excluded from the recent-chat API and Electric sidebar collections, including when disabled.

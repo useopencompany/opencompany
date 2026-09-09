@@ -3444,6 +3444,7 @@ describe("canonical Hono API", () => {
           ...fakeUserSettings(),
           updatePreferences: async () => ({
             timezone: "Europe/Berlin",
+            botsEnabled: false,
             taskSpawningEnabled: true,
             wikiEnabled: true,
             taskViewMode: "list",
@@ -3501,9 +3502,38 @@ describe("canonical Hono API", () => {
     },
   );
 
+  it.each([true, false])(
+    "accepts the Bots preference %s through the public API",
+    async (botsEnabled) => {
+      const updatePreferences = vi.fn(async () => ({
+        timezone: "UTC",
+        botsEnabled,
+        taskSpawningEnabled: false,
+        wikiEnabled: true as const,
+        taskViewMode: "board" as const,
+        taskTimeRange: "7d" as const,
+        autoModelRoutingEnabled: false,
+      }));
+      const app = testApp(fakeRepository(), {
+        userSettings: { ...fakeUserSettings(), updatePreferences },
+      });
+
+      const response = await app.request("/v1/me/preferences", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ botsEnabled }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(updatePreferences).toHaveBeenCalledWith(actor, { botsEnabled });
+      await expect(response.json()).resolves.toMatchObject({ data: { botsEnabled } });
+    },
+  );
+
   it("updates user preferences through the typed settings command", async () => {
     const updatePreferences = vi.fn(async () => ({
       timezone: "Europe/Berlin",
+      botsEnabled: false,
       taskSpawningEnabled: true,
       wikiEnabled: true as const,
       taskViewMode: "list" as const,
