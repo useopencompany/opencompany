@@ -877,23 +877,17 @@ export function SkillsSettingsRoute({
   return (
     <SettingsContent title="Skills">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div
-          role="group"
-          aria-label="Skill scope"
-          className="flex w-fit items-center rounded-full bg-surface-muted p-0.5"
-        >
+        <div role="group" aria-label="Skill scope" className="flex flex-wrap items-center gap-2">
           {SKILL_SCOPE_FILTERS.map((filter) => (
             <Button
               key={filter.value}
-              variant="ghost"
+              variant={scopeFilter === filter.value ? "default" : "secondary"}
               size="sm"
               aria-pressed={scopeFilter === filter.value}
               onClick={() => setScopeFilter(filter.value)}
               className={cn(
-                "h-8 rounded-full px-3 text-[13px]",
-                scopeFilter === filter.value
-                  ? "bg-surface text-ink shadow-sm hover:bg-surface"
-                  : "text-ink-subtle hover:text-ink",
+                "h-8 rounded-full px-3 text-[13px] font-normal shadow-none",
+                scopeFilter !== filter.value && "text-ink-muted hover:text-ink",
               )}
             >
               {filter.label}
