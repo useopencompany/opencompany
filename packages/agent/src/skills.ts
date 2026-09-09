@@ -163,7 +163,7 @@ export async function executeWorkspaceSkillToolForActor(input: {
   tool: WorkspaceSkillToolName;
   args: Record<string, unknown>;
   idempotencyKey: string;
-  db?: Db;
+  db: PooledDb;
 }) {
   const field = (name: string) => {
     const value = input.args[name];

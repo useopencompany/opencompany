@@ -20,7 +20,7 @@ Immutable bundle IDs are content addresses, not authorization. Installation-to-v
 
 ## Migration and deployment
 
-Migration 0262 keeps all existing standalone Skills Company-scoped, including archived entries, because they were previously shared. It records their previously shared same-name immutable bundles as Company revisions. Existing creator IDs are unknown and remain null; current admins manage those Skills. The admin making a legacy Skill Personal becomes its creator. Newly created rows default to Personal and require a creator. Scoped partial unique indexes replace the old workspace/name index.
+Migration 0263 keeps all existing standalone Skills Company-scoped, including archived entries, because they were previously shared. It records their previously shared same-name immutable bundles as Company revisions. Existing creator IDs are unknown and remain null; current admins manage those Skills. The admin making a legacy Skill Personal becomes its creator. Newly created rows default to Personal and require a creator. Scoped partial unique indexes replace the old workspace/name index.
 
 Apply the migration before serving the new API, web and runner code. Old application versions do not enforce Personal visibility; do not roll back to them after Personal Skills exist. A rollback requires restoring compatible authorization or explicitly resolving Personal data before returning to the old schema and code.
 

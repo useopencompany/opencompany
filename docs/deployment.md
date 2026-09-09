@@ -140,6 +140,21 @@ tickets bound to one plugin registration, integration, operation, and tool; the 
 ticket and rechecks the installation, connection scopes, and current permission before calling a
 stable Google REST API. Google access and refresh tokens are never used as MCP bearer credentials.
 
+The Calendar MCP supports `reschedule_event` for an existing event or a single recurring
+occurrence. It patches only the start and end times, retaining the event identity and meeting
+details. After deploying a new MCP tool, refresh the installed plugin's tools to update its
+persisted discovery snapshot. With the current pinned Calendar package, `reschedule_event` is
+unmapped and defaults to Ask until the reviewed plugin capability map includes it; existing broad
+write permissions do not silently enable new tools.
+
+The action gateway claims identical non-idempotent external writes once per turn using the action,
+source, canonical parameters, and approval context. Changing a model-generated call id cannot
+dispatch the same write twice, including after approval or a runner restart. A duplicate gets an
+explicit error rather than a second dispatch. This also prevents automatic same-input retries
+after a failed or uncertain dispatch; inspect provider state before taking another action. A new
+user turn can intentionally repeat a write. This is turn-scoped admission, not a provider result
+journal or cross-turn exactly-once delivery.
+
 ## Official plugin packages
 
 Official catalog packages ship with the application as immutable release artifacts. Their reviewed

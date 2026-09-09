@@ -24,6 +24,7 @@ export type ActionProviderId =
   | "supabase"
   | "resend"
   | "betterstack"
+  | "convex"
   | "render"
   | "vercel"
   | "signoz"

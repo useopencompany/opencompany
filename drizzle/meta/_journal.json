@@ -1839,8 +1839,15 @@
     {
       "idx": 262,
       "version": "7",
-      "when": 1788941000000,
-      "tag": "0262_personal_company_skills",
+      "when": 1788961359935,
+      "tag": "0262_opencompany_convex_integration",
+      "breakpoints": true
+    },
+    {
+      "idx": 263,
+      "version": "7",
+      "when": 1788961359936,
+      "tag": "0263_personal_company_skills",
       "breakpoints": true
     }
   ]

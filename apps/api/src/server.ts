@@ -8,6 +8,7 @@ import {
 import { BrainSourceApplicationService } from "@opencompany/agent/brain-sources";
 import { BrowserProfileApplicationService } from "@opencompany/agent/browser-profiles/service";
 import { createCustomMcpService } from "@opencompany/agent/custom-mcp";
+import { createConvexMcpService } from "@opencompany/agent/integrations/convex-mcp-server";
 import { createGmailMcpService } from "@opencompany/agent/integrations/gmail-mcp-server";
 import { createGoogleCalendarMcpService } from "@opencompany/agent/integrations/google-calendar-mcp-server";
 import { getAvailableHarnessTools } from "@opencompany/agent/integrations/google-data";
@@ -218,6 +219,13 @@ const app = createApiApp({
   integrationAccounts: createIntegrationAccountService({
     db: database.db,
     runner: runnerClient,
+    refreshConvexPluginRegistrations: ({ userWorkosId, workspaceId }) =>
+      refreshPluginGatewayRegistrationsForWorkspaces({
+        db: database.db,
+        userWorkosId,
+        workspaceIds: [workspaceId],
+        connectionProvider: "convex",
+      }),
     refreshRenderPluginRegistrations: ({ userWorkosId, workspaceId }) =>
       refreshPluginGatewayRegistrationsForWorkspaces({
         db: database.db,
@@ -256,6 +264,10 @@ const app = createApiApp({
           internalSecret: process.env.API_INTERNAL_TOKEN.trim(),
         }),
         googleCalendarMcp: createGoogleCalendarMcpService({
+          db: database.db,
+          internalSecret: process.env.API_INTERNAL_TOKEN.trim(),
+        }),
+        convexMcp: createConvexMcpService({
           db: database.db,
           internalSecret: process.env.API_INTERNAL_TOKEN.trim(),
         }),

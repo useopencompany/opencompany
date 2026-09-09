@@ -49,7 +49,7 @@ const migrationPaths = [
   "0247_preserve_assistant_message_boundaries.sql",
   "0248_goat_chat_attachment_upload_idempotency.sql",
   "0261_persistent_bots.sql",
-  "0262_personal_company_skills.sql",
+  "0263_personal_company_skills.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 

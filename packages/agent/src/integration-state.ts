@@ -260,6 +260,7 @@ export type PersonalAccountProvider =
   | "fathom"
   | "attio"
   | "betterstack"
+  | "convex"
   | "render"
   | "vercel"
   | "signoz"
@@ -342,6 +343,7 @@ export function personalAccountsFromRows(
     fathom: [],
     attio: [],
     betterstack: [],
+    convex: [],
     render: [],
     vercel: [],
     signoz: [],
@@ -398,6 +400,7 @@ export function personalAccountsFromRows(
       row.provider === "github_user" ||
       row.provider === "slack" ||
       row.provider === "betterstack" ||
+      row.provider === "convex" ||
       row.provider === "render" ||
       row.provider === "vercel" ||
       row.provider === "signoz" ||

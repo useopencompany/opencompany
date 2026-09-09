@@ -78,7 +78,7 @@ describe("Postgres immutable Skill bundle repository", () => {
       if (statement.trim()) await database.exec(statement);
     }
     const scopeMigration = await readFile(
-      path.resolve(import.meta.dirname, "../../..", "drizzle/0262_personal_company_skills.sql"),
+      path.resolve(import.meta.dirname, "../../..", "drizzle/0263_personal_company_skills.sql"),
       "utf8",
     );
     for (const statement of scopeMigration.split("--> statement-breakpoint"))
@@ -908,7 +908,7 @@ describe("Personal and Company skill migration", () => {
         VALUES ('archived', 'legacy_workspace', 'legacy', 'legacy_old', now()),
                ('active', 'legacy_workspace', 'legacy', 'legacy_current', null);
       `);
-      await migrate("0262_personal_company_skills.sql");
+      await migrate("0263_personal_company_skills.sql");
       expect(
         (
           await legacy.query(

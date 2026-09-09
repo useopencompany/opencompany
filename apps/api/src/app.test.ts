@@ -178,6 +178,20 @@ describe("canonical Hono API", () => {
     expect((await app.request("/mcp/plugins/google-calendar", { method: "GET" })).status).toBe(404);
   });
 
+  it("mounts the first-party Convex MCP at its package endpoint", async () => {
+    const handle = vi.fn(async (_request: Request) => Response.json({ ok: true }));
+    const app = testApp(fakeRepository(), { convexMcp: { handle } });
+    const response = await app.request("/mcp/plugins/convex", {
+      method: "POST",
+      headers: { authorization: "Bearer narrow-ticket" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(handle).toHaveBeenCalledOnce();
+    expect(handle.mock.calls[0]?.[0].headers.get("authorization")).toBe("Bearer narrow-ticket");
+    expect((await app.request("/mcp/plugins/convex", { method: "GET" })).status).toBe(404);
+  });
   it("mounts the first-party Google Drive MCP at its package endpoint", async () => {
     const handle = vi.fn(async (_request: Request) => Response.json({ ok: true }));
     const app = testApp(fakeRepository(), { googleDriveMcp: { handle } });
@@ -5500,6 +5514,9 @@ function fakeIntegrationAccounts(): Parameters<typeof createApiApp>[0]["integrat
     },
     connectGranola: async () => {
       throw new Error("Unexpected Granola connect.");
+    },
+    connectConvex: async () => {
+      throw new Error("Unexpected Convex connect.");
     },
     connectRender: async () => {
       throw new Error("Unexpected Render connect.");
