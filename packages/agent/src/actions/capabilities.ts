@@ -87,7 +87,7 @@ export const PROVIDER_CAPABILITIES: Partial<
     {
       id: "write",
       label: "Manage calendar events",
-      description: "Create, update, delete, and respond to events on your calendars.",
+      description: "Create events and reschedule existing meetings on your calendars.",
       defaultMode: "ask",
     },
   ],
