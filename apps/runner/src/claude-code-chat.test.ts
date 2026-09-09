@@ -11,6 +11,7 @@ import type {
   Task,
 } from "@opencompany/db/product-schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { loadBotIdentityPrompt } from "./bot-context";
 import {
   CLAUDE_CORE_MCP_UNAVAILABLE_MESSAGE,
   extractAcpScheduleWakeup,
@@ -117,6 +118,8 @@ const wakeupMocks = vi.hoisted(() => ({
 const workspaceMocks = vi.hoisted(() => ({
   isLegacyBrainEnabledForWorkspace: vi.fn(async () => false),
 }));
+
+vi.mock("./bot-context", () => ({ loadBotIdentityPrompt: vi.fn(async () => "") }));
 
 vi.mock("@opencompany/db/claude-code-auth", () => ({
   loadClaudeCodeCredential: authMocks.loadClaudeCodeCredential,
@@ -543,6 +546,9 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
   });
 
   it("configures Claude MCP against the runner with an attempt-and-lease capability", async () => {
+    vi.mocked(loadBotIdentityPrompt).mockResolvedValueOnce(
+      "Bot identity: customer research assistant.",
+    );
     await runClaudeCodeChatTurn({
       turn: claudeTurn(),
       session: claudeSession({
@@ -561,6 +567,7 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
         headers: Array<{ name: string; value: string }>;
       }>;
     };
+    expect(harnessInput.task).toContain("Bot identity: customer research assistant.");
     expect(harnessInput.task).toContain("Actions may modify connected services");
     expect(harnessInput.task).toContain("denial is a normal outcome");
     expect(harnessInput.task).not.toContain("cannot modify connected services");

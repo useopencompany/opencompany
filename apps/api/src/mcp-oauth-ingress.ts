@@ -66,6 +66,12 @@ import {
   verifyPostHogMcpState,
 } from "@opencompany/agent/integrations/posthog-mcp";
 import {
+  appendResendMcpStatus,
+  completeResendMcpOAuth,
+  startResendMcpOAuth,
+  verifyResendMcpState,
+} from "@opencompany/agent/integrations/resend-mcp";
+import {
   appendSigNozMcpStatus,
   completeSigNozMcpOAuth,
   startSigNozMcpOAuth,
@@ -100,6 +106,7 @@ export type McpOAuthProvider =
   | "neon"
   | "notion"
   | "supabase"
+  | "resend"
   | "latitude"
   | "jamie"
   | "betterstack"
@@ -210,6 +217,13 @@ const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
     verifyState: verifySupabaseMcpState,
     appendStatus: appendSupabaseMcpStatus,
     deniedReason: "supabase_denied",
+  },
+  resend: {
+    start: startResendMcpOAuth,
+    complete: completeResendMcpOAuth,
+    verifyState: verifyResendMcpState,
+    appendStatus: appendResendMcpStatus,
+    deniedReason: "resend_denied",
   },
   latitude: {
     start: startLatitudeMcpOAuth,

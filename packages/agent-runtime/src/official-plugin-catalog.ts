@@ -31,6 +31,8 @@ export const OFFICIAL_PLUGIN_SOURCES = {
     "https://github.com/useopencompany/plugins/tree/fb207086016a74e2e5724386c524d275771e5db6/notion",
   posthog:
     "https://github.com/useopencompany/plugins/tree/4ba32cd5a7618d9be3714ec0efd3c8784209046c/posthog",
+  resend:
+    "https://github.com/useopencompany/plugins/tree/194603acc21c455dbce4571fd631e5e228772978/resend",
   render:
     "https://github.com/useopencompany/plugins/tree/569241125c96a07b9072d42aee404822a6950b26/render",
   vercel:

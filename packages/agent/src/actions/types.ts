@@ -22,6 +22,7 @@ export type ActionProviderId =
   | "neon"
   | "notion"
   | "supabase"
+  | "resend"
   | "betterstack"
   | "render"
   | "vercel"

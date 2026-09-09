@@ -331,7 +331,7 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/latitude",
     );
-    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(17);
+    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(18);
     await user.click(screen.getByRole("button", { name: "View all productivity plugins" }));
     expect(screen.getByRole("link", { name: /jamie/i })).toHaveAttribute(
       "href",
@@ -451,6 +451,12 @@ describe("Plugin settings", () => {
     expect(within(business).getByRole("link", { name: /stripe/i })).toBeInTheDocument();
     expect(within(business).getByRole("link", { name: /yc advise/i })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /gmail/i })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Communication" }));
+    expect(screen.getByRole("link", { name: /resend/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/resend",
+    );
   });
 
   it("opens a full category from its overview section", async () => {

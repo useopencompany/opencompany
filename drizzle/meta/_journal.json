@@ -1821,6 +1821,20 @@
       "when": 1788881646172,
       "tag": "0259_custom_mcp_plugins",
       "breakpoints": true
+    },
+    {
+      "idx": 260,
+      "version": "7",
+      "when": 1788937000000,
+      "tag": "0260_opencompany_resend_integration",
+      "breakpoints": true
+    },
+    {
+      "idx": 261,
+      "version": "7",
+      "when": 1788939784822,
+      "tag": "0261_persistent_bots",
+      "breakpoints": true
     }
   ]
 }

@@ -57,6 +57,7 @@
         "stripe": "22.1.1",
       },
       "devDependencies": {
+        "@electric-sql/pglite": "^0.5.8",
         "@types/node": "^25.9.1",
         "@types/pg": "^8.23.1",
         "typescript": "^6.0.3",

@@ -179,6 +179,7 @@ export type IntegrationProvider =
   | "neon"
   | "notion"
   | "supabase"
+  | "resend"
   | "x_account";
 // Ownership is a property of the integration's binding, not a per-connect
 // choice. Identity-bound connections (OAuth acting as a person: Gmail,
@@ -745,6 +746,7 @@ export const users = productSchema.table(
     lastName: text("last_name"),
     avatarUrl: text("avatar_url"),
     timezone: text("timezone").notNull().default("UTC"),
+    botsEnabled: boolean("bots_enabled").notNull().default(false),
     taskSpawningEnabled: boolean("task_spawning_enabled").notNull().default(false),
     autoModelRoutingEnabled: boolean("auto_model_routing_enabled").notNull().default(false),
     chatCapabilitiesBetaEnabled: boolean("chat_capabilities_beta_enabled").notNull().default(false),
@@ -1656,7 +1658,7 @@ export const integrations = productSchema.table(
     ),
     providerCheck: check(
       "goat_integrations_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'render', 'vercel', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'x_account', 'custom_mcp')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'render', 'vercel', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'resend', 'x_account', 'custom_mcp')`,
     ),
     statusCheck: check(
       "goat_integrations_status_check",
@@ -1706,7 +1708,7 @@ export const integrationCredentials = productSchema.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_credentials_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'render', 'vercel', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'x_account', 'custom_mcp')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'render', 'vercel', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'resend', 'x_account', 'custom_mcp')`,
     ),
     kindCheck: check(
       "goat_integration_credentials_kind_check",
@@ -1756,7 +1758,7 @@ export const integrationResources = productSchema.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_resources_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'render', 'vercel', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'x_account', 'custom_mcp')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'render', 'vercel', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'resend', 'x_account', 'custom_mcp')`,
     ),
     statusCheck: check(
       "goat_integration_resources_status_check",
@@ -4155,6 +4157,8 @@ export const chatSessions = productSchema.table(
       .notNull()
       .references(() => users.workosUserId, { onDelete: "cascade" }),
     title: text("title").notNull().default("New chat"),
+    botName: text("bot_name"),
+    botDescription: text("bot_description"),
     model: text("model").$type<AgentModelId>().notNull(),
     engine: text("engine").$type<ChatEngine>().notNull().default("opencompany"),
     kind: text("kind").$type<ChatSessionKind>().notNull().default("chat"),
@@ -4176,6 +4180,10 @@ export const chatSessions = productSchema.table(
       sql`${table.engine} IN ('opencompany', 'codex', 'claude_code')`,
     ),
     kindCheck: check("goat_chat_sessions_kind_check", sql`${table.kind} IN ('chat', 'task')`),
+    botIdentityCheck: check(
+      "chat_sessions_bot_identity_check",
+      sql`(${table.botName} IS NULL AND ${table.botDescription} IS NULL) OR (${table.botName} IS NOT NULL AND ${table.botDescription} IS NOT NULL AND length(btrim(${table.botName})) BETWEEN 1 AND 80 AND length(${table.botDescription}) <= 4000 AND ${table.kind} = 'chat')`,
+    ),
   }),
 );
 
@@ -5173,6 +5181,7 @@ export const conversationReadModelV1 = productSchema.table(
     actorId: text("actor_id").notNull(),
     workspaceId: text("workspace_id"),
     title: text("title").notNull(),
+    isBot: boolean("is_bot").notNull().default(false),
     engine: text("engine").$type<ChatEngine>().notNull(),
     model: text("model").notNull(),
     archivedAt: timestamp("archived_at", { withTimezone: true }),

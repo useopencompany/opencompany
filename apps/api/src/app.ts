@@ -88,6 +88,7 @@ import type { AttachmentUploadService } from "./attachments";
 import type { AttioIngressService } from "./attio-ingress";
 import type { ApiAuthenticator, ApiIdentity, ApiIdentityVerifier } from "./auth";
 import type { BillingReconcileService } from "./billing-reconcile";
+import type { BotService } from "./bots";
 import type { BrainAssetService } from "./brain-assets";
 import type { BrainControlService } from "./brain-control";
 import type { ChatResourceDownload, ChatResourceService } from "./chat-resources";
@@ -200,6 +201,7 @@ export type CreateApiAppInput = {
   }) => Promise<unknown> | unknown;
   brainControl: BrainControlService;
   attachments: AttachmentUploadService;
+  bots?: BotService;
   userSettings: UserSettingsService;
   feedback: FeedbackService;
   repoConfigs: RepoConfigService;
@@ -1577,6 +1579,36 @@ export function createApiApp(input: CreateApiAppInput) {
       );
       return c.json({ data: publicPluginInstallation(plugin), meta }, 200);
     },
+    listBots: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      if (!input.bots) throw new ApiError(404, "not_found", "Bots are not enabled.");
+      return c.json({ data: await input.bots.list(actor), meta }, 200);
+    },
+    getBot: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      if (!input.bots) throw new ApiError(404, "not_found", "Bots are not enabled.");
+      return c.json({ data: await input.bots.get(actor, c.req.valid("param").botId), meta }, 200);
+    },
+    createBot: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 30);
+      if (!input.bots) throw new ApiError(404, "not_found", "Bots are not enabled.");
+      return c.json({ data: await input.bots.create(actor, c.req.valid("json")), meta }, 200);
+    },
+    updateBot: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      if (!input.bots) throw new ApiError(404, "not_found", "Bots are not enabled.");
+      return c.json(
+        {
+          data: await input.bots.update(actor, c.req.valid("param").botId, c.req.valid("json")),
+          meta,
+        },
+        200,
+      );
+    },
     listConversations: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);
@@ -1594,6 +1626,7 @@ export function createApiApp(input: CreateApiAppInput) {
     getConversation: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);
+      await input.bots?.authorizeConversation(actor, c.req.valid("param").conversationId);
       const conversation = await input.chat.getConversation(
         actor,
         c.req.valid("param").conversationId,
@@ -1670,6 +1703,7 @@ export function createApiApp(input: CreateApiAppInput) {
         ...(body.conversationId ? { conversation_id: body.conversationId } : {}),
       });
       const idempotencyKey = c.req.valid("header")["idempotency-key"];
+      if (body.conversationId) await input.bots?.authorizeConversation(actor, body.conversationId);
       const existingTarget = body.conversationId
         ? await getConversationOrTask(input, actor, body.conversationId)
         : null;
@@ -2952,8 +2986,10 @@ export function createApiApp(input: CreateApiAppInput) {
     app.get("/integrations/neon/callback", (c) => ingress.callback("neon", c.req.raw));
     app.get("/integrations/notion/start", (c) => ingress.start("notion", c.req.raw));
     app.get("/integrations/supabase/start", (c) => ingress.start("supabase", c.req.raw));
+    app.get("/integrations/resend/start", (c) => ingress.start("resend", c.req.raw));
     app.get("/integrations/notion/callback", (c) => ingress.callback("notion", c.req.raw));
     app.get("/integrations/supabase/callback", (c) => ingress.callback("supabase", c.req.raw));
+    app.get("/integrations/resend/callback", (c) => ingress.callback("resend", c.req.raw));
     app.get("/integrations/latitude/start", (c) => ingress.start("latitude", c.req.raw));
     app.get("/integrations/latitude/callback", (c) => ingress.callback("latitude", c.req.raw));
     app.get("/integrations/jamie-mcp/start", (c) => ingress.start("jamie", c.req.raw));

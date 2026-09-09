@@ -17,6 +17,7 @@ export type OfficialMcpPluginName =
   | "neon"
   | "notion"
   | "supabase"
+  | "resend"
   | "posthog"
   | "render"
   | "vercel"
@@ -64,6 +65,7 @@ export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
     | "neon"
     | "notion"
     | "supabase"
+    | "resend"
     | "posthog"
     | "render"
     | "vercel"
@@ -295,6 +297,19 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectHref: "/api/integrations/supabase/start?returnTo=/settings/plugins/supabase",
     accountDescription:
       "Choose the Supabase organization to authorize. SQL can read or change data; review permissions before use.",
+  },
+  resend: {
+    name: "resend",
+    kind: "mcp",
+    label: "Resend",
+    description:
+      "Send emails, read inbound messages, and manage contacts and broadcasts with permission controls.",
+    category: "communication",
+    source: OFFICIAL_PLUGIN_SOURCES["resend"],
+    connectionProvider: "resend",
+    connectHref: "/api/integrations/resend/start?returnTo=/settings/plugins/resend",
+    accountDescription:
+      "Connect your Resend account. Sending and sensitive reads require approval; access administration and destructive actions start off.",
   },
   posthog: {
     name: "posthog",
