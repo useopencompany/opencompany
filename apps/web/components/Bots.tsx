@@ -81,6 +81,7 @@ export function BotsProvider({ children }: { children: ReactNode }) {
     setLoading(false);
     setError(null);
     setBots((current) => [bot, ...current.filter((item) => item.id !== bot.id)]);
+    setRevision((current) => current + 1);
   };
   return (
     <BotsContext.Provider

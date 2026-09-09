@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { BotSettingsButton, BotsProvider, SidebarBots } from "./Bots";
@@ -86,4 +86,34 @@ it("edits settings on the existing conversation", async () => {
 it("keeps the shared chat surface usable outside the authenticated bots provider", () => {
   render(<BotSettingsButton conversationId="chat_1" />);
   expect(screen.queryByRole("button", { name: "Bot settings" })).not.toBeInTheDocument();
+});
+
+it("retains existing bots when creation finishes before the initial list loads", async () => {
+  const user = userEvent.setup();
+  const existing = { id: "bot_existing", name: "Existing assistant", description: "" };
+  let resolveInitial!: (bots: (typeof existing)[]) => void;
+  state.list.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        resolveInitial = resolve;
+      }),
+  );
+  state.save.mockImplementationOnce(async (bot) => {
+    state.list.mockResolvedValue([bot, existing]);
+    return bot;
+  });
+  render(
+    <BotsProvider>
+      <SidebarBots />
+    </BotsProvider>,
+  );
+  await user.click(screen.getByRole("button", { name: "Create bot" }));
+  await user.type(screen.getByLabelText("Name"), "New assistant");
+  await user.click(screen.getByRole("button", { name: "Create bot" }));
+  expect(await screen.findByRole("link", { name: "Existing assistant" })).toBeInTheDocument();
+  await act(async () => {
+    resolveInitial([]);
+  });
+  expect(screen.getByRole("link", { name: "New assistant" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Existing assistant" })).toBeInTheDocument();
 });
