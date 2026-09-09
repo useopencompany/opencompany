@@ -86,4 +86,3 @@ BEGIN
     updated_at = EXCLUDED.updated_at;
 END
 $$;--> statement-breakpoint
-
