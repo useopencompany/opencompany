@@ -15,14 +15,15 @@ import artifact12 from "./linear.json";
 import artifact13 from "./neon.json";
 import artifact14 from "./notion.json";
 import artifact15 from "./posthog.json";
-import artifact16 from "./render.json";
-import artifact18 from "./signoz.json";
-import artifact19 from "./slack.json";
-import artifact21 from "./stripe.json";
-import artifact20 from "./supabase.json";
-import artifact17 from "./vercel.json";
-import artifact22 from "./x.json";
-import artifact23 from "./yc-advise.json";
+import artifact17 from "./render.json";
+import artifact16 from "./resend.json";
+import artifact19 from "./signoz.json";
+import artifact20 from "./slack.json";
+import artifact22 from "./stripe.json";
+import artifact21 from "./supabase.json";
+import artifact18 from "./vercel.json";
+import artifact23 from "./x.json";
+import artifact24 from "./yc-advise.json";
 
 export const OFFICIAL_PLUGIN_ARTIFACTS = {
   attio: artifact0,
@@ -41,12 +42,13 @@ export const OFFICIAL_PLUGIN_ARTIFACTS = {
   neon: artifact13,
   notion: artifact14,
   posthog: artifact15,
-  render: artifact16,
-  vercel: artifact17,
-  signoz: artifact18,
-  slack: artifact19,
-  supabase: artifact20,
-  stripe: artifact21,
-  x: artifact22,
-  "yc-advise": artifact23,
+  resend: artifact16,
+  render: artifact17,
+  vercel: artifact18,
+  signoz: artifact19,
+  slack: artifact20,
+  supabase: artifact21,
+  stripe: artifact22,
+  x: artifact23,
+  "yc-advise": artifact24,
 };

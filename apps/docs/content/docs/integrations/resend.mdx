@@ -1,0 +1,49 @@
+---
+title: Resend
+description: Send emails, read inbound messages, and manage contacts and campaigns through Resend.
+---
+
+Use Resend to send transactional emails and broadcasts, check delivery, read inbound
+messages, and manage contacts, templates, and email infrastructure.
+
+## Connect Resend
+
+1. Open **Settings → Plugins → Resend** and install the Plugin as a workspace admin.
+2. Select **Connect Resend account**.
+3. Sign in to Resend and approve access to your account.
+4. Review the permission groups before asking opencompany to use Resend.
+
+The connection uses Resend's [official hosted MCP server](https://resend.com/docs/mcp-server)
+with OAuth. Resend grants full account access for this tool set; opencompany checks your
+Plugin permissions before each action. Your connection credentials stay on the server.
+
+## Default permissions
+
+| Group | Default | Includes |
+| --- | --- | --- |
+| Inspect email configuration | On | Domains, segments, topics, and contact property definitions |
+| Read email and contact data | Ask | Messages, recipients, attachments, contacts, campaigns, logs, and account details |
+| Send emails and manage content | Ask | Individual and batch sends, broadcasts, scheduling, content editing, and automation triggers |
+| Administer access and destructive actions | Off | API keys, OAuth revocation, webhook configuration, domain ownership claims, public email links, and irreversible removals |
+
+New or unclassified tools require confirmation, including tools Resend labels read-only.
+Reading draft content in the visual editor also creates editor presence, so it requires
+approval under **Send emails and manage content**. Event-definition management can delete
+definitions; its combined read and write tool starts Off.
+
+## Sending and data access
+
+Use a verified sending domain and review recipients, content, and scheduled time before
+approving a send. Sent emails cannot be recalled. Broadcasts and automation triggers can
+reach multiple contacts.
+
+Email bodies, subjects, attachments, contact records, and API logs can contain sensitive
+information. Public email links let anyone with the link view a message, so link creation
+starts Off. Removing a suppression allows an address to receive messages again and also
+starts Off.
+
+The hosted server cannot read files from your coding sandbox. Use content/base64 or a URL
+Resend can access for attachments and contact imports instead of a local file path.
+
+Disconnect your account or uninstall the Plugin from its settings page when you no longer
+want opencompany to access Resend. Resend has no legacy action integration to configure.

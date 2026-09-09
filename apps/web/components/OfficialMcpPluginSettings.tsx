@@ -450,6 +450,25 @@ export function SupabasePluginDetail({
   );
 }
 
+export function ResendPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.resend}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
 export function RenderPluginDetail({
   pluginState,
   canEdit,
@@ -1741,6 +1760,7 @@ function pluginAccountsFromState(
     config.connectionProvider === "neon" ||
     config.connectionProvider === "notion" ||
     config.connectionProvider === "supabase" ||
+    config.connectionProvider === "resend" ||
     config.connectionProvider === "posthog" ||
     config.connectionProvider === "render" ||
     config.connectionProvider === "vercel" ||

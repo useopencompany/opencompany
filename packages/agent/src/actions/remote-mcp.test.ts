@@ -754,6 +754,149 @@ describe("plugin tool outcome analytics", () => {
   });
 });
 
+describe("reviewed Resend package permissions", () => {
+  it("imports the pinned package and gates sensitive data, sends, administration, and drift", async () => {
+    const url = OFFICIAL_PLUGIN_SOURCES.resend;
+    const plugin = await resolvePlugin({
+      url,
+      fetcher: (await createOfficialPluginFetcher({ url }))!,
+      trustedCapabilitySources: ["useopencompany/plugins"],
+    });
+    expect(plugin.remoteServers).toEqual([
+      { name: "resend", type: "streamable-http", url: "https://mcp.resend.com/mcp", headers: {} },
+    ]);
+    expect(plugin.report.capabilities).toMatchObject({ status: "parsed", issues: [] });
+    const tools = plugin.capabilities.flatMap((group) => group.tools);
+    expect(tools).toHaveLength(103);
+    expect(new Set(tools).size).toBe(tools.length);
+    for (const [id, mode, names] of [
+      ["read", "on", ["list-domains", "get-domain", "list-segments", "list-topics"]],
+      [
+        "query",
+        "ask",
+        [
+          "list-emails",
+          "get-received-email",
+          "get-sent-email-attachment",
+          "get-contact",
+          "list-broadcast-recipients",
+          "get-log",
+          "get-webhook",
+          "list-api-keys",
+        ],
+      ],
+      [
+        "write",
+        "ask",
+        [
+          "send-email",
+          "send-batch-emails",
+          "send-broadcast",
+          "send-event",
+          "update-automation",
+          "get-tiptap-json-content",
+          "create-contact-import",
+          "replay-webhook-event",
+        ],
+      ],
+      [
+        "draft",
+        "off",
+        [
+          "create-api-key",
+          "revoke-oauth-grant",
+          "create-webhook",
+          "share-email",
+          "create-domain-claim",
+          "remove-domain",
+          "remove-suppression",
+          "manage-events",
+        ],
+      ],
+    ] as const) {
+      for (const name of names) {
+        // Editor presence and other effects override vendor read-only annotations.
+        expect(
+          classifyRemoteTool({ name, annotations: { readOnlyHint: true } }, plugin.capabilities),
+        ).toMatchObject({
+          curated: true,
+          capability: { id, defaultMode: mode },
+          bucket: id === "read" || id === "query" ? "read" : "write",
+        });
+      }
+    }
+    const discovery = client({
+      pages: [
+        {
+          tools: [...tools, "new-reader"].map((name) => ({
+            name,
+            inputSchema: { type: "object" },
+            annotations: { readOnlyHint: true },
+          })),
+        },
+      ],
+    });
+    const createClient = vi.fn(async () => discovery);
+    const recordDispatch = vi.fn(async () => {});
+    const resend = registration({
+      pluginName: "resend",
+      source: "plugin:resend:resend",
+      connectionProvider: "resend",
+      label: "Resend",
+      server: plugin.remoteServers[0]!,
+      capabilities: plugin.capabilities,
+    });
+    const snapshot = await discoverRemoteMcpSnapshot(identity, resend, {
+      createClient,
+      recordDispatch,
+    });
+    const catalog = await resolveRemoteMcpActions(
+      identity,
+      { ...resend, discoverySnapshot: snapshot! },
+      { createClient, recordDispatch },
+    );
+    for (const [name, mode] of [
+      ["list-domains", "on"],
+      ["send-email", "ask"],
+      ["get-email", "ask"],
+    ]) {
+      expect(
+        catalog?.actions.find((action) => action.id.endsWith(`.${name}`))?.permissionMode,
+      ).toBe(mode);
+    }
+    for (const name of ["create-api-key", "remove-contact", "share-email", "manage-events"]) {
+      expect(catalog?.actions.some((action) => action.id.endsWith(`.${name}`))).toBe(false);
+    }
+    const enabled = await resolveRemoteMcpActions(
+      identity,
+      {
+        ...resend,
+        discoverySnapshot: snapshot!,
+        getState: async () => connectedState({ read: "on", write: "on" }),
+      },
+      { createClient, recordDispatch },
+    );
+    expect(
+      enabled?.actions.find((action) => action.id.endsWith(".new-reader"))?.permissionMode,
+    ).toBe("ask");
+    const uninstalled = await resolveRemoteMcpActions(
+      identity,
+      {
+        ...resend,
+        discoverySnapshot: snapshot!,
+        isEnabled: async () => false,
+      },
+      { createClient, recordDispatch },
+    );
+    await expect(
+      uninstalled?.actions
+        .find((action) => action.id.endsWith(".list-domains"))
+        ?.execute({}, context),
+    ).rejects.toBeInstanceOf(ActionPermissionError);
+    expect(discovery.callTool).not.toHaveBeenCalled();
+  });
+});
+
 describe("reviewed Supabase package permissions", () => {
   it("imports the pinned package and gates sensitive reads, SQL, costs, and drift", async () => {
     const url = OFFICIAL_PLUGIN_SOURCES.supabase;

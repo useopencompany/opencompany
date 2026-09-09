@@ -36,8 +36,10 @@ const mocks = vi.hoisted(() => ({
   loadNeonConnection: vi.fn(),
   getNotionState: vi.fn(),
   getSupabaseState: vi.fn(),
+  getResendState: vi.fn(),
   loadNotionConnection: vi.fn(),
   loadSupabaseConnection: vi.fn(),
+  loadResendConnection: vi.fn(),
   getBetterStackState: vi.fn(),
   loadBetterStackConnection: vi.fn(),
   getRenderState: vi.fn(),
@@ -163,6 +165,11 @@ vi.mock("./integrations/supabase-mcp", () => ({
   SUPABASE_MCP_ENDPOINT_URL: "https://mcp.supabase.com/mcp",
   getSupabaseMcpIntegrationState: mocks.getSupabaseState,
   loadSupabaseMcpWorkerConnection: mocks.loadSupabaseConnection,
+}));
+vi.mock("./integrations/resend-mcp", () => ({
+  RESEND_MCP_ENDPOINT_URL: "https://mcp.resend.com/mcp",
+  getResendMcpIntegrationState: mocks.getResendState,
+  loadResendMcpWorkerConnection: mocks.loadResendConnection,
 }));
 vi.mock("./integrations/latitude-mcp", () => ({
   LATITUDE_MCP_ENDPOINT_URL: "https://api.latitude.so/v1/mcp",
@@ -1093,6 +1100,45 @@ describe("plugin gateway registration cache", () => {
     ]) {
       mocks.listRegistrations.mockResolvedValueOnce([
         { ...supabaseRecord, server: { ...supabaseRecord.server, url } },
+      ]);
+      await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+    }
+  });
+  it("binds Resend OAuth credentials only to Resend's exact hosted MCP endpoint", async () => {
+    const resendRecord = record({
+      pluginName: "resend",
+      pluginLabel: "resend",
+      pluginDescription: "Resend plugin tools.",
+      connectionProvider: "resend",
+      server: {
+        name: "resend",
+        type: "streamable-http",
+        url: "https://mcp.resend.com/mcp",
+        headers: {},
+      },
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([resendRecord]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:resend:resend",
+        connectionProvider: "resend",
+        getState: mocks.getResendState,
+        loadConnection: mocks.loadResendConnection,
+      }),
+    ]);
+
+    for (const url of [
+      "https://mcp.resend.com.evil.example/mcp",
+      "https://evil.example/mcp",
+      "http://mcp.resend.com/mcp",
+      "https://mcp.resend.com/other",
+      "https://mcp.resend.com/mcp?redirect=unreviewed",
+      "https://attacker@mcp.resend.com/mcp",
+    ]) {
+      mocks.listRegistrations.mockResolvedValueOnce([
+        { ...resendRecord, server: { ...resendRecord.server, url } },
       ]);
       await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
     }

@@ -402,6 +402,29 @@ describe("Supabase integration state", () => {
     ]);
   });
 });
+describe("Resend integration state", () => {
+  it("exposes the personal MCP connection to plugin settings", () => {
+    const state = integrationStateFromRows([
+      {
+        id: "gint_resend_mcp",
+        provider: "resend",
+        externalId: "resend_mcp",
+        accountName: "Resend",
+        connectionLabel: "Acme workspace",
+        status: "connected",
+        scopes: [],
+        capabilityModes: { read: "on", query: "ask", write: "ask" },
+      },
+    ]);
+
+    expect(state.personalAccounts.resend).toEqual([
+      expect.objectContaining({
+        integrationId: "gint_resend_mcp",
+        connectionLabel: "Acme workspace",
+      }),
+    ]);
+  });
+});
 
 describe("Granola integration state", () => {
   it("keeps MCP tool authorization separate from legacy API ingestion", () => {

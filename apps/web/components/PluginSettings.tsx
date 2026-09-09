@@ -39,6 +39,7 @@ import {
   KeyRound,
   Link2,
   Loader2,
+  Mail,
   PackageOpen,
   Search,
   ServerCog,
@@ -229,6 +230,11 @@ export const OFFICIAL_MCP_PLUGINS = {
     ...OFFICIAL_MCP_PLUGIN_METADATA.supabase,
     Icon: ServerCog,
     iconClassName: "bg-[#003D2B] text-[#3ECF8E]",
+  },
+  resend: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.resend,
+    Icon: Mail,
+    iconClassName: "bg-black text-white",
   },
   signoz: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.signoz,
