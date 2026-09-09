@@ -177,7 +177,7 @@ export async function serveActionRequest(input: {
         code: "duplicate_invocation",
         source: action.source,
         message:
-          "This action invocation was already admitted, so the service did not dispatch it again.",
+          "This action invocation or identical write was already admitted in this turn, so the service did not dispatch it again. Preserve its earlier result. If the outcome is uncertain, read the provider state before proposing another change; do not retry the same write with a new call id.",
       },
     };
   }

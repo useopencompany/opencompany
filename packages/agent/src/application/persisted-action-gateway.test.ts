@@ -15,6 +15,7 @@ import {
   type ResolvedAction,
   type ResolvedActionCatalog,
 } from "../actions/types";
+import type { ActionGatewayServiceDependencies } from "./action-gateway";
 import {
   createActionGateway,
   createActionHostGateway,
@@ -43,9 +44,116 @@ const interactiveContext = {
 };
 
 describe("executeActionGateway", () => {
+  it("admits an identical non-idempotent write only once across fresh tool ids and gateway instances", async () => {
+    const action = {
+      ...createReadAction(),
+      effects: ACTION_EFFECTS_WRITE,
+      capability: "write" as const,
+    };
+    const admitted = new Set<string>();
+    const claimInvocation = vi.fn<ActionGatewayServiceDependencies["claimInvocation"]>(
+      async ({ run, invocationId, deduplicationKey }) => {
+        const keys = [invocationId, ...(deduplicationKey ? [deduplicationKey] : [])].map(
+          (key) => `${run.runId}:${key}`,
+        );
+        const duplicate = keys.some((key) => admitted.has(key));
+        if (!duplicate) for (const key of keys) admitted.add(key);
+        return { ok: true as const, duplicate, callCount: admitted.size };
+      },
+    );
+    const executeAction = vi.fn(async () => ({
+      ok: true as const,
+      action: action.id,
+      result: { id: "original_result" },
+    }));
+    const dependencies = {
+      loadContext: vi.fn(async () => interactiveContext),
+      resolveCatalog: vi.fn(async () => ({
+        providers: [{ id: "gmail" as const, label: "Gmail", description: "Email" }],
+        actions: [action],
+      })),
+      claimInvocation,
+      executeAction,
+    };
+    const call = (invocationId: string, params: Record<string, unknown>, turnId = "turn_1") =>
+      createActionGateway(dependencies)({
+        request: {
+          operation: "execute",
+          sessionId: "session_1",
+          turnId,
+          action: action.id,
+          invocationId,
+          params,
+        },
+        signal: new AbortController().signal,
+      });
+    const results = await Promise.all([
+      call("approved_call", { title: "Planning", time: "10:00" }),
+      call("regenerated_call", { time: "10:00", title: "Planning" }),
+    ]);
+    expect(results.filter((result) => result.ok)).toHaveLength(1);
+    expect(results).toContainEqual(
+      expect.objectContaining({
+        ok: false,
+        error: expect.objectContaining({ code: "duplicate_invocation" }),
+      }),
+    );
+    expect(executeAction).toHaveBeenCalledOnce();
+    expect(executeAction).toHaveBeenCalledWith(
+      expect.objectContaining({ toolCallId: "approved_call" }),
+    );
+    expect((await call("approved_call", { title: "Changed input", time: "12:00" })).ok).toBe(false);
+    expect((await call("different_write", { title: "Planning", time: "11:00" })).ok).toBe(true);
+    expect((await call("next_turn", { title: "Planning", time: "10:00" }, "turn_2")).ok).toBe(true);
+    expect(executeAction).toHaveBeenCalledTimes(3);
+  });
+
   beforeEach(() => {
     vi.unstubAllEnvs();
   });
+
+  it.each([ACTION_EFFECTS_READ, { ...ACTION_EFFECTS_WRITE, idempotent: true }])(
+    "retains invocation-based admission for retry-safe effects %j",
+    async (effects) => {
+      const action = { ...createReadAction(), effects };
+      const claimInvocation = vi.fn<ActionGatewayServiceDependencies["claimInvocation"]>(
+        async () => ({
+          ok: true as const,
+          callCount: 1,
+          duplicate: false,
+        }),
+      );
+      const gateway = createActionGateway({
+        loadContext: vi.fn(async () => interactiveContext),
+        resolveCatalog: vi.fn(async () => ({
+          providers: [{ id: "gmail" as const, label: "Gmail", description: "Email" }],
+          actions: [action],
+        })),
+        claimInvocation,
+        executeAction: vi.fn(async () => ({ ok: true as const, action: action.id, result: {} })),
+      });
+      for (const invocationId of ["call_1", "call_2"]) {
+        expect(
+          (
+            await gateway({
+              request: {
+                operation: "execute",
+                sessionId: "session_1",
+                turnId: "turn_1",
+                invocationId,
+                action: action.id,
+                params: {},
+              },
+              signal: new AbortController().signal,
+            })
+          ).ok,
+        ).toBe(true);
+      }
+      for (const [claim] of claimInvocation.mock.calls) {
+        expect(claim).not.toHaveProperty("deduplicationKey");
+      }
+    },
+  );
 
   it.each([
     ACTION_HOST_TOOL_CONTRACT_VERSION_V2,
