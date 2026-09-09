@@ -40,6 +40,11 @@ are rejected with an instruction to refresh rather than being parsed through a l
 Attachments are uploaded to `/v1/attachments` and referenced by opaque IDs. Credential or storage
 locator fields never enter client DTOs.
 
+Claude Code coding chats and Workflow steps share the model catalog in
+`packages/agent-runtime/src/models.ts`. Claude Opus 5 is available as
+`anthropic/claude-opus-5`, mapped to `claude-opus-5` for sandbox execution, with reasoning-effort
+controls and a 1M-token context window. Claude Sonnet 5 remains the default.
+
 ## Tasks and Workflows
 
 Manual, Workflow, schedule, and agent producers call shared application services. Creation writes a

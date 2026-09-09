@@ -2202,7 +2202,10 @@ describe("Surface chat streaming UI", () => {
     );
   });
 
-  it("selects a Claude model and submits per-turn reasoning effort", async () => {
+  it.each([
+    ["Claude Opus 4.8", "anthropic/claude-opus-4.8"],
+    ["Claude Opus 5", "anthropic/claude-opus-5"],
+  ])("selects %s and submits per-turn reasoning effort", async (label, model) => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       return new Response(
@@ -2240,7 +2243,7 @@ describe("Surface chat streaming UI", () => {
       screen.queryByRole("button", { name: /Claude reasoning effort/ }),
     ).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Claude model: Claude Haiku 4.5" }));
-    await user.click(screen.getByRole("option", { name: /Claude Opus 4\.8/ }));
+    await user.click(screen.getByRole("option", { name: new RegExp(label) }));
     await user.click(
       screen.getByRole("button", { name: "Claude reasoning effort: High (click to cycle)" }),
     );
@@ -2253,7 +2256,7 @@ describe("Surface chat streaming UI", () => {
     expect(chatMock.sendMessage).toHaveBeenCalledWith({ text: "Inspect this repository" });
     expect(chatMock.preparedRequestBodies.at(-1)).toMatchObject({
       newSessionId: expect.stringMatching(/^goat_chat_/),
-      model: "anthropic/claude-opus-4.8",
+      model,
       engine: {
         type: "claude_code",
         schemaVersion: 1,
