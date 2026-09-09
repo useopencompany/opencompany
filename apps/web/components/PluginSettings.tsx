@@ -12,6 +12,7 @@ import { toast } from "@opencompany/ui/components/sonner";
 import {
   AttioIcon,
   BetterStackIcon,
+  ConvexIcon,
   FathomIcon,
   GitHubIcon,
   GmailIcon,
@@ -218,6 +219,11 @@ export const OFFICIAL_MCP_PLUGINS = {
     ...OFFICIAL_MCP_PLUGIN_METADATA.posthog,
     Icon: PostHogIcon,
     iconClassName: "bg-[#F54E00] text-white",
+  },
+  convex: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.convex,
+    Icon: ConvexIcon,
+    iconClassName: "bg-surface-muted",
   },
   render: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.render,

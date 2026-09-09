@@ -19,6 +19,7 @@ export type OfficialMcpPluginName =
   | "supabase"
   | "resend"
   | "posthog"
+  | "convex"
   | "render"
   | "vercel"
   | "signoz"
@@ -67,6 +68,7 @@ export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
     | "supabase"
     | "resend"
     | "posthog"
+    | "convex"
     | "render"
     | "vercel"
     | "signoz"
@@ -322,6 +324,19 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectionProvider: "posthog",
     connectHref: "/api/integrations/posthog/start?returnTo=/settings/plugins/posthog",
     accountDescription: "The PostHog account opencompany uses when you run analytics tools.",
+  },
+  convex: {
+    name: "convex",
+    kind: "mcp",
+    label: "Convex",
+    category: "engineering",
+    description:
+      "Inspect deployments, query data, and run Convex functions with permission controls.",
+    source: OFFICIAL_PLUGIN_SOURCES.convex,
+    connectionProvider: "convex",
+    connectHref: "/settings/plugins/convex#convex-deploy-key",
+    accountDescription:
+      "A deployment-scoped key connects one Convex deployment. Production supports schema and function inspection only.",
   },
   render: {
     name: "render",

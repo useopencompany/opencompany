@@ -1,4 +1,9 @@
 import {
+  connectConvexMcpIntegration,
+  getConvexIntegrationState,
+  validateConvexApiKey,
+} from "@opencompany/agent/integrations/convex-mcp";
+import {
   connectGranolaIntegration,
   getGranolaIntegrationState,
   validateGranolaApiKey,
@@ -52,6 +57,21 @@ vi.mock("@opencompany/agent/integrations/granola", async (importOriginal) => ({
   })),
 }));
 
+vi.mock("@opencompany/agent/integrations/convex-mcp", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  validateConvexApiKey: vi.fn(),
+  connectConvexMcpIntegration: vi.fn(async () => ({ integrationId: "gint_convex" })),
+  getConvexIntegrationState: vi.fn(async () => ({
+    provider: "convex" as const,
+    connected: true,
+    status: "connected" as const,
+    integrationId: "gint_convex",
+    accountName: "Acme",
+    statusReason: null,
+    capabilityModes: {},
+    toolModes: {},
+  })),
+}));
 vi.mock("@opencompany/agent/integrations/render-mcp", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   validateRenderApiKey: vi.fn(),
@@ -607,5 +627,42 @@ describe("integration account service", () => {
       status: 404,
       message: "Stripe is not connected.",
     });
+  });
+});
+
+describe("Convex connection", () => {
+  it("validates a scoped key before storage and refreshes plugin discovery", async () => {
+    const refresh = vi.fn(async () => undefined);
+    const service = createIntegrationAccountService({
+      db: {},
+      refreshConvexPluginRegistrations: refresh,
+    });
+    vi.mocked(validateConvexApiKey).mockResolvedValue({ ok: true, deployment: "happy-animal-123" });
+    const state = await service.connectConvex(member, " dev:happy-animal-123|abcdefgh ");
+    expect(connectConvexMcpIntegration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userWorkosId: member.userId,
+        apiKey: "dev:happy-animal-123|abcdefgh",
+        deployment: "happy-animal-123",
+      }),
+    );
+    expect(refresh).toHaveBeenCalledWith({
+      userWorkosId: member.userId,
+      workspaceId: member.workspaceId,
+    });
+    expect(state.provider).toBe("convex");
+    expect(JSON.stringify(state)).not.toContain("abcdefgh");
+  });
+  it("rejects project tokens and rejected credentials without storage", async () => {
+    vi.mocked(connectConvexMcpIntegration).mockClear();
+    const service = createIntegrationAccountService({ db: {} });
+    await expect(
+      service.connectConvex(member, "project:team:project|abcdefgh"),
+    ).rejects.toMatchObject({ status: 400 });
+    vi.mocked(validateConvexApiKey).mockResolvedValue({ ok: false, error: "Key rejected" });
+    await expect(
+      service.connectConvex(member, "dev:happy-animal-123|abcdefgh"),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(connectConvexMcpIntegration).not.toHaveBeenCalled();
   });
 });

@@ -307,6 +307,7 @@ describe("Electric read models", () => {
       "fathom",
       "attio",
       "betterstack",
+      "convex",
       "render",
       "vercel",
       "signoz",

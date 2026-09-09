@@ -106,6 +106,7 @@ function providerName(provider: string | null) {
       return "Neon";
     case "betterstack":
       return "Better Stack";
+    case "convex":
     case "render":
       return "Render";
     case "vercel":
