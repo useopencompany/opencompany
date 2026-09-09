@@ -703,7 +703,9 @@ describe("SkillsSettingsRoute", () => {
     await userEvent.click(screen.getByRole("button", { name: "Preview" }));
 
     expect(await screen.findByText(/will be installed as/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Install skill" })).toBeEnabled();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Install skill" })).toBeEnabled(),
+    );
   });
 
   it("creates a standard workspace-authored Skill with a derived slash command", async () => {
