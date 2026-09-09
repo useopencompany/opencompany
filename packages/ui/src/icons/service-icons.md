@@ -1,0 +1,30 @@
+# Service logo sources
+
+Use a vendor's published mark for an integration, and verify that it belongs to
+that product (for example, Fathom's meeting assistant and Fathom Analytics are
+different services). Add it to `service-icons.tsx` so catalog rows, plugin details,
+and other service badges can share the same artwork. Generic UI icons are for
+actions and unbranded plugins, not substitutes for service logos.
+
+The original monochrome paths in this module come from [Simple Icons](https://simpleicons.org),
+except where their comments identify another source. The following marks were
+verified against vendor assets on 2026-09-09. Brand assets remain the property of
+their respective owners; inclusion identifies the integration and does not imply
+endorsement.
+
+| Mark | Vendor asset | Adaptation |
+| --- | --- | --- |
+| Supabase | [Brand guidelines](https://supabase.com/brand-assets), [SVG](https://github.com/supabase/supabase/blob/master/packages/common/assets/images/supabase-logo-icon.svg) | Original paths, colors, gradients, and viewBox. |
+| Infisical | [Official repository SVG](https://github.com/Infisical/infisical/blob/main/frontend/public/images/gradientLogo.svg) | Original paths, gradient, and viewBox. |
+| Jamie | [Website header](https://www.meetjamie.ai/) | Symbol path extracted from the wordmark; viewBox cropped to the symbol. Uses the surrounding foreground color. |
+| Latitude | [Website header](https://latitude.so/) | First four paths of the header SVG (`svg-1440095973_4505`); viewBox cropped to the symbol. Original colors. |
+| Render | [Website icon SVG](https://render.com/icon.svg) | Original path and viewBox; foreground color replaces the favicon's global light/dark CSS. |
+| Vercel | [Brand kit](https://vercel.com/geist/brands) | `Vercel/icon/dark/vercel-icon-dark.svg`; original path and viewBox, foreground color. |
+| Resend | [Brand kit](https://resend.com/brand), [white icon SVG](https://cdn.resend.com/brand/resend-icon-white.svg) | Original path, foreground color; viewBox crops the asset's surrounding whitespace because the UI badge provides padding. |
+| SigNoz | [Website logo SVG](https://signoz.io/img/SigNozLogo-orange.svg) | Original paths, colors, gradient, filter, and viewBox. |
+| Fathom | [Vendor website](https://www.fathom.ai/about-us), [header SVG](https://cdn.prod.website-files.com/6899da9beccbdbe92be49b5d/68e7961f4ff1cd5e326512f7_logo-wordmark-new.svg) | First three paths (the meeting assistant's symbol), original colors; viewBox cropped to the symbol. Replaces the unrelated Fathom Analytics mark. |
+
+SVG attributes are translated to JSX. Gradients and filters use React `useId` to
+keep references local to each rendered instance, including when a sidebar row and
+a detail heading display the same logo together. Assets are bundled locally;
+rendering does not fetch from vendor websites.
