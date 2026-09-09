@@ -1,7 +1,7 @@
 import { botIdentityPrompt } from "@opencompany/agent/bot-prompt";
-import { getDb } from "@opencompany/db";
 import { chatSessions } from "@opencompany/db/product-schema";
 import { and, eq } from "drizzle-orm";
+import { getDb } from "./db";
 
 export async function loadBotIdentityPrompt(conversationId: string, userWorkosId: string) {
   const [session] = await getDb()
