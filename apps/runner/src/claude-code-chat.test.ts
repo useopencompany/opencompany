@@ -11,6 +11,7 @@ import type {
   Task,
 } from "@opencompany/db/product-schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { AcpHarnessTurnInput } from "./acp-harness";
 import { loadBotIdentityPrompt } from "./bot-context";
 import {
   CLAUDE_CORE_MCP_UNAVAILABLE_MESSAGE,
