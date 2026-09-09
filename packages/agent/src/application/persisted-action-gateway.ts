@@ -259,7 +259,7 @@ async function loadCodexActionContext(
     engine: row.engine,
     assistantMessageId: row.assistantMessageId,
     policy: row.chatKind === "task" ? "headless" : "foregroundInteractive",
-    durableTaskApprovals: row.chatKind === "task" && row.engine !== "opencompany",
+    durableTaskApprovals: row.chatKind === "task",
   };
 }
 

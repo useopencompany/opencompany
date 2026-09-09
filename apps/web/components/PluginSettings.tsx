@@ -19,27 +19,31 @@ import {
   GoogleDriveIcon,
   GranolaIcon,
   HubSpotIcon,
+  InfisicalIcon,
+  JamieIcon,
+  LatitudeIcon,
   LinearIcon,
   NeonIcon,
   NotionIcon,
   PostHogIcon,
+  RenderIcon,
+  ResendIcon,
+  SigNozIcon,
   SlackIcon,
   StripeIcon,
+  SupabaseIcon,
+  VercelIcon,
   XIcon,
 } from "@opencompany/ui/icons";
 import { cn } from "@opencompany/ui/lib/utils";
 import {
-  Activity,
   Archive,
-  AudioLines,
   ChevronDown,
   ChevronRight,
   ExternalLink,
   FileArchive,
-  KeyRound,
   Link2,
   Loader2,
-  Mail,
   PackageOpen,
   Search,
   ServerCog,
@@ -47,7 +51,6 @@ import {
   ShieldCheck,
   Sparkles,
   Trash2,
-  Triangle,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -149,7 +152,7 @@ export const OFFICIAL_MCP_PLUGINS = {
   fathom: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.fathom,
     Icon: FathomIcon,
-    iconClassName: "bg-[#1355FF] text-white",
+    iconClassName: "bg-[#101820] text-white",
   },
   github: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.github,
@@ -183,17 +186,17 @@ export const OFFICIAL_MCP_PLUGINS = {
   },
   infisical: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.infisical,
-    Icon: KeyRound,
+    Icon: InfisicalIcon,
     iconClassName: "bg-[#6C47FF] text-white",
   },
   jamie: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.jamie,
-    Icon: AudioLines,
+    Icon: JamieIcon,
     iconClassName: "bg-[#5B5BD6] text-white",
   },
   latitude: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.latitude,
-    Icon: Activity,
+    Icon: LatitudeIcon,
     iconClassName: "bg-[#171717] text-white",
   },
   linear: {
@@ -218,28 +221,28 @@ export const OFFICIAL_MCP_PLUGINS = {
   },
   render: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.render,
-    Icon: ServerCog,
+    Icon: RenderIcon,
     iconClassName: "bg-[#0B0D0E] text-white",
   },
   vercel: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.vercel,
-    Icon: Triangle,
+    Icon: VercelIcon,
     iconClassName: "bg-black text-white",
   },
   supabase: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.supabase,
-    Icon: ServerCog,
+    Icon: SupabaseIcon,
     iconClassName: "bg-[#003D2B] text-[#3ECF8E]",
   },
   resend: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.resend,
-    Icon: Mail,
+    Icon: ResendIcon,
     iconClassName: "bg-black text-white",
   },
   signoz: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.signoz,
-    Icon: Activity,
-    iconClassName: "bg-[#FF6B35] text-white",
+    Icon: SigNozIcon,
+    iconClassName: "bg-[#0B0D0E] text-white",
   },
   slack: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.slack,
