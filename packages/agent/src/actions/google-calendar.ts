@@ -226,7 +226,7 @@ function createEventAction(connections: readonly GoogleCalendarConnection[]): Re
     effects: ACTION_EFFECTS_WRITE,
     ...permissionAnnotation("write", connections),
     description:
-      "Create a new event on a connected Google Calendar. Use only when the user asked to add something to their calendar. Attendees receive an email invite.",
+      "Create a new event on a connected Google Calendar. Use only when the user asked to add something to their calendar, never as a substitute for moving or rescheduling an existing event. If no reschedule action is available, explain the limitation before making changes. Attendees receive an email invite.",
     params: {
       type: "object",
       additionalProperties: false,

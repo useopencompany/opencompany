@@ -5,6 +5,7 @@ import {
   type ActionHostGatewayRequest,
   supportsCompactActionDiscovery,
 } from "@opencompany/agent-runtime";
+import { actionApprovalInputHash } from "@opencompany/db/action-governance";
 import type { CodexChatEngine } from "@opencompany/db/product-schema";
 import { createLogger } from "@opencompany/observability";
 import { type ActionCatalogPolicyName, projectActionCatalog } from "../actions/policy";
@@ -78,6 +79,7 @@ export type ActionGatewayServiceDependencies = {
     sourceId: string;
     invocationId: string;
     maxCalls: number;
+    deduplicationKey?: string;
   }) => Promise<ActionInvocationClaim>;
   registerApproval: (input: {
     run: ActionServiceRunRef;
@@ -251,8 +253,29 @@ export async function executeActionHostGatewayService(input: {
       ),
       governance: {
         recordSourceDiscovery: (sourceId) => dependencies.recordSourceDiscovery({ run, sourceId }),
-        claimInvocation: ({ sourceId, invocationId, maxCalls }) =>
-          dependencies.claimInvocation({ run, sourceId, invocationId, maxCalls }),
+        claimInvocation: ({ sourceId, invocationId, maxCalls }) => {
+          const request = input.request;
+          const action =
+            request.operation === "execute"
+              ? catalog.actions.find((candidate) => candidate.id === request.action)
+              : undefined;
+          // Model-generated call ids change when an approval continuation repeats a write.
+          // The durable, atomic turn claim must identify the operation independently of those
+          // ids. Keep the original call id for approval binding and provider result correlation.
+          const deduplicationKey =
+            action?.effects.mutatesExternalSystem &&
+            !action.effects.idempotent &&
+            request.operation === "execute"
+              ? `write:${actionApprovalInputHash({ action: action.id, source: action.provider, params: request.params }, action.approvalContext)}`
+              : undefined;
+          return dependencies.claimInvocation({
+            run,
+            sourceId,
+            invocationId,
+            maxCalls,
+            ...(deduplicationKey ? { deduplicationKey } : {}),
+          });
+        },
       },
       execute: ({ action, params, invocationId }) =>
         dependencies.executeAction({
