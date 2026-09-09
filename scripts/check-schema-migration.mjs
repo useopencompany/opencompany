@@ -13,6 +13,7 @@
 // constraint, enum value, or column-type change moves the projection and is caught.
 
 import { execFileSync } from "node:child_process";
+import { eraseSchemaTypes } from "./lib/schema-types.mjs";
 
 const repositoryRoot = new URL("..", import.meta.url).pathname;
 
@@ -146,6 +147,9 @@ if (changedSchemas.length > 0 && !addedMigrations) {
 // can be renamed without moving the projection.
 function projectDdl(source) {
   if (source === null) return "";
+  // String literal unions and $type<T>() arguments affect TypeScript only.
+  // Keep runtime expressions (including pgEnum values and SQL) in the projection.
+  source = eraseSchemaTypes(source);
   const tokens = [];
   scanCode(source, 0, source.length, tokens);
   return tokens.join("\n");

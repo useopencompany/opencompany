@@ -3649,6 +3649,7 @@ export const IdentityEnvelopeSchema = z
 
 export const UserPreferencesSchema = z
   .object({
+    botsEnabled: z.boolean(),
     timezone: z.string().min(1).max(100),
     taskSpawningEnabled: z.boolean(),
     /** @deprecated Wiki is always enabled. */
@@ -3662,6 +3663,7 @@ export const UserPreferencesSchema = z
 
 export const UpdateUserPreferencesBodySchema = z
   .object({
+    botsEnabled: z.boolean().optional(),
     timezone: z.string().min(1).max(100).optional(),
     taskSpawningEnabled: z.boolean().optional(),
     /** @deprecated Accepted for compatibility and ignored; Wiki is always enabled. */

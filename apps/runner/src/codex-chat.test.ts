@@ -550,6 +550,23 @@ describe("runCodexChatTurn over ACP", () => {
     acpMocks.runTurn.mockImplementation(completeAcpTurn);
   });
 
+  it.each(["goat-codex-host-tools.v4", ACTION_HOST_TOOL_CONTRACT_VERSION])(
+    "keeps action discovery guidance aligned with %s",
+    async (hostToolContractVersion) => {
+      await runCodexChatTurn({
+        turn: codexTurn(),
+        session: codexSession({ workspaceId: "workspace_1", hostToolContractVersion }),
+        canonicalAttemptId: "attempt_1",
+        env: env({ runnerPublicUrl: "https://runner.example.com" }),
+      });
+      const harnessInput = acpMocks.runTurn.mock.calls[0]?.[0] as AcpHarnessTurnInput;
+      expect(harnessInput.task.includes("describe_actions")).toBe(
+        hostToolContractVersion === ACTION_HOST_TOOL_CONTRACT_VERSION,
+      );
+      expect(harnessInput.task).toContain("Use list_actions to discover sources");
+    },
+  );
+
   it("uses the Codex adapter with model, reasoning, plan, goal, and the shared MCP", async () => {
     vi.mocked(loadBotIdentityPrompt).mockResolvedValueOnce(
       "Bot identity: customer research assistant.",
@@ -587,7 +604,7 @@ describe("runCodexChatTurn over ACP", () => {
     );
     const harnessInput = acpMocks.runTurn.mock.calls[0]?.[0] as AcpHarnessTurnInput;
     expect(harnessInput.task).toContain("Bot identity: customer research assistant.");
-    expect(harnessInput.task).toContain("list_actions and use_action");
+    expect(harnessInput.task).toContain("Use list_actions to discover sources");
     expect(harnessInput.task).toContain("Actions may modify connected services");
     expect(harnessInput.task).toContain("denial is a normal outcome");
     expect(harnessInput.task).not.toContain("cannot modify connected services");

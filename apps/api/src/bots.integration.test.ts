@@ -3,6 +3,7 @@ import type { Actor } from "@opencompany/core";
 import { drizzle } from "drizzle-orm/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createBotService } from "./bots";
+import { createUserSettingsService } from "./user-settings";
 
 const actor: Actor = {
   userId: "user_1",
@@ -19,7 +20,16 @@ describe("persistent bot storage", () => {
     database = new PGlite();
     await database.exec(`
       CREATE SCHEMA goat;
-      CREATE TABLE goat.users (workos_user_id text PRIMARY KEY, bots_enabled boolean NOT NULL DEFAULT false);
+      CREATE TABLE goat.users (
+        workos_user_id text PRIMARY KEY,
+        bots_enabled boolean NOT NULL DEFAULT false,
+        timezone text NOT NULL DEFAULT 'UTC',
+        task_spawning_enabled boolean NOT NULL DEFAULT false,
+        task_view_mode text NOT NULL DEFAULT 'board',
+        task_time_range text NOT NULL DEFAULT '7d',
+        auto_model_routing_enabled boolean NOT NULL DEFAULT false,
+        updated_at timestamptz NOT NULL DEFAULT now()
+      );
       CREATE TABLE goat.workspace_members (workspace_id text, user_workos_id text);
       CREATE TABLE goat.chat_sessions (id text PRIMARY KEY, user_workos_id text, title text, model text, engine text, bot_name text, bot_description text, closed_at timestamptz, created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now());
       CREATE TABLE goat.codex_chat_sessions (id text PRIMARY KEY, user_workos_id text, chat_session_id text UNIQUE REFERENCES goat.chat_sessions(id), workspace_id text, engine text, model text, status text);
@@ -47,6 +57,39 @@ describe("persistent bot storage", () => {
       status: 409,
     });
   });
+  it("enables bot access through Preferences and preserves bots across disabling and re-enabling", async () => {
+    await database.exec(
+      "UPDATE goat.users SET bots_enabled = false WHERE workos_user_id = 'user_1'",
+    );
+    const settings = createUserSettingsService({ db: drizzle(database) });
+    await expect(service.list(actor)).rejects.toMatchObject({ status: 404 });
+
+    expect(await settings.updatePreferences(actor, { botsEnabled: true })).toMatchObject({
+      botsEnabled: true,
+      taskSpawningEnabled: false,
+    });
+    await service.create(actor, bot);
+    expect(await service.list(actor)).toEqual([bot]);
+
+    expect(await settings.updatePreferences(actor, { botsEnabled: false })).toMatchObject({
+      botsEnabled: false,
+    });
+    await expect(service.list(actor)).rejects.toMatchObject({ status: 404 });
+    await expect(service.authorizeConversation(actor, bot.id)).rejects.toMatchObject({
+      status: 404,
+    });
+
+    await settings.updatePreferences(actor, { botsEnabled: true });
+    expect(await service.list(actor)).toEqual([bot]);
+    expect(
+      (
+        await database.query(
+          "SELECT bots_enabled FROM goat.users WHERE workos_user_id = 'disabled'",
+        )
+      ).rows,
+    ).toEqual([{ bots_enabled: false }]);
+  });
+
   it("checks feature flag, membership, permission, ownership and workspace", async () => {
     await service.create(actor, bot);
     for (const other of [

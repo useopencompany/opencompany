@@ -11,6 +11,7 @@ import type {
   Task,
 } from "@opencompany/db/product-schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { AcpHarnessTurnInput } from "./acp-harness";
 import { loadBotIdentityPrompt } from "./bot-context";
 import {
   CLAUDE_CORE_MCP_UNAVAILABLE_MESSAGE,
@@ -298,12 +299,13 @@ describe("isClaudeCodeAuthenticationFailure", () => {
 });
 
 describe("inspectClaudeCoreMcpInitialization", () => {
-  it("requires both action tools from a connected opencompany server", () => {
+  it("requires all action tools from a connected opencompany server", () => {
     expect(inspectClaudeCoreMcpInitialization(claudeCoreMcpInitNotification())).toEqual({
       sessionId: "claude_thread_1",
       status: "connected",
-      advertisedToolCount: 3,
+      advertisedToolCount: 4,
       hasListActions: true,
+      hasDescribeActions: true,
       hasUseAction: true,
       ready: true,
       failureReason: null,
@@ -322,6 +324,19 @@ describe("inspectClaudeCoreMcpInitialization", () => {
       ready: false,
       failureReason: "required_tools_missing",
     });
+  });
+
+  it("requires description on v5 but supports older two-tool contracts", () => {
+    const notification = claudeCoreMcpInitNotification({
+      tools: ["mcp__opencompany__list_actions", "mcp__opencompany__use_action"],
+    });
+    expect(inspectClaudeCoreMcpInitialization(notification)).toMatchObject({
+      hasDescribeActions: false,
+      ready: false,
+    });
+    expect(
+      inspectClaudeCoreMcpInitialization(notification, "goat-codex-host-tools.v4"),
+    ).toMatchObject({ hasDescribeActions: false, ready: true });
   });
 
   it("ignores unrelated ACP notifications", () => {
@@ -544,6 +559,23 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       },
     );
   });
+
+  it.each(["goat-codex-host-tools.v4", ACTION_HOST_TOOL_CONTRACT_VERSION])(
+    "keeps action discovery guidance aligned with %s",
+    async (hostToolContractVersion) => {
+      await runClaudeCodeChatTurn({
+        turn: claudeTurn(),
+        session: claudeSession({ workspaceId: "workspace_1", hostToolContractVersion }),
+        canonicalAttemptId: "attempt_1",
+        env: env({ runnerPublicUrl: "https://runner.example.com" }),
+      });
+      const harnessInput = acpMocks.runTurn.mock.calls[0]?.[0] as AcpHarnessTurnInput;
+      expect(harnessInput.task.includes("describe_actions")).toBe(
+        hostToolContractVersion === ACTION_HOST_TOOL_CONTRACT_VERSION,
+      );
+      expect(harnessInput.task).toContain("Use list_actions to discover sources");
+    },
+  );
 
   it("configures Claude MCP against the runner with an attempt-and-lease capability", async () => {
     vi.mocked(loadBotIdentityPrompt).mockResolvedValueOnce(
@@ -1340,6 +1372,7 @@ function claudeCoreMcpInitNotification(overrides: { status?: string; tools?: str
         tools: overrides.tools ?? [
           "mcp__opencompany__publish_artifact",
           "mcp__opencompany__list_actions",
+          "mcp__opencompany__describe_actions",
           "mcp__opencompany__use_action",
         ],
         mcp_servers: [{ name: "opencompany", status: overrides.status ?? "connected" }],

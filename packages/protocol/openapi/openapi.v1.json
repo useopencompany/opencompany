@@ -9854,6 +9854,9 @@
       "UserPreferences": {
         "type": "object",
         "properties": {
+          "botsEnabled": {
+            "type": "boolean"
+          },
           "timezone": {
             "type": "string",
             "minLength": 1,
@@ -9891,6 +9894,7 @@
           }
         },
         "required": [
+          "botsEnabled",
           "timezone",
           "taskSpawningEnabled",
           "wikiEnabled",
@@ -9903,6 +9907,9 @@
       "UpdateUserPreferencesBody": {
         "type": "object",
         "properties": {
+          "botsEnabled": {
+            "type": "boolean"
+          },
           "timezone": {
             "type": "string",
             "minLength": 1,
