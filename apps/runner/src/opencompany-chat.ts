@@ -1184,6 +1184,9 @@ async function resolveProductChatRuntime(input: {
   }
 
   const actionDispatcher = await createActionDispatcher({
+    ...(session.hostToolContractVersion
+      ? { hostToolContractVersion: session.hostToolContractVersion }
+      : {}),
     sessionId: session.id,
     turnId: turn.id,
     signal,
@@ -1314,6 +1317,7 @@ async function resolveProductChatRuntime(input: {
     ...(actionDispatcher?.catalog.sources.length
       ? {
           actionSources: actionDispatcher.catalog.sources,
+          legacyActionDiscovery: actionDispatcher.legacyDiscovery ?? false,
           connectedIntegrations: actionDispatcher.catalog.sources,
         }
       : {}),

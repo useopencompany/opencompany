@@ -1128,7 +1128,7 @@ describe("Postgres Chat repositories", () => {
             [created.conversationId],
           )
         ).rows,
-      ).toEqual([{ host_tool_contract_version: "goat-codex-host-tools.v4" }]);
+      ).toEqual([{ host_tool_contract_version: "goat-codex-host-tools.v5" }]);
       const paused = (
         await database.query(
           `SELECT run.status, run.lease_id, task.status AS task_status,

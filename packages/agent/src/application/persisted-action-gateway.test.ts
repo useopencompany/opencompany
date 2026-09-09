@@ -1,4 +1,12 @@
-import { ACTION_MAX_CALLS_PER_TURN, type ActionGatewayRequest } from "@opencompany/agent-runtime";
+import {
+  ACTION_HOST_TOOL_CONTRACT_VERSION_V2,
+  ACTION_HOST_TOOL_CONTRACT_VERSION_V3,
+  ACTION_HOST_TOOL_CONTRACT_VERSION_V4,
+  ACTION_MAX_CALLS_PER_TURN,
+  type ActionGatewayRequest,
+  CHAT_HOST_TOOL_CONTRACT_VERSION_V3,
+  CHAT_HOST_TOOL_CONTRACT_VERSION_V4,
+} from "@opencompany/agent-runtime";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ACTION_EFFECTS_METERED_READ,
@@ -39,11 +47,113 @@ describe("executeActionGateway", () => {
     vi.unstubAllEnvs();
   });
 
+  it.each([
+    ACTION_HOST_TOOL_CONTRACT_VERSION_V2,
+    ACTION_HOST_TOOL_CONTRACT_VERSION_V3,
+    ACTION_HOST_TOOL_CONTRACT_VERSION_V4,
+    CHAT_HOST_TOOL_CONTRACT_VERSION_V3,
+    CHAT_HOST_TOOL_CONTRACT_VERSION_V4,
+  ])(
+    "preserves full listing definitions for persisted %s sessions",
+    async (hostToolContractVersion) => {
+      const action = createReadAction();
+      const gateway = createActionGateway({
+        loadContext: vi.fn(async () => ({ ...context, hostToolContractVersion })),
+        resolveCatalog: vi.fn(async () => ({
+          providers: [{ id: "gmail" as const, label: "Gmail", description: "Email" }],
+          actions: [action],
+        })),
+        recordSourceDiscovery: vi.fn(),
+      });
+      const response = await gateway({
+        request: listRequest("gmail"),
+        signal: new AbortController().signal,
+      });
+      expect(response).toMatchObject({
+        ok: true,
+        actions: [
+          {
+            id: action.id,
+            description: action.description,
+            params: action.params,
+            permissionMode: action.permissionMode,
+          },
+        ],
+      });
+      expect(
+        await gateway({
+          request: {
+            operation: "describe",
+            sessionId: "session",
+            turnId: "turn",
+            actions: [action.id],
+          },
+          signal: new AbortController().signal,
+        }),
+      ).toMatchObject({ ok: false, error: { code: "invalid_params" } });
+    },
+  );
+
+  it("describes only policy-available definitions and records discovery without approval or execution", async () => {
+    const read = createReadAction();
+    const write = {
+      ...createReadAction("linkedin.search", "linkedin"),
+      effects: ACTION_EFFECTS_METERED_READ,
+      permissionMode: "ask" as const,
+    };
+    const recordSourceDiscovery = vi.fn();
+    const claimInvocation = vi.fn();
+    const executeAction = vi.fn();
+    const registerApproval = vi.fn();
+    const resolveCatalog = vi.fn(async () => ({
+      providers: [
+        { id: "gmail" as const, label: "Gmail", description: "Email" },
+        {
+          id: "linkedin" as const,
+          kind: "managed" as const,
+          label: "LinkedIn",
+          description: "People",
+        },
+      ],
+      actions: [read, write],
+    }));
+    const gateway = createActionGateway({
+      loadContext: vi.fn(async () => ({ ...context, policy: "headless" as const })),
+      resolveCatalog,
+      recordSourceDiscovery,
+      claimInvocation,
+      executeAction,
+      registerApproval,
+    });
+    const response = await gateway({
+      request: {
+        operation: "describe",
+        sessionId: "session",
+        turnId: "turn",
+        actions: [read.id, write.id, "missing", read.id],
+      },
+      signal: new AbortController().signal,
+    });
+    expect(response).toMatchObject({
+      ok: true,
+      actions: [{ id: read.id, params: read.params }],
+      not_found: [write.id, "missing"],
+    });
+    expect(recordSourceDiscovery).toHaveBeenCalledTimes(1);
+    expect(recordSourceDiscovery).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceId: "gmail" }),
+    );
+    expect(resolveCatalog).toHaveBeenCalledTimes(1);
+    expect(claimInvocation).not.toHaveBeenCalled();
+    expect(executeAction).not.toHaveBeenCalled();
+    expect(registerApproval).not.toHaveBeenCalled();
+  });
+
   it("lists the full interactive catalog for external engines", async () => {
     const readAction = createReadAction();
     const catalog: ResolvedActionCatalog = {
       providers: [
-        { id: "gmail", label: "Gmail", description: "Email" },
+        { id: "gmail" as const, label: "Gmail", description: "Email" },
         {
           id: "plugin:slack:slack",
           kind: "integration",
@@ -548,7 +658,7 @@ describe("executeActionGateway", () => {
   it("rejects call 17 through the shared gateway budget", async () => {
     const readAction = createReadAction();
     const catalog: ResolvedActionCatalog = {
-      providers: [{ id: "gmail", label: "Gmail", description: "Email" }],
+      providers: [{ id: "gmail" as const, label: "Gmail", description: "Email" }],
       actions: [readAction],
     };
     let count = 0;

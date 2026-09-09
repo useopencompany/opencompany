@@ -1,0 +1,374 @@
+{
+  "source": {
+    "id": "plugin:linear:linear",
+    "kind": "integration",
+    "label": "Linear",
+    "description": "Plan and track work."
+  },
+  "actions": [
+    {
+      "id": "plugin:linear:linear.get_issue",
+      "source": "plugin:linear:linear",
+      "description": "Retrieve detailed information about an issue by ID, including attachments, git branch name, and active Triage Intelligence suggestions when the issue is in triage",
+      "params": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "required": ["id"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Issue ID or identifier (e.g., LIN-123). P-prefixed identifiers (e.g., P-ENG-123) are projects, not issues"
+          },
+          "includeReleases": {
+            "type": "boolean",
+            "default": false,
+            "description": "Include associated releases"
+          },
+          "includeRelations": {
+            "type": "boolean",
+            "default": false,
+            "description": "Include blocking/related/duplicate relations"
+          },
+          "includeCustomerNeeds": {
+            "type": "boolean",
+            "default": false,
+            "description": "Include associated customer needs"
+          }
+        },
+        "additionalProperties": false
+      },
+      "permissionMode": "on"
+    },
+    {
+      "id": "plugin:linear:linear.save_issue",
+      "source": "plugin:linear:linear",
+      "description": "Create or update a Linear issue. If `id` is provided, updates the existing issue; otherwise creates a new one. When creating, `team` is required, and `title` is required unless `template` is set. Note: use `assignee` (not `assigneeId`) to set the assignee — it accepts a user ID, name, email, or \"me\".",
+      "params": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Only for updating an existing issue. Pass the issue ID or identifier (e.g., LIN-123). Do NOT pass this parameter when creating a new issue."
+          },
+          "team": {
+            "type": "string",
+            "description": "Team name or ID (required when creating)"
+          },
+          "cycle": {
+            "type": ["string", "null"],
+            "description": "Cycle name, number, or ID. Null to remove"
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["url", "title"],
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "description": "Link attachments to add [{url, title}]. Append-only; existing links are never removed"
+          },
+          "patch": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "required": ["op", "old_string", "new_string"],
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "replace"
+                    },
+                    "new_string": {
+                      "type": "string",
+                      "description": "Replacement text. Empty string deletes the match"
+                    },
+                    "old_string": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Exact text to replace. Must match the current content exactly once"
+                    },
+                    "replace_all": {
+                      "type": "boolean",
+                      "description": "Replace every occurrence instead of requiring a unique match"
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "required": ["op", "anchor", "text"],
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "insert_before"
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Text to insert directly before the anchor. Include separators (e.g. \"\\n\\n\")"
+                    },
+                    "anchor": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Exact text to insert before. Must match the current content exactly once"
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "required": ["op", "anchor", "text"],
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "insert_after"
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Text to insert directly after the anchor. Include separators (e.g. \"\\n\\n\")"
+                    },
+                    "anchor": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Exact text to insert after. Must match the current content exactly once"
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "required": ["op", "text"],
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "prepend"
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Text to insert at the very start of the content"
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "required": ["op", "text"],
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "append"
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Text to insert at the very end of the content"
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "required": ["op", "from", "to", "new_string"],
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "replace_range"
+                    },
+                    "to": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Exact text where the range ends (exclusive, stays in place). Must match exactly once after `from`"
+                    },
+                    "from": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Exact text where the range starts (inclusive). Must match exactly once"
+                    },
+                    "new_string": {
+                      "type": "string",
+                      "description": "Text replacing the range. Empty string deletes it"
+                    }
+                  }
+                }
+              ]
+            },
+            "maxItems": 50,
+            "minItems": 1,
+            "description": "Partial edits applied to the current content, in order and atomically (one failing operation aborts the whole save). Every anchor string must match the current content exactly once. Only valid on update, in place of the full content/description field"
+          },
+          "state": {
+            "type": "string",
+            "description": "State type, name, or ID"
+          },
+          "title": {
+            "type": "string",
+            "description": "Issue title (required when creating, unless template is set)"
+          },
+          "blocks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Issue IDs/identifiers this blocks. Append-only; existing relations are never removed"
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Label names or IDs as a JSON array of strings (e.g. [\"Bug\", \"Urgent\"]). Replaces the full label set; existing labels not included are removed. Omit to leave labels unchanged. Cannot be combined with addLabels/removeLabels; prefer those for incremental changes"
+          },
+          "dueDate": {
+            "type": ["string", "null"],
+            "description": "Due date (ISO format). On update, pass null to remove the due date"
+          },
+          "project": {
+            "type": ["string", "null"],
+            "description": "Project name, ID, identifier (e.g., P-ENG-123), or slug. Null to remove"
+          },
+          "slaType": {
+            "anyOf": [
+              {
+                "enum": ["all", "onlyBusinessDays"],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "SLA day counting type: \"all\" or \"onlyBusinessDays\". Only use with slaBreachesAt; null means unset"
+          },
+          "assignee": {
+            "type": ["string", "null"],
+            "description": "User ID, name, email, or \"me\". Null to remove"
+          },
+          "delegate": {
+            "type": ["string", "null"],
+            "description": "Agent name or ID. When the user asks to delegate to \"Linear\" or \"the Linear agent\", this refers to the \"Linear\" app user specifically. Null to remove"
+          },
+          "estimate": {
+            "type": ["number", "null"],
+            "description": "Issue estimate value. On create, pass null or omit for no estimate. On update, pass null to clear the estimate; omitting leaves it unchanged. 0 is a real estimate only on teams that allow zero estimates."
+          },
+          "parentId": {
+            "type": ["string", "null"],
+            "description": "Parent issue ID or identifier (e.g., LIN-123). Null to remove"
+          },
+          "priority": {
+            "type": "number",
+            "description": "0=None, 1=Urgent, 2=High, 3=Medium, 4=Low"
+          },
+          "template": {
+            "type": "string",
+            "description": "Template name or ID. Applied on create only. The template fills in the content, fields, and sub-issues server-side. A `description` replaces the template body rather than merging with it, but an empty `description` keeps the template body. Labels merge with the template's own"
+          },
+          "addLabels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Label names or IDs as a JSON array of strings (e.g. [\"Bug\", \"Urgent\"]) to add. Append-only; existing labels are never removed. Cannot be combined with a team change"
+          },
+          "blockedBy": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Issue IDs/identifiers blocking this. Append-only; existing relations are never removed"
+          },
+          "milestone": {
+            "type": "string",
+            "description": "Milestone name or ID"
+          },
+          "relatedTo": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Related issue IDs/identifiers. Append-only; existing relations are never removed"
+          },
+          "addReleases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Release IDs or slugs to add. Append-only; existing releases are never removed"
+          },
+          "description": {
+            "type": "string",
+            "description": "Content as Markdown. Do not escape the string — use literal newlines and special characters, not escape sequences. To mention a user, use @displayName (e.g., @johndoe)"
+          },
+          "duplicateOf": {
+            "type": ["string", "null"],
+            "description": "Duplicate of issue ID/identifier. Null to remove"
+          },
+          "setReleases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Replace all releases on the issue with these. Cannot be combined with addReleases/removeReleases"
+          },
+          "removeBlocks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Issue IDs/identifiers to stop blocking"
+          },
+          "removeLabels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Label names or IDs as a JSON array of strings (e.g. [\"Bug\", \"Urgent\"]) to remove. Only valid when updating an existing issue. Cannot be combined with a team change"
+          },
+          "slaBreachesAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO-8601 timestamp when the SLA will breach. On update, pass null to remove the SLA"
+          },
+          "removeReleases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Release IDs or slugs to remove. Only valid when updating an existing issue"
+          },
+          "removeBlockedBy": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Issue IDs/identifiers to remove as blockers of this issue"
+          },
+          "removeRelatedTo": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Related issue IDs/identifiers to remove"
+          }
+        },
+        "additionalProperties": false
+      },
+      "permissionMode": "on"
+    }
+  ]
+}

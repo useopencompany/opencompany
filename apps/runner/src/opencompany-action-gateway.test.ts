@@ -39,7 +39,9 @@ describe("createActionDispatcher", () => {
                   },
                   actions: [],
                 }
-              : { ok: true, action: request.action, result: { sent: true } };
+              : request.operation === "describe"
+                ? { ok: true, actions: [], not_found: request.actions }
+                : { ok: true, action: request.action, result: { sent: true } };
       return response;
     });
 
