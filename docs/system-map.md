@@ -56,6 +56,14 @@ Repeated requests for the same action and inputs reuse the result within that Ru
 require a new approval. If a worker dies after claiming an external write but before recording its
 result, recovery reports an uncertain outcome for inspection and does not repeat the write.
 
+Workflows start as Draft and can save steps without instructions. Activation requires instructions
+in every step for manual, scheduled, and event triggers. In the editor, adding an empty step or
+clearing instructions returns the workflow to Draft; completing the steps does not reactivate it.
+Saving a scheduled draft clears its next run and prepared execution plan. There is one editable
+workflow definition, so Draft also pauses future runs; it is not a separate unpublished version.
+Scheduled and event runs follow the step instructions. Optional additional run context is shared
+across steps, and existing custom context remains editable.
+
 Canonical Tasks can be archived once their run has settled, including `waiting` ("Waiting for you"),
 `succeeded`, `failed`, and `canceled`. Archiving preserves the outcome and waiting state; it does not
 resume execution. The UI and archive repository share this status rule in `@opencompany/core`.

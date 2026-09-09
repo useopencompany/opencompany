@@ -150,10 +150,55 @@ describe("WorkflowApplicationService", () => {
         status: "active",
         trigger: { type: "schedule", cron: "0 9 * * 1" },
       }),
-    ).rejects.toThrow(/need instructions/i);
+    ).rejects.toThrow("Add instructions to step 1 before activating this workflow.");
     expect(planner.prepareWorkflow).not.toHaveBeenCalled();
     expect(repository.updateWorkflow).not.toHaveBeenCalled();
   });
+
+  it.each([
+    { type: "manual" as const },
+    { type: "schedule" as const, cron: "0 9 * * 1" },
+    {
+      type: "event" as const,
+      provider: "linear",
+      event: "issue.created",
+      integrationId: "gint_1",
+      filters: {},
+      prompt: "Run this workflow.",
+    },
+  ])(
+    "saves incomplete $type drafts but rejects activation without planning or persistence",
+    async (trigger) => {
+      const repository = fakeWorkflowRepository();
+      const planner = fakePlanner();
+      const service = workflowService(repository, { planner });
+      const input = {
+        expectedVersion: 1,
+        name: "Research",
+        description: "",
+        steps: [
+          workflow().steps[0]!,
+          { ...workflow().steps[0]!, id: "step_empty", instructions: "  " },
+        ],
+        status: "draft" as const,
+        trigger,
+      };
+      await service.updateWorkflow(actor(), "workflow_1", input);
+      expect(repository.updateWorkflow).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: "draft",
+          steps: [input.steps[0], expect.objectContaining({ instructions: "" })],
+        }),
+      );
+      expect(planner.prepareWorkflow).not.toHaveBeenCalled();
+      repository.updateWorkflow.mockClear();
+      await expect(
+        service.updateWorkflow(actor(), "workflow_1", { ...input, status: "active" }),
+      ).rejects.toThrow("Add instructions to step 2 before activating this workflow.");
+      expect(planner.prepareWorkflow).not.toHaveBeenCalled();
+      expect(repository.updateWorkflow).not.toHaveBeenCalled();
+    },
+  );
 
   it("plans a durable Linear event trigger before persisting it", async () => {
     const repository = fakeWorkflowRepository();
