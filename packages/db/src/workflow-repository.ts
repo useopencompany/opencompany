@@ -218,7 +218,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         SELECT
           winner.resource_id, ${input.actor.workspaceId}, candidate.slug, ${input.name},
           ${input.description}, '', '', ${stringifyPostgresJson([input.initialStep])}::jsonb,
-          'manual', NULL, 'UTC', '', NULL, NULL, false, NULL, 'active',
+          'manual', NULL, 'UTC', '', NULL, NULL, false, NULL, 'draft',
           ${input.actor.userId}, 1, ${now}, ${now}
         FROM winner
         CROSS JOIN candidate

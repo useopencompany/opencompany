@@ -37,7 +37,7 @@ beforeEach(() => {
 });
 
 describe("createWorkflow", () => {
-  it("creates new workflows as active by default", async () => {
+  it("creates new workflows as drafts by default", async () => {
     await expect(
       createWorkflow({
         workspaceId: "workspace_1",
@@ -57,7 +57,7 @@ describe("createWorkflow", () => {
         model: "",
         trigger: "manual",
         scheduleEnabled: false,
-        status: "active",
+        status: "draft",
         createdByWorkosId: "user_1",
       }),
     );
