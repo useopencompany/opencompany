@@ -267,6 +267,7 @@ export type PersonalAccountProvider =
   | "latitude"
   | "neon"
   | "notion"
+  | "stripe"
   | "supabase"
   | "resend"
   | "x_account";
@@ -350,6 +351,7 @@ export function personalAccountsFromRows(
     latitude: [],
     neon: [],
     notion: [],
+    stripe: [],
     supabase: [],
     resend: [],
     x_account: [],
@@ -390,6 +392,12 @@ export function personalAccountsFromRows(
     if (row.provider === "fathom") {
       if ((row.externalId ?? row.external_id) === FATHOM_MCP_EXTERNAL_ID) {
         personalAccounts.fathom.push(accountViewFromRow("fathom", row));
+      }
+      continue;
+    }
+    if (row.provider === "stripe") {
+      if ((row.externalId ?? row.external_id) === "stripe_mcp") {
+        personalAccounts.stripe.push(accountViewFromRow("stripe", row));
       }
       continue;
     }

@@ -396,9 +396,8 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     category: "business",
     source: OFFICIAL_PLUGIN_SOURCES["stripe"],
     connectionProvider: "stripe",
-    connectHref: "/settings/plugins/stripe#stripe-restricted-key",
-    accountDescription:
-      "A workspace-owned restricted API key controls which Stripe resources plugin tools can access.",
+    connectHref: "/api/integrations/stripe/start?returnTo=/settings/plugins/stripe",
+    accountDescription: "Connect your Stripe account securely through Stripe. No API key required.",
   },
   x: {
     name: "x",

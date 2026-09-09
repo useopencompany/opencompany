@@ -43,6 +43,7 @@ export function integrationConnectionError(provider: string | null, reason: stri
     case "resend_denied":
     case "betterstack_denied":
     case "fathom_denied":
+    case "stripe_denied":
     case "signoz_denied":
     case "vercel_denied":
     case "x_account_denied":

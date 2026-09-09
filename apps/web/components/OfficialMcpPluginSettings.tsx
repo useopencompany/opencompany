@@ -142,6 +142,7 @@ export type PluginAccountsState =
       status: "ready";
       accounts: PluginAccount[];
       permissionConnection: IntegrationAccountView<PluginConnectionProvider> | null;
+      legacyStripeConnection?: boolean;
       managedConnection?: ManagedPluginConnection;
     };
 
@@ -1150,6 +1151,7 @@ function AccountsSection({
   canEdit: boolean;
 }) {
   const permissionConnection = state.status === "ready" ? state.permissionConnection : null;
+  const legacyStripeConnection = state.status === "ready" && Boolean(state.legacyStripeConnection);
   const managedConnection = state.status === "ready" ? state.managedConnection : undefined;
   const displayedAccounts =
     state.status !== "ready"
@@ -1185,7 +1187,7 @@ function AccountsSection({
         <ManagedConnectionStatusRow connection={managedConnection} />
       ) : displayedAccounts.length === 0 ? (
         <SectionEmpty icon={Users}>{`No ${accountLabel} accounts are connected.`}</SectionEmpty>
-      ) : config.connectionProvider === "stripe" ? (
+      ) : legacyStripeConnection ? (
         <PluginConnectionStatusRow
           identity={
             permissionConnection?.connectionLabel ||
@@ -1225,6 +1227,7 @@ function AccountsSection({
           config={config}
           permissionConnection={permissionConnection}
           managedConnection={managedConnection}
+          legacyStripeConnection={legacyStripeConnection}
           canEdit={canEdit}
         />
         {config.ingestionHref && config.ingestionLabel ? (
@@ -1272,8 +1275,10 @@ function PluginConnectionControls({
   config,
   permissionConnection,
   managedConnection,
+  legacyStripeConnection,
   canEdit,
 }: {
+  legacyStripeConnection: boolean;
   config: OfficialMcpPluginConfig;
   permissionConnection: IntegrationAccountView<PluginConnectionProvider> | null;
   managedConnection: ManagedPluginConnection | undefined;
@@ -1296,10 +1301,22 @@ function PluginConnectionControls({
   }
   if (config.connectionProvider === "stripe") {
     return (
-      <StripeRestrictedKeyConnectionForm
-        connected={Boolean(permissionConnection?.connected)}
-        canManage={canEdit}
-      />
+      <div className="flex w-full flex-col gap-3">
+        <a href={config.connectHref} className={buttonVariants({ variant: "outline", size: "sm" })}>
+          Connect Stripe account
+        </a>
+        {legacyStripeConnection ? (
+          <details>
+            <summary className="cursor-pointer text-[12px] text-ink-subtle">
+              Manage existing workspace API key
+            </summary>
+            <StripeRestrictedKeyConnectionForm
+              connected={Boolean(permissionConnection?.connected)}
+              canManage={canEdit}
+            />
+          </details>
+        ) : null}
+      </div>
     );
   }
   return (
@@ -1741,6 +1758,7 @@ function pluginAccountsFromState(
   accounts: PluginAccount[];
   permissionConnection: IntegrationAccountView<PluginConnectionProvider> | null;
   managedConnection?: ManagedPluginConnection;
+  legacyStripeConnection?: boolean;
 } {
   if (config.connectionProvider === "infisical") {
     return {
@@ -1794,6 +1812,10 @@ function pluginAccountsFromState(
     config.connectionProvider === "x_account"
   ) {
     if (config.connectionProvider === "stripe") {
+      const oauthAccount = state.personalAccounts.stripe[0];
+      if (oauthAccount) {
+        return { permissionConnection: oauthAccount, accounts: [{ account: oauthAccount }] };
+      }
       const connection = state.stripe;
       const modeLabel =
         connection.livemode === false
@@ -1817,6 +1839,7 @@ function pluginAccountsFromState(
         : null;
       return {
         permissionConnection,
+        legacyStripeConnection: Boolean(permissionConnection),
         accounts: permissionConnection ? [{ account: permissionConnection }] : [],
       };
     }
