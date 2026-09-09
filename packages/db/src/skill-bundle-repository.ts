@@ -34,6 +34,8 @@ import {
 } from "./product-schema";
 import {
   conflictingChatSkillNames,
+  isChatSkillNameConflict,
+  preserveChatSkillBundle,
   skillBundleAccess,
   skillInstallationAccess,
   skillManagementPermission,
@@ -540,8 +542,17 @@ export async function activateAndListChatSkillBundles(
         await tx
           .insert(chatSessionSkillBundles)
           .values(values)
-          .onConflictDoNothing({
+          .onConflictDoUpdate({
             target: [chatSessionSkillBundles.chatSessionId, chatSessionSkillBundles.name],
+            set: { bundleId: preserveChatSkillBundle() },
+          })
+          .catch((error: unknown) => {
+            if (isChatSkillNameConflict(error))
+              throw new CoreError(
+                "conflict",
+                "This chat already uses another skill with this name. Start a new chat to use the selected skill.",
+              );
+            throw error;
           });
       }
     }

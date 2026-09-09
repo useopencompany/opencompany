@@ -212,6 +212,72 @@ describe("Postgres Chat repositories", () => {
     ).resolves.toMatchObject({ conversationId: "task_conversation_1" });
   });
 
+  it("rejects competing same-name selections even when both preflight reads see an empty Chat", async () => {
+    await seedStandaloneReviewSkill(database);
+    await database.exec(`
+      UPDATE goat.skill_installations SET scope = 'personal', created_by_user_id = 'user_1' WHERE id = 'skill_review';
+      INSERT INTO goat.skill_bundles (id, workspace_id, integrity, name, description, body, source_type, source_url, source_path, source_ref, resolved_commit)
+      VALUES ('company_bundle', 'workspace_1', 'sha256:${"b".repeat(64)}', 'review', 'Company review', 'Different company instructions', 'github', 'https://github.com/example/company', 'review', 'main', '${"b".repeat(40)}');
+      INSERT INTO goat.skill_installations (id, workspace_id, name, bundle_id, scope) VALUES ('company_review', 'workspace_1', 'review', 'company_bundle', 'company');
+      INSERT INTO goat.skill_installation_versions (installation_id, bundle_id, company_shared) VALUES ('company_review', 'company_bundle', true);
+    `);
+    const created = await service.createMessage(actor(), {
+      idempotencyKey: "empty-skill-chat",
+      content: "Start a review.",
+      engine: "codex",
+      model: "provider/model",
+    });
+    let preflightReads = 0;
+    let release!: () => void;
+    const bothRead = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const racing = new ChatApplicationService(
+      new PostgresChatRepository(async (query) => {
+        const rows = await execute(query);
+        if (dialect.sqlToQuery(query).sql.includes("AS conflict")) {
+          preflightReads += 1;
+          if (preflightReads === 2) release();
+          await bothRead;
+        }
+        return rows;
+      }),
+    );
+    const results = await Promise.allSettled(
+      ["skill_review", "company_review"].map((id) =>
+        racing.createMessage(actor(), {
+          idempotencyKey: `race-${id}`,
+          conversationId: created.conversationId,
+          content: "/review Run this.",
+          engine: "codex",
+          model: "provider/model",
+          mentions: [{ kind: "skill", id }],
+        }),
+      ),
+    );
+    expect(preflightReads).toBe(2);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.find((result) => result.status === "rejected")).toMatchObject({
+      reason: { code: "conflict" },
+    });
+    expect(
+      (
+        await database.query(
+          "SELECT count(*)::int AS count FROM goat.chat_session_skill_bundles WHERE chat_session_id = $1",
+          [created.conversationId],
+        )
+      ).rows,
+    ).toEqual([{ count: 1 }]);
+    expect(
+      (
+        await database.query(
+          "SELECT count(*)::int AS count FROM goat.chat_messages WHERE session_id = $1 AND role = 'user'",
+          [created.conversationId],
+        )
+      ).rows,
+    ).toEqual([{ count: 2 }]);
+  });
+
   it("keeps pre-existing durable rows while adding the canonical event cursor", () => {
     expect(legacySurvivedMigration).toBe(true);
     expect(legacyRuntimeSurvivedMigration).toBe(true);

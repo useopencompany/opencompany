@@ -28,7 +28,11 @@ import {
 import { type SQL, sql } from "drizzle-orm";
 import { stringifyPostgresJson } from "./postgres-json";
 import type { ChatMessageAttachment } from "./product-schema";
-import { conflictingChatSkillNames } from "./skill-access";
+import {
+  conflictingChatSkillNames,
+  isChatSkillNameConflict,
+  preserveChatSkillBundle,
+} from "./skill-access";
 import { type ResolvedWorkspaceSkill, resolveSkillCandidates, selectSkill } from "./skill-catalog";
 
 export const RUN_EVENT_NOTIFY_CHANNEL = "goat_run_events_v1";
@@ -1178,14 +1182,8 @@ export class PostgresChatRepository implements ChatRepository {
             AND installation.bundle_id = bundle.id AND installation.workspace_id = ${input.actor.workspaceId}
             AND installation.enabled AND installation.archived_at IS NULL
             AND (installation.scope = 'company' OR (installation.created_by_user_id = ${input.actor.userId} AND target_chat.task_id IS NULL))
-        )) AND NOT EXISTS (
-            SELECT 1
-            FROM goat.chat_session_skill_bundles AS fixed
-            JOIN goat.skill_bundles AS fixed_bundle ON fixed_bundle.id = fixed.bundle_id
-            WHERE fixed.chat_session_id = target_chat.id
-              AND fixed_bundle.name = bundle.name
-        )
-        ON CONFLICT (chat_session_id, name) DO NOTHING
+        ))
+        ON CONFLICT (chat_session_id, name) DO UPDATE SET bundle_id = ${preserveChatSkillBundle()}
         RETURNING bundle_id
       ),
       captured_activated_skill_plugins AS MATERIALIZED (
@@ -1300,6 +1298,11 @@ export class PostgresChatRepository implements ChatRepository {
       FROM reservation
       `);
     } catch (error) {
+      if (isChatSkillNameConflict(error))
+        throw new CoreError(
+          "conflict",
+          "This chat already uses another skill with this name. Start a new chat to use the selected skill.",
+        );
       if (attachmentIds.length > 0 && isUnmaterializedGuardError(error)) {
         throw new CoreError("invalid_argument", "An attachment is unavailable or has expired.");
       }

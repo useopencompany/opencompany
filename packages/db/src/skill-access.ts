@@ -76,3 +76,31 @@ export function conflictingChatSkillNames(chatSessionId: string, bundleIds: read
       )
   )`;
 }
+
+// ON CONFLICT locks the winning snapshot, including a concurrent insert invisible to an earlier
+// read. Keep revisions of the same installation pinned; a different Skill deliberately fails the
+// bundle_id NOT NULL constraint so the entire activation/message transaction rolls back.
+export function preserveChatSkillBundle() {
+  return sql`CASE
+    WHEN goat.chat_session_skill_bundles.bundle_id = excluded.bundle_id
+      OR EXISTS (
+        SELECT 1 FROM goat.skill_installation_versions previous
+        JOIN goat.skill_installation_versions next ON next.installation_id = previous.installation_id
+        WHERE previous.bundle_id = goat.chat_session_skill_bundles.bundle_id
+          AND next.bundle_id = excluded.bundle_id
+      )
+    THEN goat.chat_session_skill_bundles.bundle_id
+    ELSE NULL
+  END`;
+}
+
+export function isChatSkillNameConflict(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const value = error as { code?: string; table?: string; column?: string; cause?: unknown };
+  return (
+    (value.code === "23502" &&
+      value.table === "chat_session_skill_bundles" &&
+      value.column === "bundle_id") ||
+    isChatSkillNameConflict(value.cause)
+  );
+}
