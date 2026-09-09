@@ -895,14 +895,18 @@ export function SkillsSettingsRoute({
           ))}
         </div>
         {canEdit ? (
-          <div className="flex gap-2">
+          <div className="ml-auto flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setImporting(true)}
+              className="font-normal text-ink-muted hover:text-ink"
+            >
+              Import skill
+            </Button>
             <Button size="sm" onClick={() => setCreating(true)}>
               <Plus size={14} strokeWidth={2} />
               New {creationScope} skill
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setImporting(true)}>
-              <Link2 size={14} strokeWidth={2} />
-              Import skill
             </Button>
           </div>
         ) : null}
