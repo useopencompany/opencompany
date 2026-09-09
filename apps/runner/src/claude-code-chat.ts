@@ -617,7 +617,7 @@ export async function runClaudeCodeChatTurn(input: {
     await checkAbort();
     executionStage = "load_skills";
     const [sessionSkills, workflowSkills, pluginRuntime] = await Promise.all([
-      loadCodexChatSessionSkills(turn),
+      loadCodexChatSessionSkills(turn, Boolean(taskContext)),
       taskContext ? loadWorkflowTaskSkillBundles(taskContext.harnessSpec) : Promise.resolve([]),
       taskContext
         ? loadWorkflowTaskPluginRuntime(taskContext.harnessSpec)

@@ -186,10 +186,10 @@ describe("runner ACP tools MCP", () => {
   });
 
   it.each(["codex", "claude_code"] as const)(
-    "exposes Skill management to %s admins and rechecks authority on execution",
+    "exposes Skill management to %s members and rechecks authority on execution",
     async (engine) => {
-      const admin = { ...authorized, engine, skillToolsEnabled: true };
-      const authorize = vi.fn(async () => admin);
+      const member = { ...authorized, engine, taskConversation: false, skillToolsEnabled: true };
+      const authorize = vi.fn(async () => member);
       const executeSkillTool = vi.fn(async () => ({ archived: true, name: "my-skill" }));
       const app = Fastify();
       apps.push(app);
@@ -225,7 +225,7 @@ describe("runner ACP tools MCP", () => {
             actor: {
               userId: "user_1",
               workspaceId: "workspace_1",
-              role: "admin",
+              role: "member",
               permissions: ["skill:read", "skill:write"],
               authenticationMethod: "service",
             },
@@ -233,10 +233,15 @@ describe("runner ACP tools MCP", () => {
             args: { command: "archive", name: "my-skill" },
           }),
         );
+        authorize.mockResolvedValue({ ...member, taskConversation: true });
+        await client.callTool({ name: "workspace_skills", arguments: { command: "list" } });
+        expect(executeSkillTool).toHaveBeenLastCalledWith(
+          expect.objectContaining({ actor: expect.objectContaining({ skillAccess: "company" }) }),
+        );
         executeSkillTool.mockClear();
         authorize
-          .mockResolvedValueOnce(admin)
-          .mockResolvedValueOnce({ ...admin, skillToolsEnabled: false });
+          .mockResolvedValueOnce(member)
+          .mockResolvedValueOnce({ ...member, skillToolsEnabled: false });
         const revoked = await client.callTool({
           name: "workspace_skills",
           arguments: { command: "archive", name: "my-skill" },

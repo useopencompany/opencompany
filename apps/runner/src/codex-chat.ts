@@ -1614,7 +1614,7 @@ function currentInteractionLeaseSql() {
   )`;
 }
 
-export async function loadCodexChatSessionSkills(turn: CodexChatTurn, companyOnly = false) {
+export async function loadCodexChatSessionSkills(turn: CodexChatTurn, companyOnly: boolean) {
   const activations = await getDb()
     .select({
       bundleId: chatSessionSkillBundles.bundleId,
