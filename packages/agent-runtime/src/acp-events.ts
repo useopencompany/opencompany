@@ -39,6 +39,7 @@ type AcpToolCall = {
   server?: string;
   tool?: string;
   changes?: Array<Record<string, unknown>>;
+  locations?: Array<{ path: string }>;
   rawInput?: Record<string, unknown>;
   parentToolCallId?: string;
   outputText: string;
@@ -263,6 +264,7 @@ function normalizeToolCall(
   const command = commandFromTool(providerRawInput, title) ?? title;
   const query = queryFromTool(providerRawInput) ?? title;
   const changes = fileChangesFromTool(update, providerRawInput);
+  const locations = toolLocations(update);
   const mcp = mcpToolInfo(name);
   const toolCall: AcpToolCall = {
     kind,
@@ -274,6 +276,7 @@ function normalizeToolCall(
     ...(mcp.server ? { server: mcp.server } : {}),
     ...(mcp.tool ? { tool: mcp.tool } : {}),
     ...(changes.length ? { changes } : {}),
+    ...(locations ? { locations } : {}),
     ...(rawInput ? { rawInput } : {}),
     ...(parentToolCallId ? { parentToolCallId } : {}),
     outputText: "",
@@ -314,6 +317,7 @@ function normalizeToolCallUpdate(
   const server = mcp.server ?? existing?.server;
   const tool = mcp.tool ?? existing?.tool;
   const changes = updatedChanges.length > 0 ? updatedChanges : existing?.changes;
+  const locations = toolLocations(update) ?? existing?.locations;
   const resolvedParentToolCallId = parentToolCallId ?? existing?.parentToolCallId;
   const next: AcpToolCall = {
     kind,
@@ -325,6 +329,7 @@ function normalizeToolCallUpdate(
     ...(server ? { server } : {}),
     ...(tool ? { tool } : {}),
     ...(changes ? { changes } : {}),
+    ...(locations ? { locations } : {}),
     ...(rawInput ? { rawInput } : {}),
     ...(resolvedParentToolCallId ? { parentToolCallId: resolvedParentToolCallId } : {}),
     outputText: existing?.outputText ?? "",
@@ -366,6 +371,7 @@ function toolStartedEvent(
     toolName: toolCall.name,
     kind: toolCall.acpKind,
     title: toolCall.title,
+    locations: toolCall.locations,
   };
   switch (toolCall.kind) {
     case "command":
@@ -377,6 +383,7 @@ function toolStartedEvent(
     case "file_change":
       return normalized("file_change.started", raw, {
         ...common,
+        ...toolSemantics,
         changes: toolCall.changes ?? [],
       });
     case "web_search":
@@ -416,6 +423,7 @@ function toolCompletedEvent(
     toolName: toolCall.name,
     kind: toolCall.acpKind,
     title: toolCall.title,
+    locations: toolCall.locations,
   };
   switch (toolCall.kind) {
     case "command":
@@ -435,6 +443,7 @@ function toolCompletedEvent(
     case "file_change":
       return normalized("file_change.completed", raw, {
         ...common,
+        ...toolSemantics,
         changes: toolCall.changes ?? [],
         status,
       });
@@ -558,7 +567,32 @@ function fileChangesFromTool(
     const path = readString(rawInput?.[key]);
     if (path) paths.add(path);
   }
-  return [...paths].map((path) => ({ path, kind: readString(update.kind) ?? "edit" }));
+  const changes = new Map(
+    [...paths].map((path) => [path, { path, kind: readString(update.kind) ?? "edit" }]),
+  );
+  // Codex ACP carries file paths in standard diff content, without locations or rawInput.
+  // Retain the summary here; copying whole old/new files would bloat persisted UI parts.
+  for (const item of Array.isArray(update.content) ? update.content : []) {
+    const diff = readRecord(item);
+    const path = readString(diff?.path);
+    if (diff?.type !== "diff" || !path) continue;
+    const kind =
+      diff.oldText === null
+        ? "create"
+        : readRecord(diff._meta)?.kind === "delete"
+          ? "delete"
+          : (readString(update.kind) ?? "edit");
+    changes.set(path, { path, kind });
+  }
+  return [...changes.values()];
+}
+
+function toolLocations(update: Record<string, unknown>) {
+  if (!Array.isArray(update.locations)) return undefined;
+  return update.locations.flatMap((location) => {
+    const path = readString(readRecord(location)?.path);
+    return path ? [{ path }] : [];
+  });
 }
 
 function toolOutputText(update: Record<string, unknown>) {
