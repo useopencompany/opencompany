@@ -17,6 +17,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   Archive,
   ArrowLeft,
+  Bot,
   CalendarClock,
   CircleUserRound,
   ExternalLink,
@@ -75,7 +76,11 @@ import { getHeadlessTask, getLegacyTaskCompatibilityHistory } from "@/lib/headle
 import { DEFAULT_MODEL } from "@/lib/model-options";
 import type { RepoConfigView, WorkspaceRepository } from "@/lib/repo-config-actions";
 import { buildHarnessRun, type HarnessRunViewModel } from "@/lib/task-harness-run";
-import { updateAutoModelRoutingAction, updateTaskSpawningAction } from "@/lib/user-preferences";
+import {
+  updateAutoModelRoutingAction,
+  updateBotsAction,
+  updateTaskSpawningAction,
+} from "@/lib/user-preferences";
 
 export function HomeRoute({
   chatId,
@@ -240,6 +245,13 @@ export function PreferencesSettingsRoute() {
         <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
           Beta features
         </h2>
+        <BetaFeatureSwitch
+          icon={Bot}
+          label="Bots"
+          description="Create named bots for ongoing work and return to their conversations from the sidebar."
+          checked={featureFlags.bots === true}
+          update={updateBotsAction}
+        />
         <BetaFeatureSwitch
           icon={ListTodo}
           label="Tasks & Workflows"

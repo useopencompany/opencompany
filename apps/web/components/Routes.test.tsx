@@ -33,6 +33,7 @@ const appDataMock = vi.hoisted(() => ({
     workspaces: [{ id: "goat_ws_1", name: "Ada's Workspace", role: "admin" }],
     workspaceMembers: [],
     featureFlags: {
+      bots: false,
       taskSpawning: false,
       autoModelRouting: false,
       legacyBrain: true,
@@ -43,6 +44,7 @@ const appDataMock = vi.hoisted(() => ({
 }));
 
 const userPreferencesMock = vi.hoisted(() => ({
+  updateBotsAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateTaskSpawningAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateAutoModelRoutingAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
 }));
@@ -163,6 +165,7 @@ vi.mock("@/components/InferenceSettingsPanel", () => ({
 }));
 
 vi.mock("@/lib/user-preferences", () => ({
+  updateBotsAction: userPreferencesMock.updateBotsAction,
   updateTaskSpawningAction: userPreferencesMock.updateTaskSpawningAction,
   updateAutoModelRoutingAction: userPreferencesMock.updateAutoModelRoutingAction,
 }));
@@ -284,6 +287,8 @@ describe("SettingsRoute", () => {
     themeMock.value = "system";
     themeMock.setTheme.mockClear();
     routerMock.refresh.mockReset();
+    userPreferencesMock.updateBotsAction.mockReset();
+    appDataMock.value.featureFlags.bots = false;
     userPreferencesMock.updateTaskSpawningAction.mockClear();
     userPreferencesMock.updateAutoModelRoutingAction.mockClear();
     appDataMock.value.featureFlags.taskSpawning = false;
@@ -357,6 +362,37 @@ describe("SettingsRoute", () => {
     await user.click(screen.getByRole("switch", { name: "Tasks & Workflows" }));
 
     expect(await screen.findByText("Could not update this preference.")).toBeInTheDocument();
+    expect(routerMock.refresh).not.toHaveBeenCalled();
+  });
+
+  it("shows Bots off by default and lets the user enable and disable it", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<PreferencesSettingsRoute />);
+    const toggle = screen.getByRole("switch", { name: "Bots" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+
+    await user.click(toggle);
+    expect(userPreferencesMock.updateBotsAction).toHaveBeenCalledWith(true);
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
+
+    appDataMock.value.featureFlags.bots = true;
+    rerender(<PreferencesSettingsRoute />);
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    await user.click(toggle);
+    expect(userPreferencesMock.updateBotsAction).toHaveBeenLastCalledWith(false);
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(2));
+  });
+
+  it("keeps Bots disabled and shows an error when saving fails", async () => {
+    userPreferencesMock.updateBotsAction.mockRejectedValueOnce(new Error("API unavailable"));
+    const user = userEvent.setup();
+    render(<PreferencesSettingsRoute />);
+    const toggle = screen.getByRole("switch", { name: "Bots" });
+
+    await user.click(toggle);
+
+    expect(await screen.findByText("Could not update this preference.")).toBeInTheDocument();
+    expect(toggle).toHaveAttribute("aria-checked", "false");
     expect(routerMock.refresh).not.toHaveBeenCalled();
   });
 
@@ -667,7 +703,9 @@ describe("SkillsSettingsRoute", () => {
     await userEvent.click(screen.getByRole("button", { name: "Preview" }));
 
     expect(await screen.findByText(/will be installed as/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Install skill" })).toBeEnabled();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Install skill" })).toBeEnabled(),
+    );
   });
 
   it("creates a standard workspace-authored Skill with a derived slash command", async () => {

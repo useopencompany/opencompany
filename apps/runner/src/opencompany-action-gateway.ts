@@ -4,10 +4,13 @@ import type { ChatActionCatalog, UseActionToolOutput } from "@opencompany/agent/
 import {
   type ActionGatewayResponse,
   type ActionHostGatewayRequest,
+  CHAT_HOST_TOOL_CONTRACT_VERSION,
+  supportsCompactActionDiscovery,
 } from "@opencompany/agent-runtime";
 import { createLogger } from "@opencompany/observability";
 
 type GatewayContext = {
+  hostToolContractVersion?: string;
   sessionId: string;
   turnId: string;
   signal: AbortSignal;
@@ -46,6 +49,9 @@ export async function createActionDispatcher(
 
   return {
     catalog,
+    legacyDiscovery: !supportsCompactActionDiscovery(
+      context.hostToolContractVersion ?? CHAT_HOST_TOOL_CONTRACT_VERSION,
+    ),
     ...(prelistedSourceIds.length > 0 ? { prelistedSourceIds } : {}),
     needsApproval: async ({ action, params, toolCallId }) => {
       const approval = await callGateway(

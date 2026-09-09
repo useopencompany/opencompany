@@ -40,6 +40,11 @@ are rejected with an instruction to refresh rather than being parsed through a l
 Attachments are uploaded to `/v1/attachments` and referenced by opaque IDs. Credential or storage
 locator fields never enter client DTOs.
 
+Claude Code coding chats and Workflow steps share the model catalog in
+`packages/agent-runtime/src/models.ts`. Claude Opus 5 is available as
+`anthropic/claude-opus-5`, mapped to `claude-opus-5` for sandbox execution, with reasoning-effort
+controls and a 1M-token context window. Claude Sonnet 5 remains the default.
+
 ## Tasks and Workflows
 
 Manual, Workflow, schedule, and agent producers call shared application services. Creation writes a
@@ -55,6 +60,14 @@ The runner claims and executes the saved invocation before resuming the engine w
 Repeated requests for the same action and inputs reuse the result within that Run; changed inputs
 require a new approval. If a worker dies after claiming an external write but before recording its
 result, recovery reports an uncertain outcome for inspection and does not repeat the write.
+
+Workflows start as Draft and can save steps without instructions. Activation requires instructions
+in every step for manual, scheduled, and event triggers. In the editor, adding an empty step or
+clearing instructions returns the workflow to Draft; completing the steps does not reactivate it.
+Saving a scheduled draft clears its next run and prepared execution plan. There is one editable
+workflow definition, so Draft also pauses future runs; it is not a separate unpublished version.
+Scheduled and event runs follow the step instructions. Optional additional run context is shared
+across steps, and existing custom context remains editable.
 
 Canonical Tasks can be archived once their run has settled, including `waiting` ("Waiting for you"),
 `succeeded`, `failed`, and `canceled`. Archiving preserves the outcome and waiting state; it does not
@@ -120,3 +133,25 @@ bun run build
 Do not start a second development server if one is already running. For UI changes, verify a real
 message round-trip, reload durability, one obvious failure state, and the relevant Task or coding
 engine path.
+
+## Bots
+
+Bots are named, persistent conversations. `GET/POST /v1/bots` and
+`GET/PATCH /v1/bots/:botId` expose a name (1–80 characters) and description (up to 4,000
+characters). Creation takes a client-generated `id` retained across retries and atomically
+creates an empty Chat Conversation and its workspace-bound idle runtime. It does not start a Run.
+Bots belong to their creating user within the selected workspace, matching Chat ownership.
+
+The `goat.users.bots_enabled` feature flag defaults to false. Users can enable or disable it in
+Preferences → Beta features → Bots. The switch saves `botsEnabled` through
+`PATCH /v1/me/preferences` and refreshes the app shell; no environment variable is needed. The flag gates
+bot API access and navigation. With it enabled, the sidebar shows Bots above recent chats, and
+bot conversations have a settings button that opens an editor on the right. Bot Conversations
+are excluded from the recent-chat API and Electric sidebar collections, including when disabled.
+
+Messages, history, tools, approvals, cancellation, and runner sessions use the existing Chat
+paths. Each runner engine reads the saved identity when preparing a turn and adds it as
+user-authored guidance. Edits affect subsequent turns; they preserve history and the runtime.
+Automatic title generation leaves bot names alone. There are no autonomous schedules or extra
+bot tools in this first version. Migration `0261_persistent_bots` is additive; application rollback
+can leave its columns and projection deployed without deleting bot conversations.

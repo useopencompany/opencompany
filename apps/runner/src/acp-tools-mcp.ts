@@ -20,6 +20,7 @@ import { executeWorkspaceSkillToolForActor } from "@opencompany/agent/skills";
 import {
   ACTION_HOST_TOOL_CONTRACT_VERSION,
   ACTION_HOST_TOOL_CONTRACT_VERSION_V3,
+  ACTION_HOST_TOOL_CONTRACT_VERSION_V4,
   type ActionGatewayRequest,
   type ActionGatewayResponse,
   type ExternalEngineGatewayTicketPayload,
@@ -151,6 +152,7 @@ export function registerAcpToolsMcpRoute(
           {
             sessionId: capability.codexChatSessionId,
             runId: capability.codexChatTurnId,
+            hostToolContractVersion: authorizedContext.hostToolContractVersion,
             signal: request.signal,
           },
           {
@@ -219,7 +221,8 @@ export function registerAcpToolsMcpRoute(
           env,
           includeCapture:
             authorizedContext.hostToolContractVersion === ACTION_HOST_TOOL_CONTRACT_VERSION ||
-            authorizedContext.hostToolContractVersion === ACTION_HOST_TOOL_CONTRACT_VERSION_V3,
+            authorizedContext.hostToolContractVersion === ACTION_HOST_TOOL_CONTRACT_VERSION_V3 ||
+            authorizedContext.hostToolContractVersion === ACTION_HOST_TOOL_CONTRACT_VERSION_V4,
           authorizeOperation,
           signal: request.signal,
         });

@@ -363,7 +363,7 @@ export async function createWorkflow(input: {
     scheduleHarnessSpec: null,
     scheduleUserWorkosId: null,
     scheduleNextRunAt: null,
-    status: "active",
+    status: "draft",
     createdByWorkosId: input.createdByWorkosId,
   });
   return { ok: true, slug };

@@ -98,6 +98,7 @@ export function codexCliModelNameForModelId(modelId: string): string | null {
 export const CLAUDE_CODE_DEFAULT_MODEL_ID: AgentModelId = "anthropic/claude-sonnet-5";
 export const CLAUDE_CODE_AGENT_MODEL_IDS = [
   "anthropic/claude-sonnet-5",
+  "anthropic/claude-opus-5",
   "anthropic/claude-opus-4.8",
   "anthropic/claude-fable-5",
   "anthropic/claude-haiku-4.5",
@@ -403,7 +404,27 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     type: "model",
     contextWindowTokens: 200_000,
     label: "Claude Opus 4.8",
-    description: "Latest highest-capability Claude model for demanding agent workflows.",
+    description: "Capable Claude model for demanding agent workflows.",
+    category: "Deep",
+    supportsReasoning: true,
+    supportsImages: true,
+    supportsPdf: true,
+    ratings: { capability: 3, speed: 2, cost: 3 },
+    reasoning: {
+      providerOptions: {
+        anthropic: {
+          thinkingBudget: 0.001,
+        },
+      },
+      exposure: "hidden",
+    },
+  },
+  {
+    id: "anthropic/claude-opus-5",
+    type: "model",
+    contextWindowTokens: 1_000_000,
+    label: "Claude Opus 5",
+    description: "Advanced Claude model for complex coding and long-running agent work.",
     category: "Deep",
     supportsReasoning: true,
     supportsImages: true,
