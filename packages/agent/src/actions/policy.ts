@@ -51,7 +51,10 @@ export function projectActionCatalog(
 
   return {
     providers: catalog.providers
-      .filter((source) => activeSourceIds.has(source.id))
+      .filter(
+        (source) =>
+          activeSourceIds.has(source.id) || (source.unavailable && sourceIds.has(source.id)),
+      )
       .map((source) => ({ ...source, kind: source.kind ?? "integration" })),
     actions,
   };

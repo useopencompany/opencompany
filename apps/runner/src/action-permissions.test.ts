@@ -65,6 +65,24 @@ describe("alwaysAllowAction", () => {
     });
   });
 
+  it("keeps custom MCP standing grants in per-tool settings rather than broad capabilities", async () => {
+    const catalog = await vi.mocked(resolveActionCatalog)({
+      userWorkosId: "user_1",
+      workspaceId: "workspace_1",
+    });
+    const action = catalog.actions[0]!;
+    action.permission!.provider = "custom_mcp";
+    vi.mocked(resolveActionCatalog).mockResolvedValue(catalog);
+    await expect(
+      alwaysAllowAction({
+        userWorkosId: "user_1",
+        workspaceId: "workspace_1",
+        actionId: action.id,
+      }),
+    ).rejects.toThrow("individual custom MCP tools in Plugins");
+    expect(applyIntegrationCapabilityMode).not.toHaveBeenCalled();
+  });
+
   it("fails closed after workspace membership is revoked", async () => {
     vi.mocked(getWorkspaceRole).mockResolvedValue(null);
     await expect(

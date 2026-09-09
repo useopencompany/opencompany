@@ -12,7 +12,7 @@ import type {
 } from "./skill-import";
 
 export type PluginSource = {
-  type: "github" | "skills.sh";
+  type: "github" | "skills.sh" | "custom_mcp";
   url: string;
   ref: string;
   path: string;

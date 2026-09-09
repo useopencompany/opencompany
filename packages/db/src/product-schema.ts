@@ -155,6 +155,7 @@ export type ChatModelRoutingErrorCategory =
   | "unknown";
 
 export type IntegrationProvider =
+  | "custom_mcp"
   | "gmail"
   | "google_calendar"
   | "google_drive"
@@ -1655,7 +1656,7 @@ export const integrations = productSchema.table(
     ),
     providerCheck: check(
       "goat_integrations_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'render', 'vercel', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'x_account')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'render', 'vercel', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'x_account', 'custom_mcp')`,
     ),
     statusCheck: check(
       "goat_integrations_status_check",
@@ -1705,7 +1706,7 @@ export const integrationCredentials = productSchema.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_credentials_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'render', 'vercel', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'x_account')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'render', 'vercel', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'x_account', 'custom_mcp')`,
     ),
     kindCheck: check(
       "goat_integration_credentials_kind_check",
@@ -1755,7 +1756,7 @@ export const integrationResources = productSchema.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_resources_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'render', 'vercel', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'x_account')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'render', 'vercel', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'x_account', 'custom_mcp')`,
     ),
     statusCheck: check(
       "goat_integration_resources_status_check",
@@ -3308,7 +3309,7 @@ export const plugins = productSchema.table(
     name: text("name").notNull(),
     status: text("status").$type<PluginStatus>().notNull().default("enabled"),
     manifest: jsonb("manifest").$type<PluginManifest>().notNull(),
-    sourceType: text("source_type").$type<ExternalArtifactSourceType>().notNull(),
+    sourceType: text("source_type").$type<ExternalArtifactSourceType | "custom_mcp">().notNull(),
     sourceUrl: text("source_url").notNull(),
     sourcePath: text("source_path").notNull(),
     sourceRef: text("source_ref").notNull(),
@@ -3358,9 +3359,12 @@ export const plugins = productSchema.table(
     manifestCheck: check("plugins_manifest_check", sql`jsonb_typeof(${table.manifest}) = 'object'`),
     sourceTypeCheck: check(
       "plugins_source_type_check",
-      sql`${table.sourceType} IN ('github', 'skills.sh')`,
+      sql`${table.sourceType} IN ('github', 'skills.sh', 'custom_mcp')`,
     ),
-    commitCheck: check("plugins_commit_check", sql`${table.resolvedCommit} ~ '^[0-9a-f]{40}$'`),
+    commitCheck: check(
+      "plugins_commit_check",
+      sql`(${table.sourceType} <> 'custom_mcp' AND ${table.resolvedCommit} ~ '^[0-9a-f]{40}$') OR (${table.sourceType} = 'custom_mcp' AND ${table.resolvedCommit} = '' AND ${table.sourceRef} = '' AND ${table.sourcePath} = '')`,
+    ),
     integrityCheck: check(
       "plugins_integrity_check",
       sql`${table.integrity} ~ '^sha256:[0-9a-f]{64}$'`,
@@ -3456,6 +3460,42 @@ export const pluginGatewayRegistrations = productSchema.table(
     discoverySnapshotCheck: check(
       "plugin_gateway_registrations_discovery_snapshot_check",
       sql`jsonb_typeof(${table.discoverySnapshot}) = 'array'`,
+    ),
+  }),
+);
+
+// Discovery and health belong to the personal account: a server may expose different tools for
+// different credentials. Removing a custom installation deletes its dedicated personal accounts.
+export const customMcpAccounts = productSchema.table(
+  "custom_mcp_accounts",
+  {
+    integrationId: text("integration_id")
+      .primaryKey()
+      .references(() => integrations.id, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    pluginName: text("plugin_name").notNull(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => users.workosUserId, { onDelete: "cascade" }),
+    revision: text("revision").notNull(),
+    tools: jsonb("tools")
+      .$type<PluginGatewayDiscoveredTool[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
+    error: text("error"),
+  },
+  (table) => ({
+    ownerPluginIdx: uniqueIndex("custom_mcp_accounts_owner_plugin_idx").on(
+      table.workspaceId,
+      table.pluginName,
+      table.userWorkosId,
+    ),
+    toolsCheck: check(
+      "custom_mcp_accounts_tools_check",
+      sql`jsonb_typeof(${table.tools}) = 'array'`,
     ),
   }),
 );

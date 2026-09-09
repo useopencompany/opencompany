@@ -291,6 +291,54 @@ describe("executeActionGateway", () => {
     },
   );
 
+  it("binds custom MCP approvals to the current connection revision", async () => {
+    const action = {
+      ...createReadAction("plugin:custom-test:mcp.send"),
+      provider: "plugin:custom-test:mcp" as const,
+      permissionMode: "ask" as const,
+      approvalContext: "revision-1",
+    };
+    const registerApproval = vi.fn(async ({ approvalContext }: { approvalContext?: string }) =>
+      approvalContext === "revision-1"
+        ? {
+            actionId: action.id,
+            sourceId: action.provider,
+            capabilityId: action.capability,
+            inputHash: "hash",
+            status: "pending" as const,
+          }
+        : null,
+    );
+    const gateway = createActionGateway({
+      loadContext: vi.fn(async () => interactiveContext),
+      resolveCatalog: vi.fn(async () => ({
+        providers: [{ id: action.provider, label: "Custom", description: "Custom tools" }],
+        actions: [action],
+      })),
+      registerApproval,
+      claimInvocation: admittedInvocation,
+    });
+    const request = {
+      operation: "execute" as const,
+      sessionId: "session",
+      turnId: "turn",
+      action: action.id,
+      params: {},
+      invocationId: "invocation",
+    };
+    await expect(gateway({ request, signal: new AbortController().signal })).resolves.toMatchObject(
+      { ok: false, error: { code: "approval_required" } },
+    );
+    expect(registerApproval).toHaveBeenCalledWith(
+      expect.objectContaining({ approvalContext: "revision-1" }),
+    );
+    action.approvalContext = "revision-2";
+    await expect(gateway({ request, signal: new AbortController().signal })).resolves.toMatchObject(
+      { ok: false, error: { code: "invalid_params" } },
+    );
+    expect(action.execute).not.toHaveBeenCalled();
+  });
+
   it("does not ask again when an invocation is already approved", async () => {
     const action = createReadAction("gmail.send");
     action.capability = "write";

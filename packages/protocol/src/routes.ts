@@ -72,6 +72,12 @@ import {
   CreateWorkspaceBodySchema,
   CreateWorkspaceSkillBodySchema,
   CursorSchema,
+  CustomMcpCreateBodySchema,
+  CustomMcpCredentialsSchema,
+  CustomMcpDefinitionBodySchema,
+  CustomMcpPermissionBodySchema,
+  CustomMcpProbeEnvelopeSchema,
+  CustomMcpStatusEnvelopeSchema,
   DeleteBrainFolderBodySchema,
   DeleteWikiPageBodySchema,
   EngineAuthDisconnectEnvelopeSchema,
@@ -1471,6 +1477,128 @@ export const readSkillFileRoute = createRoute({
     200: {
       description: "One bounded chunk of an authorized Skill bundle file.",
       content: { "application/json": { schema: SkillFileChunkEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const previewCustomMcpRoute = createRoute({
+  method: "post",
+  path: "/v1/plugins/custom/preview",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: CustomMcpDefinitionBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Custom MCP connection and tools for the acting user.",
+      content: { "application/json": { schema: CustomMcpProbeEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+export const createCustomMcpRoute = createRoute({
+  method: "post",
+  path: "/v1/plugins/custom",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: {
+    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: CustomMcpCreateBodySchema } },
+    },
+  },
+  responses: {
+    201: {
+      description: "Custom MCP connection and tools for the acting user.",
+      content: { "application/json": { schema: PluginImportEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+export const getCustomMcpRoute = createRoute({
+  method: "get",
+  path: "/v1/plugins/{name}/custom-mcp",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: { params: z.object({ name: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Custom MCP connection and tools for the acting user.",
+      content: { "application/json": { schema: CustomMcpStatusEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+export const connectCustomMcpRoute = createRoute({
+  method: "post",
+  path: "/v1/plugins/{name}/custom-mcp/connect",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ name: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: CustomMcpCredentialsSchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Custom MCP connection and tools for the acting user.",
+      content: { "application/json": { schema: CustomMcpStatusEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+export const refreshCustomMcpRoute = createRoute({
+  method: "post",
+  path: "/v1/plugins/{name}/custom-mcp/refresh",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: { params: z.object({ name: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Custom MCP connection and tools for the acting user.",
+      content: { "application/json": { schema: CustomMcpStatusEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+export const disconnectCustomMcpRoute = createRoute({
+  method: "post",
+  path: "/v1/plugins/{name}/custom-mcp/disconnect",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: { params: z.object({ name: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Custom MCP connection and tools for the acting user.",
+      content: { "application/json": { schema: CustomMcpStatusEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+export const setCustomMcpPermissionRoute = createRoute({
+  method: "post",
+  path: "/v1/plugins/{name}/custom-mcp/permissions",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ name: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: CustomMcpPermissionBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Custom MCP connection and tools for the acting user.",
+      content: { "application/json": { schema: CustomMcpStatusEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -3596,6 +3724,13 @@ export type V1RouteHandlers = {
   disableSkill: RouteHandler<typeof disableSkillRoute>;
   replaceSkill: RouteHandler<typeof replaceSkillRoute>;
   readSkillFile: RouteHandler<typeof readSkillFileRoute>;
+  previewCustomMcp: RouteHandler<typeof previewCustomMcpRoute>;
+  createCustomMcp: RouteHandler<typeof createCustomMcpRoute>;
+  getCustomMcp: RouteHandler<typeof getCustomMcpRoute>;
+  connectCustomMcp: RouteHandler<typeof connectCustomMcpRoute>;
+  refreshCustomMcp: RouteHandler<typeof refreshCustomMcpRoute>;
+  disconnectCustomMcp: RouteHandler<typeof disconnectCustomMcpRoute>;
+  setCustomMcpPermission: RouteHandler<typeof setCustomMcpPermissionRoute>;
   listPlugins: RouteHandler<typeof listPluginsRoute>;
   previewPluginImport: RouteHandler<typeof previewPluginImportRoute>;
   importPlugin: RouteHandler<typeof importPluginRoute>;
@@ -3872,6 +4007,13 @@ export function createV1Router(
       .openapi(createBillingPortalSessionRoute, handlers.createBillingPortalSession)
       .openapi(updateBillingAutoRefillRoute, handlers.updateBillingAutoRefill)
       .openapi(listPluginsRoute, handlers.listPlugins)
+      .openapi(previewCustomMcpRoute, handlers.previewCustomMcp)
+      .openapi(createCustomMcpRoute, handlers.createCustomMcp)
+      .openapi(getCustomMcpRoute, handlers.getCustomMcp)
+      .openapi(connectCustomMcpRoute, handlers.connectCustomMcp)
+      .openapi(refreshCustomMcpRoute, handlers.refreshCustomMcp)
+      .openapi(disconnectCustomMcpRoute, handlers.disconnectCustomMcp)
+      .openapi(setCustomMcpPermissionRoute, handlers.setCustomMcpPermission)
       .openapi(previewPluginImportRoute, handlers.previewPluginImport)
       .openapi(importPluginRoute, handlers.importPlugin)
       .openapi(getPluginRoute, handlers.getPlugin)
@@ -4803,6 +4945,49 @@ const contractDocumentHandlers: V1RouteHandlers = {
             stdioServerCount: 1,
           },
         ],
+        meta,
+      },
+      200,
+    ),
+  previewCustomMcp: (c) => c.json({ data: { tools: [], fingerprint: "a".repeat(64) }, meta }, 200),
+  createCustomMcp: (c) =>
+    c.json({ data: { plugin: placeholderPlugin, replayed: false }, meta }, 201),
+  getCustomMcp: (c) =>
+    c.json(
+      {
+        data: { label: "Custom MCP", url: "https://example.com/mcp", enabled: true, account: null },
+        meta,
+      },
+      200,
+    ),
+  connectCustomMcp: (c) =>
+    c.json(
+      {
+        data: { label: "Custom MCP", url: "https://example.com/mcp", enabled: true, account: null },
+        meta,
+      },
+      200,
+    ),
+  refreshCustomMcp: (c) =>
+    c.json(
+      {
+        data: { label: "Custom MCP", url: "https://example.com/mcp", enabled: true, account: null },
+        meta,
+      },
+      200,
+    ),
+  disconnectCustomMcp: (c) =>
+    c.json(
+      {
+        data: { label: "Custom MCP", url: "https://example.com/mcp", enabled: true, account: null },
+        meta,
+      },
+      200,
+    ),
+  setCustomMcpPermission: (c) =>
+    c.json(
+      {
+        data: { label: "Custom MCP", url: "https://example.com/mcp", enabled: true, account: null },
         meta,
       },
       200,

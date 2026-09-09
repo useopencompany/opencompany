@@ -26,6 +26,7 @@ export type ActionCapabilityQuoteRecord = {
 };
 
 export type ActionApprovalRecord = {
+  paramsHash?: string;
   actionId: string;
   sourceId: string;
   capabilityId: string;
@@ -45,6 +46,7 @@ export async function registerActionApproval(input: {
   capabilityId: string;
   params: Record<string, unknown>;
   decision?: "pending" | "denied";
+  approvalContext?: string;
   now?: Date;
   db?: DbLike;
 }): Promise<ActionApprovalRecord | null> {
@@ -55,7 +57,9 @@ export async function registerActionApproval(input: {
     actionId: input.actionId,
     sourceId: input.sourceId,
     capabilityId: input.capabilityId,
-    inputHash: actionApprovalInputHash(input.params),
+    inputHash: actionApprovalInputHash(input.params, input.approvalContext),
+    // Task staging matches parameters; dispatch still checks the full revision-bound hash.
+    ...(input.approvalContext ? { paramsHash: actionApprovalInputHash(input.params) } : {}),
     status: input.decision ?? "pending",
     requestedAt: now.toISOString(),
     ...(input.decision === "denied" ? { resolvedAt: now.toISOString() } : {}),
@@ -166,8 +170,10 @@ export async function resolveActionApproval(input: {
     : { ok: false, reason: "conflict" };
 }
 
-export function actionApprovalInputHash(params: Record<string, unknown>) {
-  return createHash("sha256").update(stableJson(params)).digest("hex");
+export function actionApprovalInputHash(params: Record<string, unknown>, approvalContext?: string) {
+  return createHash("sha256")
+    .update(stableJson(approvalContext ? { params, approvalContext } : params))
+    .digest("hex");
 }
 
 export async function recordActionSourceDiscovery(input: {
@@ -476,6 +482,7 @@ function actionApprovalRecord(value: unknown): ActionApprovalRecord | null {
     sourceId: record.sourceId,
     capabilityId: record.capabilityId,
     inputHash: record.inputHash,
+    ...(typeof record.paramsHash === "string" ? { paramsHash: record.paramsHash } : {}),
     status: record.status,
     requestedAt: record.requestedAt,
     ...(typeof record.resolvedAt === "string" ? { resolvedAt: record.resolvedAt } : {}),

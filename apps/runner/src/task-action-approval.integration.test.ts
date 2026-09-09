@@ -29,9 +29,19 @@ import { resumeTaskActionApprovals } from "./task-action-approval";
 
 // The provider is a fixture; gateway governance, persistence, approval resolution,
 // and restart/resume all execute their production code against Postgres.
-it.each(["approved", "denied"] as const)(
-  "runs the complete Gmail task approval flow with %s",
-  async (resolution) => {
+it.each([
+  { resolution: "approved" as const, custom: false, changed: false },
+  { resolution: "denied" as const, custom: false, changed: false },
+  { resolution: "approved" as const, custom: true, changed: false },
+  { resolution: "denied" as const, custom: true, changed: false },
+  { resolution: "approved" as const, custom: true, changed: true },
+])(
+  "runs the complete task approval flow with $resolution (custom: $custom, changed: $changed)",
+  async ({ resolution, custom, changed }) => {
+    const source = custom ? ("plugin:custom-test:mcp" as const) : ("plugin:gmail:gmail" as const);
+    const action = `${source}.${custom ? "send" : "create_draft"}`;
+    let approvalContext = "custom-account-revision";
+    const succeeds = resolution === "approved" && !changed;
     const pg = new PGlite();
     try {
       await pg.exec(SCHEMA);
@@ -43,7 +53,7 @@ it.each(["approved", "denied"] as const)(
       const db = drizzle(pg);
       const provider = vi.fn(async () => ({
         ok: true as const,
-        action: "plugin:gmail:gmail.create_draft",
+        action,
         result: { draftId: "draft_1" },
       }));
       const turnRef = (run: ActionServiceRunRef) => ({
@@ -64,16 +74,15 @@ it.each(["approved", "denied"] as const)(
           durableTaskApprovals: true,
         }),
         resolveCatalog: async () => ({
-          providers: [
-            { id: "plugin:gmail:gmail", kind: "integration", label: "Gmail", description: "Gmail" },
-          ],
+          providers: [{ id: source, kind: "integration", label: "Gmail", description: "Gmail" }],
           actions: [
             {
-              id: "plugin:gmail:gmail.create_draft",
-              provider: "plugin:gmail:gmail",
+              id: action,
+              provider: source,
               capability: "write",
               effects: ACTION_EFFECTS_WRITE,
               permissionMode: "ask",
+              ...(custom ? { approvalContext } : {}),
               description: "Create draft",
               params: { type: "object" },
               execute: provider,
@@ -97,7 +106,7 @@ it.each(["approved", "denied"] as const)(
           operation: "list",
           sessionId: "runtime_1",
           turnId: "run_1",
-          source: "plugin:gmail:gmail",
+          source,
         },
         signal,
       });
@@ -129,7 +138,7 @@ it.each(["approved", "denied"] as const)(
             sessionId: "runtime_1",
             turnId: "run_1",
             invocationId: requestId,
-            action: "plugin:gmail:gmail.create_draft",
+            action,
             params,
           },
           signal,
@@ -190,6 +199,7 @@ it.each(["approved", "denied"] as const)(
           })
         )?.idempotentReplay,
       ).toBe(true);
+      if (changed) approvalContext = "replaced-account-revision";
       await pg.exec(
         "UPDATE goat.codex_chat_turns SET status='running', lease_id='lease_2' WHERE id='run_1'",
       );
@@ -202,24 +212,29 @@ it.each(["approved", "denied"] as const)(
         repository: new PostgresTaskActionApprovalRepository(execute),
         execute: gateway,
       });
-      expect(resumed).toContain(resolution === "approved" ? "draft_1" : "The user denied");
-      expect(provider).toHaveBeenCalledTimes(resolution === "approved" ? 1 : 0);
+      expect(resumed).toContain(
+        changed
+          ? "does not match its existing approval request"
+          : resolution === "approved"
+            ? "draft_1"
+            : "The user denied",
+      );
+      expect(provider).toHaveBeenCalledTimes(succeeds ? 1 : 0);
       const persisted = (
         await pg.query<{ debug_trace: { uiMessageParts: { output: { ok: boolean } }[] } }>(
           "SELECT debug_trace FROM goat.chat_messages WHERE id='assistant_1'",
         )
       ).rows[0];
-      expect(persisted?.debug_trace.uiMessageParts[0]?.output.ok).toBe(resolution === "approved");
+      expect(persisted?.debug_trace.uiMessageParts[0]?.output.ok).toBe(succeeds);
 
-      if (resolution === "approved")
-        expect(provider).toHaveBeenCalledWith(expect.objectContaining({ params }));
+      if (succeeds) expect(provider).toHaveBeenCalledWith(expect.objectContaining({ params }));
       await resumeTaskActionApprovals(turn, {
         repository: new PostgresTaskActionApprovalRepository(execute),
         execute: gateway,
       });
       const retry = await call("new_mcp_id_after_restart");
-      expect(retry.ok).toBe(resolution === "approved");
-      expect(provider).toHaveBeenCalledTimes(resolution === "approved" ? 1 : 0);
+      expect(retry.ok).toBe(succeeds);
+      expect(provider).toHaveBeenCalledTimes(succeeds ? 1 : 0);
       expect((await pg.query("SELECT status FROM goat.tasks WHERE id='task_1'")).rows).toEqual([
         { status: "queued" },
       ]);

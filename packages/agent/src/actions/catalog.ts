@@ -134,6 +134,21 @@ export async function resolveActionCatalog(
         }),
       ),
       ...reconciledManaged.sources,
+      ...remoteMcpRegistrations
+        .filter(
+          (registration) =>
+            registration.connectionProvider === "custom_mcp" &&
+            !providers.some((provider) => provider.id === registration.source),
+        )
+        .map(
+          (registration): ActionSourceDescriptor => ({
+            id: registration.source,
+            kind: "integration",
+            unavailable: true,
+            label: registration.label,
+            description: registration.description,
+          }),
+        ),
     ],
     actions: [...providers.flatMap((provider) => provider.actions), ...reconciledManaged.actions],
   };

@@ -84,6 +84,7 @@ export type ActionGatewayServiceDependencies = {
     capabilityId: string;
     params: Record<string, unknown>;
     decision?: "pending" | "denied";
+    approvalContext?: string;
   }) => Promise<ActionGatewayApprovalRecord | null>;
   evaluateApproval: (input: {
     request: Extract<ActionServiceRequest, { operation: "approval" }>;
@@ -134,7 +135,12 @@ export async function executeActionHostGatewayService(input: {
   const denyHeadlessApproval = run.policy === "headless" && !context.durableTaskApprovals;
   try {
     const serviceCatalog = {
-      sources: catalog.providers,
+      sources: catalog.providers.map(({ id, kind, label, description }) => ({
+        id,
+        kind: kind ?? "integration",
+        label,
+        description,
+      })),
       actions: catalog.actions.map((action) => ({
         id: action.id,
         source: action.provider,
@@ -163,6 +169,7 @@ export async function executeActionHostGatewayService(input: {
           sourceId: action.provider,
           capabilityId: action.capability,
           params: approvalRequest.params,
+          ...(action.approvalContext ? { approvalContext: action.approvalContext } : {}),
           ...(denyHeadlessApproval ? { decision: "denied" as const } : {}),
         });
         if (!approval) {
@@ -198,6 +205,7 @@ export async function executeActionHostGatewayService(input: {
           sourceId: action.provider,
           capabilityId: action.capability,
           params: executeRequest.params,
+          ...(action.approvalContext ? { approvalContext: action.approvalContext } : {}),
           ...(denyHeadlessApproval ? { decision: "denied" as const } : {}),
         });
         if (!approval) {

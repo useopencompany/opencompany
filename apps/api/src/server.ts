@@ -7,6 +7,7 @@ import {
 } from "@opencompany/agent/brain-imports";
 import { BrainSourceApplicationService } from "@opencompany/agent/brain-sources";
 import { BrowserProfileApplicationService } from "@opencompany/agent/browser-profiles/service";
+import { createCustomMcpService } from "@opencompany/agent/custom-mcp";
 import { createGmailMcpService } from "@opencompany/agent/integrations/gmail-mcp-server";
 import { createGoogleCalendarMcpService } from "@opencompany/agent/integrations/google-calendar-mcp-server";
 import { getAvailableHarnessTools } from "@opencompany/agent/integrations/google-data";
@@ -170,6 +171,7 @@ const app = createApiApp({
   browserProfiles,
   skillImports,
   pluginImports,
+  customMcp: createCustomMcpService(database.db),
   brainAssets: createBrainAssetService({ db: database.db, knowledge }),
   chatResources: createChatResourceService({ db: database.db }),
   messagePresentations: new PostgresMessagePresentationService(execute),

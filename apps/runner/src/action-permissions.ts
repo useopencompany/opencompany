@@ -25,6 +25,9 @@ export async function alwaysAllowAction(input: {
   if (!action)
     throw new Error("This action is no longer available. Could not save the permission.");
   if (action.permissionMode === "on") return { changed: false };
+  if (action.permission?.provider === "custom_mcp") {
+    throw new Error("Set standing permissions for individual custom MCP tools in Plugins.");
+  }
   const permission = action.permission;
   if (!permission || permission.integrationIds.length === 0) {
     throw new Error("This action does not support a standing permission.");

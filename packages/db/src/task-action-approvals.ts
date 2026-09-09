@@ -62,7 +62,8 @@ export class PostgresTaskActionApprovalRepository {
             updated_at = now()
         WHERE action_turn.turn_id IN (SELECT id FROM fenced)
           AND approval_records -> ${input.invocationId} ->> 'status' = 'pending'
-          AND approval_records -> ${input.invocationId} ->> 'inputHash' = ${actionApprovalInputHash(input.params)}
+          AND COALESCE(approval_records -> ${input.invocationId} ->> 'paramsHash',
+                       approval_records -> ${input.invocationId} ->> 'inputHash') = ${actionApprovalInputHash(input.params)}
           AND NOT (approval_records -> ${input.invocationId} ? 'taskRequest')
         RETURNING turn_id
       )

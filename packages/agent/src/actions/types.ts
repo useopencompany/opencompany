@@ -3,6 +3,7 @@ import type { JSONSchema7 } from "ai";
 import type { CapabilityId } from "./capabilities";
 
 export type ActionProviderId =
+  | "custom_mcp"
   | "slack"
   | "gmail"
   | "google_calendar"
@@ -101,6 +102,7 @@ export type ActionProviderDescriptor = {
 };
 
 export type ActionSourceDescriptor = {
+  unavailable?: boolean;
   id: ActionSourceId;
   kind?: "integration" | "managed";
   label: string;
@@ -165,6 +167,8 @@ export type ActionExecuteContext = {
 };
 
 export type ResolvedAction = ActionDescriptor & {
+  // Binds durable approval to the connection and definitions used during discovery.
+  approvalContext?: string;
   timeoutMs?: number;
   // Internal-only larger result allowance for deliberately bounded actions
   // such as a validated full transcript. The executor still applies its hard cap.

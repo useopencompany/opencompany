@@ -397,7 +397,7 @@ function ActionApprovalCard({
         >
           {submitting === "accept" ? "Approving..." : taskApproval ? "Approve once" : "Accept"}
         </button>
-        {allowAlways && !taskApproval ? (
+        {allowAlways && !taskApproval && !/^plugin:custom-[a-f0-9]{24}:/.test(action) ? (
           <button
             type="button"
             disabled={submitting !== null}

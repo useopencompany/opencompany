@@ -26,6 +26,11 @@ import {
   CHAT_PRESENTATION_READ_LIMIT,
   type ChatPresentationReader,
 } from "@opencompany/chat-presentation";
+import type {
+  CustomMcpApplicationService,
+  CustomMcpProbe,
+  CustomMcpStatus,
+} from "@opencompany/core";
 import {
   type Actor,
   type BrainDocument,
@@ -173,6 +178,7 @@ export type CreateApiAppInput = {
   >;
   skillImports: SkillImportApplicationService;
   pluginImports: PluginImportApplicationService;
+  customMcp?: CustomMcpApplicationService;
   brainAssets: BrainAssetService;
   chatResources?: ChatResourceService;
   messagePresentations?: MessagePresentationService;
@@ -1359,6 +1365,93 @@ export function createApiApp(input: CreateApiAppInput) {
         ...(query.maxBytes !== undefined ? { maxBytes: query.maxBytes } : {}),
       });
       return c.json({ data: chunk, meta }, 200);
+    },
+    previewCustomMcp: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "artifact-preview", 10);
+      const probe = await requireCustomMcp(input.customMcp).preview(actor, c.req.valid("json"));
+      return c.json({ data: customMcpProbeDto(probe), meta }, 200);
+    },
+    createCustomMcp: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "artifact-import", 10);
+      const result = await requireCustomMcp(input.customMcp).create(actor, {
+        ...c.req.valid("json"),
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+      });
+      return c.json(
+        {
+          data: {
+            plugin: publicPluginInstallation(result.plugin),
+            replayed: result.idempotentReplay,
+          },
+          meta,
+        },
+        201,
+      );
+    },
+    getCustomMcp: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      return c.json(
+        {
+          data: customMcpStatusDto(
+            await requireCustomMcp(input.customMcp).status(actor, c.req.valid("param").name),
+          ),
+          meta,
+        },
+        200,
+      );
+    },
+    connectCustomMcp: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "artifact-preview", 10);
+      return c.json(
+        {
+          data: customMcpStatusDto(
+            await requireCustomMcp(input.customMcp).connect(
+              actor,
+              c.req.valid("param").name,
+              c.req.valid("json"),
+            ),
+          ),
+          meta,
+        },
+        200,
+      );
+    },
+    refreshCustomMcp: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "artifact-preview", 10);
+      return c.json(
+        {
+          data: customMcpStatusDto(
+            await requireCustomMcp(input.customMcp).refresh(actor, c.req.valid("param").name),
+          ),
+          meta,
+        },
+        200,
+      );
+    },
+    disconnectCustomMcp: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const service = requireCustomMcp(input.customMcp);
+      await service.disconnect(actor, c.req.valid("param").name);
+      return c.json(
+        { data: customMcpStatusDto(await service.status(actor, c.req.valid("param").name)), meta },
+        200,
+      );
+    },
+    setCustomMcpPermission: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const service = requireCustomMcp(input.customMcp);
+      await service.setToolMode(actor, c.req.valid("param").name, c.req.valid("json"));
+      return c.json(
+        { data: customMcpStatusDto(await service.status(actor, c.req.valid("param").name)), meta },
+        200,
+      );
     },
     listPlugins: async (c) => {
       const actor = actorFrom(c);
@@ -3564,4 +3657,31 @@ function runEventDto(event: RunEvent) {
     payload: event.payload,
     occurredAt: event.createdAt.toISOString(),
   });
+}
+
+function requireCustomMcp(service: CustomMcpApplicationService | undefined) {
+  if (!service) throw new ApiError(503, "unavailable", "Custom MCP connections are unavailable.");
+  return service;
+}
+function customMcpProbeDto(probe: CustomMcpProbe) {
+  return {
+    fingerprint: probe.fingerprint,
+    tools: probe.tools.map(({ name, description, classification }) => ({
+      name,
+      ...(description !== undefined ? { description } : {}),
+      classification,
+    })),
+  };
+}
+function customMcpStatusDto(status: CustomMcpStatus) {
+  return {
+    ...status,
+    account: status.account
+      ? {
+          ...status.account,
+          checkedAt: status.account.checkedAt.toISOString(),
+          tools: customMcpProbeDto({ tools: status.account.tools, fingerprint: "" }).tools,
+        }
+      : null,
+  };
 }

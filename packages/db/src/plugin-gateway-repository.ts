@@ -5,6 +5,7 @@ import { pluginGatewayRegistrations, plugins } from "./product-schema";
 type DbLike = any;
 
 export type PluginGatewayRegistrationRecord = {
+  sourceType?: "github" | "skills.sh" | "custom_mcp";
   id: string;
   workspaceId: string;
   pluginId: string;
@@ -41,6 +42,7 @@ export async function listActivePluginGatewayRegistrations(
   const rows = await db
     .select({
       id: pluginGatewayRegistrations.id,
+      sourceType: plugins.sourceType,
       workspaceId: pluginGatewayRegistrations.workspaceId,
       pluginId: pluginGatewayRegistrations.pluginId,
       pluginName: plugins.name,
@@ -69,6 +71,7 @@ export async function listActivePluginGatewayRegistrations(
 
   return rows.map((row: any) => ({
     id: row.id,
+    sourceType: row.sourceType,
     workspaceId: row.workspaceId,
     pluginId: row.pluginId,
     pluginName: row.pluginName,

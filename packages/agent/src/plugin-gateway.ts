@@ -14,6 +14,7 @@ import {
   type RemoteMcpGatewayDependencies,
   type RemoteMcpGatewayRegistration,
 } from "./actions/remote-mcp";
+import { bindCustomMcpRegistration } from "./custom-mcp";
 import {
   ATTIO_MCP_ENDPOINT_URL,
   getAttioMcpIntegrationState,
@@ -326,10 +327,16 @@ export async function resolvePluginGatewayRegistrations(
         : record,
     ),
   );
-  return refreshed.flatMap((record) => {
-    const registration = bindRegistration(db, identity, record);
-    return registration ? [registration] : [];
-  });
+  const registrations = await Promise.all(
+    refreshed.map((record) =>
+      record.sourceType === "custom_mcp"
+        ? bindCustomMcpRegistration(db, identity, record)
+        : bindRegistration(db, identity, record),
+    ),
+  );
+  return registrations.filter(
+    (registration): registration is RemoteMcpGatewayRegistration => registration !== null,
+  );
 }
 
 export async function refreshPluginGatewayRegistrations(input: {
