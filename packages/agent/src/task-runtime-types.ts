@@ -69,6 +69,7 @@ export type TaskToolName =
   | "web_search"
   | "web_fetch"
   | "list_actions"
+  | "describe_actions"
   | "use_action"
   | "update_task_status";
 

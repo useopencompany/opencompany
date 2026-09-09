@@ -32,6 +32,7 @@ import {
   useTransition,
 } from "react";
 import { useAppData } from "@/components/AppDataProvider";
+import { SidebarBots } from "@/components/Bots";
 import { BrainSwitcher } from "@/components/BrainSwitcher";
 import { ChatStateIndicator } from "@/components/ChatStateIndicator";
 import { SidebarFeedback } from "@/components/SidebarFeedback";
@@ -204,6 +205,8 @@ export function Sidebar({
             <BrainSwitcher />
           </div>
         ) : null}
+
+        <SidebarBots />
 
         {/* Recent chats */}
         <SidebarRecentChats />

@@ -51,6 +51,16 @@ describe("createProductChatSystemPrompt integrations", () => {
     expect(base).not.toContain("start_workflow");
   });
 
+  it("keeps older sessions on full-schema list guidance", () => {
+    const prompt = createProductChatSystemPrompt({
+      connectedIntegrations: CONNECTED_INTEGRATIONS,
+      legacyActionDiscovery: true,
+    });
+    expect(prompt).toContain("Use list_actions to discover sources and full action definitions");
+    expect(prompt).not.toContain("describe_actions");
+    expect(prompt).not.toContain("compact");
+  });
+
   it("advertises workspace skills through progressive discovery only when available", () => {
     const prompt = createProductChatSystemPrompt({ skillsAvailable: true });
 
@@ -129,7 +139,7 @@ describe("createProductChatSystemPrompt integrations", () => {
     );
     expect(prompt).toContain("Action sources usable in chat");
     expect(prompt).toContain("Call list_actions with the exact source id");
-    expect(prompt).toContain("call list_actions with the relevant source id");
+    expect(prompt).toContain("list the relevant source or describe a known action");
     expect(prompt).toContain("Managed capabilities are metered third-party services");
     expect(prompt).toContain("cannot mutate a user's third-party account");
     expect(prompt).toContain("image managed capability may create a durable image artifact");

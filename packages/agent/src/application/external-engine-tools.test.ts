@@ -2,7 +2,14 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { McpServer as McpServerType } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { ACTION_TOOL_CONTRACT, type ActionGatewayRequest } from "@opencompany/agent-runtime";
+import {
+  ACTION_HOST_TOOL_CONTRACT_VERSION_V2,
+  ACTION_HOST_TOOL_CONTRACT_VERSION_V3,
+  ACTION_HOST_TOOL_CONTRACT_VERSION_V4,
+  ACTION_TOOL_CONTRACT,
+  type ActionGatewayRequest,
+  LEGACY_ACTION_TOOL_CONTRACT,
+} from "@opencompany/agent-runtime";
 import { describe, expect, it, vi } from "vitest";
 import { createInMemoryActionTurnGovernance, serveActionRequest } from "../actions/service";
 import {
@@ -25,6 +32,7 @@ type RegisteredTool = {
 function registerTools(
   executeAction: ExternalEngineToolDependencies["executeAction"],
   publishArtifact = vi.fn<ExternalEngineToolDependencies["publishArtifact"]>(),
+  hostToolContractVersion?: string,
 ) {
   const tools = new Map<string, RegisteredTool>();
   const server = {
@@ -36,7 +44,11 @@ function registerTools(
   } as unknown as McpServerType;
   registerExternalEngineServiceTools(
     server,
-    { sessionId: "codex_session_1", runId: "codex_turn_1" },
+    {
+      sessionId: "codex_session_1",
+      runId: "codex_turn_1",
+      ...(hostToolContractVersion ? { hostToolContractVersion } : {}),
+    },
     { executeAction, publishArtifact },
   );
   return tools;
@@ -51,7 +63,12 @@ function getTool(tools: Map<string, RegisteredTool>, name: string): RegisteredTo
 describe("registerExternalEngineServiceTools", () => {
   it("registers file publication and action tools", () => {
     const tools = registerTools(vi.fn<ExternalEngineToolDependencies["executeAction"]>());
-    expect([...tools.keys()]).toEqual(["publish_artifact", "list_actions", "use_action"]);
+    expect([...tools.keys()]).toEqual([
+      "publish_artifact",
+      "list_actions",
+      "describe_actions",
+      "use_action",
+    ]);
     expect(getTool(tools, "list_actions").config.annotations).toEqual(
       ACTION_TOOL_CONTRACT.list.annotations,
     );
@@ -59,6 +76,35 @@ describe("registerExternalEngineServiceTools", () => {
       ACTION_TOOL_CONTRACT.execute.annotations,
     );
     expect(ACTION_TOOL_CONTRACT.execute.annotations.idempotentHint).toBe(false);
+  });
+
+  it.each([
+    ACTION_HOST_TOOL_CONTRACT_VERSION_V2,
+    ACTION_HOST_TOOL_CONTRACT_VERSION_V3,
+    ACTION_HOST_TOOL_CONTRACT_VERSION_V4,
+  ])("retains the old tool surface for %s", (version) => {
+    const tools = registerTools(vi.fn(), vi.fn(), version);
+    expect([...tools.keys()]).toEqual(["publish_artifact", "list_actions", "use_action"]);
+    expect(getTool(tools, "list_actions").config.description).toBe(
+      LEGACY_ACTION_TOOL_CONTRACT.list.description,
+    );
+  });
+
+  it("describes exact IDs through the same gateway used by Codex and Claude", async () => {
+    const executeAction = vi.fn<ExternalEngineToolDependencies["executeAction"]>(async () => ({
+      ok: true,
+      actions: [],
+      not_found: ["missing"],
+    }));
+    const tools = registerTools(executeAction);
+    const result = await getTool(tools, "describe_actions").callback({ actions: ["missing"] });
+    expect(executeAction.mock.calls[0]?.[0].request).toEqual({
+      operation: "describe",
+      sessionId: "codex_session_1",
+      turnId: "codex_turn_1",
+      actions: ["missing"],
+    });
+    expect(result.structuredContent).toEqual({ ok: true, actions: [], not_found: ["missing"] });
   });
 
   it("publishes a sandbox file through the turn-scoped runner bridge", async () => {
@@ -245,7 +291,14 @@ describe("registerExternalEngineServiceTools", () => {
           async ({ request }) =>
             request.operation === "list"
               ? { ok: true, sources: [{ id: "gmail", label: "Gmail", description: "d" }] }
-              : { ok: true, action: request.action, result: { echoedParams: request.params } },
+              : request.operation === "describe"
+                ? serveActionRequest({
+                    request,
+                    catalog: { sources: [], actions: [] },
+                    governance: createInMemoryActionTurnGovernance(),
+                    execute: vi.fn(),
+                  })
+                : { ok: true, action: request.action, result: { echoedParams: request.params } },
         ),
         publishArtifact: vi.fn<ExternalEngineToolDependencies["publishArtifact"]>(),
       },
@@ -259,6 +312,7 @@ describe("registerExternalEngineServiceTools", () => {
     expect(tools.tools.map((tool) => tool.name)).toEqual([
       "publish_artifact",
       "list_actions",
+      "describe_actions",
       "use_action",
     ]);
     expect(tools.tools.find((tool) => tool.name === "publish_artifact")?.inputSchema).toMatchObject(
@@ -276,6 +330,39 @@ describe("registerExternalEngineServiceTools", () => {
         params: { type: "object" },
       },
     });
+
+    expect(tools.tools.find((tool) => tool.name === "describe_actions")?.inputSchema).toMatchObject(
+      {
+        type: "object",
+        required: ["actions"],
+        additionalProperties: false,
+        properties: {
+          actions: {
+            type: "array",
+            minItems: 1,
+            maxItems: 5,
+            items: { type: "string", minLength: 1 },
+          },
+        },
+      },
+    );
+    for (const args of [
+      {},
+      { actions: [] },
+      { actions: "gmail.list" },
+      { actions: [" "] },
+      { actions: [3] },
+      { actions: Array(6).fill("gmail.list") },
+      { actions: ["gmail.list"], unexpected: true },
+    ]) {
+      expect(await client.callTool({ name: "describe_actions", arguments: args })).toMatchObject({
+        isError: true,
+      });
+    }
+    expect(
+      (await client.callTool({ name: "describe_actions", arguments: { actions: ["missing"] } }))
+        .structuredContent,
+    ).toEqual({ ok: true, actions: [], not_found: ["missing"] });
 
     const listResult = await client.callTool({ name: "list_actions", arguments: {} });
     expect(listResult.structuredContent).toEqual({

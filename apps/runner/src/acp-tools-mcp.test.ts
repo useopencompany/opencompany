@@ -168,6 +168,7 @@ describe("runner ACP tools MCP", () => {
       expect(tools.tools.map((tool) => tool.name)).toEqual([
         "publish_artifact",
         "list_actions",
+        "describe_actions",
         "use_action",
         "wiki",
       ]);
@@ -403,6 +404,7 @@ describe("runner ACP tools MCP", () => {
       expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([
         "publish_artifact",
         "list_actions",
+        "describe_actions",
         "use_action",
         "wiki",
       ]);
@@ -707,6 +709,7 @@ describe("runner ACP tools MCP", () => {
       expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([
         "publish_artifact",
         "list_actions",
+        "describe_actions",
         "use_action",
         "wiki",
         "goat_brain",
