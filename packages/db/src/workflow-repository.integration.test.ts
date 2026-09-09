@@ -203,6 +203,7 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
         slug: "weekly-research",
         name: "Weekly research",
         steps: [{ id: "step_new", instructions: "" }],
+        status: "draft",
         version: 1,
       },
       idempotentReplay: false,
@@ -343,6 +344,66 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
         [created.workflow.id],
       ),
     ).resolves.toMatchObject({ rows: [{ count: 0 }] });
+  });
+
+  it("saves incomplete drafts, activates completed steps, and clears execution when returning to draft", async () => {
+    const { workflow } = await workflows.createWorkflow(actor(), {
+      idempotencyKey: "draft-lifecycle",
+      name: "Daily report",
+    });
+    const definition = {
+      name: workflow.name,
+      description: "",
+      steps: workflow.steps,
+      status: "draft" as const,
+      trigger: { type: "schedule" as const, cron: "0 9 * * *" },
+    };
+    const draft = await workflows.updateWorkflow(actor(), workflow.id, {
+      ...definition,
+      expectedVersion: 1,
+    });
+    expect(draft.workflow).toMatchObject({
+      status: "draft",
+      steps: [{ instructions: "" }],
+      trigger: { nextRunAt: null, prompt: "Run this workflow." },
+    });
+    await expect(workflows.runWorkflowNow(actor(), workflow.id, "run-draft")).rejects.toThrow(
+      /unavailable or incomplete/,
+    );
+    await expect(
+      workflows.updateWorkflow(actor(), workflow.id, {
+        ...definition,
+        expectedVersion: 2,
+        status: "active",
+      }),
+    ).rejects.toThrow(/Add instructions to step 1/);
+    await workflows.updateWorkflow(actor(), workflow.id, {
+      ...definition,
+      expectedVersion: 2,
+      status: "active",
+      steps: [{ ...workflow.steps[0]!, instructions: "Write a daily report." }],
+    });
+    await expect(
+      database.query(
+        "SELECT schedule_next_run_at IS NOT NULL AS scheduled, schedule_harness_spec IS NOT NULL AS planned FROM goat.workflows WHERE id = $1",
+        [workflow.id],
+      ),
+    ).resolves.toMatchObject({ rows: [{ scheduled: true, planned: true }] });
+    await workflows.updateWorkflow(actor(), workflow.id, { ...definition, expectedVersion: 3 });
+    await expect(
+      database.query(
+        "SELECT status, schedule_next_run_at, schedule_harness_spec FROM goat.workflows WHERE id = $1",
+        [workflow.id],
+      ),
+    ).resolves.toMatchObject({
+      rows: [{ status: "draft", schedule_next_run_at: null, schedule_harness_spec: null }],
+    });
+    await expect(
+      database.query(
+        "SELECT status, steps->0->>'instructions' AS instructions FROM goat.workflow_read_model_v1 WHERE id = $1",
+        [workflow.id],
+      ),
+    ).resolves.toMatchObject({ rows: [{ status: "draft", instructions: "" }] });
   });
 
   it("persists and projects a Linear issue-entered-triage event trigger", async () => {
