@@ -100,7 +100,7 @@ export function StripeRestrictedKeyConnectionForm({
         <div className="flex items-center gap-2">
           {connected ? (
             <Button variant="outline" size="sm" onClick={disconnect} disabled={isPending}>
-              Disconnect
+              Disconnect workspace key
             </Button>
           ) : null}
           <Button size="sm" onClick={save} disabled={isPending || apiKey.trim().length === 0}>

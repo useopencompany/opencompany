@@ -143,6 +143,7 @@ export type PluginAccountsState =
       accounts: PluginAccount[];
       permissionConnection: IntegrationAccountView<PluginConnectionProvider> | null;
       legacyStripeConnection?: boolean;
+      stripeWorkspaceKey?: { connected: boolean };
       managedConnection?: ManagedPluginConnection;
     };
 
@@ -1227,7 +1228,7 @@ function AccountsSection({
           config={config}
           permissionConnection={permissionConnection}
           managedConnection={managedConnection}
-          legacyStripeConnection={legacyStripeConnection}
+          stripeWorkspaceKey={state.status === "ready" ? state.stripeWorkspaceKey : undefined}
           canEdit={canEdit}
         />
         {config.ingestionHref && config.ingestionLabel ? (
@@ -1275,10 +1276,10 @@ function PluginConnectionControls({
   config,
   permissionConnection,
   managedConnection,
-  legacyStripeConnection,
+  stripeWorkspaceKey,
   canEdit,
 }: {
-  legacyStripeConnection: boolean;
+  stripeWorkspaceKey: { connected: boolean } | undefined;
   config: OfficialMcpPluginConfig;
   permissionConnection: IntegrationAccountView<PluginConnectionProvider> | null;
   managedConnection: ManagedPluginConnection | undefined;
@@ -1305,13 +1306,16 @@ function PluginConnectionControls({
         <a href={config.connectHref} className={buttonVariants({ variant: "outline", size: "sm" })}>
           Connect Stripe account
         </a>
-        {legacyStripeConnection ? (
+        {stripeWorkspaceKey ? (
           <details>
             <summary className="cursor-pointer text-[12px] text-ink-subtle">
               Manage existing workspace API key
             </summary>
+            <p className="my-2 text-[12px] leading-4 text-ink-subtle">
+              The workspace key is used when you have no personal Stripe connection.
+            </p>
             <StripeRestrictedKeyConnectionForm
-              connected={Boolean(permissionConnection?.connected)}
+              connected={stripeWorkspaceKey.connected}
               canManage={canEdit}
             />
           </details>
@@ -1759,6 +1763,7 @@ function pluginAccountsFromState(
   permissionConnection: IntegrationAccountView<PluginConnectionProvider> | null;
   managedConnection?: ManagedPluginConnection;
   legacyStripeConnection?: boolean;
+  stripeWorkspaceKey?: { connected: boolean };
 } {
   if (config.connectionProvider === "infisical") {
     return {
@@ -1812,11 +1817,18 @@ function pluginAccountsFromState(
     config.connectionProvider === "x_account"
   ) {
     if (config.connectionProvider === "stripe") {
+      const connection = state.stripe;
+      const stripeWorkspaceKey = connection.integrationId
+        ? { connected: connection.connected }
+        : undefined;
       const oauthAccount = state.personalAccounts.stripe[0];
       if (oauthAccount) {
-        return { permissionConnection: oauthAccount, accounts: [{ account: oauthAccount }] };
+        return {
+          permissionConnection: oauthAccount,
+          accounts: [{ account: oauthAccount }],
+          ...(stripeWorkspaceKey ? { stripeWorkspaceKey } : {}),
+        };
       }
-      const connection = state.stripe;
       const modeLabel =
         connection.livemode === false
           ? "Test mode"
@@ -1840,6 +1852,7 @@ function pluginAccountsFromState(
       return {
         permissionConnection,
         legacyStripeConnection: Boolean(permissionConnection),
+        ...(stripeWorkspaceKey ? { stripeWorkspaceKey } : {}),
         accounts: permissionConnection ? [{ account: permissionConnection }] : [],
       };
     }

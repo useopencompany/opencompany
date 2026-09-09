@@ -1845,7 +1845,13 @@ describe("Linear plugin settings", () => {
       );
       expect(screen.getByText("Stripe OAuth")).toBeInTheDocument();
       expect(screen.queryByText("Acme Payments · Test mode")).not.toBeInTheDocument();
-      expect(screen.queryByLabelText("Restricted key")).not.toBeInTheDocument();
+      const keyManagement = screen
+        .getByText("Manage existing workspace API key")
+        .closest("details");
+      expect(keyManagement).not.toHaveAttribute("open");
+      expect(
+        screen.getByText("The workspace key is used when you have no personal Stripe connection."),
+      ).toBeInTheDocument();
       expect(screen.getByRole("link", { name: "Connect Stripe account" })).toHaveAttribute(
         "href",
         "/api/integrations/stripe/start?returnTo=/settings/plugins/stripe",
