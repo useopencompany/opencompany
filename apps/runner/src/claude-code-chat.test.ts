@@ -298,12 +298,13 @@ describe("isClaudeCodeAuthenticationFailure", () => {
 });
 
 describe("inspectClaudeCoreMcpInitialization", () => {
-  it("requires both action tools from a connected opencompany server", () => {
+  it("requires all action tools from a connected opencompany server", () => {
     expect(inspectClaudeCoreMcpInitialization(claudeCoreMcpInitNotification())).toEqual({
       sessionId: "claude_thread_1",
       status: "connected",
-      advertisedToolCount: 3,
+      advertisedToolCount: 4,
       hasListActions: true,
+      hasDescribeActions: true,
       hasUseAction: true,
       ready: true,
       failureReason: null,
@@ -322,6 +323,19 @@ describe("inspectClaudeCoreMcpInitialization", () => {
       ready: false,
       failureReason: "required_tools_missing",
     });
+  });
+
+  it("requires description on v5 but supports older two-tool contracts", () => {
+    const notification = claudeCoreMcpInitNotification({
+      tools: ["mcp__opencompany__list_actions", "mcp__opencompany__use_action"],
+    });
+    expect(inspectClaudeCoreMcpInitialization(notification)).toMatchObject({
+      hasDescribeActions: false,
+      ready: false,
+    });
+    expect(
+      inspectClaudeCoreMcpInitialization(notification, "goat-codex-host-tools.v4"),
+    ).toMatchObject({ hasDescribeActions: false, ready: true });
   });
 
   it("ignores unrelated ACP notifications", () => {
@@ -1340,6 +1354,7 @@ function claudeCoreMcpInitNotification(overrides: { status?: string; tools?: str
         tools: overrides.tools ?? [
           "mcp__opencompany__publish_artifact",
           "mcp__opencompany__list_actions",
+          "mcp__opencompany__describe_actions",
           "mcp__opencompany__use_action",
         ],
         mcp_servers: [{ name: "opencompany", status: overrides.status ?? "connected" }],

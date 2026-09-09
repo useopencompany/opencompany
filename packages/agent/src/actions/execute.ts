@@ -119,7 +119,7 @@ export async function executeAction(input: {
         error: {
           code: "invalid_params",
           source: action.provider,
-          message: `${error.message} Check the action's params schema from list_actions for ${action.provider}.`,
+          message: `${error.message} Check the action's complete params schema from describe_actions or a legacy full-schema list_actions result.`,
         },
       };
     }

@@ -2,9 +2,12 @@ import {
   ACTION_TOOL_CONTRACT,
   type ActionExecutionResponse,
   type ActionGatewayResponse,
+  type ActionSummary,
   CHAT_ARTIFACT_DATA_PART_TYPE,
   type CodexCommandToolInput,
   type CodexCommandToolOutput,
+  type DescribeActionsInput,
+  type DescribeActionsResponse,
   type PublishedChatArtifact,
   parsePublishedChatArtifact,
 } from "@opencompany/agent-runtime";
@@ -66,6 +69,8 @@ export const WEB_SEARCH_TOOL_NAME = "web_search";
 export const WEB_SEARCH_TOOL_PART_TYPE = `tool-${WEB_SEARCH_TOOL_NAME}` as const;
 export const LIST_ACTIONS_TOOL_NAME = ACTION_TOOL_CONTRACT.list.name;
 export const LIST_ACTIONS_TOOL_PART_TYPE = `tool-${LIST_ACTIONS_TOOL_NAME}` as const;
+export const DESCRIBE_ACTIONS_TOOL_NAME = ACTION_TOOL_CONTRACT.describe.name;
+export const DESCRIBE_ACTIONS_TOOL_PART_TYPE = `tool-${DESCRIBE_ACTIONS_TOOL_NAME}` as const;
 export const USE_ACTION_TOOL_NAME = ACTION_TOOL_CONTRACT.execute.name;
 export const USE_ACTION_TOOL_PART_TYPE = `tool-${USE_ACTION_TOOL_NAME}` as const;
 export const LIST_SKILLS_TOOL_NAME = "list_skills";
@@ -432,7 +437,7 @@ export type ListActionsToolOutput =
   | {
       ok: true;
       source: ActionSourceDescriptor;
-      actions: ChatActionCatalog["actions"];
+      actions: (ActionSummary | ChatActionCatalog["actions"][number])[];
     }
   | {
       ok: false;
@@ -442,6 +447,11 @@ export type ListActionsToolOutput =
         availableSources: ActionSourceId[];
       };
     };
+
+export type DescribeActionsToolInput = DescribeActionsInput;
+export type DescribeActionsToolOutput =
+  | (Omit<DescribeActionsResponse, "actions"> & { actions: ChatActionCatalog["actions"] })
+  | Extract<ActionGatewayResponse, { ok: false }>;
 
 export type UseActionToolInput = {
   action: string;
@@ -588,6 +598,10 @@ export type ChatTools = {
     input: ListActionsToolInput;
     output: ListActionsToolOutput;
   };
+  describe_actions: {
+    input: DescribeActionsToolInput;
+    output: DescribeActionsToolOutput;
+  };
   use_action: {
     input: UseActionToolInput;
     output: UseActionToolOutput;
@@ -641,6 +655,13 @@ export function listedActionSourceIdsFromMessages(
         "source" in part.output
       ) {
         sourceIds.add(part.output.source.id);
+      }
+      if (
+        part.type === DESCRIBE_ACTIONS_TOOL_PART_TYPE &&
+        part.state === "output-available" &&
+        part.output.ok
+      ) {
+        for (const action of part.output.actions) sourceIds.add(action.source);
       }
     }
   }

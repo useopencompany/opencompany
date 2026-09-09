@@ -1,18 +1,22 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
+  ACTION_HOST_TOOL_CONTRACT_VERSION,
   ACTION_TOOL_CONTRACT,
   type ActionGatewayRequest,
   type ActionGatewayResponse,
+  LEGACY_ACTION_TOOL_CONTRACT,
   PUBLISH_ARTIFACT_INPUT_JSON_SCHEMA,
   PUBLISH_ARTIFACT_TOOL_DESCRIPTION,
   PUBLISH_ARTIFACT_TOOL_NAME,
   type PublishArtifactToolResponse,
+  supportsCompactActionDiscovery,
 } from "@opencompany/agent-runtime";
 import * as z from "zod/v4-mini";
 
 export type ExternalEngineToolContext = {
   sessionId: string;
   runId: string;
+  hostToolContractVersion?: string;
   signal?: AbortSignal;
 };
 
@@ -34,6 +38,9 @@ export type ExternalEngineToolDependencies = {
 // MCP requires Zod validators. Build them from the dependency-light shared contracts so
 // field names, requiredness, descriptions, and annotations cannot drift between engines.
 const listActionsInputSchema = mcpInputSchema(ACTION_TOOL_CONTRACT.list.inputSchema);
+const describeActionsInputSchema = z.strictObject(
+  mcpInputSchema(ACTION_TOOL_CONTRACT.describe.inputSchema),
+);
 const useActionInputSchema = mcpInputSchema(ACTION_TOOL_CONTRACT.execute.inputSchema);
 const publishArtifactInputSchema = mcpInputSchema(PUBLISH_ARTIFACT_INPUT_JSON_SCHEMA);
 
@@ -42,6 +49,10 @@ export function registerExternalEngineServiceTools(
   ctx: ExternalEngineToolContext,
   dependencies: ExternalEngineToolDependencies,
 ) {
+  const compactDiscovery = supportsCompactActionDiscovery(
+    ctx.hostToolContractVersion ?? ACTION_HOST_TOOL_CONTRACT_VERSION,
+  );
+  const contract = compactDiscovery ? ACTION_TOOL_CONTRACT : LEGACY_ACTION_TOOL_CONTRACT;
   server.registerTool(
     PUBLISH_ARTIFACT_TOOL_NAME,
     {
@@ -71,7 +82,7 @@ export function registerExternalEngineServiceTools(
     ACTION_TOOL_CONTRACT.list.name,
     {
       title: ACTION_TOOL_CONTRACT.list.title,
-      description: ACTION_TOOL_CONTRACT.list.description,
+      description: contract.list.description,
       inputSchema: listActionsInputSchema,
       annotations: ACTION_TOOL_CONTRACT.list.annotations,
     },
@@ -86,11 +97,30 @@ export function registerExternalEngineServiceTools(
     },
   );
 
+  if (compactDiscovery) {
+    server.registerTool(
+      ACTION_TOOL_CONTRACT.describe.name,
+      {
+        title: ACTION_TOOL_CONTRACT.describe.title,
+        description: ACTION_TOOL_CONTRACT.describe.description,
+        inputSchema: describeActionsInputSchema,
+        annotations: ACTION_TOOL_CONTRACT.describe.annotations,
+      },
+      async (args) =>
+        runGateway(dependencies.executeAction, ctx, {
+          operation: "describe",
+          sessionId: ctx.sessionId,
+          turnId: ctx.runId,
+          actions: args.actions as string[],
+        }),
+    );
+  }
+
   server.registerTool(
     ACTION_TOOL_CONTRACT.execute.name,
     {
       title: ACTION_TOOL_CONTRACT.execute.title,
-      description: ACTION_TOOL_CONTRACT.execute.description,
+      description: contract.execute.description,
       inputSchema: useActionInputSchema,
       annotations: ACTION_TOOL_CONTRACT.execute.annotations,
     },
@@ -145,20 +175,33 @@ export function mcpInputSchema(schema: unknown): Record<string, z.ZodMiniType> {
   return Object.fromEntries(
     Object.entries(properties).map(([name, value]) => {
       const property = isRecord(value) ? value : {};
-      let validator: z.ZodMiniType =
-        property.type === "string"
-          ? z.string()
-          : property.type === "integer"
-            ? z.number().check(z.int())
-            : property.type === "object"
-              ? z.record(z.string(), z.unknown())
-              : z.unknown();
+      let validator = mcpPropertySchema(property);
       if (typeof property.description === "string" && property.description) {
         validator = validator.check(z.meta({ description: property.description }));
       }
       return [name, required.has(name) ? validator : z.optional(validator)];
     }),
   );
+}
+
+function mcpPropertySchema(property: Record<string, unknown>): z.ZodMiniType {
+  if (property.type === "string") {
+    let validator = z.string();
+    if (typeof property.minLength === "number")
+      validator = validator.check(z.minLength(property.minLength));
+    return validator;
+  }
+  if (property.type === "array") {
+    let validator = z.array(mcpPropertySchema(isRecord(property.items) ? property.items : {}));
+    if (typeof property.minItems === "number")
+      validator = validator.check(z.minLength(property.minItems));
+    if (typeof property.maxItems === "number")
+      validator = validator.check(z.maxLength(property.maxItems));
+    return validator;
+  }
+  if (property.type === "integer") return z.number().check(z.int());
+  if (property.type === "object") return z.record(z.string(), z.unknown());
+  return z.unknown();
 }
 
 function mcpInvocationId(

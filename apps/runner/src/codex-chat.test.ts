@@ -587,7 +587,7 @@ describe("runCodexChatTurn over ACP", () => {
     );
     const harnessInput = acpMocks.runTurn.mock.calls[0]?.[0] as AcpHarnessTurnInput;
     expect(harnessInput.task).toContain("Bot identity: customer research assistant.");
-    expect(harnessInput.task).toContain("list_actions and use_action");
+    expect(harnessInput.task).toContain("Use list_actions to discover sources");
     expect(harnessInput.task).toContain("Actions may modify connected services");
     expect(harnessInput.task).toContain("denial is a normal outcome");
     expect(harnessInput.task).not.toContain("cannot modify connected services");

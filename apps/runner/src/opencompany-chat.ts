@@ -1184,6 +1184,9 @@ async function resolveProductChatRuntime(input: {
   }
 
   const actionDispatcher = await createActionDispatcher({
+    ...(session.hostToolContractVersion
+      ? { hostToolContractVersion: session.hostToolContractVersion }
+      : {}),
     sessionId: session.id,
     turnId: turn.id,
     signal,

@@ -705,3 +705,63 @@ describe("workspace_skills tool", () => {
     }
   });
 });
+
+describe("action discovery tools", () => {
+  const action = {
+    id: "gmail.search",
+    source: "gmail" as const,
+    description: "Search email ".repeat(30),
+    params: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+    permissionMode: "on" as const,
+  };
+  const catalog = {
+    sources: [{ id: "gmail" as const, label: "Gmail", description: "Email" }],
+    actions: [action],
+  };
+  type ActionTool = {
+    execute: (args: unknown, context?: { toolCallId: string }) => Promise<unknown>;
+  };
+
+  it("shares compact listing, full descriptions, admission, and invalid batch handling", async () => {
+    const execute = vi.fn(async () => ({ ok: true as const, action: action.id, result: [] }));
+    const tools = createProductChatToolContext({ model, actions: { catalog, execute } }).tools;
+    const list = tools.list_actions as ActionTool;
+    const describe = tools.describe_actions as ActionTool;
+    const use = tools.use_action as ActionTool;
+    await expect(describe.execute({ actions: [] })).resolves.toMatchObject({
+      ok: false,
+      error: { code: "invalid_params" },
+    });
+    await expect(describe.execute({ actions: [action.id, "missing", action.id] })).resolves.toEqual(
+      { ok: true, actions: [action], not_found: ["missing"] },
+    );
+    expect(execute).not.toHaveBeenCalled();
+    await expect(
+      use.execute({ action: action.id, params: { query: "launch" } }, { toolCallId: "call1" }),
+    ).resolves.toMatchObject({ ok: true });
+    expect(execute).toHaveBeenCalledTimes(1);
+    const inventory = (await list.execute({ source: "gmail" })) as {
+      actions: Record<string, unknown>[];
+    };
+    expect(inventory.actions).toHaveLength(1);
+    expect(inventory.actions[0]).not.toHaveProperty("params");
+  });
+
+  it("retains the legacy surface and reuses previously discovered sources", async () => {
+    const execute = vi.fn(async () => ({ ok: true as const, action: action.id, result: [] }));
+    const tools = createProductChatToolContext({
+      model,
+      actions: { catalog, execute, legacyDiscovery: true, prelistedSourceIds: ["gmail"] },
+    }).tools;
+    expect(tools).not.toHaveProperty("describe_actions");
+    await expect(
+      (tools.list_actions as ActionTool).execute({ source: "gmail" }),
+    ).resolves.toMatchObject({ actions: [action] });
+    await expect(
+      (tools.use_action as ActionTool).execute(
+        { action: action.id, params: { query: "launch" } },
+        { toolCallId: "reused" },
+      ),
+    ).resolves.toMatchObject({ ok: true });
+  });
+});

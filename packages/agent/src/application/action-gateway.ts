@@ -1,7 +1,9 @@
-import type {
-  ActionGatewayRequest,
-  ActionGatewayResponse,
-  ActionHostGatewayRequest,
+import {
+  ACTION_HOST_TOOL_CONTRACT_VERSION,
+  type ActionGatewayRequest,
+  type ActionGatewayResponse,
+  type ActionHostGatewayRequest,
+  supportsCompactActionDiscovery,
 } from "@opencompany/agent-runtime";
 import type { CodexChatEngine } from "@opencompany/db/product-schema";
 import { createLogger } from "@opencompany/observability";
@@ -13,6 +15,7 @@ const logger = createLogger({ service: "opencompany-agent", runtime: "action-gat
 
 export type ActionPrincipal = {
   durableTaskApprovals?: boolean;
+  hostToolContractVersion?: string;
   actorId: string;
   workspaceId: string;
   conversationId: string;
@@ -96,7 +99,7 @@ export type ActionGatewayServiceDependencies = {
 };
 
 export function executeActionGatewayService(input: {
-  request: Extract<ActionServiceRequest, { operation: "list" | "execute" }>;
+  request: Extract<ActionServiceRequest, { operation: "list" | "describe" | "execute" }>;
   signal: AbortSignal;
   dependencies: ActionGatewayServiceDependencies;
 }): Promise<ActionGatewayResponse> {
@@ -243,6 +246,9 @@ export async function executeActionHostGatewayService(input: {
     return await serveActionRequest({
       request: gatewayRequest(input.request),
       catalog: serviceCatalog,
+      legacyDiscovery: !supportsCompactActionDiscovery(
+        context.hostToolContractVersion ?? ACTION_HOST_TOOL_CONTRACT_VERSION,
+      ),
       governance: {
         recordSourceDiscovery: (sourceId) => dependencies.recordSourceDiscovery({ run, sourceId }),
         claimInvocation: ({ sourceId, invocationId, maxCalls }) =>
@@ -293,8 +299,12 @@ function actionRunRef(request: ActionServiceRequest, context: ActionPrincipal) {
 }
 
 function gatewayRequest(request: ActionServiceRequest): ActionGatewayRequest {
-  if (request.operation !== "list" && request.operation !== "execute") {
-    throw new Error("Only list and execute requests can reach the action executor.");
+  if (
+    request.operation !== "list" &&
+    request.operation !== "describe" &&
+    request.operation !== "execute"
+  ) {
+    throw new Error("Only list, describe, and execute requests can reach the action executor.");
   }
   const { runId, ...input } = request;
   return { ...input, turnId: runId };

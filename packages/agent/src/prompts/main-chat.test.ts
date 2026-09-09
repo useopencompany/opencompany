@@ -129,7 +129,7 @@ describe("createProductChatSystemPrompt integrations", () => {
     );
     expect(prompt).toContain("Action sources usable in chat");
     expect(prompt).toContain("Call list_actions with the exact source id");
-    expect(prompt).toContain("call list_actions with the relevant source id");
+    expect(prompt).toContain("list the relevant source or describe a known action");
     expect(prompt).toContain("Managed capabilities are metered third-party services");
     expect(prompt).toContain("cannot mutate a user's third-party account");
     expect(prompt).toContain("image managed capability may create a durable image artifact");
