@@ -452,8 +452,9 @@ async function executeRemoteMcpTool(input: {
   );
   try {
     // Preload the selected definition from the persisted discovery snapshot. Custom servers
-    // additionally verify live definitions before dispatch. This lets the SDK honor the definition so @ai-sdk/mcp can honor transport metadata such
-    // as x-mcp-header and mirror structured arguments into request-specific Mcp-Param-* headers.
+    // additionally verify live definitions before dispatch. This lets @ai-sdk/mcp honor transport
+    // metadata such as x-mcp-header and mirror structured arguments into request-specific
+    // Mcp-Param-* headers.
     client.toolsFromDefinitions({ tools: [input.definition] });
     await input.dependencies.recordDispatch({
       operation: "tools/call",
