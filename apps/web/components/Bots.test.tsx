@@ -48,7 +48,7 @@ it("creates a bot and keeps the creation ID on a failed request retry", async ()
   await user.click(screen.getByRole("button", { name: "Create bot" }));
   await user.type(screen.getByLabelText("Name"), "Research");
   await user.type(screen.getByLabelText("Description"), "Find customers");
-  const submit = screen.getByRole("button", { name: "Create bot", exact: true });
+  const submit = screen.getByRole("button", { name: "Create bot" });
   await user.click(submit);
   expect(await screen.findByRole("alert")).toHaveTextContent("Please retry");
   await user.click(submit);
