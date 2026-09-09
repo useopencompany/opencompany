@@ -22,6 +22,7 @@ export type IdentityUser = {
   lastName: string | null;
   avatarUrl: string | null;
   timezone: string;
+  botsEnabled?: boolean;
   taskSpawningEnabled: boolean;
   autoModelRoutingEnabled: boolean;
   chatCapabilitiesBetaEnabled: boolean;
@@ -224,6 +225,7 @@ function identityUser(user: IdentityDto["user"]): IdentityUser {
     lastName: user.lastName,
     avatarUrl: user.avatarUrl,
     timezone: user.timezone,
+    botsEnabled: user.botsEnabled === true,
     taskSpawningEnabled: user.taskSpawningEnabled,
     autoModelRoutingEnabled: user.autoModelRoutingEnabled,
     chatCapabilitiesBetaEnabled: user.chatCapabilitiesBetaEnabled,

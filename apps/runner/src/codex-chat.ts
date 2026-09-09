@@ -52,6 +52,7 @@ import {
 } from "./acp-harness";
 import { buildAcpToolsMcpServers } from "./acp-tools-client";
 import { downloadBlobBytes } from "./attachment-hydration";
+import { loadBotIdentityPrompt } from "./bot-context";
 import { loadCodexCliAuth, persistRefreshedCodexAuth } from "./codex";
 import {
   CodexChatHandoffError,
@@ -636,6 +637,7 @@ export async function runCodexChatTurn(input: {
       await checkAbort();
     };
     executionStage = "run_turn";
+    const botPrompt = await loadBotIdentityPrompt(turn.chatSessionId, turn.userWorkosId);
     const buildTask = (
       history: CodingChatHistory,
       historyAttachmentMaterialization?: CodingChatHistoryAttachmentMaterialization,
@@ -650,6 +652,7 @@ export async function runCodexChatTurn(input: {
             artifactsAvailable: artifactToolsEnabled,
             wikiSupported: wikiToolsSupported,
             repositoryBootstrapPrompt: combineSandboxPromptFragments(
+              botPrompt,
               repositoryBootstrap.promptFragment,
               infisicalAuth.promptFragment,
             ),
@@ -668,6 +671,7 @@ export async function runCodexChatTurn(input: {
             artifactsAvailable: artifactToolsEnabled,
             wikiSupported: wikiToolsSupported,
             repositoryBootstrapPrompt: combineSandboxPromptFragments(
+              botPrompt,
               repositoryBootstrap.promptFragment,
               infisicalAuth.promptFragment,
             ),

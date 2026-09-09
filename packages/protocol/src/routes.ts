@@ -13,6 +13,10 @@ import {
   BillingOverviewEnvelopeSchema,
   BillingRedirectEnvelopeSchema,
   BillingUsageEnvelopeSchema,
+  BotBodySchema,
+  BotEnvelopeSchema,
+  BotListEnvelopeSchema,
+  BotSchema,
   BrainAccessEnvelopeSchema,
   BrainAccessMutationEnvelopeSchema,
   BrainAssetMutationEnvelopeSchema,
@@ -1798,6 +1802,66 @@ export const setPluginEventEnabledRoute = createRoute({
     200: {
       description: "Plugin event subscription setting updated for the workspace.",
       content: { "application/json": { schema: PluginInstallationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const listBotsRoute = createRoute({
+  method: "get",
+  path: "/v1/bots",
+  tags: ["Bots"],
+  security: actorSecurity,
+  request: {},
+  responses: {
+    200: {
+      description: "Your persistent bots.",
+      content: { "application/json": { schema: BotListEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+export const createBotRoute = createRoute({
+  method: "post",
+  path: "/v1/bots",
+  tags: ["Bots"],
+  security: actorSecurity,
+  request: { body: { required: true, content: { "application/json": { schema: BotSchema } } } },
+  responses: {
+    200: {
+      description: "Create a bot and its conversation.",
+      content: { "application/json": { schema: BotEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+export const getBotRoute = createRoute({
+  method: "get",
+  path: "/v1/bots/{botId}",
+  tags: ["Bots"],
+  security: actorSecurity,
+  request: { params: z.object({ botId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "A persistent bot.",
+      content: { "application/json": { schema: BotEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+export const updateBotRoute = createRoute({
+  method: "patch",
+  path: "/v1/bots/{botId}",
+  tags: ["Bots"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ botId: ResourceIdSchema }),
+    body: { required: true, content: { "application/json": { schema: BotBodySchema } } },
+  },
+  responses: {
+    200: {
+      description: "Update bot identity for subsequent turns.",
+      content: { "application/json": { schema: BotEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -3743,6 +3807,10 @@ export type V1RouteHandlers = {
   refreshPluginMcp: RouteHandler<typeof refreshPluginMcpRoute>;
   deletePluginData: RouteHandler<typeof deletePluginDataRoute>;
   setPluginEventEnabled: RouteHandler<typeof setPluginEventEnabledRoute>;
+  listBots: RouteHandler<typeof listBotsRoute>;
+  createBot: RouteHandler<typeof createBotRoute>;
+  getBot: RouteHandler<typeof getBotRoute>;
+  updateBot: RouteHandler<typeof updateBotRoute>;
   listConversations: RouteHandler<typeof listConversationsRoute>;
   getConversation: RouteHandler<typeof getConversationRoute>;
   updateConversation: RouteHandler<typeof updateConversationRoute>;
@@ -3930,6 +3998,10 @@ export function createV1Router(
       .openapi(disableSkillRoute, handlers.disableSkill)
       .openapi(replaceSkillRoute, handlers.replaceSkill)
       .openapi(readSkillFileRoute, handlers.readSkillFile)
+      .openapi(listBotsRoute, handlers.listBots)
+      .openapi(createBotRoute, handlers.createBot)
+      .openapi(getBotRoute, handlers.getBot)
+      .openapi(updateBotRoute, handlers.updateBot)
       .openapi(listConversationsRoute, handlers.listConversations)
       .openapi(getConversationRoute, handlers.getConversation)
       .openapi(updateConversationRoute, handlers.updateConversation)
@@ -5043,6 +5115,13 @@ const contractDocumentHandlers: V1RouteHandlers = {
   deletePluginData: (c) =>
     c.json({ data: { name: placeholderPlugin.name, deleted: true }, meta }, 200),
   setPluginEventEnabled: (c) => c.json({ data: placeholderPlugin, meta }, 200),
+  listBots: (c) => c.json({ data: [], meta }, 200),
+  createBot: (c) =>
+    c.json({ data: { id: "bot_example", name: "Assistant", description: "" }, meta }, 200),
+  getBot: (c) =>
+    c.json({ data: { id: "bot_example", name: "Assistant", description: "" }, meta }, 200),
+  updateBot: (c) =>
+    c.json({ data: { id: "bot_example", name: "Assistant", description: "" }, meta }, 200),
   listConversations: (c) => c.json({ data: [], nextCursor: null, meta }, 200),
   getConversation: (c) => c.json({ data: placeholderConversation, meta }, 200),
   updateConversation: (c) =>

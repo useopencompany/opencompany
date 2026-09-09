@@ -93,6 +93,7 @@ import {
   useSyncExternalStore,
   useTransition,
 } from "react";
+import { BotSettingsButton } from "@/components/Bots";
 import { ChatStateIndicator } from "@/components/ChatStateIndicator";
 import {
   CodingWorkspacePanel,
@@ -2940,6 +2941,9 @@ export function Surface({
                     isTask={Boolean(activeTaskConversation)}
                   />
                   <div className="flex shrink-0 items-center gap-2">
+                    {!readOnly && chatSessionId ? (
+                      <BotSettingsButton key={chatSessionId} conversationId={chatSessionId} />
+                    ) : null}
                     {!readOnly &&
                     chatSessionId &&
                     persistedChatSessionId === chatSessionId &&

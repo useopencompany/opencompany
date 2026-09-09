@@ -9,6 +9,7 @@ import {
 import type { CodexChatSession, CodexChatTurn } from "@opencompany/db/product-schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AcpHarnessTurnInput } from "./acp-harness";
+import { loadBotIdentityPrompt } from "./bot-context";
 import {
   CodexChatInterruptedError,
   claimCodexChatRecovery,
@@ -83,6 +84,8 @@ const sandboxMocks = vi.hoisted(() => ({
   writeSandboxTextFiles: vi.fn(),
 }));
 const skillMocks = vi.hoisted(() => ({ materializeCodexSkillSnapshotsForSession: vi.fn() }));
+
+vi.mock("./bot-context", () => ({ loadBotIdentityPrompt: vi.fn(async () => "") }));
 
 vi.mock("./acp-harness", () => ({
   AcpHarness: class AcpHarness {
@@ -548,6 +551,9 @@ describe("runCodexChatTurn over ACP", () => {
   });
 
   it("uses the Codex adapter with model, reasoning, plan, goal, and the shared MCP", async () => {
+    vi.mocked(loadBotIdentityPrompt).mockResolvedValueOnce(
+      "Bot identity: customer research assistant.",
+    );
     await expect(
       runCodexChatTurn({
         turn: codexTurn({
@@ -580,6 +586,7 @@ describe("runCodexChatTurn over ACP", () => {
       }),
     );
     const harnessInput = acpMocks.runTurn.mock.calls[0]?.[0] as AcpHarnessTurnInput;
+    expect(harnessInput.task).toContain("Bot identity: customer research assistant.");
     expect(harnessInput.task).toContain("list_actions and use_action");
     expect(harnessInput.task).toContain("Actions may modify connected services");
     expect(harnessInput.task).toContain("denial is a normal outcome");

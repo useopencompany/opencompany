@@ -235,7 +235,7 @@ function readModelShape(input: {
           "created_at",
           "updated_at",
         ],
-        where: `"actor_id" = $1 AND ("workspace_id" = $2 OR "workspace_id" IS NULL)`,
+        where: `"is_bot" = false AND "actor_id" = $1 AND ("workspace_id" = $2 OR "workspace_id" IS NULL)`,
         params: [input.actor.userId, input.actor.workspaceId],
       };
     case "chat-conversations-v2":
@@ -656,7 +656,7 @@ function conversationReadModelShape(
   return {
     table: "goat.conversation_read_model_v1",
     columns,
-    where: `"actor_id" = $1 AND ("workspace_id" = $2 OR "workspace_id" IS NULL)`,
+    where: `"is_bot" = false AND "actor_id" = $1 AND ("workspace_id" = $2 OR "workspace_id" IS NULL)`,
     params: [input.actor.userId, input.actor.workspaceId],
   };
 }

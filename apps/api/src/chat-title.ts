@@ -35,6 +35,7 @@ export function createChatTitleService(input: {
             eq(chatSessions.userWorkosId, actor.userId),
             eq(chatSessions.kind, "chat"),
             isNull(chatSessions.closedAt),
+            isNull(chatSessions.botName),
           ),
         )
         .limit(1);
@@ -65,6 +66,7 @@ export function createChatTitleService(input: {
             eq(chatSessions.id, conversationId),
             eq(chatSessions.userWorkosId, actor.userId),
             isNull(chatSessions.closedAt),
+            isNull(chatSessions.botName),
           ),
         )
         .returning({ id: chatSessions.id });
