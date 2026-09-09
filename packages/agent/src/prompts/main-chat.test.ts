@@ -51,6 +51,16 @@ describe("createProductChatSystemPrompt integrations", () => {
     expect(base).not.toContain("start_workflow");
   });
 
+  it("keeps older sessions on full-schema list guidance", () => {
+    const prompt = createProductChatSystemPrompt({
+      connectedIntegrations: CONNECTED_INTEGRATIONS,
+      legacyActionDiscovery: true,
+    });
+    expect(prompt).toContain("Use list_actions to discover sources and full action definitions");
+    expect(prompt).not.toContain("describe_actions");
+    expect(prompt).not.toContain("compact");
+  });
+
   it("advertises workspace skills through progressive discovery only when available", () => {
     const prompt = createProductChatSystemPrompt({ skillsAvailable: true });
 

@@ -1,4 +1,7 @@
-import { ACTION_DISCOVERY_INSTRUCTIONS } from "@opencompany/agent-runtime";
+import {
+  ACTION_DISCOVERY_INSTRUCTIONS,
+  LEGACY_ACTION_DISCOVERY_INSTRUCTIONS,
+} from "@opencompany/agent-runtime";
 import { MAX_WEB_FETCH_CALLS_PER_TURN, MAX_WEB_SEARCH_CALLS_PER_TURN } from "../chat-limits";
 
 function promptBlock(name: string, lines: readonly string[]) {
@@ -178,6 +181,7 @@ export function createProductChatSystemPrompt(
       label: string;
       description: string;
     }[];
+    legacyActionDiscovery?: boolean;
     actionSources?: readonly {
       id: string;
       kind?: "integration" | "managed";
@@ -225,7 +229,9 @@ export function createProductChatSystemPrompt(
               (source) =>
                 `- ${source.id} [${source.kind === "managed" ? "managed capability" : "connected integration"}] — ${source.label}: ${source.description}`,
             ),
-            "Call list_actions with the exact source id to see its actions; when describe_actions is available, retrieve selected complete definitions if they are not already visible before use_action.",
+            input.legacyActionDiscovery
+              ? "Call list_actions with the exact source id to see its actions and parameters before the first use_action call for that source."
+              : "Call list_actions with the exact source id to see its actions; when describe_actions is available, retrieve selected complete definitions if they are not already visible before use_action.",
           ]),
         ]
       : []),
@@ -276,7 +282,10 @@ export function createProductChatSystemPrompt(
           ]
         : []),
       ...(actionSources.length > 0
-        ? formatActionBehaviorLines({ wikiToolWriteEnabled: wikiToolEnabled && !wikiToolReadOnly })
+        ? formatActionBehaviorLines({
+            wikiToolWriteEnabled: wikiToolEnabled && !wikiToolReadOnly,
+            legacyActionDiscovery: input.legacyActionDiscovery ?? false,
+          })
         : []),
       ...(skillsAvailable ? CHAT_SKILL_BEHAVIOR_LINES : []),
       ...(workflows.length > 0 ? CHAT_WORKFLOW_BEHAVIOR_LINES : []),
@@ -286,9 +295,19 @@ export function createProductChatSystemPrompt(
   ].join("\n\n");
 }
 
-function formatActionBehaviorLines(input: { wikiToolWriteEnabled: boolean }) {
-  if (input.wikiToolWriteEnabled) return CHAT_ACTION_BEHAVIOR_LINES;
+function formatActionBehaviorLines(input: {
+  wikiToolWriteEnabled: boolean;
+  legacyActionDiscovery: boolean;
+}) {
   return CHAT_ACTION_BEHAVIOR_LINES.map((line) => {
+    if (input.legacyActionDiscovery) {
+      if (line === ACTION_DISCOVERY_INSTRUCTIONS) return LEGACY_ACTION_DISCOVERY_INSTRUCTIONS;
+      line = line.replace(
+        "list the relevant source or describe a known action",
+        "list the relevant source",
+      );
+    }
+    if (input.wikiToolWriteEnabled) return line;
     if (line === CHAT_ACTION_LINKEDIN_BEHAVIOR_LINE) {
       return "Managed LinkedIn actions are public-data lookups, not access to the user's LinkedIn account or connection graph. Do not use them to answer who the user personally knows, who is in their first-degree network, or who could introduce them to someone unless that relationship data is already present in a connected first-party network source.";
     }

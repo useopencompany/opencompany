@@ -122,6 +122,15 @@ export function supportsCompactActionDiscovery(version: string): boolean {
 export const ACTION_DISCOVERY_INSTRUCTIONS =
   "Use list_actions to discover sources and compact action inventories. When describe_actions is available, request one to five exact action IDs for their complete definitions before executing if those definitions are not already visible in the conversation. A known exact ID can go directly to describe_actions. Reuse visible definitions, including full-schema listings from older turns; do not retrieve them again just because a new turn started. Compact inventories are not definitions: never infer parameters from an action name or preview. Retrieve the full definition of each selected action before use_action, unless that exact action's complete schema is already visible. Description is not execution approval.";
 
+export const LEGACY_ACTION_DISCOVERY_INSTRUCTIONS =
+  "Use list_actions to discover sources and full action definitions. Before executing, list the relevant source unless its complete definitions are already visible in the conversation. Reuse visible full-schema listings on later turns. Copy exact parameter names and types from the complete schema before use_action.";
+
+export function actionDiscoveryInstructionsForContract(version: string): string {
+  return supportsCompactActionDiscovery(version)
+    ? ACTION_DISCOVERY_INSTRUCTIONS
+    : LEGACY_ACTION_DISCOVERY_INSTRUCTIONS;
+}
+
 export const ACTION_TOOL_CONTRACT = {
   list: {
     ...LEGACY_ACTION_TOOL_CONTRACT.list,

@@ -471,6 +471,7 @@ export async function runProductChatAgent(input: {
   });
 
   const systemPromptInput = {
+    legacyActionDiscovery: input.actions?.legacyDiscovery ?? false,
     webFetchEnabled: Boolean(input.webFetch),
     webSearchEnabled: Boolean(input.webSearch),
     browserToolsEnabled: Boolean(input.browserTools),

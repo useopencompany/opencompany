@@ -1317,6 +1317,7 @@ async function resolveProductChatRuntime(input: {
     ...(actionDispatcher?.catalog.sources.length
       ? {
           actionSources: actionDispatcher.catalog.sources,
+          legacyActionDiscovery: actionDispatcher.legacyDiscovery ?? false,
           connectedIntegrations: actionDispatcher.catalog.sources,
         }
       : {}),

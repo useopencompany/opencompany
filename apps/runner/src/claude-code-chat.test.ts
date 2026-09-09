@@ -559,6 +559,23 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     );
   });
 
+  it.each(["goat-codex-host-tools.v4", ACTION_HOST_TOOL_CONTRACT_VERSION])(
+    "keeps action discovery guidance aligned with %s",
+    async (hostToolContractVersion) => {
+      await runClaudeCodeChatTurn({
+        turn: claudeTurn(),
+        session: claudeSession({ workspaceId: "workspace_1", hostToolContractVersion }),
+        canonicalAttemptId: "attempt_1",
+        env: env({ runnerPublicUrl: "https://runner.example.com" }),
+      });
+      const harnessInput = acpMocks.runTurn.mock.calls[0]?.[0] as AcpHarnessTurnInput;
+      expect(harnessInput.task.includes("describe_actions")).toBe(
+        hostToolContractVersion === ACTION_HOST_TOOL_CONTRACT_VERSION,
+      );
+      expect(harnessInput.task).toContain("Use list_actions to discover sources");
+    },
+  );
+
   it("configures Claude MCP against the runner with an attempt-and-lease capability", async () => {
     vi.mocked(loadBotIdentityPrompt).mockResolvedValueOnce(
       "Bot identity: customer research assistant.",

@@ -47,12 +47,16 @@ describe("progressive action discovery contracts", () => {
       ACTION_HOST_TOOL_CONTRACT_VERSIONS,
       CHAT_HOST_TOOL_CONTRACT_VERSIONS,
       supportsCompactActionDiscovery,
+      actionDiscoveryInstructionsForContract,
     } = await import("./actions");
     for (const version of [
       ...ACTION_HOST_TOOL_CONTRACT_VERSIONS,
       ...CHAT_HOST_TOOL_CONTRACT_VERSIONS,
     ]) {
       expect(supportsCompactActionDiscovery(version)).toBe(version.endsWith(".v5"));
+      expect(actionDiscoveryInstructionsForContract(version).includes("describe_actions")).toBe(
+        version.endsWith(".v5"),
+      );
     }
     expect(ACTION_HOST_TOOL_CONTRACT_VERSIONS).toContain("goat-codex-host-tools.v4");
     expect(CHAT_HOST_TOOL_CONTRACT_VERSIONS).toContain("goat-chat-host-tools.v4");
