@@ -880,6 +880,22 @@ describe("runClaimedTurn", () => {
     expect(eventMocks.fail).not.toHaveBeenCalled();
   });
 
+  it("still fences and settles cancellation recovery past the total attempt budget", async () => {
+    await expect(
+      runClaimedTurn(
+        turn({
+          attempts: CODEX_CHAT_MAX_TOTAL_ATTEMPTS + 1,
+          interruptRequestedAt: new Date("2026-07-10T09:00:05.000Z"),
+        }),
+        env(),
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(engineFenceMocks.fenceCodingSessionEngine).toHaveBeenCalledOnce();
+    expect(chatMocks.runCodexChatTurn).toHaveBeenCalledOnce();
+    expect(eventMocks.fail).not.toHaveBeenCalled();
+  });
+
   it("forces a minimal settlement when the attempt-cap failure write itself throws", async () => {
     eventMocks.fail.mockRejectedValueOnce(
       new Error("could not determine data type of parameter $51"),

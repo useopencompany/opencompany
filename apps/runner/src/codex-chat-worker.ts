@@ -384,7 +384,9 @@ export async function runClaimedTurn(
     });
   }
 
-  if (turn.attempts > CODEX_CHAT_MAX_TOTAL_ATTEMPTS) {
+  // Cancellation recovery must always reach engine fencing and interrupted
+  // settlement, even when prior lease churn exhausted the execution budget.
+  if (!turn.interruptRequestedAt && turn.attempts > CODEX_CHAT_MAX_TOTAL_ATTEMPTS) {
     logger.error("opencompany chat turn exceeded the total attempt budget", {
       event: "opencompany.goat_codex_chat_turn_attempt_cap_exceeded",
       turn_id: turn.id,
