@@ -10,6 +10,7 @@ export type TaskTimeRange = "24h" | "2d" | "7d" | "30d" | "90d" | "all";
 
 type UserPreferences = {
   timezone: string;
+  botsEnabled: boolean;
   taskSpawningEnabled: boolean;
   wikiEnabled: true;
   taskViewMode: TaskViewMode;
@@ -20,6 +21,13 @@ type UserPreferences = {
 export async function updateTimezoneAction(timezone: string) {
   const preferences = await patchPreferences({ timezone });
   return { ok: true, timezone: preferences.timezone } as const;
+}
+
+export async function updateBotsAction(enabled: boolean) {
+  const preferences = await patchPreferences({ botsEnabled: enabled === true });
+  revalidatePath("/");
+  revalidatePath("/settings/preferences");
+  return { ok: true, enabled: preferences.botsEnabled } as const;
 }
 
 export async function updateTaskSpawningAction(enabled: boolean) {

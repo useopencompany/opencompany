@@ -13,6 +13,7 @@ const actor: Actor = {
 
 const storedPreferences = {
   timezone: "UTC",
+  botsEnabled: false,
   taskSpawningEnabled: false,
   wikiEnabled: true as const,
   taskViewMode: "board" as const,
