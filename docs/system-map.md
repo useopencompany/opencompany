@@ -47,8 +47,11 @@ Task, its Conversation, initial Message, and Run atomically. Follow-ups use the 
 cancellation targets the active Run. The runner applies per-Conversation FIFO, fenced leases, retries,
 and terminal settlement. An opencompany Task turn uses the same host-tool contract and runtime tool
 composition as an interactive opencompany turn; the Task context adds autonomous-run instructions,
-larger call budgets, and the headless action policy that denies operations requiring live approval.
-Codex and Claude Code Tasks support one-time approval of connected actions set to Ask. The runner
+larger call budgets, and the headless action catalog. All Task engines support one-time approval of
+connected actions set to Ask; headless callers without a durable Task still deny these requests.
+The opencompany engine uses its existing AI SDK approval continuation: the Run and Task pause for
+the user's decision, then the same tool call resumes with the recorded approval or denial.
+For Codex and Claude Code Tasks, the runner
 persists the exact inputs, stops the engine, and parks the Run and Task until the user approves or
 denies the request. Approval keeps the standing permission unchanged and queues the same Run.
 The runner claims and executes the saved invocation before resuming the engine with its result.
