@@ -4,21 +4,15 @@ import {
   finalizeCodexUiMessageParts,
 } from "@opencompany/agent-runtime";
 import { PostgresRunExecutionRepository } from "@opencompany/db/chat-repository";
-import type { CodexChatSession, CodexChatTurn } from "@opencompany/db/product-schema";
+import type { CodexChatTurn } from "@opencompany/db/product-schema";
 import {
   PostgresTaskActionApprovalRepository,
   type TaskActionRequest,
 } from "@opencompany/db/task-action-approvals";
 import { sanitizeApprovalToolInput } from "./acp-tools-mcp";
-import {
-  CodexChatLeaseLostError,
-  CodexChatRetryableInfrastructureError,
-  TaskActionApprovalPauseError,
-} from "./codex-chat-errors";
+import { CodexChatLeaseLostError, TaskActionApprovalPauseError } from "./codex-chat-errors";
 import { loadCodexChatAssistantMessageParts } from "./codex-chat-events";
-import { FINISHED_TASK_SANDBOX_IDLE_TIMEOUT_MS } from "./coding-sandbox-lifecycle";
 import { getDb } from "./db";
-import { armSandboxIdleTimeoutById, connectSandbox } from "./sandbox";
 
 const repository = () =>
   new PostgresTaskActionApprovalRepository((query) => getDb().execute(query));
@@ -130,27 +124,4 @@ export async function resumeTaskActionApprovals(
 
 function actionError(request: TaskActionRequest, message: string): ActionGatewayResponse {
   return { ok: false, action: request.action, error: { code: "not_permitted", message } };
-}
-
-// A crashed worker may leave a detached engine in the sandbox. Fence it even when
-// recovery only needs to park an approval and will not start a new engine turn.
-export async function fenceTaskApprovalEngine(session: CodexChatSession) {
-  if (!session.sandboxId) return;
-  try {
-    const sandbox = await connectSandbox({ sandboxId: session.sandboxId });
-    if (!sandbox) return;
-    if (session.engine === "codex") {
-      const { killLeftoverCodexTurnProcesses } = await import("./codex-cli");
-      await killLeftoverCodexTurnProcesses(sandbox);
-    } else {
-      const { killLeftoverClaudeTurnProcesses } = await import("./claude-code-cli");
-      await killLeftoverClaudeTurnProcesses(sandbox);
-    }
-    await armSandboxIdleTimeoutById(session.sandboxId, FINISHED_TASK_SANDBOX_IDLE_TIMEOUT_MS);
-  } catch (error) {
-    throw new CodexChatRetryableInfrastructureError(
-      "The previous task engine could not be stopped before approval recovery.",
-      error,
-    );
-  }
 }
