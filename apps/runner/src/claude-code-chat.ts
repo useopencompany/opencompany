@@ -39,6 +39,7 @@ import {
   type AcpPermissionResponse,
 } from "./acp-harness";
 import { buildAcpToolsMcpServers } from "./acp-tools-client";
+import { loadBotIdentityPrompt } from "./bot-context";
 import {
   buildClaudeAcpCommandEnv,
   type ClaudeCodeCliAuth,
@@ -697,6 +698,7 @@ export async function runClaudeCodeChatTurn(input: {
     await checkAbort();
 
     executionStage = "build_prompt";
+    const botPrompt = await loadBotIdentityPrompt(turn.chatSessionId, turn.userWorkosId);
     const buildTask = (
       history: CodingChatHistory,
       historyAttachmentMaterialization?: CodingChatHistoryAttachmentMaterialization,
@@ -711,6 +713,7 @@ export async function runClaudeCodeChatTurn(input: {
             brainAvailable: brainToolsEnabled,
             brainCaptureAvailable: brainCaptureEnabled,
             repositoryBootstrapPrompt: combineSandboxPromptFragments(
+              botPrompt,
               repositoryBootstrap.promptFragment,
               infisicalAuth.promptFragment,
             ),
@@ -730,6 +733,7 @@ export async function runClaudeCodeChatTurn(input: {
             brainAvailable: brainToolsEnabled,
             brainCaptureAvailable: brainCaptureEnabled,
             repositoryBootstrapPrompt: combineSandboxPromptFragments(
+              botPrompt,
               repositoryBootstrap.promptFragment,
               infisicalAuth.promptFragment,
             ),

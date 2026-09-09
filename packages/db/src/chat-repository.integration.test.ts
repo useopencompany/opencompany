@@ -48,6 +48,7 @@ const migrationPaths = [
   "0245_goat_task_activities.sql",
   "0247_preserve_assistant_message_boundaries.sql",
   "0248_goat_chat_attachment_upload_idempotency.sql",
+  "0261_persistent_bots.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -544,6 +545,38 @@ describe("Postgres Chat repositories", () => {
         created.messageId,
       ]),
     ).rejects.toThrow(/chat_messages_attachment_texts_object_check/u);
+  });
+
+  it("keeps bots out of recent chats while preserving the shared message and run path", async () => {
+    const first = await service.createMessage(actor(), {
+      idempotencyKey: "bot-first",
+      content: "Research",
+      engine: "opencompany",
+      model: "provider/model",
+    });
+    await database.query(
+      "UPDATE goat.chat_sessions SET bot_name = 'Research', bot_description = 'Find customers', title = 'Research' WHERE id = $1",
+      [first.conversationId],
+    );
+    expect((await service.listConversations(actor(), {})).conversations).toEqual([]);
+    expect(await service.getConversation(actor(), first.conversationId)).toMatchObject({
+      id: first.conversationId,
+      title: "Research",
+    });
+    const next = await service.createMessage(actor(), {
+      idempotencyKey: "bot-next",
+      conversationId: first.conversationId,
+      content: "Continue",
+      engine: "opencompany",
+      model: "provider/model",
+    });
+    expect(next.conversationId).toBe(first.conversationId);
+    expect(next.runId).not.toBe(first.runId);
+    expect((await service.listConversations(actor(), {})).conversations).toEqual([]);
+    expect(
+      (await service.listMessages(actor(), { conversationId: first.conversationId })).messages
+        .length,
+    ).toBeGreaterThanOrEqual(2);
   });
 
   it("atomically creates and idempotently replays the first durable Message and Run", async () => {

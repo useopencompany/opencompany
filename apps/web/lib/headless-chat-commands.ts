@@ -28,6 +28,7 @@ export async function updateHeadlessChatConversation(
   });
   if (!response.ok) throw await responseError(response);
   const data = (await response.json()).data;
+  if (command.archived !== undefined) window.dispatchEvent(new Event("bots-changed"));
   await reconcileCommittedProjection(awaitHeadlessConversationTransaction(data.transactionId));
   return data;
 }

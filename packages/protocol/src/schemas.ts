@@ -3589,6 +3589,7 @@ export const IdentityUserSchema = z
     lastName: z.string().max(128).nullable(),
     avatarUrl: z.string().max(4_096).nullable(),
     timezone: z.string().min(1).max(100),
+    botsEnabled: z.boolean().optional(),
     taskSpawningEnabled: z.boolean(),
     autoModelRoutingEnabled: z.boolean(),
     chatCapabilitiesBetaEnabled: z.boolean(),
@@ -4496,3 +4497,18 @@ export type AttioAccountStateDto = z.infer<typeof AttioAccountStateSchema>;
 export type FathomAccountStateDto = z.infer<typeof FathomAccountStateSchema>;
 export type GranolaAccountStateDto = z.infer<typeof GranolaAccountStateSchema>;
 export type StripeAccountStateDto = z.infer<typeof StripeAccountStateSchema>;
+
+export const BotBodySchema = z
+  .object({
+    name: z.string().trim().min(1).max(80),
+    description: z.string().trim().max(4000),
+  })
+  .strict();
+export const BotSchema = BotBodySchema.extend({ id: ResourceIdSchema.regex(/^[a-zA-Z0-9_-]+$/) });
+export type BotDto = z.infer<typeof BotSchema>;
+export const BotEnvelopeSchema = z
+  .object({ data: BotSchema, meta: ProtocolMetadataSchema })
+  .strict();
+export const BotListEnvelopeSchema = z
+  .object({ data: z.array(BotSchema), meta: ProtocolMetadataSchema })
+  .strict();

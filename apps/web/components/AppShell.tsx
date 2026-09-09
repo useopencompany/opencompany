@@ -1,6 +1,7 @@
 import { ProductAnalyticsProvider } from "@opencompany/analytics/product/client";
 import type { ReactNode } from "react";
 import { AppDataProvider, type AppInitialData } from "@/components/AppDataProvider";
+import { BotsProvider } from "@/components/Bots";
 import { loadOptionalAppShellData } from "@/lib/app-shell-loader";
 import { currentUser } from "@/lib/auth";
 import { listCurrentUserRecentChats } from "@/lib/chat";
@@ -242,7 +243,9 @@ export async function AppShell({ children }: { children: ReactNode }) {
         lastName: user.lastName,
       }}
     >
-      <AppDataProvider initialData={initialData}>{children}</AppDataProvider>
+      <AppDataProvider initialData={initialData}>
+        <BotsProvider key={workspace.id}>{children}</BotsProvider>
+      </AppDataProvider>
     </ProductAnalyticsProvider>
   );
 }

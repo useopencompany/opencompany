@@ -120,3 +120,24 @@ bun run build
 Do not start a second development server if one is already running. For UI changes, verify a real
 message round-trip, reload durability, one obvious failure state, and the relevant Task or coding
 engine path.
+
+## Bots
+
+Bots are named, persistent conversations. `GET/POST /v1/bots` and
+`GET/PATCH /v1/bots/:botId` expose a name (1–80 characters) and description (up to 4,000
+characters). Creation takes a client-generated `id` retained across retries and atomically
+creates an empty Chat Conversation and its workspace-bound idle runtime. It does not start a Run.
+Bots belong to their creating user within the selected workspace, matching Chat ownership.
+
+The `goat.users.bots_enabled` feature flag defaults to false. Enable it for selected users through
+the existing database administration process; no environment variable is needed. The flag gates
+bot API access and navigation. With it enabled, the sidebar shows Bots above recent chats, and
+bot conversations have a settings button that opens an editor on the right. Bot Conversations
+are excluded from the recent-chat API and Electric sidebar collections, including when disabled.
+
+Messages, history, tools, approvals, cancellation, and runner sessions use the existing Chat
+paths. Each runner engine reads the saved identity when preparing a turn and adds it as
+user-authored guidance. Edits affect subsequent turns; they preserve history and the runtime.
+Automatic title generation leaves bot names alone. There are no autonomous schedules or extra
+bot tools in this first version. Migration `0261_persistent_bots` is additive; application rollback
+can leave its columns and projection deployed without deleting bot conversations.

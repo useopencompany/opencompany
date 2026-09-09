@@ -340,6 +340,7 @@ export class PostgresChatRepository implements ChatRepository {
       FROM goat.conversation_read_model_v1 AS conversation
       WHERE conversation.actor_id = ${input.actor.userId}
         AND conversation.archived_at IS NULL
+        AND conversation.is_bot = false
         AND (conversation.workspace_id IS NULL OR conversation.workspace_id = ${input.actor.workspaceId})
         AND EXISTS (
           SELECT 1 FROM goat.workspace_members AS member
