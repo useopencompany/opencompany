@@ -267,6 +267,7 @@ export type PersonalAccountProvider =
   | "neon"
   | "notion"
   | "supabase"
+  | "resend"
   | "x_account";
 
 export type IntegrationState = {
@@ -348,6 +349,7 @@ export function personalAccountsFromRows(
     neon: [],
     notion: [],
     supabase: [],
+    resend: [],
     x_account: [],
   };
   for (const row of rows) {
@@ -403,6 +405,7 @@ export function personalAccountsFromRows(
       row.provider === "neon" ||
       row.provider === "notion" ||
       row.provider === "supabase" ||
+      row.provider === "resend" ||
       row.provider === "x_account"
     ) {
       personalAccounts[row.provider].push(accountViewFromRow(row.provider, row));

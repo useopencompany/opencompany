@@ -316,6 +316,7 @@ describe("Electric read models", () => {
       "neon",
       "notion",
       "supabase",
+      "resend",
       "x_account",
     ]);
     expect(requestedUrl?.searchParams.get("columns")).not.toContain("credential");

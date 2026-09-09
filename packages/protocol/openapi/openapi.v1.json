@@ -10749,6 +10749,7 @@
               "latitude",
               "neon",
               "supabase",
+              "resend",
               "x_account"
             ]
           },

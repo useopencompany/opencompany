@@ -32,6 +32,7 @@
     "---Coding and browser access---",
     "codex",
     "claude-code",
-    "browser-profiles"
+    "browser-profiles",
+    "resend"
   ]
 }
