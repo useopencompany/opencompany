@@ -9,7 +9,7 @@ import { and, desc, eq, isNull, ne, sql } from "drizzle-orm";
 import type { RemoteMcpOperation } from "../actions/remote-mcp";
 import { captureConnectionAddedAnalytics } from "./analytics";
 import { runConvexCli } from "./convex-cli";
-import { convexCredentialVersion, createConvexMcpTicket } from "./convex-mcp-ticket";
+import { createConvexMcpTicket } from "./convex-mcp-ticket";
 import { parseConvexDeployKey } from "./convex-policy";
 import type { RemoteMcpProviderState } from "./remote-mcp-oauth";
 import { createRemoteMcpStaticBearerAuthProvider } from "./remote-mcp-static-bearer";
@@ -108,7 +108,8 @@ export async function connectConvexMcpIntegration(input: {
       integrationId: integration.id,
       provider: "convex",
       kind: CONVEX_CREDENTIAL_KIND,
-      payload: { apiKey: input.apiKey },
+      // A fresh version revokes outstanding tickets without exposing a hash of the deploy key.
+      payload: { apiKey: input.apiKey, connectionVersion: crypto.randomUUID() },
       expiresAt: null,
       db,
       now,
@@ -174,14 +175,14 @@ export async function loadConvexMcpWorkerConnection(input: {
   const row = await loadConvexIntegration(getDb(), input.userWorkosId);
   if (!row || row.status === "disconnected") return { ok: false, reason: "not_connected" } as const;
   if (row.status !== "connected") return { ok: false, reason: "needs_reauth" } as const;
-  const apiKey = await loadConvexCredential(input.userWorkosId, row.id, getDb());
-  if (!apiKey) return { ok: false, reason: "needs_reauth" } as const;
+  const credential = await loadConvexCredential(input.userWorkosId, row.id, getDb());
+  if (!credential) return { ok: false, reason: "needs_reauth" } as const;
   const secret = process.env.API_INTERNAL_TOKEN?.trim();
   if (!secret) throw new Error("Convex MCP requires API_INTERNAL_TOKEN.");
   const { ticket } = createConvexMcpTicket({
     ...input,
     integrationId: row.id,
-    connectionVersion: convexCredentialVersion(apiKey),
+    connectionVersion: credential.connectionVersion,
     secret,
   });
   return {
@@ -207,7 +208,14 @@ export async function loadConvexCredential(
     db,
   });
   const apiKey = credential?.payload.apiKey;
-  return typeof apiKey === "string" && parseConvexDeployKey(apiKey) ? apiKey : null;
+  const connectionVersion = credential?.payload.connectionVersion;
+  return typeof apiKey === "string" &&
+    parseConvexDeployKey(apiKey) &&
+    typeof connectionVersion === "string" &&
+    connectionVersion.length > 0 &&
+    connectionVersion.length <= 128
+    ? { apiKey, connectionVersion }
+    : null;
 }
 
 export async function loadConvexIntegration(db: DbLike, userWorkosId: string) {

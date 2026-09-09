@@ -2,7 +2,7 @@ import { createMCPClient } from "@ai-sdk/mcp";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RemoteMcpOperation } from "../actions/remote-mcp";
 import { createConvexMcpService } from "./convex-mcp-server";
-import { convexCredentialVersion, createConvexMcpTicket } from "./convex-mcp-ticket";
+import { createConvexMcpTicket } from "./convex-mcp-ticket";
 import { createRemoteMcpStaticBearerAuthProvider } from "./remote-mcp-static-bearer";
 
 const mocks = vi.hoisted(() => ({ active: vi.fn(), row: vi.fn(), key: vi.fn(), run: vi.fn() }));
@@ -26,7 +26,7 @@ const service = () =>
 function ticket(operation: RemoteMcpOperation) {
   return createConvexMcpTicket({
     ...identity,
-    connectionVersion: convexCredentialVersion(key),
+    connectionVersion: "connection-version-1",
     operation,
     secret: "test-secret",
   }).ticket;
@@ -50,7 +50,7 @@ describe("Convex hosted bridge", () => {
     mocks.active.mockResolvedValue(true);
     mocks.row.mockResolvedValue(connected);
     key = "dev:happy-animal-123|fakekey123";
-    mocks.key.mockResolvedValue(key);
+    mocks.key.mockResolvedValue({ apiKey: key, connectionVersion: "connection-version-1" });
     mocks.run.mockResolvedValue({ content: [{ type: "text", text: "ok" }] });
   });
   it("completes real SDK handshake and discovery without exposing deployment selectors", async () => {
@@ -119,7 +119,16 @@ describe("Convex hosted bridge", () => {
   });
   it("invalidates already minted tickets when a key is replaced", async () => {
     const req = call("tables", "read");
-    mocks.key.mockResolvedValue("dev:another-animal-123|newkey123");
+    mocks.key.mockResolvedValue({
+      apiKey: "dev:another-animal-123|newkey123",
+      connectionVersion: "connection-version-2",
+    });
+    expect((await service().handle(req)).status).toBe(401);
+    expect(mocks.run).not.toHaveBeenCalled();
+  });
+  it("invalidates already minted tickets when the same key is reconnected", async () => {
+    const req = call("tables", "read");
+    mocks.key.mockResolvedValue({ apiKey: key, connectionVersion: "connection-version-2" });
     expect((await service().handle(req)).status).toBe(401);
     expect(mocks.run).not.toHaveBeenCalled();
   });
@@ -158,7 +167,7 @@ describe("Convex hosted bridge", () => {
   );
   it("restricts production discovery and execution independently of saved permissions", async () => {
     key = "prod:happy-animal-123|fakekey123";
-    mocks.key.mockResolvedValue(key);
+    mocks.key.mockResolvedValue({ apiKey: key, connectionVersion: "connection-version-1" });
     mocks.row.mockResolvedValue({
       ...connected,
       capabilityModes: { query: "on", write: "on", draft: "on" },

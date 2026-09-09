@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { RemoteMcpOperation } from "../actions/remote-mcp";
 import {
   createFirstPartyMcpTicket,
@@ -26,10 +25,6 @@ export function createConvexMcpTicket(
     audience: TICKET_AUDIENCE,
     signingContext: SIGNING_CONTEXT,
   });
-}
-
-export function convexCredentialVersion(apiKey: string) {
-  return createHash("sha256").update(apiKey).digest("hex");
 }
 
 export function verifyConvexMcpTicket(input: { ticket: string; secret: string; now?: number }) {

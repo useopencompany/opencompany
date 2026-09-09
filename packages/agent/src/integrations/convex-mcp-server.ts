@@ -3,7 +3,7 @@ import Ajv from "ajv";
 import { effectiveCapabilityMode, isCapabilityMode } from "../actions/capabilities";
 import { runConvexCli } from "./convex-cli";
 import { loadConvexCredential, loadConvexIntegration } from "./convex-mcp";
-import { convexCredentialVersion, verifyConvexMcpTicket } from "./convex-mcp-ticket";
+import { verifyConvexMcpTicket } from "./convex-mcp-ticket";
 import {
   CONVEX_TOOL_CAPABILITIES,
   convexToolAllowedInProduction,
@@ -64,9 +64,10 @@ export function createConvexMcpService(input: {
       if (!active) return forbidden("The Convex plugin is no longer enabled.");
       if (!row || row.id !== payload.integrationId || row.status !== "connected")
         return unauthorized();
-      const apiKey = await loadConvexCredential(payload.userWorkosId, row.id, input.db);
+      const credential = await loadConvexCredential(payload.userWorkosId, row.id, input.db);
+      const apiKey = credential?.apiKey;
       const deployment = apiKey && parseConvexDeployKey(apiKey);
-      if (!apiKey || !deployment || payload.connectionVersion !== convexCredentialVersion(apiKey))
+      if (!apiKey || !deployment || payload.connectionVersion !== credential.connectionVersion)
         return unauthorized();
       let rpc: Record<string, unknown>;
       try {
