@@ -77,7 +77,7 @@ export const SkillMention = Node.create<{ skills: SkillCatalogItem[] }>({
     },
   },
 
-  parseMarkdown(token: { id?: string }) {
+  parseMarkdown(token) {
     return { type: "skillMention", attrs: { id: token.id ?? "" } };
   },
 
