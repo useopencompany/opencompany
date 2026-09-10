@@ -53,7 +53,12 @@ export function useWorkflowComposer(workflow: WorkflowCatalogItem | null) {
     },
     restore: () => setDraft({ workflowId, overrides }),
     reset: () => setDraft({ workflowId, overrides: [] }),
-    update: (step: WorkflowStep) => {
+    update: (
+      step: Omit<WorkflowStep, "runtimeModel" | "reasoningEffort"> & {
+        runtimeModel?: string | undefined;
+        reasoningEffort?: string | undefined;
+      },
+    ) => {
       const override = {
         id: step.id,
         model: step.model,
