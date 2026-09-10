@@ -130,6 +130,14 @@ describe("resolveWorkflowStepSelection", () => {
 });
 
 describe("extractWorkflowSkillMentionRefs", () => {
+  it("resolves escaped installation IDs saved by the old markdown editor", () => {
+    expect(
+      extractWorkflowSkillMentionRefs(
+        String.raw`Use @skill/skill\_installation\_0123456789abcdef and @skill/skill_installation_0123456789abcdef.`,
+      ),
+    ).toEqual([{ id: "skill_installation_0123456789abcdef" }]);
+  });
+
   it("collects deduped skill mentions from one step", () => {
     expect(
       extractWorkflowSkillMentionRefs(

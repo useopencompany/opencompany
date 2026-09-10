@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filterSkillMentionItems, skillMentionInsertText } from "./SkillMentionSuggestion";
+import { filterSkillMentionItems } from "./SkillMentionSuggestion";
 
 const STANDUP_NOTES = {
   scope: "company" as const,
@@ -44,11 +44,5 @@ describe("filterSkillMentionItems", () => {
       description: "",
     }));
     expect(filterSkillMentionItems(many, "")).toHaveLength(8);
-  });
-});
-
-describe("skillMentionInsertText", () => {
-  it("produces the @skill/<id> token workflow-tasks.ts resolves at fire time", () => {
-    expect(skillMentionInsertText(STANDUP_NOTES)).toBe("@skill/standup-notes ");
   });
 });

@@ -50,7 +50,9 @@ const DEFAULT_WORKFLOW_SELECTION: WorkflowEngineSelection = workflowModelSelecti
 // The token must end alphanumeric so trailing punctuation ("run @sonnet-5.")
 // stays out of the capture while inner dots ("@kimi-k2.6") still match.
 const WORKFLOW_MENTION_TOKEN_PATTERN = /(^|\s)@([a-z0-9](?:[a-z0-9./-]*[a-z0-9])?)/gi;
-const WORKFLOW_SKILL_MENTION_PATTERN = /(^|\s)@skill\/([a-z0-9][a-z0-9_-]{0,199})(?![a-z0-9_-])/gi;
+// The previous workflow editor saved plain-text IDs with markdown-escaped underscores.
+const WORKFLOW_SKILL_MENTION_PATTERN =
+  /(^|\s)@skill\/([a-z0-9](?:[a-z0-9_-]|\\_){0,199})(?![a-z0-9_-])/gi;
 
 export function resolveWorkflowStepSelection(step: {
   model: string;
@@ -106,7 +108,7 @@ export function parseWorkflowEngineSelection(step: {
 export function extractWorkflowSkillMentionRefs(instructions: string): SkillMentionRef[] {
   const ids = new Set<string>();
   for (const match of instructions.matchAll(WORKFLOW_SKILL_MENTION_PATTERN)) {
-    const id = match[2]?.toLowerCase();
+    const id = match[2]?.replace(/\\_/g, "_").toLowerCase();
     if (id) ids.add(id);
   }
   return [...ids].map((id) => ({ id }));
