@@ -152,6 +152,7 @@ describe("Postgres Chat repositories", () => {
         ('member_2', 'workspace_2', 'user_2', 'admin'),
         ('member_3', 'workspace_1', 'user_3', 'member');
     `);
+    await database.exec(`ALTER TABLE goat.plugins ADD COLUMN owner_user_id text DEFAULT 'user_1';`);
     execute = async (query) => {
       const compiled = dialect.sqlToQuery(query);
       return database.query(compiled.sql, compiled.params as never[]);
@@ -1743,6 +1744,7 @@ describe("Postgres Chat repositories", () => {
     });
     await expect(
       loadChatSessionPluginRuntime(drizzle(database), {
+        userId: "user_1",
         workspaceId: "workspace_1",
         chatSessionId: first.conversationId,
       }),

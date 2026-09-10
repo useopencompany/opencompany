@@ -546,12 +546,15 @@ export async function runCodexChatTurn(input: {
     executionStage = "load_skills";
     const [sessionSkills, workflowSkills, pluginRuntime] = await Promise.all([
       loadCodexChatSessionSkills(turn, Boolean(taskContext)),
-      taskContext ? loadWorkflowTaskSkillBundles(taskContext.harnessSpec) : Promise.resolve([]),
       taskContext
-        ? loadWorkflowTaskPluginRuntime(taskContext.harnessSpec)
+        ? loadWorkflowTaskSkillBundles(taskContext.harnessSpec, turn.userWorkosId)
+        : Promise.resolve([]),
+      taskContext
+        ? loadWorkflowTaskPluginRuntime(taskContext.harnessSpec, turn.userWorkosId)
         : session.workspaceId
           ? loadChatSessionPluginRuntime(getDb(), {
               workspaceId: session.workspaceId,
+              userId: turn.userWorkosId,
               chatSessionId: session.chatSessionId,
             })
           : Promise.resolve({ plugins: [], skills: [], mcpPlugins: [] }),
@@ -570,6 +573,7 @@ export async function runCodexChatTurn(input: {
     const enabledPluginSkillBundleIds = skillWorkspaceId
       ? await loadEnabledPluginSkillBundleIds(getDb(), {
           workspaceId: skillWorkspaceId,
+          userId: turn.userWorkosId,
           bundleIds: activatedPluginBundleIds,
         })
       : new Set<string>();
@@ -607,6 +611,7 @@ export async function runCodexChatTurn(input: {
       if (!skillWorkspaceId) throw new Error("Approved Plugin MCP requires a workspace ID.");
       executionStage = "restore_plugin_data";
       pluginDataRuntime = await preparePluginDataRuntime({
+        userId: turn.userWorkosId,
         sandbox,
         workRoot: CODEX_CHAT_WORKDIR,
         workspaceId: skillWorkspaceId,
@@ -983,9 +988,13 @@ export async function runCodexChatTurn(input: {
           });
           await dataRuntime.release().catch(() => undefined);
           pluginDataRuntime = null;
-          effectiveError = new Error(
-            `The coding turn ended, but Plugin data checkpointing failed: ${errorMessage(checkpointError)}`,
-          );
+          // An unreachable guest also prevents checkpointing. Preserve recovery so the next
+          // claim can reboot the same sandbox and retain its local Plugin data.
+          if (!(effectiveError instanceof CodexChatRetryableInfrastructureError)) {
+            effectiveError = new Error(
+              `The coding turn ended, but Plugin data checkpointing failed: ${errorMessage(checkpointError)}`,
+            );
+          }
         }
       }
     }

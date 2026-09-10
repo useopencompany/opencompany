@@ -95,6 +95,7 @@ describe("runner server CORS", () => {
         acpToolsMcp: "v3",
         brainWorkerAdmission: "postgres-v1",
         personalSkillsAuthorization: "v1",
+        personalPluginsAuthorization: "v1",
       },
     });
   });

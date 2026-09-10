@@ -423,6 +423,7 @@ async function authorizeTicket(db: DbLike, payload: GoogleDriveMcpTicketPayload)
   const [active, row] = await Promise.all([
     isPluginGatewayRegistrationActive(db, {
       workspaceId: payload.workspaceId,
+      userId: payload.userWorkosId,
       registrationId: payload.registrationId,
     }),
     loadGoogleDriveIntegration({ userWorkosId: payload.userWorkosId, db }),

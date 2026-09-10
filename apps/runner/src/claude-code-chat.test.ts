@@ -829,6 +829,41 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     expect(pluginDataMocks.checkpoint).toHaveBeenCalledWith({ releaseLease: true });
   });
 
+  it("preserves infrastructure recovery when Plugin checkpointing also fails", async () => {
+    const pluginPackage = { id: "plugin_quality_v1", name: "quality-tools", files: [] };
+    pluginRuntimeMocks.loadChatSessionPluginRuntime.mockResolvedValueOnce({
+      plugins: [pluginPackage],
+      skills: [],
+      mcpPlugins: [
+        {
+          id: pluginPackage.id,
+          name: pluginPackage.name,
+          integrity: `sha256:${"a".repeat(64)}`,
+          stdioServers: [{ name: "local", type: "stdio", command: "node", args: [], env: {} }],
+        },
+      ],
+    });
+    const failure = new CodexChatRetryableInfrastructureError(
+      "Sandbox guest stopped answering",
+      new Error("probe timeout"),
+    );
+    acpMocks.runTurn.mockRejectedValueOnce(failure);
+    pluginDataMocks.checkpoint.mockRejectedValueOnce(new Error("guest checkpoint timed out"));
+
+    await expect(
+      runClaudeCodeChatTurn({
+        turn: claudeTurn(),
+        session: claudeSession({ workspaceId: "workspace_1" }),
+        env: env(),
+      }),
+    ).rejects.toBe(failure);
+
+    expect(pluginDataMocks.checkpoint).toHaveBeenCalledOnce();
+    expect(pluginDataMocks.release).toHaveBeenCalledOnce();
+    const projector = eventMocks.createExternalEngineProjector.mock.results.at(-1)?.value;
+    expect(projector.fail).not.toHaveBeenCalled();
+  });
+
   it("runs the canonical ACP harness", async () => {
     const projector = {
       push: vi.fn(async () => undefined),
@@ -1062,6 +1097,7 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       expect.anything(),
       {
         workspaceId: "workspace_1",
+        userId: "user_1",
         bundleIds: [pinnedSkill.id],
       },
     );

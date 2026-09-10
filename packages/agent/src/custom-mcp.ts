@@ -266,6 +266,7 @@ export async function bindCustomMcpRegistration(
   const isEnabled = () =>
     isPluginGatewayRegistrationActive(db, {
       workspaceId: identity.workspaceId,
+      userId: identity.userWorkosId,
       registrationId: record.id,
     });
   const label = record.pluginDescription;

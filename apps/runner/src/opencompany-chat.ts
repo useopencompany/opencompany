@@ -21,6 +21,7 @@ import {
 } from "@opencompany/agent/chat-ui";
 import { executeChatExaFetch } from "@opencompany/agent/chat-web-fetch";
 import { executeChatExaSearch } from "@opencompany/agent/chat-web-search";
+import { guardKimiOutput } from "@opencompany/agent/kimi-output-guard";
 import { resolveProductLanguageModel } from "@opencompany/agent/language-model";
 import { createProductChatSystemPrompt } from "@opencompany/agent/prompts";
 import {
@@ -329,7 +330,7 @@ export async function runProductChatTurn(input: {
     }
     const messages = context.messages;
     const stream = streamText({
-      model: modelResolution.model,
+      model: guardKimiOutput(modelResolution.model, runtime.model),
       system: runtime.system,
       messages,
       tools: runtime.toolContext.tools,
@@ -338,6 +339,7 @@ export async function runProductChatTurn(input: {
         prepareProductChatStep({
           stepNumber,
           maxSteps: runtime.maxSteps,
+          system: runtime.system,
         }),
       ...(runtime.toolContext.repairToolCall
         ? { experimental_repairToolCall: runtime.toolContext.repairToolCall }
@@ -1323,7 +1325,7 @@ async function resolveProductChatRuntime(input: {
       : {}),
   });
   const taskSkillBundles = taskContext
-    ? await loadWorkflowTaskSkillBundles(taskContext.harnessSpec)
+    ? await loadWorkflowTaskSkillBundles(taskContext.harnessSpec, turn.userWorkosId)
     : [];
   const taskSystemBlocks = taskContext
     ? [

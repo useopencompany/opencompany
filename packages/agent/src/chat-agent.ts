@@ -127,6 +127,7 @@ import {
   type WebSearchToolOutput,
 } from "./chat-ui";
 import { normalizePublicWebUrl } from "./chat-web-fetch";
+import { guardKimiOutput } from "./kimi-output-guard";
 import { type ProductLanguageModelResolution, resolveProductLanguageModel } from "./language-model";
 import {
   BRAIN_TOOL_DESCRIPTION,
@@ -514,7 +515,7 @@ export async function runProductChatAgent(input: {
   }
   const maxSteps = input.maxSteps ?? CHAT_MAX_STEPS;
   const generationOptions = {
-    model: modelResolution.model,
+    model: guardKimiOutput(modelResolution.model, input.model),
     system,
     messages: input.messages.map((message) => ({
       role: message.role,
@@ -522,7 +523,7 @@ export async function runProductChatAgent(input: {
     })),
     stopWhen: stepCountIs(maxSteps),
     prepareStep: ({ stepNumber }: { stepNumber: number }) =>
-      prepareProductChatStep({ stepNumber, maxSteps }),
+      prepareProductChatStep({ stepNumber, maxSteps, system }),
     tools: toolContext.tools,
     ...(toolContext.repairToolCall
       ? { experimental_repairToolCall: toolContext.repairToolCall }
@@ -1688,7 +1689,11 @@ export function createProductChatToolContext(input: {
   };
 }
 
+export const PRODUCT_CHAT_FINAL_RESPONSE_INSTRUCTION =
+  "No tools are available for this final response. Provide the result directly in your answer using the information already gathered. Do not attempt or simulate tool calls. Do not claim to have saved, published, or changed anything unless an earlier tool result confirms it. Clearly state any work that remains incomplete.";
+
 export function prepareProductChatStep(input: {
+  system?: string;
   stepNumber: number;
   // Background task runs use a larger budget than an interactive chat turn; the
   // final step is always reserved with toolChoice "none" so the model produces
@@ -1700,16 +1705,12 @@ export function prepareProductChatStep(input: {
   // The AI SDK executes approved tool calls before the first continuation
   // model step. Keep that step answer-only so a completed write cannot spawn
   // another approval request in the same user turn.
-  if (input.finalizeAfterApproval) {
+  if (input.finalizeAfterApproval || input.stepNumber >= maxSteps - 1) {
+    // Keep schemas in the request: Kimi K3 can emit native tool syntax as text
+    // when schemas disappear after tool use, even with toolChoice "none".
     return {
-      activeTools: [],
       toolChoice: "none" as const,
-    };
-  }
-  if (input.stepNumber >= maxSteps - 1) {
-    return {
-      activeTools: [],
-      toolChoice: "none" as const,
+      system: [input.system, PRODUCT_CHAT_FINAL_RESPONSE_INSTRUCTION].filter(Boolean).join("\n\n"),
     };
   }
   return {};

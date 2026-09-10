@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   isLinearIssueEnteringTriage,
   linearEventTypeFor,
   linearRouteMatchesEvent,
   linearSelectedEventTypes,
   linearWorkflowRouteMatchesEvent,
+  listWorkflowEventTriggerRoutes,
   parseLinearBrainSourceConfig,
   parseLinearWikiSourceConfig,
   parseWorkflowEventConfig,
@@ -187,5 +188,69 @@ describe("opencompany Linear brain source config", () => {
       prompt: "Review it.",
       legacyTriageStateId: "state_triage",
     });
+  });
+});
+
+describe("personal Linear workflow event authorization", () => {
+  it("ignores workspace-owned connections even for their original connector", async () => {
+    const db = { select: vi.fn() };
+    await expect(
+      listWorkflowEventTriggerRoutes(
+        {
+          provider: "linear",
+          integrations: [
+            {
+              id: "shared",
+              workspaceId: "workspace_1",
+              userWorkosId: "user_1",
+              status: "connected",
+            },
+          ],
+        },
+        db as never,
+      ),
+    ).resolves.toEqual([]);
+    expect(db.select).not.toHaveBeenCalled();
+  });
+
+  it("requires the subscriber's own enabled plugin event", async () => {
+    const workflow = {
+      workflowId: "workflow_1",
+      workspaceId: "workspace_1",
+      userWorkosId: "user_1",
+      workflowSlug: "new-issue",
+      workflowName: "New issue",
+      harnessSpec: {},
+      config: {
+        provider: "linear",
+        event: "issue.created",
+        integrationId: "personal",
+        filters: {},
+        prompt: "Review it.",
+      },
+    };
+    const plugin = {
+      workspaceId: "workspace_1",
+      ownerUserId: "user_2",
+      name: "linear",
+      events: [{ id: "issue.created" }],
+      eventModes: { "issue.created": true },
+    };
+    const db = { select: vi.fn() };
+    const result = (rows: unknown[]) => ({ from: () => ({ where: async () => rows }) });
+    const input = {
+      provider: "linear",
+      integrations: [
+        { id: "personal", workspaceId: null, userWorkosId: "user_1", status: "connected" as const },
+      ],
+    };
+    db.select.mockReturnValueOnce(result([workflow])).mockReturnValueOnce(result([plugin]));
+    await expect(listWorkflowEventTriggerRoutes(input, db as never)).resolves.toEqual([]);
+    db.select
+      .mockReturnValueOnce(result([workflow]))
+      .mockReturnValueOnce(result([{ ...plugin, ownerUserId: "user_1" }]));
+    await expect(listWorkflowEventTriggerRoutes(input, db as never)).resolves.toEqual([
+      expect.objectContaining({ workflowId: "workflow_1", userWorkosId: "user_1" }),
+    ]);
   });
 });

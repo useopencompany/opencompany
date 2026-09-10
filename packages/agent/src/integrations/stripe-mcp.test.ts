@@ -24,31 +24,8 @@ describe("Stripe MCP bearer connection", () => {
     mocks.db = null;
   });
 
-  it("injects the saved restricted key as a server-side bearer token", async () => {
-    const apiKey = `rk_live_${"a".repeat(24)}`;
-    mocks.db = fakeDb([
-      [],
-      [],
-      [stripeStateRow()],
-      [
-        {
-          id: "gint_stripe",
-          userWorkosId: "user_admin",
-          externalId: "acct_123",
-          accountName: "Acme",
-          status: "connected",
-        },
-      ],
-    ]);
-    mocks.loadCredential.mockResolvedValueOnce({
-      payload: {
-        apiKey,
-        accountId: "acct_123",
-        livemode: true,
-        connectedAt: "2026-09-04T00:00:00.000Z",
-      },
-    });
-
+  it("requires personal OAuth even when a workspace restricted key exists", async () => {
+    mocks.db = fakeDb([[], [stripeStateRow()]]);
     const connection = await loadStripeMcpWorkerConnection({
       userWorkosId: "user_member",
       workspaceId: "workspace_1",
@@ -56,51 +33,9 @@ describe("Stripe MCP bearer connection", () => {
         throw new Error("authorization required");
       },
     });
-
     expect(STRIPE_MCP_ENDPOINT_URL).toBe("https://mcp.stripe.com");
-    expect(connection).toMatchObject({ ok: true, integrationId: "gint_stripe" });
-    if (!connection.ok) throw new Error("Expected a connected Stripe MCP worker.");
-    expect(await connection.authProvider.tokens()).toEqual({
-      access_token: apiKey,
-      token_type: "Bearer",
-    });
-    expect(mocks.markStatus).not.toHaveBeenCalled();
-  });
-
-  it("fails closed and marks the connection for reauthorization when the credential is invalid", async () => {
-    mocks.db = fakeDb([
-      [],
-      [],
-      [stripeStateRow()],
-      [
-        {
-          id: "gint_stripe",
-          userWorkosId: "user_admin",
-          externalId: "acct_123",
-          accountName: "Acme",
-          status: "connected",
-        },
-      ],
-    ]);
-    mocks.loadCredential.mockResolvedValueOnce({ payload: { apiKey: "sk_live_not_allowed" } });
-
-    await expect(
-      loadStripeMcpWorkerConnection({
-        userWorkosId: "user_member",
-        workspaceId: "workspace_1",
-        onAuthorizationRequired: () => {
-          throw new Error("authorization required");
-        },
-      }),
-    ).resolves.toEqual({ ok: false, reason: "needs_reauth" });
-    expect(mocks.markStatus).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userWorkosId: "user_admin",
-        integrationId: "gint_stripe",
-        provider: "stripe",
-        status: "needs_reauth",
-      }),
-    );
+    expect(connection).toEqual({ ok: false, reason: "not_connected" });
+    expect(mocks.loadCredential).not.toHaveBeenCalled();
   });
   it("prefers OAuth over a saved workspace key", async () => {
     mocks.db = fakeDb([

@@ -42,10 +42,7 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
   const { name } = await params;
   const normalizedName = name.toLocaleLowerCase();
   if (isOfficialMcpPluginName(normalizedName)) {
-    const [context, pluginState] = await Promise.all([
-      currentUser(),
-      loadOfficialPlugin(normalizedName),
-    ]);
+    const [, pluginState] = await Promise.all([currentUser(), loadOfficialPlugin(normalizedName)]);
     const Detail = {
       attio: AttioPluginDetail,
       betterstack: BetterStackPluginDetail,
@@ -73,23 +70,23 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
       vercel: VercelPluginDetail,
       x: XPluginDetail,
     }[normalizedName];
-    return <Detail pluginState={pluginState} canEdit={context.role === "admin"} />;
+    return <Detail pluginState={pluginState} canEdit={true} />;
   }
   if (isOfficialSkillPluginName(normalizedName)) {
-    const [context, plugin] = await Promise.all([currentUser(), getHeadlessPlugin(normalizedName)]);
+    const [, plugin] = await Promise.all([currentUser(), getHeadlessPlugin(normalizedName)]);
     const metadata = OFFICIAL_SKILL_PLUGIN_METADATA[normalizedName];
     return plugin ? (
       <PluginDetail
         plugin={plugin}
-        canEdit={context.role === "admin"}
+        canEdit={true}
         title={metadata.label}
         description={metadata.description}
       />
     ) : (
-      <OfficialSkillPluginDetail name={normalizedName} canEdit={context.role === "admin"} />
+      <OfficialSkillPluginDetail name={normalizedName} canEdit={true} />
     );
   }
-  const [context, plugin] = await Promise.all([currentUser(), getHeadlessPlugin(name)]);
+  const [, plugin] = await Promise.all([currentUser(), getHeadlessPlugin(name)]);
   if (!plugin) {
     return (
       <SettingsContent
@@ -106,11 +103,11 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
       <CustomMcpPluginDetail
         plugin={plugin}
         initialStatus={await getHeadlessCustomMcp(name)}
-        canEdit={context.role === "admin"}
+        canEdit={true}
       />
     );
   }
-  return <PluginDetail plugin={plugin} canEdit={context.role === "admin"} />;
+  return <PluginDetail plugin={plugin} canEdit={true} />;
 }
 
 async function loadOfficialPlugin(
