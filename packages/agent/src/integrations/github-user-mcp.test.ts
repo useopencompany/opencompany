@@ -79,7 +79,7 @@ describe("GitHub user MCP connection", () => {
     ).resolves.toEqual({ ok: false, reason: "needs_reauth" });
   });
 
-  it("surfaces a plain error when a forced refresh proves the GitHub credential is valid", async () => {
+  it("refreshes only if the rejected MCP bearer is still current", async () => {
     const connection = await loadGitHubUserMcpWorkerConnection({
       userWorkosId: "user_1",
       onAuthorizationRequired: () => {
@@ -93,13 +93,13 @@ describe("GitHub user MCP connection", () => {
         GITHUB_USER_MCP_ENDPOINT_URL,
         GITHUB_USER_MCP_ENDPOINT_URL,
       ),
-    ).rejects.toThrow("GitHub MCP rejected a freshly refreshed credential.");
+    ).rejects.toThrow("GitHub MCP credential changed after the connection started.");
     expect(mocks.getAccessToken).toHaveBeenLastCalledWith(
       {
         userWorkosId: "user_1",
         integrationId: "gint_github_user",
       },
-      { forceRefresh: true },
+      { refreshIfAccessToken: "ghu_fresh_access" },
     );
   });
 
