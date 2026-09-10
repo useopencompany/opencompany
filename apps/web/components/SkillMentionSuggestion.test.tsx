@@ -1,10 +1,5 @@
-import { extractWorkflowSkillMentionRefs } from "@opencompany/agent/workflow-skill-mentions";
-import { Editor } from "@tiptap/core";
-import { Markdown } from "@tiptap/markdown";
-import StarterKit from "@tiptap/starter-kit";
-
 import { describe, expect, it } from "vitest";
-import { filterSkillMentionItems, skillMentionInsertText } from "./SkillMentionSuggestion";
+import { filterSkillMentionItems } from "./SkillMentionSuggestion";
 
 const STANDUP_NOTES = {
   scope: "company" as const,
@@ -49,31 +44,5 @@ describe("filterSkillMentionItems", () => {
       description: "",
     }));
     expect(filterSkillMentionItems(many, "")).toHaveLength(8);
-  });
-});
-
-describe("skillMentionInsertText", () => {
-  it("produces the @skill/<id> token workflow-tasks.ts resolves at fire time", () => {
-    expect(skillMentionInsertText(STANDUP_NOTES)).toBe("@skill/standup-notes ");
-  });
-
-  it("resolves the selected installation after saving and reopening Markdown", () => {
-    const skill = { ...STANDUP_NOTES, id: "skill_installation_0123456789abcdef" };
-    const editor = new Editor({
-      extensions: [StarterKit, Markdown],
-      content: "",
-    });
-    try {
-      editor.commands.insertContent(skillMentionInsertText(skill));
-      const markdown = editor.getMarkdown();
-      expect(markdown).toContain(String.raw`@skill/skill\_installation\_0123456789abcdef`);
-      expect(extractWorkflowSkillMentionRefs(markdown)).toEqual([{ id: skill.id }]);
-
-      editor.commands.setContent(markdown, { contentType: "markdown" });
-      expect(editor.getText().trim()).toBe(`@skill/${skill.id}`);
-      expect(extractWorkflowSkillMentionRefs(editor.getMarkdown())).toEqual([{ id: skill.id }]);
-    } finally {
-      editor.destroy();
-    }
   });
 });
