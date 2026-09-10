@@ -1100,7 +1100,9 @@ function workflowWithModelOverrides(
         ...(override.reasoningEffort ? { reasoningEffort: override.reasoningEffort } : {}),
       },
     ]);
-    if (normalized) byId.set(step.id, normalized);
+    if (normalized) {
+      byId.set(step.id, { ...normalized, title: step.title, instructions: step.instructions });
+    }
   }
   return { ...workflow, steps: workflow.steps.map((step) => byId.get(step.id) ?? step) };
 }

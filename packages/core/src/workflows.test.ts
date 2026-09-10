@@ -349,11 +349,11 @@ describe("WorkflowApplicationService", () => {
       steps: [
         {
           id: "step_1",
-          title: "Build",
+          title: " Build ",
           model: "codex",
           runtimeModel: "openai/gpt-5.6-sol",
           reasoningEffort: "high",
-          instructions: "Build it.",
+          instructions: "  Build it.\n",
         },
         { id: "step_2", title: "Review", model: "sonnet-5", instructions: "Review it." },
       ],
@@ -371,7 +371,7 @@ describe("WorkflowApplicationService", () => {
         workflow: {
           ...saved,
           steps: [
-            { id: "step_1", title: "Build", model: "gpt-5.5", instructions: "Build it." },
+            { id: "step_1", title: " Build ", model: "gpt-5.5", instructions: "  Build it.\n" },
             saved.steps[1],
           ],
         },
