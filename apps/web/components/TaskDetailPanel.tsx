@@ -14,10 +14,9 @@ import { legacyHarnessRunToChatMessages } from "@/lib/legacy-task-chat-messages"
 import { normalizeModel } from "@/lib/model-options";
 import type { HarnessRunViewModel } from "@/lib/task-harness-run";
 
-// Pane contract, forwarded to Surface: an embedded host (the review queue) owns the URL and the
-// global shortcuts, so its Task view must not react to them or navigate home when it closes.
+// Pane contract, forwarded to Surface: an embedded host (the review queue) detaches this view
+// itself instead of letting it navigate home and cancel a run that is still going.
 export type TaskDetailPaneProps = {
-  isActivePane?: boolean;
   onClosePane?: () => void;
 };
 

@@ -46,8 +46,12 @@ vi.mock("@/components/Routes", () => ({
 // The detail pane is the canonical conversation surface. These stubs assert which surface it
 // mounts for a queue item; the surfaces themselves are covered by their own tests.
 vi.mock("@/components/Surface", () => ({
-  Surface: ({ initialChat }: { initialChat: { id: string; title: string } }) => (
-    <div data-testid="chat-conversation" data-conversation-id={initialChat.id}>
+  Surface: ({ initialChat }: { initialChat: { id: string; title: string; model: string } }) => (
+    <div
+      data-testid="chat-conversation"
+      data-conversation-id={initialChat.id}
+      data-model={initialChat.model}
+    >
       {initialChat.title}
     </div>
   ),
@@ -75,12 +79,17 @@ vi.mock("@/lib/headless-task-commands", () => ({
   markHeadlessTaskSeen: markTaskSeenMock,
 }));
 
-function chatItem(id: string, title: string, updatedAt: string): ReviewItem {
+function chatItem(
+  id: string,
+  title: string,
+  updatedAt: string,
+  source: Partial<Extract<ReviewItem["source"], { kind: "chat" }>> = {},
+): ReviewItem {
   return {
     conversationId: id,
     title,
     updatedAt,
-    source: { kind: "chat", model: "claude-opus-5", engine: "opencompany" },
+    source: { kind: "chat", model: "claude-opus-5", engine: "opencompany", ...source },
   };
 }
 
@@ -142,6 +151,25 @@ describe("ReviewInboxRoute", () => {
     await userEvent.click(screen.getByRole("button", { name: /Draft the investor update/ }));
 
     expect(screen.getByTestId("chat-conversation")).toHaveAttribute("data-conversation-id", "c1");
+  });
+
+  // A cloud engine runs on its own model ids, which the opencompany catalog does not contain.
+  // Normalizing without the engine would rewrite the model the composer then sends.
+  it("keeps a cloud engine's own model when it opens the conversation", async () => {
+    reviewItemsMock.value = [
+      chatItem("c1", "Ship the migration", "2026-09-10T11:00:00.000Z", {
+        model: "openai/gpt-5.6-sol",
+        engine: "codex",
+      }),
+    ];
+
+    render(<ReviewInboxRoute />);
+    await userEvent.click(screen.getByRole("button", { name: /Ship the migration/ }));
+
+    expect(screen.getByTestId("chat-conversation")).toHaveAttribute(
+      "data-model",
+      "openai/gpt-5.6-sol",
+    );
   });
 
   it("opens a task as its task conversation, which resumes on a comment", async () => {

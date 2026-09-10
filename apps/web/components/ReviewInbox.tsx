@@ -13,7 +13,7 @@ import { useTaskRun } from "@/components/useTaskRun";
 import type { ChatSessionView } from "@/lib/chat-ui";
 import { updateHeadlessChatConversation } from "@/lib/headless-chat-commands";
 import { markHeadlessTaskSeen } from "@/lib/headless-task-commands";
-import { normalizeModel } from "@/lib/model-options";
+import { DEFAULT_MODEL, normalizeConversationModel } from "@/lib/model-options";
 import type { ReviewItem } from "@/lib/review-inbox";
 
 export function ReviewInboxRoute() {
@@ -274,19 +274,23 @@ function ReviewChatConversation({
   // The sidebar list is bounded by recency, so an older unread chat is missing from it. The queue
   // item carries everything needed to open the conversation; the summary only sharpens it.
   const summary = data.recentChats.find((chat) => chat.id === conversationId) ?? null;
+  const conversationEngine = summary?.engine ?? engine;
   const initialChat = useMemo<ChatSessionView>(
     () => ({
       id: conversationId,
       title: summary?.title ?? title,
-      model: normalizeModel(summary?.model ?? model),
-      engine: summary?.engine ?? engine,
+      // A Codex or Claude Code conversation runs on that engine's own model ids, which the
+      // opencompany catalog does not contain: normalizing without the engine would silently
+      // rewrite the model the composer sends.
+      model: normalizeConversationModel(conversationEngine, summary?.model ?? model),
+      engine: conversationEngine,
       codexComposerSettings: summary?.codexComposerSettings ?? null,
       // Detail controls wait for the conversation-scoped record instead of trusting a list row.
       runtime: null,
       updatedAt: summary?.updatedAt ?? updatedAt,
       messages: [],
     }),
-    [conversationId, engine, model, summary, title, updatedAt],
+    [conversationEngine, conversationId, model, summary, title, updatedAt],
   );
 
   return (
@@ -295,7 +299,7 @@ function ReviewChatConversation({
       tasks={data.tasks}
       allTasks={data.allTasks}
       schedules={data.schedules}
-      defaultModel={initialChat.model}
+      defaultModel={DEFAULT_MODEL}
       initialChat={initialChat}
       recentChats={data.recentChats}
       archivedChats={data.archivedChats}
@@ -306,9 +310,8 @@ function ReviewChatConversation({
       workspaceId={data.workspace.id}
       userName={userName}
       userWorkosId={data.user.workosUserId}
-      // The queue owns this pane: the route stays /review, and closing returns to the list rather
-      // than navigating home or cancelling a run that is still going.
-      isActivePane={false}
+      // Closing this pane returns to the list rather than navigating home and cancelling a run
+      // that is still going; the queue, not the chat route, is where the reader came from.
       onClosePane={onClose}
     />
   );
@@ -325,7 +328,7 @@ function ReviewTaskConversation({ taskId, onClose }: { taskId: string; onClose: 
       </div>
     );
   }
-  return <TaskDetailPanel initialRun={run} isActivePane={false} onClosePane={onClose} />;
+  return <TaskDetailPanel initialRun={run} onClosePane={onClose} />;
 }
 
 function timestampMs(value: string) {
