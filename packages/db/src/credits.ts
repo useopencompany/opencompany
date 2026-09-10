@@ -627,7 +627,21 @@ export async function recordAutoRefillCredit(input: {
   };
 }
 
-export type SpendCategory = "chat" | "ingestion" | "capabilities" | "other";
+export type SpendCategory = "chat" | "ingestion" | "capabilities" | "sandbox" | "other";
+
+// Balance movements such as expired allowances and adjustments are not usage.
+// Keep the dashboard and billing overview on the same source classification.
+const usageDebitSql = sql`amount_usd_micros < 0 AND source IN (
+  'chat_model_usage', 'ingest_model_usage', 'ingest_fee', 'frontier_ingest',
+  'ingest_overage', 'capability_usage', 'sandbox_usage'
+)`;
+const spendCategorySql = sql`CASE
+  WHEN source = 'chat_model_usage' THEN 'chat'
+  WHEN source IN ('ingest_model_usage', 'ingest_fee', 'frontier_ingest', 'ingest_overage') THEN 'ingestion'
+  WHEN source = 'capability_usage' THEN 'capabilities'
+  WHEN source = 'sandbox_usage' THEN 'sandbox'
+  ELSE 'other'
+END`;
 
 export type SpendBreakdownRow = {
   day: string;
@@ -653,18 +667,13 @@ export async function loadSpendBreakdown(
   const result = await db.execute(sql`
     SELECT
       to_char(date_trunc('day', created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS "day",
-      CASE
-        WHEN source = 'chat_model_usage' THEN 'chat'
-        WHEN source IN ('ingest_model_usage', 'ingest_fee', 'frontier_ingest', 'ingest_overage') THEN 'ingestion'
-        WHEN source = 'capability_usage' THEN 'capabilities'
-        ELSE 'other'
-      END AS "category",
+      ${spendCategorySql} AS "category",
       -SUM(amount_usd_micros) AS "spendUsdMicros",
       SUM(provider_cost_usd_micros) AS "providerCostUsdMicros",
       SUM(platform_fee_usd_micros) AS "platformFeeUsdMicros"
     FROM goat.credit_ledger
     WHERE workspace_id = ${workspaceId}
-      AND amount_usd_micros < 0
+      AND ${usageDebitSql}
       AND created_at >= ${since.toISOString()}
     GROUP BY 1, 2
     ORDER BY 1 DESC, 2 ASC
@@ -716,22 +725,17 @@ export async function loadCreditOverview(
     SELECT COALESCE(-SUM(amount_usd_micros), 0) AS "spendUsdMicros"
     FROM goat.credit_ledger
     WHERE workspace_id = ${workspaceId}
-      AND amount_usd_micros < 0
+      AND ${usageDebitSql}
       AND created_at >= ${monthStart.toISOString()}
   `);
   const spendRows = rowsFromExecute<{ spendUsdMicros: number | string }>(spendResult);
   const categorySpendResult = await db.execute(sql`
     SELECT
-      CASE
-        WHEN source = 'chat_model_usage' THEN 'chat'
-        WHEN source IN ('ingest_model_usage', 'ingest_fee', 'frontier_ingest', 'ingest_overage') THEN 'ingestion'
-        WHEN source = 'capability_usage' THEN 'capabilities'
-        ELSE 'other'
-      END AS "category",
+      ${spendCategorySql} AS "category",
       COALESCE(-SUM(amount_usd_micros), 0) AS "spendUsdMicros"
     FROM goat.credit_ledger
     WHERE workspace_id = ${workspaceId}
-      AND amount_usd_micros < 0
+      AND ${usageDebitSql}
       AND created_at >= ${monthStart.toISOString()}
     GROUP BY 1
   `);
@@ -743,6 +747,7 @@ export async function loadCreditOverview(
     chat: 0,
     ingestion: 0,
     capabilities: 0,
+    sandbox: 0,
   };
   for (const row of categorySpendRows) {
     if (row.category !== "other") {

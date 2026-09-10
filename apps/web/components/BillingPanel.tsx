@@ -292,6 +292,7 @@ export function BillingPanel({
             ["Chat", data.spendThisMonthByCategory.chat],
             ["Brain ingestion", data.spendThisMonthByCategory.ingestion],
             ["Paid capabilities", data.spendThisMonthByCategory.capabilities],
+            ["Sandbox usage", data.spendThisMonthByCategory.sandbox],
           ].map(([label, amount]) => (
             <div key={String(label)} className="rounded-lg border border-border px-3 py-2.5">
               <div className="text-[11px] text-ink-subtle">{label}</div>
@@ -462,7 +463,7 @@ function billingActivityLabel(
 ) {
   if (source === "chat_model_usage") return "Chat";
   if (source === "subscription_covered") return "Chat · covered by ChatGPT subscription";
-  if (source === "sandbox_usage") return "Cloud browser";
+  if (source === "sandbox_usage") return "Sandbox usage";
   if (
     source === "ingest_model_usage" ||
     source === "ingest_fee" ||

@@ -1,6 +1,8 @@
 import { createLogger } from "@opencompany/observability";
 import { Sandbox, type SandboxNetworkOpts } from "e2b";
 import { ACTIVE_CODING_SANDBOX_TIMEOUT_MS } from "./coding-sandbox-lifecycle";
+import { registerSandboxBilling, type SandboxBillingOwner } from "./sandbox-billing";
+import { billSandboxBeforeTransition } from "./sandbox-billing-worker";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "sandbox" });
 
@@ -69,18 +71,45 @@ export async function createOrConnectSandbox(input: {
   metadata?: Record<string, string> | undefined;
   network?: SandboxNetworkOpts | undefined;
   idleTimeoutMs: number;
+  billingOwner?: SandboxBillingOwner;
   onLatency?: (observation: SandboxLatencyObservation) => void | Promise<void>;
 }) {
+  const billableFrom = new Date();
+  let acquired: SandboxHandle | null = null;
   if (input.sandboxId) {
-    const sandbox = await connectSandbox({
+    if (input.billingOwner) await billSandboxBeforeTransition(input.sandboxId);
+    acquired = await connectSandbox({
       sandboxId: input.sandboxId,
       recoverUnresponsiveGuest: true,
       ...(input.onLatency ? { onLatency: input.onLatency } : {}),
     });
-    if (sandbox) return sandbox;
   }
-
-  return createSandbox(input);
+  const created = acquired === null;
+  const sandbox = acquired ?? (await createSandbox(input));
+  if (input.billingOwner) {
+    try {
+      await registerSandboxBilling({
+        ...input.billingOwner,
+        sandboxId: sandbox.sandboxId,
+        billableFrom,
+      });
+    } catch (error) {
+      // A fresh sandbox has no user work yet. Do not leave it consuming compute
+      // without a billing owner if persistence failed; preserve reused workspaces.
+      if (created) {
+        await Sandbox.kill(sandbox.sandboxId, {
+          requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS,
+        }).catch((cleanupError) => {
+          logger.error("Failed to remove an unregistered sandbox", {
+            sandbox_id: sandbox.sandboxId,
+            error: cleanupError,
+          });
+        });
+      }
+      throw error;
+    }
+  }
+  return sandbox;
 }
 
 export async function connectSandbox(input: {
@@ -364,6 +393,7 @@ export async function armSandboxActiveTimeoutById(sandboxId: string) {
 }
 
 export async function killSandbox(sandboxId: string) {
+  await billSandboxBeforeTransition(sandboxId);
   try {
     return await Sandbox.kill(sandboxId, { requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS });
   } catch (error) {

@@ -289,8 +289,15 @@ export async function runCodexChatTurn(input: {
 
   let sandbox;
   try {
+    if (!session.workspaceId)
+      throw new Error("A billing workspace is required to run this coding workload.");
     sandbox = await createOrConnectSandbox({
       sandboxId: session.sandboxId,
+      billingOwner: {
+        workspaceId: session.workspaceId,
+        userWorkosId: turn.userWorkosId,
+        namespace: env.sandboxNamespace,
+      },
       template: env.codexE2bTemplate ?? "codex",
       envs: {},
       metadata: managedSandboxMetadata({

@@ -58,6 +58,9 @@ Sandboxes do not receive application database credentials or raw platform secret
 validates short-lived tokens, applies provider/model scope, records usage, and forwards only to
 configured upstreams. See [LLM token broker](./llm-token-broker.md).
 
+See [Sandbox usage billing](./sandbox-usage-billing.md) for the E2B compute meter and its
+workspace credit settlement boundary.
+
 ## Chat attachment retention
 
 The API gives each unclaimed chat attachment a 24-hour TTL. Keyed uploads reserve their key before
