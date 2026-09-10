@@ -43,42 +43,59 @@ const registration: RemoteMcpGatewayRegistration = {
   isEnabled: async () => true,
 };
 
-async function harness(failure: (id: number) => Response, failureCount = 1) {
+async function harness(
+  failure: (id: number, args: Record<string, unknown>) => Response | undefined,
+  failureCount = 1,
+  schema: Record<string, unknown> = { type: "object" },
+) {
   let dispatches = 0;
-  const remote = await resolveRemoteMcpActions(identity, registration, {
-    recordDispatch: async () => {},
-    createClient: async (config) =>
-      createMCPClient({
-        ...config,
-        transport: {
-          ...config.transport,
-          fetch: async (_url, init) => {
-            if (init?.method === "DELETE") return new Response(null, { status: 204 });
-            const request = JSON.parse(String(init?.body));
-            if (request.method === "server/discover")
+  let connections = 0;
+  const remote = await resolveRemoteMcpActions(
+    identity,
+    {
+      ...registration,
+      discoverySnapshot: [{ ...registration.discoverySnapshot[0]!, inputSchema: schema }],
+    },
+    {
+      recordDispatch: async () => {},
+      createClient: async (config) => {
+        connections++;
+        return createMCPClient({
+          ...config,
+          transport: {
+            ...config.transport,
+            fetch: async (_url, init) => {
+              if (init?.method === "DELETE") return new Response(null, { status: 204 });
+              const request = JSON.parse(String(init?.body));
+              if (request.method === "server/discover")
+                return Response.json({
+                  jsonrpc: "2.0",
+                  id: request.id,
+                  result: {
+                    resultType: "complete",
+                    supportedVersions: ["2026-07-28"],
+                    capabilities: { tools: {} },
+                  },
+                });
+              dispatches++;
+              if (dispatches <= failureCount) {
+                const response = failure(request.id, request.params?.arguments ?? {});
+                if (response) return response;
+              }
               return Response.json({
                 jsonrpc: "2.0",
                 id: request.id,
                 result: {
                   resultType: "complete",
-                  supportedVersions: ["2026-07-28"],
-                  capabilities: { tools: {} },
+                  content: [{ type: "text", text: '{"recovered":true}' }],
                 },
               });
-            dispatches++;
-            if (dispatches <= failureCount) return failure(request.id);
-            return Response.json({
-              jsonrpc: "2.0",
-              id: request.id,
-              result: {
-                resultType: "complete",
-                content: [{ type: "text", text: '{"recovered":true}' }],
-              },
-            });
+            },
           },
-        },
-      }),
-  });
+        });
+      },
+    },
+  );
   const action = remote!.actions[0]!;
   const execute = (params: Record<string, unknown> = {}) =>
     executeAction({
@@ -90,7 +107,7 @@ async function harness(failure: (id: number) => Response, failureCount = 1) {
       currentDate: new Date(),
       userTimezone: "UTC",
     });
-  return { execute, action, dispatches: () => dispatches };
+  return { execute, action, dispatches: () => dispatches, connections: () => connections };
 }
 
 describe("remote MCP error classification through the action service", () => {
@@ -148,6 +165,83 @@ describe("remote MCP error classification through the action service", () => {
     expect(execute).toHaveBeenCalledTimes(3);
     expect(h.dispatches()).toBe(3);
   });
+
+  it.each([undefined, "https://json-schema.org/draft/2020-12/schema"])(
+    "rejects the observed object filter locally and allows corrected parallel queries (%s)",
+    async (dialect) => {
+      const schema = {
+        type: "object",
+        ...(dialect ? { $schema: dialect } : {}),
+        properties: {
+          properties: { type: "array", items: { type: "object" } },
+        },
+      };
+      const h = await harness(
+        (id, args) =>
+          Array.isArray(args.properties)
+            ? undefined
+            : Response.json({
+                jsonrpc: "2.0",
+                id,
+                result: {
+                  resultType: "complete",
+                  isError: true,
+                  content: [
+                    {
+                      type: "text",
+                      text: 'Invalid input for "query-trends": parameter "properties" must be of type array',
+                    },
+                  ],
+                },
+              }),
+        Infinity,
+        schema,
+      );
+      const governance = createInMemoryActionTurnGovernance();
+      const source = registration.source;
+      await governance.recordSourceDiscovery(source);
+      const catalog = {
+        sources: [{ id: source, label: "Diagnostic", description: "Read" }],
+        actions: [{ id: h.action.id, source, description: "Read", params: schema }],
+      };
+      const call = (invocationId: string, properties: unknown) =>
+        serveActionRequest({
+          catalog,
+          governance,
+          execute: ({ params }) => h.execute(params),
+          request: {
+            operation: "execute",
+            sessionId: "session",
+            turnId: "turn",
+            invocationId,
+            action: h.action.id,
+            params: { properties },
+          },
+        });
+      const malformed = {
+        type: "AND",
+        values: [
+          {
+            type: "AND",
+            values: [{ key: "name", type: "person", value: "example", operator: "icontains" }],
+          },
+        ],
+      };
+      const failures = await Promise.all([call("bad-1", malformed), call("bad-2", malformed)]);
+      for (const failure of failures)
+        expect(failure).toMatchObject({
+          ok: false,
+          error: { code: "invalid_params", message: expect.stringContaining("must be array") },
+        });
+      expect(h.connections()).toBe(0);
+      expect(h.dispatches()).toBe(0);
+      const filter = malformed.values[0]!.values;
+      const recovered = await Promise.all([call("fixed-1", filter), call("fixed-2", filter)]);
+      for (const result of recovered)
+        expect(result).toMatchObject({ ok: true, result: { recovered: true } });
+      expect(h.dispatches()).toBe(2);
+    },
+  );
 
   it.each([-32601, -32603])("preserves JSON-RPC error %s as a provider failure", async (code) => {
     const h = await harness((id) =>
