@@ -9,11 +9,12 @@ import {
   type SpendSeries,
 } from "@/lib/usage-spend";
 
-// Validated categorical palette (six-checks pass, light + dark); tokens live in globals.css.
+// Category colors for light and dark themes live in globals.css.
 const BAR_CLASS: Record<SpendCategory, string> = {
   chat: "bg-spend-chat",
   ingestion: "bg-spend-ingestion",
   capabilities: "bg-spend-capabilities",
+  sandbox: "bg-spend-sandbox",
   other: "bg-spend-other",
 };
 

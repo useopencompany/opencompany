@@ -5775,7 +5775,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
           memberCount: 1,
           memberCap: 1,
           spendThisMonthUsdMicros: 0,
-          spendThisMonthByCategory: { chat: 0, ingestion: 0, capabilities: 0 },
+          spendThisMonthByCategory: { chat: 0, ingestion: 0, capabilities: 0, sandbox: 0 },
           recentActivity: [],
           lowBalanceWarnUsdMicros: 1_000_000,
           includedUsagePerSeatCents: 2_000,
