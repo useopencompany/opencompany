@@ -6,10 +6,12 @@ export function assertPersonalSkillsAuthorization(service, payload) {
     !payload ||
     typeof payload !== "object" ||
     payload.ok !== true ||
-    payload.capabilities?.personalSkillsAuthorization !== PERSONAL_SKILLS_AUTHORIZATION_CAPABILITY
+    payload.capabilities?.personalSkillsAuthorization !==
+      PERSONAL_SKILLS_AUTHORIZATION_CAPABILITY ||
+    payload.capabilities?.personalPluginsAuthorization !== "v1"
   ) {
     throw new Error(
-      `${service} does not advertise Personal-skill authorization ${PERSONAL_SKILLS_AUTHORIZATION_CAPABILITY}.`,
+      `${service} does not advertise Personal-skill and personal-plugin authorization ${PERSONAL_SKILLS_AUTHORIZATION_CAPABILITY}.`,
     );
   }
 }

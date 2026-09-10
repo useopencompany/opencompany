@@ -43,6 +43,8 @@ describe("personal custom MCP account persistence", () => {
       CREATE SCHEMA goat;
       CREATE TABLE goat.users (workos_user_id text PRIMARY KEY);
       CREATE TABLE goat.workspaces (id text PRIMARY KEY);
+      CREATE TABLE goat.workspace_members (workspace_id text, user_workos_id text, role text);
+      INSERT INTO goat.workspace_members VALUES ('workspace_1','user_1','member'),('workspace_1','user_2','member'),('workspace_2','user_1','member');
       INSERT INTO goat.users VALUES ('user_1'), ('user_2');
       INSERT INTO goat.workspaces VALUES ('workspace_1'), ('workspace_2');
       CREATE TABLE goat.integrations (
@@ -63,7 +65,7 @@ describe("personal custom MCP account persistence", () => {
       );
       CREATE TABLE goat.integration_resources (provider text NOT NULL, CONSTRAINT goat_integration_resources_provider_check CHECK (provider <> 'custom_mcp'));
       CREATE TABLE goat.plugins (
-        id text PRIMARY KEY, workspace_id text NOT NULL, name text NOT NULL, source_type text NOT NULL, status text NOT NULL DEFAULT 'enabled',
+        id text PRIMARY KEY, workspace_id text NOT NULL, owner_user_id text DEFAULT 'user_1', name text NOT NULL, source_type text NOT NULL, status text NOT NULL DEFAULT 'enabled',
         source_ref text NOT NULL DEFAULT '', source_path text NOT NULL DEFAULT '', resolved_commit text NOT NULL DEFAULT '',
         CONSTRAINT plugins_source_type_check CHECK (source_type IN ('github', 'skills.sh')),
         CONSTRAINT plugins_commit_check CHECK (resolved_commit ~ '^[0-9a-f]{40}$')
@@ -80,7 +82,8 @@ describe("personal custom MCP account persistence", () => {
   });
   beforeEach(async () => {
     await database.exec(`DELETE FROM goat.integrations; DELETE FROM goat.plugins;
-      INSERT INTO goat.plugins (id, workspace_id, name, source_type) VALUES ('plugin_1','workspace_1','custom-test','custom_mcp'), ('plugin_2','workspace_2','custom-test','custom_mcp');`);
+      INSERT INTO goat.plugins (id, workspace_id, name, source_type) VALUES ('plugin_1','workspace_1','custom-test','custom_mcp'), ('plugin_2','workspace_2','custom-test','custom_mcp');
+      INSERT INTO goat.plugins (id, workspace_id, owner_user_id, name, source_type) VALUES ('plugin_3','workspace_1','user_2','custom-test','custom_mcp');`);
   });
   afterAll(async () => {
     await database.close();

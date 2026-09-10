@@ -471,6 +471,7 @@ async function authorizeTicket(db: DbLike, payload: GmailMcpTicketPayload) {
   const [active, row] = await Promise.all([
     isPluginGatewayRegistrationActive(db, {
       workspaceId: payload.workspaceId,
+      userId: payload.userWorkosId,
       registrationId: payload.registrationId,
     }),
     loadGmailIntegration({ userWorkosId: payload.userWorkosId, db }),

@@ -2,6 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 import type { ChatHostToolServiceDependencies } from "./host-tools";
 import { executePersistedChatHostTool, taskSpawnIdempotencyKey } from "./persisted-host-tools";
 
+const listSkillCatalog = vi.hoisted(() => vi.fn(async () => []));
+vi.mock("../skills", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  listSkillCatalog,
+}));
+
 function executeHostTool(input: {
   request: Parameters<typeof executePersistedChatHostTool>[0]["request"];
   dependencies?: Partial<ChatHostToolServiceDependencies>;
@@ -19,6 +25,35 @@ function executeHostTool(input: {
 }
 
 describe("headless Chat host tools", () => {
+  it("forwards company scope and the acting member through the persisted task catalog adapter", async () => {
+    const response = await executeHostTool({
+      request: { operation: "bootstrap", sessionId: "runtime_1", turnId: "turn_1", input: {} },
+      dependencies: {
+        loadContext: async () => ({
+          actorId: "user_1",
+          workspaceId: "workspace_1",
+          workspaceName: "opencompany",
+          conversationId: "task_conversation",
+          messageId: "message_1",
+          brainRef: null,
+          email: "ada@example.test",
+          firstName: "Ada",
+          lastName: "Lovelace",
+          timezone: "UTC",
+          taskToolsEnabled: false,
+          taskConversation: true,
+          skillToolsEnabled: true,
+          legacyBrainEnabled: false,
+        }),
+        listBrains: async () => [],
+        browserProfilesAvailable: () => false,
+        activateAndListSkills: async () => [],
+      },
+    });
+    expect(response.ok).toBe(true);
+    expect(listSkillCatalog).toHaveBeenCalledWith("workspace_1", undefined, "user_1", "company");
+  });
+
   it("derives stable, distinct task idempotency keys from each tool call", () => {
     expect(taskSpawnIdempotencyKey("turn_1", "call_1")).toBe(
       taskSpawnIdempotencyKey("turn_1", "call_1"),

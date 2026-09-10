@@ -463,7 +463,7 @@ describe("Granola integration state", () => {
   });
 });
 
-it("exposes only Stripe MCP OAuth as a personal account and preserves the workspace key state", () => {
+it("exposes personal Stripe MCP OAuth and excludes retired workspace keys", () => {
   const state = integrationStateFromRows([
     {
       id: "stripe_key",
@@ -486,8 +486,7 @@ it("exposes only Stripe MCP OAuth as a personal account and preserves the worksp
     expect.objectContaining({ integrationId: "stripe_oauth", connected: false }),
   ]);
   expect(state.stripe).toMatchObject({
-    integrationId: "stripe_key",
-    connected: true,
-    livemode: false,
+    integrationId: null,
+    connected: false,
   });
 });

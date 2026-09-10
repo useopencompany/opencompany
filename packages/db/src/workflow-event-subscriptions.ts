@@ -23,25 +23,20 @@ export async function validateWorkflowEventSubscription(
         ON plugin.workspace_id = ${input.actor.workspaceId}
        AND plugin.name = ${input.trigger.provider}
        AND plugin.status = 'enabled'
+       AND plugin.owner_user_id = ${input.actor.userId}
        AND plugin.archived_at IS NULL
       WHERE integration.id = ${input.trigger.integrationId}
         AND integration.user_workos_id = ${input.actor.userId}
         AND integration.provider = ${input.trigger.provider}
         AND integration.status = 'connected'
+        AND integration.workspace_id IS NULL
+        AND EXISTS (SELECT 1 FROM goat.workspace_members member WHERE member.workspace_id = ${input.actor.workspaceId} AND member.user_workos_id = ${input.actor.userId})
       ORDER BY plugin.updated_at DESC NULLS LAST
       LIMIT 1
     `),
   );
   const row = rows[0];
   if (!row?.integrationId) return "Event triggers need a connected provider account.";
-
-  // Historical subscriptions predate plugin event declarations. They remain authorable so an
-  // unchanged workflow can still be edited and continue firing during the v1 migration.
-  if (input.trigger.provider === "linear" && input.trigger.event === "issue_enters_triage") {
-    return input.trigger.filters.team?.metadata?.triageStateId
-      ? null
-      : "Legacy Linear triage triggers need a team triage state.";
-  }
 
   const events = pluginEvents(row.events);
   const declaration = events.find((event) => event.id === input.trigger.event);

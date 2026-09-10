@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { composerDraftKey, persistComposerDraft } from "@/lib/chat-composer-draft";
 import { persistLastChatSelection } from "@/lib/chat-composer-selection";
 import {
   CHAT_COMPOSER_FOCUS_EVENT,
@@ -1758,6 +1759,156 @@ describe("Surface chat streaming UI", () => {
     expect(composer).toHaveValue("");
     expect(composer).toHaveFocus();
     expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+  });
+
+  it.each([null, { id: "chat_1", title: "Chat", model: DEFAULT_MODEL, messages: [] }])(
+    "restores the composer after a reload for %j",
+    (initialChat) => {
+      const props = { tasks: [], defaultModel: DEFAULT_MODEL, initialChat };
+      const placeholder = initialChat ? "Reply..." : "Ask opencompany anything...";
+      const first = render(
+        <StrictMode>
+          <Surface {...props} />
+        </StrictMode>,
+      );
+      fireEvent.change(screen.getByPlaceholderText(placeholder), {
+        target: { value: "An unfinished message\nwith another line" },
+      });
+      first.unmount();
+
+      render(
+        <StrictMode>
+          <Surface {...props} />
+        </StrictMode>,
+      );
+      expect(screen.getByPlaceholderText(placeholder)).toHaveValue(
+        "An unfinished message\nwith another line",
+      );
+    },
+  );
+
+  it("keeps home and session drafts separate when navigating and reloading", async () => {
+    const props = { tasks: [], defaultModel: DEFAULT_MODEL };
+    const chat = { id: "chat_1", title: "Chat", model: DEFAULT_MODEL, messages: [] };
+    const view = render(<Surface {...props} initialChat={null} />);
+    fireEvent.change(screen.getByPlaceholderText("Ask opencompany anything..."), {
+      target: { value: "Home draft" },
+    });
+    view.rerender(<Surface {...props} initialChat={chat} />);
+    await nextAnimationFrame();
+    expect(screen.getByPlaceholderText("Reply...")).toHaveValue("");
+    fireEvent.change(screen.getByPlaceholderText("Reply..."), {
+      target: { value: "Session draft" },
+    });
+    act(() => window.dispatchEvent(new Event(HOME_NAVIGATION_EVENT)));
+    expect(screen.getByPlaceholderText("Ask opencompany anything...")).toHaveValue("Home draft");
+    view.unmount();
+    render(<Surface {...props} initialChat={chat} />);
+    expect(screen.getByPlaceholderText("Reply...")).toHaveValue("Session draft");
+  });
+
+  it.each(["delete", "send"])("does not restore a draft after %s", async (action) => {
+    const props = {
+      tasks: [],
+      defaultModel: DEFAULT_MODEL,
+      initialChat: { id: "chat_1", title: "Chat", model: DEFAULT_MODEL, messages: [] },
+    };
+    const view = render(<Surface {...props} />);
+    fireEvent.change(screen.getByPlaceholderText("Reply..."), { target: { value: "Draft" } });
+    if (action === "delete") {
+      fireEvent.change(screen.getByPlaceholderText("Reply..."), { target: { value: "" } });
+    } else {
+      await userEvent.setup().click(screen.getByRole("button", { name: "Send message" }));
+    }
+    view.unmount();
+    render(<Surface {...props} />);
+    expect(screen.getByPlaceholderText("Reply...")).toHaveValue("");
+  });
+
+  it("keeps an edited draft after a failed first send and refresh on Home", async () => {
+    chatMock.sendError = new Error("Send failed");
+    const props = { tasks: [], defaultModel: DEFAULT_MODEL, initialChat: null };
+    const view = render(<Surface {...props} />);
+    fireEvent.change(screen.getByPlaceholderText("Ask opencompany anything..."), {
+      target: { value: "Try this message" },
+    });
+    await userEvent.setup().click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText("Reply...")).toHaveValue("Try this message"),
+    );
+    fireEvent.change(screen.getByPlaceholderText("Reply..."), {
+      target: { value: "Edited retry" },
+    });
+    view.unmount();
+    render(<Surface {...props} />);
+    expect(screen.getByPlaceholderText("Ask opencompany anything...")).toHaveValue("Edited retry");
+  });
+
+  it("moves a follow-up draft to the accepted session without leaving it on Home", async () => {
+    const props = { tasks: [], defaultModel: DEFAULT_MODEL };
+    const view = render(<Surface {...props} initialChat={null} />);
+    fireEvent.change(screen.getByPlaceholderText("Ask opencompany anything..."), {
+      target: { value: "Start a chat" },
+    });
+    await userEvent.setup().click(screen.getByRole("button", { name: "Send message" }));
+    const request = chatMock.preparedRequestBodies[0] as { newSessionId: string };
+    fireEvent.change(screen.getByPlaceholderText("Reply..."), { target: { value: "Follow up" } });
+    acceptHeadlessConversation(request.newSessionId);
+    view.unmount();
+    const chatView = render(
+      <Surface
+        {...props}
+        initialChat={{
+          id: request.newSessionId,
+          title: "Chat",
+          model: DEFAULT_MODEL,
+          messages: [],
+        }}
+      />,
+    );
+    expect(screen.getByPlaceholderText("Reply...")).toHaveValue("Follow up");
+    chatView.unmount();
+    render(<Surface {...props} initialChat={null} />);
+    expect(screen.getByPlaceholderText("Ask opencompany anything...")).toHaveValue("");
+  });
+
+  it("isolates drafts by user and workspace", () => {
+    const props = { tasks: [], defaultModel: DEFAULT_MODEL, initialChat: null };
+    const view = render(<Surface {...props} userWorkosId="user_1" workspaceId="workspace_1" />);
+    fireEvent.change(screen.getByPlaceholderText("Ask opencompany anything..."), {
+      target: { value: "Private draft" },
+    });
+    view.rerender(<Surface {...props} userWorkosId="user_2" workspaceId="workspace_1" />);
+    expect(screen.getByPlaceholderText("Ask opencompany anything...")).toHaveValue("");
+    view.rerender(<Surface {...props} userWorkosId="user_1" workspaceId="workspace_2" />);
+    expect(screen.getByPlaceholderText("Ask opencompany anything...")).toHaveValue("");
+    view.rerender(<Surface {...props} userWorkosId="user_1" workspaceId="workspace_1" />);
+    expect(screen.getByPlaceholderText("Ask opencompany anything...")).toHaveValue("Private draft");
+  });
+
+  it("restores selected mentions with a saved draft", async () => {
+    persistComposerDraft(composerDraftKey("", "", "chat_1"), {
+      input: "Use /research to investigate",
+      mentions: [{ kind: "skill", id: "skill_research", name: "research" }],
+    });
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "chat_1",
+          title: "Chat",
+          model: DEFAULT_MODEL,
+          messages: [],
+        }}
+      />,
+    );
+    await userEvent.setup().click(screen.getByRole("button", { name: "Send message" }));
+    expect(chatMock.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: { mentions: [{ kind: "skill", id: "skill_research", name: "research" }] },
+      }),
+    );
   });
 
   it("restores an unsent composer draft when returning to a chat session", async () => {
@@ -4883,6 +5034,54 @@ describe("Surface chat streaming UI", () => {
     expect(screen.getByText("Streaming answer")).toBeInTheDocument();
     expect(screen.getByRole("status", { name: "opencompany is working" })).toBeInTheDocument();
     expect(screen.getByText(/^\d+\.\ds$/)).toBeInTheDocument();
+  });
+
+  it("stops the task timer while waiting for approval and restarts it on resume", () => {
+    const initialChat = {
+      id: "chat_task_1",
+      title: "Morning workflow",
+      model: DEFAULT_MODEL,
+      engine: "opencompany" as const,
+      messages: [],
+    };
+    const taskConversation = {
+      taskId: "task_1",
+      status: "running" as const,
+      startedAtMs: Date.now() - 106_000,
+      activeRunId: "run_1",
+    };
+    const view = render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={initialChat}
+        taskConversation={taskConversation}
+      />,
+    );
+    expect(screen.getByRole("status", { name: "opencompany is working" })).toBeInTheDocument();
+
+    view.rerender(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={initialChat}
+        taskConversation={{ ...taskConversation, status: "waiting" }}
+      />,
+    );
+    expect(
+      screen.queryByRole("status", { name: "opencompany is working" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop task" })).not.toBeInTheDocument();
+
+    view.rerender(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={initialChat}
+        taskConversation={{ ...taskConversation, status: "queued" }}
+      />,
+    );
+    expect(screen.getByRole("status", { name: "opencompany is working" })).toBeInTheDocument();
   });
 
   it("does not show a live timer for a finalized turn when stream and runtime state are stale", () => {

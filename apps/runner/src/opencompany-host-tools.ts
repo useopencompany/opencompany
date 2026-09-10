@@ -258,7 +258,8 @@ async function callGateway(
     ...(includeTurnSignal ? { signal: context.signal } : {}),
     dependencies: {
       resolveSkillMentions: (input) => resolveSkillMentions({ ...input, db: getDb() }),
-      listSkillCatalog: (workspaceId, userId) => listSkillCatalog(workspaceId, getDb(), userId),
+      listSkillCatalog: (workspaceId, userId, skillAccess) =>
+        listSkillCatalog(workspaceId, getDb(), userId, skillAccess),
       activateAndListSkills: ({
         conversationId,
         messageId,

@@ -525,7 +525,7 @@ export function PluginsSettings({
   return (
     <SettingsContent
       title="Plugins"
-      description="Add trusted tools and expertise to your workspace."
+      description="Your plugins, accounts, and permissions are personal. Install and manage them for yourself."
       contentClassName="max-w-[960px]"
     >
       <PluginConnectionFeedback />
@@ -882,7 +882,7 @@ export function OfficialSkillPluginDetail({
 
       {!canEdit ? (
         <p className="text-[13px] leading-5 text-ink-subtle">
-          Only workspace admins can install plugins.
+          You need plugin write permission to install plugins.
         </p>
       ) : null}
 
@@ -966,10 +966,13 @@ export function PluginDetail({
     >
       {!canEdit ? (
         <p className="text-[13px] leading-5 text-ink-subtle">
-          Only workspace admins can manage plugin installations.
+          You need plugin write permission to manage your plugins.
         </p>
       ) : null}
 
+      <p className="text-[13px] leading-5 text-ink-subtle">
+        Installed for you. Disabling or removing this plugin affects only your use.
+      </p>
       <section className="flex flex-col gap-2">
         <SectionLabel>Status</SectionLabel>
         <PluginStatus status={plugin.status} />
@@ -1010,8 +1013,8 @@ export function PluginDetail({
       <section className="flex flex-col gap-2">
         <SectionLabel>Passive skills ({plugin.skills.length})</SectionLabel>
         <p className="text-[12.5px] leading-5 text-ink-subtle">
-          These standard Agent Skills join the workspace catalog while this plugin is enabled. They
-          do not execute a process.
+          These Agent Skills are available to you while your plugin is enabled. They do not execute
+          a process.
         </p>
         {plugin.skills.length === 0 ? (
           <EmptyRow label="No valid skills were discovered." />

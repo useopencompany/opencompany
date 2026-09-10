@@ -496,6 +496,7 @@ export class PostgresTaskRepository implements TaskRepository {
           FROM goat.plugins AS plugin
           WHERE plugin.workspace_id = ${input.actor.workspaceId}
             AND plugin.status = 'enabled'
+            AND plugin.owner_user_id = ${input.actor.userId}
         ),
         prior AS MATERIALIZED (
           SELECT *

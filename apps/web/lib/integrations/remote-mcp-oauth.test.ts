@@ -574,7 +574,7 @@ describe("opencompany remote MCP OAuth", () => {
     expect(markIntegrationStatus).not.toHaveBeenCalled();
   });
 
-  it("prefers the acting user's connection and falls back to the workspace connection", async () => {
+  it("uses only the acting user's connection even when a workspace connection exists", async () => {
     observed.dbResults = [
       [
         {
@@ -613,9 +613,9 @@ describe("opencompany remote MCP OAuth", () => {
     await expect(
       getLinearIntegrationState({ userWorkosId: "user_1", workspaceId: "workspace_1" }),
     ).resolves.toMatchObject({
-      integrationId: "gint_workspace",
-      accountName: "Workspace Linear",
-      capabilityModes: { read: "ask" },
+      integrationId: null,
+      accountName: null,
+      capabilityModes: {},
     });
 
     observed.dbResults = [
@@ -640,12 +640,8 @@ describe("opencompany remote MCP OAuth", () => {
           throw new Error("authorization required");
         },
       }),
-    ).resolves.toEqual({ ok: false, reason: "needs_reauth" });
-    expect(loadIntegrationCredential).toHaveBeenLastCalledWith(
-      expect.objectContaining({ userWorkosId: "workspace_admin" }),
-    );
-    expect(markIntegrationStatus).toHaveBeenLastCalledWith(
-      expect.objectContaining({ userWorkosId: "workspace_admin" }),
-    );
+    ).resolves.toEqual({ ok: false, reason: "not_connected" });
+    expect(loadIntegrationCredential).not.toHaveBeenCalled();
+    expect(markIntegrationStatus).not.toHaveBeenCalled();
   });
 });

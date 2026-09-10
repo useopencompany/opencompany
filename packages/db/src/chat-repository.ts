@@ -1152,6 +1152,7 @@ export class PostgresChatRepository implements ChatRepository {
         JOIN goat.plugins AS plugin
           ON plugin.workspace_id = ${input.actor.workspaceId}
          AND plugin.status = 'enabled'
+         AND plugin.owner_user_id = ${input.actor.userId}
         WHERE ${input.command.engine !== "opencompany"}::boolean
           AND NOT EXISTS (
             SELECT 1
@@ -1202,6 +1203,7 @@ export class PostgresChatRepository implements ChatRepository {
           ON plugin.id = plugin_skill.plugin_id
          AND plugin.workspace_id = plugin_skill.workspace_id
          AND plugin.status = 'enabled'
+         AND plugin.owner_user_id = ${input.actor.userId}
         WHERE resolved_skill.source_kind = 'plugin'
           AND resolved_skill.bundle_id = activated.bundle_id
         ON CONFLICT (chat_session_id, plugin_id) DO NOTHING
@@ -2030,6 +2032,7 @@ export class PostgresChatRepository implements ChatRepository {
        AND bundle.workspace_id = plugin_skill.workspace_id
       WHERE plugin_skill.workspace_id = ${actor.workspaceId}
         AND plugin.status = 'enabled'
+        AND plugin.owner_user_id = ${actor.userId}
         AND plugin_skill.skill_name IN (${skillIdList})
     `);
     const catalog = resolveSkillCandidates(

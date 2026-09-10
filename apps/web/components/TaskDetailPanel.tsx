@@ -101,7 +101,13 @@ function CanonicalTaskDetailView({
       userWorkosId={data.user.workosUserId}
       taskConversation={{
         taskId: run.task.id,
-        status: activeRun ? "running" : (liveTask?.status ?? run.task.status),
+        status: activeRun
+          ? activeRun.status === "paused"
+            ? "waiting"
+            : activeRun.status === "queued"
+              ? "queued"
+              : "running"
+          : (liveTask?.status ?? run.task.status),
         startedAtMs: taskActivityStartedAtMs(run),
         activeRunId: activeRun?.id ?? null,
       }}
