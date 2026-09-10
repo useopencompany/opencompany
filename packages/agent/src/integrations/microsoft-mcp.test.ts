@@ -281,6 +281,7 @@ describe("Outlook Graph behavior", () => {
     expect(decode(result)).toMatchObject({ isDraft: true });
     expect(mocks.api.mock.calls[0]![1]).toBe("POST");
     expect(mocks.api.mock.calls[0]![2].pathname).toBe("/v1.0/me/messages");
+    expect(mocks.api.mock.calls[0]![2].search).toBe("");
     expect(mocks.api.mock.calls[0]![3].body).toMatchObject({
       body: { contentType: "Text", content: "Hello" },
     });
@@ -294,6 +295,7 @@ describe("Outlook Graph behavior", () => {
       id: "new-id",
     });
     expect(mocks.api.mock.calls[0]![3].body).toEqual({ destinationId });
+    expect(mocks.api.mock.calls[0]![2].search).toBe("");
   });
   it("escapes conversation filters and rejects pagination that changes the resource", async () => {
     mocks.api.mockResolvedValue({ value: [] });
@@ -304,6 +306,19 @@ describe("Outlook Graph behavior", () => {
     const result = await call("outlook", "search_messages", {
       pageToken: Buffer.from("https://evil.example/v1.0/me/messages").toString("base64url"),
     });
+    expect(result.isError).toBe(true);
+    expect(mocks.api).toHaveBeenCalledOnce();
+  });
+  it("rejects pagination that adds query parameters", async () => {
+    mocks.api.mockResolvedValue({ value: [] });
+    await call("outlook", "search_messages", {});
+    const widened = new URL(mocks.api.mock.calls[0]![2]);
+    widened.searchParams.set("$expand", "attachments");
+
+    const result = await call("outlook", "search_messages", {
+      pageToken: Buffer.from(widened.toString()).toString("base64url"),
+    });
+
     expect(result.isError).toBe(true);
     expect(mocks.api).toHaveBeenCalledOnce();
   });
@@ -389,6 +404,7 @@ describe("Outlook Calendar Graph behavior", () => {
       .mockResolvedValueOnce({ id: "e1" });
     await call("outlook-calendar", "update_event", { eventId: "e1", ...range });
     expect(mocks.api.mock.calls[1]![1]).toBe("PATCH");
+    expect(mocks.api.mock.calls[1]![2].search).toBe("");
     expect(mocks.api.mock.calls[1]![3].body).toEqual({
       start: { dateTime: "2026-09-10T07:00:00.000", timeZone: "UTC" },
       end: { dateTime: "2026-09-10T08:00:00.000", timeZone: "UTC" },
@@ -428,7 +444,7 @@ describe("Outlook Calendar Graph behavior", () => {
           sendResponse: false,
         }),
       ),
-    ).toMatchObject({ responseRequested: false });
+    ).toMatchObject({ responseSent: false });
     expect(mocks.api.mock.calls[1]![2].pathname).toBe("/v1.0/me/events/e1/accept");
     expect(mocks.api.mock.calls[1]![3].body.sendResponse).toBe(false);
   });

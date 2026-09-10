@@ -25,6 +25,7 @@ import {
   CommandItem,
   CommandList,
   CommandShortcut,
+  defaultFilter,
 } from "@opencompany/ui/components/command";
 import {
   Dialog,
@@ -168,6 +169,7 @@ import {
   chatSummaryState,
   isChatRuntimeActive,
   textFromChatUiMessage,
+  USE_ACTION_TOOL_PART_TYPE,
 } from "@/lib/chat-ui";
 import { CHAT_OUT_OF_CREDITS_MESSAGE } from "@/lib/chat-validation";
 import {
@@ -2343,14 +2345,6 @@ export function Surface({
   }, [defaultModel]);
 
   const handleActionApproval = async ({ approvalId, action, decision }: ActionApprovalRequest) => {
-    if (decision === "accept_always") {
-      const saved = await alwaysAllowChatActionAction(action).catch(() => null);
-      if (!saved?.ok) {
-        // The one-off approval still goes through; only the standing
-        // permission failed to save.
-        toast.error("Could not save the permission. Running this action once.");
-      }
-    }
     const approvalMessage = chatMessages.findLast(
       (message) =>
         message.role === "assistant" &&
@@ -2367,14 +2361,42 @@ export function Surface({
     if (!approvalMessage || !runId) {
       throw new Error("The durable Run for this approval is no longer available.");
     }
-    await headlessTransport.resolveApproval({
-      chatId: chatInstanceKey,
-      approvalId,
-      approved: decision !== "decline",
-      runId,
-      assistantMessageId: approvalMessage.id,
-      ...(approvalMessage.metadata?.model ? { model: approvalMessage.metadata.model } : {}),
-    });
+    let allowMatchingPendingActions = false;
+    if (decision === "accept_always") {
+      const saved = await alwaysAllowChatActionAction(action).catch(() => null);
+      allowMatchingPendingActions = saved?.ok === true;
+      if (!allowMatchingPendingActions) {
+        toast.error("Could not save the permission. Running this action once.");
+      }
+    }
+
+    const approvals = new Map([[approvalId, approvalMessage]]);
+    if (allowMatchingPendingActions) {
+      for (const message of chatMessages) {
+        if (message.role !== "assistant" || message.metadata?.runId !== runId) continue;
+        for (const part of message.parts) {
+          if (
+            part.type === USE_ACTION_TOOL_PART_TYPE &&
+            part.state === "approval-requested" &&
+            part.input.action === action
+          ) {
+            approvals.set(part.approval.id, message);
+          }
+        }
+      }
+    }
+    // Each command rewrites the durable assistant message. Resolve sequentially
+    // so those writes cannot race, then reconnect after all decisions are saved.
+    for (const [pendingApprovalId, message] of approvals) {
+      await headlessTransport.resolveApproval({
+        chatId: chatInstanceKey,
+        approvalId: pendingApprovalId,
+        approved: decision !== "decline",
+        runId,
+        assistantMessageId: message.id,
+        ...(message.metadata?.model ? { model: message.metadata.model } : {}),
+      });
+    }
     await resumeStream();
   };
 
@@ -2803,7 +2825,13 @@ export function Surface({
               />
             </>
           ) : (
-            <Command className="bg-surface text-ink">
+            <Command
+              className="bg-surface text-ink"
+              // Equal match scores keep the recency order instead of letting cmdk rank by relevance.
+              filter={(value, search, keywords) =>
+                defaultFilter(value, search, keywords) > 0 ? 1 : 0
+              }
+            >
               <CommandInput
                 autoFocus
                 value={chatSearchQuery}

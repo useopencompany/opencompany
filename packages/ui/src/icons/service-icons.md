@@ -43,3 +43,12 @@ Source: [Microsoft Outlook product page](https://www.microsoft.com/en-us/microso
 The shared OutlookIcon preserves the 48 × 48 viewBox, paths, colors, gradients, and filters.
 Only SVG-to-JSX attribute translation and per-instance ids are applied. Both mail and calendar
 use the Outlook product mark.
+
+## Google Admin (verified 2026-09-10)
+
+Vendor source: https://workspace.google.com/products/admin/.
+Exact SVG: https://storage.googleapis.com/gweb-workspace-assets/uploads/7uffzv9dk4sn-1Wi9Oq1LQ3QRaQSg7l82o5-d3afb24f28626a725d5f2507b2523595-Admin.svg.
+GoogleAdminIcon retains all six paths, original blue colors, and the 96 × 96
+viewBox. The two redundant rectangular clips exactly covering the viewBox were
+removed; there are no remaining SVG IDs or references. Width and height follow
+shared icon props. Catalog, installed rows, and details share this component.

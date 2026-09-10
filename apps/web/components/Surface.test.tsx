@@ -27,6 +27,7 @@ import {
 import { CLAUDE_CHAT_DEFAULT_MODEL_ID, CODEX_CHAT_DEFAULT_MODEL_ID } from "@/lib/engine-registry";
 import { updateHeadlessChatConversation } from "@/lib/headless-chat-commands";
 import { HeadlessChatTransport } from "@/lib/headless-chat-transport";
+import { alwaysAllowChatActionAction } from "@/lib/integration-account-actions";
 import { DEFAULT_MODEL } from "@/lib/model-options";
 import { buildOnboardingKickoffPrompt, queueOnboardingKickoff } from "@/lib/onboarding-kickoff";
 import {
@@ -731,6 +732,105 @@ describe("Surface chat streaming UI", () => {
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { decision: "Always allow", save: "success", expectedIds: [0, 1] },
+    { decision: "Accept", save: "success", expectedIds: [0] },
+    { decision: "Decline", save: "success", expectedIds: [0] },
+    { decision: "Always allow", save: "failure", expectedIds: [0] },
+    { decision: "Always allow", save: "rejected", expectedIds: [0] },
+  ])(
+    "resolves pending action approvals for $decision with permission save $save",
+    async ({ decision, save, expectedIds }) => {
+      const user = userEvent.setup();
+      let finishFirstApproval: (() => void) | undefined;
+      const resolveApproval = vi
+        .spyOn(HeadlessChatTransport.prototype, "resolveApproval")
+        .mockResolvedValue()
+        .mockImplementationOnce(
+          () =>
+            new Promise<void>((resolve) => {
+              finishFirstApproval = resolve;
+            }),
+        );
+      const savePermission = vi.mocked(alwaysAllowChatActionAction);
+      if (save === "failure") {
+        savePermission.mockResolvedValueOnce({ ok: false, error: "Permission unavailable" });
+      } else if (save === "rejected") {
+        savePermission.mockRejectedValueOnce(new Error("Network unavailable"));
+      }
+      const action = "plugin:x:x.search_posts_all";
+      const pendingPart = (id: string, actionId = action) => ({
+        type: USE_ACTION_TOOL_PART_TYPE,
+        toolCallId: `tool_${id}`,
+        state: "approval-requested" as const,
+        input: { action: actionId, params: { query: id } },
+        approval: { id: `approval_${id}` },
+      });
+      render(
+        <Surface
+          tasks={[]}
+          defaultModel={DEFAULT_MODEL}
+          initialChat={{
+            id: "chat_batch_approval",
+            title: "Find founders",
+            model: DEFAULT_MODEL,
+            messages: [
+              {
+                id: "assistant_other_run",
+                role: "assistant",
+                metadata: { runId: "run_other", model: DEFAULT_MODEL },
+                parts: [pendingPart("other_run")],
+              },
+              {
+                id: "assistant_batch_approval",
+                role: "assistant",
+                metadata: { runId: "run_batch_approval", model: DEFAULT_MODEL },
+                parts: [
+                  pendingPart("batch_0"),
+                  pendingPart("batch_1"),
+                  pendingPart("other_action", "plugin:x:x.get_users_by_usernames"),
+                  {
+                    ...pendingPart("denied"),
+                    state: "approval-responded",
+                    approval: { id: "approval_denied", approved: false },
+                  },
+                ],
+              },
+            ],
+          }}
+        />,
+      );
+      await user.click(screen.getAllByRole("button", { name: decision })[0]!);
+      await waitFor(() => expect(resolveApproval).toHaveBeenCalledOnce());
+      expect(chatMock.resumeStream).not.toHaveBeenCalled();
+      await act(async () => finishFirstApproval!());
+      await waitFor(() => expect(chatMock.resumeStream).toHaveBeenCalledOnce());
+      expect(resolveApproval).toHaveBeenCalledTimes(expectedIds.length);
+      for (const index of expectedIds) {
+        expect(resolveApproval).toHaveBeenCalledWith({
+          chatId: "chat_batch_approval",
+          runId: "run_batch_approval",
+          assistantMessageId: "assistant_batch_approval",
+          model: DEFAULT_MODEL,
+          approvalId: `approval_batch_${index}`,
+          approved: decision !== "Decline",
+        });
+      }
+      if (decision === "Always allow") {
+        expect(savePermission).toHaveBeenCalledExactlyOnceWith(action);
+        expect(savePermission.mock.invocationCallOrder[0]).toBeLessThan(
+          resolveApproval.mock.invocationCallOrder[0]!,
+        );
+      } else {
+        expect(savePermission).not.toHaveBeenCalled();
+      }
+      expect(resolveApproval.mock.invocationCallOrder.at(-1)).toBeLessThan(
+        chatMock.resumeStream.mock.invocationCallOrder[0]!,
+      );
+      expect(chatMock.sendMessage).not.toHaveBeenCalled();
+    },
+  );
+
   it("starts a background chat from the main composer when the message starts with ampersand", async () => {
     const user = userEvent.setup();
     let resolveFirstCompletion: (() => void) | null = null;
@@ -792,7 +892,7 @@ describe("Surface chat streaming UI", () => {
       content: "Research Q3",
       model: DEFAULT_MODEL,
     });
-    expect(body.clientConversationId).toMatch(/^goat_chat_/);
+    expect(body.clientConversationId).toMatch(/^conversation_/);
     expect(body.clientMessageId).toMatch(/^ui_background_/);
     expect(screen.getByTestId("optimistic-chat-summaries")).toHaveTextContent(
       `${body.clientConversationId}:Research Q3`,
@@ -993,7 +1093,7 @@ describe("Surface chat streaming UI", () => {
         settings: { reasoningEffort: "xhigh" },
       },
     });
-    expect(body.clientConversationId).toMatch(/^goat_chat_/);
+    expect(body.clientConversationId).toMatch(/^conversation_/);
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     expect(historyMock.replaceState).not.toHaveBeenCalled();
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
@@ -2305,7 +2405,7 @@ describe("Surface chat streaming UI", () => {
     expect(chatMock.sendMessage).toHaveBeenCalledWith({ text: "Clone my repo" });
     const body = chatMock.preparedRequestBodies.at(-1) as Record<string, unknown>;
     expect(body).toMatchObject({
-      newSessionId: expect.stringMatching(/^goat_chat_/),
+      newSessionId: expect.stringMatching(/^conversation_/),
       engine: {
         type: "codex",
         schemaVersion: 1,
@@ -2406,7 +2506,7 @@ describe("Surface chat streaming UI", () => {
 
     expect(chatMock.sendMessage).toHaveBeenCalledWith({ text: "Inspect this repository" });
     expect(chatMock.preparedRequestBodies.at(-1)).toMatchObject({
-      newSessionId: expect.stringMatching(/^goat_chat_/),
+      newSessionId: expect.stringMatching(/^conversation_/),
       model,
       engine: {
         type: "claude_code",
@@ -3036,7 +3136,7 @@ describe("Surface chat streaming UI", () => {
     expect(chatMock.preparedRequestBodies).toHaveLength(2);
     expect(chatMock.preparedRequestBodies[0]).toMatchObject({
       sessionId: null,
-      newSessionId: expect.stringMatching(/^goat_chat_/),
+      newSessionId: expect.stringMatching(/^conversation_/),
       model: DEFAULT_MODEL,
     });
     expect(chatMock.preparedRequestBodies[1]).toMatchObject({
@@ -3108,7 +3208,7 @@ describe("Surface chat streaming UI", () => {
     );
     const body = chatMock.preparedRequestBodies.at(-1) as { newSessionId: string };
     expect(body).toMatchObject({
-      newSessionId: expect.stringMatching(/^goat_chat_/),
+      newSessionId: expect.stringMatching(/^conversation_/),
       model: "openai/gpt-6-astra",
       engine: { type: "codex", schemaVersion: 1 },
     });
@@ -3181,7 +3281,7 @@ describe("Surface chat streaming UI", () => {
     );
     const body = chatMock.preparedRequestBodies.at(-1);
     expect(body).toMatchObject({
-      newSessionId: expect.stringMatching(/^goat_chat_/),
+      newSessionId: expect.stringMatching(/^conversation_/),
       model: CLAUDE_CHAT_DEFAULT_MODEL_ID,
       engine: { type: "claude_code", schemaVersion: 1 },
     });
@@ -4394,7 +4494,7 @@ describe("Surface chat streaming UI", () => {
     expect(body).toMatchObject({
       content: "Research Q3",
     });
-    expect(body.clientConversationId).toMatch(/^goat_chat_/);
+    expect(body.clientConversationId).toMatch(/^conversation_/);
   });
 
   it("routes a dropped file only to the Cmd+K composer while the compose view is open", async () => {
@@ -4467,7 +4567,7 @@ describe("Surface chat streaming UI", () => {
       content: "Clone my repo",
       engine: { type: "codex", schemaVersion: 1 },
     });
-    expect(body.clientConversationId).toMatch(/^goat_chat_/);
+    expect(body.clientConversationId).toMatch(/^conversation_/);
     // Never adopted into the visible thread and never navigated to.
     expect(historyMock.replaceState).not.toHaveBeenCalled();
     expect(routerMock.push).not.toHaveBeenCalled();
@@ -4638,6 +4738,49 @@ describe("Surface chat streaming UI", () => {
     await user.click(result);
 
     expect(routerMock.push).toHaveBeenCalledWith("/chat/chat_1");
+  });
+
+  it("keeps Cmd+K matches in recency order while searching and after clearing", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={null}
+        recentChats={[
+          codexChatSummary({
+            id: "chat_newer",
+            title: "Plans for spring",
+            updatedAt: "2026-08-10T12:00:00.000Z",
+          }),
+          codexChatSummary({
+            id: "chat_older",
+            title: "Planning",
+            updatedAt: "2026-08-09T12:00:00.000Z",
+          }),
+        ]}
+      />,
+    );
+
+    await user.keyboard("{Meta>}k{/Meta}");
+    const dialog = screen.getByRole("dialog");
+    const input = within(dialog).getByRole("combobox");
+    const recentTitles = () =>
+      within(dialog)
+        .getAllByRole("option")
+        .filter((option) => option.dataset.value !== "start-new-chat")
+        .map((option) => option.querySelector("p")?.textContent);
+
+    expect(recentTitles()).toEqual(["Plans for spring", "Planning"]);
+    await user.type(input, "planning");
+    expect(recentTitles()).toEqual(["Plans for spring", "Planning"]);
+    await user.clear(input);
+    await user.type(input, "no matching work");
+    expect(within(dialog).getByText("No matching tasks or chats.")).toBeInTheDocument();
+    expect(within(dialog).getAllByRole("option")).toHaveLength(1);
+    await user.clear(input);
+    expect(recentTitles()).toEqual(["Plans for spring", "Planning"]);
   });
 
   it("mixes archived chats into the Cmd+K palette by recency and restores them", async () => {

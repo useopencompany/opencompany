@@ -6,28 +6,29 @@ import artifact0 from "./convex.json";
 import artifact3 from "./fathom.json";
 import artifact4 from "./github.json";
 import artifact5 from "./gmail.json";
-import artifact7 from "./google-calendar.json";
-import artifact8 from "./google-drive.json";
+import artifact7 from "./google-admin.json";
+import artifact8 from "./google-calendar.json";
+import artifact9 from "./google-drive.json";
 import artifact6 from "./granola.json";
-import artifact9 from "./hubspot.json";
-import artifact10 from "./infisical.json";
-import artifact11 from "./jamie.json";
-import artifact12 from "./latitude.json";
-import artifact13 from "./linear.json";
-import artifact14 from "./neon.json";
-import artifact15 from "./notion.json";
-import artifact26 from "./outlook.json";
-import artifact27 from "./outlook-calendar.json";
-import artifact16 from "./posthog.json";
-import artifact18 from "./render.json";
-import artifact17 from "./resend.json";
-import artifact20 from "./signoz.json";
-import artifact21 from "./slack.json";
-import artifact23 from "./stripe.json";
-import artifact22 from "./supabase.json";
-import artifact19 from "./vercel.json";
-import artifact24 from "./x.json";
-import artifact25 from "./yc-advise.json";
+import artifact10 from "./hubspot.json";
+import artifact11 from "./infisical.json";
+import artifact12 from "./jamie.json";
+import artifact13 from "./latitude.json";
+import artifact14 from "./linear.json";
+import artifact15 from "./neon.json";
+import artifact16 from "./notion.json";
+import artifact17 from "./outlook.json";
+import artifact18 from "./outlook-calendar.json";
+import artifact19 from "./posthog.json";
+import artifact21 from "./render.json";
+import artifact20 from "./resend.json";
+import artifact23 from "./signoz.json";
+import artifact24 from "./slack.json";
+import artifact26 from "./stripe.json";
+import artifact25 from "./supabase.json";
+import artifact22 from "./vercel.json";
+import artifact27 from "./x.json";
+import artifact28 from "./yc-advise.json";
 
 export const OFFICIAL_PLUGIN_ARTIFACTS = {
   convex: artifact0,
@@ -37,25 +38,26 @@ export const OFFICIAL_PLUGIN_ARTIFACTS = {
   github: artifact4,
   gmail: artifact5,
   granola: artifact6,
-  "google-calendar": artifact7,
-  "google-drive": artifact8,
-  hubspot: artifact9,
-  infisical: artifact10,
-  jamie: artifact11,
-  latitude: artifact12,
-  linear: artifact13,
-  neon: artifact14,
-  notion: artifact15,
-  posthog: artifact16,
-  resend: artifact17,
-  render: artifact18,
-  vercel: artifact19,
-  signoz: artifact20,
-  slack: artifact21,
-  supabase: artifact22,
-  stripe: artifact23,
-  x: artifact24,
-  "yc-advise": artifact25,
-  outlook: artifact26,
-  "outlook-calendar": artifact27,
+  "google-admin": artifact7,
+  "google-calendar": artifact8,
+  "google-drive": artifact9,
+  hubspot: artifact10,
+  infisical: artifact11,
+  jamie: artifact12,
+  latitude: artifact13,
+  linear: artifact14,
+  neon: artifact15,
+  notion: artifact16,
+  outlook: artifact17,
+  "outlook-calendar": artifact18,
+  posthog: artifact19,
+  resend: artifact20,
+  render: artifact21,
+  vercel: artifact22,
+  signoz: artifact23,
+  slack: artifact24,
+  supabase: artifact25,
+  stripe: artifact26,
+  x: artifact27,
+  "yc-advise": artifact28,
 };

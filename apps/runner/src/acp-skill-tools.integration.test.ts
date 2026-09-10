@@ -166,6 +166,32 @@ describe("external engine Skill persistence through the MCP route", () => {
         });
         expect(stale.isError).toBe(true);
         expect(JSON.stringify(stale.content)).toContain("changed since you opened it");
+        const renamed = await client.callTool({
+          name: "edit_workspace_skill",
+          arguments: {
+            name: savedSkill.id,
+            newName: "renamed-skill",
+            expectedBundleId: savedSkill.bundleId,
+          },
+        });
+        expect(renamed.isError, JSON.stringify(renamed.content)).not.toBe(true);
+        expect(JSON.parse((renamed.content as Array<{ text: string }>)[0]!.text)).toMatchObject({
+          id: savedSkill.id,
+          name: "renamed-skill",
+          command: "/renamed-skill",
+        });
+        const renamedRead = await client.callTool({
+          name: "workspace_skills",
+          arguments: { command: "read", name: "renamed-skill" },
+        });
+        expect(JSON.parse((renamedRead.content as Array<{ text: string }>)[0]!.text)).toMatchObject(
+          {
+            id: savedSkill.id,
+            name: "renamed-skill",
+            instructions: "Revised steps.\n",
+            description: "Revised description.",
+          },
+        );
         const created = await client.callTool({
           name: "create_workspace_skill",
           arguments: {
@@ -181,6 +207,7 @@ describe("external engine Skill persistence through the MCP route", () => {
         expect(saved.rows.map(({ body }) => body)).toEqual([
           "New steps.\n",
           "Original steps.\n",
+          "Revised steps.\n",
           "Revised steps.\n",
         ]);
       } finally {

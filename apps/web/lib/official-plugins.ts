@@ -9,6 +9,7 @@ export type OfficialMcpPluginName =
   | "granola"
   | "outlook"
   | "outlook-calendar"
+  | "google-admin"
   | "google-calendar"
   | "google-drive"
   | "hubspot"
@@ -60,6 +61,7 @@ export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
     | "granola"
     | "outlook"
     | "outlook-calendar"
+    | "google_admin"
     | "google_calendar"
     | "google_drive"
     | "hubspot"
@@ -201,6 +203,18 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
       "/api/integrations/outlook-calendar/start?returnTo=/settings/plugins/outlook-calendar",
     accountDescription:
       "Connect a work, school, or personal Microsoft account. The most recently connected account powers calendar tools. Colleague availability requires Microsoft 365.",
+  },
+  "google-admin": {
+    name: "google-admin",
+    kind: "mcp",
+    label: "Google Admin",
+    description: "Create Workspace user accounts, set up groups, and add group members.",
+    category: "productivity",
+    source: OFFICIAL_PLUGIN_SOURCES["google-admin"],
+    connectionProvider: "google_admin",
+    connectHref: "/api/integrations/google-admin/start?returnTo=/settings/plugins/google-admin",
+    accountDescription:
+      "Connect a Google Workspace administrator with user and group management privileges. The most recently connected account powers these tools. New users need a password reset and sign-in details from Google Admin.",
   },
   "google-calendar": {
     name: "google-calendar",

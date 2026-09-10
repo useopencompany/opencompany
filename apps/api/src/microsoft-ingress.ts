@@ -84,12 +84,19 @@ export function createMicrosoftIngress(input: {
           scopes: tokens.scope.split(/\s+/u),
           db: input.db,
         });
-        await captureConnectionAddedAnalytics({
-          connectionId: connection.integrationId,
-          userWorkosId: session.userId,
-          workspaceId: session.workspaceId,
-          provider,
-        });
+        try {
+          await captureConnectionAddedAnalytics({
+            connectionId: connection.integrationId,
+            userWorkosId: session.userId,
+            workspaceId: session.workspaceId,
+            provider,
+          });
+        } catch {
+          logger.warn("Microsoft connection analytics failed", {
+            event: "opencompany.microsoft_connection_analytics_failed",
+            provider,
+          });
+        }
         try {
           await input.refreshPluginRegistrations?.({
             provider,

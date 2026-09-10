@@ -28,7 +28,7 @@ export async function loadMicrosoftIntegration(input: {
         ne(integrations.status, "disconnected"),
       ),
     )
-    .orderBy(desc(integrations.updatedAt), desc(integrations.id))
+    .orderBy(desc(integrations.createdAt), desc(integrations.id))
     .limit(1);
   return row;
 }

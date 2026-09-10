@@ -6,6 +6,7 @@ export type ActionProviderId =
   | "custom_mcp"
   | "slack"
   | "gmail"
+  | "google_admin"
   | "google_calendar"
   | "outlook"
   | "outlook-calendar"

@@ -207,7 +207,9 @@ async function refreshGooglePluginAfterConnection(
           ? "goat.google_drive_plugin_reconnect_refresh_failed"
           : provider === "gmail"
             ? "goat.gmail_plugin_reconnect_refresh_failed"
-            : "goat.google_calendar_plugin_reconnect_refresh_failed",
+            : provider === "google_admin"
+              ? "goat.google_admin_plugin_reconnect_refresh_failed"
+              : "goat.google_calendar_plugin_reconnect_refresh_failed",
       provider,
       error_message: error instanceof Error ? error.message : String(error),
     });

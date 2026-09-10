@@ -10,6 +10,7 @@ import { BrowserProfileApplicationService } from "@opencompany/agent/browser-pro
 import { createCustomMcpService } from "@opencompany/agent/custom-mcp";
 import { createConvexMcpService } from "@opencompany/agent/integrations/convex-mcp-server";
 import { createGmailMcpService } from "@opencompany/agent/integrations/gmail-mcp-server";
+import { createGoogleAdminMcpService } from "@opencompany/agent/integrations/google-admin-mcp-server";
 import { createGoogleCalendarMcpService } from "@opencompany/agent/integrations/google-calendar-mcp-server";
 import { getAvailableHarnessTools } from "@opencompany/agent/integrations/google-data";
 import { createGoogleDriveMcpService } from "@opencompany/agent/integrations/google-drive-mcp-server";
@@ -267,6 +268,10 @@ const app = createApiApp({
           db: database.db,
           internalSecret: process.env.API_INTERNAL_TOKEN.trim(),
         }),
+        googleAdminMcp: createGoogleAdminMcpService({
+          db: database.db,
+          internalSecret: process.env.API_INTERNAL_TOKEN.trim(),
+        }),
         googleCalendarMcp: createGoogleCalendarMcpService({
           db: database.db,
           internalSecret: process.env.API_INTERNAL_TOKEN.trim(),
@@ -347,7 +352,9 @@ const app = createApiApp({
             ? "gmail"
             : provider === "google_drive"
               ? "google-drive"
-              : "google-calendar",
+              : provider === "google_admin"
+                ? "google-admin"
+                : "google-calendar",
       }),
   }),
   slackIngress: createSlackIngress({

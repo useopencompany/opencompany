@@ -48,6 +48,12 @@ import {
   loadGmailMcpWorkerConnection,
 } from "./integrations/gmail-mcp";
 import {
+  GOOGLE_ADMIN_MCP_ENDPOINT_URL,
+  getGoogleAdminMcpIntegrationState,
+  googleAdminMcpRuntimeEndpointUrl,
+  loadGoogleAdminMcpWorkerConnection,
+} from "./integrations/google-admin-mcp";
+import {
   GOOGLE_CALENDAR_MCP_ENDPOINT_URL,
   getGoogleCalendarMcpIntegrationState,
   googleCalendarMcpRuntimeEndpointUrl,
@@ -215,6 +221,12 @@ const providerBindings = {
     getState: (identity: Identity) => getMicrosoftMcpIntegrationState("outlook-calendar", identity),
     loadConnection: (input: Parameters<typeof loadMicrosoftMcpWorkerConnection>[1]) =>
       loadMicrosoftMcpWorkerConnection("outlook-calendar", input),
+  },
+  "google-admin": {
+    provider: "google_admin",
+    endpointUrl: GOOGLE_ADMIN_MCP_ENDPOINT_URL,
+    getState: getGoogleAdminMcpIntegrationState,
+    loadConnection: loadGoogleAdminMcpWorkerConnection,
   },
   "google-calendar": {
     provider: "google_calendar",
@@ -551,6 +563,10 @@ function bindRegistration(
     loadConnection = (input) =>
       loadMicrosoftMcpWorkerConnection(provider, { ...input, registrationId: record.id });
     server = { ...record.server, url: microsoftMcpRuntimeEndpointUrl(provider) };
+  } else if (record.pluginName === "google-admin") {
+    loadConnection = (input) =>
+      loadGoogleAdminMcpWorkerConnection({ ...input, registrationId: record.id });
+    server = { ...record.server, url: googleAdminMcpRuntimeEndpointUrl() };
   } else if (record.pluginName === "google-calendar") {
     loadConnection = (input) =>
       loadGoogleCalendarMcpWorkerConnection({ ...input, registrationId: record.id });

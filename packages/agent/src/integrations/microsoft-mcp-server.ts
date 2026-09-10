@@ -72,8 +72,10 @@ export function createMicrosoftMcpService(
           params?.name === payload.operation.tool);
       if (!allowed)
         return new Response("This ticket does not authorize the operation.", { status: 403 });
-      const authorization = await authorizeMicrosoftTicket(input, payload);
-      if (authorization) return authorization;
+      if (!handshake) {
+        const authorization = await authorizeMicrosoftTicket(input, payload);
+        if (authorization) return authorization;
+      }
       const context: MicrosoftToolContext = {
         connection: {
           provider: input.provider,
@@ -244,13 +246,7 @@ export async function graphPage(context: MicrosoftToolContext, base: URL, pageTo
       throw new Error("Invalid Microsoft pagination token.");
     }
     assertGraphUrl(url);
-    // A token can continue only this collection/query, never change the resource or filter.
-    if (url.pathname !== base.pathname)
-      throw new Error("Pagination token belongs to a different collection.");
-    for (const [key, value] of base.searchParams) {
-      if (key !== "$top" && url.searchParams.get(key) !== value)
-        throw new Error("Pagination token belongs to a different query.");
-    }
+    assertPaginationUrl(base, url, "Pagination token");
     url.searchParams.set("$top", base.searchParams.get("$top") ?? "25");
   }
   const result = graphRecord(await callGraph(context, "GET", url));
@@ -263,9 +259,28 @@ export async function graphPage(context: MicrosoftToolContext, base: URL, pageTo
       throw new Error("Microsoft Graph returned invalid pagination.");
     const nextUrl = new URL(next);
     assertGraphUrl(nextUrl);
-    if (nextUrl.pathname !== base.pathname)
-      throw new Error("Microsoft Graph returned an unexpected collection.");
+    assertPaginationUrl(base, nextUrl, "Microsoft Graph pagination");
     nextPageToken = Buffer.from(next).toString("base64url");
   }
   return { items: result.value.map(graphRecord), nextPageToken };
+}
+
+const MICROSOFT_CONTINUATION_QUERY_KEYS = new Set(["$skip", "$skiptoken", "$top"]);
+
+function assertPaginationUrl(base: URL, candidate: URL, source: string) {
+  if (candidate.pathname !== base.pathname)
+    throw new Error(`${source} belongs to a different collection.`);
+
+  const candidateKeys = new Set<string>();
+  for (const key of candidate.searchParams.keys()) {
+    if (candidateKeys.has(key)) throw new Error(`${source} contains duplicate query parameters.`);
+    candidateKeys.add(key);
+    if (!base.searchParams.has(key) && !MICROSOFT_CONTINUATION_QUERY_KEYS.has(key))
+      throw new Error(`${source} belongs to a different query.`);
+  }
+
+  for (const [key, value] of base.searchParams) {
+    if (key !== "$top" && candidate.searchParams.get(key) !== value)
+      throw new Error(`${source} belongs to a different query.`);
+  }
 }

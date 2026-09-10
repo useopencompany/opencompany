@@ -1,4 +1,4 @@
-import { z } from "zod";
+import * as z from "zod";
 import type { ChatMention } from "@/lib/chat-ui";
 
 export type ChatComposerDraft = { input: string; mentions: ChatMention[] };

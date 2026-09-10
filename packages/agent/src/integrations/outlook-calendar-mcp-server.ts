@@ -199,21 +199,16 @@ export function createOutlookCalendarMcpService(input: MicrosoftMcpServiceInput)
         { ...calendarSchema, ...rangeSchema, ...editableSchema },
         async (args) => {
           validateRange(args);
-          return callGraph(
-            context,
-            "POST",
-            graphUrl(`${calendarPath(args.calendarId)}/events`, { $select: EVENT_FIELDS }),
-            {
-              ...eventFields(args),
-              start: graphTime(args.startTime),
-              end: graphTime(args.endTime),
-            },
-          );
+          return callGraph(context, "POST", graphUrl(`${calendarPath(args.calendarId)}/events`), {
+            ...eventFields(args),
+            start: graphTime(args.startTime),
+            end: graphTime(args.endTime),
+          });
         },
       );
       register(
         "update_event",
-        "Update an existing Outlook event by its original id, preserving omitted fields. Reschedule a timed event by providing both startTime and endTime with UTC offsets. Attendee changes can send updates. For recurring meetings use an occurrence id from list_events; changing an entire series or rescheduling all-day events is not supported.",
+        "Update an existing Outlook event by its original id, preserving omitted fields. The attendees field replaces the full attendee list, so read the event first and preserve everyone the user wants to keep. Reschedule a timed event by providing both startTime and endTime with UTC offsets. Attendee changes can send updates. For recurring meetings use an occurrence id from list_events; changing an entire series or rescheduling all-day events is not supported.",
         {
           eventId: graphIdSchema,
           subject: editableSchema.subject.optional(),
@@ -237,7 +232,7 @@ export function createOutlookCalendarMcpService(input: MicrosoftMcpServiceInput)
               throw new Error("Reschedule all-day events in Outlook.");
             validateRange({ startTime, endTime });
           }
-          return callGraph(context, "PATCH", url, {
+          return callGraph(context, "PATCH", graphUrl(`events/${graphId(eventId)}`), {
             ...eventFields(fields),
             ...(startTime && endTime
               ? { start: graphTime(startTime), end: graphTime(endTime) }
@@ -282,7 +277,7 @@ export function createOutlookCalendarMcpService(input: MicrosoftMcpServiceInput)
           return {
             eventId: args.eventId,
             response: args.response,
-            responseRequested: args.sendResponse ?? true,
+            responseSent: args.sendResponse ?? true,
           };
         },
       );

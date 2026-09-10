@@ -14,6 +14,7 @@ import {
   type WorkflowStep,
   type WorkflowTrigger,
 } from "@opencompany/core";
+import { newResourceId } from "@opencompany/core/resource-ids";
 import { type SQL, sql } from "drizzle-orm";
 import { stringifyPostgresJson } from "./postgres-json";
 
@@ -83,9 +84,9 @@ type CreateReservationRow = {
 
 const defaultIds: RepositoryIds = {
   command: () => `goat_automation_command_${randomUUID()}`,
-  workflow: () => `goat_wf_${randomUUID()}`,
-  taskSchedule: () => `goat_task_schedule_${randomUUID()}`,
-  scheduleRun: (kind) => `goat_${kind}_schedule_run_${randomUUID()}`,
+  workflow: () => newResourceId("workflow"),
+  taskSchedule: () => newResourceId("task_schedule"),
+  scheduleRun: (kind) => newResourceId(`${kind}_schedule_run`),
 };
 
 export class PostgresWorkflowRepository implements WorkflowRepository {

@@ -294,6 +294,7 @@ describe("Electric read models", () => {
     expect(requestedUrl?.searchParams.get("params[2]")).toBe("workspace_1");
     expect(requestedUrl?.searchParams.get("params[3]")?.split(",")).toEqual([
       "gmail",
+      "google_admin",
       "google_calendar",
       "outlook",
       "outlook-calendar",

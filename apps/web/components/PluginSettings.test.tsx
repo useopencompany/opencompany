@@ -8,6 +8,7 @@ import {
   importHeadlessPlugin,
   previewHeadlessPluginImport,
 } from "@/lib/headless-knowledge-commands";
+import { type IntegrationState, integrationStateFromRows } from "@/lib/integration-state";
 import {
   ATTIO_PLUGIN_SOURCE,
   BETTERSTACK_PLUGIN_SOURCE,
@@ -38,8 +39,13 @@ import {
 
 const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
 const toasts = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
+const appData = vi.hoisted(() => ({ integrations: null as unknown as IntegrationState }));
 
 vi.mock("next/navigation", () => ({ useRouter: () => router }));
+vi.mock("@/components/AppDataProvider", () => ({
+  useAppData: () => appData,
+  useAppDataOptional: () => appData,
+}));
 vi.mock("@opencompany/analytics/product/client", () => ({ captureProductEvent: vi.fn() }));
 vi.mock("@opencompany/ui/components/sonner", () => ({ toast: toasts }));
 vi.mock("@/lib/headless-knowledge-commands", () => ({
@@ -184,8 +190,42 @@ const ycAdvisePreview = {
     ],
   },
 } as const satisfies PluginImportPreviewDto;
+function integrationsWithConnectedLinear(): IntegrationState {
+  const base = integrationStateFromRows([]);
+  return {
+    ...base,
+    linear: {
+      ...base.linear,
+      connected: true,
+      status: "connected",
+      integrationId: "gint_linear_tools",
+      accountName: "Linear tool access",
+    },
+  };
+}
+
+function installedOfficialPlugin(name: string) {
+  return {
+    id: `plugin_${name}`,
+    name,
+    status: "enabled" as const,
+    manifest: { name, description: `${name} workflows.` },
+    source: plugin.source,
+    integrity: plugin.integrity,
+    installReport: plugin.installReport,
+    mcpApprovedIntegrity: plugin.mcpApprovedIntegrity,
+    createdAt: plugin.createdAt,
+    updatedAt: plugin.updatedAt,
+    archivedAt: plugin.archivedAt,
+    fileCount: 1,
+    skillCount: 1,
+    stdioServerCount: 1,
+  };
+}
+
 describe("Plugin settings", () => {
   beforeEach(() => {
+    appData.integrations = integrationsWithConnectedLinear();
     router.push.mockReset();
     router.refresh.mockReset();
     toasts.error.mockReset();
@@ -252,6 +292,50 @@ describe("Plugin settings", () => {
     expect(screen.queryByRole("region", { name: "Featured" })).not.toBeInTheDocument();
   });
 
+  it("warns that an enabled plugin still needs its account connection", () => {
+    appData.integrations = integrationStateFromRows([]);
+    render(
+      <PluginsSettings plugins={[installedOfficialPlugin("linear")]} canEdit workspaceId="w1" />,
+    );
+
+    expect(screen.getByText("Requires connection")).toBeInTheDocument();
+    expect(screen.queryByText("Enabled")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Connect" })).toHaveAttribute(
+      "href",
+      "/settings/plugins/linear",
+    );
+    expect(screen.queryByRole("link", { name: "Manage" })).toBeNull();
+  });
+
+  it("keeps a disabled plugin disabled rather than warning about its connection", () => {
+    appData.integrations = integrationStateFromRows([]);
+    render(
+      <PluginsSettings
+        plugins={[{ ...installedOfficialPlugin("linear"), status: "disabled" as const }]}
+        canEdit
+        workspaceId="w1"
+      />,
+    );
+
+    expect(screen.getByText("Disabled")).toBeInTheDocument();
+    expect(screen.queryByText("Requires connection")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Manage" })).toBeInTheDocument();
+  });
+
+  it("stays green for a plugin that has no connection to make", async () => {
+    const user = userEvent.setup();
+    appData.integrations = integrationStateFromRows([]);
+    render(
+      <PluginsSettings plugins={[installedOfficialPlugin("vercel")]} canEdit workspaceId="w1" />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Show 1 installed plugin" }));
+
+    const installed = screen.getByRole("region", { name: "Installed" });
+    expect(within(installed).getByText("Enabled")).toBeInTheDocument();
+    expect(within(installed).queryByText("Requires connection")).not.toBeInTheDocument();
+  });
+
   it("offers one-click installation for every uninstalled official package", async () => {
     const user = userEvent.setup();
     render(<PluginsSettings plugins={[]} canEdit workspaceId="workspace_1" />);
@@ -309,10 +393,7 @@ describe("Plugin settings", () => {
       "/settings/plugins/slack",
     );
     await user.click(screen.getByRole("button", { name: "All" }));
-    expect(screen.getByRole("link", { name: /google calendar/i })).toHaveAttribute(
-      "href",
-      "/settings/plugins/google-calendar",
-    );
+
     expect(screen.getByRole("link", { name: /infisical/i })).toHaveAttribute(
       "href",
       "/settings/plugins/infisical",
@@ -338,6 +419,14 @@ describe("Plugin settings", () => {
     expect(screen.getByRole("link", { name: /outlook calendar/i })).toHaveAttribute(
       "href",
       "/settings/plugins/outlook-calendar",
+    );
+    expect(screen.getByRole("link", { name: /google drive/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/google-drive",
+    );
+    expect(screen.getByRole("link", { name: /google calendar/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/google-calendar",
     );
     expect(screen.getByRole("link", { name: /jamie/i })).toHaveAttribute(
       "href",
@@ -512,7 +601,7 @@ describe("Plugin settings", () => {
     expect(screen.getByRole("region", { name: "Featured" })).toBeInTheDocument();
   });
 
-  it("installs from the overview and opens the installed plugin page", async () => {
+  it("installs from the overview and refreshes the router cache after opening the plugin", async () => {
     const user = userEvent.setup();
     let finishPreview: ((preview: PluginImportPreviewDto) => void) | undefined;
     vi.mocked(previewHeadlessPluginImport).mockImplementation(
@@ -530,6 +619,8 @@ describe("Plugin settings", () => {
 
     expect(screen.getByRole("button", { name: "Installing…" })).toBeDisabled();
     expect(screen.getAllByRole("button", { name: "Install" })[0]).toBeDisabled();
+    expect(router.push).not.toHaveBeenCalled();
+    expect(router.refresh).not.toHaveBeenCalled();
 
     finishPreview?.(officialPreview);
 
@@ -543,33 +634,39 @@ describe("Plugin settings", () => {
       expectedIntegrity: officialPreview.integrity,
     });
     expect(toasts.success).toHaveBeenCalledWith("Linear installed.");
+    expect(router.refresh).toHaveBeenCalledOnce();
+    expect(router.push).toHaveBeenCalledBefore(router.refresh);
   });
 
-  it("keeps the user on the overview and allows a retry when installation fails", async () => {
-    const user = userEvent.setup();
-    vi.mocked(previewHeadlessPluginImport).mockRejectedValue(
-      new Error("Package source unavailable."),
-    );
+  it.each(["preview", "import"] as const)(
+    "keeps the catalog cache and allows a retry when %s fails",
+    async (stage) => {
+      const user = userEvent.setup();
+      vi.mocked(
+        stage === "preview" ? previewHeadlessPluginImport : importHeadlessPlugin,
+      ).mockRejectedValue(new Error("Package source unavailable."));
 
-    render(<PluginsSettings plugins={[]} canEdit workspaceId="workspace_1" />);
+      render(<PluginsSettings plugins={[]} canEdit workspaceId="workspace_1" />);
 
-    const linearCard = screen.getByRole("link", { name: /linear/i }).closest("li");
-    expect(linearCard).not.toBeNull();
-    const installButton = within(linearCard as HTMLElement).getByRole("button", {
-      name: "Install",
-    });
-    await user.click(installButton);
+      const linearCard = screen.getByRole("link", { name: /linear/i }).closest("li");
+      expect(linearCard).not.toBeNull();
+      const installButton = within(linearCard as HTMLElement).getByRole("button", {
+        name: "Install",
+      });
+      await user.click(installButton);
 
-    await waitFor(() => {
-      expect(toasts.error).toHaveBeenCalledWith(
-        "Couldn't install Linear. Package source unavailable.",
-      );
-    });
-    expect(router.push).not.toHaveBeenCalled();
-    await waitFor(() => {
-      expect(installButton).toBeEnabled();
-    });
-  });
+      await waitFor(() => {
+        expect(toasts.error).toHaveBeenCalledWith(
+          "Couldn't install Linear. Package source unavailable.",
+        );
+      });
+      expect(router.push).not.toHaveBeenCalled();
+      expect(router.refresh).not.toHaveBeenCalled();
+      await waitFor(() => {
+        expect(installButton).toBeEnabled();
+      });
+    },
+  );
 
   it("previews and installs an official skills-only package from its detail page", async () => {
     vi.mocked(previewHeadlessPluginImport).mockResolvedValue(ycAdvisePreview);

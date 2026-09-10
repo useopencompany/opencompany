@@ -61,6 +61,7 @@ export function createOutlookMcpService(
           description,
           schema,
           capability: OUTLOOK_TOOL_CAPABILITIES[name],
+          destructive: name === "trash_message",
           execute,
         });
       register(
@@ -220,7 +221,7 @@ export function createOutlookMcpService(
           const recipients = (addresses: string[]) =>
             addresses.map((address) => ({ emailAddress: { address } }));
           return compactMessage(
-            await callGraph(context, "POST", graphUrl("messages", { $select: MESSAGE_FIELDS }), {
+            await callGraph(context, "POST", graphUrl("messages"), {
               subject: args.subject,
               body: { contentType: "Text", content: args.body },
               toRecipients: recipients(args.to),
@@ -247,12 +248,9 @@ export function createOutlookMcpService(
           ),
       );
       const move = (messageId: string, destinationId: string) =>
-        callGraph(
-          context,
-          "POST",
-          graphUrl(`messages/${graphId(messageId)}/move`, { $select: MESSAGE_FIELDS }),
-          { destinationId },
-        );
+        callGraph(context, "POST", graphUrl(`messages/${graphId(messageId)}/move`), {
+          destinationId,
+        });
       register(
         "move_message",
         "Move a message to an Outlook folder. Moving can change the message id; use the returned id for subsequent actions.",
@@ -279,12 +277,9 @@ export function createOutlookMcpService(
           categories: z.array(z.string().trim().min(1).max(255)).max(50),
         },
         (args) =>
-          callGraph(
-            context,
-            "PATCH",
-            graphUrl(`messages/${graphId(args.messageId)}`, { $select: MESSAGE_FIELDS }),
-            { categories: [...new Set(args.categories)] },
-          ),
+          callGraph(context, "PATCH", graphUrl(`messages/${graphId(args.messageId)}`), {
+            categories: [...new Set(args.categories)],
+          }),
       );
     },
   });

@@ -45,10 +45,16 @@ export function isMicrosoftIntegrationConfigured() {
 }
 
 export function sanitizeMicrosoftReturnTo(value: string) {
-  if (!value.startsWith("/") || value.startsWith("//") || /[\\\u0000-\u001f]/u.test(value))
+  if (
+    value.length > 2048 ||
+    !value.startsWith("/") ||
+    value.startsWith("//") ||
+    /[\\\u0000-\u001f]/u.test(value)
+  )
     return "/settings";
   const url = new URL(value, "https://opencompany.invalid");
-  return `${url.pathname}${url.search}`;
+  const returnTo = `${url.pathname}${url.search}`;
+  return returnTo.length <= 2048 ? returnTo : "/settings";
 }
 
 export function createMicrosoftIntegrationState(input: {

@@ -1,3 +1,4 @@
+import { captureConnectionAddedAnalytics } from "@opencompany/agent/integrations/analytics";
 import {
   createMicrosoftIntegrationState,
   exchangeMicrosoftCode,
@@ -110,6 +111,14 @@ describe("Microsoft OAuth ingress", () => {
       "reason=not_configured",
     );
   });
+  it("sanitizes an overlong return path before creating OAuth state", async () => {
+    const request = new Request(
+      `https://api.example.com/integrations/outlook/start?returnTo=/${"a".repeat(3000)}`,
+    );
+    const response = await ingress().start("outlook", request);
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toContain("login.microsoftonline.com");
+  });
   it("rejects provider and session substitution before exchanging a code", async () => {
     for (const req of [
       callback("outlook", "other-user"),
@@ -153,5 +162,14 @@ describe("Microsoft OAuth ingress", () => {
     expect((await ingress().callback("outlook", callback())).headers.get("location")).toContain(
       "setup=connected",
     );
+  });
+  it("keeps a successful connection when analytics fails", async () => {
+    vi.mocked(captureConnectionAddedAnalytics).mockRejectedValueOnce(
+      new Error("analytics unavailable"),
+    );
+    expect((await ingress().callback("outlook", callback())).headers.get("location")).toContain(
+      "setup=connected",
+    );
+    expect(refresh).toHaveBeenCalled();
   });
 });
