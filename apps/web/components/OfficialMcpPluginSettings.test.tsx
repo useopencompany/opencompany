@@ -1447,6 +1447,7 @@ describe("Linear plugin settings", () => {
       "https://eu.infisical.com/login?callback_port=23456",
     );
 
+    await waitFor(() => expect(screen.getByLabelText("Browser token")).toBeEnabled());
     await user.type(screen.getByLabelText("Browser token"), "browser-token");
     await user.click(screen.getByRole("button", { name: "Finish connection" }));
 
