@@ -23,7 +23,7 @@ if (!local) {
   const services = productionServices();
   await assertServicesReady(services);
   console.log(
-    `Waiting ${Math.ceil(PERSONAL_SKILLS_DRAIN_MS / 1000)} seconds for previous API and runner revisions to drain.`,
+    `Waiting ${Math.ceil(PERSONAL_SKILLS_DRAIN_MS / 1000)} seconds for previous web, API, and runner revisions to drain.`,
   );
   await sleep(PERSONAL_SKILLS_DRAIN_MS);
   await assertServicesReady(services);
@@ -88,6 +88,7 @@ function productionServices() {
   return [
     ["API", healthUrl(requiredEnv("PRODUCTION_API_URL"))],
     ["runner", healthUrl(requiredEnv("RUNNER_PUBLIC_URL"))],
+    ["web", `${requiredEnv("PRODUCTION_OPENCOMPANY_URL").replace(/\/+$/u, "")}/api/healthz`],
   ];
 }
 

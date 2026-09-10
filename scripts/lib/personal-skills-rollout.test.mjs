@@ -7,7 +7,7 @@ import {
   PERSONAL_SKILLS_DRAIN_MS,
 } from "./personal-skills-rollout.mjs";
 
-test("requires the authorization capability from both replacement services", () => {
+test("requires the authorization capability from replacement services", () => {
   assert.doesNotThrow(() =>
     assertPersonalSkillsAuthorization("API", {
       ok: true,
@@ -32,5 +32,12 @@ test("does not activate personal plugins against services that only support pers
         capabilities: { personalSkillsAuthorization: "v1" },
       }),
     /personal-plugin/u,
+  );
+});
+
+test("rejects an older web deployment before enabling personal writes", () => {
+  assert.throws(
+    () => assertPersonalSkillsAuthorization("web", { ok: true }),
+    /web does not advertise/u,
   );
 });

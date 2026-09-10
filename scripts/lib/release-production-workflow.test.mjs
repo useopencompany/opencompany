@@ -39,9 +39,9 @@ test("builds Vercel outputs before migrations and rechecks main before deploys",
     "Deploy and smoke marketing",
     "Deploy and smoke docs",
     "Deploy and smoke Render services",
-    "Activate Personal Skills and plugins after old services drain",
     "Deploy web",
     "Smoke web release",
+    "Activate Personal Skills and plugins after old services drain",
   ]);
   assert.doesNotMatch(workflow, /node <<['"]?NODE/u);
   assert.match(workflow, /timeout-minutes: 45/u);
@@ -49,7 +49,16 @@ test("builds Vercel outputs before migrations and rechecks main before deploys",
   assert.match(workflow, /VERCEL_DEPLOY_TIMEOUT_MS: "600000"/u);
   assert.match(workflow, /run: bun scripts\/backfill-wiki-path-links\.ts/u);
   assert.match(workflow, /run: node scripts\/activate-personal-skills\.mjs/u);
-  assert.match(workflow, /steps\.activate-personal-skills\.outcome == 'success'/u);
+  const activation = workflow.slice(
+    workflow.indexOf("- name: Activate Personal Skills and plugins"),
+    workflow.indexOf("- name: Finalize database deployment"),
+  );
+  assert.match(activation, /steps\.smoke-web\.outcome == 'success'/u);
+  const deployWeb = workflow.slice(
+    workflow.indexOf("- name: Deploy web"),
+    workflow.indexOf("- name: Smoke web release"),
+  );
+  assert.doesNotMatch(deployWeb, /steps\.activate-personal-skills/u);
   assert.match(
     workflow,
     /steps\.migrate\.outcome == 'success' && steps\.backfill-wiki-path-links\.outcome == 'success'/u,

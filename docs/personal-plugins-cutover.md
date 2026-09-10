@@ -40,10 +40,10 @@ plugin credentials or change their sharing rules.
 2. Deploy both API and runner with `personalPluginsAuthorization: v1` in health responses. New
    readers immediately exclude legacy shared installations. Some plugin operations are unavailable
    during this transition.
-3. The existing release activation step checks both backend authorization capabilities, waits
+3. Deploy and smoke web. The release activation step checks web and both backend authorization capabilities, waits
    310 seconds beyond the runner shutdown window, checks again, then enables personal writes in a
    transaction. A failed backend deployment or missing capability keeps the gate closed.
-4. Deploy web. Verify two members can independently install the same plugin and that removing one
+4. Verify two members can independently install the same plugin and that removing one
    leaves the other's connection, discovery, Skills, events, and saved data intact.
 
 Local `bun run setup` activates the same gate after migrations on the isolated development database.
