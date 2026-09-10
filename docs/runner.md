@@ -58,8 +58,8 @@ Sandboxes do not receive application database credentials or raw platform secret
 validates short-lived tokens, applies provider/model scope, records usage, and forwards only to
 configured upstreams. See [LLM token broker](./llm-token-broker.md).
 
-See [Sandbox usage billing](./sandbox-usage-billing.md) for the current E2B metering gap
-and the required lifecycle settlement boundary.
+See [Sandbox usage billing](./sandbox-usage-billing.md) for the E2B compute meter and its
+workspace credit settlement boundary.
 
 ## Chat attachment retention
 

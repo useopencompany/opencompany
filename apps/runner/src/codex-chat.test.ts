@@ -550,6 +550,15 @@ describe("runCodexChatTurn over ACP", () => {
     acpMocks.runTurn.mockImplementation(completeAcpTurn);
   });
 
+  it("passes workspace billing ownership to the sandbox independently of model credentials", async () => {
+    await runCodexChatTurn({ turn: codexTurn(), session: codexSession(), env: env() });
+    expect(sandboxMocks.createOrConnectSandbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        billingOwner: { namespace: "test", workspaceId: "workspace_1", userWorkosId: "user_1" },
+      }),
+    );
+  });
+
   it.each(["goat-codex-host-tools.v4", ACTION_HOST_TOOL_CONTRACT_VERSION])(
     "keeps action discovery guidance aligned with %s",
     async (hostToolContractVersion) => {
@@ -1315,7 +1324,7 @@ function codexSession(overrides: Partial<CodexChatSession> = {}): CodexChatSessi
     engine: "codex",
     model: "gpt-5.5",
     brainRef: null,
-    workspaceId: null,
+    workspaceId: "workspace_1",
     hostToolContractVersion: null,
     sandboxId: "sbx_existing",
     codexThreadId: "thread_existing",

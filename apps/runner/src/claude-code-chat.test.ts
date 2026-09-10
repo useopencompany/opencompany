@@ -560,6 +560,15 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     );
   });
 
+  it("passes workspace billing ownership to the sandbox independently of model credentials", async () => {
+    await runClaudeCodeChatTurn({ turn: claudeTurn(), session: claudeSession(), env: env() });
+    expect(sandboxMocks.createOrConnectSandbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        billingOwner: { namespace: "test", workspaceId: "workspace_1", userWorkosId: "user_1" },
+      }),
+    );
+  });
+
   it.each(["goat-codex-host-tools.v4", ACTION_HOST_TOOL_CONTRACT_VERSION])(
     "keeps action discovery guidance aligned with %s",
     async (hostToolContractVersion) => {
@@ -1461,7 +1470,7 @@ function claudeSession(overrides: Partial<CodexChatSession> = {}): CodexChatSess
     engine: "claude_code",
     model: "claude-sonnet-5",
     brainRef: null,
-    workspaceId: null,
+    workspaceId: "workspace_1",
     hostToolContractVersion: null,
     sandboxId: "sbx_existing",
     codexThreadId: "claude_thread_1",

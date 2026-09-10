@@ -1,61 +1,68 @@
 # Sandbox usage billing
 
-Workspace usage reporting groups `goat.credit_ledger` debits by model, ingestion,
-paid capability, and sandbox usage. Only usage sources count as spend; expiring
-included credits and balance adjustments remain in billing activity but do not
-inflate usage totals. Sandbox entries carry the source `sandbox_usage`, including
-Browserbase sessions. Reporting does not create usage or debit workspace balances.
+The runner charges E2B compute to the workload's workspace credit balance and
+records the owning user. Charges appear as **Sandbox usage** in Usage and Billing.
+They are independent of model billing, including connected Codex/Claude subscriptions,
+and do not require a chat session or message reference in the ledger.
 
-## Current metering gap
+## Metering
 
-The retained Codex and Claude Code runners create, reconnect, and park E2B
-sandboxes without recording E2B usage or debiting the product credit ledger.
-`calculateSandboxUsageCost` still exists in `packages/billing`, but has no active
-runtime caller. The old runner's metering path was removed with the legacy runtime
-in PR #1161; it was tied to the legacy ledger and was not wired into the retained
-product coding runners. Reinstating that legacy path would not fix product billing.
+Codex and Claude coding workloads register their sandbox, workspace, user, and
+runner namespace in `goat.sandbox_billing_cursors` before starting work. A workload
+without a billing workspace cannot acquire a coding sandbox. Authentication-only
+sandboxes are not workload registrations and remain platform costs.
 
-The existing `chat_sandbox_usage` and `task_sandbox_usage` tables are not evidence
-that current coding usage is billed. The task tables are also a separate read
-model from the workspace credit ledger. Browserbase has its own settlement path
-in `packages/agent/src/browser-profiles`, which uses `recordCreditDebit` and does
-not meter E2B compute.
+A runner worker polls registered sandboxes every minute, in bounded batches scoped
+to its namespace. E2B's sandbox information supplies the current running interval,
+allocated CPU/RAM, and the last pause time. The worker charges running time,
+including warm idle time, at the existing [E2B compute rates](https://e2b.dev/pricing).
+Paused time is excluded. Resource allocation comes from E2B rather than the template
+name, so custom memory allocations are priced correctly.
 
-The credit debit primitive already attributes charges to a workspace and actor,
-spends included credit before top-ups, and atomically deduplicates debits by
-idempotency key. The missing responsibility is durable E2B metering and settlement,
-not another balance implementation.
+The cursor and `recordCreditDebit` run in one transaction under a cursor row lock.
+Repeated polls, competing workers, and restarted workers cannot charge the same
+interval twice. A failed transaction preserves both the prior cursor and balance.
+Prices are calculated cumulatively within each running interval to retain fractional
+micro-dollar rounding across short polls. Charges consume included credits first,
+then top-ups, using the existing workspace billing rules.
 
-## Required lifecycle metering
+Reconnecting a registered sandbox also attempts to settle its previous interval
+before resume; deleting a sandbox attempts to settle before E2B removes it. Sandbox
+replacement creates a separate cursor. Registration preserves the original owner
+and first billable timestamp, preventing reconnects from resetting billing or
+silently moving charges to another workspace/user.
 
-E2B [charges for allocated CPU and RAM per second while a sandbox is running](https://e2b.dev/pricing).
-Paused time is not running time. A sandbox can span multiple turns, resume from
-pause, survive a runner deployment, or be replaced during recovery. Turn wall
-time is therefore insufficient to reconstruct its billable lifetime.
+## Scope and limits
 
-The next implementation should:
+Billing begins when a workload first registers its sandbox after deployment. An
+existing sandbox registers on its next coding acquisition; earlier runtime is not
+backbilled. No historical charges are reconstructed from chat timestamps.
 
-1. Persist sandbox ownership (workspace, actor, conversation/task), allocation, and
-   running intervals independently of the worker's turn lease. Resolve allocation
-   from the actual provider sandbox; template names and historical defaults can
-   disagree with deployed CPU/RAM.
-2. Capture create/resume/pause/kill transitions and reconcile provider lifecycle
-   evidence after worker crashes, timeouts, and sandbox replacement. Use a durable
-   settlement cursor or outbox so a failed debit remains retryable without rerunning
-   the user's work. Persist evidence before it disappears from the provider.
-3. Settle nonoverlapping intervals once, recording duration, resources, pricing
-   version, and provider cost. Use the existing product credit ledger for the
-   charge and expose the same evidence to task cost reporting. Avoid separate
-   uncoordinated writes that can leave a usage row without its debit.
-4. Define attribution for warm idle time, authentication-only sandboxes, and work
-   that continues across a handoff. Never bill paused time or precharge an assumed
-   idle timeout that another turn may shorten. Billing must apply independently
-   of whether the model uses a connected subscription or API credits.
-5. Cover successful, failed, interrupted, retried, and handed-off turns for both
-   engines; repeated settlement; changed allocations; multiple actors in one
-   workspace; and isolation between workspaces. Alert on unsettled intervals and
-   reconcile aggregate recorded provider cost against E2B usage.
+This is a polling meter, not an E2B invoice reconciliation system. E2B's information
+endpoint exposes the current or most recently paused interval, not a full history.
+If a sandbox is deleted externally, or several pause/resume cycles replace its
+history between observations, some runtime can remain unbilled. The same limitation
+applies if the pre-transition billing attempt fails during a database/provider
+outage. Unknown time is not charged from an assumed timeout. A provider 404 retires
+the cursor from polling; a subsequent successful acquisition reactivates it.
 
-Enabling this meter changes customer charges and requires a reviewed billing
-design. Do not backfill charges from message timestamps or zero-cost legacy rows:
-they do not establish actual running intervals, idle time, or resource allocation.
+Worker errors emit `opencompany.sandbox_billing_failed` and remain eligible for a
+later poll. Full provider event history would be the next step if exact invoice
+reconciliation becomes necessary.
+
+## Deployment and rollback
+
+Apply migration `0265_sandbox_billing_cursors.sql` before deploying the runner.
+The billing worker runs under the existing `RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED`
+gate and uses the existing E2B credentials; no additional environment variables or
+provider webhooks are required. Registration and billing start with the new runner.
+
+The migration is additive and does not debit or backfill existing workspaces.
+Rolling back the runner stops new E2B debits. Keep the cursor table and ledger rows
+so a later rollout preserves settlement history. Removing billing code does not
+reverse charges already recorded in the ledger.
+
+Usage reporting groups ledger usage sources into model, ingestion, paid capability,
+and sandbox categories. Credit expirations and balance adjustments remain in billing
+activity but are excluded from usage spend totals. Browserbase retains its separate
+settlement path and shares the `sandbox_usage` ledger source.
