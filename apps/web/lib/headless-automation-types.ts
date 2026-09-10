@@ -50,6 +50,7 @@ export type WorkflowListItem = WorkflowDetail;
 export type TaskScheduleView = TaskScheduleReadModel;
 
 export type WorkflowCatalogItem = {
+  steps: WorkflowStep[];
   id: string;
   name: string;
   description: string;
@@ -64,6 +65,7 @@ export function workflowDtoToCatalogItem(workflow: WorkflowDto): WorkflowCatalog
     return null;
   }
   return {
+    steps: workflow.steps,
     id: workflow.slug,
     name: workflow.name,
     description: workflow.description,

@@ -1,5 +1,32 @@
 # Marketing site
 
+## Demo requests
+
+Demo CTAs and the legacy `/talk` link lead to `/request-demo`. The form asks for
+work email, company type, and team size before opening the existing Cal.com
+calendar in a dialog. Team size replaces the reference flow's funding question
+because the product is built for founders and small teams, including bootstrapped
+startups. All company types can schedule; this collects context without adding
+an unvalidated rejection rule.
+
+Email and qualification answers are passed to Cal.com using its documented
+[booking field prefill parameters](https://cal.com/help/bookings/prefill-fields).
+The answers prefill the booking's `notes` field and Cal.com booking metadata so
+the host receives them with the completed booking. Keep that booking question
+enabled on the event. Team size also prefills the existing custom question
+`how-many-people-are-on-your-team`, mapping to its current values (`Just me`,
+`2-10`, `10-50`, `>50`). Keep that mapping in sync if the Cal.com event changes.
+The existing calendar still asks for name, AI stack, website, and intended use.
+There is no separate lead submission or saved request before a booking is completed.
+Form values stay in component memory until the visitor opens scheduling; they
+are not added to the marketing page URL, local storage, or analytics events.
+The dialog also offers a prefilled external link if the embedded calendar fails.
+
+Run `bun run --cwd apps/marketing test` for the booking URL contract. For UI
+verification, check `/request-demo` on desktop and mobile, missing/invalid fields,
+keyboard selection, dialog close/reopen, and Cal.com's prefilled booking form.
+Do not submit a real booking during verification.
+
 ## Favicon
 
 `public/icon/oc-icon-v3.svg` is the source for both favicon formats. The root

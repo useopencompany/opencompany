@@ -45,6 +45,9 @@ export const X_ACCOUNT_SCOPES = [
   "tweet.read",
   "tweet.write",
   "users.read",
+  "media.write",
+  "bookmark.read",
+  "bookmark.write",
   "offline.access",
 ] as const;
 

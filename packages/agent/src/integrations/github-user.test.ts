@@ -177,6 +177,49 @@ describe("GitHub user integration", () => {
     expect(mocks.rotateCredential).toHaveBeenCalledOnce();
   });
 
+  it("keeps a newer stored token when an older consumer reports unauthorized", async () => {
+    mocks.loadCredential.mockResolvedValue({
+      ...storedCredential({ access_token: "ghu_access_newer" }),
+      expiresAt: new Date("2026-09-01T20:00:00.000Z"),
+      lastRotatedAt: new Date("2026-09-01T11:30:00.000Z"),
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+
+    await expect(
+      getGitHubUserAccessToken(connection, {
+        now,
+        refreshIfAccessToken: "ghu_access_old",
+      }),
+    ).resolves.toBe("ghu_access_newer");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mocks.claimRefresh).not.toHaveBeenCalled();
+    expect(mocks.rotateCredential).not.toHaveBeenCalled();
+  });
+
+  it("rotates a rejected token when it is still the stored credential", async () => {
+    mocks.loadCredential.mockResolvedValue({
+      ...storedCredential(),
+      expiresAt: new Date("2026-09-01T20:00:00.000Z"),
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({
+        access_token: "ghu_access_new",
+        expires_in: 28_800,
+        refresh_token: "ghr_refresh_new",
+        refresh_token_expires_in: 15_897_600,
+        token_type: "bearer",
+      }),
+    );
+
+    await expect(
+      getGitHubUserAccessToken(connection, {
+        now,
+        refreshIfAccessToken: "ghu_access_old",
+      }),
+    ).resolves.toBe("ghu_access_new");
+    expect(mocks.rotateCredential).toHaveBeenCalledOnce();
+  });
+
   it("loads the stable account identity from the encrypted credential", async () => {
     mocks.loadCredential.mockResolvedValue(storedCredential());
 

@@ -11,7 +11,7 @@ export const PLATFORM_FEE_BPS = 0;
 
 const TOKENS_PER_MILLION = 1_000_000;
 const GPT_5_4_LONG_CONTEXT_INPUT_TOKEN_THRESHOLD = 272_000;
-const MODEL_PRICING_VERSION = "2026-09-04.standard.1";
+const MODEL_PRICING_VERSION = "2026-09-10.standard.1";
 
 type PricingProvider =
   | "openai"
@@ -240,6 +240,7 @@ const MODEL_PRICING: Partial<Record<BillableModelId, ModelPricing>> = {
     cacheWriteUsdMicrosPerMillion: 435_000,
     outputUsdMicrosPerMillion: 870_000,
   },
+  // verified 2026-09-10 against DeepSeek's published rates and Vercel AI Gateway route
   "deepseek/deepseek-v4-flash": {
     model: "deepseek/deepseek-v4-flash",
     provider: "deepseek",

@@ -29,6 +29,7 @@ const connectedRow = {
   status: "connected",
   capabilityModes: { read: "on", query: "ask", write: "ask" },
   toolModes: {},
+  scopes: ["tweet.read", "tweet.write", "users.read"],
 };
 
 describe("X MCP connection", () => {
@@ -48,6 +49,19 @@ describe("X MCP connection", () => {
       integrationId: "gint_x",
       capabilityModes: connectedRow.capabilityModes,
       toolModes: {},
+    });
+  });
+
+  it("preserves a per-tool denial saved under X's previous spelling", async () => {
+    mocks.rows.mockResolvedValue([{ ...connectedRow, toolModes: { getPostsByIds: "off" } }]);
+    await expect(getXMcpIntegrationState("user_1")).resolves.toMatchObject({
+      toolModes: { get_posts_by_ids: "off" },
+    });
+    mocks.rows.mockResolvedValue([
+      { ...connectedRow, toolModes: { getPostsByIds: "off", get_posts_by_ids: "on" } },
+    ]);
+    await expect(getXMcpIntegrationState("user_1")).resolves.toMatchObject({
+      toolModes: { get_posts_by_ids: "on" },
     });
   });
 
@@ -83,6 +97,51 @@ describe("X MCP connection", () => {
         },
       }),
     ).resolves.toEqual({ ok: false, reason: "needs_reauth" });
+  });
+
+  it.each([
+    ["upload_image", "media.write"],
+    ["set_media_alt_text", "media.write"],
+    ["get_users_bookmarks", "bookmark.read"],
+    ["create_users_bookmark", "bookmark.write"],
+  ])("requires reconnect for %s without disabling existing read access", async (tool, scope) => {
+    await expect(
+      loadXMcpWorkerConnection({
+        userWorkosId: "user_1",
+        operation: { type: "tools/call", tool, capability: "write" },
+        onAuthorizationRequired: () => {
+          throw new Error("authorization required");
+        },
+      }),
+    ).rejects.toThrow(`grant ${scope}`);
+    expect(mocks.getAccessToken).not.toHaveBeenCalled();
+    await expect(getXMcpIntegrationState("user_1")).resolves.toMatchObject({ connected: true });
+  });
+
+  it("allows existing connections to publish and reconnected accounts to upload", async () => {
+    for (const tool of ["create_posts", "get_posts_analytics", "search_posts_recent"]) {
+      await expect(
+        loadXMcpWorkerConnection({
+          userWorkosId: "user_1",
+          operation: { type: "tools/call", tool, capability: "write" },
+          onAuthorizationRequired: () => {
+            throw new Error("authorization required");
+          },
+        }),
+      ).resolves.toMatchObject({ ok: true, createClient: expect.any(Function) });
+    }
+    mocks.rows.mockResolvedValue([
+      { ...connectedRow, scopes: [...connectedRow.scopes, "media.write"] },
+    ]);
+    await expect(
+      loadXMcpWorkerConnection({
+        userWorkosId: "user_1",
+        operation: { type: "tools/call", tool: "upload_image", capability: "write" },
+        onAuthorizationRequired: () => {
+          throw new Error("authorization required");
+        },
+      }),
+    ).resolves.toMatchObject({ ok: true });
   });
 
   it("forces one provider refresh before asking the user to reconnect", async () => {

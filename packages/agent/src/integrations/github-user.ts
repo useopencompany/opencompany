@@ -400,6 +400,7 @@ export async function getGitHubUserAccessToken(
   options: {
     signal?: AbortSignal;
     forceRefresh?: boolean;
+    refreshIfAccessToken?: string;
     minimumValidityMs?: number;
     db?: DbLike;
     now?: Date;

@@ -2635,11 +2635,21 @@ export const WorkflowArchiveEnvelopeSchema = z
   .strict()
   .openapi("WorkflowArchiveEnvelope");
 
+export const WorkflowStepModelOverrideSchema = WorkflowStepSchema.pick({
+  id: true,
+  model: true,
+  runtimeModel: true,
+  reasoningEffort: true,
+})
+  .strict()
+  .openapi("WorkflowStepModelOverride");
+
 export const InvokeWorkflowBodySchema = z
   .object({
     description: z.string().min(1).max(10_000),
     attachmentIds: z.array(ResourceIdSchema).max(5).optional(),
     skillIds: z.array(ResourceIdSchema).max(16).optional(),
+    stepModelOverrides: z.array(WorkflowStepModelOverrideSchema).max(20).optional(),
   })
   .strict()
   .openapi("InvokeWorkflowBody");

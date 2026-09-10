@@ -98,4 +98,16 @@ describe("DeepSeek model catalog", () => {
       reasoningExposure: "raw",
     });
   });
+
+  it("exposes V4 Flash reasoning while retaining automatic Gateway caching", () => {
+    expect(getAgentModelRuntimeOptions("deepseek/deepseek-v4-flash")).toEqual({
+      supportsReasoning: true,
+      providerOptions: {
+        gateway: {
+          caching: "auto",
+        },
+      },
+      reasoningExposure: "raw",
+    });
+  });
 });

@@ -439,6 +439,19 @@ describe("plugin gateway registration cache", () => {
     });
     expect(registration?.getState).toBe(mocks.getXState);
     expect(registration?.loadConnection).toBe(mocks.loadXConnection);
+    expect(registration?.discoverySnapshot).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "create_posts",
+          classification: expect.objectContaining({ capabilityId: "write", defaultMode: "ask" }),
+        }),
+        expect.objectContaining({
+          name: "get_posts_analytics",
+          classification: expect.objectContaining({ capabilityId: "query", defaultMode: "ask" }),
+        }),
+      ]),
+    );
+    expect(mocks.discoverSnapshot).not.toHaveBeenCalled();
 
     mocks.listRegistrations.mockResolvedValueOnce([
       {
