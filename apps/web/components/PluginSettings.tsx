@@ -471,6 +471,8 @@ export function PluginsSettings({
         await installOfficialPlugin(config);
         toast.success(`${config.label} installed.`);
         router.push(`/settings/plugins/${config.name}`);
+        // API mutations do not invalidate the catalog cached for back navigation.
+        router.refresh();
       } catch (cause) {
         setInstallingPluginName(null);
         toast.error(`Couldn't install ${config.label}. ${errorMessage(cause)}`);
