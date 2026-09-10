@@ -31,6 +31,7 @@ function fakeAcpSandbox(
   });
   const run = vi.fn(
     async (_command: string, options: { onStdout?: (data: string) => void | Promise<void> }) => {
+      if (_command === "true") return { exitCode: 0 } as never;
       onStdout = options.onStdout ?? null;
       return { pid: 41, wait: () => new Promise<never>(() => {}) };
     },
@@ -68,6 +69,137 @@ function harnessInput(
 }
 
 describe("AcpHarness", () => {
+  it.each([CODEX_ACP_ENGINE_ADAPTER, CLAUDE_ACP_ENGINE_ADAPTER])(
+    "recovers a silent $displayName stream when the running guest stops answering",
+    async (adapter) => {
+      vi.useFakeTimers();
+      try {
+        const transport = fakeAcpSandbox(async (message, emit) => {
+          if (message.method === "initialize") {
+            await emit({ id: message.id, result: { agentCapabilities: {} } });
+          } else if (message.method === "session/new") {
+            await emit({ id: message.id, result: { sessionId: "session_wedged" } });
+          }
+        });
+        const running = new AcpHarness().runTurn(
+          harnessInput(transport.sandbox, {
+            adapter,
+            timeoutMs: 3 * 60 * 60_000,
+            onEngineStopped: async () => {
+              throw new Error("guest cleanup also timed out");
+            },
+          }),
+        );
+        const rejected = expect(running).rejects.toMatchObject({
+          name: CodexChatRetryableInfrastructureError.name,
+          diagnosticMessage: "[sandbox_guest_probe] TimeoutError: guest did not answer",
+        });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(transport.requests.some((request) => request.method === "session/prompt")).toBe(
+          true,
+        );
+        transport.run.mockImplementationOnce(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 15_000));
+          throw Object.assign(new Error("guest did not answer"), { name: "TimeoutError" });
+        });
+
+        await vi.advanceTimersByTimeAsync(75_000);
+        await rejected;
+        expect(transport.run).toHaveBeenLastCalledWith("true", {
+          timeoutMs: 15_000,
+          requestTimeoutMs: 15_000,
+        });
+        expect(transport.kill).toHaveBeenCalledWith(41);
+        await vi.advanceTimersByTimeAsync(120_000);
+        expect(transport.run).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("allows long silent work when the guest is healthy and stops probing after completion", async () => {
+    vi.useFakeTimers();
+    try {
+      let finish: (() => Promise<void>) | undefined;
+      const transport = fakeAcpSandbox(async (message, emit) => {
+        if (message.method === "initialize") {
+          await emit({ id: message.id, result: { agentCapabilities: {} } });
+        } else if (message.method === "session/new") {
+          await emit({ id: message.id, result: { sessionId: "session_quiet" } });
+        } else if (message.method === "session/prompt") {
+          finish = () => emit({ id: message.id, result: { stopReason: "end_turn" } });
+        }
+      });
+      const running = new AcpHarness().runTurn(
+        harnessInput(transport.sandbox, { timeoutMs: 3 * 60 * 60_000 }),
+      );
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(transport.run).toHaveBeenCalledTimes(3);
+      expect(transport.kill).not.toHaveBeenCalled();
+      expect(finish).toBeDefined();
+      await finish?.();
+      await expect(running).resolves.toMatchObject({ promptResponse: { stopReason: "end_turn" } });
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(transport.run).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["activity", "completion"])(
+    "ignores a failed in-flight probe after new guest %s",
+    async (outcome) => {
+      vi.useFakeTimers();
+      try {
+        let finish: (() => Promise<void>) | undefined;
+        let activity: (() => Promise<void>) | undefined;
+        const transport = fakeAcpSandbox(async (message, emit) => {
+          if (message.method === "initialize") {
+            await emit({ id: message.id, result: { agentCapabilities: {} } });
+          } else if (message.method === "session/new") {
+            await emit({ id: message.id, result: { sessionId: "session_probe_race" } });
+          } else if (message.method === "session/prompt") {
+            finish = () => emit({ id: message.id, result: { stopReason: "end_turn" } });
+            activity = () => emit({ method: "session/update", params: {} });
+          }
+        });
+        const running = new AcpHarness().runTurn(
+          harnessInput(transport.sandbox, { timeoutMs: 3 * 60 * 60_000 }),
+        );
+        await vi.advanceTimersByTimeAsync(0);
+        let rejectProbe: ((error: Error) => void) | undefined;
+        transport.run.mockImplementationOnce(
+          () =>
+            new Promise((_resolve, reject) => {
+              rejectProbe = reject;
+            }),
+        );
+        await vi.advanceTimersByTimeAsync(61_000);
+        expect(rejectProbe).toBeDefined();
+        if (outcome === "completion") {
+          await finish?.();
+          await running;
+        } else {
+          await activity?.();
+        }
+        rejectProbe?.(Object.assign(new Error("probe timed out"), { name: "TimeoutError" }));
+        await vi.advanceTimersByTimeAsync(0);
+        if (outcome === "activity") {
+          expect(transport.kill).not.toHaveBeenCalled();
+          await finish?.();
+        }
+        await expect(running).resolves.toMatchObject({
+          promptResponse: { stopReason: "end_turn" },
+        });
+        await vi.advanceTimersByTimeAsync(120_000);
+        expect(transport.run).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
   it("retries an initialize timeout because no engine execution has started", async () => {
     vi.useFakeTimers();
     try {

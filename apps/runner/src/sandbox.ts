@@ -141,7 +141,10 @@ export async function connectSandbox(input: {
   }
 }
 
-async function probeSandboxGuest(sandbox: SandboxHandle, timeoutMs: number) {
+export async function probeSandboxGuest(
+  sandbox: SandboxHandle,
+  timeoutMs = SANDBOX_GUEST_PROBE_TIMEOUT_MS,
+) {
   await sandbox.commands.run(SANDBOX_GUEST_PROBE_COMMAND, {
     timeoutMs,
     requestTimeoutMs: timeoutMs,

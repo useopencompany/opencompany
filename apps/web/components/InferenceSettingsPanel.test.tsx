@@ -7,6 +7,7 @@ import { InferenceSettingsPanel } from "./InferenceSettingsPanel";
 const {
   disconnectClaudeCodeAuth,
   disconnectCodexAuth,
+  loadCurrentCodexUsage,
   pollCodexDeviceAuth,
   refresh,
   saveClaudeCodeToken,
@@ -15,6 +16,10 @@ const {
 } = vi.hoisted(() => ({
   disconnectClaudeCodeAuth: vi.fn(),
   disconnectCodexAuth: vi.fn(),
+  loadCurrentCodexUsage: vi.fn(async () => ({
+    ok: true,
+    usage: { windows: [], updatedAt: new Date().toISOString() },
+  })),
   pollCodexDeviceAuth: vi.fn(),
   refresh: vi.fn(),
   saveClaudeCodeToken: vi.fn(),
@@ -33,6 +38,7 @@ vi.mock("@/lib/claude-code-auth", () => ({
 
 vi.mock("@/lib/codex-auth", () => ({
   disconnectCodexAuth,
+  loadCurrentCodexUsage,
   pollCodexDeviceAuth,
   setCodexWorkspaceEngineEnabled,
   startCodexDeviceAuth,
