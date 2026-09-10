@@ -9,7 +9,7 @@ import type { SkillCatalogItem } from "@/lib/skills";
 
 // Workflow instructions are plain markdown compiled server-side
 // (extractWorkflowSkillMentionRefs in lib/workflow-tasks.ts scans the raw
-// text for `@skill/<id>` tokens when the workflow fires) — so this extension
+// Markdown prose for `@skill/<id>` tokens when the workflow fires) — so this extension
 // only needs to make that token easy to discover and type correctly. It
 // inserts literal `@skill/<id>` text, not a special mention node, so it
 // round-trips through the Markdown extension like any other text.
