@@ -761,7 +761,7 @@ function appendPlanDelta(
 
 function fileChangeStatusPart(event: HarnessNormalizedEvent): CodexUiStatusPartPayload {
   const changes = Array.isArray(event.payload.changes) ? event.payload.changes : [];
-  const input = { label: "File change", changes };
+  const input = { label: "File change", ...toolSemanticsFromPayload(event), changes };
   if (event.type === "file_change.started") return { state: "input-available", input };
   return {
     state: "output-available",
@@ -1039,10 +1039,12 @@ function toolSemanticsFromPayload(event: HarnessNormalizedEvent) {
   const toolName = readString(event.payload.toolName);
   const kind = readString(event.payload.kind);
   const title = readString(event.payload.title);
+  const locations = Array.isArray(event.payload.locations) ? event.payload.locations : undefined;
   return {
     ...(toolName ? { toolName } : {}),
     ...(kind ? { kind } : {}),
     ...(title ? { title } : {}),
+    ...(locations ? { locations } : {}),
   };
 }
 

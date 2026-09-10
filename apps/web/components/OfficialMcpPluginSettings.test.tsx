@@ -333,6 +333,7 @@ const appData = vi.hoisted(() => ({
         },
       ],
       neon: [],
+      stripe: [] as IntegrationAccountView<"stripe">[],
       supabase: [],
       resend: [],
       notion: [
@@ -1348,6 +1349,7 @@ const gmailPlugin = {
 
 describe("Linear plugin settings", () => {
   beforeEach(() => {
+    appData.integrations.personalAccounts.stripe = [];
     router.push.mockReset();
     router.refresh.mockReset();
     for (const command of Object.values(commands)) command.mockReset();
@@ -1809,6 +1811,59 @@ describe("Linear plugin settings", () => {
     );
     expect(useLiveQuery).not.toHaveBeenCalled();
   });
+
+  it.each(["connected", "needs_reauth"] as const)(
+    "prefers the %s Stripe OAuth account in settings",
+    async (status) => {
+      appData.integrations.personalAccounts.stripe = [
+        {
+          integrationId: "stripe_oauth",
+          provider: "stripe",
+          status,
+          connected: status === "connected",
+          accountEmail: null,
+          accountName: "Stripe OAuth",
+          connectionLabel: "Stripe OAuth",
+          statusReason: status === "needs_reauth" ? "Reconnect Stripe" : null,
+          scopes: [],
+          capabilityModes: {},
+        },
+      ];
+      render(
+        <StripePluginDetail
+          pluginState={{
+            status: "ready",
+            plugin: {
+              ...plugin,
+              name: "stripe",
+              manifest: { name: "stripe", description: "Work with Stripe." },
+            },
+          }}
+          toolsState={defaultStripeToolsState()}
+          canEdit
+        />,
+      );
+      expect(screen.getByText("Stripe OAuth")).toBeInTheDocument();
+      expect(screen.queryByText("Acme Payments · Test mode")).not.toBeInTheDocument();
+      const keyManagement = screen
+        .getByText("Manage existing workspace API key")
+        .closest("details");
+      expect(keyManagement).not.toHaveAttribute("open");
+      expect(
+        screen.getByText("The workspace key is used when you have no personal Stripe connection."),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Connect Stripe account" })).toHaveAttribute(
+        "href",
+        "/api/integrations/stripe/start?returnTo=/settings/plugins/stripe",
+      );
+      if (status === "needs_reauth")
+        expect(screen.getByRole("link", { name: "Reconnect" })).toBeInTheDocument();
+      await userEvent.setup().click(screen.getByRole("button", { name: "Disconnect" }));
+      expect(accountActions.disconnectIntegrationAccountAction).toHaveBeenCalledWith(
+        "stripe_oauth",
+      );
+    },
+  );
 
   it("maps the workspace Stripe key onto the official plugin surface", () => {
     const stripePlugin = {

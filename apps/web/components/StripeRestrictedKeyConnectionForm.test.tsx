@@ -54,7 +54,7 @@ describe("StripeRestrictedKeyConnectionForm", () => {
     const user = userEvent.setup();
     render(<StripeRestrictedKeyConnectionForm connected canManage />);
 
-    await user.click(screen.getByRole("button", { name: "Disconnect" }));
+    await user.click(screen.getByRole("button", { name: "Disconnect workspace key" }));
 
     await waitFor(() => expect(actions.disconnect).toHaveBeenCalled());
     expect(router.refresh).toHaveBeenCalled();
