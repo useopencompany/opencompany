@@ -1,0 +1,51 @@
+---
+title: "you can now connect any mcp server"
+description: "Add a custom MCP server to opencompany from settings. Its tools become actions your agents can call in chat, workflows, and coding tasks, with per-tool permissions and encrypted personal credentials."
+date: "2026-09-10"
+author: "Louis Morgner"
+keywords:
+  - custom mcp server
+  - connect mcp server to ai agent
+  - bring your own mcp server
+  - mcp streamable http
+  - ai agent tool permissions
+  - self-serve mcp integration
+---
+
+opencompany now supports custom MCP servers. paste a public HTTPS endpoint into settings and its tools become actions your agents can call — in chat, in workflows, and in Claude Code and Codex tasks.
+
+## the escape hatch you didn't have
+
+we ship 26 official plugins. that list will never cover your stack. every company runs at least one tool nobody else runs: an internal admin, a niche vendor, a database wrapper somebody wrote in an afternoon.
+
+until this week, if your tool wasn't an official plugin, you were blocked. the agent couldn't reach it, there was no self-serve path, and your only move was to ask us and wait for a release. a design partner hit this on the first call. official plugins stay the default; this is the way around them.
+
+## what it is
+
+settings → plugins → add custom MCP. give it a name and a server URL.
+
+- authentication is none, a bearer token, or custom headers. credentials are encrypted in the vault and belong to you — teammates connect their own.
+- opencompany tests the endpoint before installing and shows you every tool it advertises. nothing installs until the connection works.
+- every tool starts on ask. set each one to on, ask, or off on the plugin's detail page.
+- custom tools run through the same action gateway as official plugins, so they work everywhere a session runs. a Codex or Claude Code task pauses mid-run for a one-time approval and resumes with the result.
+
+## for example
+
+- connect your database's MCP server, have an agent reproduce a customer bug against a replica, and keep every write on ask.
+- point at your observability vendor so a scheduled session pulls last night's errors into the wiki before standup.
+- connect the internal MCP server you already run for your own team — deploys, billing admin, feature flags — and give the agent the same buttons a human gets.
+- a vendor ships an MCP server this week. connect it this week.
+
+## what runs underneath
+
+each execution re-reads the server's live tool list before it dispatches. if the tools changed, dispatch stops and asks you to review permissions again, and approvals are bound to the installation, the account, and that snapshot — so an old approval can't authorize a server that has since changed. outbound requests validate the resolved IP after every DNS lookup and pin it to the TLS connection, redirects are rejected, and credential values are redacted from discovery and errors. custom tools never auto-retry.
+
+## availability
+
+live now for every workspace. go to [settings → plugins](https://opencompany.cloud/settings/plugins), pick **add custom MCP**, and connect your first server.
+
+this release accepts public HTTPS servers speaking [Streamable HTTP](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports). OAuth servers, local and stdio servers, private network endpoints, and legacy HTTP+SSE aren't supported yet. endpoints are immutable — a new URL means a new installation.
+
+## the point
+
+the set of tools your company runs on isn't a list we get to decide. now it isn't one we can slow down either.

@@ -43,6 +43,61 @@ describe("createExternalEngineProjector", () => {
     vi.clearAllMocks();
   });
 
+  it("awaits durable effects on assembled tool completion before projecting it", async () => {
+    mocks.execute
+      .mockResolvedValueOnce({ rows: [{ id: "event_1" }] })
+      .mockResolvedValueOnce({ rows: [{ id: "message_1" }] });
+    const normalizer = createAcpEventNormalizer();
+    const onNormalizedEvent = vi.fn(async (event) => {
+      if (event.type === "mcp_tool.completed") throw new Error("Persistence unavailable");
+    });
+    const projector = createExternalEngineProjector({
+      target: projectorTarget(),
+      redact: (value) => value,
+      normalizeEvent: normalizer.normalize,
+      onNormalizedEvent,
+    });
+    const update = (fields: Record<string, unknown>) => ({
+      method: "session/update",
+      params: {
+        sessionId: "session_1",
+        update: {
+          toolCallId: "wakeup_1",
+          ...fields,
+        },
+      },
+    });
+    await projector.push([
+      update({
+        sessionUpdate: "tool_call",
+        title: "ScheduleWakeup",
+        _meta: { claudeCode: { toolName: "ScheduleWakeup" } },
+        rawInput: {},
+        status: "pending",
+      }),
+    ]);
+    await projector.push([
+      update({
+        sessionUpdate: "tool_call_update",
+        status: "in_progress",
+        rawInput: { delaySeconds: 480, reason: "Wait for CI" },
+      }),
+    ]);
+    mocks.execute.mockClear();
+    await expect(
+      projector.push([update({ sessionUpdate: "tool_call_update", status: "completed" })]),
+    ).rejects.toThrow("Persistence unavailable");
+    expect(onNormalizedEvent).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        type: "mcp_tool.completed",
+        payload: expect.objectContaining({
+          rawInput: { delaySeconds: 480, reason: "Wait for CI" },
+        }),
+      }),
+    );
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
   it("keeps projecting a valid event when its auxiliary audit insert fails", async () => {
     const databaseError = Object.assign(new Error("query details must not be reported"), {
       code: "23514",
