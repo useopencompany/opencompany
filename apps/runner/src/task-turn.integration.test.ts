@@ -5,6 +5,7 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildTaskFailureCompletion,
+  buildTaskTerminalProjection,
   markTaskTurnRunning,
   settleDurableTurn,
   type TaskTurnContext,
@@ -345,6 +346,54 @@ describe("task-turn SQL against real Postgres", () => {
       "SELECT kind, metadata->>'runId' AS run_id FROM goat.task_activities WHERE task_id = 'task_1'",
     );
     expect(activity.rows).toEqual([{ kind: "run_started", run_id: "turn_1" }]);
+  });
+
+  it("settles a recovered cancellation even though the task is already canceled", async () => {
+    await seed({ taskStatus: "canceled", taskStage: "canceled", taskAttempts: 2 });
+    await pg.exec(
+      `INSERT INTO goat.run_attempts (id,run_id,number,status,worker_id,lease_id) VALUES ('attempt_1','turn_1',2,'running','runner_1','lease_1')`,
+    );
+    const spec = harnessSpec();
+    await settleDurableTurn({
+      target: {
+        userWorkosId: "user_1",
+        workspaceId: null,
+        codexChatSessionId: "runtime_1",
+        chatSessionId: "chat_task_1",
+        turnId: "turn_1",
+        leaseId: "lease_1",
+        leaseOwner: "runner_1",
+      },
+      turnStatus: "interrupted",
+      sessionStatus: "interrupted",
+      error: null,
+      completedAt: NOW,
+      taskCompletion: buildTaskTerminalProjection({
+        task: taskFixture(spec, { status: "canceled", stage: "canceled", attempts: 2 }),
+        harnessSpec: spec,
+      }),
+      canonicalRun: {
+        attemptId: "attempt_1",
+        assistantMessageId: "assistant_message_1",
+        content: "Work before cancellation.",
+      },
+    });
+    expect((await pg.query("SELECT status FROM goat.codex_chat_turns")).rows).toEqual([
+      { status: "interrupted" },
+    ]);
+    expect(
+      (await pg.query("SELECT status,active_turn_id FROM goat.codex_chat_sessions")).rows,
+    ).toEqual([{ status: "interrupted", active_turn_id: null }]);
+    expect((await pg.query("SELECT status FROM goat.run_attempts")).rows).toEqual([
+      { status: "canceled" },
+    ]);
+    expect((await pg.query("SELECT status,stage FROM goat.tasks")).rows).toEqual([
+      { status: "canceled", stage: "canceled" },
+    ]);
+    expect((await pg.query("SELECT type FROM goat.run_events ORDER BY sequence")).rows).toEqual([
+      { type: "message.content_updated" },
+      { type: "run.canceled" },
+    ]);
   });
 
   it("settles a failed turn and writes the orchestrator comment activity", async () => {
