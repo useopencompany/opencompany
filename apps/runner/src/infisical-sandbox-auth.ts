@@ -315,7 +315,7 @@ async function reconcileDisconnectedGeneration(
 
 async function clearInfisicalAuth(sandbox: SandboxHandle) {
   await sandbox.commands.run(
-    `rm -rf ${shellQuote(INFISICAL_CONFIG_ROOT)} ${shellQuote(INFISICAL_KEYRING_ROOT)}`,
+    `rm -rf ${shellQuote(INFISICAL_CONFIG_ROOT)} ${shellQuote(INFISICAL_KEYRING_ROOT)} ${shellQuote(INFISICAL_GENERATION_PATH)}`,
     { user: "user", timeoutMs: 30_000 },
   );
 }

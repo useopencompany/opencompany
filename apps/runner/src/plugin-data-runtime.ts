@@ -78,6 +78,7 @@ export async function preparePluginDataRuntime(input: {
       const lease = await acquireLease({
         workspaceId: input.workspaceId,
         userId: input.userId,
+        pluginId: plugin.id,
         pluginName: plugin.name,
         leaseOwner: input.leaseOwner,
         storage,
@@ -176,6 +177,7 @@ export async function preparePluginDataRuntime(input: {
 async function acquireLease(input: {
   workspaceId: string;
   userId: string;
+  pluginId: string;
   pluginName: string;
   leaseOwner: string;
   storage: PluginDataStorage;
@@ -184,9 +186,16 @@ async function acquireLease(input: {
   const leaseId = randomUUID();
   const deadline = Date.now() + PLUGIN_DATA_LEASE_WAIT_MS;
   while (true) {
+    await input.checkAbort();
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `Plugin data for ${JSON.stringify(input.pluginName)} is in use by another coding session.`,
+      );
+    }
     const lease = await acquireWorkspacePluginDataLease(getDb(), {
       workspaceId: input.workspaceId,
       userId: input.userId,
+      pluginId: input.pluginId,
       pluginName: input.pluginName,
       leaseId,
       leaseOwner: input.leaseOwner,
@@ -202,27 +211,26 @@ async function acquireLease(input: {
         blobPathname(input.workspaceId, input.userId, input.pluginName, 0),
         bytes,
       );
-      const initialized = await initializeWorkspacePluginDataLease(getDb(), {
-        workspaceId: input.workspaceId,
-        userId: input.userId,
-        pluginName: input.pluginName,
-        blobPathname: uploaded.pathname,
-        checksum,
-        sizeBytes: bytes.byteLength,
-        leaseId,
-        leaseOwner: input.leaseOwner,
-        leaseTtlMs: PLUGIN_DATA_LEASE_TTL_MS,
-      });
+      let initialized: WorkspacePluginDataLease | null = null;
+      try {
+        initialized = await initializeWorkspacePluginDataLease(getDb(), {
+          workspaceId: input.workspaceId,
+          userId: input.userId,
+          pluginId: input.pluginId,
+          pluginName: input.pluginName,
+          blobPathname: uploaded.pathname,
+          checksum,
+          sizeBytes: bytes.byteLength,
+          leaseId,
+          leaseOwner: input.leaseOwner,
+          leaseTtlMs: PLUGIN_DATA_LEASE_TTL_MS,
+        });
+      } finally {
+        if (!initialized) await input.storage.delete(uploaded.pathname);
+      }
       if (initialized) return initialized;
-      await input.storage.delete(uploaded.pathname);
       continue;
     }
-    if (Date.now() >= deadline) {
-      throw new Error(
-        `Plugin data for ${JSON.stringify(input.pluginName)} is in use by another coding session.`,
-      );
-    }
-    await input.checkAbort();
     await sleep(PLUGIN_DATA_LEASE_POLL_MS);
   }
 }
@@ -375,6 +383,7 @@ async function checkpointPluginData(input: {
   const checkpoint = await checkpointWorkspacePluginData(getDb(), {
     workspaceId: input.entry.lease.workspaceId,
     userId: input.entry.lease.userId,
+    pluginId: input.entry.lease.pluginId,
     pluginName: input.entry.lease.pluginName,
     leaseId: input.entry.lease.leaseId,
     leaseOwner: input.entry.lease.leaseOwner,
@@ -457,6 +466,7 @@ async function renewLease(lease: WorkspacePluginDataLease) {
   return renewWorkspacePluginDataLease(getDb(), {
     workspaceId: lease.workspaceId,
     userId: lease.userId,
+    pluginId: lease.pluginId,
     pluginName: lease.pluginName,
     leaseId: lease.leaseId,
     leaseOwner: lease.leaseOwner,
@@ -468,6 +478,7 @@ async function releaseLease(lease: WorkspacePluginDataLease) {
   await releaseWorkspacePluginDataLease(getDb(), {
     workspaceId: lease.workspaceId,
     userId: lease.userId,
+    pluginId: lease.pluginId,
     pluginName: lease.pluginName,
     leaseId: lease.leaseId,
     leaseOwner: lease.leaseOwner,

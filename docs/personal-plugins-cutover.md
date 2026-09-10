@@ -5,7 +5,7 @@ skills, MCP approval, discovery cache, events, and saved plugin data. Members ca
 same package independently. An administrator does not gain access to another member's installation.
 Shared Skills and Workflows can require a plugin; running them still requires the acting person's
 installation and personal account. Durable plugin IDs are snapshots, not authorization grants.
-Every runtime read and gateway dispatch checks current ownership and workspace membership.
+Every runtime read and gateway dispatch checks current ownership and workspace membership. Saved-data leases also require the exact running installation and its current MCP approval, so a replacement with the same name cannot renew an older installation’s lease.
 
 ## Existing data and exceptions
 
@@ -20,7 +20,7 @@ accounts. Personal Infisical logins use both workspace and owner in credential e
 | Workspace plugin installations, pinned IDs, MCP approvals and discovery | Retained for audit; excluded from personal catalogs and all runtimes. Members reinstall and approve their own packages. |
 | Workspace saved plugin data | Retained under the legacy owner, never restored or deleted by a personal installation. Reinstalled plugins start with empty personal data. |
 | Workspace Infisical login | Retained but inaccessible. Each member performs a new login; old sandbox authentication is cleared during reconciliation. |
-| Workspace Stripe restricted key | Retired from the action catalog and plugin UI. Stripe MCP requires personal OAuth. Existing private credentials are not reassigned. |
+| Workspace Stripe restricted key | Retired from the action catalog, plugin UI, and new key setup API. Stripe MCP requires personal OAuth. An admin can still remove a legacy key; existing private credentials are not reassigned. |
 | Generic workspace MCP OAuth fallback | Removed. Missing personal authorization requires reconnection. |
 | Legacy built-in actions, including workspace Revolut | Removed from catalog fallback. Disabling/removing a plugin cannot revive an older integration route. Revolut needs a supported personal plugin before returning to the catalog. |
 | GitHub App repository installations and Slack bot workspace installs | Remain infrastructure for repository access and bot ingress. They do not supply plugin action credentials; GitHub actions use `github_user`, Slack actions use the member's grant. |

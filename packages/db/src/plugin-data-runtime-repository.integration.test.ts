@@ -51,6 +51,7 @@ describe("workspace Plugin data leases", () => {
       VALUES ('plugin_1', 'workspace_1', 'user_1', 'quality-tools', '{}', 'github', 'https://github.com/example/plugins', '', 'main', '${"a".repeat(40)}', 'sha256:${"b".repeat(64)}', '{}'),
              ('plugin_2', 'workspace_1', 'user_2', 'quality-tools', '{}', 'github', 'https://github.com/example/plugins', '', 'main', '${"a".repeat(40)}', 'sha256:${"b".repeat(64)}', '{}');
     `);
+    await database.exec("UPDATE goat.plugins SET mcp_approved_integrity = integrity");
     db = drizzle(database);
   });
 
@@ -71,27 +72,94 @@ describe("workspace Plugin data leases", () => {
     const first = await initializeWorkspacePluginDataLease(db, {
       ...common,
       userId: "user_1",
+      pluginId: "plugin_1",
       blobPathname: "alice.tar",
     });
     expect(first).not.toBeNull();
-    expect(await getWorkspacePluginDataRecord(db, { ...common, userId: "user_2" })).toBeNull();
-    expect(await releaseWorkspacePluginDataLease(db, { ...common, userId: "user_2" })).toBe(false);
+    expect(
+      await getWorkspacePluginDataRecord(db, { ...common, userId: "user_2", pluginId: "plugin_2" }),
+    ).toBeNull();
+    expect(
+      await releaseWorkspacePluginDataLease(db, {
+        ...common,
+        userId: "user_2",
+        pluginId: "plugin_2",
+      }),
+    ).toBe(false);
     const second = await initializeWorkspacePluginDataLease(db, {
       ...common,
       userId: "user_2",
+      pluginId: "plugin_2",
       blobPathname: "bob.tar",
     });
     expect(second?.blobPathname).toBe("bob.tar");
     await database.exec("DELETE FROM goat.workspace_members WHERE user_workos_id = 'user_2'");
-    expect(await getWorkspacePluginDataRecord(db, { ...common, userId: "user_2" })).toBeNull();
-    expect(await renewWorkspacePluginDataLease(db, { ...common, userId: "user_2" })).toBe(false);
+    expect(
+      await getWorkspacePluginDataRecord(db, { ...common, userId: "user_2", pluginId: "plugin_2" }),
+    ).toBeNull();
+    expect(
+      await renewWorkspacePluginDataLease(db, {
+        ...common,
+        userId: "user_2",
+        pluginId: "plugin_2",
+      }),
+    ).toBe(false);
     await database.exec("DELETE FROM goat.workspace_plugin_data");
+  });
+
+  it("rejects a running package after approval revocation or replacement by the same owner", async () => {
+    const access = {
+      workspaceId: "workspace_1",
+      userId: "user_1",
+      pluginId: "plugin_1",
+      pluginName: "quality-tools",
+      leaseId: "revocable",
+      leaseOwner: "old-session",
+      leaseTtlMs: 60_000,
+    };
+    const lease = await initializeWorkspacePluginDataLease(db, {
+      ...access,
+      blobPathname: "approved.tar",
+      checksum: `sha256:${"a".repeat(64)}`,
+      sizeBytes: 0,
+    });
+    expect(lease?.pluginId).toBe("plugin_1");
+    await database.exec(
+      "UPDATE goat.plugins SET mcp_approved_integrity = NULL WHERE id = 'plugin_1'",
+    );
+    expect(await renewWorkspacePluginDataLease(db, access)).toBe(false);
+    expect(await getWorkspacePluginDataRecord(db, access)).toBeNull();
+    expect(
+      await checkpointWorkspacePluginData(db, {
+        ...access,
+        expectedGeneration: 0,
+        blobPathname: "unapproved.tar",
+        checksum: `sha256:${"b".repeat(64)}`,
+        sizeBytes: 0,
+        releaseLease: true,
+      }),
+    ).toBeNull();
+    await database.exec(`
+      UPDATE goat.plugins SET status = 'archived', archived_at = now() WHERE id = 'plugin_1';
+      INSERT INTO goat.plugins (id, workspace_id, owner_user_id, name, manifest, source_type, source_url, source_path, source_ref, resolved_commit, integrity, install_report, mcp_approved_integrity)
+      SELECT 'replacement', workspace_id, owner_user_id, name, manifest, source_type, source_url, source_path, source_ref, resolved_commit, integrity, install_report, integrity FROM goat.plugins WHERE id = 'plugin_1';
+    `);
+    expect(await renewWorkspacePluginDataLease(db, access)).toBe(false);
+    const replacement = await acquireWorkspacePluginDataLease(db, {
+      ...access,
+      pluginId: "replacement",
+    });
+    expect(replacement).toMatchObject({ pluginId: "replacement", blobPathname: "approved.tar" });
+    await database.exec(`DELETE FROM goat.workspace_plugin_data;
+      DELETE FROM goat.plugins WHERE id = 'replacement';
+      UPDATE goat.plugins SET status = 'enabled', archived_at = NULL, mcp_approved_integrity = integrity WHERE id = 'plugin_1';`);
   });
 
   it("serializes use and fences renewals, checkpoints, and releases", async () => {
     const now = new Date("2026-08-24T10:00:00.000Z");
     const initialized = await initializeWorkspacePluginDataLease(db, {
       userId: "user_1",
+      pluginId: "plugin_1",
       workspaceId: "workspace_1",
       pluginName: "quality-tools",
       blobPathname: "plugin-data/workspace_1/quality-tools/0.tar",
@@ -107,6 +175,7 @@ describe("workspace Plugin data leases", () => {
     await expect(
       acquireWorkspacePluginDataLease(db, {
         userId: "user_1",
+        pluginId: "plugin_1",
         workspaceId: "workspace_1",
         pluginName: "quality-tools",
         leaseId: "lease_b",
@@ -118,6 +187,7 @@ describe("workspace Plugin data leases", () => {
     await expect(
       renewWorkspacePluginDataLease(db, {
         userId: "user_1",
+        pluginId: "plugin_1",
         workspaceId: "workspace_1",
         pluginName: "quality-tools",
         leaseId: "wrong_lease",
@@ -129,6 +199,7 @@ describe("workspace Plugin data leases", () => {
 
     const checkpoint = await checkpointWorkspacePluginData(db, {
       userId: "user_1",
+      pluginId: "plugin_1",
       workspaceId: "workspace_1",
       pluginName: "quality-tools",
       leaseId: "lease_a",
@@ -145,6 +216,7 @@ describe("workspace Plugin data leases", () => {
     await expect(
       checkpointWorkspacePluginData(db, {
         userId: "user_1",
+        pluginId: "plugin_1",
         workspaceId: "workspace_1",
         pluginName: "quality-tools",
         leaseId: "lease_a",
@@ -161,6 +233,7 @@ describe("workspace Plugin data leases", () => {
 
     const acquired = await acquireWorkspacePluginDataLease(db, {
       userId: "user_1",
+      pluginId: "plugin_1",
       workspaceId: "workspace_1",
       pluginName: "quality-tools",
       leaseId: "lease_b",
@@ -172,6 +245,7 @@ describe("workspace Plugin data leases", () => {
     await expect(
       releaseWorkspacePluginDataLease(db, {
         userId: "user_1",
+        pluginId: "plugin_1",
         workspaceId: "workspace_1",
         pluginName: "quality-tools",
         leaseId: "lease_a",
@@ -181,6 +255,7 @@ describe("workspace Plugin data leases", () => {
     await expect(
       releaseWorkspacePluginDataLease(db, {
         userId: "user_1",
+        pluginId: "plugin_1",
         workspaceId: "workspace_1",
         pluginName: "quality-tools",
         leaseId: "lease_b",
@@ -190,6 +265,7 @@ describe("workspace Plugin data leases", () => {
     await expect(
       getWorkspacePluginDataRecord(db, {
         userId: "user_1",
+        pluginId: "plugin_1",
         workspaceId: "workspace_1",
         pluginName: "quality-tools",
       }),

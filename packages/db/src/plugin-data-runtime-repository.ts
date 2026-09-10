@@ -8,6 +8,7 @@ type DbClient = any;
 export type WorkspacePluginDataLease = {
   workspaceId: string;
   userId: string;
+  pluginId: string;
   pluginName: string;
   blobPathname: string;
   checksum: string;
@@ -33,7 +34,7 @@ const leaseSelection = {
 
 export async function getWorkspacePluginDataRecord(
   db: DbClient,
-  input: { workspaceId: string; userId: string; pluginName: string },
+  input: { workspaceId: string; userId: string; pluginId: string; pluginName: string },
 ) {
   const [row] = await db
     .select(leaseSelection)
@@ -47,7 +48,7 @@ export async function getWorkspacePluginDataRecord(
       ),
     )
     .limit(1);
-  return row ?? null;
+  return row ? { ...row, pluginId: input.pluginId } : null;
 }
 
 export async function acquireWorkspacePluginDataLease(
@@ -55,6 +56,7 @@ export async function acquireWorkspacePluginDataLease(
   input: {
     workspaceId: string;
     userId: string;
+    pluginId: string;
     pluginName: string;
     leaseId: string;
     leaseOwner: string;
@@ -86,7 +88,7 @@ export async function acquireWorkspacePluginDataLease(
       ),
     )
     .returning(leaseSelection);
-  return asLease(row);
+  return asLease(row, input.pluginId);
 }
 
 export async function initializeWorkspacePluginDataLease(
@@ -94,6 +96,7 @@ export async function initializeWorkspacePluginDataLease(
   input: {
     workspaceId: string;
     userId: string;
+    pluginId: string;
     pluginName: string;
     blobPathname: string;
     checksum: string;
@@ -127,14 +130,14 @@ export async function initializeWorkspacePluginDataLease(
     })
     .onConflictDoNothing()
     .returning(leaseSelection);
-  return asLease(row);
+  return asLease(row, input.pluginId);
 }
 
 export async function renewWorkspacePluginDataLease(
   db: DbClient,
   input: Pick<
     WorkspacePluginDataLease,
-    "workspaceId" | "userId" | "pluginName" | "leaseId" | "leaseOwner"
+    "workspaceId" | "userId" | "pluginId" | "pluginName" | "leaseId" | "leaseOwner"
   > & {
     leaseTtlMs: number;
     now?: Date;
@@ -153,7 +156,7 @@ export async function checkpointWorkspacePluginData(
   db: DbClient,
   input: Pick<
     WorkspacePluginDataLease,
-    "workspaceId" | "userId" | "pluginName" | "leaseId" | "leaseOwner"
+    "workspaceId" | "userId" | "pluginId" | "pluginName" | "leaseId" | "leaseOwner"
   > & {
     expectedGeneration: number;
     blobPathname: string;
@@ -183,6 +186,7 @@ export async function checkpointWorkspacePluginData(
   if (!row) return null;
   return {
     ...row,
+    pluginId: input.pluginId,
     leaseId: input.releaseLease ? input.leaseId : row.leaseId!,
     leaseOwner: input.releaseLease ? input.leaseOwner : row.leaseOwner!,
     leaseExpiresAt: input.releaseLease ? now : row.leaseExpiresAt!,
@@ -193,7 +197,7 @@ export async function releaseWorkspacePluginDataLease(
   db: DbClient,
   input: Pick<
     WorkspacePluginDataLease,
-    "workspaceId" | "userId" | "pluginName" | "leaseId" | "leaseOwner"
+    "workspaceId" | "userId" | "pluginId" | "pluginName" | "leaseId" | "leaseOwner"
   >,
 ) {
   const [row] = await db
@@ -207,7 +211,7 @@ export async function releaseWorkspacePluginDataLease(
 function leaseFence(
   input: Pick<
     WorkspacePluginDataLease,
-    "workspaceId" | "userId" | "pluginName" | "leaseId" | "leaseOwner"
+    "workspaceId" | "userId" | "pluginId" | "pluginName" | "leaseId" | "leaseOwner"
   >,
 ) {
   return and(
@@ -220,17 +224,27 @@ function leaseFence(
   );
 }
 
-function asLease(row: Record<string, unknown> | undefined): WorkspacePluginDataLease | null {
+function asLease(
+  row: Record<string, unknown> | undefined,
+  pluginId: string,
+): WorkspacePluginDataLease | null {
   if (!row || !row.leaseId || !row.leaseOwner || !row.leaseExpiresAt) return null;
-  return row as WorkspacePluginDataLease;
+  return { ...row, pluginId } as WorkspacePluginDataLease;
 }
 
-function dataOwnerAccess(input: { workspaceId: string; userId: string; pluginName: string }) {
+function dataOwnerAccess(input: {
+  workspaceId: string;
+  userId: string;
+  pluginId: string;
+  pluginName: string;
+}) {
   return and(
     skillMembership(input),
     sql`EXISTS (SELECT 1 FROM goat.plugins plugin
       WHERE plugin.workspace_id = ${input.workspaceId}
         AND plugin.owner_user_id = ${input.userId}
+        AND plugin.id = ${input.pluginId}
+        AND plugin.mcp_approved_integrity = plugin.integrity
         AND plugin.name = ${input.pluginName} AND plugin.status = 'enabled')`,
   )!;
 }

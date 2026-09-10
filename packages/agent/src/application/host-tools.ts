@@ -111,11 +111,13 @@ export type ChatHostToolServiceDependencies = {
   resolveSkillMentions: (input: {
     workspaceId: string;
     userId?: string;
+    skillAccess?: "company";
     mentions: { id: string }[];
   }) => Promise<MentionedSkill[]>;
   listSkillCatalog: (
     workspaceId: string,
     userId?: string,
+    skillAccess?: "company",
   ) => Promise<Array<{ id: string; name: string; description: string }>>;
   activateAndListSkills: (input: {
     conversationId: string;
@@ -289,7 +291,8 @@ async function executeOperation(
       const skill = requiredString(toolInput.skill, "skill");
       const [resolved] = await dependencies.resolveSkillMentions({
         workspaceId: context.workspaceId,
-        ...(!context.taskConversation ? { userId: context.actorId } : {}),
+        userId: context.actorId,
+        ...(context.taskConversation ? { skillAccess: "company" as const } : {}),
         mentions: [{ id: skill }],
       });
       if (!resolved) throw new Error(`Skill "@skill/${skill}" is unavailable or incomplete.`);
@@ -572,13 +575,15 @@ async function bootstrap(
       mentionedSkillIds.length
         ? dependencies.resolveSkillMentions({
             workspaceId: context.workspaceId,
-            ...(!context.taskConversation ? { userId: context.actorId } : {}),
+            userId: context.actorId,
+            ...(context.taskConversation ? { skillAccess: "company" as const } : {}),
             mentions: mentionedSkillIds.map((id) => ({ id })),
           })
         : Promise.resolve([]),
       dependencies.listSkillCatalog(
         context.workspaceId,
-        context.taskConversation ? undefined : context.actorId,
+        context.actorId,
+        context.taskConversation ? "company" : undefined,
       ),
       context.taskToolsEnabled
         ? dependencies.listWorkflowCatalog(context.workspaceId)

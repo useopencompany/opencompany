@@ -49,13 +49,7 @@ import {
   type RenderProviderState,
   validateRenderApiKey,
 } from "@opencompany/agent/integrations/render-mcp";
-import {
-  connectStripeIntegration,
-  disconnectStripeIntegration,
-  getStripeIntegrationState,
-  isValidStripeRestrictedApiKey,
-  validateStripeRestrictedApiKey,
-} from "@opencompany/agent/integrations/stripe";
+import { disconnectStripeIntegration } from "@opencompany/agent/integrations/stripe";
 import { captureProductServerEvent } from "@opencompany/analytics/product/server";
 import type { Actor } from "@opencompany/core";
 import {
@@ -115,10 +109,6 @@ export function createIntegrationAccountService(input: {
     workspaceId: string;
   }) => Promise<void>;
   refreshRenderPluginRegistrations?: (input: {
-    userWorkosId: string;
-    workspaceId: string;
-  }) => Promise<void>;
-  refreshStripePluginRegistrations?: (input: {
     userWorkosId: string;
     workspaceId: string;
   }) => Promise<void>;
@@ -404,45 +394,12 @@ export function createIntegrationAccountService(input: {
       }
     },
 
-    async connectStripe(actor, apiKey) {
-      requireAdmin(actor, STRIPE_ADMIN_ONLY_MESSAGE);
-      const trimmed = apiKey.trim();
-      if (!isValidStripeRestrictedApiKey(trimmed)) {
-        throw new ApiError(
-          400,
-          "invalid_request",
-          "Use a restricted Stripe key beginning with rk_test_ or rk_live_. Unrestricted sk_ keys are not accepted.",
-        );
-      }
-      try {
-        const validation = await validateStripeRestrictedApiKey(trimmed);
-        if (!validation.ok) throw new ApiError(400, "invalid_request", validation.error);
-        await connectStripeIntegration({
-          userWorkosId: actor.userId,
-          workspaceId: actor.workspaceId,
-          apiKey: trimmed,
-          identity: validation.identity,
-          db,
-        });
-        await input
-          .refreshStripePluginRegistrations?.({
-            userWorkosId: actor.userId,
-            workspaceId: actor.workspaceId,
-          })
-          .catch((error) => {
-            logger.warn("Stripe connected but plugin discovery refresh failed", {
-              event: "opencompany.stripe_plugin_refresh_failed",
-              error_message: error instanceof Error ? error.message : String(error),
-            });
-          });
-        return await getStripeIntegrationState(actor.workspaceId, db);
-      } catch (error) {
-        throw commandFailure(
-          error,
-          "Could not connect Stripe. Check the restricted key and try again.",
-          "stripe_connect",
-        );
-      }
+    async connectStripe() {
+      throw new ApiError(
+        410,
+        "invalid_request",
+        "Workspace Stripe keys are retired. Connect your personal Stripe account in Plugins settings.",
+      );
     },
 
     async disconnectStripe(actor) {

@@ -28,7 +28,6 @@ import { getLinearIntegrationState } from "@/lib/integrations/linear-mcp";
 import { getPersonalAccounts } from "@/lib/integrations/personal-accounts";
 import { getPostHogIntegrationState } from "@/lib/integrations/posthog-mcp";
 import { getSlackIntegrationState } from "@/lib/integrations/slack";
-import { getStripeIntegrationState } from "@/lib/integrations/stripe";
 import { getXAccountIntegrationState } from "@/lib/integrations/x-account";
 import { getWorkspaceSettingsAction } from "@/lib/workspace-actions";
 
@@ -52,7 +51,6 @@ export async function AppShell({ children }: { children: ReactNode }) {
     granolaMcp,
     fathom,
     attio,
-    stripe,
     xAccount,
     codex,
     claudeCode,
@@ -113,11 +111,6 @@ export async function AppShell({ children }: { children: ReactNode }) {
       "attio_mcp_integration",
       () => getAttioMcpIntegrationState(user.workosUserId),
       emptyIntegrations.attio,
-    ),
-    loadOptionalAppShellData(
-      "stripe_integration",
-      () => getStripeIntegrationState(workspace.id),
-      emptyIntegrations.stripe,
     ),
     loadOptionalAppShellData(
       "x_account_integration",
@@ -196,7 +189,7 @@ export async function AppShell({ children }: { children: ReactNode }) {
       granolaMcp,
       fathom,
       attio,
-      stripe,
+      stripe: emptyIntegrations.stripe,
       xAccount,
       personalAccounts,
       codex: {

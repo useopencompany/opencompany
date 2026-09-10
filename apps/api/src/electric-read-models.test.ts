@@ -287,7 +287,7 @@ describe("Electric read models", () => {
 
     expect(requestedUrl?.searchParams.get("table")).toBe("goat.integrations");
     expect(requestedUrl?.searchParams.get("where")).toBe(
-      `(("user_workos_id" = $1 AND "workspace_id" IS NULL) OR "workspace_id" = $2) ` +
+      `"user_workos_id" = $1 AND "workspace_id" IS NULL AND CAST($2 AS text) = CAST($2 AS text) ` +
         `AND CAST($3 AS text) = CAST($3 AS text)`,
     );
     expect(requestedUrl?.searchParams.get("params[1]")).toBe("user_1");

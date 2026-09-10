@@ -26,7 +26,7 @@ import { type PluginDataStorage, preparePluginDataRuntime } from "./plugin-data-
 
 describe("Plugin data runtime", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
   });
 
   afterEach(() => {
@@ -37,6 +37,7 @@ describe("Plugin data runtime", () => {
     type StoredLease = {
       workspaceId: string;
       userId: string;
+      pluginId: string;
       pluginName: string;
       blobPathname: string;
       checksum: string;
@@ -53,6 +54,7 @@ describe("Plugin data runtime", () => {
       record = {
         workspaceId: input.workspaceId,
         userId: input.userId,
+        pluginId: input.pluginId,
         pluginName: input.pluginName,
         blobPathname: input.blobPathname,
         checksum: input.checksum,
@@ -68,6 +70,7 @@ describe("Plugin data runtime", () => {
       if (!record || record.leaseId) return null;
       record = {
         ...record,
+        pluginId: input.pluginId,
         leaseId: input.leaseId,
         leaseOwner: input.leaseOwner,
         leaseExpiresAt: new Date(Date.now() + input.leaseTtlMs),
@@ -96,6 +99,7 @@ describe("Plugin data runtime", () => {
       };
       return {
         ...record,
+        pluginId: input.pluginId,
         leaseId: input.leaseId,
         leaseOwner: input.leaseOwner,
         leaseExpiresAt: record.leaseExpiresAt ?? new Date(),
@@ -173,6 +177,35 @@ describe("Plugin data runtime", () => {
     await replacementRuntime.release();
   });
 
+  it("removes the empty archive when installation access is revoked during initialization", async () => {
+    repositoryMocks.acquire.mockResolvedValue(null);
+    repositoryMocks.get.mockResolvedValue(null);
+    repositoryMocks.initialize.mockRejectedValue(new Error("Install and enable your plugin"));
+    const storage: PluginDataStorage = {
+      upload: vi.fn(async () => ({ pathname: "temporary.tar" })),
+      download: vi.fn(),
+      delete: vi.fn(async () => undefined),
+    };
+    await expect(
+      preparePluginDataRuntime({
+        userId: "user_1",
+        workspaceId: "workspace_1",
+        workRoot: "/workspace",
+        leaseOwner: "session",
+        sandbox: fakeSandbox(new Uint8Array()).sandbox as never,
+        mcpPlugins: [mcpPlugin("revoked_plugin", "a")],
+        checkAbort: async () => undefined,
+        storage,
+      }),
+    ).rejects.toThrow("Install and enable your plugin");
+    expect(repositoryMocks.initialize).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({ pluginId: "revoked_plugin", userId: "user_1" }),
+    );
+    expect(storage.delete).toHaveBeenCalledWith("temporary.tar");
+    expect(storage.download).not.toHaveBeenCalled();
+  });
+
   it("renews every lease during a checkpoint that exceeds the lease TTL", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-24T12:00:00.000Z"));
@@ -182,6 +215,7 @@ describe("Plugin data runtime", () => {
       {
         workspaceId: string;
         userId: string;
+        pluginId: string;
         pluginName: string;
         blobPathname: string;
         checksum: string;
@@ -196,6 +230,7 @@ describe("Plugin data runtime", () => {
       const record = {
         workspaceId: input.workspaceId,
         userId: input.userId,
+        pluginId: input.pluginId,
         pluginName: input.pluginName,
         blobPathname: `initial/${input.pluginName}.tar`,
         checksum: initialChecksum,

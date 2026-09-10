@@ -430,6 +430,7 @@ export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): 
   let granolaMcpRow: IntegrationStateRow | undefined;
   for (const row of rows) {
     if (row.status === "disconnected") continue;
+    if (row.workspaceId ?? row.workspace_id) continue;
     // Provider "linear" covers two kinds of rows; the MCP card must only ever
     // reflect the MCP connector row (external_id "linear_mcp"). Linear
     // brain-source rows are surfaced through the brain settings page instead.
@@ -445,8 +446,8 @@ export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): 
       granolaMcpRow = row;
       continue;
     }
-    // Attio's API-key connection remains available for Wiki ingestion and as
-    // a legacy action fallback. Plugin settings reflect only the MCP OAuth row.
+    // Attio's API-key connection remains available for Wiki ingestion.
+    // Plugin settings reflect only the MCP OAuth row.
     if (row.provider === "attio" && (row.externalId ?? row.external_id) !== "attio_mcp") {
       continue;
     }
@@ -458,11 +459,8 @@ export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): 
     ) {
       continue;
     }
-    // Stripe is workspace-owned; personal rows are pre-ownership leftovers
-    // and must not shadow the workspace connection.
-    if (row.provider === "stripe" && !(row.workspaceId ?? row.workspace_id)) {
-      continue;
-    }
+    // Stripe MCP uses the personal OAuth account, exposed in personalAccounts.
+    if (row.provider === "stripe") continue;
     // Jamie's retired webhook integration used workspace-owned rows. Only the
     // personal OAuth connector row belongs to the official plugin.
     if (

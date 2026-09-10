@@ -16,7 +16,6 @@ import {
 import {
   connectStripeIntegration,
   disconnectStripeIntegration,
-  getStripeIntegrationState,
   validateStripeRestrictedApiKey,
 } from "@opencompany/agent/integrations/stripe";
 import { captureProductServerEvent } from "@opencompany/analytics/product/server";
@@ -531,62 +530,22 @@ describe("integration account service", () => {
     expect(getRenderIntegrationState).toHaveBeenCalled();
   });
 
-  it("admin-gates the workspace-scoped Stripe commands", async () => {
+  it.each([member, admin])("retires shared Stripe key creation for $role", async (actor) => {
     const service = createIntegrationAccountService({ db: fakeDb() });
-    await expect(service.connectStripe(member, "rk_test_x".padEnd(40, "a"))).rejects.toMatchObject({
-      status: 403,
-      message: "Only workspace admins can manage the Stripe integration.",
+    await expect(service.connectStripe(actor, "rk_test_x".padEnd(40, "a"))).rejects.toMatchObject({
+      status: 410,
+      message:
+        "Workspace Stripe keys are retired. Connect your personal Stripe account in Plugins settings.",
     });
+    expect(validateStripeRestrictedApiKey).not.toHaveBeenCalled();
+    expect(connectStripeIntegration).not.toHaveBeenCalled();
+  });
+
+  it("requires admin access to remove a retired shared Stripe key", async () => {
+    const service = createIntegrationAccountService({ db: fakeDb() });
     await expect(service.disconnectStripe(member)).rejects.toMatchObject({
       status: 403,
       message: "Only workspace admins can manage the Stripe integration.",
-    });
-  });
-
-  it("connects Stripe and refreshes installed plugin discovery", async () => {
-    const apiKey = `rk_test_${"a".repeat(24)}`;
-    vi.mocked(validateStripeRestrictedApiKey).mockResolvedValueOnce({
-      ok: true,
-      identity: {
-        accountId: "acct_123",
-        accountName: "Acme Payments",
-        accountEmail: "finance@example.com",
-        country: "US",
-        livemode: false,
-      },
-    });
-    vi.mocked(getStripeIntegrationState).mockResolvedValueOnce({
-      provider: "stripe",
-      connected: true,
-      status: "connected",
-      integrationId: "gint_stripe",
-      accountName: "Acme Payments",
-      livemode: false,
-      statusReason: null,
-      capabilityModes: {},
-      toolModes: {},
-    });
-    const refreshStripePluginRegistrations = vi.fn(async () => undefined);
-    const service = createIntegrationAccountService({
-      db: fakeDb(),
-      refreshStripePluginRegistrations,
-    });
-
-    await expect(service.connectStripe(admin, apiKey)).resolves.toMatchObject({
-      provider: "stripe",
-      connected: true,
-      integrationId: "gint_stripe",
-    });
-    expect(connectStripeIntegration).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userWorkosId: "user_1",
-        workspaceId: "workspace_1",
-        apiKey,
-      }),
-    );
-    expect(refreshStripePluginRegistrations).toHaveBeenCalledWith({
-      userWorkosId: "user_1",
-      workspaceId: "workspace_1",
     });
   });
 
@@ -604,12 +563,8 @@ describe("integration account service", () => {
     );
   });
 
-  it("keeps the retired Stripe key-format and not-connected copy", async () => {
+  it("reports when no retired Stripe key exists", async () => {
     const service = createIntegrationAccountService({ db: fakeDb() });
-    await expect(service.connectStripe(admin, "sk_live_notrestricted")).rejects.toMatchObject({
-      message:
-        "Use a restricted Stripe key beginning with rk_test_ or rk_live_. Unrestricted sk_ keys are not accepted.",
-    });
     vi.mocked(disconnectStripeIntegration).mockResolvedValueOnce(false);
     await expect(service.disconnectStripe(admin)).rejects.toMatchObject({
       status: 404,
