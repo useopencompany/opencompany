@@ -192,7 +192,7 @@ export async function serveActionRequest(input: {
       error: {
         code: "provider_error",
         source: action.source,
-        message: `${JSON.stringify(action.id)} reached its provider retry limit in this turn. Do not call it again now; summarize any results already available and explain what remains unverified.`,
+        message: `opencompany stopped further attempts of ${JSON.stringify(action.id)} after repeated failures in this turn. This limit is enforced by opencompany; use the earlier errors to explain the cause. Do not call it again now; summarize any results already available and explain what remains unverified.`,
       },
     };
   }
