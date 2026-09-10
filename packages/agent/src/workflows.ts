@@ -11,6 +11,7 @@ import {
   isValidBrainId,
   normalizeBrainId,
 } from "@opencompany/brain";
+import { newResourceId } from "@opencompany/core/resource-ids";
 import { getDb } from "@opencompany/db/client";
 import {
   type HarnessSpec,
@@ -347,7 +348,7 @@ export async function createWorkflow(input: {
   const db = getDb();
   const slug = await uniqueWorkflowSlug(db, input.workspaceId, input.name);
   await db.insert(workflows).values({
-    id: `goat_wf_${randomUUID()}`,
+    id: newResourceId("workflow"),
     workspaceId: input.workspaceId,
     slug,
     name: input.name.trim(),

@@ -1,13 +1,15 @@
+import { newResourceId } from "@opencompany/core/resource-ids";
+
 export const HOME_NAVIGATION_EVENT = "opencompany:home-navigation";
 export const CHAT_COMPOSER_FOCUS_EVENT = "opencompany:chat-composer-focus";
 
 let pendingChatComposerFocusSessionId: string | null = null;
 
 const CHAT_SESSION_ID_PATTERN =
-  /^goat_chat_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  /^(?:conversation_|goat_chat_)[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function newOptimisticChatSessionId() {
-  return `goat_chat_${crypto.randomUUID()}`;
+  return newResourceId("conversation");
 }
 
 export function requestChatComposerFocus(sessionId: string) {

@@ -1,6 +1,6 @@
 "use server";
 
-import { randomUUID } from "node:crypto";
+import { newResourceId } from "@opencompany/core/resource-ids";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { unstable_rethrow } from "next/navigation";
@@ -135,7 +135,7 @@ export async function createWorkspaceAction(name: unknown): Promise<WorkspaceCre
   const validation = validateWorkspaceName(name);
   if (!validation.ok) return validation;
 
-  const workspaceId = `goat_ws_${randomUUID()}`;
+  const workspaceId = newResourceId("workspace");
   let activation: {
     workspaceId: string;
     organizationId: string;

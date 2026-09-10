@@ -54,6 +54,7 @@ import {
   ClaudeCodeAuthStatusEnvelopeSchema,
   CodexAuthStatusEnvelopeSchema,
   CodexDeviceAuthFlowEnvelopeSchema,
+  CodexUsageEnvelopeSchema,
   CompleteInfisicalAuthBodySchema,
   ConfirmBrainImportBodySchema,
   ConversationEnvelopeSchema,
@@ -3483,6 +3484,21 @@ export const getCodexAuthRoute = createRoute({
   },
 });
 
+export const getCodexUsageRoute = createRoute({
+  method: "get",
+  path: "/v1/engine-auth/codex/usage",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description:
+        "Current subscription limits for the acting user's connected Codex account. Includes usage across apps; never includes credentials.",
+      content: { "application/json": { schema: CodexUsageEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const startCodexDeviceAuthRoute = createRoute({
   method: "post",
   path: "/v1/engine-auth/codex/device",
@@ -3914,6 +3930,7 @@ export type V1RouteHandlers = {
   saveClaudeCodeToken: RouteHandler<typeof saveClaudeCodeTokenRoute>;
   deleteClaudeCodeAuth: RouteHandler<typeof deleteClaudeCodeAuthRoute>;
   getCodexAuth: RouteHandler<typeof getCodexAuthRoute>;
+  getCodexUsage: RouteHandler<typeof getCodexUsageRoute>;
   updateCodexWorkspaceEngine: RouteHandler<typeof updateCodexWorkspaceEngineRoute>;
   startCodexDeviceAuth: RouteHandler<typeof startCodexDeviceAuthRoute>;
   pollCodexDeviceAuth: RouteHandler<typeof pollCodexDeviceAuthRoute>;
@@ -4110,6 +4127,7 @@ export function createV1Router(
       .openapi(saveClaudeCodeTokenRoute, handlers.saveClaudeCodeToken)
       .openapi(deleteClaudeCodeAuthRoute, handlers.deleteClaudeCodeAuth)
       .openapi(getCodexAuthRoute, handlers.getCodexAuth)
+      .openapi(getCodexUsageRoute, handlers.getCodexUsage)
       .openapi(updateCodexWorkspaceEngineRoute, handlers.updateCodexWorkspaceEngine)
       // POST /codex/device registers before the {flowId} poll route so the
       // static segment always wins route matching.
@@ -4786,7 +4804,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
     c.json(
       {
         data: {
-          workspace: { id: "goat_ws_contract", name: "Contract Workspace" },
+          workspace: { id: "workspace_contract", name: "Contract Workspace" },
           role: "admin" as const,
           plan: "hobby" as const,
           memberCap: 1,
@@ -4798,7 +4816,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
       200,
     ),
   renameWorkspace: (c) =>
-    c.json({ data: { id: "goat_ws_contract", name: "Contract Workspace" }, meta }, 200),
+    c.json({ data: { id: "workspace_contract", name: "Contract Workspace" }, meta }, 200),
   inviteWorkspaceMember: (c) => c.json({ data: { completed: true as const }, meta }, 201),
   revokeWorkspaceInvitation: (c) => c.json({ data: { completed: true as const }, meta }, 200),
   removeWorkspaceMember: (c) => c.json({ data: { completed: true as const }, meta }, 200),
@@ -4806,7 +4824,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
     c.json(
       {
         data: {
-          workspaceId: "goat_ws_contract",
+          workspaceId: "workspace_contract",
           organizationId: "org_contract",
           brainId: "brain_contract",
         },
@@ -4818,7 +4836,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
     c.json(
       {
         data: {
-          workspaceId: "goat_ws_contract",
+          workspaceId: "workspace_contract",
           organizationId: "org_contract",
           brainId: "brain_contract",
         },
@@ -4845,7 +4863,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
     c.json(
       {
         data: {
-          workspaceId: "goat_ws_contract",
+          workspaceId: "workspace_contract",
           organizationId: "org_contract",
           brainId: "brain_contract",
           createdByCaller: true,
@@ -5188,7 +5206,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
       {
         data: {
           conversationId: "conversation_contract",
-          shareId: "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+          shareId: "share_01234567-89ab-4cde-8f01-23456789abcd",
         },
         meta,
       },
@@ -5282,7 +5300,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
     c.json(
       {
         data: {
-          shareId: "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+          shareId: "share_01234567-89ab-4cde-8f01-23456789abcd",
           title: "Shared conversation",
           kind: "chat" as const,
           engine: "opencompany" as const,
@@ -5296,7 +5314,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
     c.json(
       {
         data: {
-          shareId: "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+          shareId: "share_01234567-89ab-4cde-8f01-23456789abcd",
           title: "Shared conversation",
           kind: "chat" as const,
           engine: "opencompany" as const,
@@ -5611,6 +5629,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
       200,
     ),
   deleteClaudeCodeAuth: (c) => c.json({ data: { deleted: true as const }, meta }, 200),
+  getCodexUsage: (c) => c.json({ data: { windows: [], updatedAt: placeholderTime }, meta }, 200),
   getCodexAuth: (c) =>
     c.json(
       {
@@ -5756,7 +5775,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
           memberCount: 1,
           memberCap: 1,
           spendThisMonthUsdMicros: 0,
-          spendThisMonthByCategory: { chat: 0, ingestion: 0, capabilities: 0 },
+          spendThisMonthByCategory: { chat: 0, ingestion: 0, capabilities: 0, sandbox: 0 },
           recentActivity: [],
           lowBalanceWarnUsdMicros: 1_000_000,
           includedUsagePerSeatCents: 2_000,
@@ -5836,18 +5855,18 @@ function contractIdentity() {
     },
     workspaces: [
       {
-        id: "goat_ws_contract",
+        id: "workspace_contract",
         name: "Contract Workspace",
         slug: "contract-workspace",
         role: "admin" as const,
         legacyBrainEnabled: false,
       },
     ],
-    activeWorkspaceId: "goat_ws_contract",
+    activeWorkspaceId: "workspace_contract",
     brains: [
       {
         id: "brain_contract",
-        workspaceId: "goat_ws_contract",
+        workspaceId: "workspace_contract",
         name: "General",
         slug: "general",
         description: null,

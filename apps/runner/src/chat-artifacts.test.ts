@@ -77,7 +77,7 @@ describe("publishChatArtifact", () => {
       },
     });
     expect(blobMocks.put).toHaveBeenCalledWith(
-      expect.stringMatching(/^goat-chat-artifacts\/workspace_1\/goat_chat_artifact_/),
+      expect.stringMatching(/^goat-chat-artifacts\/workspace_1\/artifact_/),
       expect.any(Buffer),
       expect.objectContaining({
         access: "private",
@@ -254,7 +254,7 @@ describe("publishChatArtifact", () => {
       },
     });
     expect(blobMocks.put).toHaveBeenCalledWith(
-      expect.stringMatching(/^goat-chat-artifacts\/workspace_1\/goat_chat_artifact_/),
+      expect.stringMatching(/^goat-chat-artifacts\/workspace_1\/artifact_/),
       Buffer.from("# Report"),
       expect.objectContaining({ contentType: "text/markdown", access: "private" }),
     );

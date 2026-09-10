@@ -15,6 +15,62 @@ The Slack workspace may require an admin to approve the OAuth grant. Slack only 
 server for internal or Marketplace-distributed Slack apps, so self-distributed apps are not
 supported.
 
+## Catch up on recent messages
+
+Ask, for example: “What direct messages and group DMs did I receive in the last two hours?”
+The existing `slack_search_public_and_private` tool supports this with exact time bounds; no
+additional MCP tool or connection is needed. “I” means the person whose Slack account is connected.
+Searching for another person does not grant access to their private conversations.
+
+For an agent or workflow, calculate the window once at the start of the search. Use the top-level
+`after` and `before` parameters as Unix timestamps in **seconds**, supplied as strings. The
+`after:YYYY-MM-DD` query modifier only expresses a date and cannot specify a rolling two-hour window.
+
+```js
+const end = Math.floor(Date.now() / 1000);
+const params = {
+  query: "-from:me",
+  after: String(end - 2 * 60 * 60),
+  before: String(end),
+  channel_types: "im,mpim",
+  content_types: "messages",
+  only_my_channels: true,
+  include_bots: true,
+  include_context: false,
+  sort: "timestamp",
+  sort_dir: "desc",
+  limit: 20,
+};
+// Pass params to slack_search_public_and_private.
+```
+
+This searches one-to-one DMs (`im`) and group DMs (`mpim`), excluding messages sent by the
+connected user. Bot messages are included explicitly because search excludes them by default;
+set `include_bots` to `false` for a catch-up limited to people.
+
+Choose the scope to match the question:
+
+| Question | Search scope |
+| --- | --- |
+| What DMs did I receive? | Use `channel_types: "im,mpim"` and `query: "-from:me"` as above. |
+| What happened in my channels and DMs? | Use `channel_types: "public_channel,private_channel,im,mpim"`, keeping `only_my_channels: true`. |
+| What was sent directly to me? | Use `query: "to:me -from:me"`. This recipient filter is narrower than general activity in joined channels. |
+| What happened in one known conversation? | Use `slack_read_channel` with its `channel_id`, `oldest`, and `latest` timestamps; read thread replies with `slack_read_thread`. |
+
+Search returns at most 20 results per page. Follow the returned cursor with the same filters and
+the original time bounds until there are no more pages. If a budget, error, or rate limit stops
+pagination, label the answer as partial rather than claiming it includes every message. When
+combining searches, deduplicate by channel ID and message timestamp. Include message links in the
+catch-up so the user can open the original conversations.
+
+“Recent” describes message timestamps, not unread status or Slack's Activity feed. This search
+does not establish whether the user has read a message or received a notification. Search indexing
+can also lag very recent messages; use channel history for a known conversation when that matters.
+Thread context may contain older messages, so distinguish context from messages inside the window.
+See [Slack's search guidance](https://github.com/slackapi/slack-skills-plugin/blob/main/skills/slack-search/SKILL.md)
+for search syntax and indexing limitations. Private search still follows the account's tool
+permissions described below.
+
 ## Scopes and permissions
 
 The plugin groups reviewed tools into three controls:
