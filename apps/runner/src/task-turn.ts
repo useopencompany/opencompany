@@ -913,7 +913,10 @@ export async function settleDurableTurn(input: {
       WHERE task.id = ${completion?.taskId ?? null}
         AND task.session_id = ${target.chatSessionId}
         AND task.user_workos_id = ${target.userWorkosId}
-        AND task.status IN ('queued', 'running')
+        AND (
+          task.status IN ('queued', 'running')
+          OR (task.status = 'canceled' AND ${input.turnStatus} = 'interrupted')
+        )
         AND EXISTS (SELECT 1 FROM settled_turn)
       FOR UPDATE
     ),

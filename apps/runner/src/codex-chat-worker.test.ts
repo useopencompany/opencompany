@@ -21,11 +21,14 @@ import {
 import type { RunnerEnv } from "./env";
 
 const taskApprovalMocks = vi.hoisted(() => ({
-  fenceTaskApprovalEngine: vi.fn(async () => undefined),
   resumeTaskActionApprovals: vi.fn(async () => ""),
   pauseTaskActionApprovals: vi.fn(async () => undefined),
 }));
 vi.mock("./task-action-approval", () => taskApprovalMocks);
+const engineFenceMocks = vi.hoisted(() => ({
+  fenceCodingSessionEngine: vi.fn(async () => undefined),
+}));
+vi.mock("./coding-engine-fence", () => engineFenceMocks);
 
 const sessionRows = vi.hoisted(() => [] as CodexChatSession[]);
 const claimedTaskContext = vi.hoisted(() => ({
@@ -593,6 +596,34 @@ describe("runClaimedTurn", () => {
     );
   });
 
+  it("fences an interrupted coding session before terminal settlement without resuming approvals", async () => {
+    const interruptRequestedAt = new Date("2026-07-10T09:00:05.000Z");
+    await runClaimedTurn(turn({ attempts: 2, interruptRequestedAt }), env());
+    expect(engineFenceMocks.fenceCodingSessionEngine).toHaveBeenCalledWith(
+      sessionRows[0],
+      expect.any(Number),
+    );
+    expect(engineFenceMocks.fenceCodingSessionEngine.mock.invocationCallOrder[0]).toBeLessThan(
+      chatMocks.runCodexChatTurn.mock.invocationCallOrder[0]!,
+    );
+    expect(taskApprovalMocks.resumeTaskActionApprovals).not.toHaveBeenCalled();
+    expect(chatMocks.runCodexChatTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ turn: expect.objectContaining({ interruptRequestedAt }) }),
+    );
+  });
+
+  it("defers cancellation recovery when the sandbox process cannot be fenced", async () => {
+    engineFenceMocks.fenceCodingSessionEngine.mockRejectedValueOnce(
+      new CodexChatRetryableInfrastructureError("fence failed", new Error("unavailable")),
+    );
+    await runClaimedTurn(turn({ attempts: 2, interruptRequestedAt: new Date() }), env());
+    expect(chatMocks.runCodexChatTurn).not.toHaveBeenCalled();
+    expect(taskApprovalMocks.resumeTaskActionApprovals).not.toHaveBeenCalled();
+    expect(
+      dbMock.execute.mock.calls.some(([query]) => sqlText(query).includes("WITH deferred AS")),
+    ).toBe(true);
+  });
+
   it("dispatches opencompany turns without coding-engine recovery state", async () => {
     sessionRows.length = 0;
     sessionRows.push(session({ engine: "opencompany", model: "anthropic/claude-sonnet-5" }));
@@ -849,6 +880,22 @@ describe("runClaimedTurn", () => {
     expect(eventMocks.fail).not.toHaveBeenCalled();
   });
 
+  it("still fences and settles cancellation recovery past the total attempt budget", async () => {
+    await expect(
+      runClaimedTurn(
+        turn({
+          attempts: CODEX_CHAT_MAX_TOTAL_ATTEMPTS + 1,
+          interruptRequestedAt: new Date("2026-07-10T09:00:05.000Z"),
+        }),
+        env(),
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(engineFenceMocks.fenceCodingSessionEngine).toHaveBeenCalledOnce();
+    expect(chatMocks.runCodexChatTurn).toHaveBeenCalledOnce();
+    expect(eventMocks.fail).not.toHaveBeenCalled();
+  });
+
   it("forces a minimal settlement when the attempt-cap failure write itself throws", async () => {
     eventMocks.fail.mockRejectedValueOnce(
       new Error("could not determine data type of parameter $51"),
@@ -938,7 +985,7 @@ function sqlText(query: unknown): string {
       ) {
         return ((chunk as { value: unknown[] }).value ?? []).join("");
       }
-      return "";
+      return chunk && typeof chunk === "object" && "queryChunks" in chunk ? sqlText(chunk) : "";
     })
     .join("");
 }

@@ -1,5 +1,8 @@
+import { createLogger } from "@opencompany/observability";
 import { Sandbox, type SandboxNetworkOpts } from "e2b";
 import { ACTIVE_CODING_SANDBOX_TIMEOUT_MS } from "./coding-sandbox-lifecycle";
+
+const logger = createLogger({ service: "opencompany-runner", runtime: "sandbox" });
 
 export type SandboxHandle = Awaited<ReturnType<typeof Sandbox.create>>;
 export type SandboxTextFile = {
@@ -8,7 +11,7 @@ export type SandboxTextFile = {
 };
 export type SandboxLatencyObservation = {
   operation: "create" | "connect";
-  outcome: "success" | "not_found" | "error";
+  outcome: "success" | "not_found" | "error" | "unresponsive";
   latencyMs: number;
   sandboxId?: string;
   requestedSandboxId?: string;
@@ -48,6 +51,17 @@ const SANDBOX_REQUEST_TIMEOUT_MS = 30_000;
 // larger deadline scoped to connect so transient E2B cold starts do not make a durable session
 // unusable while routine sandbox operations still fail promptly.
 const SANDBOX_CONNECT_REQUEST_TIMEOUT_MS = 2 * 60 * 1000;
+// A snapshot paused under memory pressure can wedge on restore: the control-plane connect
+// succeeds but the guest never answers envd requests, so every command against the sandbox
+// times out and a durable session retries into the same dead sandbox until its retry budget
+// exhausts (prod incident 2026-09-08/09, confirmed by E2B). Probe the guest after connect
+// and, when it is unresponsive, cold-boot from disk state (E2B `onResume: "reboot"` — files
+// survive, memory and processes do not) before giving up and letting the caller provision a
+// replacement sandbox.
+const SANDBOX_GUEST_PROBE_COMMAND = "true";
+const SANDBOX_GUEST_PROBE_TIMEOUT_MS = 15_000;
+// A reboot costs a full boot rather than a ~1s memory restore; give its probe more room.
+const SANDBOX_REBOOT_PROBE_TIMEOUT_MS = 60_000;
 export async function createOrConnectSandbox(input: {
   sandboxId?: string | null;
   template?: string | undefined;
@@ -60,6 +74,7 @@ export async function createOrConnectSandbox(input: {
   if (input.sandboxId) {
     const sandbox = await connectSandbox({
       sandboxId: input.sandboxId,
+      recoverUnresponsiveGuest: true,
       ...(input.onLatency ? { onLatency: input.onLatency } : {}),
     });
     if (sandbox) return sandbox;
@@ -70,14 +85,31 @@ export async function createOrConnectSandbox(input: {
 
 export async function connectSandbox(input: {
   sandboxId: string;
+  // Rescue a sandbox whose guest wedged on memory restore by rebooting it from disk state.
+  // Only safe for callers that hold the session's turn lease: recovery cold-boots the
+  // sandbox, which kills anything still running in it.
+  recoverUnresponsiveGuest?: boolean;
   onLatency?: (observation: SandboxLatencyObservation) => void | Promise<void>;
 }) {
   const startedAt = performance.now();
   try {
-    const sandbox = await Sandbox.connect(input.sandboxId, {
+    let sandbox = await Sandbox.connect(input.sandboxId, {
       timeoutMs: ACTIVE_SANDBOX_TIMEOUT_MS,
       requestTimeoutMs: SANDBOX_CONNECT_REQUEST_TIMEOUT_MS,
     });
+    if (input.recoverUnresponsiveGuest) {
+      const responsive = await ensureResponsiveGuest(sandbox);
+      if (!responsive) {
+        emitSandboxLatency(input.onLatency, {
+          operation: "connect",
+          outcome: "unresponsive",
+          latencyMs: elapsedMs(startedAt),
+          requestedSandboxId: input.sandboxId,
+        });
+        return null;
+      }
+      sandbox = responsive;
+    }
     emitSandboxLatency(input.onLatency, {
       operation: "connect",
       outcome: "success",
@@ -107,6 +139,88 @@ export async function connectSandbox(input: {
     });
     return null;
   }
+}
+
+async function probeSandboxGuest(sandbox: SandboxHandle, timeoutMs: number) {
+  await sandbox.commands.run(SANDBOX_GUEST_PROBE_COMMAND, {
+    timeoutMs,
+    requestTimeoutMs: timeoutMs,
+  });
+}
+
+function isUnresponsiveGuestError(error: unknown) {
+  if (!(error instanceof Error)) return false;
+  return error.name === "TimeoutError" || isRetryableCommandStreamError(error);
+}
+
+async function ensureResponsiveGuest(sandbox: SandboxHandle) {
+  try {
+    await probeSandboxGuest(sandbox, SANDBOX_GUEST_PROBE_TIMEOUT_MS);
+    return sandbox;
+  } catch (error) {
+    if (!isUnresponsiveGuestError(error)) throw error;
+  }
+  logger.warn("Sandbox guest unresponsive after connect; rebooting from disk state", {
+    event: "opencompany.runner_sandbox_reboot_resume",
+    sandbox_id: sandbox.sandboxId,
+  });
+  return rebootSandboxFromDisk(sandbox.sandboxId);
+}
+
+async function rebootSandboxFromDisk(sandboxId: string) {
+  // `onResume: "reboot"` only applies to a paused sandbox, and a failed restore can leave the
+  // wedged guest in "running" state — pause it first so the reboot has a snapshot to boot from.
+  // Pausing is a host-side operation that needs no guest cooperation, so it works on a wedged
+  // instance and replaces nothing the reboot needs (disk state is part of the snapshot).
+  try {
+    const info = await Sandbox.getInfo(sandboxId, {
+      requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS,
+    });
+    if (info.state !== "paused") {
+      await Sandbox.pause(sandboxId, { requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS });
+    }
+  } catch (error) {
+    if (isSandboxNotFound(error)) return null;
+    // A pause race or transient control-plane error must not block the rescue; the reboot
+    // attempt below settles whether the sandbox is usable.
+  }
+
+  let sandbox: SandboxHandle;
+  try {
+    sandbox = await Sandbox.connect(sandboxId, {
+      timeoutMs: ACTIVE_SANDBOX_TIMEOUT_MS,
+      requestTimeoutMs: SANDBOX_CONNECT_REQUEST_TIMEOUT_MS,
+      onResume: "reboot",
+    });
+  } catch (error) {
+    if (isSandboxNotFound(error)) return null;
+    // Capacity blips keep the snapshot intact for the caller's regular infrastructure retry;
+    // anything else means this sandbox cannot come back and a replacement is the way out.
+    if (isRetryableSandboxAcquisitionError(error)) throw error;
+    logGuestUnrecoverable(sandboxId, error);
+    return null;
+  }
+  try {
+    await probeSandboxGuest(sandbox, SANDBOX_REBOOT_PROBE_TIMEOUT_MS);
+  } catch (error) {
+    if (!isUnresponsiveGuestError(error)) throw error;
+    logGuestUnrecoverable(sandboxId, error);
+    return null;
+  }
+  logger.info("Sandbox recovered by disk-state reboot", {
+    event: "opencompany.runner_sandbox_reboot_resume_succeeded",
+    sandbox_id: sandboxId,
+  });
+  return sandbox;
+}
+
+function logGuestUnrecoverable(sandboxId: string, error: unknown) {
+  logger.error("Sandbox guest unrecoverable after disk-state reboot; provisioning replacement", {
+    event: "opencompany.runner_sandbox_guest_unrecoverable",
+    sandbox_id: sandboxId,
+    error_name: error instanceof Error ? error.name : "unknown",
+    error: error instanceof Error ? error.message : String(error),
+  });
 }
 
 async function createSandbox(input: {
