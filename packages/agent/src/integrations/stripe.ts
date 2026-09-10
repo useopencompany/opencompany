@@ -10,12 +10,13 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import type { StripeProviderState } from "../integration-state";
 import { captureConnectionAddedAnalytics } from "./analytics";
 import { createRemoteMcpStaticBearerAuthProvider } from "./remote-mcp-static-bearer";
+import { getStripeOAuthIntegrationState, loadStripeOAuthWorkerConnection } from "./stripe-mcp";
 
 export const STRIPE_PROVIDER = "stripe" as const;
 export const STRIPE_CREDENTIAL_KIND = "api_key" as const;
 export const STRIPE_API_BASE_URL = "https://api.stripe.com/v1";
 export const STRIPE_API_VERSION = "2026-04-22.dahlia";
-export const STRIPE_MCP_ENDPOINT_URL = "https://mcp.stripe.com";
+export { STRIPE_MCP_ENDPOINT_URL } from "./stripe-mcp";
 
 // Follows the repo-wide injectable-db convention so the canonical API can pass
 // its pooled handle while web/runner callers keep the getDb() default.
@@ -287,7 +288,12 @@ export async function getStripeIntegrationState(
   };
 }
 
-export function getStripeMcpIntegrationState(input: { userWorkosId: string; workspaceId: string }) {
+export async function getStripeMcpIntegrationState(input: {
+  userWorkosId: string;
+  workspaceId: string;
+}) {
+  const oauthState = await getStripeOAuthIntegrationState(input);
+  if (oauthState.status !== "not_connected") return oauthState;
   return getStripeIntegrationState(input.workspaceId);
 }
 
@@ -296,6 +302,11 @@ export async function loadStripeMcpWorkerConnection(input: {
   workspaceId: string;
   onAuthorizationRequired: () => never;
 }) {
+  const oauthConnection = await loadStripeOAuthWorkerConnection(input);
+  // Once OAuth exists, an expired grant must not silently switch to a different
+  // Stripe account or the workspace key's permissions.
+  if (oauthConnection.ok || oauthConnection.reason !== "not_connected") return oauthConnection;
+
   const state = await getStripeIntegrationState(input.workspaceId);
   if (state.status === "not_connected" || state.status === "disconnected") {
     return { ok: false as const, reason: "not_connected" as const };

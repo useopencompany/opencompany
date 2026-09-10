@@ -462,3 +462,32 @@ describe("Granola integration state", () => {
     ]);
   });
 });
+
+it("exposes only Stripe MCP OAuth as a personal account and preserves the workspace key state", () => {
+  const state = integrationStateFromRows([
+    {
+      id: "stripe_key",
+      provider: "stripe",
+      workspaceId: "workspace_1",
+      externalId: "acct_123",
+      status: "connected",
+      accountType: "stripe_test_restricted_key",
+    },
+    {
+      id: "stripe_oauth",
+      provider: "stripe",
+      externalId: "stripe_mcp",
+      status: "needs_reauth",
+      accountName: "Stripe",
+    },
+    { id: "stripe_old", provider: "stripe", externalId: "acct_old", status: "connected" },
+  ]);
+  expect(state.personalAccounts.stripe).toEqual([
+    expect.objectContaining({ integrationId: "stripe_oauth", connected: false }),
+  ]);
+  expect(state.stripe).toMatchObject({
+    integrationId: "stripe_key",
+    connected: true,
+    livemode: false,
+  });
+});

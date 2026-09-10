@@ -78,6 +78,12 @@ import {
   verifySigNozMcpState,
 } from "@opencompany/agent/integrations/signoz-mcp";
 import {
+  appendStripeMcpStatus,
+  completeStripeMcpOAuth,
+  startStripeMcpOAuth,
+  verifyStripeMcpState,
+} from "@opencompany/agent/integrations/stripe-mcp";
+import {
   appendSupabaseMcpStatus,
   completeSupabaseMcpOAuth,
   startSupabaseMcpOAuth,
@@ -105,6 +111,7 @@ export type McpOAuthProvider =
   | "posthog"
   | "neon"
   | "notion"
+  | "stripe"
   | "supabase"
   | "resend"
   | "latitude"
@@ -203,6 +210,13 @@ const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
     verifyState: verifyNeonMcpState,
     appendStatus: appendNeonMcpStatus,
     deniedReason: "neon_denied",
+  },
+  stripe: {
+    start: startStripeMcpOAuth,
+    complete: completeStripeMcpOAuth,
+    verifyState: verifyStripeMcpState,
+    appendStatus: appendStripeMcpStatus,
+    deniedReason: "stripe_denied",
   },
   notion: {
     start: startNotionMcpOAuth,

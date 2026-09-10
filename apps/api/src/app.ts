@@ -2999,6 +2999,8 @@ export function createApiApp(input: CreateApiAppInput) {
     app.get("/integrations/posthog/callback", (c) => ingress.callback("posthog", c.req.raw));
     app.get("/integrations/neon/start", (c) => ingress.start("neon", c.req.raw));
     app.get("/integrations/neon/callback", (c) => ingress.callback("neon", c.req.raw));
+    app.get("/integrations/stripe/start", (c) => ingress.start("stripe", c.req.raw));
+    app.get("/integrations/stripe/callback", (c) => ingress.callback("stripe", c.req.raw));
     app.get("/integrations/notion/start", (c) => ingress.start("notion", c.req.raw));
     app.get("/integrations/supabase/start", (c) => ingress.start("supabase", c.req.raw));
     app.get("/integrations/resend/start", (c) => ingress.start("resend", c.req.raw));

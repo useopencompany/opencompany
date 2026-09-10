@@ -142,6 +142,8 @@ export type PluginAccountsState =
       status: "ready";
       accounts: PluginAccount[];
       permissionConnection: IntegrationAccountView<PluginConnectionProvider> | null;
+      legacyStripeConnection?: boolean;
+      stripeWorkspaceKey?: { connected: boolean };
       managedConnection?: ManagedPluginConnection;
     };
 
@@ -1150,6 +1152,7 @@ function AccountsSection({
   canEdit: boolean;
 }) {
   const permissionConnection = state.status === "ready" ? state.permissionConnection : null;
+  const legacyStripeConnection = state.status === "ready" && Boolean(state.legacyStripeConnection);
   const managedConnection = state.status === "ready" ? state.managedConnection : undefined;
   const displayedAccounts =
     state.status !== "ready"
@@ -1185,7 +1188,7 @@ function AccountsSection({
         <ManagedConnectionStatusRow connection={managedConnection} />
       ) : displayedAccounts.length === 0 ? (
         <SectionEmpty icon={Users}>{`No ${accountLabel} accounts are connected.`}</SectionEmpty>
-      ) : config.connectionProvider === "stripe" ? (
+      ) : legacyStripeConnection ? (
         <PluginConnectionStatusRow
           identity={
             permissionConnection?.connectionLabel ||
@@ -1225,6 +1228,7 @@ function AccountsSection({
           config={config}
           permissionConnection={permissionConnection}
           managedConnection={managedConnection}
+          stripeWorkspaceKey={state.status === "ready" ? state.stripeWorkspaceKey : undefined}
           canEdit={canEdit}
         />
         {config.ingestionHref && config.ingestionLabel ? (
@@ -1272,8 +1276,10 @@ function PluginConnectionControls({
   config,
   permissionConnection,
   managedConnection,
+  stripeWorkspaceKey,
   canEdit,
 }: {
+  stripeWorkspaceKey: { connected: boolean } | undefined;
   config: OfficialMcpPluginConfig;
   permissionConnection: IntegrationAccountView<PluginConnectionProvider> | null;
   managedConnection: ManagedPluginConnection | undefined;
@@ -1296,10 +1302,25 @@ function PluginConnectionControls({
   }
   if (config.connectionProvider === "stripe") {
     return (
-      <StripeRestrictedKeyConnectionForm
-        connected={Boolean(permissionConnection?.connected)}
-        canManage={canEdit}
-      />
+      <div className="flex w-full flex-col gap-3">
+        <a href={config.connectHref} className={buttonVariants({ variant: "outline", size: "sm" })}>
+          Connect Stripe account
+        </a>
+        {stripeWorkspaceKey ? (
+          <details>
+            <summary className="cursor-pointer text-[12px] text-ink-subtle">
+              Manage existing workspace API key
+            </summary>
+            <p className="my-2 text-[12px] leading-4 text-ink-subtle">
+              The workspace key is used when you have no personal Stripe connection.
+            </p>
+            <StripeRestrictedKeyConnectionForm
+              connected={stripeWorkspaceKey.connected}
+              canManage={canEdit}
+            />
+          </details>
+        ) : null}
+      </div>
     );
   }
   return (
@@ -1741,6 +1762,8 @@ function pluginAccountsFromState(
   accounts: PluginAccount[];
   permissionConnection: IntegrationAccountView<PluginConnectionProvider> | null;
   managedConnection?: ManagedPluginConnection;
+  legacyStripeConnection?: boolean;
+  stripeWorkspaceKey?: { connected: boolean };
 } {
   if (config.connectionProvider === "infisical") {
     return {
@@ -1795,6 +1818,17 @@ function pluginAccountsFromState(
   ) {
     if (config.connectionProvider === "stripe") {
       const connection = state.stripe;
+      const stripeWorkspaceKey = connection.integrationId
+        ? { connected: connection.connected }
+        : undefined;
+      const oauthAccount = state.personalAccounts.stripe[0];
+      if (oauthAccount) {
+        return {
+          permissionConnection: oauthAccount,
+          accounts: [{ account: oauthAccount }],
+          ...(stripeWorkspaceKey ? { stripeWorkspaceKey } : {}),
+        };
+      }
       const modeLabel =
         connection.livemode === false
           ? "Test mode"
@@ -1817,6 +1851,8 @@ function pluginAccountsFromState(
         : null;
       return {
         permissionConnection,
+        legacyStripeConnection: Boolean(permissionConnection),
+        ...(stripeWorkspaceKey ? { stripeWorkspaceKey } : {}),
         accounts: permissionConnection ? [{ account: permissionConnection }] : [],
       };
     }

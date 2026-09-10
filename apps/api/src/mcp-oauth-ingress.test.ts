@@ -49,6 +49,10 @@ import {
   startSigNozMcpOAuth,
 } from "@opencompany/agent/integrations/signoz-mcp";
 import {
+  completeStripeMcpOAuth,
+  startStripeMcpOAuth,
+} from "@opencompany/agent/integrations/stripe-mcp";
+import {
   completeSupabaseMcpOAuth,
   startSupabaseMcpOAuth,
 } from "@opencompany/agent/integrations/supabase-mcp";
@@ -141,6 +145,12 @@ vi.mock("@opencompany/agent/integrations/latitude-mcp", async (importOriginal) =
   completeLatitudeMcpOAuth: vi.fn(),
 }));
 
+vi.mock("@opencompany/agent/integrations/stripe-mcp", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  startStripeMcpOAuth: vi.fn(),
+  completeStripeMcpOAuth: vi.fn(),
+}));
+
 const STATE_SECRET = "mcp-state-secret-mcp-state-secret";
 const sentinelDb = { sentinel: "db" };
 const PROVIDERS: McpOAuthProvider[] = [
@@ -151,6 +161,7 @@ const PROVIDERS: McpOAuthProvider[] = [
   "posthog",
   "neon",
   "notion",
+  "stripe",
   "supabase",
   "resend",
   "latitude",
@@ -169,6 +180,7 @@ const flowMocks = {
   granola: { start: startGranolaMcpOAuth, complete: completeGranolaMcpOAuth },
   posthog: { start: startPostHogMcpOAuth, complete: completePostHogMcpOAuth },
   neon: { start: startNeonMcpOAuth, complete: completeNeonMcpOAuth },
+  stripe: { start: startStripeMcpOAuth, complete: completeStripeMcpOAuth },
   notion: { start: startNotionMcpOAuth, complete: completeNotionMcpOAuth },
   supabase: { start: startSupabaseMcpOAuth, complete: completeSupabaseMcpOAuth },
   resend: { start: startResendMcpOAuth, complete: completeResendMcpOAuth },
