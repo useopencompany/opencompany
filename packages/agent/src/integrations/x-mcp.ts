@@ -1,9 +1,13 @@
 import { getDb } from "@opencompany/db/client";
 import { integrations } from "@opencompany/db/product-schema";
 import { and, desc, eq, isNull, ne } from "drizzle-orm";
-import type { RemoteMcpConnectionState } from "../actions/remote-mcp";
+import type { RemoteMcpConnectionState, RemoteMcpOperation } from "../actions/remote-mcp";
+import { ActionAuthError } from "../actions/types";
 import { createRemoteMcpStaticBearerAuthProvider } from "./remote-mcp-static-bearer";
 import { getXAccessToken, XAccessAuthError } from "./x-access-token";
+import { X_API_TOOLS } from "./x-api-tools";
+import { xMcpToolModes, xToolName } from "./x-mcp-catalog";
+import { createXMcpClient } from "./x-mcp-client";
 
 export const X_MCP_ENDPOINT_URL = "https://api.x.com/mcp";
 
@@ -24,17 +28,37 @@ export async function getXMcpIntegrationState(
     connected: row.status === "connected",
     integrationId: row.id,
     capabilityModes: row.capabilityModes,
-    toolModes: row.toolModes,
+    toolModes: xMcpToolModes(row.toolModes),
   };
 }
 
 export async function loadXMcpWorkerConnection(input: {
   userWorkosId: string;
+  operation?: RemoteMcpOperation;
   onAuthorizationRequired: () => never;
 }) {
   const row = await loadXMcpIntegration(input.userWorkosId);
   if (!row || row.status === "disconnected") return { ok: false, reason: "not_connected" } as const;
   if (row.status !== "connected") return { ok: false, reason: "needs_reauth" } as const;
+
+  if (input.operation?.type === "tools/call") {
+    const tool = xToolName(input.operation.tool);
+    const requiredScopes =
+      X_API_TOOLS.find((entry) => entry.name === tool)?.scopes ??
+      (tool.startsWith("get_users_bookmark")
+        ? ["bookmark.read"]
+        : tool.startsWith("create_users_bookmark") || tool === "delete_users_bookmark"
+          ? ["bookmark.write"]
+          : []);
+    const missing = requiredScopes.filter((scope) => !row.scopes?.includes(scope));
+    if (missing.length) {
+      throw new ActionAuthError(
+        "auth_expired",
+        "x_account",
+        `Reconnect X in Settings → Plugins → X to grant ${missing.join(", ")}, then retry. Your current connection does not include these permissions.`,
+      );
+    }
+  }
 
   let accessToken: string;
   try {
@@ -52,6 +76,9 @@ export async function loadXMcpWorkerConnection(input: {
   return {
     ok: true,
     integrationId: row.id,
+    createClient: createXMcpClient({
+      connection: { userWorkosId: input.userWorkosId, integrationId: row.id },
+    }),
     authProvider: createRemoteMcpStaticBearerAuthProvider({
       accessToken,
       onAuthorizationRequired: async () => {
@@ -77,6 +104,7 @@ async function loadXMcpIntegration(userWorkosId: string) {
       status: integrations.status,
       capabilityModes: integrations.capabilityModes,
       toolModes: integrations.toolModes,
+      scopes: integrations.scopes,
     })
     .from(integrations)
     .where(
