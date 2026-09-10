@@ -244,10 +244,11 @@ function isGitHubAccessFailure(value: string) {
 }
 
 function repositoryFromCommand(value: string) {
+  // A literal API endpoint takes precedence over the repository used for gh placeholders.
   const match =
-    value.match(/(?:--repo(?:=|\s+)|GH_REPO=)["']?([a-z0-9-]{1,39})\/([^\s"']+)/iu) ??
-    value.match(/(?:^|[\s"'])\/?repos\/([a-z0-9-]{1,39})\/([^\s"'/?#]+)/iu) ??
-    value.match(/(?:https?:\/\/|git@)github\.com[/:]([a-z0-9-]{1,39})\/([^\s"'/:]+)/iu);
+    value.match(/(?:^|[\s"'])\/?repos\/([a-z0-9-]{1,39})\/([^\s"'/?#;&|<>()]+)/iu) ??
+    value.match(/(?:--repo(?:=|\s+)|GH_REPO=)["']?([a-z0-9-]{1,39})\/([^\s"'/?#;&|<>()]+)/iu) ??
+    value.match(/(?:https?:\/\/|git@)github\.com[/:]([a-z0-9-]{1,39})\/([^\s"'/:?#;&|<>()]+)/iu);
   return match ? repositoryTarget(match[1], match[2]) : null;
 }
 

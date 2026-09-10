@@ -120,6 +120,29 @@ describe("GitHub installation gap detection", () => {
     ).toBeNull();
   });
 
+  it.each([
+    "gh api 'repos/useopencompany/opencompany/commits/abc/status'",
+    'gh api "/repos/useopencompany/opencompany/commits/abc/status"',
+    "gh api repos/useopencompany/opencompany; exit 1",
+    "gh api repos/useopencompany/opencompany&&echo done",
+    "set -o pipefail; gh api repos/useopencompany/opencompany|cat",
+    "gh api repos/useopencompany/opencompany>result.json",
+    "(gh api repos/useopencompany/opencompany)",
+    "GH_REPO=other/example gh api repos/useopencompany/opencompany/commits/abc/status",
+    "gh pr checks --repo useopencompany/opencompany; exit 1",
+    "git push git@github.com:useopencompany/opencompany.git&&echo done",
+  ])("extracts the requested repository from %s", (command) => {
+    expect(
+      githubInstallGapCandidate({
+        name: CODEX_COMMAND_TOOL_NAME,
+        status: "failed",
+        input: { command },
+        output: null,
+        errorText: "Resource not accessible by integration",
+      }),
+    ).toEqual({ owner: "useopencompany", repo: "opencompany" });
+  });
+
   it("shares one account access sweep across repository cards", async () => {
     const fetchMock = vi.fn(async () =>
       Response.json({
