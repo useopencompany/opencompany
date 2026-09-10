@@ -56,7 +56,8 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type ReactNode, useEffect, useRef, useState, useTransition } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useAppData } from "@/components/AppDataProvider";
 import { PluginConnectionFeedback } from "@/components/PluginConnectionSettings";
 import { SettingsContent } from "@/components/SettingsChrome";
 import {
@@ -81,6 +82,7 @@ import {
   type OfficialSkillPluginMetadata,
   type OfficialSkillPluginName,
 } from "@/lib/official-plugins";
+import { pluginAccountsFromState, pluginConnectionSatisfied } from "@/lib/plugin-connection-state";
 
 type PluginSkillView = {
   name: string;
@@ -441,6 +443,7 @@ export function PluginsSettings({
   workspaceId: string;
 }) {
   const router = useRouter();
+  const { integrations } = useAppData();
   const catalogViewCaptured = useRef(false);
   const [query, setQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState<PluginCatalogFilter>("all");
@@ -448,9 +451,22 @@ export function PluginsSettings({
   const [isInstalling, startInstall] = useTransition();
   const configs: OfficialPluginConfig[] = Object.values(OFFICIAL_PLUGINS);
   const normalizedQuery = query.trim().toLocaleLowerCase();
-  const installedPlugins = new Map(
-    plugins.map((plugin) => [plugin.name.toLocaleLowerCase(), plugin] as const),
+  const installedPlugins = useMemo(
+    () => new Map(plugins.map((plugin) => [plugin.name.toLocaleLowerCase(), plugin] as const)),
+    [plugins],
   );
+  // An enabled MCP plugin without its account connection cannot run, so the catalog must not
+  // claim it is "Enabled". Skills-only plugins never need a connection.
+  const pluginsMissingConnection = useMemo(() => {
+    const names = new Set<string>();
+    for (const config of Object.values(OFFICIAL_MCP_PLUGINS)) {
+      if (installedPlugins.get(config.name)?.status !== "enabled") continue;
+      if (!pluginConnectionSatisfied(config, pluginAccountsFromState(integrations, config))) {
+        names.add(config.name);
+      }
+    }
+    return names;
+  }, [installedPlugins, integrations]);
   const installedConfigs = configs.filter((config) => installedPlugins.has(config.name));
   const customPlugins = plugins.filter((plugin) => plugin.source.type === "custom_mcp");
   const installedCount = installedConfigs.length + customPlugins.length;
@@ -514,6 +530,7 @@ export function PluginsSettings({
         title={title}
         configs={options?.preview ? sectionConfigs.slice(0, CATALOG_PREVIEW_SIZE) : sectionConfigs}
         installedPlugins={installedPlugins}
+        pluginsMissingConnection={pluginsMissingConnection}
         canEdit={canEdit}
         isInstalling={isInstalling}
         installingPluginName={installingPluginName}
@@ -677,6 +694,7 @@ function PluginCatalogSection({
   title,
   configs,
   installedPlugins,
+  pluginsMissingConnection,
   canEdit,
   isInstalling,
   installingPluginName,
@@ -686,6 +704,7 @@ function PluginCatalogSection({
   title: string;
   configs: OfficialPluginConfig[];
   installedPlugins: ReadonlyMap<string, PluginListItemDto>;
+  pluginsMissingConnection: ReadonlySet<string>;
   canEdit: boolean;
   isInstalling: boolean;
   installingPluginName: OfficialPluginName | null;
@@ -715,6 +734,7 @@ function PluginCatalogSection({
       <ul className="grid grid-cols-1 gap-x-3 gap-y-1 sm:grid-cols-2">
         {configs.map((config) => {
           const plugin = installedPlugins.get(config.name);
+          const missingConnection = pluginsMissingConnection.has(config.name);
           const installingThisPlugin = isInstalling && installingPluginName === config.name;
 
           return (
@@ -740,7 +760,9 @@ function PluginCatalogSection({
                     <span className="truncate text-[13.5px] font-medium leading-5 text-ink">
                       {config.label}
                     </span>
-                    {plugin ? <PluginStatus status={plugin.status} /> : null}
+                    {plugin ? (
+                      <PluginStatus status={plugin.status} missingConnection={missingConnection} />
+                    ) : null}
                   </span>
                   <span className="block truncate text-[12px] leading-5 text-ink-subtle">
                     {plugin?.manifest.description || config.description}
@@ -755,7 +777,7 @@ function PluginCatalogSection({
                     "h-8 rounded-full px-3 text-[12px] text-ink shadow-none",
                   )}
                 >
-                  Manage
+                  {missingConnection ? "Connect" : "Manage"}
                 </Link>
               ) : canEdit ? (
                 <Button
@@ -1565,7 +1587,20 @@ function CollisionReport({ collisions }: { collisions: PluginCollisionView[] }) 
   );
 }
 
-function PluginStatus({ status }: { status: PluginListItemDto["status"] }) {
+function PluginStatus({
+  status,
+  missingConnection = false,
+}: {
+  status: PluginListItemDto["status"];
+  missingConnection?: boolean;
+}) {
+  if (status === "enabled" && missingConnection) {
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-warning-bg px-1.5 py-px text-[10.5px] font-medium leading-4 text-warning">
+        <span className="h-1.5 w-1.5 rounded-full bg-warning" /> Requires connection
+      </span>
+    );
+  }
   return status === "enabled" ? (
     <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-success/10 px-1.5 py-px text-[10.5px] font-medium leading-4 text-success">
       <span className="h-1.5 w-1.5 rounded-full bg-success" /> Enabled

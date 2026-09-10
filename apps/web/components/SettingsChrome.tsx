@@ -233,12 +233,18 @@ export function SettingsContent({
   title,
   description,
   backLink,
+  icon,
+  badge,
   contentClassName,
   children,
 }: {
   title: string;
   description?: string;
   backLink?: { href: string; label: string };
+  /** Optional mark rendered beside the page title, for pages about a single named thing. */
+  icon?: ReactNode;
+  /** Optional status pill rendered beside the page title. */
+  badge?: ReactNode;
   contentClassName?: string;
   children: ReactNode;
 }) {
@@ -262,9 +268,13 @@ export function SettingsContent({
             </Link>
           ) : null}
           <header className="flex flex-col gap-1.5">
-            <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-ink">
-              {title}
-            </h1>
+            <div className="flex flex-wrap items-center gap-2.5">
+              {icon}
+              <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-ink">
+                {title}
+              </h1>
+              {badge}
+            </div>
             {description ? (
               <p className="text-[13px] leading-5 text-ink-subtle">{description}</p>
             ) : null}
