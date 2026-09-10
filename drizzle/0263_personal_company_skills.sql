@@ -2,7 +2,16 @@ ALTER TABLE goat.skill_installations ADD COLUMN scope text NOT NULL DEFAULT 'com
 --> statement-breakpoint
 ALTER TABLE goat.skill_installations ADD COLUMN created_by_user_id text;
 --> statement-breakpoint
-ALTER TABLE goat.skill_installations ALTER COLUMN scope SET DEFAULT 'personal';
+CREATE TABLE goat.skill_scope_rollout (
+  id text PRIMARY KEY,
+  personal_enabled boolean NOT NULL DEFAULT false,
+  activated_at timestamp with time zone,
+  activated_release text,
+  CONSTRAINT skill_scope_rollout_id_check CHECK (id = 'personal_skills'),
+  CONSTRAINT skill_scope_rollout_activation_check CHECK ((personal_enabled AND activated_at IS NOT NULL AND activated_release IS NOT NULL) OR (NOT personal_enabled AND activated_at IS NULL AND activated_release IS NULL))
+);
+--> statement-breakpoint
+INSERT INTO goat.skill_scope_rollout (id) VALUES ('personal_skills');
 --> statement-breakpoint
 ALTER TABLE goat.skill_installations ADD CONSTRAINT skill_installations_scope_check CHECK (scope IN ('personal', 'company') AND (scope = 'company' OR created_by_user_id IS NOT NULL));
 --> statement-breakpoint
@@ -20,6 +29,22 @@ CREATE TABLE goat.skill_installation_versions (
 );
 --> statement-breakpoint
 CREATE INDEX skill_installation_versions_bundle_idx ON goat.skill_installation_versions (bundle_id);
+--> statement-breakpoint
+CREATE FUNCTION goat.record_skill_installation_version() RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  INSERT INTO goat.skill_installation_versions (installation_id, bundle_id, company_shared)
+  VALUES (NEW.id, NEW.bundle_id, NEW.scope = 'company')
+  ON CONFLICT (installation_id, bundle_id) DO UPDATE
+  SET company_shared = goat.skill_installation_versions.company_shared OR EXCLUDED.company_shared;
+  RETURN NEW;
+END;
+$$;
+--> statement-breakpoint
+CREATE TRIGGER skill_installations_record_version
+AFTER INSERT OR UPDATE OF bundle_id, scope ON goat.skill_installations
+FOR EACH ROW EXECUTE FUNCTION goat.record_skill_installation_version();
 --> statement-breakpoint
 -- All existing standalone revisions were shared in their workspace. Keep that lineage, including
 -- archived installations, so existing Chat and Workflow snapshots remain usable.

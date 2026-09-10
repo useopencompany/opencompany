@@ -101,7 +101,6 @@ describe("SkillImportApplicationService", () => {
     });
     expect(install).toHaveBeenCalledWith({
       actor,
-      scope: "personal",
       idempotencyKey: "workspace-skill-1",
       bundle: expect.objectContaining({ name: "investigate-bug", source: { type: "workspace" } }),
     });
@@ -167,7 +166,6 @@ describe("SkillImportApplicationService", () => {
 
     expect(install).toHaveBeenCalledWith({
       actor,
-      scope: "personal",
       idempotencyKey: "skill-install-1",
       bundle: resolved.bundle,
     });

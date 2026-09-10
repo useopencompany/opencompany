@@ -3276,7 +3276,9 @@ export const skillInstallations = productSchema.table(
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
-    scope: text("scope").$type<"personal" | "company">().notNull().default("personal"),
+    // Keep the physical default compatible with application revisions deployed before Personal
+    // Skills. New writers always choose a scope after checking the rollout boundary below.
+    scope: text("scope").$type<"personal" | "company">().notNull().default("company"),
     createdByUserId: text("created_by_user_id"),
     bundleId: text("bundle_id").notNull(),
     enabled: boolean("enabled").notNull().default(true),
@@ -3306,6 +3308,25 @@ export const skillInstallations = productSchema.table(
       foreignColumns: [skillBundles.workspaceId, skillBundles.id],
       name: "skill_installations_workspace_bundle_fk",
     }).onDelete("restrict"),
+  }),
+);
+
+// Personal rows become writable only after the release workflow confirms that every API and
+// runner instance enforces their authorization boundary and the previous revisions have drained.
+export const skillScopeRollout = productSchema.table(
+  "skill_scope_rollout",
+  {
+    id: text("id").primaryKey(),
+    personalEnabled: boolean("personal_enabled").notNull().default(false),
+    activatedAt: timestamp("activated_at", { withTimezone: true }),
+    activatedRelease: text("activated_release"),
+  },
+  (table) => ({
+    idCheck: check("skill_scope_rollout_id_check", sql`${table.id} = 'personal_skills'`),
+    activationCheck: check(
+      "skill_scope_rollout_activation_check",
+      sql`(${table.personalEnabled} AND ${table.activatedAt} IS NOT NULL AND ${table.activatedRelease} IS NOT NULL) OR (NOT ${table.personalEnabled} AND ${table.activatedAt} IS NULL AND ${table.activatedRelease} IS NULL)`,
+    ),
   }),
 );
 

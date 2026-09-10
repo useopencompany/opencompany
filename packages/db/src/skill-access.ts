@@ -1,8 +1,17 @@
 import type { Actor } from "@opencompany/core";
 import { and, eq, or, sql } from "drizzle-orm";
-import { skillBundles, skillInstallations } from "./product-schema";
+import { skillBundles, skillInstallations, skillScopeRollout } from "./product-schema";
 
 export type SkillReader = { workspaceId: string; userId?: string; skillAccess?: "company" };
+
+export async function personalSkillsEnabled(db: any): Promise<boolean> {
+  const [rollout] = await db
+    .select({ enabled: skillScopeRollout.personalEnabled })
+    .from(skillScopeRollout)
+    .where(eq(skillScopeRollout.id, "personal_skills"))
+    .limit(1);
+  return rollout?.enabled === true;
+}
 
 export function skillMembership(input: SkillReader, admin = false) {
   return input.userId

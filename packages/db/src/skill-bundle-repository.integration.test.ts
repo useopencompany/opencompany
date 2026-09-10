@@ -93,11 +93,78 @@ describe("Postgres immutable Skill bundle repository", () => {
       DELETE FROM goat.chat_sessions;
       DELETE FROM goat.skill_installations;
       DELETE FROM goat.skill_bundles;
+      UPDATE goat.skill_scope_rollout
+      SET personal_enabled = true, activated_at = now(), activated_release = 'test'
+      WHERE id = 'personal_skills';
     `);
   });
 
   afterAll(async () => {
     await database.close();
+  });
+
+  it("keeps old writers Company-scoped until every Personal-skill reader is deployed", async () => {
+    await database.exec(`
+      UPDATE goat.skill_scope_rollout
+      SET personal_enabled = false, activated_at = NULL, activated_release = NULL
+      WHERE id = 'personal_skills';
+    `);
+    const company = await repository.install({
+      actor: actor(),
+      idempotencyKey: "rollout-company-default",
+      bundle: await resolvedBundle("rollout-company", "Still shared during rollout."),
+    });
+    expect(company.installation.scope).toBe("company");
+
+    await database.query(
+      `INSERT INTO goat.skill_installations (id, workspace_id, name, bundle_id)
+       VALUES ('legacy_writer', 'workspace_1', 'legacy-writer', $1)`,
+      [company.installation.bundle.id],
+    );
+    expect(
+      (
+        await database.query<{ scope: string }>(
+          "SELECT scope FROM goat.skill_installations WHERE id = 'legacy_writer'",
+        )
+      ).rows[0]?.scope,
+    ).toBe("company");
+    expect(
+      (
+        await database.query<{ company_shared: boolean }>(
+          "SELECT company_shared FROM goat.skill_installation_versions WHERE installation_id = 'legacy_writer'",
+        )
+      ).rows,
+    ).toEqual([{ company_shared: true }]);
+
+    await expect(
+      repository.install({
+        actor: actor(),
+        scope: "personal",
+        idempotencyKey: "rollout-personal-rejected",
+        bundle: await resolvedBundle("rollout-private", "Not writable yet."),
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      repository.setScope({
+        actor: actor(),
+        name: company.installation.id,
+        scope: "personal",
+        expectedScope: "company",
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+
+    await database.exec(`
+      UPDATE goat.skill_scope_rollout
+      SET personal_enabled = true, activated_at = now(), activated_release = 'release_sha'
+      WHERE id = 'personal_skills';
+    `);
+    await expect(
+      repository.install({
+        actor: actor(),
+        idempotencyKey: "rollout-personal-default",
+        bundle: await resolvedBundle("rollout-private", "Now private."),
+      }),
+    ).resolves.toMatchObject({ installation: { scope: "personal" } });
   });
 
   it("makes member-created Personal skills private across reads, files, catalogs, and bundle loads", async () => {
@@ -922,12 +989,36 @@ describe("Personal and Company skill migration", () => {
       expect(
         (await legacy.query("SELECT company_shared FROM goat.skill_installation_versions")).rows,
       ).toEqual(Array.from({ length: 4 }, () => ({ company_shared: true })));
+      expect(
+        (
+          await legacy.query(
+            "SELECT personal_enabled, activated_at, activated_release FROM goat.skill_scope_rollout",
+          )
+        ).rows,
+      ).toEqual([{ personal_enabled: false, activated_at: null, activated_release: null }]);
       await legacy.exec(
-        "INSERT INTO goat.skill_installations (id, workspace_id, name, bundle_id, created_by_user_id) VALUES ('new', 'legacy_workspace', 'legacy', 'legacy_current', 'creator');",
+        "INSERT INTO goat.skill_installations (id, workspace_id, name, bundle_id, created_by_user_id) VALUES ('new', 'legacy_workspace', 'new-legacy', 'legacy_current', 'creator');",
       );
       expect(
         (await legacy.query("SELECT scope FROM goat.skill_installations WHERE id = 'new'")).rows,
-      ).toEqual([{ scope: "personal" }]);
+      ).toEqual([{ scope: "company" }]);
+      expect(
+        (
+          await legacy.query(
+            "SELECT company_shared FROM goat.skill_installation_versions WHERE installation_id = 'new'",
+          )
+        ).rows,
+      ).toEqual([{ company_shared: true }]);
+      await legacy.exec(
+        "UPDATE goat.skill_installations SET bundle_id = 'legacy_old' WHERE id = 'new'",
+      );
+      expect(
+        (
+          await legacy.query(
+            "SELECT company_shared FROM goat.skill_installation_versions WHERE installation_id = 'new' ORDER BY bundle_id",
+          )
+        ).rows,
+      ).toEqual([{ company_shared: true }, { company_shared: true }]);
     } finally {
       await legacy.close();
     }

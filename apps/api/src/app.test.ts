@@ -217,6 +217,7 @@ describe("canonical Hono API", () => {
       await expect(response.json()).resolves.toMatchObject({
         ok: true,
         service: "opencompany-api",
+        capabilities: { personalSkillsAuthorization: "v1" },
         protocolVersion: PROTOCOL_VERSION,
         release: "api-release-sha",
         renderGitCommit: "api-release-sha",

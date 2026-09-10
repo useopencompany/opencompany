@@ -205,7 +205,7 @@ export class SkillImportApplicationService {
       actor,
       idempotencyKey: idempotencyKey(input.idempotencyKey),
       bundle,
-      scope: skillScope(input.scope ?? "personal"),
+      ...(input.scope !== undefined ? { scope: skillScope(input.scope) } : {}),
     });
   }
 
@@ -256,7 +256,7 @@ export class SkillImportApplicationService {
       actor,
       idempotencyKey: idempotencyKey(input.idempotencyKey),
       bundle,
-      scope: skillScope(input.scope ?? "personal"),
+      ...(input.scope !== undefined ? { scope: skillScope(input.scope) } : {}),
     });
   }
 

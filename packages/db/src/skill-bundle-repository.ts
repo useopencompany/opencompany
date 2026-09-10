@@ -35,6 +35,7 @@ import {
 import {
   conflictingChatSkillNames,
   isChatSkillNameConflict,
+  personalSkillsEnabled,
   preserveChatSkillBundle,
   skillBundleAccess,
   skillInstallationAccess,
@@ -128,12 +129,7 @@ export class PostgresSkillBundleRepository implements SkillBundleRepository {
     bundle: ResolvedSkillBundle;
     scope?: SkillScope;
   }) {
-    const scope = input.scope ?? "personal";
-    if (input.actor.skillAccess === "company" && scope === "personal")
-      throw new CoreError(
-        "forbidden",
-        "Create Personal skills in a private chat or Skills settings.",
-      );
+    let resolvedScope: SkillScope | undefined;
     const installationId = deterministicId(
       "skill_installation",
       input.actor.userId,
@@ -142,6 +138,21 @@ export class PostgresSkillBundleRepository implements SkillBundleRepository {
     );
     try {
       return await this.db.transaction(async (tx: DbClient) => {
+        const personalEnabled = await personalSkillsEnabled(tx);
+        if (input.scope === "personal" && !personalEnabled)
+          throw new CoreError(
+            "conflict",
+            "Personal skills are temporarily unavailable while the release finishes.",
+          );
+        // Omitted scope came from an application revision that predates Personal Skills during a
+        // rolling release. Preserve its Company behavior until every old reader has drained.
+        const scope = input.scope ?? (personalEnabled ? "personal" : "company");
+        resolvedScope = scope;
+        if (input.actor.skillAccess === "company" && scope === "personal")
+          throw new CoreError(
+            "forbidden",
+            "Create Personal skills in a private chat or Skills settings.",
+          );
         await assertMember(tx, input.actor);
         const bundleId = await storeSkillBundle(tx, input.actor.workspaceId, input.bundle);
         const replay = await installationById(tx, input.actor, installationId);
@@ -188,7 +199,7 @@ export class PostgresSkillBundleRepository implements SkillBundleRepository {
         if (
           replay?.installationName === input.bundle.name &&
           replay.integrity === input.bundle.integrity &&
-          replay.scope === scope
+          replay.scope === resolvedScope
         ) {
           return {
             installation: await hydrateInstallation(this.db, replay),
@@ -400,6 +411,11 @@ export class PostgresSkillBundleRepository implements SkillBundleRepository {
       throw new CoreError("forbidden", "Change a skill to Personal from Skills settings.");
     try {
       return await this.db.transaction(async (tx: DbClient) => {
+        if (input.scope === "personal" && !(await personalSkillsEnabled(tx)))
+          throw new CoreError(
+            "conflict",
+            "Personal skills are temporarily unavailable while the release finishes.",
+          );
         const current = await liveInstallation(tx, input.actor, input.name, true);
         if (!current) throw new CoreError("not_found", "Skill not found.");
         if (!current.canManage)

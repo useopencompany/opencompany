@@ -2808,6 +2808,7 @@ export function createApiApp(input: CreateApiAppInput) {
     c.json({
       ok: true,
       service: "opencompany-api",
+      capabilities: { personalSkillsAuthorization: "v1" },
       environment: process.env.OBSERVABILITY_ENV ?? process.env.NODE_ENV ?? "development",
       protocolVersion: PROTOCOL_VERSION,
       release:

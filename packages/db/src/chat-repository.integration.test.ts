@@ -219,7 +219,6 @@ describe("Postgres Chat repositories", () => {
       INSERT INTO goat.skill_bundles (id, workspace_id, integrity, name, description, body, source_type, source_url, source_path, source_ref, resolved_commit)
       VALUES ('company_bundle', 'workspace_1', 'sha256:${"b".repeat(64)}', 'review', 'Company review', 'Different company instructions', 'github', 'https://github.com/example/company', 'review', 'main', '${"b".repeat(40)}');
       INSERT INTO goat.skill_installations (id, workspace_id, name, bundle_id, scope) VALUES ('company_review', 'workspace_1', 'review', 'company_bundle', 'company');
-      INSERT INTO goat.skill_installation_versions (installation_id, bundle_id, company_shared) VALUES ('company_review', 'company_bundle', true);
     `);
     const created = await service.createMessage(actor(), {
       idempotencyKey: "empty-skill-chat",
@@ -1828,7 +1827,6 @@ describe("Postgres Chat repositories", () => {
         'skill_installation_standalone_review', 'workspace_1',
         'review', 'skill_bundle_standalone_review', 'company'
       );
-      INSERT INTO goat.skill_installation_versions (installation_id, bundle_id, company_shared) VALUES ('skill_installation_standalone_review', 'skill_bundle_standalone_review', true);
     `);
     await expect(
       listChatSkillBundleActivations(db, {
@@ -2490,7 +2488,6 @@ describe("Postgres Chat repositories", () => {
       UPDATE goat.skill_installations
       SET bundle_id = 'skill_bundle_review_v2'
       WHERE id = 'skill_review';
-      INSERT INTO goat.skill_installation_versions (installation_id, bundle_id, company_shared) VALUES ('skill_review', 'skill_bundle_review_v2', true);
     `);
 
     await service.createMessage(actor(), {
@@ -2605,7 +2602,6 @@ async function seedStandaloneReviewSkill(database: PGlite) {
     VALUES ('skill_bundle_review', 'SKILL.md', ''::bytea, false, 0);
     INSERT INTO goat.skill_installations (id, workspace_id, name, bundle_id, scope)
     VALUES ('skill_review', 'workspace_1', 'review', 'skill_bundle_review', 'company');
-    INSERT INTO goat.skill_installation_versions (installation_id, bundle_id, company_shared) VALUES ('skill_review', 'skill_bundle_review', true);
   `);
 }
 

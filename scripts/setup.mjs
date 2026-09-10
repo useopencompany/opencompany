@@ -972,6 +972,9 @@ async function runMigrations() {
   run("bun", ["run", "db:migrate"], {
     env: { ...process.env, DATABASE_URL: databaseUrl },
   });
+  run("node", ["scripts/activate-personal-skills.mjs", "--local"], {
+    env: { ...process.env, DATABASE_URL: databaseUrl },
+  });
 }
 
 // Like run(), but returns the exit code instead of throwing so a failed Docker
