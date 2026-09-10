@@ -16,6 +16,7 @@ import {
   FathomIcon,
   GitHubIcon,
   GmailIcon,
+  GoogleAdminIcon,
   GoogleCalendarIcon,
   GoogleDriveIcon,
   GranolaIcon,
@@ -171,6 +172,11 @@ export const OFFICIAL_MCP_PLUGINS = {
     ...OFFICIAL_MCP_PLUGIN_METADATA.granola,
     Icon: GranolaIcon,
     iconClassName: "bg-[#F0EBE1] text-[#1A1714]",
+  },
+  "google-admin": {
+    ...OFFICIAL_MCP_PLUGIN_METADATA["google-admin"],
+    Icon: GoogleAdminIcon,
+    iconClassName: "bg-white",
   },
   "google-calendar": {
     ...OFFICIAL_MCP_PLUGIN_METADATA["google-calendar"],
@@ -487,6 +493,8 @@ export function PluginsSettings({
         await installOfficialPlugin(config);
         toast.success(`${config.label} installed.`);
         router.push(`/settings/plugins/${config.name}`);
+        // API mutations do not invalidate the catalog cached for back navigation.
+        router.refresh();
       } catch (cause) {
         setInstallingPluginName(null);
         toast.error(`Couldn't install ${config.label}. ${errorMessage(cause)}`);
@@ -542,7 +550,7 @@ export function PluginsSettings({
   return (
     <SettingsContent
       title="Plugins"
-      description="Add trusted tools and expertise to your workspace."
+      description="Your plugins, accounts, and permissions are personal. Older workspace installations no longer appear here. If a plugin you used before is missing, reinstall it for yourself and review its permissions."
       contentClassName="max-w-[960px]"
     >
       <PluginConnectionFeedback />
@@ -904,7 +912,7 @@ export function OfficialSkillPluginDetail({
 
       {!canEdit ? (
         <p className="text-[13px] leading-5 text-ink-subtle">
-          Only workspace admins can install plugins.
+          You need plugin write permission to install plugins.
         </p>
       ) : null}
 
@@ -988,10 +996,13 @@ export function PluginDetail({
     >
       {!canEdit ? (
         <p className="text-[13px] leading-5 text-ink-subtle">
-          Only workspace admins can manage plugin installations.
+          You need plugin write permission to manage your plugins.
         </p>
       ) : null}
 
+      <p className="text-[13px] leading-5 text-ink-subtle">
+        Installed for you. Disabling or removing this plugin affects only your use.
+      </p>
       <section className="flex flex-col gap-2">
         <SectionLabel>Status</SectionLabel>
         <PluginStatus status={plugin.status} />
@@ -1032,8 +1043,8 @@ export function PluginDetail({
       <section className="flex flex-col gap-2">
         <SectionLabel>Passive skills ({plugin.skills.length})</SectionLabel>
         <p className="text-[12.5px] leading-5 text-ink-subtle">
-          These standard Agent Skills join the workspace catalog while this plugin is enabled. They
-          do not execute a process.
+          These Agent Skills are available to you while your plugin is enabled. They do not execute
+          a process.
         </p>
         {plugin.skills.length === 0 ? (
           <EmptyRow label="No valid skills were discovered." />

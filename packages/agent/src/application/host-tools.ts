@@ -111,11 +111,13 @@ export type ChatHostToolServiceDependencies = {
   resolveSkillMentions: (input: {
     workspaceId: string;
     userId?: string;
+    skillAccess?: "company";
     mentions: { id: string }[];
   }) => Promise<MentionedSkill[]>;
   listSkillCatalog: (
     workspaceId: string,
     userId?: string,
+    skillAccess?: "company",
   ) => Promise<Array<{ id: string; name: string; description: string }>>;
   activateAndListSkills: (input: {
     conversationId: string;
@@ -155,7 +157,12 @@ export type ChatHostToolServiceDependencies = {
   updateWorkspaceSkill: (input: {
     actor: Actor;
     name: string;
-    skill: { description: string; instructions: string; expectedBundleId?: string };
+    skill: {
+      newName?: string;
+      description?: string;
+      instructions?: string;
+      expectedBundleId?: string;
+    };
   }) => Promise<{ updated: true; name: string; command: string; bundleId: string }>;
   createTask: (input: {
     actorId: string;
@@ -289,7 +296,8 @@ async function executeOperation(
       const skill = requiredString(toolInput.skill, "skill");
       const [resolved] = await dependencies.resolveSkillMentions({
         workspaceId: context.workspaceId,
-        ...(!context.taskConversation ? { userId: context.actorId } : {}),
+        userId: context.actorId,
+        ...(context.taskConversation ? { skillAccess: "company" as const } : {}),
         mentions: [{ id: skill }],
       });
       if (!resolved) throw new Error(`Skill "@skill/${skill}" is unavailable or incomplete.`);
@@ -382,8 +390,15 @@ async function executeOperation(
         name: requiredString(toolInput.name, "name"),
         skill: {
           ...(expectedBundleId ? { expectedBundleId } : {}),
-          description: requiredString(toolInput.description, "description"),
-          instructions: requiredString(toolInput.instructions, "instructions"),
+          ...(toolInput.newName !== undefined
+            ? { newName: requiredString(toolInput.newName, "newName") }
+            : {}),
+          ...(toolInput.description !== undefined
+            ? { description: requiredString(toolInput.description, "description") }
+            : {}),
+          ...(toolInput.instructions !== undefined
+            ? { instructions: requiredString(toolInput.instructions, "instructions") }
+            : {}),
         },
       });
     }
@@ -572,13 +587,15 @@ async function bootstrap(
       mentionedSkillIds.length
         ? dependencies.resolveSkillMentions({
             workspaceId: context.workspaceId,
-            ...(!context.taskConversation ? { userId: context.actorId } : {}),
+            userId: context.actorId,
+            ...(context.taskConversation ? { skillAccess: "company" as const } : {}),
             mentions: mentionedSkillIds.map((id) => ({ id })),
           })
         : Promise.resolve([]),
       dependencies.listSkillCatalog(
         context.workspaceId,
-        context.taskConversation ? undefined : context.actorId,
+        context.actorId,
+        context.taskConversation ? "company" : undefined,
       ),
       context.taskToolsEnabled
         ? dependencies.listWorkflowCatalog(context.workspaceId)

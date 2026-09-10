@@ -83,6 +83,14 @@ describe("Postgres immutable Skill bundle repository", () => {
     );
     for (const statement of scopeMigration.split("--> statement-breakpoint"))
       if (statement.trim()) await database.exec(statement);
+    await database.exec(`
+      ALTER TABLE goat.plugins ADD COLUMN owner_user_id text;
+      DROP INDEX goat.plugins_workspace_live_name_idx;
+      CREATE UNIQUE INDEX plugins_workspace_live_name_idx ON goat.plugins (workspace_id, owner_user_id, name) WHERE status <> 'archived';
+      ALTER TABLE goat.workspace_plugin_data ADD COLUMN owner_user_id text NOT NULL DEFAULT 'user_1';
+      ALTER TABLE goat.workspace_plugin_data DROP CONSTRAINT goat_workspace_plugin_data_workspace_id_plugin_name_pk;
+      ALTER TABLE goat.workspace_plugin_data ADD PRIMARY KEY (workspace_id, owner_user_id, plugin_name);
+    `);
     repository = new PostgresSkillBundleRepository(drizzle(database));
   });
 
@@ -622,6 +630,125 @@ describe("Postgres immutable Skill bundle repository", () => {
     await expect(
       database.query<{ count: number }>("SELECT COUNT(*)::int AS count FROM goat.skill_bundles"),
     ).resolves.toMatchObject({ rows: [{ count: 2 }] });
+  });
+
+  it("renames workspace Skills atomically while keeping IDs and captured versions", async () => {
+    const original = await createWorkspaceSkillArtifact({
+      name: "my-skill",
+      description: "Description.",
+      instructions: "Original steps.",
+    });
+    const first = await repository.install({
+      actor: actor(),
+      idempotencyKey: "rename",
+      bundle: original,
+    });
+    await database.exec(`
+      INSERT INTO goat.chat_sessions (id) VALUES ('chat_1');
+      INSERT INTO goat.chat_messages (id, session_id) VALUES ('message_1', 'chat_1');
+    `);
+    const db = drizzle(database);
+    await activateAndListChatSkillBundles(db, {
+      workspaceId: "workspace_1",
+      userId: "user_1",
+      chatSessionId: "chat_1",
+      activatedMessageId: "message_1",
+      bundles: [{ bundleId: first.installation.bundle.id, sourceKind: "standalone" }],
+    });
+    const renamedBundle = await createWorkspaceSkillArtifact({
+      name: "renamed-skill",
+      description: original.description,
+      instructions: original.body,
+    });
+    const renamed = await repository.replace({
+      actor: actor(),
+      name: first.installation.id,
+      bundle: renamedBundle,
+      expectedBundleId: first.installation.bundle.id,
+    });
+    expect(renamed).toMatchObject({
+      id: first.installation.id,
+      name: "renamed-skill",
+      scope: first.installation.scope,
+      bundle: { name: "renamed-skill", body: original.body },
+    });
+    expect(renamed.bundle.id).not.toBe(first.installation.bundle.id);
+    expect(await repository.get({ actor: actor(), name: "my-skill" })).toBeNull();
+    expect(await repository.get({ actor: actor(), name: "renamed-skill" })).toMatchObject({
+      id: first.installation.id,
+    });
+    expect(
+      await loadImmutableSkillBundles(db, {
+        workspaceId: "workspace_1",
+        userId: "user_1",
+        bundleIds: [first.installation.bundle.id],
+      }),
+    ).toMatchObject([{ name: "my-skill", body: original.body }]);
+    const captured = await readChatSkillBundleFile(db, {
+      workspaceId: "workspace_1",
+      userId: "user_1",
+      chatSessionId: "chat_1",
+      skillName: "my-skill",
+      path: "SKILL.md",
+    });
+    expect(new TextDecoder().decode(captured!.content)).toContain("name: my-skill");
+    await expect(
+      repository.replace({
+        actor: actor(),
+        name: first.installation.id,
+        bundle: renamedBundle,
+        expectedBundleId: first.installation.bundle.id,
+      }),
+    ).resolves.toMatchObject({ bundle: { id: renamed.bundle.id } });
+    await expect(
+      repository.replace({
+        actor: actor(),
+        name: first.installation.id,
+        bundle: original,
+        expectedBundleId: first.installation.bundle.id,
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+
+    await repository.install({
+      actor: actor(),
+      idempotencyKey: "occupied",
+      bundle: await createWorkspaceSkillArtifact({
+        name: "occupied",
+        description: "Other.",
+        instructions: "Other steps.",
+      }),
+    });
+    await expect(
+      repository.replace({
+        actor: actor(),
+        name: renamed.id,
+        bundle: await createWorkspaceSkillArtifact({
+          name: "occupied",
+          description: original.description,
+          instructions: original.body,
+        }),
+        expectedBundleId: renamed.bundle.id,
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(await repository.get({ actor: actor(), name: renamed.id })).toMatchObject({
+      name: "renamed-skill",
+      bundle: { id: renamed.bundle.id },
+    });
+  });
+
+  it("does not rename imported Skills on refresh", async () => {
+    const first = await repository.install({
+      actor: actor(),
+      idempotencyKey: "imported",
+      bundle: await resolvedBundle("my-skill", "Steps."),
+    });
+    await expect(
+      repository.replace({
+        actor: actor(),
+        name: first.installation.id,
+        bundle: await resolvedBundle("renamed-skill", "Steps."),
+      }),
+    ).rejects.toMatchObject({ code: "invalid_argument" });
   });
 
   it("rejects stale edits and permits a retry of an already saved version", async () => {

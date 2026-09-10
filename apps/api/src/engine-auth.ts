@@ -1,4 +1,6 @@
 import { validateClaudeCodeToken } from "@opencompany/agent/claude-code-token";
+import { CodexBackendError } from "@opencompany/agent/codex-backend-language-model";
+import { fetchCodexUsage } from "@opencompany/agent/codex-usage";
 import type { Actor } from "@opencompany/core";
 import {
   deleteClaudeCodeCredential,
@@ -18,6 +20,7 @@ import {
   loadInfisicalConnectionMetadata,
 } from "@opencompany/db/infisical-auth";
 import { createLogger } from "@opencompany/observability";
+import type { CodexUsage } from "@opencompany/protocol";
 import { ApiError } from "./errors";
 import type { RunnerClient } from "./runner-client";
 
@@ -26,8 +29,6 @@ const logger = createLogger({ service: "opencompany-api", runtime: "engine-auth"
 // Follows the repo-wide injectable-db convention for services that only need a
 // drizzle handle without dragging the full inferred schema type across packages.
 type DbLike = any;
-
-const INFISICAL_ADMIN_ONLY_MESSAGE = "Only workspace admins can manage Infisical.";
 
 export type EngineAuthConnectionStatus = {
   status: "connected" | "needs_reauth" | null;
@@ -80,6 +81,7 @@ export type EngineAuthService = {
   saveClaudeCodeToken(actor: Actor, token: string): Promise<EngineAuthConnectionStatus>;
   disconnectClaudeCode(actor: Actor): Promise<void>;
   getCodexStatus(actor: Actor): Promise<CodexAuthStatus>;
+  getCodexUsage(actor: Actor): Promise<CodexUsage>;
   setCodexWorkspaceEngine(actor: Actor, enabled: boolean): Promise<CodexAuthStatus>;
   startCodexDeviceAuth(actor: Actor): Promise<CodexDeviceAuthFlow>;
   pollCodexDeviceAuth(actor: Actor, flowId: string): Promise<CodexDeviceAuthFlow>;
@@ -134,6 +136,26 @@ export function createEngineAuthService(input: {
   return {
     getClaudeCodeStatus,
     getCodexStatus,
+    async getCodexUsage(actor) {
+      try {
+        return await fetchCodexUsage({ db, userWorkosId: actor.userId });
+      } catch (error) {
+        if (error instanceof CodexBackendError) {
+          throw new ApiError(
+            error.statusCode,
+            "unavailable",
+            error.message,
+            error.kind !== "needs_reauth",
+          );
+        }
+        throw new ApiError(
+          503,
+          "unavailable",
+          "Codex usage is temporarily unavailable. Try again shortly.",
+          true,
+        );
+      }
+    },
 
     async setCodexWorkspaceEngine(actor, enabled) {
       requireAdmin(actor, "Only workspace admins can manage subscription-backed models.");
@@ -225,12 +247,10 @@ export function createEngineAuthService(input: {
     },
 
     async getInfisicalStatus(actor) {
-      // Member-visible on purpose: the retired settings read powered the
-      // provider states for every workspace member; only mutations are
-      // admin-gated.
       const connection = await loadInfisicalConnectionMetadata({
         db,
         workspaceId: actor.workspaceId,
+        userId: actor.userId,
       });
       return {
         status: connection?.status ?? null,
@@ -242,7 +262,6 @@ export function createEngineAuthService(input: {
     },
 
     async startInfisicalAuth(actor, host) {
-      requireAdmin(actor, INFISICAL_ADMIN_ONLY_MESSAGE);
       if (!isInfisicalHost(host)) {
         throw new ApiError(400, "invalid_request", "Choose a supported Infisical region.");
       }
@@ -271,7 +290,6 @@ export function createEngineAuthService(input: {
     },
 
     async completeInfisicalAuth(actor, flowId, browserToken) {
-      requireAdmin(actor, INFISICAL_ADMIN_ONLY_MESSAGE);
       const trimmedFlowId = flowId.trim();
       const trimmedToken = browserToken.trim();
       if (!trimmedFlowId || !trimmedToken) {
@@ -301,9 +319,12 @@ export function createEngineAuthService(input: {
     },
 
     async disconnectInfisical(actor) {
-      requireAdmin(actor, INFISICAL_ADMIN_ONLY_MESSAGE);
       try {
-        await disconnectInfisicalConnection({ db, workspaceId: actor.workspaceId });
+        await disconnectInfisicalConnection({
+          db,
+          workspaceId: actor.workspaceId,
+          userId: actor.userId,
+        });
       } catch (error) {
         throw commandFailure(error, "Could not disconnect Infisical.", "infisical_disconnect");
       }

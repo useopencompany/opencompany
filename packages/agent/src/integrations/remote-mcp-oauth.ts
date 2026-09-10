@@ -169,22 +169,7 @@ export function createRemoteMcpIntegration<const TProvider extends IntegrationPr
       )
       .orderBy(desc(integrations.updatedAt))
       .limit(1);
-    if (personal || !input.workspaceId) return personal;
-
-    const [workspace] = await getDb()
-      .select(selection)
-      .from(integrations)
-      .where(
-        and(
-          eq(integrations.workspaceId, input.workspaceId),
-          eq(integrations.provider, config.provider),
-          eq(integrations.externalId, config.externalId),
-          ne(integrations.status, "disconnected"),
-        ),
-      )
-      .orderBy(desc(integrations.updatedAt))
-      .limit(1);
-    return workspace;
+    return personal;
   }
 
   // The web settings surface and runner workers keep resolving the shared

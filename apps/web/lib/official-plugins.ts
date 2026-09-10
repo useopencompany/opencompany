@@ -7,6 +7,7 @@ export type OfficialMcpPluginName =
   | "github"
   | "gmail"
   | "granola"
+  | "google-admin"
   | "google-calendar"
   | "google-drive"
   | "hubspot"
@@ -56,6 +57,7 @@ export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
     | "github_user"
     | "gmail"
     | "granola"
+    | "google_admin"
     | "google_calendar"
     | "google_drive"
     | "hubspot"
@@ -171,6 +173,18 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     ingestionHref: "/wiki/sources",
     ingestionLabel: "Configure legacy Granola API ingestion in Wiki sources",
   },
+  "google-admin": {
+    name: "google-admin",
+    kind: "mcp",
+    label: "Google Admin",
+    description: "Create Workspace user accounts, set up groups, and add group members.",
+    category: "productivity",
+    source: OFFICIAL_PLUGIN_SOURCES["google-admin"],
+    connectionProvider: "google_admin",
+    connectHref: "/api/integrations/google-admin/start?returnTo=/settings/plugins/google-admin",
+    accountDescription:
+      "Connect a Google Workspace administrator with user and group management privileges. The most recently connected account powers these tools. New users need a password reset and sign-in details from Google Admin.",
+  },
   "google-calendar": {
     name: "google-calendar",
     kind: "mcp",
@@ -222,7 +236,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectionProvider: "infisical",
     connectHref: "/settings/plugins/infisical",
     accountDescription:
-      "The workspace CLI connection restored into coding sandboxes. Its credentials are never sent to the documentation MCP.",
+      "Your personal Infisical login, restored into your coding sandboxes. Its credentials are never sent to the documentation MCP.",
   },
   jamie: {
     name: "jamie",

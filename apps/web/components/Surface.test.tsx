@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { composerDraftKey, persistComposerDraft } from "@/lib/chat-composer-draft";
 import { persistLastChatSelection } from "@/lib/chat-composer-selection";
 import {
   CHAT_COMPOSER_FOCUS_EVENT,
@@ -791,7 +792,7 @@ describe("Surface chat streaming UI", () => {
       content: "Research Q3",
       model: DEFAULT_MODEL,
     });
-    expect(body.clientConversationId).toMatch(/^goat_chat_/);
+    expect(body.clientConversationId).toMatch(/^conversation_/);
     expect(body.clientMessageId).toMatch(/^ui_background_/);
     expect(screen.getByTestId("optimistic-chat-summaries")).toHaveTextContent(
       `${body.clientConversationId}:Research Q3`,
@@ -992,7 +993,7 @@ describe("Surface chat streaming UI", () => {
         settings: { reasoningEffort: "xhigh" },
       },
     });
-    expect(body.clientConversationId).toMatch(/^goat_chat_/);
+    expect(body.clientConversationId).toMatch(/^conversation_/);
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     expect(historyMock.replaceState).not.toHaveBeenCalled();
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
@@ -1760,6 +1761,156 @@ describe("Surface chat streaming UI", () => {
     expect(screen.getByText("welcome back, there")).toBeInTheDocument();
   });
 
+  it.each([null, { id: "chat_1", title: "Chat", model: DEFAULT_MODEL, messages: [] }])(
+    "restores the composer after a reload for %j",
+    (initialChat) => {
+      const props = { tasks: [], defaultModel: DEFAULT_MODEL, initialChat };
+      const placeholder = initialChat ? "Reply..." : "Ask opencompany anything...";
+      const first = render(
+        <StrictMode>
+          <Surface {...props} />
+        </StrictMode>,
+      );
+      fireEvent.change(screen.getByPlaceholderText(placeholder), {
+        target: { value: "An unfinished message\nwith another line" },
+      });
+      first.unmount();
+
+      render(
+        <StrictMode>
+          <Surface {...props} />
+        </StrictMode>,
+      );
+      expect(screen.getByPlaceholderText(placeholder)).toHaveValue(
+        "An unfinished message\nwith another line",
+      );
+    },
+  );
+
+  it("keeps home and session drafts separate when navigating and reloading", async () => {
+    const props = { tasks: [], defaultModel: DEFAULT_MODEL };
+    const chat = { id: "chat_1", title: "Chat", model: DEFAULT_MODEL, messages: [] };
+    const view = render(<Surface {...props} initialChat={null} />);
+    fireEvent.change(screen.getByPlaceholderText("Ask opencompany anything..."), {
+      target: { value: "Home draft" },
+    });
+    view.rerender(<Surface {...props} initialChat={chat} />);
+    await nextAnimationFrame();
+    expect(screen.getByPlaceholderText("Reply...")).toHaveValue("");
+    fireEvent.change(screen.getByPlaceholderText("Reply..."), {
+      target: { value: "Session draft" },
+    });
+    act(() => window.dispatchEvent(new Event(HOME_NAVIGATION_EVENT)));
+    expect(screen.getByPlaceholderText("Ask opencompany anything...")).toHaveValue("Home draft");
+    view.unmount();
+    render(<Surface {...props} initialChat={chat} />);
+    expect(screen.getByPlaceholderText("Reply...")).toHaveValue("Session draft");
+  });
+
+  it.each(["delete", "send"])("does not restore a draft after %s", async (action) => {
+    const props = {
+      tasks: [],
+      defaultModel: DEFAULT_MODEL,
+      initialChat: { id: "chat_1", title: "Chat", model: DEFAULT_MODEL, messages: [] },
+    };
+    const view = render(<Surface {...props} />);
+    fireEvent.change(screen.getByPlaceholderText("Reply..."), { target: { value: "Draft" } });
+    if (action === "delete") {
+      fireEvent.change(screen.getByPlaceholderText("Reply..."), { target: { value: "" } });
+    } else {
+      await userEvent.setup().click(screen.getByRole("button", { name: "Send message" }));
+    }
+    view.unmount();
+    render(<Surface {...props} />);
+    expect(screen.getByPlaceholderText("Reply...")).toHaveValue("");
+  });
+
+  it("keeps an edited draft after a failed first send and refresh on Home", async () => {
+    chatMock.sendError = new Error("Send failed");
+    const props = { tasks: [], defaultModel: DEFAULT_MODEL, initialChat: null };
+    const view = render(<Surface {...props} />);
+    fireEvent.change(screen.getByPlaceholderText("Ask opencompany anything..."), {
+      target: { value: "Try this message" },
+    });
+    await userEvent.setup().click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText("Reply...")).toHaveValue("Try this message"),
+    );
+    fireEvent.change(screen.getByPlaceholderText("Reply..."), {
+      target: { value: "Edited retry" },
+    });
+    view.unmount();
+    render(<Surface {...props} />);
+    expect(screen.getByPlaceholderText("Ask opencompany anything...")).toHaveValue("Edited retry");
+  });
+
+  it("moves a follow-up draft to the accepted session without leaving it on Home", async () => {
+    const props = { tasks: [], defaultModel: DEFAULT_MODEL };
+    const view = render(<Surface {...props} initialChat={null} />);
+    fireEvent.change(screen.getByPlaceholderText("Ask opencompany anything..."), {
+      target: { value: "Start a chat" },
+    });
+    await userEvent.setup().click(screen.getByRole("button", { name: "Send message" }));
+    const request = chatMock.preparedRequestBodies[0] as { newSessionId: string };
+    fireEvent.change(screen.getByPlaceholderText("Reply..."), { target: { value: "Follow up" } });
+    acceptHeadlessConversation(request.newSessionId);
+    view.unmount();
+    const chatView = render(
+      <Surface
+        {...props}
+        initialChat={{
+          id: request.newSessionId,
+          title: "Chat",
+          model: DEFAULT_MODEL,
+          messages: [],
+        }}
+      />,
+    );
+    expect(screen.getByPlaceholderText("Reply...")).toHaveValue("Follow up");
+    chatView.unmount();
+    render(<Surface {...props} initialChat={null} />);
+    expect(screen.getByPlaceholderText("Ask opencompany anything...")).toHaveValue("");
+  });
+
+  it("isolates drafts by user and workspace", () => {
+    const props = { tasks: [], defaultModel: DEFAULT_MODEL, initialChat: null };
+    const view = render(<Surface {...props} userWorkosId="user_1" workspaceId="workspace_1" />);
+    fireEvent.change(screen.getByPlaceholderText("Ask opencompany anything..."), {
+      target: { value: "Private draft" },
+    });
+    view.rerender(<Surface {...props} userWorkosId="user_2" workspaceId="workspace_1" />);
+    expect(screen.getByPlaceholderText("Ask opencompany anything...")).toHaveValue("");
+    view.rerender(<Surface {...props} userWorkosId="user_1" workspaceId="workspace_2" />);
+    expect(screen.getByPlaceholderText("Ask opencompany anything...")).toHaveValue("");
+    view.rerender(<Surface {...props} userWorkosId="user_1" workspaceId="workspace_1" />);
+    expect(screen.getByPlaceholderText("Ask opencompany anything...")).toHaveValue("Private draft");
+  });
+
+  it("restores selected mentions with a saved draft", async () => {
+    persistComposerDraft(composerDraftKey("", "", "chat_1"), {
+      input: "Use /research to investigate",
+      mentions: [{ kind: "skill", id: "skill_research", name: "research" }],
+    });
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "chat_1",
+          title: "Chat",
+          model: DEFAULT_MODEL,
+          messages: [],
+        }}
+      />,
+    );
+    await userEvent.setup().click(screen.getByRole("button", { name: "Send message" }));
+    expect(chatMock.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: { mentions: [{ kind: "skill", id: "skill_research", name: "research" }] },
+      }),
+    );
+  });
+
   it("restores an unsent composer draft when returning to a chat session", async () => {
     const user = userEvent.setup();
     const chatOne = {
@@ -1934,7 +2085,7 @@ describe("Surface chat streaming UI", () => {
 
     expect(screen.queryByText("Capability / Speed / Cost")).not.toBeInTheDocument();
     expect(screen.getAllByText("Claude Sonnet 5").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("Claude Opus 4.8")).toBeInTheDocument();
+    expect(screen.queryByText("Claude Opus 4.8")).not.toBeInTheDocument();
     expect(screen.queryByText("GPT 6 Astra")).not.toBeInTheDocument();
     expect(screen.getByText("GPT 5.6 Sol")).toBeInTheDocument();
     expect(screen.getByText("GPT 5.6 Terra")).toBeInTheDocument();
@@ -2154,7 +2305,7 @@ describe("Surface chat streaming UI", () => {
     expect(chatMock.sendMessage).toHaveBeenCalledWith({ text: "Clone my repo" });
     const body = chatMock.preparedRequestBodies.at(-1) as Record<string, unknown>;
     expect(body).toMatchObject({
-      newSessionId: expect.stringMatching(/^goat_chat_/),
+      newSessionId: expect.stringMatching(/^conversation_/),
       engine: {
         type: "codex",
         schemaVersion: 1,
@@ -2202,10 +2353,9 @@ describe("Surface chat streaming UI", () => {
     );
   });
 
-  it.each([
-    ["Claude Opus 4.8", "anthropic/claude-opus-4.8"],
-    ["Claude Opus 5", "anthropic/claude-opus-5"],
-  ])("selects %s and submits per-turn reasoning effort", async (label, model) => {
+  it("selects Opus 5 and submits per-turn reasoning effort", async () => {
+    const label = "Claude Opus 5";
+    const model = "anthropic/claude-opus-5";
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       return new Response(
@@ -2243,6 +2393,7 @@ describe("Surface chat streaming UI", () => {
       screen.queryByRole("button", { name: /Claude reasoning effort/ }),
     ).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Claude model: Claude Haiku 4.5" }));
+    expect(screen.queryByRole("option", { name: /Claude Opus 4\.8/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole("option", { name: new RegExp(label) }));
     await user.click(
       screen.getByRole("button", { name: "Claude reasoning effort: High (click to cycle)" }),
@@ -2255,7 +2406,7 @@ describe("Surface chat streaming UI", () => {
 
     expect(chatMock.sendMessage).toHaveBeenCalledWith({ text: "Inspect this repository" });
     expect(chatMock.preparedRequestBodies.at(-1)).toMatchObject({
-      newSessionId: expect.stringMatching(/^goat_chat_/),
+      newSessionId: expect.stringMatching(/^conversation_/),
       model,
       engine: {
         type: "claude_code",
@@ -2885,7 +3036,7 @@ describe("Surface chat streaming UI", () => {
     expect(chatMock.preparedRequestBodies).toHaveLength(2);
     expect(chatMock.preparedRequestBodies[0]).toMatchObject({
       sessionId: null,
-      newSessionId: expect.stringMatching(/^goat_chat_/),
+      newSessionId: expect.stringMatching(/^conversation_/),
       model: DEFAULT_MODEL,
     });
     expect(chatMock.preparedRequestBodies[1]).toMatchObject({
@@ -2957,7 +3108,7 @@ describe("Surface chat streaming UI", () => {
     );
     const body = chatMock.preparedRequestBodies.at(-1) as { newSessionId: string };
     expect(body).toMatchObject({
-      newSessionId: expect.stringMatching(/^goat_chat_/),
+      newSessionId: expect.stringMatching(/^conversation_/),
       model: "openai/gpt-6-astra",
       engine: { type: "codex", schemaVersion: 1 },
     });
@@ -3030,7 +3181,7 @@ describe("Surface chat streaming UI", () => {
     );
     const body = chatMock.preparedRequestBodies.at(-1);
     expect(body).toMatchObject({
-      newSessionId: expect.stringMatching(/^goat_chat_/),
+      newSessionId: expect.stringMatching(/^conversation_/),
       model: CLAUDE_CHAT_DEFAULT_MODEL_ID,
       engine: { type: "claude_code", schemaVersion: 1 },
     });
@@ -4243,7 +4394,7 @@ describe("Surface chat streaming UI", () => {
     expect(body).toMatchObject({
       content: "Research Q3",
     });
-    expect(body.clientConversationId).toMatch(/^goat_chat_/);
+    expect(body.clientConversationId).toMatch(/^conversation_/);
   });
 
   it("routes a dropped file only to the Cmd+K composer while the compose view is open", async () => {
@@ -4316,7 +4467,7 @@ describe("Surface chat streaming UI", () => {
       content: "Clone my repo",
       engine: { type: "codex", schemaVersion: 1 },
     });
-    expect(body.clientConversationId).toMatch(/^goat_chat_/);
+    expect(body.clientConversationId).toMatch(/^conversation_/);
     // Never adopted into the visible thread and never navigated to.
     expect(historyMock.replaceState).not.toHaveBeenCalled();
     expect(routerMock.push).not.toHaveBeenCalled();
@@ -4487,6 +4638,49 @@ describe("Surface chat streaming UI", () => {
     await user.click(result);
 
     expect(routerMock.push).toHaveBeenCalledWith("/chat/chat_1");
+  });
+
+  it("keeps Cmd+K matches in recency order while searching and after clearing", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={null}
+        recentChats={[
+          codexChatSummary({
+            id: "chat_newer",
+            title: "Plans for spring",
+            updatedAt: "2026-08-10T12:00:00.000Z",
+          }),
+          codexChatSummary({
+            id: "chat_older",
+            title: "Planning",
+            updatedAt: "2026-08-09T12:00:00.000Z",
+          }),
+        ]}
+      />,
+    );
+
+    await user.keyboard("{Meta>}k{/Meta}");
+    const dialog = screen.getByRole("dialog");
+    const input = within(dialog).getByRole("combobox");
+    const recentTitles = () =>
+      within(dialog)
+        .getAllByRole("option")
+        .filter((option) => option.dataset.value !== "start-new-chat")
+        .map((option) => option.querySelector("p")?.textContent);
+
+    expect(recentTitles()).toEqual(["Plans for spring", "Planning"]);
+    await user.type(input, "planning");
+    expect(recentTitles()).toEqual(["Plans for spring", "Planning"]);
+    await user.clear(input);
+    await user.type(input, "no matching work");
+    expect(within(dialog).getByText("No matching tasks or chats.")).toBeInTheDocument();
+    expect(within(dialog).getAllByRole("option")).toHaveLength(1);
+    await user.clear(input);
+    expect(recentTitles()).toEqual(["Plans for spring", "Planning"]);
   });
 
   it("mixes archived chats into the Cmd+K palette by recency and restores them", async () => {
@@ -4883,6 +5077,54 @@ describe("Surface chat streaming UI", () => {
     expect(screen.getByText("Streaming answer")).toBeInTheDocument();
     expect(screen.getByRole("status", { name: "opencompany is working" })).toBeInTheDocument();
     expect(screen.getByText(/^\d+\.\ds$/)).toBeInTheDocument();
+  });
+
+  it("stops the task timer while waiting for approval and restarts it on resume", () => {
+    const initialChat = {
+      id: "chat_task_1",
+      title: "Morning workflow",
+      model: DEFAULT_MODEL,
+      engine: "opencompany" as const,
+      messages: [],
+    };
+    const taskConversation = {
+      taskId: "task_1",
+      status: "running" as const,
+      startedAtMs: Date.now() - 106_000,
+      activeRunId: "run_1",
+    };
+    const view = render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={initialChat}
+        taskConversation={taskConversation}
+      />,
+    );
+    expect(screen.getByRole("status", { name: "opencompany is working" })).toBeInTheDocument();
+
+    view.rerender(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={initialChat}
+        taskConversation={{ ...taskConversation, status: "waiting" }}
+      />,
+    );
+    expect(
+      screen.queryByRole("status", { name: "opencompany is working" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop task" })).not.toBeInTheDocument();
+
+    view.rerender(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={initialChat}
+        taskConversation={{ ...taskConversation, status: "queued" }}
+      />,
+    );
+    expect(screen.getByRole("status", { name: "opencompany is working" })).toBeInTheDocument();
   });
 
   it("does not show a live timer for a finalized turn when stream and runtime state are stale", () => {

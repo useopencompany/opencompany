@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   CHAT_MAX_STEPS,
   createProductChatToolContext,
+  PRODUCT_CHAT_FINAL_RESPONSE_INSTRUCTION,
   prepareProductChatStep,
   UPDATE_TASK_STATUS_TOOL_NAME,
 } from "./chat-agent";
@@ -153,6 +154,22 @@ describe("edit_workspace_skill tool", () => {
       EDIT_WORKSPACE_SKILL_TOOL_NAME in
         createProductChatToolContext({ model, editWorkspaceSkill: vi.fn() }).tools,
     ).toBe(true);
+  });
+
+  it("passes a rename without requiring replacement instructions", async () => {
+    const editWorkspaceSkill = vi.fn();
+    const context = createProductChatToolContext({ model, editWorkspaceSkill });
+    const skillTool = context.tools[EDIT_WORKSPACE_SKILL_TOOL_NAME] as {
+      execute: (args: unknown, context: { toolCallId: string }) => Promise<unknown>;
+    };
+    await skillTool.execute(
+      { name: " installation_1 ", newName: " renamed-skill ", expectedBundleId: "bundle_1" },
+      { toolCallId: "rename_1" },
+    );
+    expect(editWorkspaceSkill).toHaveBeenCalledWith(
+      { name: "installation_1", newName: "renamed-skill", expectedBundleId: "bundle_1" },
+      { toolCallId: "rename_1" },
+    );
   });
 
   it("passes the complete revised Skill and stable SDK tool-call id to the host", async () => {
@@ -663,19 +680,31 @@ describe("start_workflow tool", () => {
 });
 
 describe("prepareProductChatStep maxSteps", () => {
+  it("preserves the system prompt while explaining the final response transition", () => {
+    const system = "Follow the workspace instructions.";
+    expect(prepareProductChatStep({ stepNumber: 15, maxSteps: 16, system })).toEqual({
+      toolChoice: "none",
+      system: `${system}\n\n${PRODUCT_CHAT_FINAL_RESPONSE_INSTRUCTION}`,
+    });
+    expect(prepareProductChatStep({ stepNumber: 0, finalizeAfterApproval: true, system })).toEqual({
+      toolChoice: "none",
+      system: `${system}\n\n${PRODUCT_CHAT_FINAL_RESPONSE_INSTRUCTION}`,
+    });
+  });
+
   it("reserves the final step with the default chat budget", () => {
     expect(prepareProductChatStep({ stepNumber: CHAT_MAX_STEPS - 2 })).toEqual({});
     expect(prepareProductChatStep({ stepNumber: CHAT_MAX_STEPS - 1 })).toEqual({
-      activeTools: [],
       toolChoice: "none",
+      system: PRODUCT_CHAT_FINAL_RESPONSE_INSTRUCTION,
     });
   });
 
   it("reserves the final step at a task's larger budget", () => {
     expect(prepareProductChatStep({ stepNumber: 14, maxSteps: 16 })).toEqual({});
     expect(prepareProductChatStep({ stepNumber: 15, maxSteps: 16 })).toEqual({
-      activeTools: [],
       toolChoice: "none",
+      system: PRODUCT_CHAT_FINAL_RESPONSE_INSTRUCTION,
     });
   });
 

@@ -292,9 +292,7 @@ export async function getStripeMcpIntegrationState(input: {
   userWorkosId: string;
   workspaceId: string;
 }) {
-  const oauthState = await getStripeOAuthIntegrationState(input);
-  if (oauthState.status !== "not_connected") return oauthState;
-  return getStripeIntegrationState(input.workspaceId);
+  return getStripeOAuthIntegrationState(input);
 }
 
 export async function loadStripeMcpWorkerConnection(input: {
@@ -302,31 +300,7 @@ export async function loadStripeMcpWorkerConnection(input: {
   workspaceId: string;
   onAuthorizationRequired: () => never;
 }) {
-  const oauthConnection = await loadStripeOAuthWorkerConnection(input);
-  // Once OAuth exists, an expired grant must not silently switch to a different
-  // Stripe account or the workspace key's permissions.
-  if (oauthConnection.ok || oauthConnection.reason !== "not_connected") return oauthConnection;
-
-  const state = await getStripeIntegrationState(input.workspaceId);
-  if (state.status === "not_connected" || state.status === "disconnected") {
-    return { ok: false as const, reason: "not_connected" as const };
-  }
-  if (!state.connected) return { ok: false as const, reason: "needs_reauth" as const };
-
-  const connection = await loadStripeConnection(input.workspaceId);
-  if (!connection) return { ok: false as const, reason: "needs_reauth" as const };
-
-  return {
-    ok: true as const,
-    integrationId: connection.integrationId,
-    authProvider: createRemoteMcpStaticBearerAuthProvider({
-      accessToken: connection.apiKey,
-      onAuthorizationRequired: async () => {
-        await markStripeConnectionNeedsReauth(connection);
-        return input.onAuthorizationRequired();
-      },
-    }),
-  };
+  return loadStripeOAuthWorkerConnection(input);
 }
 
 export async function loadStripeConnection(workspaceId: string): Promise<StripeConnection | null> {

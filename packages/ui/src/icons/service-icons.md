@@ -36,3 +36,12 @@ Source: https://www.convex.dev/brand — official download https://www.convex.de
 clear space, and three brand colors. Only sizing is delegated to component props. No IDs,
 gradients, masks, or clipping references occur in the source. This is Convex's database
 platform, not the unrelated Convex blockchain project.
+
+## Google Admin (verified 2026-09-10)
+
+Vendor source: https://workspace.google.com/products/admin/.
+Exact SVG: https://storage.googleapis.com/gweb-workspace-assets/uploads/7uffzv9dk4sn-1Wi9Oq1LQ3QRaQSg7l82o5-d3afb24f28626a725d5f2507b2523595-Admin.svg.
+GoogleAdminIcon retains all six paths, original blue colors, and the 96 × 96
+viewBox. The two redundant rectangular clips exactly covering the viewBox were
+removed; there are no remaining SVG IDs or references. Width and height follow
+shared icon props. Catalog, installed rows, and details share this component.

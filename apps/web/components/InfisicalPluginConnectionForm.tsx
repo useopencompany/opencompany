@@ -98,7 +98,7 @@ export function InfisicalPluginConnectionForm({
   if (!canManage) {
     return (
       <p className="text-[12px] leading-4 text-ink-subtle">
-        This workspace connection is managed by workspace admins.
+        You need permission to manage your Infisical connection.
       </p>
     );
   }

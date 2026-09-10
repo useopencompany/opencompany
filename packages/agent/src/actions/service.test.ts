@@ -83,6 +83,31 @@ describe("serveActionRequest", () => {
     expect(execute).toHaveBeenCalledTimes(ACTION_MAX_CALLS_PER_TURN);
   });
 
+  it("keeps the failure cap and identifies opencompany as the owner of the limit", async () => {
+    const governance = createInMemoryActionTurnGovernance();
+    await governance.recordSourceDiscovery("gmail");
+    const execute = vi.fn(async () => ({
+      ok: false as const,
+      error: { code: "provider_error", message: "HTTP 503" },
+    }));
+    let result;
+    for (let i = 0; i < 3; i++)
+      result = await serveActionRequest({
+        request: executeRequest(`failure-${i}`),
+        catalog,
+        governance,
+        execute,
+      });
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "provider_error",
+        message: expect.stringContaining("This limit is enforced by opencompany"),
+      },
+    });
+  });
+
   it("returns the same structured catalog errors to every adapter", async () => {
     await expect(
       serveActionRequest({

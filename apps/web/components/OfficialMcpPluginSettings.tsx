@@ -50,7 +50,6 @@ import {
 } from "@/components/PluginSettings";
 import { RenderApiKeyConnectionForm } from "@/components/RenderApiKeyConnectionForm";
 import { SettingsContent } from "@/components/SettingsChrome";
-import { StripeRestrictedKeyConnectionForm } from "@/components/StripeRestrictedKeyConnectionForm";
 import {
   type CapabilityId,
   type CapabilityMode,
@@ -133,8 +132,6 @@ export type PluginAccountsState =
       status: "ready";
       accounts: PluginAccount[];
       permissionConnection: IntegrationAccountView<PluginConnectionProvider> | null;
-      legacyStripeConnection?: boolean;
-      stripeWorkspaceKey?: { connected: boolean };
       managedConnection?: ManagedPluginConnection;
     };
 
@@ -247,6 +244,25 @@ export function GranolaPluginDetail({
   return (
     <OfficialMcpPluginDetail
       config={OFFICIAL_MCP_PLUGINS.granola}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
+export function GoogleAdminPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS["google-admin"]}
       pluginState={pluginState}
       canEdit={canEdit}
       {...(toolsState ? { toolsState } : {})}
@@ -921,7 +937,7 @@ function EventsSection({ plugin, canEdit }: { plugin: PluginInstallationDto; can
         id={`${plugin.name}-events-heading`}
         icon={Webhook}
         title="Events"
-        description="Choose which provider events may start workflows in this workspace. Events are off by default."
+        description="Choose which events from your account may start your workflows. Events are off by default."
       />
       <ul className="overflow-hidden rounded-lg border border-border bg-surface">
         {plugin.events.map((event: PluginEventDefinitionDto) => {
@@ -954,7 +970,7 @@ function EventsSection({ plugin, canEdit }: { plugin: PluginInstallationDto; can
       </ul>
       {!canEdit ? (
         <p className="text-[12px] leading-4 text-ink-subtle">
-          Only workspace admins can change event subscriptions.
+          You need plugin write permission to change event subscriptions.
         </p>
       ) : null}
       {error ? <SectionError title="Event setting failed" message={error} /> : null}
@@ -1011,7 +1027,6 @@ function PluginSetupCallout({
           config={config}
           permissionConnection={accounts.permissionConnection}
           managedConnection={accounts.managedConnection}
-          stripeWorkspaceKey={accounts.stripeWorkspaceKey}
           canEdit={canEdit}
           connectedAccountCount={0}
           prominence="primary"
@@ -1089,6 +1104,16 @@ function PluginHeaderSection({
 
   return (
     <section aria-label={`${config.label} package`} className="flex flex-col gap-3">
+      <p className="text-[12px] leading-4 text-ink-subtle">
+        Your personal plugin. Installing, disabling, or removing it affects only your use.
+      </p>
+      {!plugin ? (
+        <p className="text-[12px] leading-5 text-ink-subtle">
+          Used this plugin before? Older workspace installations were retired when plugins became
+          personal. Install it for yourself, review its permissions, and connect your account if
+          prompted.
+        </p>
+      ) : null}
       {canEdit && !plugin ? (
         <div className="flex flex-wrap items-center gap-2">
           <Button
@@ -1166,7 +1191,7 @@ function PluginHeaderSection({
 
       {!canEdit ? (
         <p className="text-[12px] leading-4 text-ink-subtle">
-          Only workspace admins can install or uninstall plugins.
+          You need plugin write permission to manage your plugins.
         </p>
       ) : null}
       {error ? <SectionError title="Plugin update failed" message={error} /> : null}
@@ -1208,7 +1233,6 @@ function AccountsSection({
   connectPromoted: boolean;
 }) {
   const permissionConnection = state.status === "ready" ? state.permissionConnection : null;
-  const legacyStripeConnection = state.status === "ready" && Boolean(state.legacyStripeConnection);
   const managedConnection = state.status === "ready" ? state.managedConnection : undefined;
   const displayedAccounts =
     state.status !== "ready"
@@ -1254,16 +1278,6 @@ function AccountsSection({
         <ManagedConnectionStatusRow connection={managedConnection} />
       ) : displayedAccounts.length === 0 ? (
         <SectionEmpty icon={Users}>{`No ${accountLabel} accounts are connected.`}</SectionEmpty>
-      ) : legacyStripeConnection ? (
-        <PluginConnectionStatusRow
-          identity={
-            permissionConnection?.connectionLabel ||
-            permissionConnection?.accountName ||
-            permissionConnection?.integrationId ||
-            accountLabel
-          }
-          status={permissionConnection?.connected ? "Connected" : "Needs reconnect"}
-        />
       ) : (
         <div className="flex flex-col gap-2">
           {displayedAccounts.map(({ account }) => (
@@ -1295,7 +1309,6 @@ function AccountsSection({
             config={config}
             permissionConnection={permissionConnection}
             managedConnection={managedConnection}
-            stripeWorkspaceKey={state.status === "ready" ? state.stripeWorkspaceKey : undefined}
             canEdit={canEdit}
             connectedAccountCount={connectedAccountCount}
           />
@@ -1338,12 +1351,10 @@ function PluginConnectionControls({
   config,
   permissionConnection,
   managedConnection,
-  stripeWorkspaceKey,
   canEdit,
   connectedAccountCount,
   prominence = "secondary",
 }: {
-  stripeWorkspaceKey: { connected: boolean } | undefined;
   config: OfficialMcpPluginConfig;
   permissionConnection: IntegrationAccountView<PluginConnectionProvider> | null;
   managedConnection: ManagedPluginConnection | undefined;
@@ -1389,20 +1400,6 @@ function PluginConnectionControls({
           <a href={config.connectHref} className={connectClassName}>
             {connectLabel}
           </a>
-        ) : null}
-        {stripeWorkspaceKey ? (
-          <details>
-            <summary className="cursor-pointer text-[12px] text-ink-subtle">
-              Manage existing workspace API key
-            </summary>
-            <p className="my-2 text-[12px] leading-4 text-ink-subtle">
-              The workspace key is used when you have no personal Stripe connection.
-            </p>
-            <StripeRestrictedKeyConnectionForm
-              connected={stripeWorkspaceKey.connected}
-              canManage={canEdit}
-            />
-          </details>
         ) : null}
       </div>
     );

@@ -23,6 +23,29 @@ const context: ChatHostContext = {
 };
 
 describe("opencompany Chat Task host tools", () => {
+  it("keeps the acting member when a task resolves plugin Skills and restricts standalone Skills to company scope", async () => {
+    const dependencies = testDependencies({
+      loadContext: vi.fn(async () => ({ ...context, taskConversation: true })),
+    });
+    const result = await executeChatHostToolService({
+      command: {
+        operation: "bootstrap",
+        sessionId: "runtime_1",
+        runId: "run_1",
+        input: { mentionedSkillIds: ["plugin-skill"] },
+      },
+      dependencies,
+    });
+    expect(result.ok).toBe(true);
+    expect(dependencies.resolveSkillMentions).toHaveBeenCalledWith({
+      workspaceId: "workspace_1",
+      userId: "user_1",
+      skillAccess: "company",
+      mentions: [{ id: "plugin-skill" }],
+    });
+    expect(dependencies.listSkillCatalog).toHaveBeenCalledWith("workspace_1", "user_1", "company");
+  });
+
   it("derives stable, distinct workspace Skill keys from each model tool call", () => {
     expect(workspaceSkillIdempotencyKey("turn_1", "call_1")).toBe(
       workspaceSkillIdempotencyKey("turn_1", "call_1"),
@@ -213,6 +236,31 @@ describe("opencompany Chat Task host tools", () => {
       error: "Skill tools are unavailable for this user.",
     });
     expect(createWorkspaceSkill).not.toHaveBeenCalled();
+  });
+
+  it("forwards partial Skill edits to the authenticated update service", async () => {
+    const updateWorkspaceSkill = vi.fn(async () => ({
+      updated: true as const,
+      name: "renamed-skill",
+      command: "/renamed-skill",
+      bundleId: "bundle_2",
+    }));
+    await executeChatHostToolService({
+      command: {
+        operation: "edit_workspace_skill",
+        sessionId: "runtime_1",
+        runId: "turn_1",
+        toolCallId: "rename_1",
+        input: { name: "installation_1", newName: "renamed-skill", expectedBundleId: "bundle_1" },
+      },
+      dependencies: testDependencies({ updateWorkspaceSkill }),
+    });
+    expect(updateWorkspaceSkill).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "installation_1",
+        skill: { newName: "renamed-skill", expectedBundleId: "bundle_1" },
+      }),
+    );
   });
 
   it("updates a workspace Skill as the authenticated member", async () => {

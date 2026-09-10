@@ -61,14 +61,14 @@ describe("custom MCP application", () => {
   it("requires plugin installation permission before testing arbitrary endpoints", async () => {
     const { service, transport } = fixture();
     const member = { ...actor, permissions: ["skill:read"] };
-    await expect(service.preview(member, definition)).rejects.toThrow("admins");
+    await expect(service.preview(member, definition)).rejects.toThrow("Plugin write permission");
     await expect(
       service.create(member, {
         ...definition,
         fingerprint: probe.fingerprint,
         idempotencyKey: "key",
       }),
-    ).rejects.toThrow("admins");
+    ).rejects.toThrow("Plugin write permission");
     expect(transport.probe).not.toHaveBeenCalled();
   });
   it("requires a fresh matching discovery preview before installation", async () => {

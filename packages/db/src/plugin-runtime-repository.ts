@@ -1,6 +1,7 @@
 import type { PluginInstallReport, PluginStdioServer, SkillBundleFile } from "@opencompany/core";
 import { CoreError } from "@opencompany/core";
 import { and, eq, inArray } from "drizzle-orm";
+import { pluginAccess } from "./plugin-access";
 import { chatSessionPlugins, pluginFiles, plugins } from "./product-schema";
 import { type ImmutableSkillBundle, loadImmutableSkillBundles } from "./skill-bundle-repository";
 import { resolveWorkspaceSkillCatalog } from "./skill-catalog";
@@ -28,7 +29,7 @@ export type EnabledPluginRuntime = {
 
 export async function loadChatSessionPluginRuntime(
   db: DbClient,
-  input: { workspaceId: string; chatSessionId: string },
+  input: { workspaceId: string; userId: string; chatSessionId: string },
 ): Promise<EnabledPluginRuntime> {
   const snapshot = await db
     .select({ pluginId: chatSessionPlugins.pluginId })
@@ -36,13 +37,14 @@ export async function loadChatSessionPluginRuntime(
     .where(eq(chatSessionPlugins.chatSessionId, input.chatSessionId));
   return loadEnabledPluginRuntime(db, {
     workspaceId: input.workspaceId,
+    userId: input.userId,
     pluginIds: snapshot.map((row: { pluginId: string }) => row.pluginId),
   });
 }
 
 export async function loadEnabledPluginRuntime(
   db: DbClient,
-  input: { workspaceId: string; pluginIds: readonly string[] },
+  input: { workspaceId: string; userId: string; pluginIds: readonly string[] },
 ): Promise<EnabledPluginRuntime> {
   const pluginIds = [...new Set(input.pluginIds)];
   if (pluginIds.length === 0) return { plugins: [], skills: [], mcpPlugins: [] };
@@ -62,6 +64,7 @@ export async function loadEnabledPluginRuntime(
         and(
           eq(plugins.workspaceId, input.workspaceId),
           eq(plugins.status, "enabled"),
+          pluginAccess(input),
           inArray(plugins.id, pluginIds),
         ),
       ),
@@ -79,10 +82,15 @@ export async function loadEnabledPluginRuntime(
         and(
           eq(plugins.workspaceId, input.workspaceId),
           eq(plugins.status, "enabled"),
+          pluginAccess(input),
           inArray(plugins.id, pluginIds),
         ),
       ),
-    resolveWorkspaceSkillCatalog(db, { workspaceId: input.workspaceId, pluginIds }),
+    resolveWorkspaceSkillCatalog(db, {
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      pluginIds,
+    }),
   ]);
 
   const typedPluginRows = pluginRows as Array<{
@@ -141,6 +149,7 @@ export async function loadEnabledPluginRuntime(
   );
   const skills = await loadImmutableSkillBundles(db, {
     workspaceId: input.workspaceId,
+    userId: input.userId,
     bundleIds: winningPluginBundleIds,
   });
   const mcpPlugins = typedPluginRows.flatMap((plugin) => {

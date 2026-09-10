@@ -94,6 +94,40 @@ function messageHeaders(idempotencyKey: string) {
 }
 
 describe("canonical Hono API", () => {
+  it("serves private Codex usage with a dedicated refresh rate limit", async () => {
+    const usage = {
+      windows: [
+        {
+          id: "codex:primary",
+          label: "5-hour",
+          usedPercent: 75,
+          resetsAt: "2026-09-11T00:00:00.000Z",
+        },
+      ],
+      updatedAt: "2026-09-10T12:00:00.000Z",
+    };
+    const getCodexUsage = vi.fn(async () => usage);
+    const buckets: string[] = [];
+    const app = testApp(fakeRepository(), {
+      engineAuth: engineAuthService({ getCodexUsage }),
+      rateLimiter: {
+        consume: async ({ bucket, limit }) => {
+          buckets.push(`${bucket}:${limit}`);
+          return { allowed: true };
+        },
+      },
+    });
+    const response = await app.request("/v1/engine-auth/codex/usage?userId=someone_else");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(getCodexUsage).toHaveBeenCalledWith(actor);
+    expect(buckets).toEqual(["codex-usage:6"]);
+    await expect(response.json()).resolves.toEqual({
+      data: usage,
+      meta: { apiVersion: "v1", protocolVersion: expect.any(String) },
+    });
+  });
+
   it("serves bots through authenticated validated canonical routes", async () => {
     const bot = { id: "bot_1", name: "Research", description: "Find customers" };
     const create = vi.fn(async () => bot);
@@ -163,6 +197,21 @@ describe("canonical Hono API", () => {
     expect(downloadAttachment).toHaveBeenCalledOnce();
   });
 
+  it("mounts the first-party Google Admin MCP at its package endpoint", async () => {
+    const handle = vi.fn(async (_request: Request) => Response.json({ ok: true }));
+    const app = testApp(fakeRepository(), { googleAdminMcp: { handle } });
+    const response = await app.request("/mcp/plugins/google-admin", {
+      method: "POST",
+      headers: { authorization: "Bearer narrow-ticket" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(handle).toHaveBeenCalledOnce();
+    expect(handle.mock.calls[0]?.[0].headers.get("authorization")).toBe("Bearer narrow-ticket");
+    expect((await app.request("/mcp/plugins/google-admin", { method: "GET" })).status).toBe(404);
+  });
+
   it("mounts the first-party Google Calendar MCP at its package endpoint", async () => {
     const handle = vi.fn(async (_request: Request) => Response.json({ ok: true }));
     const app = testApp(fakeRepository(), { googleCalendarMcp: { handle } });
@@ -217,7 +266,7 @@ describe("canonical Hono API", () => {
       await expect(response.json()).resolves.toMatchObject({
         ok: true,
         service: "opencompany-api",
-        capabilities: { personalSkillsAuthorization: "v1" },
+        capabilities: { personalSkillsAuthorization: "v1", personalPluginsAuthorization: "v1" },
         protocolVersion: PROTOCOL_VERSION,
         release: "api-release-sha",
         renderGitCommit: "api-release-sha",
@@ -797,7 +846,8 @@ describe("canonical Hono API", () => {
     );
     expect(replace).toHaveBeenCalledWith({
       actor,
-      name: "investigate-bug",
+      name: createdInstallation.id,
+      expectedBundleId: createdInstallation.bundle.id,
       bundle: authoredBundle,
     });
     expect(create).toHaveBeenNthCalledWith(1, {
@@ -3282,34 +3332,36 @@ describe("canonical Hono API", () => {
     expect(captureChatMessage).not.toHaveBeenCalled();
   });
 
-  it("serves public Chat presentation without actor authentication or private metadata", async () => {
-    const loadPublicShare = vi.fn(async () => ({
-      shareId: "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
-      title: "Shared Chat",
-      kind: "chat" as const,
-      engine: "codex" as const,
-      messages: [{ id: "message_1", role: "assistant" as const, parts: [] }],
-    }));
-    const app = testApp(fakeRepository(), {
-      chatResources: chatResourceService({ loadPublicShare }),
-      authenticate: async () => {
-        throw new Error("Public resources must not authenticate an actor.");
-      },
-    });
+  it.each(["share", "goat_chat_share"])(
+    "serves %s public Chat presentation without actor authentication or private metadata",
+    async (prefix) => {
+      const shareId = `${prefix}_01234567-89ab-4cde-8f01-23456789abcd`;
+      const loadPublicShare = vi.fn(async () => ({
+        shareId,
+        title: "Shared Chat",
+        kind: "chat" as const,
+        engine: "codex" as const,
+        messages: [{ id: "message_1", role: "assistant" as const, parts: [] }],
+      }));
+      const app = testApp(fakeRepository(), {
+        chatResources: chatResourceService({ loadPublicShare }),
+        authenticate: async () => {
+          throw new Error("Public resources must not authenticate an actor.");
+        },
+      });
 
-    const response = await app.request(
-      "/public/chat-shares/goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
-    );
+      const response = await app.request(`/public/chat-shares/${shareId}`);
 
-    expect(response.status).toBe(200);
-    expect(response.headers.get("cache-control")).toBe("private, no-store");
-    expect(response.headers.get("x-robots-tag")).toContain("noindex");
-    const body = await response.json();
-    expect(body).toMatchObject({
-      data: { title: "Shared Chat", engine: "codex", messages: [{ id: "message_1" }] },
-    });
-    expect(JSON.stringify(body)).not.toMatch(/sessionId|contextTokens|blob|lease|token/iu);
-  });
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("private, no-store");
+      expect(response.headers.get("x-robots-tag")).toContain("noindex");
+      const body = await response.json();
+      expect(body).toMatchObject({
+        data: { title: "Shared Chat", engine: "codex", messages: [{ id: "message_1" }] },
+      });
+      expect(JSON.stringify(body)).not.toMatch(/sessionId|contextTokens|blob|lease|token/iu);
+    },
+  );
 
   it("streams authorized Chat resource bytes with defensive headers", async () => {
     const downloadAttachment = vi.fn(async () => ({
@@ -3656,6 +3708,7 @@ describe("canonical Hono API", () => {
       ["/v1/engine-auth/claude-code", "GET"],
       ["/v1/engine-auth/claude-code", "PUT"],
       ["/v1/engine-auth/codex", "GET"],
+      ["/v1/engine-auth/codex/usage", "GET"],
       ["/v1/engine-auth/codex/device", "POST"],
       ["/v1/engine-auth/infisical", "GET"],
       ["/v1/engine-auth/infisical/start", "POST"],
@@ -4383,7 +4436,7 @@ describe("canonical Hono API", () => {
       memberCount: 2,
       memberCap: 10,
       spendThisMonthUsdMicros: 500_000,
-      spendThisMonthByCategory: { chat: 500_000, ingestion: 0, capabilities: 0 },
+      spendThisMonthByCategory: { chat: 500_000, ingestion: 0, capabilities: 0, sandbox: 0 },
       recentActivity: [
         {
           activityId: "billing_activity_safe",
@@ -4426,6 +4479,32 @@ describe("canonical Hono API", () => {
     });
     expect(JSON.stringify(body)).not.toMatch(/stripeCustomerId|paymentMethodId|ledgerId/u);
     expect(getOverview).toHaveBeenCalledWith(actor);
+  });
+
+  it("serves sandbox usage through the authenticated usage endpoint", async () => {
+    const getUsage = vi.fn(async () => ({
+      breakdown: [
+        {
+          day: "2026-09-10",
+          category: "sandbox" as const,
+          spendUsdMicros: 100_000,
+          providerCostUsdMicros: 100_000,
+          platformFeeUsdMicros: 0,
+        },
+      ],
+      ingestedThisMonth: 0,
+      pending: 0,
+      creditBalanceUsdMicros: 4_900_000,
+      providers: [],
+      recent: [],
+    }));
+    const app = testApp(fakeRepository(), { billing: { ...fakeBilling(), getUsage } });
+    const response = await app.request("/v1/billing/usage");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: { breakdown: [{ category: "sandbox", spendUsdMicros: 100_000 }] },
+    });
+    expect(getUsage).toHaveBeenCalledWith(actor);
   });
 
   it("reports unexpected request failures with correlation context", async () => {
@@ -5569,6 +5648,9 @@ function fakeEngineAuth(): Parameters<typeof createApiApp>[0]["engineAuth"] {
     },
     disconnectClaudeCode: async () => {
       throw new Error("Unexpected Claude Code disconnect.");
+    },
+    getCodexUsage: async () => {
+      throw new Error("Unexpected Codex usage read.");
     },
     getCodexStatus: async () => {
       throw new Error("Unexpected Codex status read.");

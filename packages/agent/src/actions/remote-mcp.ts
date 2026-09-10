@@ -4,12 +4,16 @@ import { captureProductServerEvent } from "@opencompany/analytics/product/server
 import type { PluginGatewayDiscoveredTool } from "@opencompany/core";
 import { createLogger } from "@opencompany/observability";
 import type { JSONSchema7 } from "ai";
+import Ajv, { type AnySchema } from "ajv";
+import Ajv2019 from "ajv/dist/2019";
+import Ajv2020 from "ajv/dist/2020";
 import { type CapabilityId, type CapabilityMode, isCapabilityMode } from "./capabilities";
 import {
   ACTION_EFFECTS_READ,
   ACTION_EFFECTS_WRITE,
   ActionAuthError,
   type ActionExecuteContext,
+  ActionInvalidParamsError,
   ActionPermissionError,
   type ActionProviderCatalog,
   type ActionProviderId,
@@ -400,6 +404,15 @@ async function executeRemoteMcpTool(input: {
     userWorkosId: input.context.userWorkosId,
     workspaceId: input.context.workspaceId ?? input.identity.workspaceId,
   };
+  if (
+    identity.userWorkosId !== input.identity.userWorkosId ||
+    identity.workspaceId !== input.identity.workspaceId
+  ) {
+    throw new ActionPermissionError(
+      input.registration.connectionProvider,
+      "This action belongs to another personal plugin context. Refresh your available actions.",
+    );
+  }
   const current = await input.registration.getState(identity);
   if (!current.connected || !current.integrationId) {
     throw remoteAuthError(input.registration, "not_connected");
@@ -422,6 +435,8 @@ async function executeRemoteMcpTool(input: {
       `${input.classification.capability.label} permission changed before this action could run. Retry to use the current permission.`,
     );
   }
+
+  validateRemoteMcpInput(input.definition, input.params);
 
   const connection = await input.registration.loadConnection({
     ...identity,
@@ -482,6 +497,13 @@ async function executeRemoteMcpTool(input: {
       );
       outcome = "success";
       return output;
+    } catch (error) {
+      // JSON-RPC invalid params are model-correctable input failures. Counting them as
+      // provider outages can exhaust the turn's retry budget before corrected input runs.
+      if (error instanceof Error && "code" in error && error.code === -32602) {
+        throw new ActionInvalidParamsError(error.message);
+      }
+      throw error;
     } finally {
       await captureProductServerEvent("plugin_tool_call_completed", identity.userWorkosId, {
         workspace_id: identity.workspaceId,
@@ -541,6 +563,28 @@ function normalizeInputSchema(value: RemoteToolDefinition["inputSchema"]): JSONS
   } as JSONSchema7;
 }
 
+function validateRemoteMcpInput(definition: RemoteToolDefinition, params: Record<string, unknown>) {
+  const schema = normalizeInputSchema(definition.inputSchema);
+  // MCP defaults schemas without an explicit dialect to JSON Schema 2020-12.
+  const Validator =
+    !schema.$schema || schema.$schema.includes("2020-12")
+      ? Ajv2020
+      : schema.$schema.includes("2019-09")
+        ? Ajv2019
+        : Ajv;
+  // Provider formats and extension keywords are not necessarily registered locally.
+  // Validate structure without coercing, removing, or defaulting model arguments.
+  const validator = new Validator({ strict: false, validateFormats: false });
+  const validate = validator.compile(schema as AnySchema);
+  if (!validate(params)) {
+    throw new ActionInvalidParamsError(
+      `Invalid arguments for "${definition.name}": ${validator.errorsText(validate.errors, {
+        dataVar: "arguments",
+      })}. Correct the arguments and retry this action in the current turn.`,
+    );
+  }
+}
+
 function unwrapRemoteMcpResult(
   result: unknown,
   registration: Pick<RemoteMcpGatewayRegistration, "connectionProvider" | "label">,
@@ -554,7 +598,11 @@ function unwrapRemoteMcpResult(
     .map((entry) => entry.text);
   const joined = texts.join("\n");
   if (result.isError === true) {
-    if (registration.connectionProvider === "google_calendar" && isAuthExpiredMcpError(joined)) {
+    if (
+      (registration.connectionProvider === "google_calendar" ||
+        registration.connectionProvider === "google_admin") &&
+      isAuthExpiredMcpError(joined)
+    ) {
       throw remoteAuthError(registration, "auth_expired");
     }
     throw new Error(joined || `${registration.label} returned an MCP tool error.`);

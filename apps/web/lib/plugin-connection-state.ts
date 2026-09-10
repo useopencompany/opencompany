@@ -21,8 +21,6 @@ export type PluginAccounts = {
   accounts: PluginAccount[];
   permissionConnection: IntegrationAccountView<PluginConnectionProvider> | null;
   managedConnection?: ManagedPluginConnection;
-  legacyStripeConnection?: boolean;
-  stripeWorkspaceKey?: { connected: boolean };
 };
 
 /**
@@ -80,6 +78,7 @@ export function pluginAccountsFromState(
     config.connectionProvider === "fathom" ||
     config.connectionProvider === "github_user" ||
     config.connectionProvider === "gmail" ||
+    config.connectionProvider === "google_admin" ||
     config.connectionProvider === "google_calendar" ||
     config.connectionProvider === "google_drive" ||
     config.connectionProvider === "hubspot" ||
@@ -98,44 +97,8 @@ export function pluginAccountsFromState(
     config.connectionProvider === "x_account"
   ) {
     if (config.connectionProvider === "stripe") {
-      const connection = state.stripe;
-      const stripeWorkspaceKey = connection.integrationId
-        ? { connected: connection.connected }
-        : undefined;
-      const oauthAccount = state.personalAccounts.stripe[0];
-      if (oauthAccount) {
-        return {
-          permissionConnection: oauthAccount,
-          accounts: [{ account: oauthAccount }],
-          ...(stripeWorkspaceKey ? { stripeWorkspaceKey } : {}),
-        };
-      }
-      const modeLabel =
-        connection.livemode === false
-          ? "Test mode"
-          : connection.livemode === true
-            ? "Live mode"
-            : null;
-      const permissionConnection: IntegrationAccountView<"stripe"> | null = connection.integrationId
-        ? {
-            integrationId: connection.integrationId,
-            provider: "stripe",
-            status: connection.status === "not_connected" ? "disconnected" : connection.status,
-            connected: connection.connected,
-            accountEmail: null,
-            accountName: connection.accountName,
-            connectionLabel: [connection.accountName, modeLabel].filter(Boolean).join(" · "),
-            statusReason: connection.statusReason,
-            scopes: [],
-            capabilityModes: connection.capabilityModes,
-          }
-        : null;
-      return {
-        permissionConnection,
-        legacyStripeConnection: Boolean(permissionConnection),
-        ...(stripeWorkspaceKey ? { stripeWorkspaceKey } : {}),
-        accounts: permissionConnection ? [{ account: permissionConnection }] : [],
-      };
+      const account = state.personalAccounts.stripe[0] ?? null;
+      return { permissionConnection: account, accounts: account ? [{ account }] : [] };
     }
     if (
       config.connectionProvider === "attio" ||

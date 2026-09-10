@@ -27,6 +27,7 @@ import {
   GitHubPluginDetailView,
   GmailPluginDetail,
   GmailPluginDetailView,
+  GoogleAdminPluginDetail,
   GoogleCalendarPluginDetail,
   GoogleDrivePluginDetail,
   GranolaPluginDetail,
@@ -217,6 +218,7 @@ const appData = vi.hoisted(() => ({
       integrationId: "gint_x_latest",
     },
     personalAccounts: {
+      google_admin: [] as IntegrationAccountView<"google_admin">[],
       betterstack: [],
       fathom: [
         {
@@ -1374,6 +1376,71 @@ describe("Linear plugin settings", () => {
     vi.unstubAllGlobals();
   });
 
+  it("uses the shared Google Admin account, OAuth, permission, and uninstall controls", async () => {
+    const adminAccount: IntegrationAccountView<"google_admin"> = {
+      integrationId: "gint_admin",
+      provider: "google_admin",
+      status: "connected",
+      connected: true,
+      accountEmail: "admin@example.com",
+      accountName: "Admin",
+      connectionLabel: "admin@example.com",
+      statusReason: null,
+      scopes: [
+        "https://www.googleapis.com/auth/admin.directory.user",
+        "https://www.googleapis.com/auth/admin.directory.group",
+      ],
+      capabilityModes: {},
+    };
+    appData.integrations.personalAccounts.google_admin = [adminAccount];
+    const adminPlugin: PluginInstallationDto = {
+      ...plugin,
+      name: "google-admin",
+      manifest: { name: "google-admin" },
+      skills: [],
+      remoteMcpServers: [
+        {
+          ...googleCalendarPlugin.remoteMcpServers[0],
+          name: "google-admin",
+          connectionProvider: "google-admin",
+          capabilities: [
+            { id: "query", label: "Read directory", defaultMode: "ask", tools: ["list_users"] },
+            {
+              id: "write",
+              label: "Manage users and groups",
+              defaultMode: "ask",
+              tools: ["create_user"],
+            },
+          ],
+          tools: [],
+        },
+      ],
+    };
+    try {
+      render(
+        <GoogleAdminPluginDetail pluginState={{ status: "ready", plugin: adminPlugin }} canEdit />,
+      );
+      expect(screen.getAllByText("admin@example.com").length).toBeGreaterThan(0);
+      expect(screen.queryByRole("link", { name: /Connect Google Admin account/ })).toBeNull();
+      expect(screen.getByText("Read directory")).toBeInTheDocument();
+      expect(screen.getByText("Manage users and groups")).toBeInTheDocument();
+      for (const label of ["Read directory permission", "Manage users and groups permission"]) {
+        expect(
+          within(screen.getByRole("group", { name: label })).getByRole("button", { name: "Ask" }),
+        ).toHaveAttribute("aria-pressed", "true");
+      }
+      await userEvent.click(screen.getByRole("button", { name: "Uninstall" }));
+      const dialog = await screen.findByRole("dialog", { name: "Uninstall Google Admin?" });
+      await userEvent.click(within(dialog).getByRole("button", { name: "Uninstall" }));
+      await waitFor(() =>
+        expect(commands.archiveHeadlessPlugin).toHaveBeenCalledWith("google-admin"),
+      );
+      expect(accountActions.disconnectIntegrationAccountAction).not.toHaveBeenCalled();
+    } finally {
+      appData.integrations.personalAccounts.google_admin = [];
+    }
+  });
+
   it("server-renders account data without starting another live query", () => {
     const html = renderToString(
       <LinearPluginDetail
@@ -1447,6 +1514,7 @@ describe("Linear plugin settings", () => {
       "https://eu.infisical.com/login?callback_port=23456",
     );
 
+    await waitFor(() => expect(screen.getByLabelText("Browser token")).toBeEnabled());
     await user.type(screen.getByLabelText("Browser token"), "browser-token");
     await user.click(screen.getByRole("button", { name: "Finish connection" }));
 
@@ -1845,13 +1913,7 @@ describe("Linear plugin settings", () => {
       );
       expect(screen.getByText("Stripe OAuth")).toBeInTheDocument();
       expect(screen.queryByText("Acme Payments · Test mode")).not.toBeInTheDocument();
-      const keyManagement = screen
-        .getByText("Manage existing workspace API key")
-        .closest("details");
-      expect(keyManagement).not.toHaveAttribute("open");
-      expect(
-        screen.getByText("The workspace key is used when you have no personal Stripe connection."),
-      ).toBeInTheDocument();
+      expect(screen.queryByText("Manage existing workspace API key")).not.toBeInTheDocument();
       if (status === "connected") {
         expect(screen.queryByRole("link", { name: "Connect Stripe account" })).toBeNull();
       } else {
@@ -1869,7 +1931,7 @@ describe("Linear plugin settings", () => {
     },
   );
 
-  it("maps the workspace Stripe key onto the official plugin surface", () => {
+  it("requires a personal Stripe account instead of showing the workspace key", () => {
     const stripePlugin = {
       ...plugin,
       id: "plugin_stripe",
@@ -1885,11 +1947,12 @@ describe("Linear plugin settings", () => {
       />,
     );
 
-    expect(html).toContain("Acme Payments · Test mode");
+    expect(html).not.toContain("Acme Payments · Test mode");
+    expect(html).toContain("No Stripe accounts are connected.");
     expect(html).toContain("Learn about Stripe");
     expect(html).toContain("Read Stripe data");
     expect(html).toContain("Manage Stripe");
-    expect(html).toContain("mcp.stripe.com");
+    expect(html).toContain("/api/integrations/stripe/start");
     expect(STRIPE_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/68c22e8a1ffe5eb8a83fb91c68f76f3f45705d3a/stripe",
     );

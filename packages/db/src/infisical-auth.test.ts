@@ -20,6 +20,7 @@ describe("opencompany Infisical credentials", () => {
     const now = new Date("2026-08-05T16:00:00.000Z");
     let stored: Record<string, unknown> | null = null;
     const insertDb = {
+      ...selectDbReturning({ enabled: true }),
       insert: vi.fn(() => ({
         values: vi.fn((value: Record<string, unknown>) => {
           stored = value;
@@ -49,6 +50,7 @@ describe("opencompany Infisical credentials", () => {
     };
 
     await saveInfisicalConnection({
+      userId: "user_1",
       db: insertDb as never,
       workspaceId: "workspace_1",
       authBundle: bundle,
@@ -73,12 +75,25 @@ describe("opencompany Infisical credentials", () => {
     };
     const selectDb = selectDbReturning(row);
     await expect(
-      loadInfisicalConnection({ db: selectDb as never, workspaceId: "workspace_1" }),
+      loadInfisicalConnection({
+        userId: "user_1",
+        db: selectDb as never,
+        workspaceId: "workspace_1",
+      }),
     ).resolves.toMatchObject({ authBundle: bundle, status: "connected" });
+
+    await expect(
+      loadInfisicalConnection({
+        userId: "user_2",
+        db: selectDbReturning(row) as never,
+        workspaceId: "workspace_1",
+      }),
+    ).rejects.toThrow("Infisical credential could not be decrypted.");
 
     const copiedToOtherWorkspace = selectDbReturning({ ...row, workspaceId: "workspace_2" });
     await expect(
       loadInfisicalConnection({
+        userId: "user_1",
         db: copiedToOtherWorkspace as never,
         workspaceId: "workspace_2",
       }),
@@ -99,9 +114,10 @@ describe("opencompany Infisical credentials", () => {
     const values = vi.fn(() => ({
       onConflictDoUpdate: vi.fn(async () => undefined),
     }));
-    const db = { insert: vi.fn(() => ({ values })) };
+    const db = { ...selectDbReturning({ enabled: true }), insert: vi.fn(() => ({ values })) };
 
     const result = await disconnectInfisicalConnection({
+      userId: "user_1",
       db: db as never,
       workspaceId: "workspace_1",
     });

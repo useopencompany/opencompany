@@ -48,6 +48,12 @@ import {
   loadGmailMcpWorkerConnection,
 } from "./integrations/gmail-mcp";
 import {
+  GOOGLE_ADMIN_MCP_ENDPOINT_URL,
+  getGoogleAdminMcpIntegrationState,
+  googleAdminMcpRuntimeEndpointUrl,
+  loadGoogleAdminMcpWorkerConnection,
+} from "./integrations/google-admin-mcp";
+import {
   GOOGLE_CALENDAR_MCP_ENDPOINT_URL,
   getGoogleCalendarMcpIntegrationState,
   googleCalendarMcpRuntimeEndpointUrl,
@@ -196,6 +202,12 @@ const providerBindings = {
     getState: getGranolaMcpIntegrationState,
     loadConnection: loadGranolaMcpWorkerConnection,
   },
+  "google-admin": {
+    provider: "google_admin",
+    endpointUrl: GOOGLE_ADMIN_MCP_ENDPOINT_URL,
+    getState: getGoogleAdminMcpIntegrationState,
+    loadConnection: loadGoogleAdminMcpWorkerConnection,
+  },
   "google-calendar": {
     provider: "google_calendar",
     endpointUrl: GOOGLE_CALENDAR_MCP_ENDPOINT_URL,
@@ -333,6 +345,7 @@ export async function resolvePluginGatewayRegistrations(
   const now = options.now ?? new Date();
   const records = await listActivePluginGatewayRegistrations(db, {
     workspaceId: identity.workspaceId,
+    userId: identity.userWorkosId,
   });
   const refreshed = await Promise.all(
     records.map((record) =>
@@ -375,6 +388,7 @@ export async function refreshPluginGatewayRegistrations(input: {
   const now = input.now ?? new Date();
   const records = await listActivePluginGatewayRegistrations(db, {
     workspaceId: input.identity.workspaceId,
+    userId: input.identity.userWorkosId,
     ...(input.pluginName ? { pluginName: input.pluginName } : {}),
     ...(input.connectionProvider ? { connectionProvider: input.connectionProvider } : {}),
   });
@@ -426,6 +440,7 @@ async function refreshRegistration(input: {
   if (!input.force) {
     const claimed = await claimPluginGatewayDiscoveryRefresh(input.db, {
       workspaceId: input.identity.workspaceId,
+      userId: input.identity.userWorkosId,
       registrationId: input.record.id,
       staleAt: input.now,
       leaseUntil: new Date(input.now.getTime() + DISCOVERY_RETRY_MS),
@@ -442,6 +457,7 @@ async function refreshRegistration(input: {
     if (!snapshot) {
       await storePluginGatewayDiscoveryFailure(input.db, {
         workspaceId: input.identity.workspaceId,
+        userId: input.identity.userWorkosId,
         registrationId: input.record.id,
         error: "No usable provider connection was available for MCP discovery.",
         retryAfter: new Date(input.now.getTime() + DISCOVERY_RETRY_MS),
@@ -452,6 +468,7 @@ async function refreshRegistration(input: {
     const refreshAfter = new Date(input.now.getTime() + DISCOVERY_TTL_MS);
     await storePluginGatewayDiscoverySnapshot(input.db, {
       workspaceId: input.identity.workspaceId,
+      userId: input.identity.userWorkosId,
       registrationId: input.record.id,
       snapshot,
       discoveredAt: input.now,
@@ -468,6 +485,7 @@ async function refreshRegistration(input: {
     const message = error instanceof Error ? error.message : String(error);
     await storePluginGatewayDiscoveryFailure(input.db, {
       workspaceId: input.identity.workspaceId,
+      userId: input.identity.userWorkosId,
       registrationId: input.record.id,
       error: message,
       retryAfter: new Date(input.now.getTime() + DISCOVERY_RETRY_MS),
@@ -520,6 +538,10 @@ function bindRegistration(
     loadConnection = (input) =>
       loadConvexMcpWorkerConnection({ ...input, registrationId: record.id });
     server = { ...record.server, url: convexMcpRuntimeEndpointUrl() };
+  } else if (record.pluginName === "google-admin") {
+    loadConnection = (input) =>
+      loadGoogleAdminMcpWorkerConnection({ ...input, registrationId: record.id });
+    server = { ...record.server, url: googleAdminMcpRuntimeEndpointUrl() };
   } else if (record.pluginName === "google-calendar") {
     loadConnection = (input) =>
       loadGoogleCalendarMcpWorkerConnection({ ...input, registrationId: record.id });
@@ -547,6 +569,7 @@ function bindRegistration(
     isEnabled: () =>
       isPluginGatewayRegistrationActive(db, {
         workspaceId: identity.workspaceId,
+        userId: identity.userWorkosId,
         registrationId: record.id,
       }),
   };

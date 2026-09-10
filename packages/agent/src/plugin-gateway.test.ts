@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => ({
   loadGmailConnection: vi.fn(),
   getGranolaState: vi.fn(),
   loadGranolaConnection: vi.fn(),
+  getGoogleAdminState: vi.fn(),
+  loadGoogleAdminConnection: vi.fn(),
   getGoogleCalendarState: vi.fn(),
   loadConnection: vi.fn(),
   loadGitHubConnection: vi.fn(),
@@ -112,6 +114,12 @@ vi.mock("./integrations/granola-mcp", () => ({
   GRANOLA_MCP_ENDPOINT_URL: "https://mcp.granola.ai/mcp",
   getGranolaMcpIntegrationState: mocks.getGranolaState,
   loadGranolaMcpWorkerConnection: mocks.loadGranolaConnection,
+}));
+vi.mock("./integrations/google-admin-mcp", () => ({
+  GOOGLE_ADMIN_MCP_ENDPOINT_URL: "https://api.opencompany.chat/mcp/plugins/google-admin",
+  googleAdminMcpRuntimeEndpointUrl: () => "https://api.opencompany.chat/mcp/plugins/google-admin",
+  getGoogleAdminMcpIntegrationState: mocks.getGoogleAdminState,
+  loadGoogleAdminMcpWorkerConnection: mocks.loadGoogleAdminConnection,
 }));
 vi.mock("./integrations/google-calendar-mcp", () => ({
   GOOGLE_CALENDAR_MCP_ENDPOINT_URL: "https://api.opencompany.chat/mcp/plugins/google-calendar",
@@ -262,6 +270,7 @@ describe("plugin gateway registration cache", () => {
     const registrations = await resolvePluginGatewayRegistrations(identity, { db, now });
 
     expect(mocks.claimRefresh).toHaveBeenCalledWith(db, {
+      userId: "user_1",
       workspaceId: "workspace_1",
       registrationId: "plugin_gateway_1",
       staleAt: now,
@@ -535,6 +544,57 @@ describe("plugin gateway registration cache", () => {
         server: {
           ...gmailRecord.server,
           url: "https://api.opencompany.chat.evil.example/mcp/plugins/gmail",
+        },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
+  it("binds Google credentials only to opencompany's exact Admin MCP endpoint", async () => {
+    const calendarRecord = record({
+      pluginName: "google-admin",
+      pluginLabel: "google-admin",
+      pluginDescription: "Google Admin plugin tools.",
+      connectionProvider: "google-admin",
+      server: {
+        name: "google-admin",
+        type: "streamable-http",
+        url: "https://api.opencompany.chat/mcp/plugins/google-admin",
+        headers: {},
+      },
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([calendarRecord]);
+
+    const registrations = await resolvePluginGatewayRegistrations(identity, { db, now });
+    expect(registrations).toEqual([
+      expect.objectContaining({
+        source: "plugin:google-admin:google-admin",
+        connectionProvider: "google_admin",
+        getState: mocks.getGoogleAdminState,
+      }),
+    ]);
+    await registrations[0]!.loadConnection({
+      ...identity,
+      operation: { type: "tools/list" },
+      onAuthorizationRequired: () => {
+        throw new Error("authorization required");
+      },
+    });
+    expect(mocks.loadGoogleAdminConnection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ...identity,
+        registrationId: "plugin_gateway_1",
+        operation: { type: "tools/list" },
+      }),
+    );
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...calendarRecord,
+        server: {
+          ...calendarRecord.server,
+          url: "https://api.opencompany.chat.evil.example/mcp/plugins/google-admin",
         },
       },
     ]);
@@ -1301,6 +1361,7 @@ describe("plugin gateway registration cache", () => {
     });
 
     expect(mocks.listRegistrations).toHaveBeenCalledWith(db, {
+      userId: "user_1",
       workspaceId: "workspace_1",
       pluginName: "linear",
     });

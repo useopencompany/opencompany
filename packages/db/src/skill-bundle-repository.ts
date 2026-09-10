@@ -221,8 +221,11 @@ export class PostgresSkillBundleRepository implements SkillBundleRepository {
       return await this.db.transaction(async (tx: DbClient) => {
         const current = await liveInstallation(tx, input.actor, input.name, true);
         if (!current) throw new CoreError("not_found", "Skill not found.");
-        if (input.bundle.name !== current.installationName)
-          throw new CoreError("invalid_argument", "A replacement must keep the skill name.");
+        if (input.bundle.name !== current.installationName && current.sourceType !== "workspace")
+          throw new CoreError(
+            "invalid_argument",
+            "An imported replacement must keep the skill name.",
+          );
         if ((current.sourceType === "workspace") !== (input.bundle.source.type === "workspace")) {
           throw new CoreError(
             "conflict",
@@ -239,7 +242,7 @@ export class PostgresSkillBundleRepository implements SkillBundleRepository {
         const bundleId = await storeSkillBundle(tx, input.actor.workspaceId, input.bundle);
         const [updated] = await tx
           .update(skillInstallations)
-          .set({ bundleId, updatedAt: new Date() })
+          .set({ name: input.bundle.name, bundleId, updatedAt: new Date() })
           .where(
             and(
               eq(skillInstallations.id, current.installationId),
@@ -612,6 +615,7 @@ export async function listChatSkillBundleActivations(
   }
   const enabledPluginBundleIds = await loadEnabledPluginSkillBundleIds(db, {
     workspaceId: input.workspaceId,
+    userId: input.userId,
     bundleIds: activations.flatMap((activation) =>
       activation.sourceKind === "plugin" ? [activation.bundleId] : [],
     ),
@@ -724,6 +728,7 @@ export async function readChatSkillBundleFile(
   if (row?.sourceKind === "plugin") {
     const enabledPluginBundleIds = await loadEnabledPluginSkillBundleIds(db, {
       workspaceId: input.workspaceId,
+      userId: input.userId,
       bundleIds: [row.bundleId],
     });
     if (!enabledPluginBundleIds.has(row.bundleId)) return null;

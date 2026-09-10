@@ -9,12 +9,14 @@ import {
 } from "@opencompany/crypto";
 import { and, eq } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
+import { assertPersonalPluginWritesEnabled } from "./plugin-access";
 import type * as schema from "./product-schema";
 import {
   type InfisicalConnectionStatus,
   type IntegrationCredentialEncryptedPayload,
   infisicalConnections,
 } from "./product-schema";
+import { skillMembership } from "./skill-access";
 
 const ENCRYPTION_KEY_VERSION = 1;
 export const INFISICAL_AUTH_BUNDLE_FORMAT_VERSION = 1 as const;
@@ -78,6 +80,7 @@ export function newInfisicalAuthFlowId() {
 export async function saveInfisicalConnection(input: {
   db: InfisicalAuthDb;
   workspaceId: string;
+  userId: string;
   authBundle: InfisicalAuthBundle;
   host: InfisicalHost;
   accountEmail: string;
@@ -86,11 +89,12 @@ export async function saveInfisicalConnection(input: {
   connectedByWorkosId: string;
   now?: Date;
 }) {
+  await assertPersonalPluginWritesEnabled(input.db);
   const now = input.now ?? new Date();
   const credentialGeneration = randomUUID();
   const encryptedAuthBundle = encryptAuthBundle(
     input.authBundle,
-    input.workspaceId,
+    JSON.stringify([input.workspaceId, input.userId]),
     ENCRYPTION_KEY_VERSION,
   );
 
@@ -98,6 +102,7 @@ export async function saveInfisicalConnection(input: {
     .insert(infisicalConnections)
     .values({
       workspaceId: input.workspaceId,
+      ownerUserId: input.userId,
       encryptedAuthBundle,
       encryptionKeyVersion: ENCRYPTION_KEY_VERSION,
       credentialGeneration,
@@ -114,7 +119,7 @@ export async function saveInfisicalConnection(input: {
       updatedAt: now,
     })
     .onConflictDoUpdate({
-      target: infisicalConnections.workspaceId,
+      target: [infisicalConnections.workspaceId, infisicalConnections.ownerUserId],
       set: {
         encryptedAuthBundle,
         encryptionKeyVersion: ENCRYPTION_KEY_VERSION,
@@ -144,14 +149,17 @@ export async function saveInfisicalConnection(input: {
 export async function disconnectInfisicalConnection(input: {
   db: InfisicalAuthDb;
   workspaceId: string;
+  userId: string;
   now?: Date;
 }) {
+  await assertPersonalPluginWritesEnabled(input.db);
   const now = input.now ?? new Date();
   const credentialGeneration = randomUUID();
   await input.db
     .insert(infisicalConnections)
     .values({
       workspaceId: input.workspaceId,
+      ownerUserId: input.userId,
       encryptedAuthBundle: null,
       encryptionKeyVersion: null,
       credentialGeneration,
@@ -168,7 +176,7 @@ export async function disconnectInfisicalConnection(input: {
       updatedAt: now,
     })
     .onConflictDoUpdate({
-      target: infisicalConnections.workspaceId,
+      target: [infisicalConnections.workspaceId, infisicalConnections.ownerUserId],
       set: {
         encryptedAuthBundle: null,
         encryptionKeyVersion: null,
@@ -191,6 +199,7 @@ export async function disconnectInfisicalConnection(input: {
 export async function markInfisicalConnectionNeedsReauth(input: {
   db: InfisicalAuthDb;
   workspaceId: string;
+  userId: string;
   expectedCredentialGeneration: string;
   statusReason: string;
   now?: Date;
@@ -205,6 +214,8 @@ export async function markInfisicalConnectionNeedsReauth(input: {
     .where(
       and(
         eq(infisicalConnections.workspaceId, input.workspaceId),
+        eq(infisicalConnections.ownerUserId, input.userId),
+        skillMembership(input),
         eq(infisicalConnections.credentialGeneration, input.expectedCredentialGeneration),
         eq(infisicalConnections.status, "connected"),
       ),
@@ -216,6 +227,7 @@ export async function markInfisicalConnectionNeedsReauth(input: {
 export async function markInfisicalConnectionValidated(input: {
   db: InfisicalAuthDb;
   workspaceId: string;
+  userId: string;
   expectedCredentialGeneration: string;
   now?: Date;
 }) {
@@ -226,6 +238,8 @@ export async function markInfisicalConnectionValidated(input: {
     .where(
       and(
         eq(infisicalConnections.workspaceId, input.workspaceId),
+        eq(infisicalConnections.ownerUserId, input.userId),
+        skillMembership(input),
         eq(infisicalConnections.credentialGeneration, input.expectedCredentialGeneration),
         eq(infisicalConnections.status, "connected"),
       ),
@@ -237,6 +251,7 @@ export async function markInfisicalConnectionValidated(input: {
 export async function loadInfisicalConnection(input: {
   db: InfisicalAuthDb;
   workspaceId: string;
+  userId: string;
 }): Promise<LoadedInfisicalConnection | null> {
   const row = await loadConnectionRow(input);
   if (!row) return null;
@@ -246,7 +261,11 @@ export async function loadInfisicalConnection(input: {
 
   const authBundle =
     row.encryptedAuthBundle && row.encryptionKeyVersion !== null
-      ? decryptAuthBundle(row.encryptedAuthBundle, input.workspaceId, row.encryptionKeyVersion)
+      ? decryptAuthBundle(
+          row.encryptedAuthBundle,
+          JSON.stringify([input.workspaceId, input.userId]),
+          row.encryptionKeyVersion,
+        )
       : null;
   return metadataFromRow(row, authBundle);
 }
@@ -254,12 +273,17 @@ export async function loadInfisicalConnection(input: {
 export async function loadInfisicalConnectionMetadata(input: {
   db: InfisicalAuthDb;
   workspaceId: string;
+  userId: string;
 }): Promise<InfisicalConnectionMetadata | null> {
   const row = await loadConnectionRow(input);
   return row ? metadataFromRow(row, null) : null;
 }
 
-async function loadConnectionRow(input: { db: InfisicalAuthDb; workspaceId: string }) {
+async function loadConnectionRow(input: {
+  db: InfisicalAuthDb;
+  workspaceId: string;
+  userId: string;
+}) {
   const [row] = await input.db
     .select({
       workspaceId: infisicalConnections.workspaceId,
@@ -279,7 +303,13 @@ async function loadConnectionRow(input: { db: InfisicalAuthDb; workspaceId: stri
       updatedAt: infisicalConnections.updatedAt,
     })
     .from(infisicalConnections)
-    .where(eq(infisicalConnections.workspaceId, input.workspaceId))
+    .where(
+      and(
+        eq(infisicalConnections.workspaceId, input.workspaceId),
+        eq(infisicalConnections.ownerUserId, input.userId),
+        skillMembership(input),
+      ),
+    )
     .limit(1);
   return row ?? null;
 }

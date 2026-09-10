@@ -1,3 +1,4 @@
+import { ChatShareIdSchema } from "@opencompany/protocol";
 import { describe, expect, it, vi } from "vitest";
 import { type ChatResourceStorage, createChatResourceService } from "./chat-resources";
 
@@ -11,6 +12,22 @@ const actor = {
 const shareId = "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd";
 
 describe("Chat resource service", () => {
+  it("creates a readable share capability while preserving an existing share", async () => {
+    const db = fakeDb([[{ id: "conversation_1" }], [{ id: shareId }]]);
+    const values = vi.fn((_row: { id: string; chatSessionId: string }) => ({
+      onConflictDoNothing: vi.fn(),
+    }));
+    db.insert.mockReturnValue({ values });
+    const service = createChatResourceService({ db, storage: fakeStorage() });
+
+    await expect(service.ensureShare(actor, "conversation_1")).resolves.toBe(shareId);
+    expect(values).toHaveBeenCalledWith({
+      id: expect.stringMatching(/^share_/u),
+      chatSessionId: "conversation_1",
+    });
+    expect(ChatShareIdSchema.safeParse(values.mock.calls[0]?.[0]?.id).success).toBe(true);
+  });
+
   it("projects a public transcript without session, token, or Blob locators", async () => {
     const db = fakeDb([
       [

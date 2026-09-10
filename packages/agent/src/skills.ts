@@ -7,6 +7,7 @@ import {
   type SkillFileChunk,
   SkillImportApplicationService,
   type SkillScope,
+  type SkillUpdateInput,
 } from "@opencompany/core";
 import { getDb } from "@opencompany/db/client";
 import type { PooledDb } from "@opencompany/db/pool";
@@ -98,10 +99,12 @@ export async function listSkillCatalog(
   workspaceId: string,
   db: Db = getDb(),
   userId?: string,
+  skillAccess?: "company",
 ): Promise<SkillCatalogItem[]> {
   const catalog = await resolveWorkspaceSkillCatalog(db, {
     workspaceId,
     ...(userId ? { userId } : {}),
+    ...(skillAccess ? { skillAccess } : {}),
   });
   return catalog.skills.map(({ id, name, description, scope }) => ({
     id,
@@ -139,7 +142,7 @@ export async function createWorkspaceSkillForActor(input: {
 export async function updateWorkspaceSkillForActor(input: {
   actor: Actor;
   name: string;
-  skill: Omit<SkillAuthoringInput, "name"> & { expectedBundleId?: string };
+  skill: SkillUpdateInput;
   db?: Db;
 }): Promise<UpdatedWorkspaceSkill> {
   const service = new SkillImportApplicationService(
@@ -183,25 +186,24 @@ export async function executeWorkspaceSkillToolForActor(input: {
         : {}),
     });
   }
-  const skill = {
-    name: field("name"),
-    description: field("description"),
-    instructions: field("instructions"),
-  };
   if (input.tool === "create_workspace_skill") {
     return createWorkspaceSkillForActor({
       ...input,
       skill: {
-        ...skill,
+        name: field("name"),
+        description: field("description"),
+        instructions: field("instructions"),
         ...(input.args.scope !== undefined ? { scope: field("scope") as SkillScope } : {}),
       },
     });
   }
   return updateWorkspaceSkillForActor({
     ...input,
-    name: skill.name,
+    name: field("name"),
     skill: {
-      ...skill,
+      ...(input.args.newName !== undefined ? { newName: field("newName") } : {}),
+      ...(input.args.description !== undefined ? { description: field("description") } : {}),
+      ...(input.args.instructions !== undefined ? { instructions: field("instructions") } : {}),
       ...(input.args.expectedBundleId !== undefined
         ? { expectedBundleId: field("expectedBundleId") }
         : {}),
@@ -232,6 +234,7 @@ export async function manageWorkspaceSkillsForActor(input: {
           createdByUserId,
           canManage,
           name,
+          command: `/${name}`,
           description: bundle.description,
           enabled,
           source: bundle.source.type,
@@ -266,6 +269,7 @@ export async function manageWorkspaceSkillsForActor(input: {
     createdByUserId: installation.createdByUserId,
     canManage: installation.canManage,
     name: installation.name,
+    command: `/${installation.name}`,
     description: installation.bundle.description,
     instructions: installation.bundle.body,
     bundleId: installation.bundle.id,
@@ -278,6 +282,7 @@ export async function manageWorkspaceSkillsForActor(input: {
 export async function resolveSkillMentions(input: {
   workspaceId: string | null;
   userId?: string;
+  skillAccess?: "company";
   mentions: SkillMentionRef[];
   db?: Db;
 }): Promise<WorkspaceSkill[]> {
@@ -294,6 +299,7 @@ export async function resolveSkillMentions(input: {
   const catalog = await resolveWorkspaceSkillCatalog(input.db ?? getDb(), {
     workspaceId: input.workspaceId,
     ...(input.userId ? { userId: input.userId } : {}),
+    ...(input.skillAccess ? { skillAccess: input.skillAccess } : {}),
   });
   const byId = new Map(
     catalog.skills.map((skill) => [

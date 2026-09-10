@@ -1,5 +1,9 @@
 import type { IntegrationProvider, IntegrationStatus } from "@opencompany/db/product-schema";
 import {
+  GOOGLE_ADMIN_MCP_RECONNECT_REASON,
+  googleAdminMcpScopesSatisfied,
+} from "./integrations/google-admin-scopes";
+import {
   GOOGLE_CALENDAR_MCP_RECONNECT_REASON,
   googleCalendarMcpScopesSatisfied,
 } from "./integrations/google-calendar-scopes";
@@ -249,6 +253,7 @@ export type IntegrationAccountView<Provider extends string = PersonalAccountProv
 
 export type PersonalAccountProvider =
   | "gmail"
+  | "google_admin"
   | "google_calendar"
   | "google_drive"
   | "linear"
@@ -333,6 +338,7 @@ export function personalAccountsFromRows(
 ): Record<PersonalAccountProvider, IntegrationAccountView[]> {
   const personalAccounts: Record<PersonalAccountProvider, IntegrationAccountView[]> = {
     gmail: [],
+    google_admin: [],
     google_calendar: [],
     google_drive: [],
     linear: [],
@@ -403,6 +409,7 @@ export function personalAccountsFromRows(
     }
     if (
       row.provider === "gmail" ||
+      row.provider === "google_admin" ||
       row.provider === "google_calendar" ||
       row.provider === "google_drive" ||
       row.provider === "github_user" ||
@@ -430,6 +437,7 @@ export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): 
   let granolaMcpRow: IntegrationStateRow | undefined;
   for (const row of rows) {
     if (row.status === "disconnected") continue;
+    if (row.workspaceId ?? row.workspace_id) continue;
     // Provider "linear" covers two kinds of rows; the MCP card must only ever
     // reflect the MCP connector row (external_id "linear_mcp"). Linear
     // brain-source rows are surfaced through the brain settings page instead.
@@ -445,8 +453,8 @@ export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): 
       granolaMcpRow = row;
       continue;
     }
-    // Attio's API-key connection remains available for Wiki ingestion and as
-    // a legacy action fallback. Plugin settings reflect only the MCP OAuth row.
+    // Attio's API-key connection remains available for Wiki ingestion.
+    // Plugin settings reflect only the MCP OAuth row.
     if (row.provider === "attio" && (row.externalId ?? row.external_id) !== "attio_mcp") {
       continue;
     }
@@ -458,11 +466,8 @@ export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): 
     ) {
       continue;
     }
-    // Stripe is workspace-owned; personal rows are pre-ownership leftovers
-    // and must not shadow the workspace connection.
-    if (row.provider === "stripe" && !(row.workspaceId ?? row.workspace_id)) {
-      continue;
-    }
+    // Stripe MCP uses the personal OAuth account, exposed in personalAccounts.
+    if (row.provider === "stripe") continue;
     // Jamie's retired webhook integration used workspace-owned rows. Only the
     // personal OAuth connector row belongs to the official plugin.
     if (
@@ -532,7 +537,12 @@ function accountViewFromRow(
     provider === "google_calendar" &&
     row.status === "connected" &&
     !googleCalendarMcpScopesSatisfied(scopes);
-  const needsPluginGrant = needsSlackPluginGrant || needsGoogleCalendarPluginGrant;
+  const needsGoogleAdminPluginGrant =
+    provider === "google_admin" &&
+    row.status === "connected" &&
+    !googleAdminMcpScopesSatisfied(scopes);
+  const needsPluginGrant =
+    needsSlackPluginGrant || needsGoogleCalendarPluginGrant || needsGoogleAdminPluginGrant;
   return {
     integrationId: row.id ?? "",
     provider,
@@ -541,11 +551,13 @@ function accountViewFromRow(
     accountEmail: row.accountEmail ?? row.account_email ?? null,
     accountName: row.accountName ?? row.account_name ?? null,
     connectionLabel: row.connectionLabel ?? row.connection_label ?? null,
-    statusReason: needsSlackPluginGrant
-      ? SLACK_MCP_RECONNECT_REASON
-      : needsGoogleCalendarPluginGrant
-        ? GOOGLE_CALENDAR_MCP_RECONNECT_REASON
-        : (row.statusReason ?? row.status_reason ?? null),
+    statusReason: needsGoogleAdminPluginGrant
+      ? GOOGLE_ADMIN_MCP_RECONNECT_REASON
+      : needsSlackPluginGrant
+        ? SLACK_MCP_RECONNECT_REASON
+        : needsGoogleCalendarPluginGrant
+          ? GOOGLE_CALENDAR_MCP_RECONNECT_REASON
+          : (row.statusReason ?? row.status_reason ?? null),
     scopes,
     capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
   };

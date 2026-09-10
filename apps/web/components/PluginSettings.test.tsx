@@ -381,9 +381,9 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/granola",
     );
-    expect(screen.getByRole("link", { name: /google drive/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /google admin/i })).toHaveAttribute(
       "href",
-      "/settings/plugins/google-drive",
+      "/settings/plugins/google-admin",
     );
     await user.click(screen.getByRole("button", { name: "View all featured plugins" }));
     expect(screen.getByRole("link", { name: /slack/i })).toHaveAttribute(
@@ -391,6 +391,7 @@ describe("Plugin settings", () => {
       "/settings/plugins/slack",
     );
     await user.click(screen.getByRole("button", { name: "All" }));
+
     expect(screen.getByRole("link", { name: /google calendar/i })).toHaveAttribute(
       "href",
       "/settings/plugins/google-calendar",
@@ -417,6 +418,10 @@ describe("Plugin settings", () => {
     );
     expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(18);
     await user.click(screen.getByRole("button", { name: "View all productivity plugins" }));
+    expect(screen.getByRole("link", { name: /google drive/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/google-drive",
+    );
     expect(screen.getByRole("link", { name: /jamie/i })).toHaveAttribute(
       "href",
       "/settings/plugins/jamie",
@@ -590,7 +595,7 @@ describe("Plugin settings", () => {
     expect(screen.getByRole("region", { name: "Featured" })).toBeInTheDocument();
   });
 
-  it("installs from the overview and opens the installed plugin page", async () => {
+  it("installs from the overview and refreshes the router cache after opening the plugin", async () => {
     const user = userEvent.setup();
     let finishPreview: ((preview: PluginImportPreviewDto) => void) | undefined;
     vi.mocked(previewHeadlessPluginImport).mockImplementation(
@@ -608,6 +613,8 @@ describe("Plugin settings", () => {
 
     expect(screen.getByRole("button", { name: "Installing…" })).toBeDisabled();
     expect(screen.getAllByRole("button", { name: "Install" })[0]).toBeDisabled();
+    expect(router.push).not.toHaveBeenCalled();
+    expect(router.refresh).not.toHaveBeenCalled();
 
     finishPreview?.(officialPreview);
 
@@ -621,33 +628,39 @@ describe("Plugin settings", () => {
       expectedIntegrity: officialPreview.integrity,
     });
     expect(toasts.success).toHaveBeenCalledWith("Linear installed.");
+    expect(router.refresh).toHaveBeenCalledOnce();
+    expect(router.push).toHaveBeenCalledBefore(router.refresh);
   });
 
-  it("keeps the user on the overview and allows a retry when installation fails", async () => {
-    const user = userEvent.setup();
-    vi.mocked(previewHeadlessPluginImport).mockRejectedValue(
-      new Error("Package source unavailable."),
-    );
+  it.each(["preview", "import"] as const)(
+    "keeps the catalog cache and allows a retry when %s fails",
+    async (stage) => {
+      const user = userEvent.setup();
+      vi.mocked(
+        stage === "preview" ? previewHeadlessPluginImport : importHeadlessPlugin,
+      ).mockRejectedValue(new Error("Package source unavailable."));
 
-    render(<PluginsSettings plugins={[]} canEdit workspaceId="workspace_1" />);
+      render(<PluginsSettings plugins={[]} canEdit workspaceId="workspace_1" />);
 
-    const linearCard = screen.getByRole("link", { name: /linear/i }).closest("li");
-    expect(linearCard).not.toBeNull();
-    const installButton = within(linearCard as HTMLElement).getByRole("button", {
-      name: "Install",
-    });
-    await user.click(installButton);
+      const linearCard = screen.getByRole("link", { name: /linear/i }).closest("li");
+      expect(linearCard).not.toBeNull();
+      const installButton = within(linearCard as HTMLElement).getByRole("button", {
+        name: "Install",
+      });
+      await user.click(installButton);
 
-    await waitFor(() => {
-      expect(toasts.error).toHaveBeenCalledWith(
-        "Couldn't install Linear. Package source unavailable.",
-      );
-    });
-    expect(router.push).not.toHaveBeenCalled();
-    await waitFor(() => {
-      expect(installButton).toBeEnabled();
-    });
-  });
+      await waitFor(() => {
+        expect(toasts.error).toHaveBeenCalledWith(
+          "Couldn't install Linear. Package source unavailable.",
+        );
+      });
+      expect(router.push).not.toHaveBeenCalled();
+      expect(router.refresh).not.toHaveBeenCalled();
+      await waitFor(() => {
+        expect(installButton).toBeEnabled();
+      });
+    },
+  );
 
   it("previews and installs an official skills-only package from its detail page", async () => {
     vi.mocked(previewHeadlessPluginImport).mockResolvedValue(ycAdvisePreview);

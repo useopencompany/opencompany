@@ -77,7 +77,7 @@ describe("workflow event subscription validation", () => {
     ).resolves.toMatch(/required/i);
   });
 
-  it("keeps the legacy Linear triage alias available", async () => {
+  it("requires legacy triage subscriptions to use a declared personal plugin event", async () => {
     const execute = vi.fn(async () => ({
       rows: [{ integrationId: trigger.integrationId, events: [], eventModes: {} }],
     }));
@@ -96,6 +96,6 @@ describe("workflow event subscription validation", () => {
           },
         },
       }),
-    ).resolves.toBeNull();
+    ).resolves.toMatch(/enable/i);
   });
 });
