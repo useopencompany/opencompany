@@ -333,6 +333,45 @@ describe("ACP elicitation translation", () => {
     },
   };
 
+  const claudeAskUserQuestionSchema = {
+    mode: "form",
+    sessionId: "session_1",
+    toolCallId: "tool_1",
+    message: "What should remove an item from the For Review list?",
+    requestedSchema: {
+      type: "object",
+      properties: {
+        question_0: {
+          type: "string",
+          title: "Clearing",
+          oneOf: [
+            {
+              const: "Just opening it (Recommended)",
+              title: "Just opening it (Recommended)",
+              description: "Mark the conversation seen when its detail opens.",
+            },
+            {
+              const: "Explicitly clearing it",
+              title: "Explicitly clearing it",
+              description: "Keep the item until the user clears it.",
+            },
+          ],
+        },
+        question_0_custom: {
+          type: "string",
+          title: "Other",
+          description: "Type your own answer instead of choosing an option above (optional).",
+          _meta: {
+            _askUserQuestionCustomAnswer: {
+              questionId: "question_0",
+              isCustomAnswer: true,
+            },
+          },
+        },
+      },
+    },
+  };
+
   it("folds Codex's hidden Other field into one logical question", () => {
     expect(
       elicitationUserInputParams({
@@ -370,6 +409,92 @@ describe("ACP elicitation translation", () => {
         answers: { branch: { answers: ["release/next"] } },
       }),
     ).toEqual({ branch_other: "release/next" });
+  });
+
+  it("folds Claude AskUserQuestion's shared custom-answer field into one logical question", () => {
+    expect(
+      elicitationUserInputParams({
+        params: claudeAskUserQuestionSchema,
+        engineSessionId: "session_1",
+        turnId: "turn_1",
+      }),
+    ).toMatchObject({
+      itemId: "tool_1",
+      questions: [
+        {
+          id: "question_0",
+          header: "Clearing",
+          question: "What should remove an item from the For Review list?",
+          isOther: true,
+          options: [
+            {
+              label: "Just opening it (Recommended)",
+              description: "Mark the conversation seen when its detail opens.",
+            },
+            {
+              label: "Explicitly clearing it",
+              description: "Keep the item until the user clears it.",
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("returns Claude AskUserQuestion selections and custom answers under the adapter fields", () => {
+    expect(
+      elicitationContent(claudeAskUserQuestionSchema, {
+        answers: { question_0: { answers: ["Explicitly clearing it"] } },
+      }),
+    ).toEqual({ question_0: "Explicitly clearing it" });
+    expect(
+      elicitationContent(claudeAskUserQuestionSchema, {
+        answers: { question_0: { answers: ["After archiving it"] } },
+      }),
+    ).toEqual({ question_0_custom: "After archiving it" });
+  });
+
+  it("does not count Claude custom-answer companions toward the logical question limit", () => {
+    const secondQuestion = {
+      question_1: {
+        type: "string",
+        title: "Timing",
+        oneOf: [{ const: "Immediately", title: "Immediately" }],
+      },
+      question_1_custom: {
+        type: "string",
+        title: "Other",
+        _meta: {
+          _askUserQuestionCustomAnswer: {
+            questionId: "question_1",
+            isCustomAnswer: true,
+          },
+        },
+      },
+    };
+    const params = {
+      ...claudeAskUserQuestionSchema,
+      requestedSchema: {
+        ...claudeAskUserQuestionSchema.requestedSchema,
+        properties: {
+          ...claudeAskUserQuestionSchema.requestedSchema.properties,
+          ...secondQuestion,
+        },
+      },
+    };
+
+    expect(
+      elicitationUserInputParams({
+        params,
+        engineSessionId: "session_1",
+        turnId: "turn_1",
+      }),
+    ).toMatchObject({
+      questions: [
+        { id: "question_0", isOther: true },
+        { id: "question_1", isOther: true },
+      ],
+    });
   });
 
   it("coerces standard MCP boolean, integer, and enum form answers", () => {
