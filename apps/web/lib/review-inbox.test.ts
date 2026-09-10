@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  countAwaitingReview,
-  groupReviewItems,
-  hasPendingApproval,
-  selectReviewItems,
-} from "@/lib/review-inbox";
+import { countAwaitingReview, selectReviewItems } from "@/lib/review-inbox";
 
 type ConversationInput = Parameters<typeof selectReviewItems>[0]["conversations"][number];
 type TaskInput = Parameters<typeof selectReviewItems>[0]["tasks"][number];
@@ -12,6 +7,8 @@ type TaskInput = Parameters<typeof selectReviewItems>[0]["tasks"][number];
 function conversation(overrides: Partial<ConversationInput> & { id: string }): ConversationInput {
   return {
     title: `Conversation ${overrides.id}`,
+    model: "claude-opus-5",
+    engine: "opencompany",
     updatedAt: "2026-09-10T10:00:00.000Z",
     archivedAt: null,
     activityState: "idle",
@@ -45,7 +42,7 @@ describe("selectReviewItems", () => {
         conversationId: "c1",
         title: "Draft the update",
         updatedAt: "2026-09-10T10:00:00.000Z",
-        source: { kind: "chat" },
+        source: { kind: "chat", model: "claude-opus-5", engine: "opencompany" },
       },
     ]);
   });
@@ -157,77 +154,5 @@ describe("countAwaitingReview", () => {
     });
 
     expect(count).toBe(3);
-  });
-});
-
-describe("groupReviewItems", () => {
-  it("splits task results from chat replies and drops empty groups", () => {
-    const items = selectReviewItems({
-      conversations: [conversation({ id: "c2", updatedAt: "2026-09-10T11:00:00.000Z" })],
-      tasks: [
-        task({
-          id: "t1",
-          displayId: "TASK-7",
-          conversationId: "c1",
-          updatedAt: "2026-09-10T12:00:00.000Z",
-        }),
-      ],
-    });
-
-    expect(groupReviewItems(items)).toEqual([
-      {
-        kind: "task",
-        label: "Task results",
-        items: [expect.objectContaining({ conversationId: "c1" })],
-      },
-      {
-        kind: "chat",
-        label: "Chat replies",
-        items: [expect.objectContaining({ conversationId: "c2" })],
-      },
-    ]);
-  });
-
-  it("returns no groups for an empty queue", () => {
-    expect(groupReviewItems([])).toEqual([]);
-  });
-});
-
-describe("hasPendingApproval", () => {
-  it("detects an unanswered approval request on the turn", () => {
-    expect(
-      hasPendingApproval({
-        parts: [
-          { type: "text", text: "I need to send this email." },
-          {
-            type: "dynamic-tool",
-            toolName: "codex_approval",
-            toolCallId: "call_1",
-            state: "approval-requested",
-            input: {},
-          },
-        ],
-      } as never),
-    ).toBe(true);
-  });
-
-  it("ignores an approval the user already answered", () => {
-    expect(
-      hasPendingApproval({
-        parts: [
-          {
-            type: "dynamic-tool",
-            toolName: "codex_approval",
-            toolCallId: "call_1",
-            state: "approval-responded",
-            input: {},
-          },
-        ],
-      } as never),
-    ).toBe(false);
-  });
-
-  it("is false for an ordinary finished turn", () => {
-    expect(hasPendingApproval({ parts: [{ type: "text", text: "Done." }] } as never)).toBe(false);
   });
 });

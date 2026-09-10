@@ -1,5 +1,6 @@
+import type { ChatEngine } from "@opencompany/core";
 import type { TaskReadModel } from "@opencompany/protocol";
-import { type ChatUiMessage, chatSummaryState } from "@/lib/chat-ui";
+import { chatSummaryState } from "@/lib/chat-ui";
 
 // An agent turn the user has not read yet. Chats and Tasks reach this queue through separate
 // projections: chats through the conversation read model, Tasks through the Task read model.
@@ -12,19 +13,18 @@ export type ReviewItem = {
   source: ReviewItemSource;
 };
 
+// A chat carries the model and engine it runs on because the review surface opens the live
+// conversation, composer included, and the sidebar summary it could otherwise read from is
+// bounded by recency — an older unread chat is missing from it.
 export type ReviewItemSource =
-  | { kind: "chat" }
+  | { kind: "chat"; model: string; engine: ChatEngine }
   | { kind: "task"; taskId: string; displayId: string };
-
-export type ReviewGroup = {
-  kind: "task" | "chat";
-  label: string;
-  items: ReviewItem[];
-};
 
 type ConversationCandidate = {
   id: string;
   title: string;
+  model: string;
+  engine: ChatEngine;
   updatedAt: string;
   archivedAt?: string | null;
   activityState?: "working" | "idle";
@@ -44,6 +44,9 @@ const TASK_RESULT_STATUSES = new Set<TaskReadModel["status"]>(["succeeded", "fai
 /**
  * The review queue: agent turns that finished with something to read and have not been read yet.
  *
+ * Tasks and chats share one recency-ordered list. They are different projections, not different
+ * kinds of work to the reader: both are a finished turn waiting on them.
+ *
  * Items leave this list as soon as they are marked seen. ReviewInbox holds the ones the reader
  * opened during a visit so the list does not resequence under the cursor.
  */
@@ -59,7 +62,11 @@ export function selectReviewItems(input: {
         conversationId: conversation.id,
         title: conversation.title,
         updatedAt: conversation.updatedAt,
-        source: { kind: "chat" },
+        source: {
+          kind: "chat",
+          model: conversation.model,
+          engine: conversation.engine,
+        },
       }),
     );
 
@@ -85,15 +92,6 @@ function isTaskAwaitingReview(task: TaskCandidate) {
   return task.hasUnseen && !task.archivedAt && TASK_RESULT_STATUSES.has(task.status);
 }
 
-export function groupReviewItems(items: readonly ReviewItem[]): ReviewGroup[] {
-  const tasks = items.filter((item) => item.source.kind === "task");
-  const chats = items.filter((item) => item.source.kind === "chat");
-  return [
-    { kind: "task" as const, label: "Task results", items: tasks },
-    { kind: "chat" as const, label: "Chat replies", items: chats },
-  ].filter((group) => group.items.length > 0);
-}
-
 // The sidebar badge counts only genuinely unread work, so it does not keep counting items the
 // user already opened and is holding in place on the review surface.
 export function countAwaitingReview(input: {
@@ -109,16 +107,4 @@ export function countAwaitingReview(input: {
 function updatedAtMs(item: ReviewItem) {
   const timestamp = new Date(item.updatedAt).getTime();
   return Number.isFinite(timestamp) ? timestamp : 0;
-}
-
-/**
- * Whether an assistant turn is still asking the reader to approve an action.
- *
- * Pausing for an approval settles the run and raises the same unread flag a finished result does,
- * so the queue cannot tell the two apart from the conversation projection alone. The transcript
- * can: a part stays `approval-requested` until the decision is recorded as `approval-responded`.
- * Both the opencompany action tool and the Codex approval tool use that state.
- */
-export function hasPendingApproval(message: Pick<ChatUiMessage, "parts">): boolean {
-  return message.parts.some((part) => "state" in part && part.state === "approval-requested");
 }

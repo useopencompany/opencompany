@@ -1,11 +1,11 @@
 import "@testing-library/jest-dom/vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReviewItem } from "@/lib/review-inbox";
 import { ReviewInboxRoute } from "./ReviewInbox";
 
-type TranscriptPart = { type: string; text?: string; state?: string; toolCallId?: string };
+type TranscriptPart = { type: string; text?: string };
 
 const reviewItemsMock = vi.hoisted(() => ({ value: [] as ReviewItem[] }));
 const transcriptMock = vi.hoisted(() => ({
@@ -20,6 +20,16 @@ vi.mock("@/components/AppDataProvider", () => ({
   useAppData: () => ({
     reviewItems: reviewItemsMock.value,
     workspace: { id: "workspace_1" },
+    user: { firstName: "Ada", email: "ada@example.com", workosUserId: "user_1" },
+    recentChats: [],
+    archivedChats: [],
+    tasks: [],
+    allTasks: [],
+    schedules: [],
+    featureFlags: { taskSpawning: true, autoModelRouting: false },
+    activeBrain: null,
+    codexConnected: false,
+    claudeCodeConnected: false,
   }),
 }));
 
@@ -33,8 +43,28 @@ vi.mock("@/components/Routes", () => ({
   ),
 }));
 
-vi.mock("@/components/Markdown", () => ({
-  Markdown: ({ content }: { content: string }) => <div data-testid="markdown">{content}</div>,
+// The detail pane is the canonical conversation surface. These stubs assert which surface it
+// mounts for a queue item; the surfaces themselves are covered by their own tests.
+vi.mock("@/components/Surface", () => ({
+  Surface: ({ initialChat }: { initialChat: { id: string; title: string; model: string } }) => (
+    <div
+      data-testid="chat-conversation"
+      data-conversation-id={initialChat.id}
+      data-model={initialChat.model}
+    >
+      {initialChat.title}
+    </div>
+  ),
+}));
+
+vi.mock("@/components/TaskDetailPanel", () => ({
+  TaskDetailPanel: ({ initialRun }: { initialRun: { task: { id: string } } }) => (
+    <div data-testid="task-conversation" data-task-id={initialRun.task.id} />
+  ),
+}));
+
+vi.mock("@/components/useTaskRun", () => ({
+  useTaskRun: (taskId: string) => ({ task: { id: taskId } }),
 }));
 
 vi.mock("@/components/useHeadlessChatTranscript", () => ({
@@ -49,8 +79,18 @@ vi.mock("@/lib/headless-task-commands", () => ({
   markHeadlessTaskSeen: markTaskSeenMock,
 }));
 
-function chatItem(id: string, title: string, updatedAt: string): ReviewItem {
-  return { conversationId: id, title, updatedAt, source: { kind: "chat" } };
+function chatItem(
+  id: string,
+  title: string,
+  updatedAt: string,
+  source: Partial<Extract<ReviewItem["source"], { kind: "chat" }>> = {},
+): ReviewItem {
+  return {
+    conversationId: id,
+    title,
+    updatedAt,
+    source: { kind: "chat", model: "claude-opus-5", engine: "opencompany", ...source },
+  };
 }
 
 function taskItem(id: string, title: string, updatedAt: string): ReviewItem {
@@ -81,20 +121,68 @@ describe("ReviewInboxRoute", () => {
     expect(screen.getByText("You're all caught up")).toBeInTheDocument();
   });
 
-  it("groups task results above chat replies", () => {
+  // Tasks and chats are one queue, newest first: to the reader they are the same thing, a
+  // finished turn waiting on them.
+  it("lists tasks and chats together in one recency-ordered list", () => {
     reviewItemsMock.value = [
       taskItem("c1", "Weekly competitor scan", "2026-09-10T12:00:00.000Z"),
       chatItem("c2", "Draft the investor update", "2026-09-10T11:00:00.000Z"),
+      chatItem("c3", "Newest reply", "2026-09-10T13:00:00.000Z"),
     ];
 
     render(<ReviewInboxRoute />);
 
-    const headings = screen.getAllByRole("heading", { level: 2 }).map((node) => node.textContent);
-    expect(headings).toEqual(["Task results", "Chat replies", "Pick something to read"]);
+    const titles = screen.getAllByRole("button").map((node) => node.textContent);
+    expect(titles[0]).toContain("Newest reply");
+    expect(titles[1]).toContain("Weekly competitor scan");
+    expect(titles[2]).toContain("Draft the investor update");
+    // One list, no task/chat split — the task id is the only distinction the reader needs.
+    expect(screen.queryByRole("heading", { level: 2, name: /Task results|Chats/ })).toBeNull();
     expect(screen.getByText("TASK-7")).toBeInTheDocument();
   });
 
-  it("marks a chat seen once its result renders", async () => {
+  it("opens a chat as the live conversation, not a rendered result", async () => {
+    reviewItemsMock.value = [
+      chatItem("c1", "Draft the investor update", "2026-09-10T11:00:00.000Z"),
+    ];
+    transcriptMock.messages = [assistantReply("Here is the draft.")];
+
+    render(<ReviewInboxRoute />);
+    await userEvent.click(screen.getByRole("button", { name: /Draft the investor update/ }));
+
+    expect(screen.getByTestId("chat-conversation")).toHaveAttribute("data-conversation-id", "c1");
+  });
+
+  // A cloud engine runs on its own model ids, which the opencompany catalog does not contain.
+  // Normalizing without the engine would rewrite the model the composer then sends.
+  it("keeps a cloud engine's own model when it opens the conversation", async () => {
+    reviewItemsMock.value = [
+      chatItem("c1", "Ship the migration", "2026-09-10T11:00:00.000Z", {
+        model: "openai/gpt-5.6-sol",
+        engine: "codex",
+      }),
+    ];
+
+    render(<ReviewInboxRoute />);
+    await userEvent.click(screen.getByRole("button", { name: /Ship the migration/ }));
+
+    expect(screen.getByTestId("chat-conversation")).toHaveAttribute(
+      "data-model",
+      "openai/gpt-5.6-sol",
+    );
+  });
+
+  it("opens a task as its task conversation, which resumes on a comment", async () => {
+    reviewItemsMock.value = [taskItem("c1", "Weekly competitor scan", "2026-09-10T12:00:00.000Z")];
+    transcriptMock.messages = [assistantReply("Scan complete.")];
+
+    render(<ReviewInboxRoute />);
+    await userEvent.click(screen.getByRole("button", { name: /Weekly competitor scan/ }));
+
+    expect(screen.getByTestId("task-conversation")).toHaveAttribute("data-task-id", "task_c1");
+  });
+
+  it("marks a chat seen once its conversation renders", async () => {
     reviewItemsMock.value = [
       chatItem("c1", "Draft the investor update", "2026-09-10T11:00:00.000Z"),
     ];
@@ -107,7 +195,6 @@ describe("ReviewInboxRoute", () => {
     await userEvent.click(screen.getByRole("button", { name: /Draft the investor update/ }));
 
     expect(updateConversationMock).toHaveBeenCalledWith("c1", { markSeen: true });
-    expect(screen.getByTestId("markdown")).toHaveTextContent("Here is the draft.");
   });
 
   // A Task's seen state lives behind the Task command: the conversation command rejects a
@@ -123,7 +210,7 @@ describe("ReviewInboxRoute", () => {
     expect(updateConversationMock).not.toHaveBeenCalled();
   });
 
-  it("does not acknowledge a result that failed to load", async () => {
+  it("does not acknowledge a conversation that failed to sync", async () => {
     reviewItemsMock.value = [
       chatItem("c1", "Draft the investor update", "2026-09-10T11:00:00.000Z"),
     ];
@@ -132,7 +219,6 @@ describe("ReviewInboxRoute", () => {
     render(<ReviewInboxRoute />);
     await userEvent.click(screen.getByRole("button", { name: /Draft the investor update/ }));
 
-    expect(screen.getByText(/could not be loaded/)).toBeInTheDocument();
     expect(updateConversationMock).not.toHaveBeenCalled();
     expect(screen.getByTestId("review-item-unread")).toBeInTheDocument();
   });
@@ -147,47 +233,6 @@ describe("ReviewInboxRoute", () => {
     await userEvent.click(screen.getByRole("button", { name: /Draft the investor update/ }));
 
     expect(updateConversationMock).not.toHaveBeenCalled();
-  });
-
-  // A run paused for an approval settles like a finished one and reaches this queue. Clearing its
-  // unread state here would drop the only signal that it is waiting on the reader.
-  it("offers an approval affordance and leaves the item unread", async () => {
-    reviewItemsMock.value = [chatItem("c1", "Send the outreach", "2026-09-10T11:00:00.000Z")];
-    transcriptMock.messages = [
-      {
-        role: "assistant",
-        parts: [
-          { type: "text", text: "I am ready to send this." },
-          { type: "dynamic-tool", toolCallId: "call_1", state: "approval-requested" },
-        ],
-      },
-    ];
-
-    render(<ReviewInboxRoute />);
-    await userEvent.click(screen.getByRole("button", { name: /Send the outreach/ }));
-
-    expect(screen.getByText(/stopped to ask for approval/)).toBeInTheDocument();
-    // The reader still needs what the agent said in order to decide.
-    expect(screen.getByTestId("markdown")).toHaveTextContent("I am ready to send this.");
-    expect(updateConversationMock).not.toHaveBeenCalled();
-    expect(screen.getByTestId("review-item-unread")).toBeInTheDocument();
-  });
-
-  // Scanning back for the most recent turn that happens to carry text would show a stale answer
-  // as if it were the current result.
-  it("renders the latest assistant turn rather than the latest one carrying text", async () => {
-    reviewItemsMock.value = [chatItem("c1", "Pull the numbers", "2026-09-10T11:00:00.000Z")];
-    transcriptMock.messages = [
-      assistantReply("Here are last week's numbers."),
-      { role: "user", parts: [{ type: "text", text: "And this week?" }] },
-      { role: "assistant", parts: [{ type: "file", text: "" }] },
-    ];
-
-    render(<ReviewInboxRoute />);
-    await userEvent.click(screen.getByRole("button", { name: /Pull the numbers/ }));
-
-    expect(screen.queryByTestId("markdown")).not.toBeInTheDocument();
-    expect(screen.getByText(/finished without a text result/)).toBeInTheDocument();
   });
 
   it("keeps an opened item in the list after it leaves the unread queue", async () => {
@@ -218,26 +263,21 @@ describe("ReviewInboxRoute", () => {
   });
 
   it("links a task to its task route and a chat to its chat route", async () => {
-    reviewItemsMock.value = [taskItem("c1", "Weekly competitor scan", "2026-09-10T12:00:00.000Z")];
+    reviewItemsMock.value = [
+      taskItem("c1", "Weekly competitor scan", "2026-09-10T12:00:00.000Z"),
+      chatItem("c2", "Draft the investor update", "2026-09-10T11:00:00.000Z"),
+    ];
     transcriptMock.messages = [assistantReply("Scan complete.")];
 
     render(<ReviewInboxRoute />);
     await userEvent.click(screen.getByRole("button", { name: /Weekly competitor scan/ }));
-
     expect(screen.getByRole("link", { name: "Open task" })).toHaveAttribute(
       "href",
       "/tasks/task_c1",
     );
-  });
 
-  it("explains a turn that finished without text instead of rendering an empty pane", async () => {
-    reviewItemsMock.value = [chatItem("c1", "Silent run", "2026-09-10T11:00:00.000Z")];
-    transcriptMock.messages = [{ role: "user", parts: [{ type: "text", text: "Go" }] }];
-
-    render(<ReviewInboxRoute />);
-    await userEvent.click(screen.getByRole("button", { name: /Silent run/ }));
-
-    expect(screen.getByText(/finished without a text result/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /Draft the investor update/ }));
+    expect(screen.getByRole("link", { name: "Open chat" })).toHaveAttribute("href", "/chat/c2");
   });
 
   it("returns to the list from the detail pane", async () => {
@@ -250,21 +290,5 @@ describe("ReviewInboxRoute", () => {
     await userEvent.click(screen.getByRole("button", { name: "Back to the review list" }));
 
     expect(screen.getByText("Pick something to read")).toBeInTheDocument();
-  });
-
-  it("orders the queue newest first", () => {
-    reviewItemsMock.value = [
-      chatItem("older", "Older reply", "2026-09-10T08:00:00.000Z"),
-      chatItem("newer", "Newer reply", "2026-09-10T12:00:00.000Z"),
-    ];
-
-    render(<ReviewInboxRoute />);
-
-    const list = screen.getByRole("heading", { name: "Chat replies" }).parentElement;
-    const titles = within(list as HTMLElement)
-      .getAllByRole("button")
-      .map((node) => node.textContent);
-    expect(titles[0]).toContain("Newer reply");
-    expect(titles[1]).toContain("Older reply");
   });
 });
