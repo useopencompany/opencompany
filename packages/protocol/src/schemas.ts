@@ -427,6 +427,8 @@ export const IntegrationAccountReadModelSchema = z
     provider: z.enum([
       "gmail",
       "google_calendar",
+      "outlook",
+      "outlook-calendar",
       "google_drive",
       "linear",
       "github",
@@ -3830,6 +3832,8 @@ export const IntegrationAccountStatusSchema = z.enum([
 export const PersonalIntegrationProviderSchema = z.enum([
   "gmail",
   "google_calendar",
+  "outlook",
+  "outlook-calendar",
   "google_drive",
   "linear",
   "github_user",

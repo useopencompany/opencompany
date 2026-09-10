@@ -36,3 +36,10 @@ Source: https://www.convex.dev/brand — official download https://www.convex.de
 clear space, and three brand colors. Only sizing is delegated to component props. No IDs,
 gradients, masks, or clipping references occur in the source. This is Convex's database
 platform, not the unrelated Convex blockchain project.
+
+## Outlook (verified 2026-09-10)
+
+Source: [Microsoft Outlook product page](https://www.microsoft.com/en-us/microsoft-365/outlook/email-and-calendar-software-microsoft-outlook), [official FY26 SVG](https://www.microsoft.com/content/dam/microsoft/bade/images/icons/en-us/m365-app-icons-fy26/Outlook-Icon-FY26.svg).
+The shared OutlookIcon preserves the 48 × 48 viewBox, paths, colors, gradients, and filters.
+Only SVG-to-JSX attribute translation and per-instance ids are applied. Both mail and calendar
+use the Outlook product mark.

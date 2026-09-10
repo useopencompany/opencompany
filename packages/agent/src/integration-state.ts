@@ -3,6 +3,7 @@ import {
   GOOGLE_CALENDAR_MCP_RECONNECT_REASON,
   googleCalendarMcpScopesSatisfied,
 } from "./integrations/google-calendar-scopes";
+import { microsoftScopesSatisfied } from "./integrations/microsoft-scopes";
 import { SLACK_MCP_RECONNECT_REASON, slackMcpScopesSatisfied } from "./integrations/slack-scopes";
 
 export type GoogleProviderState = {
@@ -250,6 +251,8 @@ export type IntegrationAccountView<Provider extends string = PersonalAccountProv
 export type PersonalAccountProvider =
   | "gmail"
   | "google_calendar"
+  | "outlook"
+  | "outlook-calendar"
   | "google_drive"
   | "linear"
   | "github_user"
@@ -334,6 +337,8 @@ export function personalAccountsFromRows(
   const personalAccounts: Record<PersonalAccountProvider, IntegrationAccountView[]> = {
     gmail: [],
     google_calendar: [],
+    outlook: [],
+    "outlook-calendar": [],
     google_drive: [],
     linear: [],
     github_user: [],
@@ -404,6 +409,8 @@ export function personalAccountsFromRows(
     if (
       row.provider === "gmail" ||
       row.provider === "google_calendar" ||
+      row.provider === "outlook" ||
+      row.provider === "outlook-calendar" ||
       row.provider === "google_drive" ||
       row.provider === "github_user" ||
       row.provider === "slack" ||
@@ -530,7 +537,12 @@ function accountViewFromRow(
     provider === "google_calendar" &&
     row.status === "connected" &&
     !googleCalendarMcpScopesSatisfied(scopes);
-  const needsPluginGrant = needsSlackPluginGrant || needsGoogleCalendarPluginGrant;
+  const needsMicrosoftGrant =
+    (provider === "outlook" || provider === "outlook-calendar") &&
+    row.status === "connected" &&
+    !microsoftScopesSatisfied(provider, scopes);
+  const needsPluginGrant =
+    needsSlackPluginGrant || needsGoogleCalendarPluginGrant || needsMicrosoftGrant;
   return {
     integrationId: row.id ?? "",
     provider,
@@ -539,11 +551,13 @@ function accountViewFromRow(
     accountEmail: row.accountEmail ?? row.account_email ?? null,
     accountName: row.accountName ?? row.account_name ?? null,
     connectionLabel: row.connectionLabel ?? row.connection_label ?? null,
-    statusReason: needsSlackPluginGrant
-      ? SLACK_MCP_RECONNECT_REASON
-      : needsGoogleCalendarPluginGrant
-        ? GOOGLE_CALENDAR_MCP_RECONNECT_REASON
-        : (row.statusReason ?? row.status_reason ?? null),
+    statusReason: needsMicrosoftGrant
+      ? "Reconnect your Microsoft account to grant the required permissions."
+      : needsSlackPluginGrant
+        ? SLACK_MCP_RECONNECT_REASON
+        : needsGoogleCalendarPluginGrant
+          ? GOOGLE_CALENDAR_MCP_RECONNECT_REASON
+          : (row.statusReason ?? row.status_reason ?? null),
     scopes,
     capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
   };

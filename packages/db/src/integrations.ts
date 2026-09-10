@@ -177,6 +177,27 @@ export async function connectGoogleIntegration(input: {
   });
 }
 
+export async function connectMicrosoftIntegration(input: {
+  provider: "outlook" | "outlook-calendar";
+  userWorkosId: string;
+  externalId: string;
+  accountEmail: string | null;
+  accountName: string | null;
+  tokens: { access_token: string; refresh_token: string; scope: string; token_type: string };
+  expiresAt: Date;
+  scopes: string[];
+  db?: IntegrationDb;
+}) {
+  return connectPersonalOAuthIntegration({
+    ...input,
+    connectionLabel: input.accountEmail || input.accountName || "Microsoft",
+    accountType: "microsoft_account",
+    payload: { ...input.tokens },
+    displayName: "Microsoft",
+    credentialFailureReason: "Failed to persist Microsoft integration credentials.",
+  });
+}
+
 export type XAccountOAuthCredentialPayload = {
   access_token: string;
   refresh_token?: string;

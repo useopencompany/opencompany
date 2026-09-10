@@ -26,6 +26,7 @@ import {
   LinearIcon,
   NeonIcon,
   NotionIcon,
+  OutlookIcon,
   PostHogIcon,
   RenderIcon,
   ResendIcon,
@@ -169,6 +170,12 @@ export const OFFICIAL_MCP_PLUGINS = {
     ...OFFICIAL_MCP_PLUGIN_METADATA.granola,
     Icon: GranolaIcon,
     iconClassName: "bg-[#F0EBE1] text-[#1A1714]",
+  },
+  outlook: { ...OFFICIAL_MCP_PLUGIN_METADATA.outlook, Icon: OutlookIcon, iconClassName: "" },
+  "outlook-calendar": {
+    ...OFFICIAL_MCP_PLUGIN_METADATA["outlook-calendar"],
+    Icon: OutlookIcon,
+    iconClassName: "",
   },
   "google-calendar": {
     ...OFFICIAL_MCP_PLUGIN_METADATA["google-calendar"],

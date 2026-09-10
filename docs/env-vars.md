@@ -172,3 +172,33 @@ override a developer's generated values and remains gitignored.
 Update the runtime reader, `.env.example`, setup/export code, Turbo env configuration, hosted
 Infisical path, host sync, and release preflight together. Remove a variable only after `rg` proves
 there is no runtime, script, workflow, or operational-doc consumer.
+
+## Microsoft Outlook plugins
+
+Register one confidential Microsoft Entra application with **Accounts in any organizational directory
+and personal Microsoft accounts**. Use the global Microsoft cloud `/common` v2.0 endpoints.
+Add these **Web** redirect URIs for both production and your configured development app origin:
+
+- `${OPENCOMPANY_NEXT_PUBLIC_APP_URL}/api/integrations/outlook/callback`
+- `${OPENCOMPANY_NEXT_PUBLIC_APP_URL}/api/integrations/outlook-calendar/callback`
+
+Set `MICROSOFT_OAUTH_CLIENT_ID`, `MICROSOFT_OAUTH_CLIENT_SECRET`, and a separate random
+`MICROSOFT_INTEGRATION_STATE_SECRET` in Infisical `prod` `/api`. Set the client ID and client
+secret in `prod` `/runner` too, because the action gateway validates and refreshes credentials
+there. The API and runner also need the existing credential encryption key and internal ticket
+secret. Web only relays OAuth requests and does not need Microsoft secrets. Release preflight
+requires these values in their respective services. Verify the hosted API and runner environment
+sync before releasing the catalog entries; do not add placeholder production credentials.
+
+Consent is separate for each plugin: `offline_access User.Read Mail.ReadWrite` for Outlook,
+and `offline_access User.Read Calendars.ReadWrite` for Outlook Calendar. No `Mail.Send`,
+application permissions, or mailbox settings scopes are requested. The shared app registration
+reuses existing consent where Microsoft allows it, but each plugin stores and revokes its own
+personal connection. Tokens stay encrypted in the credential vault. MCP clients receive only
+short-lived, operation-scoped HMAC tickets.
+
+Complete Microsoft publisher verification for the registered application before general release.
+Some organizations require an administrator to approve user consent even for a verified publisher.
+A Microsoft 365 Copilot license is not required. Live release validation must cover both a work/school
+mailbox and a personal Outlook account, including consent, token refresh, revocation, drafts,
+attachments, and calendar writes. See [the Outlook integration guide](./outlook-integration.md).

@@ -1310,3 +1310,43 @@ describe("plugin gateway registration cache", () => {
     expect(mocks.discoverSnapshot).toHaveBeenCalledOnce();
   });
 });
+
+describe("Microsoft plugin endpoint binding", () => {
+  it.each(["outlook", "outlook-calendar"])(
+    "binds %s only to its reviewed endpoint",
+    async (provider) => {
+      const microsoftRecord = record({
+        pluginName: provider,
+        connectionProvider: provider,
+        server: {
+          name: provider,
+          type: "streamable-http",
+          url: `https://api.opencompany.chat/mcp/plugins/${provider}`,
+          headers: {},
+        },
+        refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+      });
+      mocks.listRegistrations.mockResolvedValueOnce([microsoftRecord]);
+      const registrations = await resolvePluginGatewayRegistrations(identity, { db, now });
+      expect(registrations).toHaveLength(1);
+      expect(registrations[0]).toMatchObject({
+        connectionProvider: provider,
+        source: `plugin:${provider}:${provider}`,
+      });
+      for (const url of [
+        "https://evil.example/mcp",
+        `https://api.opencompany.chat/mcp/plugins/${provider}?redirect=evil`,
+        `https://api.opencompany.chat/mcp/plugins/${provider === "outlook" ? "outlook-calendar" : "outlook"}`,
+      ]) {
+        mocks.listRegistrations.mockResolvedValueOnce([
+          { ...microsoftRecord, server: { ...microsoftRecord.server, url } },
+        ]);
+        expect(await resolvePluginGatewayRegistrations(identity, { db, now })).toEqual([]);
+      }
+      mocks.listRegistrations.mockResolvedValueOnce([
+        { ...microsoftRecord, connectionProvider: "gmail" },
+      ]);
+      expect(await resolvePluginGatewayRegistrations(identity, { db, now })).toEqual([]);
+    },
+  );
+});

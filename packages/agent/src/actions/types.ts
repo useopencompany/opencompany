@@ -7,6 +7,8 @@ export type ActionProviderId =
   | "slack"
   | "gmail"
   | "google_calendar"
+  | "outlook"
+  | "outlook-calendar"
   | "google_drive"
   | "granola"
   | "linear"

@@ -107,11 +107,17 @@ services:
         sync: false
       # Google-family OAuth ingress moved to the API in the #1203 4a2 cutover
       # (Gmail, Calendar, Drive; Drive webhook verification is row-based).
+      - key: MICROSOFT_OAUTH_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_OAUTH_CLIENT_SECRET
+        sync: false
       - key: GOOGLE_OAUTH_CLIENT_ID
         sync: false
       - key: GOOGLE_OAUTH_CLIENT_SECRET
         sync: false
       - key: GOOGLE_INTEGRATION_STATE_SECRET
+        sync: false
+      - key: MICROSOFT_INTEGRATION_STATE_SECRET
         sync: false
       # Official Slack plugin OAuth + Linear ingest OAuth/webhook ingress.
       - key: OPENCOMPANY_SLACK_CLIENT_ID
@@ -395,6 +401,10 @@ services:
       - key: GITHUB_USER_APP_CLIENT_SECRET
         sync: false
       # Google OAuth client, used by the runner to refresh Gmail/Calendar access tokens.
+      - key: MICROSOFT_OAUTH_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_OAUTH_CLIENT_SECRET
+        sync: false
       - key: GOOGLE_OAUTH_CLIENT_ID
         sync: false
       - key: GOOGLE_OAUTH_CLIENT_SECRET

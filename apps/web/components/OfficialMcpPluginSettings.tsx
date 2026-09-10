@@ -260,6 +260,44 @@ export function GranolaPluginDetail({
   );
 }
 
+export function OutlookPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS["outlook"]}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
+export function OutlookCalendarPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS["outlook-calendar"]}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
 export function GoogleCalendarPluginDetail({
   pluginState,
   canEdit,
@@ -1770,6 +1808,8 @@ function pluginAccountsFromState(
     config.connectionProvider === "github_user" ||
     config.connectionProvider === "gmail" ||
     config.connectionProvider === "google_calendar" ||
+    config.connectionProvider === "outlook" ||
+    config.connectionProvider === "outlook-calendar" ||
     config.connectionProvider === "google_drive" ||
     config.connectionProvider === "hubspot" ||
     config.connectionProvider === "jamie" ||
