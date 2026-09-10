@@ -1934,7 +1934,7 @@ describe("Surface chat streaming UI", () => {
 
     expect(screen.queryByText("Capability / Speed / Cost")).not.toBeInTheDocument();
     expect(screen.getAllByText("Claude Sonnet 5").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("Claude Opus 4.8")).toBeInTheDocument();
+    expect(screen.queryByText("Claude Opus 4.8")).not.toBeInTheDocument();
     expect(screen.queryByText("GPT 6 Astra")).not.toBeInTheDocument();
     expect(screen.getByText("GPT 5.6 Sol")).toBeInTheDocument();
     expect(screen.getByText("GPT 5.6 Terra")).toBeInTheDocument();
@@ -2202,10 +2202,9 @@ describe("Surface chat streaming UI", () => {
     );
   });
 
-  it.each([
-    ["Claude Opus 4.8", "anthropic/claude-opus-4.8"],
-    ["Claude Opus 5", "anthropic/claude-opus-5"],
-  ])("selects %s and submits per-turn reasoning effort", async (label, model) => {
+  it("selects Opus 5 and submits per-turn reasoning effort", async () => {
+    const label = "Claude Opus 5";
+    const model = "anthropic/claude-opus-5";
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       return new Response(
@@ -2243,6 +2242,7 @@ describe("Surface chat streaming UI", () => {
       screen.queryByRole("button", { name: /Claude reasoning effort/ }),
     ).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Claude model: Claude Haiku 4.5" }));
+    expect(screen.queryByRole("option", { name: /Claude Opus 4\.8/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole("option", { name: new RegExp(label) }));
     await user.click(
       screen.getByRole("button", { name: "Claude reasoning effort: High (click to cycle)" }),
