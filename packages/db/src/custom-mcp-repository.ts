@@ -11,7 +11,9 @@ import {
 } from "@opencompany/core";
 import { and, eq, isNull } from "drizzle-orm";
 import { loadIntegrationCredential, saveIntegrationCredential } from "./integrations";
+import { pluginAccess } from "./plugin-access";
 import { customMcpAccounts, integrationCredentials, integrations, plugins } from "./product-schema";
+import { skillMembership } from "./skill-access";
 
 type DbLike = any;
 type Identity = Pick<Actor, "userId" | "workspaceId">;
@@ -86,7 +88,7 @@ export class PostgresCustomMcpRepository implements CustomMcpRepository {
         .from(plugins)
         .where(
           and(
-            eq(plugins.workspaceId, actor.workspaceId),
+            pluginAccess(actor),
             eq(plugins.name, name),
             eq(plugins.sourceType, "custom_mcp"),
             eq(plugins.status, "enabled"),
@@ -332,6 +334,7 @@ export class PostgresCustomMcpRepository implements CustomMcpRepository {
 
 function owner(actor: Identity, name: string) {
   return and(
+    skillMembership(actor),
     eq(customMcpAccounts.workspaceId, actor.workspaceId),
     eq(customMcpAccounts.pluginName, name),
     eq(customMcpAccounts.userWorkosId, actor.userId),

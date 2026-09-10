@@ -27,8 +27,6 @@ const logger = createLogger({ service: "opencompany-api", runtime: "engine-auth"
 // drizzle handle without dragging the full inferred schema type across packages.
 type DbLike = any;
 
-const INFISICAL_ADMIN_ONLY_MESSAGE = "Only workspace admins can manage Infisical.";
-
 export type EngineAuthConnectionStatus = {
   status: "connected" | "needs_reauth" | null;
   statusReason: string | null;
@@ -225,12 +223,10 @@ export function createEngineAuthService(input: {
     },
 
     async getInfisicalStatus(actor) {
-      // Member-visible on purpose: the retired settings read powered the
-      // provider states for every workspace member; only mutations are
-      // admin-gated.
       const connection = await loadInfisicalConnectionMetadata({
         db,
         workspaceId: actor.workspaceId,
+        userId: actor.userId,
       });
       return {
         status: connection?.status ?? null,
@@ -242,7 +238,6 @@ export function createEngineAuthService(input: {
     },
 
     async startInfisicalAuth(actor, host) {
-      requireAdmin(actor, INFISICAL_ADMIN_ONLY_MESSAGE);
       if (!isInfisicalHost(host)) {
         throw new ApiError(400, "invalid_request", "Choose a supported Infisical region.");
       }
@@ -271,7 +266,6 @@ export function createEngineAuthService(input: {
     },
 
     async completeInfisicalAuth(actor, flowId, browserToken) {
-      requireAdmin(actor, INFISICAL_ADMIN_ONLY_MESSAGE);
       const trimmedFlowId = flowId.trim();
       const trimmedToken = browserToken.trim();
       if (!trimmedFlowId || !trimmedToken) {
@@ -301,9 +295,12 @@ export function createEngineAuthService(input: {
     },
 
     async disconnectInfisical(actor) {
-      requireAdmin(actor, INFISICAL_ADMIN_ONLY_MESSAGE);
       try {
-        await disconnectInfisicalConnection({ db, workspaceId: actor.workspaceId });
+        await disconnectInfisicalConnection({
+          db,
+          workspaceId: actor.workspaceId,
+          userId: actor.userId,
+        });
       } catch (error) {
         throw commandFailure(error, "Could not disconnect Infisical.", "infisical_disconnect");
       }

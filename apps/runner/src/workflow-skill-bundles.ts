@@ -15,6 +15,7 @@ import { getDb } from "./db";
 
 export async function loadWorkflowTaskSkillBundles(
   harnessSpec: HarnessSpec,
+  userId: string,
 ): Promise<ImmutableSkillBundle[]> {
   const bundleIds = getWorkflowHarnessSkillBundleIds(harnessSpec);
   if (bundleIds.length === 0) return [];
@@ -22,11 +23,17 @@ export async function loadWorkflowTaskSkillBundles(
   if (!workspaceId) {
     throw new Error("Workflow Task Skill bundles require a workspace ID.");
   }
-  return loadImmutableSkillBundles(getDb(), { workspaceId, bundleIds });
+  return loadImmutableSkillBundles(getDb(), {
+    workspaceId,
+    userId,
+    skillAccess: "company",
+    bundleIds,
+  });
 }
 
 export async function loadWorkflowTaskPluginRuntime(
   harnessSpec: HarnessSpec,
+  userId: string,
 ): Promise<EnabledPluginRuntime> {
   const workflow = harnessSpec.workflow;
   if (!workflow) return { plugins: [], skills: [], mcpPlugins: [] };
@@ -34,6 +41,7 @@ export async function loadWorkflowTaskPluginRuntime(
   if (!workspaceId) throw new Error("Workflow Task Plugins require a workspace ID.");
   return loadEnabledPluginRuntime(getDb(), {
     workspaceId,
+    userId,
     pluginIds: getWorkflowHarnessPluginIds(harnessSpec),
   });
 }

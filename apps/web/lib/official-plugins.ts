@@ -222,7 +222,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectionProvider: "infisical",
     connectHref: "/settings/plugins/infisical",
     accountDescription:
-      "The workspace CLI connection restored into coding sandboxes. Its credentials are never sent to the documentation MCP.",
+      "Your personal Infisical login, restored into your coding sandboxes. Its credentials are never sent to the documentation MCP.",
   },
   jamie: {
     name: "jamie",

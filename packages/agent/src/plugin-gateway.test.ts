@@ -262,6 +262,7 @@ describe("plugin gateway registration cache", () => {
     const registrations = await resolvePluginGatewayRegistrations(identity, { db, now });
 
     expect(mocks.claimRefresh).toHaveBeenCalledWith(db, {
+      userId: "user_1",
       workspaceId: "workspace_1",
       registrationId: "plugin_gateway_1",
       staleAt: now,
@@ -1301,6 +1302,7 @@ describe("plugin gateway registration cache", () => {
     });
 
     expect(mocks.listRegistrations).toHaveBeenCalledWith(db, {
+      userId: "user_1",
       workspaceId: "workspace_1",
       pluginName: "linear",
     });
