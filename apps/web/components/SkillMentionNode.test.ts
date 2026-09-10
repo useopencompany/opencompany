@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { extractWorkflowSkillMentionRefs } from "@opencompany/agent/workflow-skill-mentions";
 import { Editor } from "@tiptap/core";
 import { Markdown } from "@tiptap/markdown";
 import StarterKit from "@tiptap/starter-kit";
@@ -39,6 +40,28 @@ function chips(editor: Editor) {
 }
 
 describe("skill mention identity and presentation", () => {
+  it.each([`Use **${TOKEN}**.`, `Use *${TOKEN}*.`, `Use (${TOKEN}).`])(
+    "extracts the same reference that the editor renders and saves: %s",
+    (input) => {
+      const editor = makeEditor(input);
+      expect(chips(editor).map((chip) => chip.textContent)).toEqual(["@feature-blog-post"]);
+      const saved = editor.getMarkdown();
+      expect(extractWorkflowSkillMentionRefs(saved)).toEqual([{ id: SKILL.id }]);
+      const reopened = makeEditor(saved);
+      expect(chips(reopened)).toHaveLength(1);
+      expect(extractWorkflowSkillMentionRefs(reopened.getMarkdown())).toEqual([{ id: SKILL.id }]);
+    },
+  );
+
+  it("does not activate literal code examples after saving and reopening", () => {
+    const editor = makeEditor(`Example: \`use ${TOKEN}\`.\n\n\`\`\`text\n${TOKEN}\n\`\`\``);
+    expect(chips(editor)).toHaveLength(0);
+    expect(extractWorkflowSkillMentionRefs(editor.getMarkdown())).toEqual([]);
+    const reopened = makeEditor(editor.getMarkdown());
+    expect(chips(reopened)).toHaveLength(0);
+    expect(extractWorkflowSkillMentionRefs(reopened.getMarkdown())).toEqual([]);
+  });
+
   it("loads a saved installation reference as an atomic named chip and round-trips its ID", () => {
     const input = `Use ${TOKEN}.`;
     const editor = makeEditor(input);

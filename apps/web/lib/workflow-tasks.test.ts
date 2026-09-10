@@ -130,12 +130,12 @@ describe("resolveWorkflowStepSelection", () => {
 });
 
 describe("extractWorkflowSkillMentionRefs", () => {
-  it("resolves escaped installation IDs saved by the old markdown editor", () => {
+  it("resolves installation IDs escaped by the Markdown editor", () => {
     expect(
       extractWorkflowSkillMentionRefs(
-        String.raw`Use @skill/skill\_installation\_0123456789abcdef and @skill/skill_installation_0123456789abcdef.`,
+        String.raw`@skill/skill\_installation\_0123456789abcdef0123456789abcdef`,
       ),
-    ).toEqual([{ id: "skill_installation_0123456789abcdef" }]);
+    ).toEqual([{ id: "skill_installation_0123456789abcdef0123456789abcdef" }]);
   });
 
   it("collects deduped skill mentions from one step", () => {
@@ -417,19 +417,19 @@ describe("createTaskFromWorkflow", () => {
           id: "step-1",
           title: "Research",
           model: "kimi-k2.6",
-          instructions: "Use @skill/research.",
+          instructions: String.raw`Use @skill/skill\_installation\_research.`,
         },
         {
           id: "step-2",
           title: "Write",
           model: "sonnet-5",
-          instructions: "Use @skill/writing and @skill/research.",
+          instructions: "Use @skill/writing and @skill/skill_installation_research.",
         },
       ],
     });
     mocks.resolveSkillMentions.mockResolvedValue([
       {
-        id: "research",
+        id: "skill_installation_research",
         bundleId: "skill_bundle_research_v1",
         name: "Research",
         description: "",
@@ -464,7 +464,11 @@ describe("createTaskFromWorkflow", () => {
 
     expect(mocks.resolveSkillMentions).toHaveBeenCalledWith({
       workspaceId: "ws_1",
-      mentions: [{ id: "research" }, { id: "writing" }, { id: "smooth-shadow-ring" }],
+      mentions: [
+        { id: "skill_installation_research" },
+        { id: "writing" },
+        { id: "smooth-shadow-ring" },
+      ],
     });
     expect(mocks.createTaskForUser).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -472,7 +476,7 @@ describe("createTaskFromWorkflow", () => {
         workflowId: "mixed-workflow",
         harnessSpec: expect.objectContaining({
           workflow: expect.objectContaining({
-            skillIds: ["research", "writing", "smooth-shadow-ring"],
+            skillIds: ["skill_installation_research", "writing", "smooth-shadow-ring"],
             skillBundleIds: [
               "skill_bundle_research_v1",
               "skill_bundle_writing_v1",
@@ -480,11 +484,11 @@ describe("createTaskFromWorkflow", () => {
             ],
             steps: [
               expect.objectContaining({
-                skillIds: ["research", "smooth-shadow-ring"],
+                skillIds: ["skill_installation_research", "smooth-shadow-ring"],
                 skillBundleIds: ["skill_bundle_research_v1", "skill_bundle_shadow_v1"],
               }),
               expect.objectContaining({
-                skillIds: ["writing", "research"],
+                skillIds: ["writing", "skill_installation_research"],
                 skillBundleIds: ["skill_bundle_writing_v1", "skill_bundle_research_v1"],
               }),
             ],
