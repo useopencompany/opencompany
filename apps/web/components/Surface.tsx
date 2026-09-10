@@ -5547,6 +5547,7 @@ function CodingEngineModelPicker({
   const selectedModel =
     models.find((model) => model.id === value) ?? models.find((model) => model.id === defaultValue);
   const selectedLabel = selectedModel?.label ?? `${engineLabel} model`;
+  const visibleModels = models.filter((model) => model.id !== "anthropic/claude-opus-4.8");
   const ModelIcon = provider === "anthropic" ? AnthropicIcon : OpenAIIcon;
 
   return (
@@ -5570,7 +5571,7 @@ function CodingEngineModelPicker({
         <Command className="bg-surface text-ink">
           <CommandList>
             <CommandGroup heading={`${engineLabel} models`}>
-              {models.map((model) => (
+              {visibleModels.map((model) => (
                 <CommandItem
                   key={model.id}
                   value={model.id}
@@ -6560,6 +6561,7 @@ function ModelPicker({
             ) : null}
             <CommandGroup heading="Models">
               {MODELS.map((model) => {
+                if (model.id === "anthropic/claude-opus-4.8") return null;
                 const isSelected =
                   !isAutoSelected && !isEngineSelected && model.id === selectedModel?.id;
                 return (
