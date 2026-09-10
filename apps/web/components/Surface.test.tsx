@@ -4885,6 +4885,54 @@ describe("Surface chat streaming UI", () => {
     expect(screen.getByText(/^\d+\.\ds$/)).toBeInTheDocument();
   });
 
+  it("stops the task timer while waiting for approval and restarts it on resume", () => {
+    const initialChat = {
+      id: "chat_task_1",
+      title: "Morning workflow",
+      model: DEFAULT_MODEL,
+      engine: "opencompany" as const,
+      messages: [],
+    };
+    const taskConversation = {
+      taskId: "task_1",
+      status: "running" as const,
+      startedAtMs: Date.now() - 106_000,
+      activeRunId: "run_1",
+    };
+    const view = render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={initialChat}
+        taskConversation={taskConversation}
+      />,
+    );
+    expect(screen.getByRole("status", { name: "opencompany is working" })).toBeInTheDocument();
+
+    view.rerender(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={initialChat}
+        taskConversation={{ ...taskConversation, status: "waiting" }}
+      />,
+    );
+    expect(
+      screen.queryByRole("status", { name: "opencompany is working" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop task" })).not.toBeInTheDocument();
+
+    view.rerender(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={initialChat}
+        taskConversation={{ ...taskConversation, status: "queued" }}
+      />,
+    );
+    expect(screen.getByRole("status", { name: "opencompany is working" })).toBeInTheDocument();
+  });
+
   it("does not show a live timer for a finalized turn when stream and runtime state are stale", () => {
     chatMock.status = "streaming";
 

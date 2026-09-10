@@ -184,6 +184,39 @@ describe("TaskDetailPanel", () => {
     });
   });
 
+  it("keeps a paused approval run waiting, then reflects approval resumption", () => {
+    const initialTask = { ...task(), status: "waiting" as const };
+    const initialRun = buildHarnessRun({ task: initialTask, messages: [], events: [] });
+    mocks.tasks = [initialTask];
+    const activeRun = {
+      id: "run_1",
+      status: "paused",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    };
+    mocks.runRows = [activeRun];
+
+    const view = render(<TaskDetailPanel initialRun={initialRun} />);
+
+    expect(mocks.surfaceProps?.taskConversation).toMatchObject({
+      status: "waiting",
+      activeRunId: "run_1",
+    });
+
+    // Run updates may arrive before the task collection catches up.
+    mocks.runRows = [{ ...activeRun, status: "queued" }];
+    view.rerender(<TaskDetailPanel initialRun={initialRun} />);
+    expect(mocks.surfaceProps?.taskConversation).toMatchObject({ status: "queued" });
+
+    mocks.runRows = [{ ...activeRun, status: "running" }];
+    view.rerender(<TaskDetailPanel initialRun={initialRun} />);
+    expect(mocks.surfaceProps?.taskConversation).toMatchObject({ status: "running" });
+
+    mocks.tasks = [{ ...initialTask, status: "running" }];
+    mocks.runRows = [activeRun];
+    view.rerender(<TaskDetailPanel initialRun={initialRun} />);
+    expect(mocks.surfaceProps?.taskConversation).toMatchObject({ status: "waiting" });
+  });
+
   it("adopts the live canonical Task status after its active Run completes", () => {
     const initialTask = { ...task(), status: "running" as const, stage: "running" as const };
     mocks.tasks = [
