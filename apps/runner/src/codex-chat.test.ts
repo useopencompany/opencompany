@@ -899,6 +899,34 @@ describe("runCodexChatTurn over ACP", () => {
     );
   });
 
+  it("preserves infrastructure recovery when Plugin checkpointing also fails", async () => {
+    const { pluginPackage, mcpPlugin } = approvedPluginRuntime();
+    pluginRuntimeMocks.loadChatSessionPluginRuntime.mockResolvedValueOnce({
+      plugins: [pluginPackage],
+      skills: [],
+      mcpPlugins: [mcpPlugin],
+    });
+    const failure = new CodexChatRetryableInfrastructureError(
+      "Sandbox guest stopped answering",
+      new Error("probe timeout"),
+    );
+    acpMocks.runTurn.mockRejectedValueOnce(failure);
+    pluginDataMocks.checkpoint.mockRejectedValueOnce(new Error("guest checkpoint timed out"));
+
+    await expect(
+      runCodexChatTurn({
+        turn: codexTurn(),
+        session: codexSession({ workspaceId: "workspace_1" }),
+        env: env(),
+      }),
+    ).rejects.toBe(failure);
+
+    expect(pluginDataMocks.checkpoint).toHaveBeenCalledOnce();
+    expect(pluginDataMocks.release).toHaveBeenCalledOnce();
+    const projector = eventMocks.createExternalEngineProjector.mock.results.at(-1)?.value;
+    expect(projector.fail).not.toHaveBeenCalled();
+  });
+
   it("bootstraps durable history after ACP invalidates a stored session", async () => {
     dbMocks.selectRows.push(
       [],

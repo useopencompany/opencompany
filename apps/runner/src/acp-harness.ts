@@ -1,6 +1,7 @@
 import type { Harness } from "@opencompany/agent-runtime";
+import { createLogger } from "@opencompany/observability";
 import { CodexChatRetryableInfrastructureError } from "./codex-chat-errors";
-import { commandExitResult, type SandboxHandle } from "./sandbox";
+import { commandExitResult, probeSandboxGuest, type SandboxHandle } from "./sandbox";
 
 const ACP_REQUEST_TIMEOUT_MS = 30_000;
 const ACP_ABORT_POLL_INTERVAL_MS = 500;
@@ -8,6 +9,8 @@ const ACP_CANCEL_GRACE_MS = 5_000;
 const ACP_STDERR_TAIL_LIMIT = 4_000;
 const ACP_FAILURE_DIAGNOSTIC_LIMIT = 2_000;
 const ACP_COMMAND_STREAM_RECONNECT_ATTEMPTS = 3;
+const ACP_GUEST_PROBE_INTERVAL_MS = 60_000;
+const logger = createLogger({ service: "opencompany-runner", runtime: "acp-harness" });
 
 export const ACP_EMPTY_RESULT_REPAIR_PROMPT =
   "The previous turn completed successfully but produced no final assistant response. Do not repeat any completed actions. Inspect the work and current external state only as needed, then provide a concise final response summarizing what was done and its outcome.";
@@ -167,6 +170,7 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
     });
 
     await client.start();
+    let executionError: unknown;
     try {
       const initialized = await client.requestBeforeExecution("initialize", {
         protocolVersion: 1,
@@ -292,11 +296,25 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
         promptResponse,
         stderrTail: client.stderrTail(),
       };
+    } catch (error) {
+      executionError = error;
+      throw error;
     } finally {
       try {
-        await client.stop();
-      } finally {
-        await input.onEngineStopped?.();
+        try {
+          await client.stop();
+        } finally {
+          await input.onEngineStopped?.();
+        }
+      } catch (cleanupError) {
+        if (!(executionError instanceof CodexChatRetryableInfrastructureError)) throw cleanupError;
+        // Cleanup also needs the guest. Keep the original recovery signal if it is unreachable;
+        // the next claim must fence or reboot before starting another engine.
+        logger.warn("ACP cleanup failed after an infrastructure failure", {
+          event: "opencompany.goat_acp_cleanup_failed",
+          engine: input.adapter.id,
+          error: input.redact(asError(cleanupError).message),
+        });
       }
     }
   }
@@ -534,6 +552,8 @@ class AcpJsonRpcClient {
   private lastStderr = "";
   private processing: Promise<void> = Promise.resolve();
   private watchGeneration = 0;
+  private lastGuestActivityAt = Date.now();
+  private guestProbeTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly pending = new Map<
     number | string,
     {
@@ -565,14 +585,17 @@ class AcpJsonRpcClient {
         this.consumeStdout(data);
       },
       onStderr: (data: string) => {
+        this.lastGuestActivityAt = Date.now();
         this.lastStderr = (this.lastStderr + this.input.redact(data)).slice(-ACP_STDERR_TAIL_LIMIT);
       },
     });
     this.watch(this.handle);
+    this.scheduleGuestProbe();
   }
 
   async stop() {
     this.stopping = true;
+    this.clearGuestProbe();
     const pid = commandHandlePid(this.handle);
     if (pid != null) await this.input.sandbox.commands.kill(pid).catch(() => false);
     for (const pending of this.pending.values()) {
@@ -644,6 +667,7 @@ class AcpJsonRpcClient {
   }
 
   private consumeStdout(data: string) {
+    this.lastGuestActivityAt = Date.now();
     this.buffer += data;
     const lines = this.buffer.split("\n");
     this.buffer = lines.pop() ?? "";
@@ -773,6 +797,7 @@ class AcpJsonRpcClient {
             this.consumeStdout(data);
           },
           onStderr: (data: string) => {
+            this.lastGuestActivityAt = Date.now();
             this.lastStderr = (this.lastStderr + this.input.redact(data)).slice(
               -ACP_STDERR_TAIL_LIMIT,
             );
@@ -806,9 +831,52 @@ class AcpJsonRpcClient {
     );
   }
 
+  private scheduleGuestProbe() {
+    if (this.stopping || this.failure) return;
+    this.guestProbeTimer = setTimeout(() => {
+      this.guestProbeTimer = null;
+      void this.checkGuestHealth();
+    }, ACP_GUEST_PROBE_INTERVAL_MS);
+    this.guestProbeTimer.unref?.();
+  }
+
+  private async checkGuestHealth() {
+    const lastActivityAt = this.lastGuestActivityAt;
+    try {
+      if (this.stopping || this.failure) return;
+      if (Date.now() - lastActivityAt < ACP_GUEST_PROBE_INTERVAL_MS) return;
+      // A wedged guest can leave the command watch open while the worker keeps its DB lease
+      // alive. Silence alone is normal during thinking and long tools; test guest execution
+      // before entering the existing fenced recovery path, which can reboot from disk state.
+      await probeSandboxGuest(this.input.sandbox);
+    } catch (error) {
+      if (this.stopping || this.failure || this.lastGuestActivityAt !== lastActivityAt) return;
+      const cause = asError(error);
+      this.fail(
+        new CodexChatRetryableInfrastructureError(
+          `${this.input.adapterName} sandbox stopped answering during the active turn.`,
+          cause,
+          `[sandbox_guest_probe] ${cause.name}: ${this.input.redact(cause.message)}`.slice(
+            0,
+            ACP_FAILURE_DIAGNOSTIC_LIMIT,
+          ),
+        ),
+      );
+    } finally {
+      // Schedule after completion so slow probes never overlap.
+      this.scheduleGuestProbe();
+    }
+  }
+
+  private clearGuestProbe() {
+    if (this.guestProbeTimer) clearTimeout(this.guestProbeTimer);
+    this.guestProbeTimer = null;
+  }
+
   private fail(error: Error) {
     if (this.failure) return;
     this.failure = error;
+    this.clearGuestProbe();
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timeout);
       pending.reject(error);

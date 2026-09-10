@@ -88,6 +88,40 @@ describe("Postgres immutable Plugin repository", () => {
     await database.close();
   });
 
+  it("keeps a legacy installation hidden and intact when its member reinstalls personally", async () => {
+    const member = actor();
+    const plugin = await resolvedPlugin("linear", "review", "Linear review.");
+    const legacy = await repository.install({
+      actor: member,
+      plugin,
+      idempotencyKey: "legacy-linear",
+    });
+    await database.query("UPDATE goat.plugins SET owner_user_id = NULL WHERE id = $1", [
+      legacy.plugin.id,
+    ]);
+
+    expect(await repository.list({ actor: member })).toEqual([]);
+    expect(await repository.get({ actor: member, name: "linear" })).toBeNull();
+
+    const personal = await repository.install({
+      actor: member,
+      plugin,
+      idempotencyKey: "personal-linear",
+    });
+    expect(personal.plugin.id).not.toBe(legacy.plugin.id);
+    expect((await repository.list({ actor: member })).map((item) => item.id)).toEqual([
+      personal.plugin.id,
+    ]);
+    expect(
+      (
+        await database.query(
+          "SELECT owner_user_id, status, archived_at FROM goat.plugins WHERE id = $1",
+          [legacy.plugin.id],
+        )
+      ).rows,
+    ).toEqual([{ owner_user_id: null, status: "enabled", archived_at: null }]);
+  });
+
   it("isolates two members' installations, events, discovery, saved data, and pinned runtime", async () => {
     await database.exec(
       "INSERT INTO goat.workspace_members VALUES ('workspace_1', 'user_2', 'member')",
