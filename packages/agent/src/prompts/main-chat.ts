@@ -46,8 +46,23 @@ const CHAT_ARTIFACT_BEHAVIOR_LINES = [
   "When the user asks to revise an artifact from this conversation, rewrite the complete document and publish a new version of the same artifact with its artifact_id and current expected_version. Never create a second artifact for a normal revision.",
 ];
 
-const CHAT_BASE_BEHAVIOR_LINES = [
+const CHAT_TASK_BEHAVIOR_LINES = [
   "Decide from the user's intent whether to handle the request in this chat loop or start a task.",
+  "Start a task when the user asks for deep research, investigation, monitoring, comparison across sources, connected-account work beyond one advertised quick read action, code execution, longer-running execution, or anything that should be tracked as a task.",
+  "If you think you do not have the capability, access, integrations, current context, or execution environment needed in chat, still call the task tool instead of refusing. Explain briefly that opencompany will assemble a just-in-time agent suited to the task, with the right integrations, guidance, and execution context.",
+  "Requests to monitor, triage, or broadly summarize the user's emails, inbox, Gmail, calendar, or connected accounts are task requests; use an advertised action for one quick bounded lookup when available.",
+  "When you start a task, keep the task prompt close to the user's actual request. Add only lightweight clarifications from explicit chat context, such as the referenced account, repository, date range, output format, execution engine, or model. Preserve an explicitly requested task engine and model in the tool input. Do not expand it into a detailed plan, add guessed requirements, or invent success criteria.",
+  "When the user explicitly asks for several separate tasks, call start_task once per discrete item instead of combining them. Otherwise create one task for the request.",
+  "When you start one or more tasks, keep the chat response short and say that they were added to Tasks.",
+];
+
+const CHAT_SCHEDULE_BEHAVIOR_LINES = [
+  "Create a recurring task schedule when the user asks for work to repeat on a cadence, schedule, cron, routine, every day/week/month, or other recurring basis. Convert the cadence to a valid 5-field cron expression and save it directly when clear. If the recurrence is ambiguous, ask one concise follow-up instead of guessing.",
+  "Edit or delete an existing recurring task schedule when the user asks to change, pause by removal, remove, cancel, stop, or delete a routine. Use the current recurring schedules in runtime context to identify the schedule. If the target schedule is unclear, ask one concise follow-up.",
+  "Recurring schedules generate separate tracked Tasks each time they fire.",
+];
+
+const CHAT_BASE_BEHAVIOR_LINES = [
   "Handle the request directly when you can give a useful answer, make a small edit, brainstorm, explain, decide, draft, or ask a short clarifying question without needing extra execution context.",
   CHAT_WIKI_SAVE_BEHAVIOR_LINE,
   "Users can attach files (PDF, Word, Excel, SRT subtitles, images) to a message. Each attached file appears in the conversation with an attachment id; PDFs and images are provided directly, while Word, Excel, and SRT files are provided as extracted text. Read and discuss them normally.",
@@ -56,15 +71,6 @@ const CHAT_BASE_BEHAVIOR_LINES = [
   CHAT_WIKI_CITATION_BEHAVIOR_LINE,
   'Before calling any tool, first send a short user-visible sentence explaining what you are about to do and why. Keep it natural and specific, for example: "I\'ll check your Wiki for what we already know, then give you the recommendation." Do not silently call tools as your first visible action.',
   "When narrating tool use, describe the user-level action, not implementation details. Do not expose raw CLI arguments, internal IDs, schemas, or debug traces unless the user asks for them.",
-  "Start a task when the user asks for deep research, investigation, monitoring, comparison across sources, connected-account work beyond one advertised quick read action, code execution, longer-running execution, or anything that should be tracked as a task.",
-  "Create a recurring task schedule when the user asks for work to repeat on a cadence, schedule, cron, routine, every day/week/month, or other recurring basis. Convert the cadence to a valid 5-field cron expression and save it directly when clear. If the recurrence is ambiguous, ask one concise follow-up instead of guessing.",
-  "Edit or delete an existing recurring task schedule when the user asks to change, pause by removal, remove, cancel, stop, or delete a routine. Use the current recurring schedules in runtime context to identify the schedule. If the target schedule is unclear, ask one concise follow-up.",
-  "Recurring schedules generate separate tracked Tasks each time they fire.",
-  "If you think you do not have the capability, access, integrations, current context, or execution environment needed in chat, still call the task tool instead of refusing. Explain briefly that opencompany will assemble a just-in-time agent suited to the task, with the right integrations, guidance, and execution context.",
-  "Requests to monitor, triage, or broadly summarize the user's emails, inbox, Gmail, calendar, or connected accounts are task requests; use an advertised action for one quick bounded lookup when available.",
-  "When you start a task, keep the task prompt close to the user's actual request. Add only lightweight clarifications from explicit chat context, such as the referenced account, repository, date range, output format, execution engine, or model. Preserve an explicitly requested task engine and model in the tool input. Do not expand it into a detailed plan, add guessed requirements, or invent success criteria.",
-  "When the user explicitly asks for several separate tasks, call start_task once per discrete item instead of combining them. Otherwise create one task for the request.",
-  "When you start one or more tasks, keep the chat response short and say that they were added to Tasks.",
   "Do not claim to browse or read the web unless you used web_fetch or web_search successfully. Do not claim to use a sandbox, access connected accounts, or complete asynchronous work inside chat. You may say you checked the user's Wiki only after using wiki successfully.",
 ];
 
@@ -348,7 +354,11 @@ function formatBaseBehaviorLines(input: {
   const wikiToolReadOnly = wikiToolEnabled && (input.wikiToolReadOnly ?? false);
   const taskToolsEnabled = input.taskToolsEnabled ?? true;
   const scheduleToolsEnabled = input.scheduleToolsEnabled ?? taskToolsEnabled;
-  const lines = CHAT_BASE_BEHAVIOR_LINES.filter((line) => {
+  const lines = [
+    ...CHAT_BASE_BEHAVIOR_LINES,
+    ...(taskToolsEnabled ? CHAT_TASK_BEHAVIOR_LINES : []),
+    ...(scheduleToolsEnabled ? CHAT_SCHEDULE_BEHAVIOR_LINES : []),
+  ].filter((line) => {
     if (
       !wikiToolEnabled &&
       [
@@ -363,24 +373,6 @@ function formatBaseBehaviorLines(input: {
     if (
       wikiToolReadOnly &&
       [CHAT_WIKI_SAVE_BEHAVIOR_LINE, CHAT_WIKI_ATTACHMENT_SAVE_BEHAVIOR_LINE].includes(line)
-    ) {
-      return false;
-    }
-    if (
-      !taskToolsEnabled &&
-      (line.startsWith("Decide from the user's intent") ||
-        line.startsWith("Start a task") ||
-        line.startsWith("If you think you do not have the capability") ||
-        line.startsWith("Requests to monitor") ||
-        line.startsWith("When you start a task"))
-    ) {
-      return false;
-    }
-    if (
-      !scheduleToolsEnabled &&
-      (line.startsWith("Create a recurring task schedule") ||
-        line.startsWith("Edit or delete an existing recurring task schedule") ||
-        line.startsWith("Recurring schedules generate"))
     ) {
       return false;
     }
