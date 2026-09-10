@@ -53,6 +53,16 @@ describe("skill mention identity and presentation", () => {
     },
   );
 
+  it.each([
+    "https://example.com/@skill/url-example",
+    "<https://example.com/@skill/url-example>",
+    "www.example.com/@skill/url-example",
+  ])("does not activate URL text the editor renders as a link: %s", (input) => {
+    const editor = makeEditor(input);
+    expect(chips(editor)).toHaveLength(0);
+    expect(extractWorkflowSkillMentionRefs(editor.getMarkdown())).toEqual([]);
+  });
+
   it("does not activate literal code examples after saving and reopening", () => {
     const editor = makeEditor(`Example: \`use ${TOKEN}\`.\n\n\`\`\`text\n${TOKEN}\n\`\`\``);
     expect(chips(editor)).toHaveLength(0);
