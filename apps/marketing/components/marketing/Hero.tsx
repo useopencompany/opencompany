@@ -64,12 +64,8 @@ export function Hero() {
           </p>
 
           <div className="mt-6 flex items-center justify-center gap-2">
-            <Cta
-              href="https://cal.com/louis-morgner-k0wc9i/opencompany-onboarding"
-              variant="secondary"
-              analyticsIntent="demo"
-            >
-              Get a Demo
+            <Cta href="/request-demo" variant="secondary" analyticsIntent="demo">
+              Request Demo
             </Cta>
             <Cta href="https://my.opencompany.chat" analyticsIntent="signup">
               Sign up
