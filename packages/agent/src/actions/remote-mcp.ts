@@ -10,6 +10,7 @@ import {
   ACTION_EFFECTS_WRITE,
   ActionAuthError,
   type ActionExecuteContext,
+  ActionInvalidParamsError,
   ActionPermissionError,
   type ActionProviderCatalog,
   type ActionProviderId,
@@ -491,6 +492,13 @@ async function executeRemoteMcpTool(input: {
       );
       outcome = "success";
       return output;
+    } catch (error) {
+      // JSON-RPC invalid params are model-correctable input failures. Counting them as
+      // provider outages can exhaust the turn's retry budget before corrected input runs.
+      if (error instanceof Error && "code" in error && error.code === -32602) {
+        throw new ActionInvalidParamsError(error.message);
+      }
+      throw error;
     } finally {
       await captureProductServerEvent("plugin_tool_call_completed", identity.userWorkosId, {
         workspace_id: identity.workspaceId,
