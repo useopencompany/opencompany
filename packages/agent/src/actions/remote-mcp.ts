@@ -563,7 +563,11 @@ function unwrapRemoteMcpResult(
     .map((entry) => entry.text);
   const joined = texts.join("\n");
   if (result.isError === true) {
-    if (registration.connectionProvider === "google_calendar" && isAuthExpiredMcpError(joined)) {
+    if (
+      (registration.connectionProvider === "google_calendar" ||
+        registration.connectionProvider === "google_admin") &&
+      isAuthExpiredMcpError(joined)
+    ) {
       throw remoteAuthError(registration, "auth_expired");
     }
     throw new Error(joined || `${registration.label} returned an MCP tool error.`);

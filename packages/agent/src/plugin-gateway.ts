@@ -48,6 +48,12 @@ import {
   loadGmailMcpWorkerConnection,
 } from "./integrations/gmail-mcp";
 import {
+  GOOGLE_ADMIN_MCP_ENDPOINT_URL,
+  getGoogleAdminMcpIntegrationState,
+  googleAdminMcpRuntimeEndpointUrl,
+  loadGoogleAdminMcpWorkerConnection,
+} from "./integrations/google-admin-mcp";
+import {
   GOOGLE_CALENDAR_MCP_ENDPOINT_URL,
   getGoogleCalendarMcpIntegrationState,
   googleCalendarMcpRuntimeEndpointUrl,
@@ -195,6 +201,12 @@ const providerBindings = {
     endpointUrl: GRANOLA_MCP_ENDPOINT_URL,
     getState: getGranolaMcpIntegrationState,
     loadConnection: loadGranolaMcpWorkerConnection,
+  },
+  "google-admin": {
+    provider: "google_admin",
+    endpointUrl: GOOGLE_ADMIN_MCP_ENDPOINT_URL,
+    getState: getGoogleAdminMcpIntegrationState,
+    loadConnection: loadGoogleAdminMcpWorkerConnection,
   },
   "google-calendar": {
     provider: "google_calendar",
@@ -526,6 +538,10 @@ function bindRegistration(
     loadConnection = (input) =>
       loadConvexMcpWorkerConnection({ ...input, registrationId: record.id });
     server = { ...record.server, url: convexMcpRuntimeEndpointUrl() };
+  } else if (record.pluginName === "google-admin") {
+    loadConnection = (input) =>
+      loadGoogleAdminMcpWorkerConnection({ ...input, registrationId: record.id });
+    server = { ...record.server, url: googleAdminMcpRuntimeEndpointUrl() };
   } else if (record.pluginName === "google-calendar") {
     loadConnection = (input) =>
       loadGoogleCalendarMcpWorkerConnection({ ...input, registrationId: record.id });

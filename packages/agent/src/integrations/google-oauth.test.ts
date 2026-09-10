@@ -117,6 +117,7 @@ describe("opencompany Google OAuth", () => {
       Object.values(GOOGLE_PROVIDER_CONFIG).map((config) => googleOAuthRedirectUri(config)),
     ).toEqual([
       "https://opencompany.chat/api/integrations/gmail/callback",
+      "https://opencompany.chat/api/integrations/google-admin/callback",
       "https://opencompany.chat/api/integrations/google-calendar/callback",
       "https://opencompany.chat/api/integrations/google-drive/callback",
     ]);

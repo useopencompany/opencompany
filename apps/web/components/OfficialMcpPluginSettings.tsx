@@ -260,6 +260,25 @@ export function GranolaPluginDetail({
   );
 }
 
+export function GoogleAdminPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS["google-admin"]}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
 export function GoogleCalendarPluginDetail({
   pluginState,
   canEdit,
@@ -1769,6 +1788,7 @@ function pluginAccountsFromState(
     config.connectionProvider === "fathom" ||
     config.connectionProvider === "github_user" ||
     config.connectionProvider === "gmail" ||
+    config.connectionProvider === "google_admin" ||
     config.connectionProvider === "google_calendar" ||
     config.connectionProvider === "google_drive" ||
     config.connectionProvider === "hubspot" ||

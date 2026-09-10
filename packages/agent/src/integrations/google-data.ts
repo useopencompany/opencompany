@@ -12,7 +12,12 @@ import { getGitHubUserIntegrationState } from "./github-user";
 import { getLatitudeIntegrationState } from "./latitude-mcp";
 import { getLinearIntegrationState } from "./linear-mcp";
 
-const GOOGLE_PROVIDERS: IntegrationProvider[] = ["gmail", "google_calendar", "google_drive"];
+const GOOGLE_PROVIDERS: IntegrationProvider[] = [
+  "gmail",
+  "google_calendar",
+  "google_drive",
+  "google_admin",
+];
 type DbLike = any;
 const BROWSER_TOOLS = [
   "browser_open",
@@ -56,6 +61,33 @@ export async function getGoogleIntegrationState(userWorkosId: string) {
     .orderBy(asc(integrations.provider), asc(integrations.updatedAt), asc(integrations.id));
 
   return googleIntegrationStateFromRows(rows);
+}
+
+export async function loadGoogleAdminIntegration(input: { userWorkosId: string; db?: DbLike }) {
+  const [row] = await (input.db ?? getDb())
+    .select({
+      id: integrations.id,
+      userWorkosId: integrations.userWorkosId,
+      status: integrations.status,
+      accountEmail: integrations.accountEmail,
+      accountName: integrations.accountName,
+      statusReason: integrations.statusReason,
+      scopes: integrations.scopes,
+      capabilityModes: integrations.capabilityModes,
+      toolModes: integrations.toolModes,
+    })
+    .from(integrations)
+    .where(
+      and(
+        eq(integrations.userWorkosId, input.userWorkosId),
+        isNull(integrations.workspaceId),
+        eq(integrations.provider, "google_admin"),
+        ne(integrations.status, "disconnected"),
+      ),
+    )
+    .orderBy(desc(integrations.updatedAt), desc(integrations.id))
+    .limit(1);
+  return row;
 }
 
 export async function loadGoogleCalendarIntegration(input: { userWorkosId: string; db?: DbLike }) {

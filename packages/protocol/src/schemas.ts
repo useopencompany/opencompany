@@ -426,6 +426,7 @@ export const IntegrationAccountReadModelSchema = z
     id: z.string().min(1).max(128),
     provider: z.enum([
       "gmail",
+      "google_admin",
       "google_calendar",
       "google_drive",
       "linear",
@@ -3829,6 +3830,7 @@ export const IntegrationAccountStatusSchema = z.enum([
 
 export const PersonalIntegrationProviderSchema = z.enum([
   "gmail",
+  "google_admin",
   "google_calendar",
   "google_drive",
   "linear",
