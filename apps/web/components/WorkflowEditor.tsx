@@ -1382,6 +1382,7 @@ function StepCloudModelPicker({
   const [open, setOpen] = useState(false);
   const options = workflowCloudModelOptions(engine);
   const selectedOption = options.find((option) => option.id === value);
+  const visibleOptions = options.filter((option) => option.id !== "anthropic/claude-opus-4.8");
   const selectedLabel = selectedOption?.label ?? value;
   const runtimeLabel = CLOUD_CODING_ENGINE_CONFIG[engine].label;
 
@@ -1401,7 +1402,7 @@ function StepCloudModelPicker({
         sideOffset={8}
         className="w-[312px] max-w-[calc(100vw-1.5rem)] bg-surface p-1 text-ink"
       >
-        {options.map((option) => (
+        {visibleOptions.map((option) => (
           <ModelOption
             key={option.id}
             label={option.label}
