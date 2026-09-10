@@ -324,6 +324,7 @@ describe("runner ACP tools MCP", () => {
       ok: true,
       action: "gmail.search",
       result: { messages: [] },
+      budget: { limit: 16, used: 1, remaining: 15 },
     });
     expect(executeAction).toHaveBeenCalledWith({ request, signal });
     expect(providerExecuteAction).toHaveBeenCalledOnce();

@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.25.0] - 2026-09-10
+
+### Added
+- connect your own hosted mcp server from plugins to use tools beyond the catalog. test the connection, review its tools, and choose which actions need your approval (#1655) — @louis.
+- notion, supabase, resend, and convex are now official plugins. connect your account or deployment to work with documents, databases, and email from chat (#1640, #1651, #1659, #1669) — @louis.
+- google workspace admins can now use the google admin plugin to create user accounts, manage groups, and add group members (#1686) — @louis.
+- keep skills personal or share them with your company through the visibility setting. company skills are available for teammates to use and edit (#1668) — @louis.
+- create, edit, rename, or archive your skills from chat, including codex and claude code sessions. you can also edit instructions directly in the skill's settings page (#1646, #1685) — @louis.
+- turn on bots in preferences to create a named bot for ongoing work and return to its conversation from the sidebar (#1661, #1665) — @louis.
+- choose claude opus 5 for claude code chats and workflow steps (#1663) — @louis.
+- see your remaining codex subscription allowance and when it resets in inference settings (#1683) — @louis.
+- reschedule a google calendar event from chat while keeping its attendees and meeting link (#1670) — @louis.
+
+### Changed
+- plugins now belong to you personally, with your own accounts and permissions. if a previously installed plugin is missing, reinstall it from plugins, review its permissions, and reconnect your account when prompted (#1679, #1689) — @louis.
+- coding sandbox time now uses workspace credits and appears as sandbox usage, even with a connected model subscription. running time includes idle time; paused time is not charged (#1681) — @louis.
+- connect stripe through its sign-in and consent flow without creating and pasting an api key (#1673) — @louis.
+- unfinished workflows now save as drafts. add instructions to every step, then activate the workflow when you're ready (#1658) — @louis.
+- background tasks now pause for one-time action approval across all engines. approve or deny from the task, then it resumes without changing your standing permissions (#1654, #1660) — @louis.
+- requesting a demo now starts with a short form about your team, then lets you choose a time on the same page (#1703) — @louis.
+
+### Fixed
+- unsent message text and mentions now survive a refresh in the same browser tab. attachments still need to be added again (#1684) — @louis.
+- skills selected in workflow instructions now keep their readable names and work after saving, fixing runs that incorrectly reported a skill as unavailable (#1696, #1697) — @louis.
+- plugin installs are more reliable, and returning to the catalog after installing now shows the correct state (#1645, #1647, #1692) — @louis.
+- plugins that still need an account now show a connection warning and a clear connect button (#1680) — @louis.
+- choosing always allow now clears all pending requests for that same action in the current chat run, so work can continue (#1699) — @louis.
+- connected accounts load reliably again, including after connecting notion (#1596, #1609, #1650) — @louis.
+- approving an action now resumes the original work without restarting it or asking again. repeated identical writes within a turn no longer create duplicate results (#1631, #1670) — @louis.
+- tasks waiting for approval stop showing a working timer, and tasks waiting for your input can now be archived (#1676, #1644) — @louis.
+- coding sessions recover when a sandbox stops responding, and claude tasks reliably resume at their scheduled follow-up time (#1672, #1678, #1635, #1694) — @louis.
+- replacing a google doc no longer turns headings and ordinary paragraphs into list items (#1638) — @louis.
+- opening one tool call in an older message no longer expands the others (#1690) — @louis.
+- command-palette search keeps matching chats and tasks in newest-first order, including after you clear the search (#1698) — @louis.
+- connected tools can recover from an invalid input within the same turn, so you no longer need to send another message just to retry a corrected request (#1691) — @louis.
+- disabling legacy brain now stops its background imports and related usage charges (#1641) — @louis.
+
+### Security
+- updated dependencies to address reported security vulnerabilities (#1639) — @louis.
+
 ## [1.24.0] - 2026-09-07
 
 ### Added

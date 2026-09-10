@@ -44,6 +44,22 @@ describe("engine message model admission", () => {
     });
   });
 
+  it("admits DeepSeek V4 Flash without changing the requested model", async () => {
+    await expect(
+      admitEngineMessage({
+        actor: {} as never,
+        engine: { type: "opencompany", schemaVersion: 1 },
+        model: "deepseek/deepseek-v4-flash",
+        defaultProductModel: "moonshotai/kimi-k3",
+        auth: connectedAuth as never,
+      }),
+    ).resolves.toEqual({
+      engine: "opencompany",
+      model: "deepseek/deepseek-v4-flash",
+      runtimeModel: "deepseek/deepseek-v4-flash",
+    });
+  });
+
   it.each([undefined, "openai/gpt-6-astra"])(
     "uses Astra for Codex with model %s",
     async (model) => {
