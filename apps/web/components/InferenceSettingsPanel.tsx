@@ -13,6 +13,8 @@ import {
 } from "@/lib/codex-auth";
 import type { ClaudeCodeProviderState, CodexProviderState } from "@/lib/integration-state";
 
+import { CodexSubscriptionUsage } from "./CodexSubscriptionUsage";
+
 export function InferenceSettingsPanel({
   codex,
   claudeCode,
@@ -34,7 +36,7 @@ export function InferenceSettingsPanel({
             manages their own connections.
           </p>
         </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2">
           <CodexSubscriptionCard integration={codex} />
           <ClaudeCodeSubscriptionCard integration={claudeCode} />
         </div>
@@ -201,6 +203,9 @@ function CodexSubscriptionCard({ integration }: { integration: CodexProviderStat
           ) : null}
           {flow?.statusReason || error ? (
             <p className="text-[12px] leading-4 text-warning">{error ?? flow?.statusReason}</p>
+          ) : null}
+          {integration.connected && !flow ? (
+            <CodexSubscriptionUsage key={integration.lastValidatedAt ?? "connected"} />
           ) : null}
         </div>
       }

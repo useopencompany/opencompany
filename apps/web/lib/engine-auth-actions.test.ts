@@ -10,6 +10,7 @@ import {
 import {
   disconnectCodexAuth,
   isCodexConnectedForUser,
+  loadCurrentCodexUsage,
   pollCodexDeviceAuth,
   setCodexWorkspaceEngineEnabled,
   startCodexDeviceAuth,
@@ -59,6 +60,15 @@ function errorEnvelope(message: string, status: number) {
 }
 
 describe("engine auth command adapters", () => {
+  it("loads usage through the authenticated Codex usage endpoint", async () => {
+    const usage = { windows: [], updatedAt: "2026-09-10T12:00:00.000Z" };
+    const requests = stubApi(() => Response.json({ data: usage, meta }));
+    await expect(loadCurrentCodexUsage()).resolves.toEqual({ ok: true, usage });
+    expect(requests[0]?.method).toBe("GET");
+    expect(new URL(requests[0]!.url).pathname).toBe("/v1/engine-auth/codex/usage");
+    expect(requests[0]?.headers.get("Cookie")).toBe("wos-session=sealed");
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("OPENCOMPANY_API_ORIGIN", "https://api.example.test");
