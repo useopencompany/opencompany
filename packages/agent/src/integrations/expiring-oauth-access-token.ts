@@ -60,6 +60,9 @@ type GetExpiringOAuthAccessTokenInput<TPayload extends object> = {
   options?: {
     signal?: AbortSignal;
     forceRefresh?: boolean;
+    // A stale consumer may report 401 after another process has already rotated the credential.
+    // Refresh only while the rejected token is still current so it cannot invalidate the newer one.
+    refreshIfAccessToken?: string;
     minimumValidityMs?: number;
     db?: DbLike;
     now?: Date;
@@ -85,7 +88,16 @@ export async function getExpiringOAuthAccessToken<TPayload extends object>(
   if (!parsed) {
     return failAuthentication(input, input.invalidCredential, db, now);
   }
-  if (!input.options?.forceRefresh && isFresh(credential, now, input.options?.minimumValidityMs)) {
+  if (
+    input.options?.refreshIfAccessToken !== undefined &&
+    parsed.accessToken !== input.options.refreshIfAccessToken
+  ) {
+    return parsed.accessToken;
+  }
+  if (
+    !refreshRequested(input.options) &&
+    isFresh(credential, now, input.options?.minimumValidityMs)
+  ) {
     return parsed.accessToken;
   }
 
@@ -120,10 +132,16 @@ async function refreshWithLease<TPayload extends object>(
   const parsed = current ? input.parseCredential(current.payload) : null;
   if (!current) return failAuthentication(input, input.missingCredential, db, now);
   if (!parsed) return failAuthentication(input, input.invalidCredential, db, now);
+  if (
+    input.options?.refreshIfAccessToken !== undefined &&
+    parsed.accessToken !== input.options.refreshIfAccessToken
+  ) {
+    return parsed.accessToken;
+  }
 
   const alreadyRotated = !sameInstant(current.lastRotatedAt, initiallyLoaded.lastRotatedAt);
   if (
-    (alreadyRotated || !input.options?.forceRefresh) &&
+    (alreadyRotated || !refreshRequested(input.options)) &&
     isFresh(current, now, input.options?.minimumValidityMs)
   ) {
     return parsed.accessToken;
@@ -231,6 +249,10 @@ function isFresh(
   return Boolean(
     credential.expiresAt && credential.expiresAt.getTime() - requiredValidityMs > now.getTime(),
   );
+}
+
+function refreshRequested(options: GetExpiringOAuthAccessTokenInput<object>["options"]) {
+  return Boolean(options?.forceRefresh || options?.refreshIfAccessToken !== undefined);
 }
 
 function sameInstant(left: Date | null, right: Date | null) {

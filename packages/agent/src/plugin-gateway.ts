@@ -150,6 +150,7 @@ import {
   loadXMcpWorkerConnection,
   X_MCP_ENDPOINT_URL,
 } from "./integrations/x-mcp";
+import { xMcpCapabilities, xMcpDiscoverySnapshot } from "./integrations/x-mcp-catalog";
 
 const DISCOVERY_TTL_MS = 60 * 60 * 1_000;
 const DISCOVERY_RETRY_MS = 5 * 60 * 1_000;
@@ -555,6 +556,8 @@ function bindRegistration(
       loadGmailMcpWorkerConnection({ ...input, registrationId: record.id });
     server = { ...record.server, url: gmailMcpRuntimeEndpointUrl() };
   }
+  const capabilities =
+    record.pluginName === "x" ? xMcpCapabilities(record.capabilities) : record.capabilities;
   return {
     pluginName: record.pluginName,
     source: `plugin:${record.pluginName}:${record.server.name}`,
@@ -562,8 +565,11 @@ function bindRegistration(
     label: displayName(record.pluginName),
     description: record.pluginDescription,
     server,
-    capabilities: record.capabilities,
-    discoverySnapshot: record.discoverySnapshot,
+    capabilities,
+    discoverySnapshot:
+      record.pluginName === "x"
+        ? xMcpDiscoverySnapshot(record.discoverySnapshot, capabilities)
+        : record.discoverySnapshot,
     getState: binding.getState,
     loadConnection,
     isEnabled: () =>
