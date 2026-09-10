@@ -86,6 +86,7 @@ export async function pollSandboxBilling(
       await billRegisteredSandbox(row.sandboxId, {
         db,
         signal: input.signal,
+        observedAt: now,
         ...(input.getInfo ? { getInfo: input.getInfo } : {}),
       });
     } catch (error) {
