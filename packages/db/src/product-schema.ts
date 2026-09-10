@@ -5400,6 +5400,8 @@ export const taskReadModelV1 = productSchema.table(
     error: text("error"),
     reportedStatus: text("reported_status").$type<TaskReportedOutcome>(),
     outcomeComment: text("outcome_comment"),
+    // Mirrors the unread flag on the Task's conversation, which is where settlement sets it.
+    hasUnseen: boolean("has_unseen").notNull().default(false),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),

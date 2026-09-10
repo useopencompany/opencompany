@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { countAwaitingReview, groupReviewItems, selectReviewItems } from "@/lib/review-inbox";
+import {
+  countAwaitingReview,
+  groupReviewItems,
+  hasPendingApproval,
+  selectReviewItems,
+} from "@/lib/review-inbox";
 
 type ConversationInput = Parameters<typeof selectReviewItems>[0]["conversations"][number];
 type TaskInput = Parameters<typeof selectReviewItems>[0]["tasks"][number];
@@ -17,9 +22,13 @@ function conversation(overrides: Partial<ConversationInput> & { id: string }): C
 
 function task(overrides: Partial<TaskInput> & { id: string }): TaskInput {
   return {
-    display_id: `TASK-${overrides.id}`,
-    session_id: null,
-    archived_at: null,
+    displayId: `TASK-${overrides.id}`,
+    name: `Task ${overrides.id}`,
+    conversationId: `conversation_${overrides.id}`,
+    status: "succeeded",
+    hasUnseen: true,
+    archivedAt: null,
+    updatedAt: "2026-09-10T10:00:00.000Z",
     ...overrides,
   };
 }
@@ -55,39 +64,83 @@ describe("selectReviewItems", () => {
     expect(items.map((item) => item.conversationId)).toEqual(["unread"]);
   });
 
-  it("labels a conversation that backs a task with its task identity", () => {
+  // A Task's own conversation is never projected into the conversation read model
+  // (refresh_conversation_read_model_v1 keeps only kind 'chat'), so the Task read model is the
+  // only place a finished Task result can come from.
+  it("includes an unread task result from the task read model", () => {
     const items = selectReviewItems({
-      conversations: [conversation({ id: "c1" })],
-      tasks: [task({ id: "t1", display_id: "TASK-42", session_id: "c1" })],
+      conversations: [],
+      tasks: [
+        task({
+          id: "t1",
+          displayId: "TASK-42",
+          name: "Refresh the pipeline",
+          conversationId: "c9",
+        }),
+      ],
     });
 
-    expect(items[0]?.source).toEqual({ kind: "task", taskId: "t1", displayId: "TASK-42" });
+    expect(items).toEqual([
+      {
+        conversationId: "c9",
+        title: "Refresh the pipeline",
+        updatedAt: "2026-09-10T10:00:00.000Z",
+        source: { kind: "task", taskId: "t1", displayId: "TASK-42" },
+      },
+    ]);
   });
 
-  it("treats an archived task's conversation as a plain chat rather than dropping it", () => {
+  it("includes a failed task result, which is still something to read", () => {
     const items = selectReviewItems({
-      conversations: [conversation({ id: "c1" })],
-      tasks: [task({ id: "t1", session_id: "c1", archived_at: "2026-09-09T10:00:00.000Z" })],
+      conversations: [],
+      tasks: [task({ id: "t1", status: "failed" })],
     });
 
-    expect(items[0]?.source).toEqual({ kind: "chat" });
+    expect(items.map((item) => item.source)).toEqual([
+      { kind: "task", taskId: "t1", displayId: "TASK-t1" },
+    ]);
   });
 
-  it("sorts newest first", () => {
+  it("excludes tasks that are unfinished, waiting on input, seen, or archived", () => {
+    const items = selectReviewItems({
+      conversations: [],
+      tasks: [
+        task({ id: "queued", status: "queued" }),
+        task({ id: "running", status: "running" }),
+        task({ id: "waiting", status: "waiting" }),
+        task({ id: "canceled", status: "canceled" }),
+        task({ id: "seen", hasUnseen: false }),
+        task({ id: "archived", archivedAt: "2026-09-09T10:00:00.000Z" }),
+        task({ id: "unread" }),
+      ],
+    });
+
+    expect(items.map((item) => item.source)).toEqual([
+      { kind: "task", taskId: "unread", displayId: "TASK-unread" },
+    ]);
+  });
+
+  it("sorts tasks and chats together, newest first", () => {
     const items = selectReviewItems({
       conversations: [
-        conversation({ id: "older", updatedAt: "2026-09-10T08:00:00.000Z" }),
-        conversation({ id: "newer", updatedAt: "2026-09-10T12:00:00.000Z" }),
+        conversation({ id: "older-chat", updatedAt: "2026-09-10T08:00:00.000Z" }),
+        conversation({ id: "newest-chat", updatedAt: "2026-09-10T14:00:00.000Z" }),
       ],
-      tasks: [],
+      tasks: [
+        task({ id: "t1", conversationId: "middle-task", updatedAt: "2026-09-10T12:00:00.000Z" }),
+      ],
     });
 
-    expect(items.map((item) => item.conversationId)).toEqual(["newer", "older"]);
+    expect(items.map((item) => item.conversationId)).toEqual([
+      "newest-chat",
+      "middle-task",
+      "older-chat",
+    ]);
   });
 });
 
 describe("countAwaitingReview", () => {
-  it("counts only unread, unarchived, settled conversations", () => {
+  it("counts unread, unarchived, settled work from both sources", () => {
     const count = countAwaitingReview({
       conversations: [
         conversation({ id: "unread-a" }),
@@ -96,20 +149,29 @@ describe("countAwaitingReview", () => {
         conversation({ id: "seen", hasUnseen: false }),
         conversation({ id: "archived", archivedAt: "2026-09-09T10:00:00.000Z" }),
       ],
+      tasks: [
+        task({ id: "unread-task" }),
+        task({ id: "waiting", status: "waiting" }),
+        task({ id: "seen-task", hasUnseen: false }),
+      ],
     });
 
-    expect(count).toBe(2);
+    expect(count).toBe(3);
   });
 });
 
 describe("groupReviewItems", () => {
   it("splits task results from chat replies and drops empty groups", () => {
     const items = selectReviewItems({
-      conversations: [
-        conversation({ id: "c1", updatedAt: "2026-09-10T12:00:00.000Z" }),
-        conversation({ id: "c2", updatedAt: "2026-09-10T11:00:00.000Z" }),
+      conversations: [conversation({ id: "c2", updatedAt: "2026-09-10T11:00:00.000Z" })],
+      tasks: [
+        task({
+          id: "t1",
+          displayId: "TASK-7",
+          conversationId: "c1",
+          updatedAt: "2026-09-10T12:00:00.000Z",
+        }),
       ],
-      tasks: [task({ id: "t1", display_id: "TASK-7", session_id: "c1" })],
     });
 
     expect(groupReviewItems(items)).toEqual([
@@ -128,5 +190,44 @@ describe("groupReviewItems", () => {
 
   it("returns no groups for an empty queue", () => {
     expect(groupReviewItems([])).toEqual([]);
+  });
+});
+
+describe("hasPendingApproval", () => {
+  it("detects an unanswered approval request on the turn", () => {
+    expect(
+      hasPendingApproval({
+        parts: [
+          { type: "text", text: "I need to send this email." },
+          {
+            type: "dynamic-tool",
+            toolName: "codex_approval",
+            toolCallId: "call_1",
+            state: "approval-requested",
+            input: {},
+          },
+        ],
+      } as never),
+    ).toBe(true);
+  });
+
+  it("ignores an approval the user already answered", () => {
+    expect(
+      hasPendingApproval({
+        parts: [
+          {
+            type: "dynamic-tool",
+            toolName: "codex_approval",
+            toolCallId: "call_1",
+            state: "approval-responded",
+            input: {},
+          },
+        ],
+      } as never),
+    ).toBe(false);
+  });
+
+  it("is false for an ordinary finished turn", () => {
+    expect(hasPendingApproval({ parts: [{ type: "text", text: "Done." }] } as never)).toBe(false);
   });
 });

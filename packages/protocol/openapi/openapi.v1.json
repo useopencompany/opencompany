@@ -585,6 +585,21 @@
               "name"
             ],
             "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "markSeen": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              }
+            },
+            "required": [
+              "markSeen"
+            ],
+            "additionalProperties": false
           }
         ]
       },
@@ -4344,6 +4359,9 @@
           "chatCapabilitiesBetaEnabled": {
             "type": "boolean"
           },
+          "reviewInboxEnabled": {
+            "type": "boolean"
+          },
           "wikiEnabled": {
             "type": "boolean",
             "enum": [
@@ -4407,6 +4425,7 @@
           "taskSpawningEnabled",
           "autoModelRoutingEnabled",
           "chatCapabilitiesBetaEnabled",
+          "reviewInboxEnabled",
           "wikiEnabled",
           "taskViewMode",
           "taskTimeRange",
@@ -9968,6 +9987,9 @@
           },
           "autoModelRoutingEnabled": {
             "type": "boolean"
+          },
+          "reviewInboxEnabled": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -9977,7 +9999,8 @@
           "wikiEnabled",
           "taskViewMode",
           "taskTimeRange",
-          "autoModelRoutingEnabled"
+          "autoModelRoutingEnabled",
+          "reviewInboxEnabled"
         ],
         "additionalProperties": false
       },
@@ -10017,6 +10040,9 @@
             ]
           },
           "autoModelRoutingEnabled": {
+            "type": "boolean"
+          },
+          "reviewInboxEnabled": {
             "type": "boolean"
           }
         },

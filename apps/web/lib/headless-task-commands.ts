@@ -109,6 +109,19 @@ export async function archiveHeadlessTask(taskId: string, options: ScopedClientO
   return data.task;
 }
 
+export async function markHeadlessTaskSeen(taskId: string, options: ScopedClientOptions) {
+  const response = await taskClient(options).v1.tasks[":taskId"].$patch({
+    param: { taskId },
+    json: { markSeen: true },
+  });
+  if (!response.ok) throw await taskResponseError(response, "Task acknowledgment failed");
+  const data = (await response.json()).data;
+  await reconcileCommittedProjection(
+    awaitHeadlessTaskTransaction(data.transactionId, { scopeKey: options.scopeKey }),
+  );
+  return data.task;
+}
+
 export async function cancelHeadlessTaskRun(runId: string, options: ClientOptions = {}) {
   const response = await taskClient(options).v1.runs[":runId"].cancel.$post({ param: { runId } });
   if (!response.ok) throw await taskResponseError(response, "Task cancellation failed");

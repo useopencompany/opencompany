@@ -1,23 +1,26 @@
 import "@testing-library/jest-dom/vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReviewItem } from "@/lib/review-inbox";
 import { ReviewInboxRoute } from "./ReviewInbox";
 
+type TranscriptPart = { type: string; text?: string; state?: string; toolCallId?: string };
+
 const reviewItemsMock = vi.hoisted(() => ({ value: [] as ReviewItem[] }));
 const transcriptMock = vi.hoisted(() => ({
-  messages: [] as Array<{
-    role: "user" | "assistant";
-    parts: Array<{ type: string; text: string }>;
-  }>,
+  messages: [] as Array<{ role: "user" | "assistant"; parts: TranscriptPart[] }>,
   isLoading: false,
   syncFailed: false,
 }));
 const updateConversationMock = vi.hoisted(() => vi.fn(async () => ({ transactionId: "1" })));
+const markTaskSeenMock = vi.hoisted(() => vi.fn(async () => ({ id: "task_c1" })));
 
 vi.mock("@/components/AppDataProvider", () => ({
-  useAppData: () => ({ reviewItems: reviewItemsMock.value }),
+  useAppData: () => ({
+    reviewItems: reviewItemsMock.value,
+    workspace: { id: "workspace_1" },
+  }),
 }));
 
 vi.mock("@/components/Routes", () => ({
@@ -42,6 +45,10 @@ vi.mock("@/lib/headless-chat-commands", () => ({
   updateHeadlessChatConversation: updateConversationMock,
 }));
 
+vi.mock("@/lib/headless-task-commands", () => ({
+  markHeadlessTaskSeen: markTaskSeenMock,
+}));
+
 function chatItem(id: string, title: string, updatedAt: string): ReviewItem {
   return { conversationId: id, title, updatedAt, source: { kind: "chat" } };
 }
@@ -53,6 +60,10 @@ function taskItem(id: string, title: string, updatedAt: string): ReviewItem {
     updatedAt,
     source: { kind: "task", taskId: `task_${id}`, displayId: "TASK-7" },
   };
+}
+
+function assistantReply(text: string) {
+  return { role: "assistant" as const, parts: [{ type: "text", text }] };
 }
 
 describe("ReviewInboxRoute", () => {
@@ -83,13 +94,13 @@ describe("ReviewInboxRoute", () => {
     expect(screen.getByText("TASK-7")).toBeInTheDocument();
   });
 
-  it("marks a conversation seen when it is opened and renders its last assistant turn", async () => {
+  it("marks a chat seen once its result renders", async () => {
     reviewItemsMock.value = [
       chatItem("c1", "Draft the investor update", "2026-09-10T11:00:00.000Z"),
     ];
     transcriptMock.messages = [
       { role: "user", parts: [{ type: "text", text: "Write it" }] },
-      { role: "assistant", parts: [{ type: "text", text: "Here is the draft." }] },
+      assistantReply("Here is the draft."),
     ];
 
     render(<ReviewInboxRoute />);
@@ -99,16 +110,97 @@ describe("ReviewInboxRoute", () => {
     expect(screen.getByTestId("markdown")).toHaveTextContent("Here is the draft.");
   });
 
+  // A Task's seen state lives behind the Task command: the conversation command rejects a
+  // conversation of kind 'task', so acknowledging one through it would silently do nothing.
+  it("marks a task seen through the task command, not the conversation command", async () => {
+    reviewItemsMock.value = [taskItem("c1", "Weekly competitor scan", "2026-09-10T12:00:00.000Z")];
+    transcriptMock.messages = [assistantReply("Scan complete.")];
+
+    render(<ReviewInboxRoute />);
+    await userEvent.click(screen.getByRole("button", { name: /Weekly competitor scan/ }));
+
+    expect(markTaskSeenMock).toHaveBeenCalledWith("task_c1", { scopeKey: "workspace_1" });
+    expect(updateConversationMock).not.toHaveBeenCalled();
+  });
+
+  it("does not acknowledge a result that failed to load", async () => {
+    reviewItemsMock.value = [
+      chatItem("c1", "Draft the investor update", "2026-09-10T11:00:00.000Z"),
+    ];
+    transcriptMock.syncFailed = true;
+
+    render(<ReviewInboxRoute />);
+    await userEvent.click(screen.getByRole("button", { name: /Draft the investor update/ }));
+
+    expect(screen.getByText(/could not be loaded/)).toBeInTheDocument();
+    expect(updateConversationMock).not.toHaveBeenCalled();
+    expect(screen.getByTestId("review-item-unread")).toBeInTheDocument();
+  });
+
+  it("does not acknowledge a transcript that has not delivered its turns yet", async () => {
+    reviewItemsMock.value = [
+      chatItem("c1", "Draft the investor update", "2026-09-10T11:00:00.000Z"),
+    ];
+    transcriptMock.isLoading = true;
+
+    render(<ReviewInboxRoute />);
+    await userEvent.click(screen.getByRole("button", { name: /Draft the investor update/ }));
+
+    expect(updateConversationMock).not.toHaveBeenCalled();
+  });
+
+  // A run paused for an approval settles like a finished one and reaches this queue. Clearing its
+  // unread state here would drop the only signal that it is waiting on the reader.
+  it("offers an approval affordance and leaves the item unread", async () => {
+    reviewItemsMock.value = [chatItem("c1", "Send the outreach", "2026-09-10T11:00:00.000Z")];
+    transcriptMock.messages = [
+      {
+        role: "assistant",
+        parts: [
+          { type: "text", text: "I am ready to send this." },
+          { type: "dynamic-tool", toolCallId: "call_1", state: "approval-requested" },
+        ],
+      },
+    ];
+
+    render(<ReviewInboxRoute />);
+    await userEvent.click(screen.getByRole("button", { name: /Send the outreach/ }));
+
+    expect(screen.getByText(/stopped to ask for approval/)).toBeInTheDocument();
+    // The reader still needs what the agent said in order to decide.
+    expect(screen.getByTestId("markdown")).toHaveTextContent("I am ready to send this.");
+    expect(updateConversationMock).not.toHaveBeenCalled();
+    expect(screen.getByTestId("review-item-unread")).toBeInTheDocument();
+  });
+
+  // Scanning back for the most recent turn that happens to carry text would show a stale answer
+  // as if it were the current result.
+  it("renders the latest assistant turn rather than the latest one carrying text", async () => {
+    reviewItemsMock.value = [chatItem("c1", "Pull the numbers", "2026-09-10T11:00:00.000Z")];
+    transcriptMock.messages = [
+      assistantReply("Here are last week's numbers."),
+      { role: "user", parts: [{ type: "text", text: "And this week?" }] },
+      { role: "assistant", parts: [{ type: "file", text: "" }] },
+    ];
+
+    render(<ReviewInboxRoute />);
+    await userEvent.click(screen.getByRole("button", { name: /Pull the numbers/ }));
+
+    expect(screen.queryByTestId("markdown")).not.toBeInTheDocument();
+    expect(screen.getByText(/finished without a text result/)).toBeInTheDocument();
+  });
+
   it("keeps an opened item in the list after it leaves the unread queue", async () => {
     reviewItemsMock.value = [
       chatItem("c1", "Draft the investor update", "2026-09-10T11:00:00.000Z"),
     ];
+    transcriptMock.messages = [assistantReply("Here is the draft.")];
 
     const view = render(<ReviewInboxRoute />);
     await userEvent.click(screen.getByRole("button", { name: /Draft the investor update/ }));
-    expect(screen.getByTestId("review-item-read")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("review-item-read")).toBeInTheDocument());
 
-    // The live query drops the row once markSeen lands; the reader should not lose their place.
+    // The live query drops the row once the acknowledgment lands; the reader keeps their place.
     reviewItemsMock.value = [];
     view.rerender(<ReviewInboxRoute />);
 
@@ -127,9 +219,7 @@ describe("ReviewInboxRoute", () => {
 
   it("links a task to its task route and a chat to its chat route", async () => {
     reviewItemsMock.value = [taskItem("c1", "Weekly competitor scan", "2026-09-10T12:00:00.000Z")];
-    transcriptMock.messages = [
-      { role: "assistant", parts: [{ type: "text", text: "Scan complete." }] },
-    ];
+    transcriptMock.messages = [assistantReply("Scan complete.")];
 
     render(<ReviewInboxRoute />);
     await userEvent.click(screen.getByRole("button", { name: /Weekly competitor scan/ }));
@@ -148,18 +238,6 @@ describe("ReviewInboxRoute", () => {
     await userEvent.click(screen.getByRole("button", { name: /Silent run/ }));
 
     expect(screen.getByText(/finished without a text result/)).toBeInTheDocument();
-  });
-
-  it("surfaces a sync failure rather than showing a blank result", async () => {
-    reviewItemsMock.value = [
-      chatItem("c1", "Draft the investor update", "2026-09-10T11:00:00.000Z"),
-    ];
-    transcriptMock.syncFailed = true;
-
-    render(<ReviewInboxRoute />);
-    await userEvent.click(screen.getByRole("button", { name: /Draft the investor update/ }));
-
-    expect(screen.getByText(/could not be loaded/)).toBeInTheDocument();
   });
 
   it("returns to the list from the detail pane", async () => {

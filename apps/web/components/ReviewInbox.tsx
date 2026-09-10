@@ -1,23 +1,28 @@
 "use client";
 
-import { ArrowLeft, Inbox } from "lucide-react";
+import { ArrowLeft, Inbox, ShieldQuestion } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppData } from "@/components/AppDataProvider";
 import { Markdown } from "@/components/Markdown";
 import { EmptyState, formatRelativeTime } from "@/components/Routes";
 import { useHeadlessChatTranscript } from "@/components/useHeadlessChatTranscript";
 import { textFromChatUiMessage } from "@/lib/chat-ui";
 import { updateHeadlessChatConversation } from "@/lib/headless-chat-commands";
-import { groupReviewItems, type ReviewItem } from "@/lib/review-inbox";
+import { markHeadlessTaskSeen } from "@/lib/headless-task-commands";
+import { groupReviewItems, hasPendingApproval, type ReviewItem } from "@/lib/review-inbox";
 
 export function ReviewInboxRoute() {
-  const { reviewItems } = useAppData();
+  const { reviewItems, workspace } = useAppData();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Items opened during this visit. They stay in the list after being marked seen so the queue
   // does not resequence under the cursor mid-pass; leaving the route drops them (this component
   // unmounts with the route, which is exactly the intended lifetime).
   const [heldItems, setHeldItems] = useState<ReadonlyMap<string, ReviewItem>>(new Map());
+  const [readItems, setReadItems] = useState<ReadonlySet<string>>(new Set());
+  // Acknowledgment is fire-and-forget and the detail pane can report readability more than once
+  // (Electric redelivers rows). This keeps one command in flight per conversation.
+  const acknowledging = useRef(new Set<string>());
 
   const items = useMemo(() => {
     const live = new Map(reviewItems.map((item) => [item.conversationId, item]));
@@ -41,17 +46,34 @@ export function ReviewInboxRoute() {
       if (current.has(item.conversationId)) return current;
       return new Map(current).set(item.conversationId, item);
     });
-    void updateHeadlessChatConversation(item.conversationId, { markSeen: true }).catch(
-      (error: unknown) => {
-        // The queue is a read surface: a failed markSeen leaves the item unread, which is the
-        // safe direction, so surface it in logs rather than blocking the reader with an error.
-        console.warn("Could not mark a reviewed conversation as seen.", {
-          conversationId: item.conversationId,
-          error,
-        });
-      },
-    );
   }, []);
+
+  // Selecting an item is not the same as having read it. The detail pane calls this once the
+  // result has actually rendered, so a transcript that never loads keeps its unread state instead
+  // of being silently cleared on click.
+  const acknowledge = useCallback(
+    (item: ReviewItem) => {
+      const { conversationId } = item;
+      if (acknowledging.current.has(conversationId)) return;
+      acknowledging.current.add(conversationId);
+      const acknowledged =
+        item.source.kind === "task"
+          ? markHeadlessTaskSeen(item.source.taskId, { scopeKey: workspace.id })
+          : updateHeadlessChatConversation(conversationId, { markSeen: true });
+      void acknowledged
+        .then(() => {
+          setReadItems((current) => new Set(current).add(conversationId));
+        })
+        .catch((error: unknown) => {
+          // The queue is a read surface: a failed acknowledgment leaves the item unread, which is
+          // the safe direction, so surface it in logs rather than blocking the reader with an
+          // error. Clearing the guard lets a later visit retry.
+          acknowledging.current.delete(conversationId);
+          console.warn("Could not mark a reviewed item as seen.", { conversationId, error });
+        });
+    },
+    [workspace.id],
+  );
 
   const groups = useMemo(() => groupReviewItems(items), [items]);
 
@@ -90,7 +112,7 @@ export function ReviewInboxRoute() {
                     key={item.conversationId}
                     item={item}
                     selected={item.conversationId === selectedId}
-                    unread={!heldItems.has(item.conversationId)}
+                    unread={!readItems.has(item.conversationId)}
                     onSelect={() => select(item)}
                   />
                 ))}
@@ -106,6 +128,7 @@ export function ReviewInboxRoute() {
             key={selected.conversationId}
             item={selected}
             onBack={() => setSelectedId(null)}
+            onRead={acknowledge}
           />
         ) : (
           <div className="flex min-h-0 w-full items-center justify-center overflow-y-auto px-6 py-10">
@@ -171,18 +194,38 @@ function ReviewListRow({
   );
 }
 
-function ReviewDetail({ item, onBack }: { item: ReviewItem; onBack: () => void }) {
+function ReviewDetail({
+  item,
+  onBack,
+  onRead,
+}: {
+  item: ReviewItem;
+  onBack: () => void;
+  onRead: (item: ReviewItem) => void;
+}) {
   const { messages, isLoading, syncFailed } = useHeadlessChatTranscript(item.conversationId);
 
-  const lastAssistantText = useMemo(() => {
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-      const message = messages[index];
-      if (message?.role !== "assistant") continue;
-      const text = textFromChatUiMessage(message).trim();
-      if (text) return text;
-    }
-    return null;
-  }, [messages]);
+  // The latest assistant turn is the result, whatever it contains. Scanning back for the most
+  // recent turn that happens to carry text would present a stale answer as the current one.
+  const latestAssistantTurn = useMemo(
+    () => messages.findLast((message) => message.role === "assistant") ?? null,
+    [messages],
+  );
+  const latestAssistantText = latestAssistantTurn
+    ? textFromChatUiMessage(latestAssistantTurn).trim() || null
+    : null;
+  // A run paused for an action approval settles exactly like a finished one, so it can reach this
+  // queue. It is a request for input, not a result: the reader has to answer it in the full
+  // thread, and clearing its unread state here would drop the only signal that it needs them.
+  const awaitsApproval = latestAssistantTurn ? hasPendingApproval(latestAssistantTurn) : false;
+  // Acknowledge only what actually rendered. An empty transcript is not proof of an empty result,
+  // so it stays unread rather than being cleared on a sync that has not delivered rows yet.
+  const readable = !isLoading && !syncFailed && messages.length > 0;
+
+  useEffect(() => {
+    if (!readable || awaitsApproval) return;
+    onRead(item);
+  }, [awaitsApproval, item, onRead, readable]);
 
   const openHref =
     item.source.kind === "task"
@@ -221,8 +264,10 @@ function ReviewDetail({ item, onBack }: { item: ReviewItem; onBack: () => void }
         <ReviewDetailBody
           isLoading={isLoading}
           syncFailed={syncFailed}
-          text={lastAssistantText}
+          awaitsApproval={awaitsApproval}
+          text={latestAssistantText}
           openHref={openHref}
+          openLabel={item.source.kind === "task" ? "Open task" : "Open chat"}
         />
       </div>
     </div>
@@ -232,13 +277,17 @@ function ReviewDetail({ item, onBack }: { item: ReviewItem; onBack: () => void }
 function ReviewDetailBody({
   isLoading,
   syncFailed,
+  awaitsApproval,
   text,
   openHref,
+  openLabel,
 }: {
   isLoading: boolean;
   syncFailed: boolean;
+  awaitsApproval: boolean;
   text: string | null;
   openHref: string;
+  openLabel: string;
 }) {
   if (syncFailed) {
     return (
@@ -258,6 +307,31 @@ function ReviewDetailBody({
         <div className="h-4 w-2/3 rounded bg-surface-muted" />
         <div className="h-4 w-full rounded bg-surface-muted" />
         <div className="h-4 w-5/6 rounded bg-surface-muted" />
+      </div>
+    );
+  }
+
+  // The approval request is the headline, but what the agent said before asking for it is the
+  // context the reader needs to decide, so keep both.
+  if (awaitsApproval) {
+    return (
+      <div className="flex flex-col items-start gap-4">
+        <div className="flex flex-col items-start gap-3 rounded-md border border-border bg-surface-muted px-3 py-2.5">
+          <p className="flex items-start gap-2 text-[13px] leading-5 text-ink">
+            <ShieldQuestion size={15} strokeWidth={1.75} className="mt-0.5 shrink-0 text-warning" />
+            <span>
+              This run stopped to ask for approval. Answer it in the full thread to let it continue
+              — it stays in this queue until you do.
+            </span>
+          </p>
+          <Link
+            href={openHref}
+            className="rounded-md border border-border bg-surface px-2.5 py-1.5 text-[12px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          >
+            {openLabel}
+          </Link>
+        </div>
+        {text ? <Markdown content={text} /> : null}
       </div>
     );
   }

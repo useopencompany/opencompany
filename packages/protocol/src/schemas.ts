@@ -595,7 +595,11 @@ export const EngineRuntimeAccessEnvelopeSchema = z
   .strict()
   .openapi("EngineRuntimeAccessEnvelope");
 
-export const TaskReadModelSchema = TaskSchema.openapi("TaskReadModelV1");
+// The streamed Task projection carries the unread flag that the Task resource itself does not:
+// it belongs to the Task's conversation and only ever matters to surfaces reading a live queue.
+export const TaskReadModelSchema = TaskSchema.extend({ hasUnseen: z.boolean() }).openapi(
+  "TaskReadModelV1",
+);
 export const TaskActivityAuthorSchema = z.enum(["user", "orchestrator", "system"]);
 export const TaskActivityKindSchema = z.enum([
   "created",
@@ -2869,6 +2873,7 @@ export const UpdateTaskBodySchema = z
   .union([
     z.object({ archived: z.boolean() }).strict(),
     z.object({ name: z.string().min(1).max(160) }).strict(),
+    z.object({ markSeen: z.literal(true) }).strict(),
   ])
   .openapi("UpdateTaskBody");
 

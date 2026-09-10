@@ -370,14 +370,18 @@ function AppLiveDataSubscriptions({
     () => (chatRows ?? []) as HeadlessChatConversationReadModel[],
     [chatRows],
   );
+  // Task candidates come from the Task read model rather than the presentation rows: the unread
+  // flag and the canonical status only exist there, and legacy compatibility rows own no
+  // conversation to read a result from.
+  const reviewTasks = useMemo(() => (taskRows ?? []) as HeadlessTaskReadModel[], [taskRows]);
   const reviewItems = useMemo<ReviewItem[]>(() => {
     if (!initialData.featureFlags.reviewInbox) return [];
-    return selectReviewItems({ conversations: reviewConversations, tasks: currentTaskRows });
-  }, [currentTaskRows, initialData.featureFlags.reviewInbox, reviewConversations]);
+    return selectReviewItems({ conversations: reviewConversations, tasks: reviewTasks });
+  }, [initialData.featureFlags.reviewInbox, reviewConversations, reviewTasks]);
   const reviewCount = useMemo(() => {
     if (!initialData.featureFlags.reviewInbox) return 0;
-    return countAwaitingReview({ conversations: reviewConversations });
-  }, [initialData.featureFlags.reviewInbox, reviewConversations]);
+    return countAwaitingReview({ conversations: reviewConversations, tasks: reviewTasks });
+  }, [initialData.featureFlags.reviewInbox, reviewConversations, reviewTasks]);
 
   const integrations = useMemo(() => {
     if (integrationsLoading && !integrationRows?.length) return initialData.integrations;
