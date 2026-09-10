@@ -2539,6 +2539,13 @@ export function createApiApp(input: CreateApiAppInput) {
       const status = await input.engineAuth.getCodexStatus(actor);
       return c.json({ data: status, meta }, 200);
     },
+    getCodexUsage: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "codex-usage", 6);
+      c.header("Cache-Control", "private, no-store");
+      const usage = await input.engineAuth.getCodexUsage(actor);
+      return c.json({ data: usage, meta }, 200);
+    },
     updateCodexWorkspaceEngine: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 60);

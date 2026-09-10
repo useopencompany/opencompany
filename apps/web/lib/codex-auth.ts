@@ -1,6 +1,7 @@
 "use server";
 
 import { isCodexConnectedForUser as readCodexConnectionForUser } from "@opencompany/agent/application/engine-auth-status";
+import type { CodexUsage } from "@opencompany/protocol";
 import { revalidatePath } from "next/cache";
 import { serverApiClient, serverApiError, serverApiErrorMessage } from "@/lib/server-api-client";
 
@@ -118,5 +119,22 @@ export async function setCodexWorkspaceEngineEnabled(enabled: boolean) {
           ? error.message
           : "Could not update subscription-backed model routing.",
     };
+  }
+}
+
+export async function loadCurrentCodexUsage(): Promise<
+  { ok: true; usage: CodexUsage } | { ok: false; error: string }
+> {
+  try {
+    const response = await (await serverApiClient()).v1["engine-auth"].codex.usage.$get();
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: await serverApiErrorMessage(response, "Codex usage is temporarily unavailable."),
+      };
+    }
+    return { ok: true, usage: (await response.json()).data };
+  } catch {
+    return { ok: false, error: "Codex usage is temporarily unavailable. Try again shortly." };
   }
 }
