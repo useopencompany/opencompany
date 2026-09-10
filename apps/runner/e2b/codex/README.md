@@ -19,8 +19,10 @@ Run the build with an E2B API key:
 E2B_API_KEY=e2b_... bun apps/runner/e2b/codex/build.prod.ts
 ```
 
-The production alias is `opencompany-codex-toolbox`. The build must use 8 vCPU and 8192 MB RAM to
-match the runner's Codex sandbox billing allocation.
+The production alias is `opencompany-codex-toolbox`. The build must use 8 vCPU and 16384 MB RAM to
+match the runner's Codex sandbox billing allocation. The 16 GB allocation is deliberate headroom:
+sandboxes paused near their memory ceiling can produce snapshots that wedge on resume
+(prod incident 2026-09-08/09).
 
 ## Smoke Test
 

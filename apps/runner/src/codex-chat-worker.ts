@@ -25,6 +25,7 @@ import {
   createExternalEngineProjector,
   loadCodexChatAssistantMessageParts,
 } from "./codex-chat-events";
+import { fenceCodingSessionEngine } from "./coding-engine-fence";
 import { runCodingEngineTurn } from "./coding-engine-registry";
 import { settledCodingSandboxIdleTimeoutMs } from "./coding-sandbox-lifecycle";
 import { getDb } from "./db";
@@ -32,11 +33,7 @@ import type { RunnerEnv } from "./env";
 import { recoveryReasonForDeployVersions, runnerDeployVersion } from "./runner-deploy-version";
 import { armSandboxActiveTimeoutById, armSandboxIdleTimeoutById } from "./sandbox";
 import { rowsFromExecute } from "./sql-exec";
-import {
-  fenceTaskApprovalEngine,
-  pauseTaskActionApprovals,
-  resumeTaskActionApprovals,
-} from "./task-action-approval";
+import { pauseTaskActionApprovals, resumeTaskActionApprovals } from "./task-action-approval";
 import { orchestrateTaskFailure, resolveTaskTurnContext, type TaskTurnContext } from "./task-turn";
 
 const logger = createLogger({
@@ -110,9 +107,10 @@ type ClaimedTurnRow = {
 
 // Approval resolution may come from an older API during a rolling deploy. A queued
 // approval continuation also wakes its waiting task atomically with the worker claim.
-// Claims the next runnable codex chat turn. Four predicates shape the queue:
+// Claims the next runnable codex chat turn. The queue enforces:
 //  - claimable: freshly queued, or a running turn whose lease expired (worker crash);
 //  - one active turn per session: skip while a sibling holds a live running lease;
+//  - cancellation recovery remains eligible after a Task is canceled or archived;
 //  - per-session FIFO: an earlier queued sibling always goes first;
 //  - contract fence: queued turns stamped with a host-tool contract this binary
 //    does not support are left for workers of the matching release. Expired-lease
@@ -150,10 +148,15 @@ export async function claimNextCodexChatTurn(input: {
                 SELECT 1
                 FROM goat.tasks AS task
                 WHERE task.session_id = chat.id
-                  AND task.archived_at IS NULL
-                  AND (task.status IN ('queued', 'running') OR (
-                    task.status = 'waiting' AND turn.settings ->> 'approvalContinuation' = 'true'
-                  ))
+                  AND (
+                    turn.interrupt_requested_at IS NOT NULL
+                    OR (
+                      task.archived_at IS NULL
+                      AND (task.status IN ('queued', 'running') OR (
+                        task.status = 'waiting' AND turn.settings ->> 'approvalContinuation' = 'true'
+                      ))
+                    )
+                  )
               )
             )
             AND (
@@ -231,17 +234,21 @@ export async function heartbeatCodexChatTurn(input: {
   leaseId: string;
   leaseOwner: string;
   leaseTtlMs: number;
+  cancellationRecovery?: boolean;
 }) {
   const now = new Date();
   const renewedLeaseExpiresAt = new Date(now.getTime() + input.leaseTtlMs);
   const interruptedLeaseExpiresAt = new Date(now.getTime() - 1);
+  // Revoke an executing worker when Stop arrives, but let the worker that claimed
+  // that cancellation retain its lease while it fences the sandbox and settles.
+  const canRenew = input.cancellationRecovery ? sql`TRUE` : sql`interrupt_requested_at IS NULL`;
   const result = await getDb().execute(sql`
     WITH heartbeat AS (
       UPDATE goat.codex_chat_turns
-      SET lease_id = CASE WHEN interrupt_requested_at IS NULL THEN lease_id ELSE NULL END,
-          lease_owner = CASE WHEN interrupt_requested_at IS NULL THEN lease_owner ELSE NULL END,
+      SET lease_id = CASE WHEN ${canRenew} THEN lease_id ELSE NULL END,
+          lease_owner = CASE WHEN ${canRenew} THEN lease_owner ELSE NULL END,
           lease_expires_at = CASE
-            WHEN interrupt_requested_at IS NULL THEN ${renewedLeaseExpiresAt}
+            WHEN ${canRenew} THEN ${renewedLeaseExpiresAt}
             WHEN lease_expires_at IS NULL OR lease_expires_at > ${interruptedLeaseExpiresAt}
               THEN ${interruptedLeaseExpiresAt}
             ELSE lease_expires_at
@@ -255,7 +262,7 @@ export async function heartbeatCodexChatTurn(input: {
     )
     SELECT id
     FROM heartbeat
-    WHERE interrupt_requested_at IS NULL
+    WHERE ${canRenew}
   `);
   return rowsFromExecute<{ id: string }>(result).length > 0;
 }
@@ -377,7 +384,9 @@ export async function runClaimedTurn(
     });
   }
 
-  if (turn.attempts > CODEX_CHAT_MAX_TOTAL_ATTEMPTS) {
+  // Cancellation recovery must always reach engine fencing and interrupted
+  // settlement, even when prior lease churn exhausted the execution budget.
+  if (!turn.interruptRequestedAt && turn.attempts > CODEX_CHAT_MAX_TOTAL_ATTEMPTS) {
     logger.error("opencompany chat turn exceeded the total attempt budget", {
       event: "opencompany.goat_codex_chat_turn_attempt_cap_exceeded",
       turn_id: turn.id,
@@ -424,6 +433,7 @@ export async function runClaimedTurn(
         leaseId,
         leaseOwner,
         leaseTtlMs: codexChatLeaseTtlMs(env),
+        cancellationRecovery: Boolean(turn.interruptRequestedAt),
       })
         .then((owned) => {
           if (!owned) markHeartbeatLost(new CodexChatLeaseLostError());
@@ -439,10 +449,21 @@ export async function runClaimedTurn(
   > | null = null;
   try {
     runPromise = (async () => {
+      const fenceEngine = () =>
+        fenceCodingSessionEngine(
+          session,
+          settledCodingSandboxIdleTimeoutMs({
+            configuredIdleTimeoutMs: env.codexChatIdleTimeoutMs,
+            taskSession: Boolean(taskContext),
+          }),
+        );
+      // Interrupted engine adapters settle before acquiring a sandbox. Fence a
+      // detached process here so cancellation recovery cannot leave it running.
+      if (turn.interruptRequestedAt) await fenceEngine();
       const approvalContext =
         taskContext && session.engine !== "opencompany" && !turn.interruptRequestedAt
           ? await resumeTaskActionApprovals(turn, undefined, async () => {
-              await fenceTaskApprovalEngine(session);
+              await fenceEngine();
               if (options.handoffSignal?.aborted) throw new CodexChatHandoffError();
               if (heartbeatAbort) throw heartbeatAbort;
             })
