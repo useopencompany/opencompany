@@ -3,5 +3,5 @@ export const CLAUDE_CODE_CLI_PACKAGE = `@anthropic-ai/claude-code@${CLAUDE_CODE_
 
 // The ACP adapter is installed inside the coding sandbox. Keep it pinned so its
 // wire or event mapping cannot change independently of a runner deploy.
-export const CLAUDE_CODE_ACP_ADAPTER_VERSION = "0.70.0";
+export const CLAUDE_CODE_ACP_ADAPTER_VERSION = "0.76.0";
 export const CLAUDE_CODE_ACP_ADAPTER_PACKAGE = `@agentclientprotocol/claude-agent-acp@${CLAUDE_CODE_ACP_ADAPTER_VERSION}`;

@@ -1276,7 +1276,7 @@ export function elicitationUserInputParams(input: {
   if (!properties) return null;
   const entries = Object.entries(properties).filter(([, value]) => {
     const property = isRecord(value) ? value : null;
-    return !property || !isCodexOtherAnswerProperty(property, properties);
+    return !property || !isOtherAnswerProperty(property, properties);
   });
   if (entries.length === 0 || entries.length > 3) return null;
   const questions: Array<Record<string, unknown>> = [];
@@ -1284,7 +1284,9 @@ export function elicitationUserInputParams(input: {
     const property = isRecord(value) ? value : null;
     if (!property || !isSupportedElicitationProperty(property)) return null;
     const choices = elicitationChoices(property);
-    const isOther = readNestedBoolean(property._meta, ["codex", "isOther"]);
+    const isOther =
+      readNestedBoolean(property._meta, ["codex", "isOther"]) ||
+      otherAnswerFieldId(properties, id) !== null;
     questions.push({
       id,
       header: typeof property.title === "string" ? property.title : id,
@@ -1321,7 +1323,7 @@ export function elicitationContent(
     if (strings.length === 0) continue;
     const property = isRecord(properties[id]) ? properties[id] : {};
     const first = strings[0] as string;
-    const otherFieldId = codexOtherAnswerFieldId(properties, id);
+    const otherFieldId = otherAnswerFieldId(properties, id);
     const choice = elicitationChoiceValue(property, first);
     if (otherFieldId && !choice.matched) {
       content[otherFieldId] = first;
@@ -1474,27 +1476,36 @@ function isSupportedElicitationProperty(property: Record<string, unknown>) {
   );
 }
 
-function codexOtherAnswerFieldId(properties: Record<string, unknown>, questionId: string) {
+function otherAnswerFieldId(properties: Record<string, unknown>, questionId: string) {
   for (const [id, value] of Object.entries(properties)) {
     const property = isRecord(value) ? value : null;
-    const meta = property && isRecord(property._meta) ? property._meta.codex : null;
-    const codexMeta = isRecord(meta) ? meta : null;
-    if (codexMeta?.isOtherAnswer === true && codexMeta.questionId === questionId) return id;
+    if (property && otherAnswerQuestionId(property) === questionId) return id;
   }
   return null;
 }
 
-function isCodexOtherAnswerProperty(
+function isOtherAnswerProperty(
   property: Record<string, unknown>,
   properties: Record<string, unknown>,
 ) {
-  const meta = isRecord(property._meta) ? property._meta.codex : null;
-  return (
-    isRecord(meta) &&
-    meta.isOtherAnswer === true &&
-    typeof meta.questionId === "string" &&
-    isRecord(properties[meta.questionId])
-  );
+  const questionId = otherAnswerQuestionId(property);
+  return questionId !== null && isRecord(properties[questionId]);
+}
+
+function otherAnswerQuestionId(property: Record<string, unknown>) {
+  const meta = isRecord(property._meta) ? property._meta : null;
+  const codexMeta = isRecord(meta?.codex) ? meta.codex : null;
+  if (codexMeta?.isOtherAnswer === true && typeof codexMeta.questionId === "string") {
+    return codexMeta.questionId;
+  }
+  // Claude's ACP adapter uses this shared marker so clients can fold the optional companion
+  // field into the same select control instead of requiring a second free-text answer.
+  const sharedMeta = isRecord(meta?._askUserQuestionCustomAnswer)
+    ? meta._askUserQuestionCustomAnswer
+    : null;
+  return sharedMeta?.isCustomAnswer === true && typeof sharedMeta.questionId === "string"
+    ? sharedMeta.questionId
+    : null;
 }
 
 function readNestedNumber(value: unknown, path: string[]): number | null {
