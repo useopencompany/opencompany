@@ -1,16 +1,20 @@
 "use client";
 
-import { ArrowLeft, Inbox, ShieldQuestion } from "lucide-react";
+import type { ChatEngine } from "@opencompany/core";
+import { ArrowLeft, Inbox } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppData } from "@/components/AppDataProvider";
-import { Markdown } from "@/components/Markdown";
 import { EmptyState, formatRelativeTime } from "@/components/Routes";
+import { Surface } from "@/components/Surface";
+import { TaskDetailPanel } from "@/components/TaskDetailPanel";
 import { useHeadlessChatTranscript } from "@/components/useHeadlessChatTranscript";
-import { textFromChatUiMessage } from "@/lib/chat-ui";
+import { useTaskRun } from "@/components/useTaskRun";
+import type { ChatSessionView } from "@/lib/chat-ui";
 import { updateHeadlessChatConversation } from "@/lib/headless-chat-commands";
 import { markHeadlessTaskSeen } from "@/lib/headless-task-commands";
-import { groupReviewItems, hasPendingApproval, type ReviewItem } from "@/lib/review-inbox";
+import { normalizeModel } from "@/lib/model-options";
+import type { ReviewItem } from "@/lib/review-inbox";
 
 export function ReviewInboxRoute() {
   const { reviewItems, workspace } = useAppData();
@@ -49,8 +53,8 @@ export function ReviewInboxRoute() {
   }, []);
 
   // Selecting an item is not the same as having read it. The detail pane calls this once the
-  // result has actually rendered, so a transcript that never loads keeps its unread state instead
-  // of being silently cleared on click.
+  // conversation has actually rendered, so a transcript that never loads keeps its unread state
+  // instead of being silently cleared on click.
   const acknowledge = useCallback(
     (item: ReviewItem) => {
       const { conversationId } = item;
@@ -75,8 +79,6 @@ export function ReviewInboxRoute() {
     [workspace.id],
   );
 
-  const groups = useMemo(() => groupReviewItems(items), [items]);
-
   return (
     <main className="flex h-full min-h-0 w-full overflow-hidden bg-canvas text-ink">
       <div
@@ -95,28 +97,21 @@ export function ReviewInboxRoute() {
             </span>
           ) : null}
         </header>
-        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-6">
-          {groups.length === 0 ? (
+        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-6 pt-1">
+          {items.length === 0 ? (
             <p className="px-2 py-8 text-center text-[12.5px] leading-5 text-ink-subtle">
               Nothing to review. Finished chats and tasks land here when you haven&apos;t read them
               yet.
             </p>
           ) : (
-            groups.map((group) => (
-              <section key={group.kind} className="flex flex-col">
-                <h2 className="px-2 pb-1 pt-4 text-[11px] font-medium uppercase tracking-[0.07em] text-ink-faint">
-                  {group.label}
-                </h2>
-                {group.items.map((item) => (
-                  <ReviewListRow
-                    key={item.conversationId}
-                    item={item}
-                    selected={item.conversationId === selectedId}
-                    unread={!readItems.has(item.conversationId)}
-                    onSelect={() => select(item)}
-                  />
-                ))}
-              </section>
+            items.map((item) => (
+              <ReviewListRow
+                key={item.conversationId}
+                item={item}
+                selected={item.conversationId === selectedId}
+                unread={!readItems.has(item.conversationId)}
+                onSelect={() => select(item)}
+              />
             ))
           )}
         </div>
@@ -138,8 +133,8 @@ export function ReviewInboxRoute() {
                 title={items.length > 0 ? "Pick something to read" : "You're all caught up"}
                 description={
                   items.length > 0
-                    ? "Select an item on the left to read the finished result without leaving the queue."
-                    : "When a chat reply or task result finishes and you haven't read it, it shows up here."
+                    ? "Select an item on the left to pick the conversation up where it stopped."
+                    : "When a chat or task finishes and you haven't read it, it shows up here."
                 }
               />
             </div>
@@ -194,6 +189,11 @@ function ReviewListRow({
   );
 }
 
+/**
+ * The reader opens the live conversation, not a summary of it: the same thread and composer the
+ * chat and Task routes render, so answering an approval or continuing the work never means
+ * leaving the queue first.
+ */
 function ReviewDetail({
   item,
   onBack,
@@ -204,37 +204,24 @@ function ReviewDetail({
   onRead: (item: ReviewItem) => void;
 }) {
   const { messages, isLoading, syncFailed } = useHeadlessChatTranscript(item.conversationId);
-
-  // The latest assistant turn is the result, whatever it contains. Scanning back for the most
-  // recent turn that happens to carry text would present a stale answer as the current one.
-  const latestAssistantTurn = useMemo(
-    () => messages.findLast((message) => message.role === "assistant") ?? null,
-    [messages],
-  );
-  const latestAssistantText = latestAssistantTurn
-    ? textFromChatUiMessage(latestAssistantTurn).trim() || null
-    : null;
-  // A run paused for an action approval settles exactly like a finished one, so it can reach this
-  // queue. It is a request for input, not a result: the reader has to answer it in the full
-  // thread, and clearing its unread state here would drop the only signal that it needs them.
-  const awaitsApproval = latestAssistantTurn ? hasPendingApproval(latestAssistantTurn) : false;
   // Acknowledge only what actually rendered. An empty transcript is not proof of an empty result,
   // so it stays unread rather than being cleared on a sync that has not delivered rows yet.
   const readable = !isLoading && !syncFailed && messages.length > 0;
 
   useEffect(() => {
-    if (!readable || awaitsApproval) return;
+    if (!readable) return;
     onRead(item);
-  }, [awaitsApproval, item, onRead, readable]);
+  }, [item, onRead, readable]);
 
+  const source = item.source;
   const openHref =
-    item.source.kind === "task"
-      ? `/tasks/${encodeURIComponent(item.source.taskId)}`
+    source.kind === "task"
+      ? `/tasks/${encodeURIComponent(source.taskId)}`
       : `/chat/${encodeURIComponent(item.conversationId)}`;
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
-      <header className="flex items-center gap-3 border-b border-border-subtle px-6 pb-3 pt-5">
+      <header className="flex items-center gap-3 px-4 pt-4">
         <button
           type="button"
           onClick={onBack}
@@ -243,112 +230,102 @@ function ReviewDetail({
         >
           <ArrowLeft size={15} strokeWidth={1.75} />
         </button>
-        <div className="min-w-0 flex-1">
-          <h2 className="truncate text-[14px] font-semibold leading-tight text-ink">
-            {item.title}
-          </h2>
-          <p className="truncate text-[11.5px] leading-4 text-ink-subtle">
-            {item.source.kind === "task" ? `${item.source.displayId} · ` : ""}
-            {formatRelativeTime(item.updatedAt)}
-          </p>
-        </div>
         <Link
           href={openHref}
           prefetch
-          className="shrink-0 rounded-md border border-border bg-surface px-2.5 py-1.5 text-[12px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          className="ml-auto shrink-0 rounded-md border border-border bg-surface px-2.5 py-1.5 text-[12px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
         >
-          {item.source.kind === "task" ? "Open task" : "Open chat"}
+          {source.kind === "task" ? "Open task" : "Open chat"}
         </Link>
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
-        <ReviewDetailBody
-          isLoading={isLoading}
-          syncFailed={syncFailed}
-          awaitsApproval={awaitsApproval}
-          text={latestAssistantText}
-          openHref={openHref}
-          openLabel={item.source.kind === "task" ? "Open task" : "Open chat"}
+      {source.kind === "task" ? (
+        <ReviewTaskConversation taskId={source.taskId} onClose={onBack} />
+      ) : (
+        <ReviewChatConversation
+          conversationId={item.conversationId}
+          title={item.title}
+          model={source.model}
+          engine={source.engine}
+          updatedAt={item.updatedAt}
+          onClose={onBack}
         />
-      </div>
+      )}
     </div>
   );
 }
 
-function ReviewDetailBody({
-  isLoading,
-  syncFailed,
-  awaitsApproval,
-  text,
-  openHref,
-  openLabel,
+function ReviewChatConversation({
+  conversationId,
+  title,
+  model,
+  engine,
+  updatedAt,
+  onClose,
 }: {
-  isLoading: boolean;
-  syncFailed: boolean;
-  awaitsApproval: boolean;
-  text: string | null;
-  openHref: string;
-  openLabel: string;
+  conversationId: string;
+  title: string;
+  model: string;
+  engine: ChatEngine;
+  updatedAt: string;
+  onClose: () => void;
 }) {
-  if (syncFailed) {
-    return (
-      <p className="text-[13px] leading-5 text-warning">
-        This result could not be loaded.{" "}
-        <Link href={openHref} className="underline">
-          Open it directly
-        </Link>{" "}
-        to retry.
-      </p>
-    );
-  }
+  const data = useAppData();
+  const userName = data.user.firstName?.trim() || data.user.email.split("@")[0] || "there";
+  // The sidebar list is bounded by recency, so an older unread chat is missing from it. The queue
+  // item carries everything needed to open the conversation; the summary only sharpens it.
+  const summary = data.recentChats.find((chat) => chat.id === conversationId) ?? null;
+  const initialChat = useMemo<ChatSessionView>(
+    () => ({
+      id: conversationId,
+      title: summary?.title ?? title,
+      model: normalizeModel(summary?.model ?? model),
+      engine: summary?.engine ?? engine,
+      codexComposerSettings: summary?.codexComposerSettings ?? null,
+      // Detail controls wait for the conversation-scoped record instead of trusting a list row.
+      runtime: null,
+      updatedAt: summary?.updatedAt ?? updatedAt,
+      messages: [],
+    }),
+    [conversationId, engine, model, summary, title, updatedAt],
+  );
 
-  if (isLoading && !text) {
+  return (
+    <Surface
+      key={data.activeBrain?.id ?? "no-brain"}
+      tasks={data.tasks}
+      allTasks={data.allTasks}
+      schedules={data.schedules}
+      defaultModel={initialChat.model}
+      initialChat={initialChat}
+      recentChats={data.recentChats}
+      archivedChats={data.archivedChats}
+      codexConnected={data.codexConnected}
+      claudeCodeConnected={data.claudeCodeConnected}
+      taskSpawningEnabled={data.featureFlags.taskSpawning}
+      autoModelRoutingEnabled={data.featureFlags.autoModelRouting}
+      workspaceId={data.workspace.id}
+      userName={userName}
+      userWorkosId={data.user.workosUserId}
+      // The queue owns this pane: the route stays /review, and closing returns to the list rather
+      // than navigating home or cancelling a run that is still going.
+      isActivePane={false}
+      onClosePane={onClose}
+    />
+  );
+}
+
+function ReviewTaskConversation({ taskId, onClose }: { taskId: string; onClose: () => void }) {
+  const run = useTaskRun(taskId);
+  if (!run) {
     return (
-      <div aria-label="Loading result" className="flex flex-col gap-3">
+      <div aria-label="Loading conversation" className="flex flex-col gap-3 px-6 py-5">
         <div className="h-4 w-2/3 rounded bg-surface-muted" />
         <div className="h-4 w-full rounded bg-surface-muted" />
         <div className="h-4 w-5/6 rounded bg-surface-muted" />
       </div>
     );
   }
-
-  // The approval request is the headline, but what the agent said before asking for it is the
-  // context the reader needs to decide, so keep both.
-  if (awaitsApproval) {
-    return (
-      <div className="flex flex-col items-start gap-4">
-        <div className="flex flex-col items-start gap-3 rounded-md border border-border bg-surface-muted px-3 py-2.5">
-          <p className="flex items-start gap-2 text-[13px] leading-5 text-ink">
-            <ShieldQuestion size={15} strokeWidth={1.75} className="mt-0.5 shrink-0 text-warning" />
-            <span>
-              This run stopped to ask for approval. Answer it in the full thread to let it continue
-              — it stays in this queue until you do.
-            </span>
-          </p>
-          <Link
-            href={openHref}
-            className="rounded-md border border-border bg-surface px-2.5 py-1.5 text-[12px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-          >
-            {openLabel}
-          </Link>
-        </div>
-        {text ? <Markdown content={text} /> : null}
-      </div>
-    );
-  }
-
-  if (!text) {
-    return (
-      <p className="text-[13px] leading-5 text-ink-subtle">
-        This turn finished without a text result.{" "}
-        <Link href={openHref} className="underline">
-          Open it
-        </Link>{" "}
-        to see the full run.
-      </p>
-    );
-  }
-
-  return <Markdown content={text} />;
+  return <TaskDetailPanel initialRun={run} isActivePane={false} onClosePane={onClose} />;
 }
 
 function timestampMs(value: string) {
