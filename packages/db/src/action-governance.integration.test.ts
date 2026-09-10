@@ -50,10 +50,14 @@ it("atomically claims both the invocation id and write key while counting one ac
     expect(await claim("read_1")).toEqual({ ok: true, duplicate: false, callCount: 3 });
     expect(await claim("read_2")).toEqual({ ok: true, duplicate: false, callCount: 4 });
     expect(await claim("read_1")).toEqual({ ok: true, duplicate: true, callCount: 4 });
+    const batch = await Promise.all(Array.from({ length: 20 }, (_, i) => claim(`batch-${i}`)));
+    expect(batch.filter((result) => result.ok && !result.duplicate)).toHaveLength(12);
+    expect(batch.filter((result) => !result.ok && result.reason === "call_budget")).toHaveLength(8);
+    expect(await claim("read_1")).toEqual({ ok: true, duplicate: true, callCount: 16 });
     const { rows } = await database.query<{ action_call_count: number }>(
       "SELECT action_call_count FROM goat.action_turns",
     );
-    expect(rows).toEqual([{ action_call_count: 4 }]);
+    expect(rows).toEqual([{ action_call_count: 16 }]);
   } finally {
     await database.close();
   }

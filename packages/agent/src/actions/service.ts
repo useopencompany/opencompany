@@ -153,6 +153,9 @@ export async function serveActionRequest(input: {
     return {
       ok: false,
       action: action.id,
+      ...(claim.reason === "call_budget"
+        ? { budget: { limit: maxCalls, used: maxCalls, remaining: 0 } }
+        : {}),
       error:
         claim.reason === "list_required"
           ? {
@@ -165,14 +168,20 @@ export async function serveActionRequest(input: {
           : {
               code: "call_budget",
               source: action.source,
-              message: `This turn has reached its limit of ${maxCalls} action calls.`,
+              message: `This turn has reached its limit of ${maxCalls} action calls. Do not call use_action again in this turn. Complete work that can use the available information and state any coverage that remains incomplete.`,
             },
     };
   }
+  const budget = {
+    limit: maxCalls,
+    used: claim.callCount,
+    remaining: Math.max(0, maxCalls - claim.callCount),
+  };
   if (claim.duplicate) {
     return {
       ok: false,
       action: action.id,
+      budget,
       error: {
         code: "duplicate_invocation",
         source: action.source,
@@ -189,6 +198,7 @@ export async function serveActionRequest(input: {
     return {
       ok: false,
       action: action.id,
+      budget,
       error: {
         code: "provider_error",
         source: action.source,
@@ -212,7 +222,15 @@ export async function serveActionRequest(input: {
     ) {
       outcome = "failure";
     }
-    return response;
+    // A host gateway retains accounting across approval resumes; its snapshot
+    // takes precedence over a freshly created model-facing wrapper.
+    const hostExhausted = !response.ok && response.error.code === "call_budget";
+    return {
+      ...response,
+      budget:
+        response.budget ??
+        (hostExhausted ? { limit: maxCalls, used: maxCalls, remaining: 0 } : budget),
+    };
   } finally {
     input.governance.completeProviderAttempt?.(action.id, outcome);
   }
