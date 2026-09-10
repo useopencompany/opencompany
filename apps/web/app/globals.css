@@ -25,6 +25,7 @@
   --color-spend-chat: #3b6ea5;
   --color-spend-ingestion: #b07a2e;
   --color-spend-capabilities: #2e8968;
+  --color-spend-sandbox: #8665ac;
   --color-spend-other: #b6b6b0;
 }
 
@@ -51,6 +52,7 @@
   --color-spend-chat: #5b93d6;
   --color-spend-ingestion: #c1863a;
   --color-spend-capabilities: #3fa07f;
+  --color-spend-sandbox: #b294d6;
   --color-spend-other: #5f635a;
 }
 
@@ -78,6 +80,7 @@
     --color-spend-chat: #5b93d6;
     --color-spend-ingestion: #c1863a;
     --color-spend-capabilities: #3fa07f;
+    --color-spend-sandbox: #b294d6;
     --color-spend-other: #5f635a;
   }
 }

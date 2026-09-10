@@ -38,6 +38,7 @@ import { startHubspotFlushWorker } from "./hubspot-flush-worker";
 import { startLinearFlushWorker } from "./linear-flush-worker";
 import { settleExpiredBrokerTokens } from "./llm-broker-tokens";
 import { drainRunnerTasks, type RunnerDrainTask, settlesWithin } from "./runner-shutdown";
+import { startSandboxBillingWorker } from "./sandbox-billing-worker";
 import { startSandboxReconciler } from "./sandbox-reconciler";
 import { startTaskScheduleWorker } from "./scheduler";
 import { createServer } from "./server";
@@ -120,6 +121,9 @@ const codexChatSelfHealSweeper =
   env.taskWorkerEnabled && env.codexChatSelfHealEnabled ? startCodexChatSelfHealSweeper() : null;
 const sandboxReconciler = env.taskWorkerEnabled
   ? startSandboxReconciler({ namespace: env.sandboxNamespace })
+  : null;
+const sandboxBillingWorker = env.taskWorkerEnabled
+  ? startSandboxBillingWorker(env.sandboxNamespace)
   : null;
 const browserProfileReconciler =
   env.taskWorkerEnabled && process.env.OPENCOMPANY_BROWSER_PROFILES_ENABLED === "true"
@@ -238,6 +242,7 @@ async function shutdownRunner(signal: "SIGINT" | "SIGTERM") {
     runnerDrainTask("stuck_work_monitor", stuckWorkMonitor),
     runnerDrainTask("codex_chat_self_heal", codexChatSelfHealSweeper),
     runnerDrainTask("sandbox_reconciler", sandboxReconciler),
+    runnerDrainTask("sandbox_billing", sandboxBillingWorker),
     runnerDrainTask("browser_profile_reconciler", browserProfileReconciler),
     runnerDrainTask("brain_worker_admission", brainWorkerAdmissionListener),
     { name: "http_server", stop: async () => server.close() },

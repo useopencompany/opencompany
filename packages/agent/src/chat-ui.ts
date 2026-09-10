@@ -537,8 +537,9 @@ export type CreateWorkspaceSkillToolOutput = {
 export type EditWorkspaceSkillToolInput = {
   expectedBundleId?: string;
   name: string;
-  description: string;
-  instructions: string;
+  newName?: string;
+  description?: string;
+  instructions?: string;
 };
 
 export type EditWorkspaceSkillToolOutput = {

@@ -28,6 +28,7 @@ import {
   type UpdateTaskCommand,
   type UpdateTaskResult,
 } from "@opencompany/core";
+import { newResourceId } from "@opencompany/core/resource-ids";
 import { type SQL, sql } from "drizzle-orm";
 import {
   type ChatAttachmentResolver,
@@ -51,7 +52,7 @@ export type TaskRepositoryIdFactory = {
 const defaultIds: TaskRepositoryIdFactory = {
   command: () => `task_command_${randomUUID()}`,
   task: () => `task_${randomUUID()}`,
-  conversation: () => `conversation_${randomUUID()}`,
+  conversation: () => newResourceId("conversation"),
   message: () => `message_${randomUUID()}`,
   runtime: () => `runtime_${randomUUID()}`,
   run: () => `run_${randomUUID()}`,

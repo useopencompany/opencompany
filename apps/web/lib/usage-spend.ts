@@ -9,6 +9,7 @@ export type SpendDay = {
   chat: number;
   ingestion: number;
   capabilities: number;
+  sandbox: number;
   other: number;
   total: number;
 };
@@ -18,7 +19,7 @@ export type SpendSeries = { key: SpendCategory; label: string; total: number };
 const DAY_MS = 86_400_000;
 
 function emptySpendDay(day: string): SpendDay {
-  return { day, chat: 0, ingestion: 0, capabilities: 0, other: 0, total: 0 };
+  return { day, chat: 0, ingestion: 0, capabilities: 0, sandbox: 0, other: 0, total: 0 };
 }
 
 export function buildDailySpendSeries(

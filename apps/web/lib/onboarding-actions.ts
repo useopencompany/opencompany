@@ -1,6 +1,6 @@
 "use server";
 
-import { randomUUID } from "node:crypto";
+import { newResourceId } from "@opencompany/core/resource-ids";
 import type { OnboardingStateDto } from "@opencompany/protocol";
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
@@ -58,7 +58,7 @@ export async function saveOnboardingWorkspaceAction(input: {
   const slug = normalizeWorkspaceSlug(candidate?.slug);
   if (!slug) return { ok: false, error: "Enter a valid workspace URL." };
 
-  const workspaceId = `goat_ws_${randomUUID()}`;
+  const workspaceId = newResourceId("workspace");
   try {
     const response = await (await serverApiClient()).v1.onboarding.workspace.$put({
       json: { workspaceId, name, slug },

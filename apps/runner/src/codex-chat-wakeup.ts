@@ -206,18 +206,17 @@ export async function persistCodexChatScheduledWakeup(input: {
   codexChatSessionId: string;
   leaseId: string;
   leaseOwner: string;
-  wakeup: CodexChatScheduledWakeup;
+  wakeup: CodexChatScheduledWakeup | null;
   now?: Date;
 }) {
   const now = input.now ?? new Date();
   const result = await getDb().execute(sql`
     UPDATE goat.codex_chat_turns
-    SET settings = jsonb_set(
-          settings,
-          '{scheduledWakeup}',
-          ${stringifyPostgresJson(input.wakeup)}::jsonb,
-          true
-        ),
+    SET settings = ${
+      input.wakeup
+        ? sql`jsonb_set(settings, '{scheduledWakeup}', ${stringifyPostgresJson(input.wakeup)}::jsonb, true)`
+        : sql`settings - 'scheduledWakeup'`
+    },
         updated_at = ${now}
     WHERE id = ${input.turnId}
       AND user_workos_id = ${input.userWorkosId}

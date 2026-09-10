@@ -25,6 +25,7 @@ import {
   type RunExecutionRepository,
   type RunStatus,
 } from "@opencompany/core";
+import { newResourceId } from "@opencompany/core/resource-ids";
 import { type SQL, sql } from "drizzle-orm";
 import { stringifyPostgresJson } from "./postgres-json";
 import type { ChatMessageAttachment } from "./product-schema";
@@ -101,7 +102,7 @@ export type ChatRepositoryIdFactory = {
 
 const defaultIds: ChatRepositoryIdFactory = {
   command: () => `command_${randomUUID()}`,
-  conversation: () => `conversation_${randomUUID()}`,
+  conversation: () => newResourceId("conversation"),
   message: () => `message_${randomUUID()}`,
   runtime: () => `runtime_${randomUUID()}`,
   run: () => `run_${randomUUID()}`,

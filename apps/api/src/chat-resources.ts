@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import {
   chatScreenshotBlobPath,
   safeScreenshotFilename,
@@ -9,6 +8,7 @@ import {
   toChatUiMessage,
 } from "@opencompany/agent/chat-ui";
 import type { Actor } from "@opencompany/core";
+import { newResourceId } from "@opencompany/core/resource-ids";
 import {
   type ChatArtifactVersion,
   type ChatMessageAttachment,
@@ -123,7 +123,7 @@ export function createChatResourceService(input: {
   now?: () => Date;
 }): ChatResourceService {
   const storage = input.storage ?? vercelBlobStorage();
-  const id = input.id ?? (() => `goat_chat_share_${randomUUID()}`);
+  const id = input.id ?? (() => newResourceId("share"));
   const now = input.now ?? (() => new Date());
 
   return {

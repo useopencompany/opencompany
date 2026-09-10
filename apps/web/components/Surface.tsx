@@ -25,6 +25,7 @@ import {
   CommandItem,
   CommandList,
   CommandShortcut,
+  defaultFilter,
 } from "@opencompany/ui/components/command";
 import {
   Dialog,
@@ -2803,7 +2804,13 @@ export function Surface({
               />
             </>
           ) : (
-            <Command className="bg-surface text-ink">
+            <Command
+              className="bg-surface text-ink"
+              // Equal match scores keep the recency order instead of letting cmdk rank by relevance.
+              filter={(value, search, keywords) =>
+                defaultFilter(value, search, keywords) > 0 ? 1 : 0
+              }
+            >
               <CommandInput
                 autoFocus
                 value={chatSearchQuery}

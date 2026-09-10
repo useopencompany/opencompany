@@ -792,7 +792,7 @@ describe("Surface chat streaming UI", () => {
       content: "Research Q3",
       model: DEFAULT_MODEL,
     });
-    expect(body.clientConversationId).toMatch(/^goat_chat_/);
+    expect(body.clientConversationId).toMatch(/^conversation_/);
     expect(body.clientMessageId).toMatch(/^ui_background_/);
     expect(screen.getByTestId("optimistic-chat-summaries")).toHaveTextContent(
       `${body.clientConversationId}:Research Q3`,
@@ -993,7 +993,7 @@ describe("Surface chat streaming UI", () => {
         settings: { reasoningEffort: "xhigh" },
       },
     });
-    expect(body.clientConversationId).toMatch(/^goat_chat_/);
+    expect(body.clientConversationId).toMatch(/^conversation_/);
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     expect(historyMock.replaceState).not.toHaveBeenCalled();
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
@@ -2305,7 +2305,7 @@ describe("Surface chat streaming UI", () => {
     expect(chatMock.sendMessage).toHaveBeenCalledWith({ text: "Clone my repo" });
     const body = chatMock.preparedRequestBodies.at(-1) as Record<string, unknown>;
     expect(body).toMatchObject({
-      newSessionId: expect.stringMatching(/^goat_chat_/),
+      newSessionId: expect.stringMatching(/^conversation_/),
       engine: {
         type: "codex",
         schemaVersion: 1,
@@ -2406,7 +2406,7 @@ describe("Surface chat streaming UI", () => {
 
     expect(chatMock.sendMessage).toHaveBeenCalledWith({ text: "Inspect this repository" });
     expect(chatMock.preparedRequestBodies.at(-1)).toMatchObject({
-      newSessionId: expect.stringMatching(/^goat_chat_/),
+      newSessionId: expect.stringMatching(/^conversation_/),
       model,
       engine: {
         type: "claude_code",
@@ -3036,7 +3036,7 @@ describe("Surface chat streaming UI", () => {
     expect(chatMock.preparedRequestBodies).toHaveLength(2);
     expect(chatMock.preparedRequestBodies[0]).toMatchObject({
       sessionId: null,
-      newSessionId: expect.stringMatching(/^goat_chat_/),
+      newSessionId: expect.stringMatching(/^conversation_/),
       model: DEFAULT_MODEL,
     });
     expect(chatMock.preparedRequestBodies[1]).toMatchObject({
@@ -3108,7 +3108,7 @@ describe("Surface chat streaming UI", () => {
     );
     const body = chatMock.preparedRequestBodies.at(-1) as { newSessionId: string };
     expect(body).toMatchObject({
-      newSessionId: expect.stringMatching(/^goat_chat_/),
+      newSessionId: expect.stringMatching(/^conversation_/),
       model: "openai/gpt-6-astra",
       engine: { type: "codex", schemaVersion: 1 },
     });
@@ -3181,7 +3181,7 @@ describe("Surface chat streaming UI", () => {
     );
     const body = chatMock.preparedRequestBodies.at(-1);
     expect(body).toMatchObject({
-      newSessionId: expect.stringMatching(/^goat_chat_/),
+      newSessionId: expect.stringMatching(/^conversation_/),
       model: CLAUDE_CHAT_DEFAULT_MODEL_ID,
       engine: { type: "claude_code", schemaVersion: 1 },
     });
@@ -4394,7 +4394,7 @@ describe("Surface chat streaming UI", () => {
     expect(body).toMatchObject({
       content: "Research Q3",
     });
-    expect(body.clientConversationId).toMatch(/^goat_chat_/);
+    expect(body.clientConversationId).toMatch(/^conversation_/);
   });
 
   it("routes a dropped file only to the Cmd+K composer while the compose view is open", async () => {
@@ -4467,7 +4467,7 @@ describe("Surface chat streaming UI", () => {
       content: "Clone my repo",
       engine: { type: "codex", schemaVersion: 1 },
     });
-    expect(body.clientConversationId).toMatch(/^goat_chat_/);
+    expect(body.clientConversationId).toMatch(/^conversation_/);
     // Never adopted into the visible thread and never navigated to.
     expect(historyMock.replaceState).not.toHaveBeenCalled();
     expect(routerMock.push).not.toHaveBeenCalled();
@@ -4638,6 +4638,49 @@ describe("Surface chat streaming UI", () => {
     await user.click(result);
 
     expect(routerMock.push).toHaveBeenCalledWith("/chat/chat_1");
+  });
+
+  it("keeps Cmd+K matches in recency order while searching and after clearing", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={null}
+        recentChats={[
+          codexChatSummary({
+            id: "chat_newer",
+            title: "Plans for spring",
+            updatedAt: "2026-08-10T12:00:00.000Z",
+          }),
+          codexChatSummary({
+            id: "chat_older",
+            title: "Planning",
+            updatedAt: "2026-08-09T12:00:00.000Z",
+          }),
+        ]}
+      />,
+    );
+
+    await user.keyboard("{Meta>}k{/Meta}");
+    const dialog = screen.getByRole("dialog");
+    const input = within(dialog).getByRole("combobox");
+    const recentTitles = () =>
+      within(dialog)
+        .getAllByRole("option")
+        .filter((option) => option.dataset.value !== "start-new-chat")
+        .map((option) => option.querySelector("p")?.textContent);
+
+    expect(recentTitles()).toEqual(["Plans for spring", "Planning"]);
+    await user.type(input, "planning");
+    expect(recentTitles()).toEqual(["Plans for spring", "Planning"]);
+    await user.clear(input);
+    await user.type(input, "no matching work");
+    expect(within(dialog).getByText("No matching tasks or chats.")).toBeInTheDocument();
+    expect(within(dialog).getAllByRole("option")).toHaveLength(1);
+    await user.clear(input);
+    expect(recentTitles()).toEqual(["Plans for spring", "Planning"]);
   });
 
   it("mixes archived chats into the Cmd+K palette by recency and restores them", async () => {

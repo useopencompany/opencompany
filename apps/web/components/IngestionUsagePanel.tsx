@@ -13,12 +13,19 @@ import {
 
 export type UsageData = BillingUsageDto;
 
-const CATEGORY_ORDER: readonly SpendCategory[] = ["chat", "ingestion", "capabilities", "other"];
+const CATEGORY_ORDER: readonly SpendCategory[] = [
+  "chat",
+  "ingestion",
+  "capabilities",
+  "sandbox",
+  "other",
+];
 
 const CATEGORY_LABELS: Record<SpendCategory, string> = {
   chat: "Chat",
   ingestion: "Ingestion",
   capabilities: "Paid capabilities",
+  sandbox: "Sandbox usage",
   other: "Other",
 };
 
