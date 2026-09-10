@@ -831,7 +831,8 @@ describe("canonical Hono API", () => {
     );
     expect(replace).toHaveBeenCalledWith({
       actor,
-      name: "investigate-bug",
+      name: createdInstallation.id,
+      expectedBundleId: createdInstallation.bundle.id,
       bundle: authoredBundle,
     });
     expect(create).toHaveBeenNthCalledWith(1, {
