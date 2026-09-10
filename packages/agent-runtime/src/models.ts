@@ -519,10 +519,14 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     label: "DeepSeek V4 Flash",
     description: "High-throughput DeepSeek model for cost-sensitive agent work.",
     category: "Fast",
-    supportsReasoning: false,
+    supportsReasoning: true,
     supportsImages: false,
     supportsPdf: false,
     ratings: { capability: 2, speed: 2, cost: 1 },
+    reasoning: {
+      providerOptions: {},
+      exposure: "raw",
+    },
   },
   {
     id: "mistral/mistral-medium-3.5",
