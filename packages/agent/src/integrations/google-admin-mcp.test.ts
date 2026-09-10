@@ -73,6 +73,14 @@ describe("Google Admin MCP connection", () => {
     );
   });
 
+  it.each(["http://untrusted.example", "ftp://localhost", "invalid origin"])(
+    "rejects an unsafe runtime origin %s",
+    (origin) => {
+      vi.stubEnv("OPENCOMPANY_API_ORIGIN", origin);
+      expect(googleAdminMcpRuntimeEndpointUrl()).toBe(GOOGLE_ADMIN_MCP_ENDPOINT_URL);
+    },
+  );
+
   it("validates Google access but injects only a narrow first-party ticket into MCP", async () => {
     const connection = await loadGoogleAdminMcpWorkerConnection({
       ...connectionInput,

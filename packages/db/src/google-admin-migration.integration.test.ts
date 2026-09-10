@@ -9,7 +9,7 @@ it("adds Google Admin to the integration vault without removing existing provide
     const tables = ["integrations", "integration_credentials", "integration_resources"];
     for (const table of tables) {
       await db.exec(
-        `CREATE TABLE goat.${table} (provider text CONSTRAINT goat_${table}_provider_check CHECK (provider IN ('gmail')))`,
+        `CREATE TABLE "goat".${table} (provider text CONSTRAINT goat_${table}_provider_check CHECK (provider IN ('gmail')))`,
       );
     }
     for (const migration of [
@@ -26,9 +26,9 @@ it("adds Google Admin to the integration vault without removing existing provide
       await db.exec(sql);
     }
     for (const table of tables) {
-      await db.exec(`INSERT INTO goat.${table} VALUES ('google_admin')`);
+      await db.exec(`INSERT INTO "goat".${table} VALUES ('google_admin')`);
       await expect(
-        db.exec(`INSERT INTO goat.${table} VALUES ('unknown_provider')`),
+        db.exec(`INSERT INTO "goat".${table} VALUES ('unknown_provider')`),
       ).rejects.toThrow();
     }
     expect(

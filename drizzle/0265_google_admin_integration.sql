@@ -10,4 +10,3 @@ ALTER TABLE "goat"."integration_credentials" ADD CONSTRAINT "goat_integration_cr
 ALTER TABLE "goat"."integration_resources" DROP CONSTRAINT "goat_integration_resources_provider_check";
 --> statement-breakpoint
 ALTER TABLE "goat"."integration_resources" ADD CONSTRAINT "goat_integration_resources_provider_check" CHECK ("provider" IN ('gmail', 'google_admin', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'convex', 'render', 'vercel', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'resend', 'x_account', 'custom_mcp'));
-

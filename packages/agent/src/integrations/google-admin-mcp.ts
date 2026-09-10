@@ -16,7 +16,10 @@ export function googleAdminMcpRuntimeEndpointUrl() {
   if (!configuredOrigin) return GOOGLE_ADMIN_MCP_ENDPOINT_URL;
   try {
     const origin = new URL(configuredOrigin);
-    if (origin.protocol !== "https:" && origin.hostname !== "localhost") {
+    if (
+      origin.protocol !== "https:" &&
+      !(origin.protocol === "http:" && origin.hostname === "localhost")
+    ) {
       return GOOGLE_ADMIN_MCP_ENDPOINT_URL;
     }
     return new URL("/mcp/plugins/google-admin", origin).toString();
