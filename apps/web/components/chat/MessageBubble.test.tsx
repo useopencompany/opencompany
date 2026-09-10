@@ -36,14 +36,26 @@ afterEach(() => {
   presentationMocks.load.mockReset();
 });
 
-it.each(["accept", "decline"] as const)(
-  "reviews a persisted task Gmail draft with a one-time %s decision",
-  async (decision) => {
+it.each(
+  (["accept", "decline"] as const).flatMap((decision) =>
+    [false, true].map((summary) => ({ decision, summary })),
+  ),
+)(
+  "reviews a persisted task draft with a one-time $decision decision (summary: $summary)",
+  async ({ decision, summary }) => {
     const onActionApproval = vi.fn(async () => undefined);
     const message: ChatUiMessage = {
       id: "assistant_task_approval",
       role: "assistant",
+      ...(summary
+        ? {
+            metadata: {
+              presentation: { source: "summary" as const, updatedAt: "2026-09-10T16:06:23Z" },
+            },
+          }
+        : {}),
       parts: [
+        { type: "text", text: "The draft is ready. Approval is needed to continue." },
         {
           type: "dynamic-tool",
           toolName: "codex_approval",
@@ -69,6 +81,7 @@ it.each(["accept", "decline"] as const)(
         onActionApproval={onActionApproval}
       />,
     );
+    expect(presentationMocks.load).not.toHaveBeenCalled();
     expect(screen.getByText("recipient@example.com")).toBeVisible();
     expect(screen.getByText("Ready to launch")).toBeVisible();
     expect(screen.getByText("The feature is live.")).toBeVisible();
@@ -84,6 +97,46 @@ it.each(["accept", "decline"] as const)(
     expect(screen.getByRole("button", { name: "Deny" })).toBeDisabled();
   },
 );
+
+it.each([
+  { readOnly: true, allowActionApproval: true },
+  { readOnly: false, allowActionApproval: false },
+])("keeps summary task approvals inert when $readOnly / $allowActionApproval", (access) => {
+  const onActionApproval = vi.fn(async () => undefined);
+  const message: ChatUiMessage = {
+    id: "assistant_task_approval_history",
+    role: "assistant",
+    metadata: {
+      presentation: { source: "summary", updatedAt: "2026-09-10T16:06:23Z" },
+    },
+    parts: [
+      {
+        type: "dynamic-tool",
+        toolName: CODEX_APPROVAL_TOOL_NAME,
+        toolCallId: "task_action_branch",
+        state: "approval-requested",
+        approval: { id: "approval_task_action_branch" },
+        input: {
+          action: "plugin:github:github.create_branch",
+          params: { owner: "useopencompany", repo: "opencompany", branch: "docs/changelog" },
+        },
+      },
+    ],
+  };
+  render(
+    <MessageBubble
+      message={message}
+      taskLookup={emptyTaskLookup}
+      onActionApproval={onActionApproval}
+      {...access}
+    />,
+  );
+  expect(screen.queryByRole("button", { name: "Approve once" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Deny" })).not.toBeInTheDocument();
+  expect(screen.getByTestId("chat-tool-call-codex_approval")).toBeVisible();
+  expect(onActionApproval).not.toHaveBeenCalled();
+  expect(presentationMocks.load).not.toHaveBeenCalled();
+});
 
 describe("MessageBubble historical presentation details", () => {
   it.each(

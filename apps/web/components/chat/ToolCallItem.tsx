@@ -97,18 +97,25 @@ export function ToolCallItem({
   // authorized approval must use those fields before the historical-detail guard collapses it.
   if (
     !readOnly &&
-    tool.name === USE_ACTION_TOOL_NAME &&
+    (tool.name === USE_ACTION_TOOL_NAME || tool.name === CODEX_APPROVAL_TOOL_NAME) &&
     tool.state === "approval-requested" &&
     tool.approvalId &&
     allowActionApproval &&
     onActionApproval
   ) {
-    if (managedCapabilityActionFromTool(tool)) {
+    if (tool.name === USE_ACTION_TOOL_NAME && managedCapabilityActionFromTool(tool)) {
       return (
         <CapabilityApprovalCard tool={tool} onDecision={onActionApproval} disclosure={disclosure} />
       );
     }
-    return <ActionApprovalCard tool={tool} onDecision={onActionApproval} disclosure={disclosure} />;
+    return (
+      <ActionApprovalCard
+        tool={tool}
+        onDecision={onActionApproval}
+        allowAlways={tool.name === USE_ACTION_TOOL_NAME}
+        disclosure={disclosure}
+      />
+    );
   }
   if (detail && detail.state !== "loaded")
     return <ToolCallRow tool={tool} detail={detail} {...disclosure} />;
@@ -139,22 +146,6 @@ export function ToolCallItem({
   }
   if (tool.name === CODEX_QUESTION_TOOL_NAME && codexQuestionInput(tool.input)) {
     return <CodexQuestionRow tool={tool} onAction={onCodexAction} disclosure={disclosure} />;
-  }
-  if (
-    tool.name === CODEX_APPROVAL_TOOL_NAME &&
-    tool.state === "approval-requested" &&
-    tool.approvalId &&
-    allowActionApproval &&
-    onActionApproval
-  ) {
-    return (
-      <ActionApprovalCard
-        tool={tool}
-        onDecision={onActionApproval}
-        allowAlways={false}
-        disclosure={disclosure}
-      />
-    );
   }
   if (tool.name === USE_ACTION_TOOL_NAME && capabilityApprovalFromTool(tool)) {
     return <LegacyCapabilityApprovalRow tool={tool} />;
