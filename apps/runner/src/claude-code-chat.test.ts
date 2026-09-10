@@ -2,6 +2,8 @@ import { GitHubUserAccessAuthError } from "@opencompany/agent/integrations/githu
 import {
   ACTION_HOST_TOOL_CONTRACT_VERSION,
   ACTION_HOST_TOOL_CONTRACT_VERSION_V2,
+  createAcpEventNormalizer,
+  type HarnessNormalizedEvent,
   verifyExternalEngineGatewayTicket,
 } from "@opencompany/agent-runtime";
 import type {
@@ -344,93 +346,51 @@ describe("inspectClaudeCoreMcpInitialization", () => {
   });
 });
 
+type ProjectorInput = {
+  normalizeEvent?: (event: Record<string, unknown>) => HarnessNormalizedEvent[];
+  onNormalizedEvent?: (event: HarnessNormalizedEvent) => Promise<void>;
+};
+
 describe("extractAcpScheduleWakeup", () => {
-  it("recognizes ACP ScheduleWakeup calls and clamps their delay", () => {
-    expect(
-      extractAcpScheduleWakeup(
-        acpToolCallEvent("ScheduleWakeup", {
-          delaySeconds: 9_000,
-          reason: "Final check",
-          prompt: "Check the deploy.",
-        }),
-      ),
-    ).toEqual({
-      delaySeconds: 3_600,
-      reason: "Final check",
-      prompt: "Check the deploy.",
+  const wakeup = { delaySeconds: 600, reason: "Wait for CI", prompt: "Inspect the PR." };
+  function completed(input: Record<string, unknown> = wakeup) {
+    return createAcpEventNormalizer().normalize(
+      acpToolCallUpdateEvent("ScheduleWakeup", input),
+    )[0]!;
+  }
+
+  it("recognizes completed calls and clamps their delay", () => {
+    expect(extractAcpScheduleWakeup(completed({ ...wakeup, delaySeconds: 9000 }))).toEqual({
+      ...wakeup,
+      delaySeconds: 3600,
     });
   });
 
-  it("recognizes ScheduleWakeup calls wrapped in the Claude ACP MCP envelope", () => {
-    expect(
-      extractAcpScheduleWakeup(
-        acpToolCallEvent("codex_mcp_tool", {
-          kind: "other",
-          tool: "ScheduleWakeup",
-          toolName: "ScheduleWakeup",
-          arguments: {
-            delaySeconds: 600,
-            reason: "Wait for CI",
-            prompt: "Inspect PR #42.",
-          },
-        }),
-      ),
-    ).toEqual({
-      delaySeconds: 600,
-      reason: "Wait for CI",
-      prompt: "Inspect PR #42.",
-    });
-  });
-
-  it("recognizes ScheduleWakeup input delivered on the completed ACP tool update", () => {
-    expect(
-      extractAcpScheduleWakeup({
-        method: "session/update",
-        params: {
-          sessionId: "session_1",
-          update: {
-            sessionUpdate: "tool_call_update",
-            toolCallId: "tool_1",
-            status: "completed",
-            _meta: { claudeCode: { toolName: "ScheduleWakeup" } },
-            rawInput: {
-              delaySeconds: 1_200,
-              reason: "Wait for CI",
-              prompt: "Inspect PR #42 and merge it when checks pass.",
-            },
-          },
-        },
+  it("recognizes wrapped MCP arguments", () => {
+    const event = createAcpEventNormalizer().normalize(
+      acpToolCallUpdateEvent("codex_mcp_tool", {
+        tool: "ScheduleWakeup",
+        toolName: "ScheduleWakeup",
+        arguments: wakeup,
       }),
-    ).toEqual({
-      delaySeconds: 1_200,
-      reason: "Wait for CI",
-      prompt: "Inspect PR #42 and merge it when checks pass.",
-    });
+    )[0]!;
+    expect(extractAcpScheduleWakeup(event)).toEqual(wakeup);
   });
 
-  it("ignores malformed tool input and unrelated raw events", () => {
-    expect(
-      extractAcpScheduleWakeup(
-        acpToolCallEvent("ScheduleWakeup", {
-          delay_seconds: "60",
-          reason: "Wrong delay type",
-        }),
-      ),
-    ).toBeNull();
-    expect(
-      extractAcpScheduleWakeup({
-        method: "session/update",
-        params: {
-          update: {
-            sessionUpdate: "tool_call_update",
-            status: "in_progress",
-            _meta: { claudeCode: { toolName: "ScheduleWakeup" } },
-            rawInput: { delaySeconds: 60, reason: "Incomplete update" },
-          },
-        },
-      }),
-    ).toBeNull();
-    expect(extractAcpScheduleWakeup({ method: "session/prompt_result" })).toBeNull();
+  it("ignores pending, failed, nested, malformed and unrelated calls", () => {
+    const event = completed();
+    for (const ignored of [
+      { ...event, type: "mcp_tool.started" },
+      { ...event, payload: { ...event.payload, status: "failed" } },
+      { ...event, payload: { ...event.payload, parentToolCallId: "subagent_1" } },
+      { ...event, payload: { ...event.payload, tool: "Other", toolName: "Other" } },
+      completed({ delaySeconds: "60", reason: "Wrong type" }),
+    ] as HarnessNormalizedEvent[])
+      expect(extractAcpScheduleWakeup(ignored)).toBeUndefined();
+  });
+
+  it("distinguishes an explicit cancellation from unrelated events", () => {
+    expect(extractAcpScheduleWakeup(completed({ stop: true }))).toBeNull();
   });
 });
 
@@ -513,18 +473,20 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     cliMocks.ensureClaudeAcpAdapterInstalled.mockResolvedValue(undefined);
     cliMocks.killLeftoverClaudeTurnProcesses.mockResolvedValue(undefined);
     eventMocks.loadCodexChatAssistantMessageParts.mockResolvedValue([]);
-    eventMocks.createExternalEngineProjector.mockImplementation(
-      (input: { normalizeEvent?: (event: Record<string, unknown>) => unknown }) => ({
-        appendNotice: eventMocks.appendNotice,
-        push: vi.fn(async (events: Record<string, unknown>[]) => {
-          for (const event of events) input.normalizeEvent?.(event);
-        }),
-        finalize: vi.fn(async () => undefined),
-        fail: vi.fn(async () => undefined),
-        interrupted: vi.fn(async () => undefined),
-        cancelPendingInteractions: vi.fn(async () => false),
+    eventMocks.createExternalEngineProjector.mockImplementation((input: ProjectorInput) => ({
+      appendNotice: eventMocks.appendNotice,
+      push: vi.fn(async (events: Record<string, unknown>[]) => {
+        for (const event of events) {
+          for (const normalized of input.normalizeEvent?.(event) ?? []) {
+            await input.onNormalizedEvent?.(normalized);
+          }
+        }
       }),
-    );
+      finalize: vi.fn(async () => undefined),
+      fail: vi.fn(async () => undefined),
+      interrupted: vi.fn(async () => undefined),
+      cancelPendingInteractions: vi.fn(async () => false),
+    }));
     repoMocks.loadRepositoryBootstrap.mockResolvedValue({
       configs: [],
       promptFragment: "",
@@ -836,14 +798,16 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       fail: vi.fn(async () => undefined),
       interrupted: vi.fn(async () => undefined),
     };
-    eventMocks.createExternalEngineProjector.mockImplementationOnce(
-      (input: { normalizeEvent?: (event: Record<string, unknown>) => unknown }) => ({
-        ...projector,
-        push: vi.fn(async (events: Record<string, unknown>[]) => {
-          for (const event of events) input.normalizeEvent?.(event);
-        }),
+    eventMocks.createExternalEngineProjector.mockImplementationOnce((input: ProjectorInput) => ({
+      ...projector,
+      push: vi.fn(async (events: Record<string, unknown>[]) => {
+        for (const event of events) {
+          for (const normalized of input.normalizeEvent?.(event) ?? []) {
+            await input.onNormalizedEvent?.(normalized);
+          }
+        }
       }),
-    );
+    }));
     acpMocks.runTurn.mockImplementationOnce(
       async (input: {
         onEngineSessionId: (sessionId: string) => Promise<void>;
@@ -1290,6 +1254,57 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     );
   });
 
+  it.each([false, true])(
+    "handles streamed wakeups and later cancellation (stop=%s)",
+    async (stop) => {
+      acpMocks.runTurn.mockImplementationOnce(
+        async (input: {
+          onEngineSessionId: (id: string) => Promise<void>;
+          onRuntimeEvents: (events: Record<string, unknown>[]) => Promise<void>;
+        }) => {
+          await input.onEngineSessionId("claude_thread_1");
+          await input.onRuntimeEvents([acpToolCallEvent("ScheduleWakeup", {})]);
+          const argumentUpdate = acpToolCallUpdateEvent("ScheduleWakeup", {
+            delaySeconds: 480,
+            reason: "Wait for CI",
+            prompt: "Check the PR.",
+          });
+          argumentUpdate.params.update.status = "in_progress";
+          await input.onRuntimeEvents([argumentUpdate]);
+          const completion = acpToolCallUpdateEvent("ScheduleWakeup", {});
+          const { rawInput: _input, ...update } = completion.params.update;
+          await input.onRuntimeEvents([
+            { ...completion, params: { ...completion.params, update } },
+          ]);
+          if (stop)
+            await input.onRuntimeEvents([acpToolCallUpdateEvent("ScheduleWakeup", { stop: true })]);
+          await input.onRuntimeEvents(successfulAcpEvents(""));
+          return {
+            sessionId: "claude_thread_1",
+            loadedSession: true,
+            promptResponse: { stopReason: "end_turn" },
+            stderrTail: "",
+          };
+        },
+      );
+      await runClaudeCodeChatTurn({ turn: claudeTurn(), session: claudeSession(), env: env() });
+      const wakeup = { delaySeconds: 480, reason: "Wait for CI", prompt: "Check the PR." };
+      expect(wakeupMocks.persistCodexChatScheduledWakeup).toHaveBeenCalledWith(
+        expect.objectContaining({ wakeup }),
+      );
+      if (stop) {
+        expect(wakeupMocks.persistCodexChatScheduledWakeup).toHaveBeenLastCalledWith(
+          expect.objectContaining({ wakeup: null }),
+        );
+        expect(wakeupMocks.enqueueCodexChatWakeup).not.toHaveBeenCalled();
+      } else {
+        expect(wakeupMocks.enqueueCodexChatWakeup).toHaveBeenCalledWith(
+          expect.objectContaining({ wakeup }),
+        );
+      }
+    },
+  );
+
   it("projects a task wakeup as the next durable task turn", async () => {
     const harnessSpec = harnessSpecForClaudeTask();
     const turn = claudeTurn({ settings: { reasoningEffort: "high" } });
@@ -1300,17 +1315,19 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     });
     taskMocks.finalizeTaskResult.mockResolvedValueOnce("PR opened; CI is running.");
     taskMocks.buildTaskTurnCompletion.mockReturnValueOnce(completion);
-    eventMocks.createExternalEngineProjector.mockImplementationOnce(
-      (input: { normalizeEvent?: (event: unknown) => unknown }) => ({
-        push: vi.fn(async (events: unknown[]) => {
-          for (const event of events) input.normalizeEvent?.(event);
-        }),
-        finalize: vi.fn(async () => undefined),
-        fail: vi.fn(async () => undefined),
-        interrupted: vi.fn(async () => undefined),
-        cancelPendingInteractions: vi.fn(async () => false),
+    eventMocks.createExternalEngineProjector.mockImplementationOnce((input: ProjectorInput) => ({
+      push: vi.fn(async (events: Record<string, unknown>[]) => {
+        for (const event of events) {
+          for (const normalized of input.normalizeEvent?.(event) ?? []) {
+            await input.onNormalizedEvent?.(normalized);
+          }
+        }
       }),
-    );
+      finalize: vi.fn(async () => undefined),
+      fail: vi.fn(async () => undefined),
+      interrupted: vi.fn(async () => undefined),
+      cancelPendingInteractions: vi.fn(async () => false),
+    }));
     acpMocks.runTurn.mockImplementationOnce(
       async (input: {
         onEngineSessionId: (sessionId: string) => Promise<void>;
