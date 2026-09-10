@@ -8,7 +8,7 @@ contract v5. The model sees these operations:
 | `list_actions({})` | All currently available sources, as before. |
 | `list_actions({source})` | Every available action in catalog order, with its exact ID, source, permission mode, and a whitespace-normalized description preview of at most 160 characters. Longer previews end in `…`. No parameter schemas. |
 | `describe_actions({actions: [id, ...]})` | Complete current descriptors for one to five exact IDs, including full descriptions and parameter schemas, plus explicit `not_found` IDs. Repeated IDs are deduplicated after validating the batch size. |
-| `use_action({action, params})` | The existing execution path, with availability checks, approval, deduplication, provider retry limits, and the 16-execution turn budget. |
+| `use_action({action, params})` | The existing execution path, with availability checks, approval, deduplication, provider retry limits, and the 16-admission turn budget. |
 
 Listing and description read the existing policy-filtered catalog. They do not execute providers,
 refresh remote MCP discovery snapshots, require approval, or consume the execution budget.
@@ -24,6 +24,33 @@ The persisted session contract controls rolling deployment behavior. Retained Co
 v2–v4 and chat contracts v3–v4 receive their original full-schema listings. The MCP adapter exposes
 `describe_actions` only for v5; legacy gateway description requests are rejected. Previous
 approval continuations and legacy Brain capture remain supported.
+
+## Action budget
+
+The shared limit is 16 admitted invocations per turn for both chat and background tasks.
+Discovery is free. Unknown action IDs and missing source discovery are rejected before admission;
+a known, admitted invocation consumes a slot even when parameter validation or provider execution
+fails. A duplicate invocation does not consume another slot or dispatch the provider again.
+Approval requests and denied approvals are handled before the host admission claim.
+
+Execution responses include `budget: { limit, used, remaining }` after admission, including
+provider errors and duplicate invocations. A `call_budget` response reports zero remaining.
+Snapshots describe admission order; concurrently executing calls can finish in a different order.
+An inner host gateway's budget takes precedence over the model-facing wrapper's local count,
+because the host keeps the same turn's accounting across approval continuations.
+
+The native opencompany runner makes `use_action` inactive on subsequent model steps once a
+response reports zero remaining or `call_budget`. Other tools remain available to finish work
+from the evidence already gathered. The existing final model step still requires a text answer.
+Codex and Claude Code receive the same gateway budget and stop instructions, but their external
+loops do not use this native runner's tool selection. The host cap continues to reject excess
+invocations, including calls already emitted in the same parallel batch.
+
+The action budget bounds admitted integration/capability invocations, not total inference spend,
+discovery calls, or work through unrelated tools. Model-step limits and provider retry controls
+remain separate. Approval/retry reconstruction resets local wrapper state; the persisted host is
+the authoritative boundary. An older host without budget metadata can still report `call_budget`,
+which the native runner recognizes.
 
 ## Verification and evaluation
 

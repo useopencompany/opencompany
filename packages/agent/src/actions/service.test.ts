@@ -83,6 +83,81 @@ describe("serveActionRequest", () => {
     expect(execute).toHaveBeenCalledTimes(ACTION_MAX_CALLS_PER_TURN);
   });
 
+  it("reports admitted calls and rejects a concurrent batch beyond the shared cap", async () => {
+    const governance = createInMemoryActionTurnGovernance({ prelistedSourceIds: ["gmail"] });
+    const execute = vi.fn(async () => ({ ok: true as const, action: "gmail.search", result: [] }));
+    const results = await Promise.all(
+      Array.from({ length: 23 }, (_, i) =>
+        serveActionRequest({
+          request: executeRequest(`parallel-${i}`),
+          catalog,
+          governance,
+          execute,
+        }),
+      ),
+    );
+    expect(execute).toHaveBeenCalledTimes(16);
+    expect(
+      results.filter((result) => !result.ok && result.error.code === "call_budget"),
+    ).toHaveLength(7);
+    expect(results[0]?.budget).toEqual({ limit: 16, used: 1, remaining: 15 });
+    expect(results[15]?.budget).toEqual({ limit: 16, used: 16, remaining: 0 });
+    expect(results[22]?.budget).toEqual({ limit: 16, used: 16, remaining: 0 });
+  });
+
+  it("preserves the host budget across a fresh wrapper after approval resume", async () => {
+    const host = createInMemoryActionTurnGovernance({ prelistedSourceIds: ["gmail"] });
+    const execute = vi.fn(async () => ({ ok: true as const, action: "gmail.search", result: [] }));
+    const call = (id: string) =>
+      serveActionRequest({
+        request: executeRequest(id),
+        catalog,
+        governance: createInMemoryActionTurnGovernance({ prelistedSourceIds: ["gmail"] }),
+        execute: () =>
+          serveActionRequest({ request: executeRequest(id), catalog, governance: host, execute }),
+      });
+    for (let i = 0; i < 16; i++) await call(`resume-${i}`);
+    expect(await call("resume-16")).toMatchObject({
+      ok: false,
+      error: { code: "call_budget" },
+      budget: { limit: 16, used: 16, remaining: 0 },
+    });
+    expect(await call("resume-0")).toMatchObject({
+      ok: false,
+      error: { code: "duplicate_invocation" },
+      budget: { limit: 16, used: 16, remaining: 0 },
+    });
+    expect(execute).toHaveBeenCalledTimes(16);
+  });
+
+  it("charges admitted invalid parameters and provider failures, but not unknown actions", async () => {
+    const governance = createInMemoryActionTurnGovernance({ prelistedSourceIds: ["gmail"] });
+    const execute = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        error: { code: "invalid_params", message: "Missing query" },
+      })
+      .mockResolvedValueOnce({ ok: false, error: { code: "timeout", message: "Timed out" } });
+    await serveActionRequest({
+      request: { ...executeRequest("unknown"), action: "missing" },
+      catalog,
+      governance,
+      execute,
+    });
+    for (let i = 1; i <= 2; i++) {
+      expect(
+        await serveActionRequest({
+          request: executeRequest(`failure-${i}`),
+          catalog,
+          governance,
+          execute,
+        }),
+      ).toMatchObject({ ok: false, budget: { limit: 16, used: i, remaining: 16 - i } });
+    }
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps the failure cap and identifies opencompany as the owner of the limit", async () => {
     const governance = createInMemoryActionTurnGovernance();
     await governance.recordSourceDiscovery("gmail");
