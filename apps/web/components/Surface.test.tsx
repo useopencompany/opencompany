@@ -2269,8 +2269,8 @@ describe("Surface chat streaming UI", () => {
     const user = userEvent.setup();
     knowledgeCommandMocks.listSkillCatalog.mockResolvedValue([
       {
-        id: "coding-work",
-        name: "Coding work",
+        id: "skill_installation_coding",
+        name: "coding-work",
         description: "How coding work should happen.",
       },
     ]);
@@ -2301,14 +2301,14 @@ describe("Surface chat streaming UI", () => {
     await user.click(screen.getByText("Cloud Codex sandbox"));
     const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
     await user.type(textarea, "/coding");
-    await user.click(await screen.findByRole("option", { name: /coding work/i }));
+    await user.click(await screen.findByRole("option", { name: /coding-work/i }));
     await user.type(textarea, "implement this");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(chatMock.sendMessage).toHaveBeenCalledWith({
       text: "/coding-work implement this",
       metadata: {
-        mentions: [{ kind: "skill", id: "coding-work" }],
+        mentions: [{ kind: "skill", id: "skill_installation_coding", name: "coding-work" }],
       },
     });
   });
@@ -3050,7 +3050,7 @@ describe("Surface chat streaming UI", () => {
     knowledgeCommandMocks.listSkillCatalog.mockResolvedValue([
       {
         id: "smooth-shadow-ring",
-        name: "Smooth shadow ring",
+        name: "smooth-shadow-ring",
         description: "Polish elevation styles.",
       },
     ]);
@@ -3110,7 +3110,7 @@ describe("Surface chat streaming UI", () => {
     expect(overlay).toHaveTextContent("#morning-test");
     expect(textarea).toHaveClass("text-transparent");
     await user.type(textarea, "run today's checks with /");
-    await user.click(await screen.findByRole("option", { name: /Smooth shadow ring/i }));
+    await user.click(await screen.findByRole("option", { name: /smooth-shadow-ring/i }));
     await user.type(textarea, "{Enter}");
 
     await waitFor(() => expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalled());
@@ -3418,12 +3418,12 @@ describe("Surface chat streaming UI", () => {
     knowledgeCommandMocks.listSkillCatalog.mockResolvedValue([
       {
         id: "coding-work",
-        name: "Coding work",
+        name: "coding-work",
         description: "Use focused verification for code changes.",
       },
       {
         id: "writing-work",
-        name: "Writing work",
+        name: "writing-work",
         description: "Write clear product copy.",
       },
     ]);
@@ -3434,10 +3434,10 @@ describe("Surface chat streaming UI", () => {
 
     const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
     await user.type(textarea, "/verification");
-    const codingOption = await screen.findByRole("option", { name: /coding work/i });
+    const codingOption = await screen.findByRole("option", { name: /coding-work/i });
     await user.click(codingOption);
     await user.type(textarea, "then /writing");
-    await user.click(await screen.findByRole("option", { name: /writing work/i }));
+    await user.click(await screen.findByRole("option", { name: /writing-work/i }));
 
     expect(textarea).toHaveValue("/coding-work then /writing-work ");
     const overlay = textarea.parentElement?.querySelector(
@@ -3460,7 +3460,7 @@ describe("Surface chat streaming UI", () => {
     expect(chatMock.sendMessage).toHaveBeenCalledWith({
       text: "/coding-work then continue",
       metadata: {
-        mentions: [{ kind: "skill", id: "coding-work" }],
+        mentions: [{ kind: "skill", id: "coding-work", name: "coding-work" }],
       },
     });
   });
@@ -3470,7 +3470,7 @@ describe("Surface chat streaming UI", () => {
     knowledgeCommandMocks.listSkillCatalog.mockResolvedValue([
       {
         id: "coding-work",
-        name: "Coding work",
+        name: "coding-work",
         description: "Use focused verification for code changes.",
       },
     ]);
@@ -3481,11 +3481,11 @@ describe("Surface chat streaming UI", () => {
 
     const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
     await user.type(textarea, "/coding");
-    await screen.findByRole("option", { name: /coding work/i });
+    await screen.findByRole("option", { name: /coding-work/i });
     await user.clear(textarea);
     await user.type(textarea, "@coding");
 
-    expect(screen.queryByRole("option", { name: /coding work/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /coding-work/i })).not.toBeInTheDocument();
   });
 
   it("resolves exact Skill mentions pasted into the composer", async () => {
@@ -3493,12 +3493,12 @@ describe("Surface chat streaming UI", () => {
     knowledgeCommandMocks.listSkillCatalog.mockResolvedValue([
       {
         id: "product-feature",
-        name: "Product feature",
+        name: "product-feature",
         description: "Plan and shape a product feature.",
       },
       {
         id: "add-integration-to-main-chat",
-        name: "Add integration to main chat",
+        name: "add-integration-to-main-chat",
         description: "Add a new integration to the main chat.",
       },
     ]);
@@ -3523,10 +3523,11 @@ describe("Surface chat streaming UI", () => {
       text: pastedText,
       metadata: {
         mentions: [
-          { kind: "skill", id: "product-feature" },
+          { kind: "skill", id: "product-feature", name: "product-feature" },
           {
             kind: "skill",
             id: "add-integration-to-main-chat",
+            name: "add-integration-to-main-chat",
           },
         ],
       },
@@ -3542,7 +3543,7 @@ describe("Surface chat streaming UI", () => {
       return [
         {
           id: "coding-work",
-          name: "Coding work",
+          name: "coding-work",
           description: "Use focused verification for code changes.",
         },
       ];
@@ -3555,11 +3556,11 @@ describe("Surface chat streaming UI", () => {
     const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
     await user.type(textarea, "/coding");
     await waitFor(() => expect(catalogCalls).toBe(1));
-    expect(screen.queryByRole("option", { name: /coding work/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /coding-work/i })).not.toBeInTheDocument();
 
     await user.clear(textarea);
     await user.type(textarea, "/coding");
-    await screen.findByRole("option", { name: /coding work/i });
+    await screen.findByRole("option", { name: /coding-work/i });
     expect(catalogCalls).toBe(2);
   });
 

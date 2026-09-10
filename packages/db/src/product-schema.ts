@@ -3276,6 +3276,10 @@ export const skillInstallations = productSchema.table(
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
+    // Keep the physical default compatible with application revisions deployed before Personal
+    // Skills. New writers always choose a scope after checking the rollout boundary below.
+    scope: text("scope").$type<"personal" | "company">().notNull().default("company"),
+    createdByUserId: text("created_by_user_id"),
     bundleId: text("bundle_id").notNull(),
     enabled: boolean("enabled").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -3285,7 +3289,14 @@ export const skillInstallations = productSchema.table(
   (table) => ({
     workspaceLiveNameIdx: uniqueIndex("skill_installations_workspace_live_name_idx")
       .on(table.workspaceId, table.name)
-      .where(sql`${table.archivedAt} IS NULL`),
+      .where(sql`${table.archivedAt} IS NULL AND ${table.scope} = 'company'`),
+    personalLiveNameIdx: uniqueIndex("skill_installations_personal_live_name_idx")
+      .on(table.workspaceId, table.createdByUserId, table.name)
+      .where(sql`${table.archivedAt} IS NULL AND ${table.scope} = 'personal'`),
+    scopeCheck: check(
+      "skill_installations_scope_check",
+      sql`${table.scope} IN ('personal', 'company') AND (${table.scope} = 'company' OR ${table.createdByUserId} IS NOT NULL)`,
+    ),
     workspaceUpdatedIdx: index("skill_installations_workspace_updated_idx").on(
       table.workspaceId,
       table.archivedAt,
@@ -3297,6 +3308,43 @@ export const skillInstallations = productSchema.table(
       foreignColumns: [skillBundles.workspaceId, skillBundles.id],
       name: "skill_installations_workspace_bundle_fk",
     }).onDelete("restrict"),
+  }),
+);
+
+// Personal rows become writable only after the release workflow confirms that every API and
+// runner instance enforces their authorization boundary and the previous revisions have drained.
+export const skillScopeRollout = productSchema.table(
+  "skill_scope_rollout",
+  {
+    id: text("id").primaryKey(),
+    personalEnabled: boolean("personal_enabled").notNull().default(false),
+    activatedAt: timestamp("activated_at", { withTimezone: true }),
+    activatedRelease: text("activated_release"),
+  },
+  (table) => ({
+    idCheck: check("skill_scope_rollout_id_check", sql`${table.id} = 'personal_skills'`),
+    activationCheck: check(
+      "skill_scope_rollout_activation_check",
+      sql`(${table.personalEnabled} AND ${table.activatedAt} IS NOT NULL AND ${table.activatedRelease} IS NOT NULL) OR (NOT ${table.personalEnabled} AND ${table.activatedAt} IS NULL AND ${table.activatedRelease} IS NULL)`,
+    ),
+  }),
+);
+
+// Retain the installation's access boundary across immutable bundle revisions.
+export const skillInstallationVersions = productSchema.table(
+  "skill_installation_versions",
+  {
+    companyShared: boolean("company_shared").notNull().default(false),
+    installationId: text("installation_id")
+      .notNull()
+      .references(() => skillInstallations.id, { onDelete: "cascade" }),
+    bundleId: text("bundle_id")
+      .notNull()
+      .references(() => skillBundles.id, { onDelete: "restrict" }),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.installationId, table.bundleId] }),
+    bundleIdx: index("skill_installation_versions_bundle_idx").on(table.bundleId),
   }),
 );
 

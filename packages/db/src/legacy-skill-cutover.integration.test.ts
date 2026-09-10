@@ -19,6 +19,8 @@ describe("legacy Skill cutover migration", () => {
     }
     await database.exec(SEED);
     await applyMigration(database, "0230_legacy_skill_cutover.sql");
+    await applyMigration(database, "0232_workspace_authored_skills.sql");
+    await applyMigration(database, "0263_personal_company_skills.sql");
   });
 
   afterAll(async () => {

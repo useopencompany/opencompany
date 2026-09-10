@@ -83,7 +83,11 @@ export const MessageEngineSchema = z
   ])
   .openapi("MessageEngineV1");
 export const MessageMentionSchema = z
-  .object({ kind: z.literal("skill"), id: ResourceIdSchema })
+  .object({
+    kind: z.literal("skill"),
+    id: ResourceIdSchema,
+    name: z.string().min(1).max(64).optional(),
+  })
   .strict()
   .openapi("MessageMention");
 export const RunStatusSchema = z.enum([
@@ -1381,9 +1385,19 @@ export const SkillBundleSchema = SkillBundleSummarySchema.extend({
   .strict()
   .openapi("SkillBundle");
 
+export const SkillScopeSchema = z.enum(["personal", "company"]).openapi("SkillScope");
+export const SetSkillScopeBodySchema = z
+  .object({ scope: SkillScopeSchema, expectedScope: SkillScopeSchema })
+  .strict()
+  .openapi("SetSkillScopeBody");
+
 export const SkillListItemSchema = z
   .object({
     id: ResourceIdSchema,
+    scope: SkillScopeSchema.nullable(),
+    createdByUserId: z.string().nullable(),
+    canEdit: z.boolean(),
+    canManage: z.boolean(),
     name: z.string().min(1).max(64),
     enabled: z.boolean(),
     archivedAt: TimestampSchema.nullable(),
@@ -1401,7 +1415,8 @@ export const SkillInstallationSchema = SkillListItemSchema.extend({
   .openapi("SkillInstallation");
 export const SkillCatalogItemSchema = z
   .object({
-    id: z.string().min(1).max(64),
+    id: ResourceIdSchema,
+    scope: SkillScopeSchema.nullable(),
     name: z.string().min(1).max(64),
     description: z.string().max(1_024),
   })
@@ -2117,6 +2132,7 @@ export const SkillImportPreviewEnvelopeSchema = z
   .strict()
   .openapi("SkillImportPreviewEnvelope");
 export const ImportSkillBodySchema = SkillImportPreviewBodySchema.extend({
+  scope: SkillScopeSchema.optional(),
   expectedResolvedCommit: z.string().regex(/^[0-9a-f]{40}$/iu),
   expectedIntegrity: z.string().regex(/^sha256:[0-9a-f]{64}$/iu),
 })
@@ -2130,6 +2146,7 @@ export const WorkspaceSkillNameSchema = z
 export const CreateWorkspaceSkillBodySchema = z
   .object({
     name: WorkspaceSkillNameSchema,
+    scope: SkillScopeSchema.optional(),
     description: z
       .string()
       .trim()
@@ -2149,7 +2166,10 @@ export const CreateWorkspaceSkillBodySchema = z
   })
   .strict()
   .openapi("CreateWorkspaceSkillBody");
-export const UpdateWorkspaceSkillBodySchema = CreateWorkspaceSkillBodySchema.omit({ name: true })
+export const UpdateWorkspaceSkillBodySchema = CreateWorkspaceSkillBodySchema.omit({
+  name: true,
+  scope: true,
+})
   .extend({ expectedBundleId: z.string().trim().min(1).max(200).optional() })
   .strict()
   .openapi("UpdateWorkspaceSkillBody");
@@ -4538,3 +4558,5 @@ export const BotEnvelopeSchema = z
 export const BotListEnvelopeSchema = z
   .object({ data: z.array(BotSchema), meta: ProtocolMetadataSchema })
   .strict();
+
+export type SetSkillScopeBody = z.infer<typeof SetSkillScopeBodySchema>;

@@ -6,6 +6,7 @@ import {
   SKILL_LIMITS,
 } from "@opencompany/agent-runtime";
 import {
+  type Actor,
   CoreError,
   type InstalledSkillCatalogItem,
   type ResolvedSkillBundle,
@@ -15,8 +16,9 @@ import {
   type SkillBundleRepository,
   type SkillInstallation,
   type SkillInstallationListItem,
+  type SkillScope,
 } from "@opencompany/core";
-import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { loadEnabledPluginSkillBundleIds } from "./plugin-skill-runtime-status";
 import {
   type ChatSessionSkillBundleSourceKind,
@@ -28,7 +30,18 @@ import {
   skillBundleFiles,
   skillBundles,
   skillInstallations,
+  skillInstallationVersions,
 } from "./product-schema";
+import {
+  conflictingChatSkillNames,
+  isChatSkillNameConflict,
+  personalSkillsEnabled,
+  preserveChatSkillBundle,
+  skillBundleAccess,
+  skillInstallationAccess,
+  skillManagementPermission,
+  skillMembership,
+} from "./skill-access";
 import { type ResolvedWorkspaceSkill, resolveWorkspaceSkillCatalog } from "./skill-catalog";
 
 type DbClient = any;
@@ -52,6 +65,10 @@ export type ChatSkillBundleActivation = {
 };
 
 type InstallationRow = {
+  scope: SkillScope | null;
+  createdByUserId: string | null;
+  canEdit: boolean;
+  canManage: boolean;
   installationId: string;
   installationWorkspaceId: string;
   installationName: string;
@@ -77,6 +94,8 @@ type InstallationRow = {
 };
 
 const installationSelection = {
+  scope: skillInstallations.scope,
+  createdByUserId: skillInstallations.createdByUserId,
   installationId: skillInstallations.id,
   installationWorkspaceId: skillInstallations.workspaceId,
   installationName: skillInstallations.name,
@@ -108,7 +127,9 @@ export class PostgresSkillBundleRepository implements SkillBundleRepository {
     actor: Parameters<SkillBundleRepository["install"]>[0]["actor"];
     idempotencyKey: string;
     bundle: ResolvedSkillBundle;
+    scope?: SkillScope;
   }) {
+    let resolvedScope: SkillScope | undefined;
     const installationId = deterministicId(
       "skill_installation",
       input.actor.userId,
@@ -117,10 +138,30 @@ export class PostgresSkillBundleRepository implements SkillBundleRepository {
     );
     try {
       return await this.db.transaction(async (tx: DbClient) => {
+        const personalEnabled = await personalSkillsEnabled(tx);
+        if (input.scope === "personal" && !personalEnabled)
+          throw new CoreError(
+            "conflict",
+            "Personal skills are temporarily unavailable while the release finishes.",
+          );
+        // Omitted scope came from an application revision that predates Personal Skills during a
+        // rolling release. Preserve its Company behavior until every old reader has drained.
+        const scope = input.scope ?? (personalEnabled ? "personal" : "company");
+        resolvedScope = scope;
+        if (input.actor.skillAccess === "company" && scope === "personal")
+          throw new CoreError(
+            "forbidden",
+            "Create Personal skills in a private chat or Skills settings.",
+          );
+        await assertMember(tx, input.actor);
         const bundleId = await storeSkillBundle(tx, input.actor.workspaceId, input.bundle);
-        const replay = await installationById(tx, input.actor.workspaceId, installationId);
+        const replay = await installationById(tx, input.actor, installationId);
         if (replay) {
-          if (replay.installationName !== input.bundle.name || replay.bundleId !== bundleId) {
+          if (
+            replay.installationName !== input.bundle.name ||
+            replay.bundleId !== bundleId ||
+            replay.scope !== scope
+          ) {
             throw new CoreError(
               "idempotency_conflict",
               "The Idempotency-Key was already used for another Skill installation.",
@@ -136,10 +177,16 @@ export class PostgresSkillBundleRepository implements SkillBundleRepository {
           id: installationId,
           workspaceId: input.actor.workspaceId,
           name: input.bundle.name,
+          scope,
+          createdByUserId: input.actor.userId,
           bundleId,
           enabled: true,
         });
-        const created = await installationById(tx, input.actor.workspaceId, installationId);
+        await tx
+          .insert(skillInstallationVersions)
+          .values({ installationId, bundleId, companyShared: scope === "company" })
+          .onConflictDoNothing();
+        const created = await installationById(tx, input.actor, installationId);
         if (!created) throw new CoreError("conflict", "Could not install the Skill.");
         return {
           installation: await hydrateInstallation(tx, created),
@@ -148,10 +195,11 @@ export class PostgresSkillBundleRepository implements SkillBundleRepository {
       });
     } catch (error) {
       if (isUniqueViolation(error)) {
-        const replay = await installationById(this.db, input.actor.workspaceId, installationId);
+        const replay = await installationById(this.db, input.actor, installationId);
         if (
           replay?.installationName === input.bundle.name &&
-          replay.integrity === input.bundle.integrity
+          replay.integrity === input.bundle.integrity &&
+          replay.scope === resolvedScope
         ) {
           return {
             installation: await hydrateInstallation(this.db, replay),
@@ -159,7 +207,7 @@ export class PostgresSkillBundleRepository implements SkillBundleRepository {
           };
         }
       }
-      throw skillWriteError(error, input.bundle.name);
+      throw skillWriteError(error);
     }
   }
 
@@ -169,16 +217,12 @@ export class PostgresSkillBundleRepository implements SkillBundleRepository {
     bundle: ResolvedSkillBundle;
     expectedBundleId?: string;
   }) {
-    if (input.bundle.name !== input.name) {
-      throw new CoreError(
-        "invalid_argument",
-        "A replacement Skill bundle must keep the installed Skill name.",
-      );
-    }
     try {
       return await this.db.transaction(async (tx: DbClient) => {
-        const current = await liveInstallation(tx, input.actor.workspaceId, input.name);
+        const current = await liveInstallation(tx, input.actor, input.name, true);
         if (!current) throw new CoreError("not_found", "Skill not found.");
+        if (input.bundle.name !== current.installationName)
+          throw new CoreError("invalid_argument", "A replacement must keep the skill name.");
         if ((current.sourceType === "workspace") !== (input.bundle.source.type === "workspace")) {
           throw new CoreError(
             "conflict",
@@ -200,7 +244,7 @@ export class PostgresSkillBundleRepository implements SkillBundleRepository {
             and(
               eq(skillInstallations.id, current.installationId),
               eq(skillInstallations.bundleId, current.bundleId),
-              eq(skillInstallations.workspaceId, input.actor.workspaceId),
+              skillInstallationAccess(input.actor),
               isNull(skillInstallations.archivedAt),
             ),
           )
@@ -210,20 +254,33 @@ export class PostgresSkillBundleRepository implements SkillBundleRepository {
             "conflict",
             "This skill changed while saving. Read the latest version before saving again.",
           );
-        const row = await installationById(tx, input.actor.workspaceId, updated.id);
+        await tx
+          .insert(skillInstallationVersions)
+          .values({
+            installationId: updated.id,
+            bundleId,
+            companyShared: current.scope === "company",
+          })
+          .onConflictDoUpdate({
+            target: [skillInstallationVersions.installationId, skillInstallationVersions.bundleId],
+            set: {
+              companyShared: sql`${skillInstallationVersions.companyShared} OR ${current.scope === "company"}`,
+            },
+          });
+        const row = await installationById(tx, input.actor, updated.id);
         if (!row) throw new CoreError("not_found", "Skill not found.");
         return hydrateInstallation(tx, row);
       });
     } catch (error) {
-      throw skillWriteError(error, input.name);
+      throw skillWriteError(error);
     }
   }
 
   async list(input: { actor: Parameters<SkillBundleRepository["list"]>[0]["actor"] }) {
-    const rows = (await installationQuery(this.db)
+    const rows = (await installationQuery(this.db, input.actor)
       .where(
         and(
-          eq(skillInstallations.workspaceId, input.actor.workspaceId),
+          skillInstallationAccess(input.actor),
           eq(skillBundles.workspaceId, input.actor.workspaceId),
           isNull(skillInstallations.archivedAt),
         ),
@@ -237,19 +294,26 @@ export class PostgresSkillBundleRepository implements SkillBundleRepository {
   }): Promise<InstalledSkillCatalogItem[]> {
     const catalog = await resolveWorkspaceSkillCatalog(this.db, {
       workspaceId: input.actor.workspaceId,
+      userId: input.actor.userId,
+      ...(input.actor.skillAccess ? { skillAccess: input.actor.skillAccess } : {}),
     });
-    return catalog.skills.map(({ id, name, description }) => ({ id, name, description }));
+    return catalog.skills.map(({ id, name, description, scope }) => ({
+      id,
+      name,
+      description,
+      scope,
+    }));
   }
 
   async get(input: { actor: Parameters<SkillBundleRepository["get"]>[0]["actor"]; name: string }) {
-    const standalone = await liveInstallation(this.db, input.actor.workspaceId, input.name);
+    const standalone = await liveInstallation(this.db, input.actor, input.name);
     if (standalone) {
       // Disabled standalone installations remain inspectable in Settings even though they are not
       // catalog candidates and therefore do not hide an enabled Plugin Skill.
       return hydrateInstallation(this.db, standalone);
     }
 
-    const resolved = await resolvedSkillByName(this.db, input.actor.workspaceId, input.name);
+    const resolved = await resolvedSkillByName(this.db, input.actor, input.name);
     if (resolved?.sourceKind === "plugin") {
       return hydratePluginSkillInstallation(this.db, input.actor.workspaceId, resolved);
     }
@@ -262,11 +326,8 @@ export class PostgresSkillBundleRepository implements SkillBundleRepository {
     path: string;
   }): Promise<SkillBundleFile | null> {
     assertSafeStoredPath(input.path);
-    const resolved = await resolvedSkillByName(this.db, input.actor.workspaceId, input.name);
-    const fallbackInstallation = resolved
-      ? null
-      : await liveInstallation(this.db, input.actor.workspaceId, input.name);
-    const bundleId = resolved?.bundleId ?? fallbackInstallation?.bundleId;
+    const installation = await this.get({ actor: input.actor, name: input.name });
+    const bundleId = installation?.bundle.id;
     if (!bundleId) return null;
     const [row] = await this.db
       .select({
@@ -294,45 +355,117 @@ export class PostgresSkillBundleRepository implements SkillBundleRepository {
       : null;
   }
 
-  async setEnabled(input: {
-    actor: Parameters<SkillBundleRepository["setEnabled"]>[0]["actor"];
-    name: string;
-    enabled: boolean;
-  }) {
-    const [updated] = await this.db
-      .update(skillInstallations)
-      .set({ enabled: input.enabled, updatedAt: new Date() })
-      .where(
-        and(
-          eq(skillInstallations.workspaceId, input.actor.workspaceId),
-          eq(skillInstallations.name, input.name),
-          isNull(skillInstallations.archivedAt),
-        ),
-      )
-      .returning({ id: skillInstallations.id });
-    if (!updated) throw new CoreError("not_found", "Skill not found.");
-    const row = await installationById(this.db, input.actor.workspaceId, updated.id);
-    if (!row) throw new CoreError("not_found", "Skill not found.");
-    return hydrateInstallation(this.db, row);
+  async setEnabled(input: { actor: Actor; name: string; enabled: boolean }) {
+    return this.db.transaction(async (tx: DbClient) => {
+      const current = await liveInstallation(tx, input.actor, input.name, true);
+      if (!current) throw new CoreError("not_found", "Skill not found.");
+      const [updated] = await tx
+        .update(skillInstallations)
+        .set({ enabled: input.enabled, updatedAt: new Date() })
+        .where(
+          and(
+            eq(skillInstallations.id, current.installationId),
+            skillInstallationAccess(input.actor),
+          ),
+        )
+        .returning({ id: skillInstallations.id });
+      if (!updated) throw new CoreError("not_found", "Skill not found.");
+      return hydrateInstallation(
+        tx,
+        (await installationById(tx, input.actor, current.installationId))!,
+      );
+    });
   }
 
-  async archive(input: {
-    actor: Parameters<SkillBundleRepository["archive"]>[0]["actor"];
+  async archive(input: { actor: Actor; name: string }) {
+    await this.db.transaction(async (tx: DbClient) => {
+      const current = await liveInstallation(tx, input.actor, input.name, true);
+      if (!current) throw new CoreError("not_found", "Skill not found.");
+      if (!current.canManage)
+        throw new CoreError(
+          "forbidden",
+          "Only the creator or a company admin can archive this skill.",
+        );
+      const now = new Date();
+      const [updated] = await tx
+        .update(skillInstallations)
+        .set({ enabled: false, archivedAt: now, updatedAt: now })
+        .where(
+          and(
+            eq(skillInstallations.id, current.installationId),
+            skillManagementPermission(input.actor),
+          ),
+        )
+        .returning({ id: skillInstallations.id });
+      if (!updated) throw new CoreError("not_found", "Skill not found.");
+    });
+  }
+
+  async setScope(input: {
+    actor: Actor;
     name: string;
+    scope: SkillScope;
+    expectedScope: SkillScope;
   }) {
-    const now = new Date();
-    const rows = await this.db
-      .update(skillInstallations)
-      .set({ enabled: false, archivedAt: now, updatedAt: now })
-      .where(
-        and(
-          eq(skillInstallations.workspaceId, input.actor.workspaceId),
-          eq(skillInstallations.name, input.name),
-          isNull(skillInstallations.archivedAt),
-        ),
-      )
-      .returning({ id: skillInstallations.id });
-    if (rows.length === 0) throw new CoreError("not_found", "Skill not found.");
+    if (input.actor.skillAccess === "company" && input.scope === "personal")
+      throw new CoreError("forbidden", "Change a skill to Personal from Skills settings.");
+    try {
+      return await this.db.transaction(async (tx: DbClient) => {
+        if (input.scope === "personal" && !(await personalSkillsEnabled(tx)))
+          throw new CoreError(
+            "conflict",
+            "Personal skills are temporarily unavailable while the release finishes.",
+          );
+        const current = await liveInstallation(tx, input.actor, input.name, true);
+        if (!current) throw new CoreError("not_found", "Skill not found.");
+        if (!current.canManage)
+          throw new CoreError(
+            "forbidden",
+            "Only the creator or a company admin can change this skill's visibility.",
+          );
+        if (current.scope !== input.expectedScope)
+          throw new CoreError(
+            "conflict",
+            "This skill's visibility changed. Reload it before trying again.",
+          );
+        const detail = await hydrateInstallation(tx, current);
+        // Legacy company skills have no recorded creator. The admin making one personal owns it.
+        const createdByUserId =
+          current.createdByUserId ?? (input.scope === "personal" ? input.actor.userId : null);
+        const [updated] = await tx
+          .update(skillInstallations)
+          .set({ scope: input.scope, createdByUserId, updatedAt: new Date() })
+          .where(
+            and(
+              eq(skillInstallations.id, current.installationId),
+              skillManagementPermission(input.actor),
+            ),
+          )
+          .returning({ id: skillInstallations.id });
+        if (!updated) throw new CoreError("not_found", "Skill not found.");
+        if (input.scope === "company")
+          await tx
+            .update(skillInstallationVersions)
+            .set({ companyShared: true })
+            .where(
+              and(
+                eq(skillInstallationVersions.installationId, current.installationId),
+                eq(skillInstallationVersions.bundleId, current.bundleId),
+              ),
+            );
+        // An admin can return a company item to its creator's private library without reading it afterward.
+        return {
+          ...detail,
+          scope: input.scope,
+          createdByUserId,
+          updatedAt: new Date(),
+          canEdit: input.scope === "company" || createdByUserId === input.actor.userId,
+          canManage: input.scope === "company" || createdByUserId === input.actor.userId,
+        };
+      });
+    } catch (error) {
+      throw skillWriteError(error);
+    }
   }
 }
 
@@ -342,6 +475,8 @@ export async function activateAndListChatSkillBundles(
     workspaceId: string;
     chatSessionId: string;
     activatedMessageId: string;
+    userId: string;
+    skillAccess?: "company";
     bundles: Array<{ bundleId: string; sourceKind: ChatSessionSkillBundleSourceKind }>;
   },
 ): Promise<ChatSkillBundleActivation[]> {
@@ -358,7 +493,13 @@ export async function activateAndListChatSkillBundles(
           eq(chatMessages.sessionId, chatSessions.id),
         ),
       )
-      .where(eq(chatSessions.id, input.chatSessionId))
+      .where(
+        and(
+          eq(chatSessions.id, input.chatSessionId),
+          input.skillAccess === "company" ? undefined : eq(chatSessions.userWorkosId, input.userId),
+          skillMembership(input),
+        ),
+      )
       .limit(1)
       .for("update");
     if (!activationTarget) {
@@ -371,16 +512,27 @@ export async function activateAndListChatSkillBundles(
       const candidates = await tx
         .select({ id: skillBundles.id, name: skillBundles.name })
         .from(skillBundles)
-        .where(
-          and(
-            eq(skillBundles.workspaceId, input.workspaceId),
-            inArray(skillBundles.id, requestedIds),
-          ),
-        );
+        .where(and(skillBundleAccess(input), inArray(skillBundles.id, requestedIds)));
       if (candidates.length !== requestedIds.length) {
         throw new CoreError("not_found", "A Skill bundle is unavailable in this workspace.");
       }
 
+      if (
+        new Set(candidates.map((candidate: { name: string }) => candidate.name)).size !==
+        candidates.length
+      )
+        throw new CoreError(
+          "conflict",
+          "Choose one Personal or Company skill for each name in a chat.",
+        );
+      const conflicts = await tx.execute(
+        sql`SELECT ${conflictingChatSkillNames(input.chatSessionId, requestedIds)} AS conflict`,
+      );
+      if ((conflicts.rows ?? conflicts)[0]?.conflict)
+        throw new CoreError(
+          "conflict",
+          "This chat already uses another skill with this name. Start a new chat to use the selected skill.",
+        );
       const candidatesById = new Map<string, { id: string; name: string }>(
         candidates.map(
           (candidate: { id: string; name: string }) => [candidate.id, candidate] as const,
@@ -406,8 +558,17 @@ export async function activateAndListChatSkillBundles(
         await tx
           .insert(chatSessionSkillBundles)
           .values(values)
-          .onConflictDoNothing({
+          .onConflictDoUpdate({
             target: [chatSessionSkillBundles.chatSessionId, chatSessionSkillBundles.name],
+            set: { bundleId: preserveChatSkillBundle() },
+          })
+          .catch((error: unknown) => {
+            if (isChatSkillNameConflict(error))
+              throw new CoreError(
+                "conflict",
+                "This chat already uses another skill with this name. Start a new chat to use the selected skill.",
+              );
+            throw error;
           });
       }
     }
@@ -415,6 +576,8 @@ export async function activateAndListChatSkillBundles(
     // Re-read after conflict arbitration so callers receive whichever bundle first fixed the name.
     return listChatSkillBundleActivations(tx, {
       workspaceId: input.workspaceId,
+      userId: input.userId,
+      ...(input.skillAccess ? { skillAccess: input.skillAccess } : {}),
       chatSessionId: input.chatSessionId,
     });
   });
@@ -422,7 +585,7 @@ export async function activateAndListChatSkillBundles(
 
 export async function listChatSkillBundleActivations(
   db: DbClient,
-  input: { workspaceId: string; chatSessionId: string },
+  input: { workspaceId: string; chatSessionId: string; userId: string; skillAccess?: "company" },
 ): Promise<ChatSkillBundleActivation[]> {
   const activations = (await db
     .select({
@@ -439,7 +602,8 @@ export async function listChatSkillBundleActivations(
     .where(
       and(
         eq(chatSessionSkillBundles.chatSessionId, input.chatSessionId),
-        eq(skillBundles.workspaceId, input.workspaceId),
+        skillBundleAccess(input),
+        sql`EXISTS (SELECT 1 FROM goat.chat_sessions session WHERE session.id = ${input.chatSessionId} ${input.skillAccess === "company" ? sql`` : sql`AND session.user_workos_id = ${input.userId}`})`,
       ),
     )
     .orderBy(asc(skillBundles.name))) as ChatSkillBundleActivation[];
@@ -460,7 +624,13 @@ export async function listChatSkillBundleActivations(
 
 export async function loadImmutableSkillBundles(
   db: DbClient,
-  input: { workspaceId: string; bundleIds: readonly string[] },
+  input: {
+    workspaceId: string;
+    userId?: string;
+    skillAccess?: "company";
+    chatSessionId?: string;
+    bundleIds: readonly string[];
+  },
 ): Promise<ImmutableSkillBundle[]> {
   const bundleIds = [...new Set(input.bundleIds)];
   if (bundleIds.length === 0) return [];
@@ -477,9 +647,7 @@ export async function loadImmutableSkillBundles(
     })
     .from(skillBundles)
     .innerJoin(skillBundleFiles, eq(skillBundleFiles.bundleId, skillBundles.id))
-    .where(
-      and(eq(skillBundles.workspaceId, input.workspaceId), inArray(skillBundles.id, bundleIds)),
-    )
+    .where(and(skillBundleAccess(input), inArray(skillBundles.id, bundleIds)))
     .orderBy(asc(skillBundles.name), asc(skillBundleFiles.path));
 
   const bundles = new Map<string, ImmutableSkillBundle>();
@@ -516,7 +684,14 @@ export async function loadImmutableSkillBundles(
 
 export async function readChatSkillBundleFile(
   db: DbClient,
-  input: { workspaceId: string; chatSessionId: string; skillName: string; path: string },
+  input: {
+    workspaceId: string;
+    userId: string;
+    skillAccess?: "company";
+    chatSessionId: string;
+    skillName: string;
+    path: string;
+  },
 ): Promise<SkillBundleFile | null> {
   assertSafeStoredPath(input.path);
   const [row] = await db
@@ -540,7 +715,8 @@ export async function readChatSkillBundleFile(
     .where(
       and(
         eq(chatSessionSkillBundles.chatSessionId, input.chatSessionId),
-        eq(skillBundles.workspaceId, input.workspaceId),
+        skillBundleAccess(input),
+        sql`EXISTS (SELECT 1 FROM goat.chat_sessions session WHERE session.id = ${input.chatSessionId} ${input.skillAccess === "company" ? sql`` : sql`AND session.user_workos_id = ${input.userId}`})`,
         eq(skillBundles.name, input.skillName),
       ),
     )
@@ -621,9 +797,13 @@ export async function storeSkillBundle(
   return winner.id;
 }
 
-function installationQuery(db: DbClient) {
+function installationQuery(db: DbClient, actor: Actor) {
   return db
-    .select(installationSelection)
+    .select({
+      ...installationSelection,
+      canEdit: sql<boolean>`true`,
+      canManage: skillManagementPermission(actor),
+    })
     .from(skillInstallations)
     .innerJoin(
       skillBundles,
@@ -634,36 +814,45 @@ function installationQuery(db: DbClient) {
     );
 }
 
-async function installationById(db: DbClient, workspaceId: string, id: string) {
-  const [row] = (await installationQuery(db)
-    .where(
-      and(
-        eq(skillInstallations.id, id),
-        eq(skillInstallations.workspaceId, workspaceId),
-        eq(skillBundles.workspaceId, workspaceId),
-      ),
-    )
-    .limit(1)) as InstallationRow[];
-  return row ?? null;
+async function installationById(db: DbClient, actor: Actor, id: string) {
+  const [row] = await installationQuery(db, actor)
+    .where(and(eq(skillInstallations.id, id), skillInstallationAccess(actor)))
+    .limit(1);
+  return row as InstallationRow | undefined;
 }
 
-async function liveInstallation(db: DbClient, workspaceId: string, name: string) {
-  const [row] = (await installationQuery(db)
+async function liveInstallation(db: DbClient, actor: Actor, name: string, lock = false) {
+  const query = installationQuery(db, actor)
     .where(
       and(
-        eq(skillInstallations.workspaceId, workspaceId),
-        eq(skillBundles.workspaceId, workspaceId),
-        eq(skillInstallations.name, name),
+        skillInstallationAccess(actor),
+        or(eq(skillInstallations.id, name), eq(skillInstallations.name, name)),
         isNull(skillInstallations.archivedAt),
       ),
     )
-    .limit(1)) as InstallationRow[];
-  return row ?? null;
+    .limit(2);
+  const rows = (await (lock ? query.for("update") : query)) as InstallationRow[];
+  if (rows.length > 1)
+    throw new CoreError(
+      "conflict",
+      "Multiple skills have this name. Select the Personal or Company skill using its ID.",
+    );
+  return rows[0] ?? null;
 }
 
-async function resolvedSkillByName(db: DbClient, workspaceId: string, name: string) {
-  const catalog = await resolveWorkspaceSkillCatalog(db, { workspaceId });
+async function resolvedSkillByName(db: DbClient, actor: Actor, name: string) {
+  const catalog = await resolveWorkspaceSkillCatalog(db, {
+    workspaceId: actor.workspaceId,
+    userId: actor.userId,
+    ...(actor.skillAccess ? { skillAccess: actor.skillAccess } : {}),
+  });
   return catalog.skills.find((skill) => skill.id === name) ?? null;
+}
+
+async function assertMember(db: DbClient, actor: Actor) {
+  const result = await db.execute(sql`SELECT ${skillMembership(actor)} AS authorized`);
+  if (!(result.rows ?? result)[0]?.authorized)
+    throw new CoreError("not_found", "Workspace membership not found.");
 }
 
 async function hydratePluginSkillInstallation(
@@ -720,6 +909,10 @@ async function hydratePluginSkillInstallation(
   if (!row) return null;
   return hydrateInstallation(db, {
     ...row,
+    scope: null,
+    createdByUserId: null,
+    canEdit: false,
+    canManage: false,
     installationId: `plugin_skill:${skill.pluginId}:${skill.name}`,
     installationName: skill.name,
     enabled: true,
@@ -769,6 +962,10 @@ async function hydrateInstallation(db: DbClient, row: InstallationRow): Promise<
 function installation(row: InstallationRow, files: SkillBundleFileMetadata[]): SkillInstallation {
   return {
     id: row.installationId,
+    scope: row.scope,
+    createdByUserId: row.createdByUserId,
+    canEdit: row.canEdit,
+    canManage: row.canManage,
     name: row.installationName,
     enabled: row.enabled,
     archivedAt: row.archivedAt,
@@ -781,6 +978,10 @@ function installation(row: InstallationRow, files: SkillBundleFileMetadata[]): S
 function listItem(row: InstallationRow): SkillInstallationListItem {
   return {
     id: row.installationId,
+    scope: row.scope,
+    createdByUserId: row.createdByUserId,
+    canEdit: row.canEdit,
+    canManage: row.canManage,
     name: row.installationName,
     enabled: row.enabled,
     archivedAt: row.archivedAt,
@@ -921,12 +1122,12 @@ function deterministicId(prefix: string, ...parts: string[]) {
   return `${prefix}_${createHash("sha256").update(parts.join("\n")).digest("hex").slice(0, 32)}`;
 }
 
-function skillWriteError(error: unknown, name: string) {
+function skillWriteError(error: unknown) {
   if (error instanceof CoreError) return error;
   if (isUniqueViolation(error)) {
     return new CoreError(
       "conflict",
-      `A live Skill named ${JSON.stringify(name)} is already installed in this workspace.`,
+      "A skill with this name already exists in the selected scope.",
     );
   }
   return error;

@@ -54,6 +54,14 @@ and 300 seconds, respectively), so a dashboard or service-config drift cannot si
 graceful draining. A superseded run leaves unattempted surfaces inactive and cannot publish stale
 code.
 
+The Personal Skills migration starts with creation disabled and keeps the database default at
+Company so the previously deployed API can continue writing safely. After both replacement services
+advertise Personal-skill authorization, release automation waits beyond the runner's five-minute
+shutdown window, checks both services again, and activates Personal writes before deploying the web
+surface. A database trigger also records Company revision grants for installs and edits made by an
+old instance during that window. A failed or partial backend release leaves the activation closed
+and the database surface unfinished so the next release retries it.
+
 Manual dispatch from `main` forces the requested surfaces through the same verification, preflight,
 deployment, and health checks. Do not bypass preflight or branch protection.
 

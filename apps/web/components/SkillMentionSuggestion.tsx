@@ -53,10 +53,14 @@ export function createSkillMentionSuggestion(
           <Sparkles size={14} strokeWidth={2} className="mt-0.5 shrink-0 text-ink-subtle" />
           <span className="min-w-0 flex-1">
             <span className="block truncate text-[13px] font-medium leading-4 text-ink">
-              @skill/{item.id}
+              {item.name}
             </span>
             <span className="mt-0.5 block truncate text-[12px] leading-4 text-ink-subtle">
-              {item.name}
+              {item.scope === "company"
+                ? "Company"
+                : item.scope === "personal"
+                  ? "Personal"
+                  : "Plugin"}
               {item.description ? ` · ${item.description}` : ""}
             </span>
           </span>

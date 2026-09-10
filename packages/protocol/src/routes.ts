@@ -154,6 +154,7 @@ import {
   SetPluginEventEnabledBodySchema,
   SetRepoConfigEnvBodySchema,
   SetRepoConfigSetupBodySchema,
+  SetSkillScopeBodySchema,
   SetSlackBotDestinationBodySchema,
   SetWikiSourceEnabledBodySchema,
   SetWorkspaceCapabilityBodySchema,
@@ -1281,7 +1282,8 @@ export const listSkillsRoute = createRoute({
   security: actorSecurity,
   responses: {
     200: {
-      description: "Workspace skill settings list.",
+      description:
+        "Standalone skills visible to the current member: their Personal skills and Company skills.",
       content: { "application/json": { schema: SkillListEnvelopeSchema } },
     },
     default: errorResponse,
@@ -1382,7 +1384,7 @@ export const updateWorkspaceSkillRoute = createRoute({
   tags: ["Skills"],
   security: actorSecurity,
   request: {
-    params: z.object({ slug: WorkspaceSkillNameSchema }),
+    params: z.object({ slug: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,199}$/u) }),
     body: {
       required: true,
       content: { "application/json": { schema: UpdateWorkspaceSkillBodySchema } },
@@ -1391,6 +1393,24 @@ export const updateWorkspaceSkillRoute = createRoute({
   responses: {
     200: {
       description: "Workspace-authored Skill moved to a new immutable bundle version.",
+      content: { "application/json": { schema: SkillInstallationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const setSkillScopeRoute = createRoute({
+  method: "post",
+  path: "/v1/skills/{slug}/scope",
+  tags: ["Skills"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ slug: ResourceIdSchema }),
+    body: { required: true, content: { "application/json": { schema: SetSkillScopeBodySchema } } },
+  },
+  responses: {
+    200: {
+      description: "Personal or Company visibility updated on the same skill.",
       content: { "application/json": { schema: SkillInstallationEnvelopeSchema } },
     },
     default: errorResponse,
@@ -1449,7 +1469,10 @@ export const replaceSkillRoute = createRoute({
   security: actorSecurity,
   request: {
     params: z.object({ slug: ResourceIdSchema }),
-    body: { required: true, content: { "application/json": { schema: ImportSkillBodySchema } } },
+    body: {
+      required: true,
+      content: { "application/json": { schema: ImportSkillBodySchema.omit({ scope: true }) } },
+    },
   },
   responses: {
     200: {
@@ -3805,6 +3828,7 @@ export type V1RouteHandlers = {
   listSkillCatalog: RouteHandler<typeof listSkillCatalogRoute>;
   getSkill: RouteHandler<typeof getSkillRoute>;
   updateWorkspaceSkill: RouteHandler<typeof updateWorkspaceSkillRoute>;
+  setSkillScope: RouteHandler<typeof setSkillScopeRoute>;
   archiveSkill: RouteHandler<typeof archiveSkillRoute>;
   enableSkill: RouteHandler<typeof enableSkillRoute>;
   disableSkill: RouteHandler<typeof disableSkillRoute>;
@@ -4016,6 +4040,7 @@ export function createV1Router(
       .openapi(listSkillCatalogRoute, handlers.listSkillCatalog)
       .openapi(getSkillRoute, handlers.getSkill)
       .openapi(updateWorkspaceSkillRoute, handlers.updateWorkspaceSkill)
+      .openapi(setSkillScopeRoute, handlers.setSkillScope)
       .openapi(archiveSkillRoute, handlers.archiveSkill)
       .openapi(enableSkillRoute, handlers.enableSkill)
       .openapi(disableSkillRoute, handlers.disableSkill)
@@ -4332,6 +4357,10 @@ const placeholderSkillBundle = {
   createdAt: placeholderTime,
 };
 const placeholderSkillInstallation = {
+  scope: "company" as const,
+  createdByUserId: null,
+  canEdit: true,
+  canManage: true,
   id: "skill_installation_contract",
   name: "contract-skill",
   enabled: true,
@@ -4994,7 +5023,8 @@ const contractDocumentHandlers: V1RouteHandlers = {
       {
         data: [
           {
-            id: placeholderSkillInstallation.name,
+            id: placeholderSkillInstallation.id,
+            scope: placeholderSkillInstallation.scope,
             name: placeholderSkillBundle.name,
             description: placeholderSkillBundle.description,
           },
@@ -5005,6 +5035,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
     ),
   getSkill: (c) => c.json({ data: placeholderSkillInstallation, meta }, 200),
   updateWorkspaceSkill: (c) => c.json({ data: placeholderSkillInstallation, meta }, 200),
+  setSkillScope: (c) => c.json({ data: placeholderSkillInstallation, meta }, 200),
   archiveSkill: (c) => c.json({ data: { name: placeholderSkillInstallation.name }, meta }, 200),
   enableSkill: (c) => c.json({ data: placeholderSkillInstallation, meta }, 200),
   disableSkill: (c) =>

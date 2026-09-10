@@ -1,11 +1,14 @@
-import type { PluginSkillCollision } from "@opencompany/core";
+import { CoreError, type PluginSkillCollision, type SkillScope } from "@opencompany/core";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { pluginSkills, plugins, skillBundles, skillInstallations } from "./product-schema";
+
+import { skillInstallationAccess, skillMembership } from "./skill-access";
 
 type DbClient = any;
 
 export type ResolvedWorkspaceSkill = {
   id: string;
+  scope: SkillScope | null;
   bundleId: string;
   name: string;
   description: string;
@@ -39,11 +42,17 @@ export type ResolvedWorkspaceSkillCatalog = {
  */
 export async function resolveWorkspaceSkillCatalog(
   db: DbClient,
-  input: { workspaceId: string; pluginIds?: readonly string[] },
+  input: {
+    workspaceId: string;
+    userId?: string;
+    skillAccess?: "company";
+    pluginIds?: readonly string[];
+  },
 ): Promise<ResolvedWorkspaceSkillCatalog> {
   const standalonePromise = db
     .select({
-      id: skillInstallations.name,
+      id: skillInstallations.id,
+      scope: skillInstallations.scope,
       bundleId: skillBundles.id,
       name: skillBundles.name,
       description: skillBundles.description,
@@ -60,7 +69,7 @@ export async function resolveWorkspaceSkillCatalog(
     )
     .where(
       and(
-        eq(skillInstallations.workspaceId, input.workspaceId),
+        skillInstallationAccess(input),
         eq(skillBundles.workspaceId, input.workspaceId),
         eq(skillInstallations.enabled, true),
         isNull(skillInstallations.archivedAt),
@@ -99,6 +108,7 @@ export async function resolveWorkspaceSkillCatalog(
           .where(
             and(
               eq(pluginSkills.workspaceId, input.workspaceId),
+              input.userId ? skillMembership(input) : undefined,
               eq(plugins.workspaceId, input.workspaceId),
               eq(plugins.status, "enabled"),
               ...(pluginIds ? [inArray(plugins.id, pluginIds)] : []),
@@ -116,6 +126,7 @@ export async function resolveWorkspaceSkillCatalog(
     (pluginRows as PluginSkillCandidate[]).map((row) => ({
       ...row,
       sourceKind: "plugin",
+      scope: null,
       installationId: null,
     })),
   );
@@ -127,7 +138,7 @@ export function resolveSkillCandidates(
 ): ResolvedWorkspaceSkillCatalog {
   const winners = new Map<string, ResolvedWorkspaceSkill>();
   for (const candidate of [...standaloneCandidates].sort(compareCandidates)) {
-    if (!winners.has(candidate.name)) winners.set(candidate.name, candidate);
+    if (!winners.has(candidate.id)) winners.set(candidate.id, candidate);
   }
 
   const pluginsBySkill = new Map<string, ResolvedWorkspaceSkill[]>();
@@ -149,7 +160,7 @@ export function resolveSkillCandidates(
         }),
       ),
     ];
-    if (winners.has(skillName)) {
+    if (standaloneCandidates.some((candidate) => candidate.name === skillName)) {
       collisions.push({
         skillName,
         winner: { source: "standalone" },
@@ -189,4 +200,17 @@ function compareCandidates(left: ResolvedWorkspaceSkill, right: ResolvedWorkspac
 
 function compareText(left: string, right: string) {
   return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/** Accept legacy names only when unambiguous; stable IDs survive edits and visibility changes. */
+export function selectSkill(catalog: readonly ResolvedWorkspaceSkill[], reference: string) {
+  const exact = catalog.find((skill) => skill.id === reference);
+  if (exact) return exact;
+  const matches = catalog.filter((skill) => skill.name === reference);
+  if (matches.length > 1)
+    throw new CoreError(
+      "conflict",
+      "Multiple skills have this name. Select the Personal or Company skill using its ID.",
+    );
+  return matches[0];
 }

@@ -53,11 +53,14 @@ describe("external engine Skill persistence through the MCP route", () => {
     await pg.exec(`
       CREATE SCHEMA goat;
       CREATE TABLE goat.workspaces (id text PRIMARY KEY);
+      CREATE TABLE goat.workspace_members (workspace_id text, user_workos_id text, role text);
+      INSERT INTO goat.workspace_members VALUES ('workspace_1', 'user_1', 'admin');
       INSERT INTO goat.workspaces (id) VALUES ('workspace_1');
     `);
     for (const migration of [
       "0226_goat_immutable_skill_bundles.sql",
       "0232_workspace_authored_skills.sql",
+      "0263_personal_company_skills.sql",
     ]) {
       const source = await readFile(
         new URL(`../../../drizzle/${migration}`, import.meta.url),

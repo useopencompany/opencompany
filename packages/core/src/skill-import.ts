@@ -7,6 +7,7 @@ import {
 import { CoreError } from "./chat";
 
 export const SKILL_FILE_CHUNK_MAX_BYTES = 64 * 1024;
+export type SkillScope = "personal" | "company";
 
 export type ExternalSkillBundleSource = {
   type: "github" | "skills.sh";
@@ -113,6 +114,10 @@ export type SkillBundle = {
 
 export type SkillInstallation = {
   id: string;
+  scope: SkillScope | null;
+  createdByUserId: string | null;
+  canEdit: boolean;
+  canManage: boolean;
   name: string;
   enabled: boolean;
   archivedAt: Date | null;
@@ -127,6 +132,7 @@ export type SkillInstallationListItem = Omit<SkillInstallation, "bundle" | "crea
 
 export type InstalledSkillCatalogItem = {
   id: string;
+  scope: SkillScope | null;
   name: string;
   description: string;
 };
@@ -160,6 +166,7 @@ export interface SkillBundleRepository {
     actor: Actor;
     idempotencyKey: string;
     bundle: ResolvedSkillBundle;
+    scope?: SkillScope;
   }): Promise<{ installation: SkillInstallation; idempotentReplay: boolean }>;
   replace(input: {
     actor: Actor;
@@ -173,6 +180,12 @@ export interface SkillBundleRepository {
   readFile(input: { actor: Actor; name: string; path: string }): Promise<SkillBundleFile | null>;
   setEnabled(input: { actor: Actor; name: string; enabled: boolean }): Promise<SkillInstallation>;
   archive(input: { actor: Actor; name: string }): Promise<void>;
+  setScope(input: {
+    actor: Actor;
+    name: string;
+    scope: SkillScope;
+    expectedScope: SkillScope;
+  }): Promise<SkillInstallation>;
 }
 
 export class SkillImportApplicationService {
@@ -182,13 +195,17 @@ export class SkillImportApplicationService {
     private readonly author: SkillBundleAuthor,
   ) {}
 
-  async create(actor: Actor, input: SkillAuthoringInput & { idempotencyKey: string }) {
+  async create(
+    actor: Actor,
+    input: SkillAuthoringInput & { idempotencyKey: string; scope?: SkillScope },
+  ) {
     requireSkillWrite(actor);
     const bundle = await this.author.create(authoringInput(input));
     return this.repository.install({
       actor,
       idempotencyKey: idempotencyKey(input.idempotencyKey),
       bundle,
+      ...(input.scope !== undefined ? { scope: skillScope(input.scope) } : {}),
     });
   }
 
@@ -199,7 +216,9 @@ export class SkillImportApplicationService {
   ) {
     requireSkillWrite(actor);
     const name = resourceName(nameValue);
-    const bundle = await this.author.create(authoringInput({ name, ...input }));
+    const current = await this.repository.get({ actor, name });
+    if (!current) throw new CoreError("not_found", "Skill not found.");
+    const bundle = await this.author.create(authoringInput({ ...input, name: current.name }));
     return this.repository.replace({
       actor,
       name,
@@ -228,6 +247,7 @@ export class SkillImportApplicationService {
       selectedPath?: string;
       expectedResolvedCommit: string;
       expectedIntegrity: string;
+      scope?: SkillScope;
     },
   ) {
     requireSkillWrite(actor);
@@ -236,6 +256,7 @@ export class SkillImportApplicationService {
       actor,
       idempotencyKey: idempotencyKey(input.idempotencyKey),
       bundle,
+      ...(input.scope !== undefined ? { scope: skillScope(input.scope) } : {}),
     });
   }
 
@@ -252,7 +273,9 @@ export class SkillImportApplicationService {
     requireSkillWrite(actor);
     const name = resourceName(nameValue);
     const bundle = await this.resolveExpected(input);
-    if (bundle.name !== name) {
+    const current = await this.repository.get({ actor, name });
+    if (!current) throw new CoreError("not_found", "Skill not found.");
+    if (bundle.name !== current.name) {
       throw new CoreError(
         "conflict",
         `Replacement skill name must remain ${JSON.stringify(name)}. Artifacts are never renamed.`,
@@ -303,6 +326,16 @@ export class SkillImportApplicationService {
   archive(actor: Actor, nameValue: string) {
     requireSkillWrite(actor);
     return this.repository.archive({ actor, name: resourceName(nameValue) });
+  }
+
+  setScope(actor: Actor, name: string, input: { scope: SkillScope; expectedScope: SkillScope }) {
+    requireSkillWrite(actor);
+    return this.repository.setScope({
+      actor,
+      name: resourceName(name),
+      scope: skillScope(input.scope),
+      expectedScope: skillScope(input.expectedScope),
+    });
   }
 
   private async resolve(input: { url: string; selectedPath?: string }) {
@@ -452,7 +485,16 @@ function idempotencyKey(value: string) {
 }
 
 function resourceName(value: string) {
-  return bounded(value, 64, "name");
+  const reference = bounded(value, 200, "name or id");
+  if (!/^[a-z0-9][a-z0-9_-]{0,199}$/u.test(reference))
+    throw new CoreError("invalid_argument", "Use a valid skill name or ID.");
+  return reference;
+}
+
+function skillScope(value: string): SkillScope {
+  if (value !== "personal" && value !== "company")
+    throw new CoreError("invalid_argument", "Choose Personal or Company.");
+  return value;
 }
 
 function authoringInput(input: SkillAuthoringInput): SkillAuthoringInput {

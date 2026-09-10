@@ -129,12 +129,12 @@ describe("External engine tool capability authority", () => {
   });
 });
 
-it("exposes skill writes only for current workspace admins", () => {
+it("exposes skill tools to every current workspace member", () => {
   expect(
     authorizeExternalEngineToolCapability({
       capability,
       state: state({ workspaceRole: "member" }),
       now,
     }),
-  ).toMatchObject({ skillToolsEnabled: false });
+  ).toMatchObject({ skillToolsEnabled: true });
 });

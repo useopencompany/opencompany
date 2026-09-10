@@ -469,7 +469,7 @@ function requirePluginRead(actor: Actor) {
 }
 
 function requirePluginWrite(actor: Actor) {
-  if (!actorHasPermission(actor, SKILL_WRITE_PERMISSION)) {
+  if (actor.role !== "admin" || !actorHasPermission(actor, SKILL_WRITE_PERMISSION)) {
     throw new CoreError("forbidden", "Plugin write permission is required.");
   }
 }

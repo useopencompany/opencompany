@@ -28,7 +28,12 @@ import {
 import { type SQL, sql } from "drizzle-orm";
 import { stringifyPostgresJson } from "./postgres-json";
 import type { ChatMessageAttachment } from "./product-schema";
-import { type ResolvedWorkspaceSkill, resolveSkillCandidates } from "./skill-catalog";
+import {
+  conflictingChatSkillNames,
+  isChatSkillNameConflict,
+  preserveChatSkillBundle,
+} from "./skill-access";
+import { type ResolvedWorkspaceSkill, resolveSkillCandidates, selectSkill } from "./skill-catalog";
 
 export const RUN_EVENT_NOTIFY_CHANNEL = "goat_run_events_v1";
 
@@ -741,16 +746,39 @@ export class PostgresChatRepository implements ChatRepository {
       ...(input.command.mentions?.length ? { mentions: input.command.mentions } : {}),
     });
     const resolvedMentionSkills = await this.resolveMentionedSkills(
-      input.actor.workspaceId,
+      input.actor,
       input.command.mentions?.flatMap((mention) =>
         mention.kind === "skill" ? [mention.id] : [],
       ) ?? [],
+      conversationId,
     );
+    if (
+      new Set(resolvedMentionSkills.map((skill) => skill.name)).size !==
+      resolvedMentionSkills.length
+    )
+      throw new CoreError(
+        "conflict",
+        "Choose one Personal or Company skill for each name in a chat.",
+      );
+    if (resolvedMentionSkills.length > 0) {
+      const [result] = await this.rows<{ conflict: boolean }>(
+        sql`SELECT ${conflictingChatSkillNames(
+          conversationId,
+          resolvedMentionSkills.map((skill) => skill.bundleId),
+        )} AS conflict`,
+      );
+      if (result?.conflict)
+        throw new CoreError(
+          "conflict",
+          "This chat already uses another skill with this name. Start a new chat to use the selected skill.",
+        );
+    }
     const resolvedMentionSkillsJson = stringifyPostgresJson(
       resolvedMentionSkills.map((skill) => ({
         bundle_id: skill.bundleId,
         source_kind: skill.sourceKind,
         plugin_id: skill.pluginId,
+        installation_id: skill.installationId,
       })),
     );
     const runtimeModel = input.command.runtimeModel ?? input.command.model;
@@ -1144,18 +1172,18 @@ export class PostgresChatRepository implements ChatRepository {
         JOIN target_chat ON true
         CROSS JOIN jsonb_to_recordset(
           ${resolvedMentionSkillsJson}::jsonb
-        ) AS resolved_skill(bundle_id text, source_kind text)
+        ) AS resolved_skill(bundle_id text, source_kind text, installation_id text)
         JOIN goat.skill_bundles AS bundle
           ON bundle.id = resolved_skill.bundle_id
          AND bundle.workspace_id = ${input.actor.workspaceId}
-        WHERE NOT EXISTS (
-            SELECT 1
-            FROM goat.chat_session_skill_bundles AS fixed
-            JOIN goat.skill_bundles AS fixed_bundle ON fixed_bundle.id = fixed.bundle_id
-            WHERE fixed.chat_session_id = target_chat.id
-              AND fixed_bundle.name = bundle.name
-        )
-        ON CONFLICT (chat_session_id, name) DO NOTHING
+        WHERE (resolved_skill.source_kind = 'plugin' OR EXISTS (
+          SELECT 1 FROM goat.skill_installations installation
+          WHERE installation.id = resolved_skill.installation_id
+            AND installation.bundle_id = bundle.id AND installation.workspace_id = ${input.actor.workspaceId}
+            AND installation.enabled AND installation.archived_at IS NULL
+            AND (installation.scope = 'company' OR (installation.created_by_user_id = ${input.actor.userId} AND target_chat.task_id IS NULL))
+        ))
+        ON CONFLICT (chat_session_id, name) DO UPDATE SET bundle_id = ${preserveChatSkillBundle()}
         RETURNING bundle_id
       ),
       captured_activated_skill_plugins AS MATERIALIZED (
@@ -1270,6 +1298,11 @@ export class PostgresChatRepository implements ChatRepository {
       FROM reservation
       `);
     } catch (error) {
+      if (isChatSkillNameConflict(error))
+        throw new CoreError(
+          "conflict",
+          "This chat already uses another skill with this name. Start a new chat to use the selected skill.",
+        );
       if (attachmentIds.length > 0 && isUnmaterializedGuardError(error)) {
         throw new CoreError("invalid_argument", "An attachment is unavailable or has expired.");
       }
@@ -1945,8 +1978,9 @@ export class PostgresChatRepository implements ChatRepository {
   }
 
   private async resolveMentionedSkills(
-    workspaceId: string,
+    actor: Actor,
     mentionedSkillIds: readonly string[],
+    conversationId: string,
   ): Promise<ResolvedWorkspaceSkill[]> {
     const skillIds = [...new Set(mentionedSkillIds)];
     if (skillIds.length === 0) return [];
@@ -1956,7 +1990,8 @@ export class PostgresChatRepository implements ChatRepository {
     );
     const candidates = await this.rows<ResolvedWorkspaceSkill>(sql`
       SELECT
-        installation.name AS id,
+        installation.id AS id,
+        installation.scope,
         bundle.id AS "bundleId",
         bundle.name,
         bundle.description,
@@ -1969,13 +2004,15 @@ export class PostgresChatRepository implements ChatRepository {
       JOIN goat.skill_bundles AS bundle
         ON bundle.id = installation.bundle_id
        AND bundle.workspace_id = installation.workspace_id
-      WHERE installation.workspace_id = ${workspaceId}
+      WHERE installation.workspace_id = ${actor.workspaceId}
         AND installation.enabled
         AND installation.archived_at IS NULL
-        AND installation.name IN (${skillIdList})
+        AND (installation.scope = 'company' OR (installation.created_by_user_id = ${actor.userId} AND NOT EXISTS (SELECT 1 FROM goat.chat_sessions session WHERE session.id = ${conversationId} AND session.kind = 'task')))
+        AND (installation.name IN (${skillIdList}) OR installation.id IN (${skillIdList}))
       UNION ALL
       SELECT
         plugin_skill.skill_name AS id,
+        NULL::text AS scope,
         bundle.id AS "bundleId",
         bundle.name,
         bundle.description,
@@ -1991,14 +2028,19 @@ export class PostgresChatRepository implements ChatRepository {
       JOIN goat.skill_bundles AS bundle
         ON bundle.id = plugin_skill.skill_bundle_id
        AND bundle.workspace_id = plugin_skill.workspace_id
-      WHERE plugin_skill.workspace_id = ${workspaceId}
+      WHERE plugin_skill.workspace_id = ${actor.workspaceId}
         AND plugin.status = 'enabled'
         AND plugin_skill.skill_name IN (${skillIdList})
     `);
-    return resolveSkillCandidates(
+    const catalog = resolveSkillCandidates(
       candidates.filter((candidate) => candidate.sourceKind === "standalone"),
       candidates.filter((candidate) => candidate.sourceKind === "plugin"),
     ).skills;
+    return skillIds.map((id) => {
+      const skill = selectSkill(catalog, id);
+      if (!skill) throw new CoreError("not_found", "A selected skill is unavailable.");
+      return skill;
+    });
   }
 
   private async rows<Row>(query: SQL): Promise<Row[]> {

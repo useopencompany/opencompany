@@ -914,6 +914,7 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
         permissionMode: "bypassPermissions",
       }),
     );
+    expect(chatMocks.loadCodexChatSessionSkills).toHaveBeenCalledWith(claudeTurn(), false);
     expect(projector.finalize).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: "acp_session_1",
@@ -979,6 +980,7 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       env: env(),
     });
 
+    expect(chatMocks.loadCodexChatSessionSkills).toHaveBeenCalledWith(claudeTurn(), true);
     expect(skillMocks.materializeClaudeSkillSnapshotsForSession).toHaveBeenCalledWith({
       sandbox,
       claudeWorkRoot: "/home/user/opencompany-goat/claude-chat",

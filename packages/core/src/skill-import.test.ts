@@ -74,7 +74,11 @@ describe("SkillImportApplicationService", () => {
       }),
     );
     const service = new SkillImportApplicationService(
-      repository({ install, replace }),
+      repository({
+        install,
+        replace,
+        get: vi.fn(async () => ({ name: "investigate-bug" }) as never),
+      }),
       { resolve: vi.fn() },
       { create },
     );
@@ -234,6 +238,7 @@ function repository(overrides: Partial<SkillBundleRepository> = {}): SkillBundle
     readFile: vi.fn(async () => null),
     setEnabled: vi.fn(async () => ({}) as never),
     archive: vi.fn(async () => undefined),
+    setScope: vi.fn(async () => ({}) as never),
     ...overrides,
   };
 }

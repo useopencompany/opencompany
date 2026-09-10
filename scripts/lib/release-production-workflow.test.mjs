@@ -39,6 +39,7 @@ test("builds Vercel outputs before migrations and rechecks main before deploys",
     "Deploy and smoke marketing",
     "Deploy and smoke docs",
     "Deploy and smoke Render services",
+    "Activate Personal Skills after old services drain",
     "Deploy web",
     "Smoke web release",
   ]);
@@ -47,6 +48,8 @@ test("builds Vercel outputs before migrations and rechecks main before deploys",
   assert.match(workflow, /RENDER_DEPLOY_TIMEOUT_MS: "1200000"/u);
   assert.match(workflow, /VERCEL_DEPLOY_TIMEOUT_MS: "600000"/u);
   assert.match(workflow, /run: bun scripts\/backfill-wiki-path-links\.ts/u);
+  assert.match(workflow, /run: node scripts\/activate-personal-skills\.mjs/u);
+  assert.match(workflow, /steps\.activate-personal-skills\.outcome == 'success'/u);
   assert.match(
     workflow,
     /steps\.migrate\.outcome == 'success' && steps\.backfill-wiki-path-links\.outcome == 'success'/u,

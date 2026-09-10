@@ -49,6 +49,7 @@ const migrationPaths = [
   "0247_preserve_assistant_message_boundaries.sql",
   "0248_goat_chat_attachment_upload_idempotency.sql",
   "0261_persistent_bots.sql",
+  "0263_personal_company_skills.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -164,6 +165,116 @@ describe("Postgres Chat repositories", () => {
 
   afterEach(async () => {
     await database.close();
+  });
+
+  it("enforces Personal visibility for explicit chat mentions and excludes them from shared Tasks", async () => {
+    await seedTerminalTask(database);
+    await database.exec(
+      "UPDATE goat.skill_installations SET scope = 'personal', created_by_user_id = 'user_1' WHERE id = 'skill_review';",
+    );
+    const message = {
+      idempotencyKey: "private-mention",
+      content: "/review Check this.",
+      engine: "opencompany" as const,
+      model: "provider/model",
+      mentions: [{ kind: "skill" as const, id: "skill_review", name: "review" }],
+    };
+    const created = await service.createMessage(actor(), message);
+    await expect(
+      listChatSkillBundleActivations(drizzle(database), {
+        workspaceId: "workspace_1",
+        userId: "user_1",
+        chatSessionId: created.conversationId,
+      }),
+    ).resolves.toEqual([expect.objectContaining({ bundleId: "skill_bundle_review" })]);
+    await expect(
+      service.createMessage(actor({ userId: "user_3", role: "member" }), {
+        ...message,
+        idempotencyKey: "other-private-mention",
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      service.createMessage(actor(), {
+        ...message,
+        idempotencyKey: "task-private-mention",
+        conversationId: "task_conversation_1",
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await database.exec(
+      "UPDATE goat.skill_installations SET scope = 'company' WHERE id = 'skill_review'; UPDATE goat.skill_installation_versions SET company_shared = true WHERE installation_id = 'skill_review';",
+    );
+    await expect(
+      service.createMessage(actor(), {
+        ...message,
+        idempotencyKey: "task-company-mention",
+        conversationId: "task_conversation_1",
+      }),
+    ).resolves.toMatchObject({ conversationId: "task_conversation_1" });
+  });
+
+  it("rejects competing same-name selections even when both preflight reads see an empty Chat", async () => {
+    await seedStandaloneReviewSkill(database);
+    await database.exec(`
+      UPDATE goat.skill_installations SET scope = 'personal', created_by_user_id = 'user_1' WHERE id = 'skill_review';
+      INSERT INTO goat.skill_bundles (id, workspace_id, integrity, name, description, body, source_type, source_url, source_path, source_ref, resolved_commit)
+      VALUES ('company_bundle', 'workspace_1', 'sha256:${"b".repeat(64)}', 'review', 'Company review', 'Different company instructions', 'github', 'https://github.com/example/company', 'review', 'main', '${"b".repeat(40)}');
+      INSERT INTO goat.skill_installations (id, workspace_id, name, bundle_id, scope) VALUES ('company_review', 'workspace_1', 'review', 'company_bundle', 'company');
+    `);
+    const created = await service.createMessage(actor(), {
+      idempotencyKey: "empty-skill-chat",
+      content: "Start a review.",
+      engine: "codex",
+      model: "provider/model",
+    });
+    let preflightReads = 0;
+    let release!: () => void;
+    const bothRead = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const racing = new ChatApplicationService(
+      new PostgresChatRepository(async (query) => {
+        const rows = await execute(query);
+        if (dialect.sqlToQuery(query).sql.includes("AS conflict")) {
+          preflightReads += 1;
+          if (preflightReads === 2) release();
+          await bothRead;
+        }
+        return rows;
+      }),
+    );
+    const results = await Promise.allSettled(
+      ["skill_review", "company_review"].map((id) =>
+        racing.createMessage(actor(), {
+          idempotencyKey: `race-${id}`,
+          conversationId: created.conversationId,
+          content: "/review Run this.",
+          engine: "codex",
+          model: "provider/model",
+          mentions: [{ kind: "skill", id }],
+        }),
+      ),
+    );
+    expect(preflightReads).toBe(2);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.find((result) => result.status === "rejected")).toMatchObject({
+      reason: { code: "conflict" },
+    });
+    expect(
+      (
+        await database.query(
+          "SELECT count(*)::int AS count FROM goat.chat_session_skill_bundles WHERE chat_session_id = $1",
+          [created.conversationId],
+        )
+      ).rows,
+    ).toEqual([{ count: 1 }]);
+    expect(
+      (
+        await database.query(
+          "SELECT count(*)::int AS count FROM goat.chat_messages WHERE session_id = $1 AND role = 'user'",
+          [created.conversationId],
+        )
+      ).rows,
+    ).toEqual([{ count: 2 }]);
   });
 
   it("keeps pre-existing durable rows while adding the canonical event cursor", () => {
@@ -1692,6 +1803,7 @@ describe("Postgres Chat repositories", () => {
     const db = drizzle(database);
     await expect(
       listChatSkillBundleActivations(db, {
+        userId: "user_1",
         workspaceId: "workspace_1",
         chatSessionId: created.conversationId,
       }),
@@ -1710,14 +1822,15 @@ describe("Postgres Chat repositories", () => {
       );
       INSERT INTO goat.skill_bundle_files (bundle_id, path, content, executable, size_bytes)
       VALUES ('skill_bundle_standalone_review', 'SKILL.md', ''::bytea, false, 0);
-      INSERT INTO goat.skill_installations (id, workspace_id, name, bundle_id)
+      INSERT INTO goat.skill_installations (id, workspace_id, name, bundle_id, scope)
       VALUES (
         'skill_installation_standalone_review', 'workspace_1',
-        'review', 'skill_bundle_standalone_review'
+        'review', 'skill_bundle_standalone_review', 'company'
       );
     `);
     await expect(
       listChatSkillBundleActivations(db, {
+        userId: "user_1",
         workspaceId: "workspace_1",
         chatSessionId: created.conversationId,
       }),
@@ -1726,6 +1839,7 @@ describe("Postgres Chat repositories", () => {
     ]);
     await expect(
       readChatSkillBundleFile(db, {
+        userId: "user_1",
         workspaceId: "workspace_1",
         chatSessionId: created.conversationId,
         skillName: "review",
@@ -1735,12 +1849,14 @@ describe("Postgres Chat repositories", () => {
     await database.exec("UPDATE goat.plugins SET status = 'disabled' WHERE id = 'plugin_review'");
     await expect(
       listChatSkillBundleActivations(db, {
+        userId: "user_1",
         workspaceId: "workspace_1",
         chatSessionId: created.conversationId,
       }),
     ).resolves.toEqual([]);
     await expect(
       readChatSkillBundleFile(db, {
+        userId: "user_1",
         workspaceId: "workspace_1",
         chatSessionId: created.conversationId,
         skillName: "review",
@@ -2484,8 +2600,8 @@ async function seedStandaloneReviewSkill(database: PGlite) {
     );
     INSERT INTO goat.skill_bundle_files (bundle_id, path, content, executable, size_bytes)
     VALUES ('skill_bundle_review', 'SKILL.md', ''::bytea, false, 0);
-    INSERT INTO goat.skill_installations (id, workspace_id, name, bundle_id)
-    VALUES ('skill_review', 'workspace_1', 'review', 'skill_bundle_review');
+    INSERT INTO goat.skill_installations (id, workspace_id, name, bundle_id, scope)
+    VALUES ('skill_review', 'workspace_1', 'review', 'skill_bundle_review', 'company');
   `);
 }
 

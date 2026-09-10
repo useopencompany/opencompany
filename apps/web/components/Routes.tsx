@@ -12,6 +12,9 @@ import type {
   SkillListItemDto,
   SkillSourceDto,
 } from "@opencompany/protocol";
+import { Button } from "@opencompany/ui/components/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@opencompany/ui/components/tooltip";
+import { cn } from "@opencompany/ui/lib/utils";
 import { useLiveQuery } from "@tanstack/react-db";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -24,6 +27,7 @@ import {
   Link2,
   ListTodo,
   Loader2,
+  LockKeyhole,
   Mail,
   Monitor,
   Moon,
@@ -68,6 +72,7 @@ import {
   importHeadlessSkill,
   previewHeadlessSkillImport,
   replaceHeadlessSkill,
+  setHeadlessSkillScope,
   updateHeadlessWorkspaceSkill,
 } from "@/lib/headless-knowledge-commands";
 import type { BrainOverviewStats, BrainSnapshot } from "@/lib/headless-knowledge-types";
@@ -846,6 +851,13 @@ function WorkflowListRow({ workflow }: { workflow: WorkflowListItem }) {
 
 // --- Skills (settings) -------------------------------------------------------
 
+type SkillScope = "personal" | "company";
+const SKILL_SCOPE_FILTERS = [
+  { value: "all", label: "All" },
+  { value: "company", label: "Company" },
+  { value: "personal", label: "Personal" },
+] as const;
+
 export function SkillsSettingsRoute({
   skills,
   canEdit,
@@ -856,46 +868,63 @@ export function SkillsSettingsRoute({
   const router = useRouter();
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [scopeFilter, setScopeFilter] = useState<"all" | SkillScope>("all");
+  const creationScope = scopeFilter === "company" ? "company" : "personal";
+  const visibleSkills = skills.filter(
+    (skill) => scopeFilter === "all" || skill.scope === scopeFilter,
+  );
 
   return (
-    <SettingsContent
-      title="Skills"
-      description="Portable Agent Skills created in this workspace or installed from a public source."
-    >
-      {canEdit ? (
-        <div className="-mt-2 flex gap-2">
-          <button
-            type="button"
-            onClick={() => setCreating(true)}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-ink bg-ink px-3 text-[13px] font-medium text-canvas transition-colors duration-150 hover:bg-ink/90 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-          >
-            <Plus size={14} strokeWidth={2} />
-            New skill
-          </button>
-          <button
-            type="button"
-            onClick={() => setImporting(true)}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[13px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-          >
-            <Link2 size={14} strokeWidth={2} />
-            Import skill
-          </button>
+    <SettingsContent title="Skills">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div role="group" aria-label="Skill scope" className="flex flex-wrap items-center gap-2">
+          {SKILL_SCOPE_FILTERS.map((filter) => (
+            <Button
+              key={filter.value}
+              variant={scopeFilter === filter.value ? "default" : "secondary"}
+              size="sm"
+              aria-pressed={scopeFilter === filter.value}
+              onClick={() => setScopeFilter(filter.value)}
+              className={cn(
+                "h-8 rounded-full px-3 text-[13px] font-normal shadow-none",
+                scopeFilter !== filter.value && "text-ink-muted hover:text-ink",
+              )}
+            >
+              {filter.label}
+            </Button>
+          ))}
         </div>
-      ) : null}
+        {canEdit ? (
+          <div className="ml-auto flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setImporting(true)}
+              className="font-normal text-ink-muted hover:text-ink"
+            >
+              Import skill
+            </Button>
+            <Button size="sm" onClick={() => setCreating(true)}>
+              <Plus size={14} strokeWidth={2} />
+              New {creationScope} skill
+            </Button>
+          </div>
+        ) : null}
+      </div>
 
-      {skills.length === 0 ? (
+      {visibleSkills.length === 0 ? (
         <EmptyState
           icon={Sparkles}
-          title="No skills yet"
+          title={scopeFilter === "all" ? "No skills yet" : `No ${scopeFilter} skills yet`}
           description={
             canEdit
-              ? "Create a workspace Skill or import one from GitHub or skills.sh."
-              : "Workspace admins can create and install Agent Skills."
+              ? "Create a skill or import one to get started."
+              : "Skills shared with you appear here."
           }
         />
       ) : (
         <ul className="flex flex-col gap-2">
-          {skills.map((skill) => (
+          {visibleSkills.map((skill) => (
             <li key={skill.id}>
               <SkillListRow skill={skill} />
             </li>
@@ -905,12 +934,14 @@ export function SkillsSettingsRoute({
 
       {importing ? (
         <ImportSkillDialog
+          initialScope={creationScope}
           onClose={() => setImporting(false)}
           onInstalled={(name) => router.push(`/settings/skills/${encodeURIComponent(name)}`)}
         />
       ) : null}
       {creating ? (
         <WorkspaceSkillDialog
+          initialScope={creationScope}
           onClose={() => setCreating(false)}
           onSaved={(name) => router.push(`/settings/skills/${encodeURIComponent(name)}`)}
         />
@@ -922,7 +953,7 @@ export function SkillsSettingsRoute({
 function SkillListRow({ skill }: { skill: SkillListItemDto }) {
   return (
     <Link
-      href={`/settings/skills/${encodeURIComponent(skill.name)}`}
+      href={`/settings/skills/${encodeURIComponent(skill.id)}`}
       prefetch
       className="group flex items-center gap-3 rounded-lg border border-border bg-surface px-3.5 py-3 transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
     >
@@ -931,8 +962,9 @@ function SkillListRow({ skill }: { skill: SkillListItemDto }) {
           <span className="truncate text-[14px] font-medium leading-tight text-ink">
             {skill.bundle.name}
           </span>
+          <SkillScopeBadge scope={skill.scope} />
           <InstallationStatusBadge enabled={skill.enabled} />
-          {skill.bundle.source.type === "workspace" ? <WorkspaceBadge /> : <ImportedBadge />}
+          {skill.bundle.source.type !== "workspace" ? <ImportedBadge /> : null}
         </span>
         {skill.bundle.description.trim() ? (
           <span className="mt-0.5 block truncate text-[12.5px] leading-5 text-ink-subtle">
@@ -964,8 +996,8 @@ export function SkillBundleRoute({
     setError(null);
     startMutation(async () => {
       try {
-        if (enabled) await enableHeadlessSkill(installation.name);
-        else await disableHeadlessSkill(installation.name);
+        if (enabled) await enableHeadlessSkill(installation.id);
+        else await disableHeadlessSkill(installation.id);
         router.refresh();
       } catch (cause) {
         setError(errorMessage(cause));
@@ -977,7 +1009,7 @@ export function SkillBundleRoute({
     setError(null);
     startMutation(async () => {
       try {
-        await archiveHeadlessSkill(installation.name);
+        await archiveHeadlessSkill(installation.id);
         router.push("/settings/skills");
       } catch (cause) {
         setError(errorMessage(cause));
@@ -992,11 +1024,30 @@ export function SkillBundleRoute({
       backLink={{ href: "/settings/skills", label: "Skills" }}
     >
       {bundle.source.type !== "workspace" ? <SkillSourceNotice source={bundle.source} /> : null}
-      {!canEdit ? (
-        <p className="text-[13px] leading-5 text-ink-subtle">
-          Only workspace admins can manage skill installations.
-        </p>
-      ) : null}
+      {installation.scope ? (
+        <SkillScopeField
+          scope={installation.scope}
+          canManage={installation.canManage && canEdit}
+          disabled={isMutating}
+          onChange={(scope) => {
+            setError(null);
+            startMutation(async () => {
+              try {
+                const updated = await setHeadlessSkillScope(installation.id, {
+                  scope,
+                  expectedScope: installation.scope!,
+                });
+                if (!updated.canEdit) router.push("/settings/skills");
+                else router.refresh();
+              } catch (cause) {
+                setError(errorMessage(cause));
+              }
+            });
+          }}
+        />
+      ) : (
+        <p className="text-[13px] text-ink-subtle">Managed by its plugin.</p>
+      )}
 
       {bundle.source.type === "workspace" ? (
         <WorkspaceSkillEditor key={installation.id} installation={installation} canEdit={canEdit} />
@@ -1066,21 +1117,24 @@ export function SkillBundleRoute({
               Replace bundle
             </button>
           ) : null}
-          <button
-            type="button"
-            disabled={isMutating}
-            onClick={archive}
-            className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[13px] font-medium text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink disabled:opacity-60"
-          >
-            {isMutating ? <Loader2 size={14} className="animate-spin" /> : <Archive size={14} />}
-            Archive
-          </button>
+          {installation.canManage ? (
+            <button
+              type="button"
+              disabled={isMutating}
+              onClick={archive}
+              className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[13px] font-medium text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink disabled:opacity-60"
+            >
+              {isMutating ? <Loader2 size={14} className="animate-spin" /> : <Archive size={14} />}
+              Archive
+            </button>
+          ) : null}
         </div>
       ) : null}
 
       {replacing ? (
         <ImportSkillDialog
           replaceName={installation.name}
+          replaceId={installation.id}
           initialUrl={skillSourceInput(bundle.source, bundle.name)}
           initialSelectedPath={bundle.source.path}
           onClose={() => setReplacing(false)}
@@ -1132,7 +1186,7 @@ function WorkspaceSkillEditor({
     setError(null);
     startSaving(async () => {
       try {
-        const updated = await updateHeadlessWorkspaceSkill(installation.name, {
+        const updated = await updateHeadlessWorkspaceSkill(installation.id, {
           ...next,
           expectedBundleId: savedBundleId,
         });
@@ -1157,7 +1211,6 @@ function WorkspaceSkillEditor({
     >
       <div className="flex items-center gap-2">
         <InstallationStatusBadge enabled={installation.enabled} />
-        <span className="text-[12px] text-ink-subtle">Created in this workspace</span>
       </div>
       <label className="flex flex-col gap-1.5">
         <span className="text-[12px] font-medium text-ink-subtle">When to use this skill</span>
@@ -1318,15 +1371,6 @@ function ImportedBadge() {
     <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-surface-muted px-1.5 py-px text-[10.5px] font-medium leading-4 text-ink-subtle">
       <Link2 size={10} strokeWidth={2} />
       Imported
-    </span>
-  );
-}
-
-function WorkspaceBadge() {
-  return (
-    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-surface-muted px-1.5 py-px text-[10.5px] font-medium leading-4 text-ink-subtle">
-      <Sparkles size={10} strokeWidth={2} />
-      Workspace
     </span>
   );
 }
@@ -1505,13 +1549,16 @@ type ImportPreviewState = {
 };
 
 function WorkspaceSkillDialog({
+  initialScope,
   onClose,
   onSaved,
 }: {
+  initialScope: SkillScope;
   onClose: () => void;
   onSaved: (name: string) => void;
 }) {
   const [name, setName] = useState("");
+  const [scope, setScope] = useState<SkillScope>(initialScope);
   const [description, setDescription] = useState("");
   const [instructions, setInstructions] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -1544,12 +1591,13 @@ function WorkspaceSkillDialog({
     setError(null);
     startSaving(async () => {
       try {
-        await createHeadlessWorkspaceSkill({
+        const result = await createHeadlessWorkspaceSkill({
+          scope,
           name: normalizedName,
           description: normalizedDescription,
           instructions: normalizedInstructions,
         });
-        onSaved(normalizedName);
+        onSaved(result.installation.id);
       } catch (cause) {
         setError(errorMessage(cause));
       }
@@ -1571,10 +1619,8 @@ function WorkspaceSkillDialog({
         className="shadow-ring-xl relative flex max-h-[90vh] w-full max-w-[640px] flex-col overflow-hidden rounded-xl bg-surface p-5"
       >
         <h2 className="text-[15px] font-semibold leading-tight text-ink">New skill</h2>
-        <p className="mt-1 text-[12.5px] leading-5 text-ink-subtle">
-          Give the skill a name and write instructions the agent can follow.
-        </p>
         <div className="mt-4 flex flex-col gap-3 overflow-y-auto">
+          <SkillScopeField scope={scope} onChange={setScope} disabled={isSaving} />
           <label className="flex flex-col gap-1.5">
             <span className="text-[12px] font-medium text-ink-subtle">Name</span>
             <input
@@ -1647,18 +1693,23 @@ function WorkspaceSkillDialog({
 }
 
 function ImportSkillDialog({
+  initialScope = "personal",
   onClose,
   onInstalled,
   replaceName,
+  replaceId,
   initialUrl = "",
   initialSelectedPath,
 }: {
+  initialScope?: SkillScope;
   onClose: () => void;
   onInstalled: (name: string) => void;
   replaceName?: string;
+  replaceId?: string;
   initialUrl?: string;
   initialSelectedPath?: string;
 }) {
+  const [scope, setScope] = useState<SkillScope>(initialScope);
   const [url, setUrl] = useState(initialUrl);
   const [selectedPath, setSelectedPath] = useState<string | undefined>(initialSelectedPath);
   const [candidates, setCandidates] = useState<SkillImportCandidateDto[] | null>(null);
@@ -1733,11 +1784,11 @@ function ImportSkillDialog({
           expectedIntegrity: confirmedPreview.integrity,
         };
         if (replaceName) {
-          const result = await replaceHeadlessSkill(replaceName, command);
-          onInstalled(result.name);
+          const result = await replaceHeadlessSkill(replaceId ?? replaceName, command);
+          onInstalled(result.id);
         } else {
-          const result = await importHeadlessSkill(command);
-          onInstalled(result.installation.name);
+          const result = await importHeadlessSkill({ ...command, scope });
+          onInstalled(result.installation.id);
         }
       } catch (cause) {
         setError(errorMessage(cause));
@@ -1765,11 +1816,13 @@ function ImportSkillDialog({
           {replaceName ? "Replace skill bundle" : "Import a skill"}
         </h2>
         <p className="mt-1 text-[12.5px] leading-5 text-ink-subtle">
-          Preview a public GitHub or skills.sh source, then install the exact resolved commit and
-          integrity. Preview never returns file contents.
+          Paste a GitHub or skills.sh link to preview the skill.
         </p>
 
         <div className="mt-4 flex flex-col gap-3 overflow-y-auto">
+          {!replaceName ? (
+            <SkillScopeField scope={scope} onChange={setScope} disabled={pending} />
+          ) : null}
           <label className="flex flex-col gap-1.5">
             <span className="text-[12px] font-medium text-ink-subtle">URL</span>
             <div className="flex gap-2">
@@ -1935,4 +1988,56 @@ export function formatRelativeTime(value: Date | string) {
   const elapsedDays = Math.floor(elapsedHours / 24);
   if (elapsedDays < 7) return `${elapsedDays}d ago`;
   return new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(timestamp);
+}
+
+function SkillScopeBadge({ scope }: { scope: "personal" | "company" | null }) {
+  return (
+    <span className="rounded bg-surface-muted px-1.5 py-0.5 text-[11px] text-ink-subtle">
+      {scope === "personal" ? "Personal" : scope === "company" ? "Company" : "Plugin"}
+    </span>
+  );
+}
+
+function SkillScopeField({
+  scope,
+  onChange,
+  disabled,
+  canManage = true,
+}: {
+  scope: SkillScope;
+  onChange: (scope: SkillScope) => void;
+  disabled?: boolean;
+  canManage?: boolean;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      <span className="text-[12px] font-medium text-ink-subtle">Visibility</span>
+      {canManage ? (
+        <select
+          aria-label="Visibility"
+          value={scope}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.value as SkillScope)}
+          className={cn(EDITOR_INPUT_CLASS, "w-auto")}
+        >
+          <option value="personal">Personal</option>
+          <option value="company">Company</option>
+        </select>
+      ) : (
+        <Tooltip>
+          <TooltipTrigger
+            aria-label="Visibility managed by the creator or an admin"
+            className="inline-flex h-9 items-center gap-2 rounded-md bg-surface-muted px-2.5 text-[13px] text-ink-subtle"
+          >
+            {scope === "company" ? "Company" : "Personal"}
+            <LockKeyhole size={12} aria-hidden="true" />
+          </TooltipTrigger>
+          <TooltipContent>Only the creator or an admin can change visibility.</TooltipContent>
+        </Tooltip>
+      )}
+      <span className="text-[12px] leading-5 text-ink-subtle">
+        {scope === "personal" ? "Only you" : "Everyone can use and edit"}
+      </span>
+    </div>
+  );
 }

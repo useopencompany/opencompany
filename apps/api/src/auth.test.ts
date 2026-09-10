@@ -237,6 +237,7 @@ describe("API authentication", () => {
       "skill:read",
       "wiki:read",
       "wiki:write",
+      "skill:write",
     ]);
   });
 

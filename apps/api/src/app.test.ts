@@ -217,6 +217,7 @@ describe("canonical Hono API", () => {
       await expect(response.json()).resolves.toMatchObject({
         ok: true,
         service: "opencompany-api",
+        capabilities: { personalSkillsAuthorization: "v1" },
         protocolVersion: PROTOCOL_VERSION,
         release: "api-release-sha",
         renderGitCommit: "api-release-sha",
@@ -501,7 +502,12 @@ describe("canonical Hono API", () => {
       transactionIds: [71],
     }));
     const listSkillCatalog = vi.fn(async () => [
-      { id: "research", name: "Research", description: "Find primary sources." },
+      {
+        id: "research",
+        name: "Research",
+        description: "Find primary sources.",
+        scope: "company" as const,
+      },
     ]);
     const listBrainSourceItems = vi.fn(async () => [
       {
@@ -740,7 +746,11 @@ describe("canonical Hono API", () => {
     const replace = vi.fn(async () => updatedInstallation);
     const create = vi.fn(async () => authoredBundle);
     const app = testApp(fakeRepository(), {
-      skillImports: fakeSkillImportService({ install, replace }, {}, { create }),
+      skillImports: fakeSkillImportService(
+        { install, replace, get: vi.fn(async () => createdInstallation) },
+        {},
+        { create },
+      ),
     });
 
     const created = await app.request("/v1/skills", {
@@ -966,6 +976,36 @@ describe("canonical Hono API", () => {
 
     expect(create.status).toBe(400);
     expect(update.status).toBe(400);
+  });
+
+  it("changes skill visibility by stable ID with optimistic scope validation", async () => {
+    const setScope = vi.fn(async () => ({
+      ...fakeSkillInstallation(),
+      scope: "personal" as const,
+    }));
+    const app = testApp(fakeRepository(), { skillImports: fakeSkillImportService({ setScope }) });
+    const response = await app.request("/v1/skills/skill_installation_1/scope", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scope: "personal", expectedScope: "company" }),
+    });
+    expect(response.status).toBe(200);
+    expect(setScope).toHaveBeenCalledWith({
+      actor,
+      name: "skill_installation_1",
+      scope: "personal",
+      expectedScope: "company",
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      data: { id: "skill_installation_1", scope: "personal" },
+    });
+    const invalid = await app.request("/v1/skills/skill_installation_1/scope", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scope: "public" }),
+    });
+    expect(invalid.status).toBe(400);
+    expect(setScope).toHaveBeenCalledTimes(1);
   });
 
   it("lists, inspects, reads, replaces, disables, and archives Skill installations", async () => {
@@ -5856,6 +5896,7 @@ function fakeSkillImportService(
     readFile: unexpected,
     setEnabled: unexpected,
     archive: unexpected,
+    setScope: unexpected,
     ...repositoryOverrides,
   };
   const resolver: SkillImportResolver = {
@@ -5970,6 +6011,10 @@ function baseWikiPage() {
 function fakeSkillInstallation(): SkillInstallation {
   return {
     id: "skill_installation_1",
+    scope: "company",
+    createdByUserId: "user_1",
+    canEdit: true,
+    canManage: true,
     name: "imported-skill",
     enabled: true,
     archivedAt: null,

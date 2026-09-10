@@ -545,7 +545,7 @@ export async function runCodexChatTurn(input: {
     checkExternalAbort();
     executionStage = "load_skills";
     const [sessionSkills, workflowSkills, pluginRuntime] = await Promise.all([
-      loadCodexChatSessionSkills(turn),
+      loadCodexChatSessionSkills(turn, Boolean(taskContext)),
       taskContext ? loadWorkflowTaskSkillBundles(taskContext.harnessSpec) : Promise.resolve([]),
       taskContext
         ? loadWorkflowTaskPluginRuntime(taskContext.harnessSpec)
@@ -1614,7 +1614,7 @@ function currentInteractionLeaseSql() {
   )`;
 }
 
-export async function loadCodexChatSessionSkills(turn: CodexChatTurn) {
+export async function loadCodexChatSessionSkills(turn: CodexChatTurn, companyOnly: boolean) {
   const activations = await getDb()
     .select({
       bundleId: chatSessionSkillBundles.bundleId,
@@ -1656,6 +1656,9 @@ export async function loadCodexChatSessionSkills(turn: CodexChatTurn) {
   }
   const bundles = await loadImmutableSkillBundles(getDb(), {
     workspaceId: activations[0]!.workspaceId,
+    userId: turn.userWorkosId,
+    ...(companyOnly ? { skillAccess: "company" as const } : {}),
+    chatSessionId: turn.chatSessionId,
     bundleIds: activations.map((activation) => activation.bundleId),
   });
   const bundleById = new Map(bundles.map((bundle) => [bundle.id, bundle]));

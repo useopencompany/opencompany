@@ -6353,6 +6353,19 @@
             "maxLength": 256,
             "example": "run_019fed53"
           },
+          "scope": {
+            "$ref": "#/components/schemas/SkillScope"
+          },
+          "createdByUserId": {
+            "type": "string",
+            "nullable": true
+          },
+          "canEdit": {
+            "type": "boolean"
+          },
+          "canManage": {
+            "type": "boolean"
+          },
           "name": {
             "type": "string",
             "minLength": 1,
@@ -6376,6 +6389,10 @@
         },
         "required": [
           "id",
+          "scope",
+          "createdByUserId",
+          "canEdit",
+          "canManage",
           "name",
           "enabled",
           "archivedAt",
@@ -6383,6 +6400,15 @@
           "bundle"
         ],
         "additionalProperties": false
+      },
+      "SkillScope": {
+        "type": "string",
+        "nullable": true,
+        "enum": [
+          "personal",
+          "company",
+          null
+        ]
       },
       "SkillBundleSummary": {
         "type": "object",
@@ -6557,6 +6583,19 @@
             "maxLength": 256,
             "example": "run_019fed53"
           },
+          "scope": {
+            "$ref": "#/components/schemas/SkillScope"
+          },
+          "createdByUserId": {
+            "type": "string",
+            "nullable": true
+          },
+          "canEdit": {
+            "type": "boolean"
+          },
+          "canManage": {
+            "type": "boolean"
+          },
           "name": {
             "type": "string",
             "minLength": 1,
@@ -6584,6 +6623,10 @@
         },
         "required": [
           "id",
+          "scope",
+          "createdByUserId",
+          "canEdit",
+          "canManage",
           "name",
           "enabled",
           "archivedAt",
@@ -6702,6 +6745,9 @@
             "minLength": 1,
             "maxLength": 64,
             "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$/u"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/SkillScope"
           },
           "description": {
             "type": "string",
@@ -6974,6 +7020,9 @@
             "type": "string",
             "maxLength": 512
           },
+          "scope": {
+            "$ref": "#/components/schemas/SkillScope"
+          },
           "expectedResolvedCommit": {
             "type": "string",
             "pattern": "^[0-9a-f]{40}$/iu"
@@ -7015,7 +7064,11 @@
           "id": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 64
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/SkillScope"
           },
           "name": {
             "type": "string",
@@ -7029,6 +7082,7 @@
         },
         "required": [
           "id",
+          "scope",
           "name",
           "description"
         ],
@@ -7072,6 +7126,22 @@
         "required": [
           "description",
           "instructions"
+        ],
+        "additionalProperties": false
+      },
+      "SetSkillScopeBody": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "$ref": "#/components/schemas/SkillScope"
+          },
+          "expectedScope": {
+            "$ref": "#/components/schemas/SkillScope"
+          }
+        },
+        "required": [
+          "scope",
+          "expectedScope"
         ],
         "additionalProperties": false
       },
@@ -7838,6 +7908,11 @@
             "minLength": 1,
             "maxLength": 256,
             "example": "run_019fed53"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
           }
         },
         "required": [
@@ -18809,7 +18884,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Workspace skill settings list.",
+            "description": "Standalone skills visible to the current member: their Personal skills and Company skills.",
             "content": {
               "application/json": {
                 "schema": {
@@ -19096,9 +19171,7 @@
           {
             "schema": {
               "type": "string",
-              "minLength": 1,
-              "maxLength": 64,
-              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$/u"
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,199}$/u"
             },
             "required": true,
             "name": "slug",
@@ -19118,6 +19191,66 @@
         "responses": {
           "200": {
             "description": "Workspace-authored Skill moved to a new immutable bundle version.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillInstallationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/skills/{slug}/scope": {
+      "post": {
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "slug",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetSkillScopeBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Personal or Company visibility updated on the same skill.",
             "content": {
               "application/json": {
                 "schema": {
@@ -19320,7 +19453,32 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ImportSkillBody"
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2048
+                  },
+                  "selectedPath": {
+                    "type": "string",
+                    "maxLength": 512
+                  },
+                  "expectedResolvedCommit": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{40}$/iu"
+                  },
+                  "expectedIntegrity": {
+                    "type": "string",
+                    "pattern": "^sha256:[0-9a-f]{64}$/iu"
+                  }
+                },
+                "required": [
+                  "url",
+                  "expectedResolvedCommit",
+                  "expectedIntegrity"
+                ],
+                "additionalProperties": false
               }
             }
           }
