@@ -1,10 +1,10 @@
-import { randomUUID } from "node:crypto";
 import { latestCronRunAt, nextCronRunAt } from "@opencompany/agent-runtime";
 import {
   type CaptureProductTaskSpawnedInput,
   captureProductTaskSpawned,
 } from "@opencompany/analytics/product/server";
 import { type Actor, TASK_WRITE_PERMISSION, TaskApplicationService } from "@opencompany/core";
+import { newResourceId } from "@opencompany/core/resource-ids";
 import type { HarnessSpec } from "@opencompany/db/product-schema";
 import { PostgresTaskRepository } from "@opencompany/db/task-repository";
 import { captureException } from "@opencompany/observability";
@@ -174,7 +174,7 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
         return { status: "failed" as const };
       }
 
-      const runId = `goat_workflow_schedule_run_${randomUUID()}`;
+      const runId = newResourceId("workflow_schedule_run");
       const insertedRun = rowsFromExecute<{ id: string }>(
         await tx.execute(sql`
           INSERT INTO goat.workflow_schedule_runs (
@@ -259,7 +259,7 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
       return { status: "failed" as const };
     }
 
-    const runId = `goat_task_schedule_run_${randomUUID()}`;
+    const runId = newResourceId("task_schedule_run");
     const insertedRun = rowsFromExecute<{ id: string }>(
       await tx.execute(sql`
         INSERT INTO goat.task_schedule_runs (

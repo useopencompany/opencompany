@@ -144,9 +144,11 @@ export const ConversationSchema = z
 
 export const ChatShareIdSchema = z
   .string()
-  .regex(/^goat_chat_share_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu)
+  .regex(
+    /^(?:share_|goat_chat_share_)[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu,
+  )
   .openapi({
-    example: "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+    example: "share_01234567-89ab-4cde-8f01-23456789abcd",
     description: "Unguessable public Chat share capability.",
   });
 
@@ -2396,6 +2398,7 @@ export const BillingOverviewSchema = z
         chat: z.number().int().min(0),
         ingestion: z.number().int().min(0),
         capabilities: z.number().int().min(0),
+        sandbox: z.number().int().min(0),
       })
       .strict(),
     recentActivity: z.array(
@@ -2438,7 +2441,7 @@ export const BillingUsageSchema = z
       z
         .object({
           day: z.string().min(1).max(32),
-          category: z.enum(["chat", "ingestion", "capabilities", "other"]),
+          category: z.enum(["chat", "ingestion", "capabilities", "sandbox", "other"]),
           spendUsdMicros: z.number().int().min(0),
           providerCostUsdMicros: z.number().int().min(0),
           platformFeeUsdMicros: z.number().int().min(0),
@@ -3444,11 +3447,13 @@ export const WorkspaceCommandEnvelopeSchema = z
   .strict()
   .openapi("WorkspaceCommandEnvelope");
 
+const WorkspaceCreationIdSchema = ResourceIdSchema.regex(/^(?:workspace_|goat_ws_)/u, {
+  message: "workspaceId must be an opencompany workspace id.",
+});
+
 export const CreateWorkspaceBodySchema = z
   .object({
-    workspaceId: ResourceIdSchema.refine((value: string) => value.startsWith("goat_ws_"), {
-      message: "workspaceId must be an opencompany workspace id.",
-    }),
+    workspaceId: WorkspaceCreationIdSchema,
     name: z.string().trim().min(1).max(80),
   })
   .strict()
@@ -3529,9 +3534,7 @@ export const SaveOnboardingProfileBodySchema = z
 
 export const SaveOnboardingWorkspaceBodySchema = z
   .object({
-    workspaceId: ResourceIdSchema.refine((value: string) => value.startsWith("goat_ws_"), {
-      message: "workspaceId must be an opencompany workspace id.",
-    }),
+    workspaceId: WorkspaceCreationIdSchema,
     name: z.string().trim().min(1).max(80),
     slug: z
       .string()
@@ -4507,7 +4510,12 @@ export type BillingOverviewDto = {
   memberCount: number;
   memberCap: number;
   spendThisMonthUsdMicros: number;
-  spendThisMonthByCategory: { chat: number; ingestion: number; capabilities: number };
+  spendThisMonthByCategory: {
+    chat: number;
+    ingestion: number;
+    capabilities: number;
+    sandbox: number;
+  };
   recentActivity: Array<{
     activityId: string;
     source: string;
@@ -4536,7 +4544,7 @@ export type BillingOverviewDto = {
 export type BillingUsageDto = {
   breakdown: Array<{
     day: string;
-    category: "chat" | "ingestion" | "capabilities" | "other";
+    category: "chat" | "ingestion" | "capabilities" | "sandbox" | "other";
     spendUsdMicros: number;
     providerCostUsdMicros: number;
     platformFeeUsdMicros: number;

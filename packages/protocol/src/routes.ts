@@ -4804,7 +4804,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
     c.json(
       {
         data: {
-          workspace: { id: "goat_ws_contract", name: "Contract Workspace" },
+          workspace: { id: "workspace_contract", name: "Contract Workspace" },
           role: "admin" as const,
           plan: "hobby" as const,
           memberCap: 1,
@@ -4816,7 +4816,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
       200,
     ),
   renameWorkspace: (c) =>
-    c.json({ data: { id: "goat_ws_contract", name: "Contract Workspace" }, meta }, 200),
+    c.json({ data: { id: "workspace_contract", name: "Contract Workspace" }, meta }, 200),
   inviteWorkspaceMember: (c) => c.json({ data: { completed: true as const }, meta }, 201),
   revokeWorkspaceInvitation: (c) => c.json({ data: { completed: true as const }, meta }, 200),
   removeWorkspaceMember: (c) => c.json({ data: { completed: true as const }, meta }, 200),
@@ -4824,7 +4824,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
     c.json(
       {
         data: {
-          workspaceId: "goat_ws_contract",
+          workspaceId: "workspace_contract",
           organizationId: "org_contract",
           brainId: "brain_contract",
         },
@@ -4836,7 +4836,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
     c.json(
       {
         data: {
-          workspaceId: "goat_ws_contract",
+          workspaceId: "workspace_contract",
           organizationId: "org_contract",
           brainId: "brain_contract",
         },
@@ -4863,7 +4863,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
     c.json(
       {
         data: {
-          workspaceId: "goat_ws_contract",
+          workspaceId: "workspace_contract",
           organizationId: "org_contract",
           brainId: "brain_contract",
           createdByCaller: true,
@@ -5206,7 +5206,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
       {
         data: {
           conversationId: "conversation_contract",
-          shareId: "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+          shareId: "share_01234567-89ab-4cde-8f01-23456789abcd",
         },
         meta,
       },
@@ -5300,7 +5300,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
     c.json(
       {
         data: {
-          shareId: "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+          shareId: "share_01234567-89ab-4cde-8f01-23456789abcd",
           title: "Shared conversation",
           kind: "chat" as const,
           engine: "opencompany" as const,
@@ -5314,7 +5314,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
     c.json(
       {
         data: {
-          shareId: "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+          shareId: "share_01234567-89ab-4cde-8f01-23456789abcd",
           title: "Shared conversation",
           kind: "chat" as const,
           engine: "opencompany" as const,
@@ -5775,7 +5775,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
           memberCount: 1,
           memberCap: 1,
           spendThisMonthUsdMicros: 0,
-          spendThisMonthByCategory: { chat: 0, ingestion: 0, capabilities: 0 },
+          spendThisMonthByCategory: { chat: 0, ingestion: 0, capabilities: 0, sandbox: 0 },
           recentActivity: [],
           lowBalanceWarnUsdMicros: 1_000_000,
           includedUsagePerSeatCents: 2_000,
@@ -5855,18 +5855,18 @@ function contractIdentity() {
     },
     workspaces: [
       {
-        id: "goat_ws_contract",
+        id: "workspace_contract",
         name: "Contract Workspace",
         slug: "contract-workspace",
         role: "admin" as const,
         legacyBrainEnabled: false,
       },
     ],
-    activeWorkspaceId: "goat_ws_contract",
+    activeWorkspaceId: "workspace_contract",
     brains: [
       {
         id: "brain_contract",
-        workspaceId: "goat_ws_contract",
+        workspaceId: "workspace_contract",
         name: "General",
         slug: "general",
         description: null,

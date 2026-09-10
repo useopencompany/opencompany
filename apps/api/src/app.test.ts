@@ -3317,34 +3317,36 @@ describe("canonical Hono API", () => {
     expect(captureChatMessage).not.toHaveBeenCalled();
   });
 
-  it("serves public Chat presentation without actor authentication or private metadata", async () => {
-    const loadPublicShare = vi.fn(async () => ({
-      shareId: "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
-      title: "Shared Chat",
-      kind: "chat" as const,
-      engine: "codex" as const,
-      messages: [{ id: "message_1", role: "assistant" as const, parts: [] }],
-    }));
-    const app = testApp(fakeRepository(), {
-      chatResources: chatResourceService({ loadPublicShare }),
-      authenticate: async () => {
-        throw new Error("Public resources must not authenticate an actor.");
-      },
-    });
+  it.each(["share", "goat_chat_share"])(
+    "serves %s public Chat presentation without actor authentication or private metadata",
+    async (prefix) => {
+      const shareId = `${prefix}_01234567-89ab-4cde-8f01-23456789abcd`;
+      const loadPublicShare = vi.fn(async () => ({
+        shareId,
+        title: "Shared Chat",
+        kind: "chat" as const,
+        engine: "codex" as const,
+        messages: [{ id: "message_1", role: "assistant" as const, parts: [] }],
+      }));
+      const app = testApp(fakeRepository(), {
+        chatResources: chatResourceService({ loadPublicShare }),
+        authenticate: async () => {
+          throw new Error("Public resources must not authenticate an actor.");
+        },
+      });
 
-    const response = await app.request(
-      "/public/chat-shares/goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
-    );
+      const response = await app.request(`/public/chat-shares/${shareId}`);
 
-    expect(response.status).toBe(200);
-    expect(response.headers.get("cache-control")).toBe("private, no-store");
-    expect(response.headers.get("x-robots-tag")).toContain("noindex");
-    const body = await response.json();
-    expect(body).toMatchObject({
-      data: { title: "Shared Chat", engine: "codex", messages: [{ id: "message_1" }] },
-    });
-    expect(JSON.stringify(body)).not.toMatch(/sessionId|contextTokens|blob|lease|token/iu);
-  });
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("private, no-store");
+      expect(response.headers.get("x-robots-tag")).toContain("noindex");
+      const body = await response.json();
+      expect(body).toMatchObject({
+        data: { title: "Shared Chat", engine: "codex", messages: [{ id: "message_1" }] },
+      });
+      expect(JSON.stringify(body)).not.toMatch(/sessionId|contextTokens|blob|lease|token/iu);
+    },
+  );
 
   it("streams authorized Chat resource bytes with defensive headers", async () => {
     const downloadAttachment = vi.fn(async () => ({
@@ -4419,7 +4421,7 @@ describe("canonical Hono API", () => {
       memberCount: 2,
       memberCap: 10,
       spendThisMonthUsdMicros: 500_000,
-      spendThisMonthByCategory: { chat: 500_000, ingestion: 0, capabilities: 0 },
+      spendThisMonthByCategory: { chat: 500_000, ingestion: 0, capabilities: 0, sandbox: 0 },
       recentActivity: [
         {
           activityId: "billing_activity_safe",
@@ -4462,6 +4464,32 @@ describe("canonical Hono API", () => {
     });
     expect(JSON.stringify(body)).not.toMatch(/stripeCustomerId|paymentMethodId|ledgerId/u);
     expect(getOverview).toHaveBeenCalledWith(actor);
+  });
+
+  it("serves sandbox usage through the authenticated usage endpoint", async () => {
+    const getUsage = vi.fn(async () => ({
+      breakdown: [
+        {
+          day: "2026-09-10",
+          category: "sandbox" as const,
+          spendUsdMicros: 100_000,
+          providerCostUsdMicros: 100_000,
+          platformFeeUsdMicros: 0,
+        },
+      ],
+      ingestedThisMonth: 0,
+      pending: 0,
+      creditBalanceUsdMicros: 4_900_000,
+      providers: [],
+      recent: [],
+    }));
+    const app = testApp(fakeRepository(), { billing: { ...fakeBilling(), getUsage } });
+    const response = await app.request("/v1/billing/usage");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: { breakdown: [{ category: "sandbox", spendUsdMicros: 100_000 }] },
+    });
+    expect(getUsage).toHaveBeenCalledWith(actor);
   });
 
   it("reports unexpected request failures with correlation context", async () => {

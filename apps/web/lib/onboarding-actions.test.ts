@@ -20,10 +20,6 @@ const mocks = vi.hoisted(() => ({
   saveWorkspace: vi.fn(),
 }));
 
-vi.mock("node:crypto", () => ({
-  randomUUID: vi.fn(() => "00000000-0000-4000-8000-000000000123"),
-}));
-
 vi.mock("@/lib/auth", () => ({ currentIdentity: vi.fn() }));
 vi.mock("@/lib/email/onboarding-emails", () => ({
   enrollOwnerInOnboardingEmails: vi.fn(),
@@ -124,7 +120,7 @@ describe("opencompany onboarding API adapters", () => {
     });
     expect(mocks.saveWorkspace).toHaveBeenCalledWith({
       json: {
-        workspaceId: "goat_ws_00000000-0000-4000-8000-000000000123",
+        workspaceId: expect.stringMatching(/^workspace_[0-9a-f-]{36}$/u),
         name: "Analytical Co",
         slug: "analytical-co",
       },
