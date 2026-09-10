@@ -1,4 +1,5 @@
 import { type StoredChatMessage, toChatUiMessage } from "@opencompany/agent/chat-ui";
+import { guardKimiOutput, KimiToolCallLeakError } from "@opencompany/agent/kimi-output-guard";
 import { ensureMonthlyIncludedUsage } from "@opencompany/db/billing";
 import { hasPositiveCreditBalance } from "@opencompany/db/credits";
 import type { ChatMessage, ChatMessageAttachment } from "@opencompany/db/product-schema";
@@ -7,11 +8,12 @@ import {
   generateText,
   jsonSchema,
   type LanguageModelUsage,
+  streamText,
   type ToolApprovalRequestOutput,
   type ToolSet,
   tool,
 } from "ai";
-import { MockLanguageModelV3 } from "ai/test";
+import { MockLanguageModelV3, MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 import { CodexChatLeaseLostError } from "./codex-chat-errors";
 import {
@@ -99,6 +101,38 @@ describe("hosted turn credit gate", () => {
 });
 
 describe("consumeProductChatStream", () => {
+  it("fails a leaked native Kimi call without persisting or presenting it as an answer", async () => {
+    const nativeCall = '<|open|>tools<|sep|><|open|>call tool="write_artifact" index="1"<|sep|>';
+    const model = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream({
+          chunks: [
+            { type: "text-start", id: "text" },
+            { type: "text-delta", id: "text", delta: nativeCall.slice(0, 8) },
+            { type: "text-delta", id: "text", delta: nativeCall.slice(8) },
+            { type: "text-end", id: "text" },
+          ],
+        }),
+      }),
+    });
+    const stream = streamText({
+      model: guardKimiOutput(model, "moonshotai/kimi-k3"),
+      prompt: "Publish the report.",
+      maxRetries: 0,
+    });
+    const project = vi.fn(async (_projection: ProductChatProjection) => undefined);
+    const present = vi.fn();
+    await expect(
+      consumeProductChatStream({
+        fullStream: stream.fullStream,
+        signal: new AbortController().signal,
+        sink: { project, present, recordStepUsage: vi.fn(async () => undefined) },
+      }),
+    ).rejects.toBeInstanceOf(KimiToolCallLeakError);
+    expect(present).not.toHaveBeenCalled();
+    expect(JSON.stringify(project.mock.calls)).not.toContain("<|open|>");
+  });
+
   it("separates a 50 ms presentation cadence from 500 ms durable projections", async () => {
     let clock = 0;
     const project = vi.fn(async (_projection: ProductChatProjection) => undefined);
