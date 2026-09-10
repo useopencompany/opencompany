@@ -243,6 +243,42 @@ describe("remote MCP error classification through the action service", () => {
     },
   );
 
+  it.each([
+    { dialect: undefined, modern: true },
+    { dialect: "https://json-schema.org/draft/2020-12/schema", modern: true },
+    { dialect: "http://json-schema.org/draft-07/schema#", modern: false },
+    { dialect: "https://json-schema.org/draft/2019-09/schema", modern: false },
+  ])("honors tuple semantics for schema dialect $dialect", async ({ dialect, modern }) => {
+    const tupleItems = [{ type: "number" }, { type: "number" }];
+    const schema = {
+      type: "object",
+      ...(dialect ? { $schema: dialect } : {}),
+      required: ["pair"],
+      properties: {
+        pair: {
+          type: "array",
+          minItems: 2,
+          ...(modern
+            ? { prefixItems: tupleItems, items: false }
+            : { items: tupleItems, additionalItems: false }),
+        },
+      },
+    };
+    const h = await harness(() => undefined, 0, schema);
+    for (const pair of [
+      [1, "wrong"],
+      [1, 2, 3],
+    ]) {
+      expect(await h.execute({ pair })).toMatchObject({
+        ok: false,
+        error: { code: "invalid_params" },
+      });
+    }
+    expect(h.connections()).toBe(0);
+    expect(await h.execute({ pair: [1, 2] })).toMatchObject({ ok: true });
+    expect(h.dispatches()).toBe(1);
+  });
+
   it.each([-32601, -32603])("preserves JSON-RPC error %s as a provider failure", async (code) => {
     const h = await harness((id) =>
       Response.json(

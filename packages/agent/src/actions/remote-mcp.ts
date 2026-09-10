@@ -565,11 +565,13 @@ function normalizeInputSchema(value: RemoteToolDefinition["inputSchema"]): JSONS
 
 function validateRemoteMcpInput(definition: RemoteToolDefinition, params: Record<string, unknown>) {
   const schema = normalizeInputSchema(definition.inputSchema);
-  const Validator = schema.$schema?.includes("2020-12")
-    ? Ajv2020
-    : schema.$schema?.includes("2019-09")
-      ? Ajv2019
-      : Ajv;
+  // MCP defaults schemas without an explicit dialect to JSON Schema 2020-12.
+  const Validator =
+    !schema.$schema || schema.$schema.includes("2020-12")
+      ? Ajv2020
+      : schema.$schema.includes("2019-09")
+        ? Ajv2019
+        : Ajv;
   // Provider formats and extension keywords are not necessarily registered locally.
   // Validate structure without coercing, removing, or defaulting model arguments.
   const validator = new Validator({ strict: false, validateFormats: false });
