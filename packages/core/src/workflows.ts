@@ -512,6 +512,10 @@ export class WorkflowApplicationService {
       description: string;
       attachmentIds?: readonly string[];
       skillIds?: readonly string[];
+      stepModelOverrides?: readonly Pick<
+        WorkflowStep,
+        "id" | "model" | "runtimeModel" | "reasoningEffort"
+      >[];
     },
   ): Promise<CreateTaskResult> {
     requirePermission(actor, WORKFLOW_WRITE_PERMISSION, "Workflows");
@@ -520,7 +524,7 @@ export class WorkflowApplicationService {
     const execution = validatedExecution(
       await this.options.planner.prepareWorkflow({
         actor,
-        workflow,
+        workflow: workflowWithModelOverrides(workflow, input.stepModelOverrides),
         prompt: goal,
         ...(input.skillIds?.length ? { skillIds: workflowSkillIds(input.skillIds) } : {}),
       }),
@@ -1066,4 +1070,37 @@ function requirePermission(actor: Actor, permission: string, resource: string) {
   if (!actor.userId.trim() || !actor.workspaceId.trim() || !actorHasPermission(actor, permission)) {
     throw new CoreError("forbidden", `The actor is not allowed to access ${resource}.`);
   }
+}
+
+function workflowWithModelOverrides(
+  workflow: Workflow,
+  overrides: readonly Pick<
+    WorkflowStep,
+    "id" | "model" | "runtimeModel" | "reasoningEffort"
+  >[] = [],
+): Workflow {
+  if (overrides.length > 20)
+    throw new CoreError("invalid_argument", "Too many workflow model overrides.");
+  const byId = new Map<string, WorkflowStep>();
+  for (const override of overrides) {
+    const step = workflow.steps.find((step) => step.id === override.id);
+    if (!step || byId.has(override.id)) {
+      throw new CoreError(
+        "invalid_argument",
+        "Workflow model overrides must reference distinct existing steps.",
+      );
+    }
+    const [normalized] = workflowSteps([
+      {
+        id: step.id,
+        title: step.title,
+        instructions: step.instructions,
+        model: override.model,
+        ...(override.runtimeModel ? { runtimeModel: override.runtimeModel } : {}),
+        ...(override.reasoningEffort ? { reasoningEffort: override.reasoningEffort } : {}),
+      },
+    ]);
+    if (normalized) byId.set(step.id, normalized);
+  }
+  return { ...workflow, steps: workflow.steps.map((step) => byId.get(step.id) ?? step) };
 }

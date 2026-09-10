@@ -3380,6 +3380,88 @@ describe("Surface chat streaming UI", () => {
     expect(routerMock.refresh).toHaveBeenCalledTimes(1);
   });
 
+  it.each([false, true])(
+    "uses workflow models for image drops and run-only overrides (quick composer: %s)",
+    async (quick) => {
+      const user = userEvent.setup();
+      persistLastChatSelection("user_1", "deepseek/deepseek-v4-pro");
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () =>
+          Response.json({
+            workflows: [
+              {
+                id: "ship-feature",
+                name: "Ship feature",
+                description: "Ship features.",
+                steps: [
+                  {
+                    id: "step_1",
+                    title: "Ship",
+                    model: "codex",
+                    runtimeModel: "openai/gpt-5.6-sol",
+                    reasoningEffort: "high",
+                    instructions: "Ship it.",
+                  },
+                ],
+              },
+            ],
+          }),
+        ),
+      );
+      render(
+        <Surface
+          tasks={[]}
+          initialChat={null}
+          defaultModel={DEFAULT_MODEL}
+          userWorkosId="user_1"
+          workspaceId="workspace_1"
+          codexConnected
+          taskSpawningEnabled
+        />,
+      );
+      if (quick) {
+        fireEvent.keyDown(window, { key: "k", metaKey: true });
+        await user.click(
+          within(screen.getByRole("dialog")).getByRole("option", { name: "Start new chat" }),
+        );
+      }
+      const textarea = quick
+        ? within(screen.getByRole("dialog")).getByRole("textbox")
+        : screen.getByRole("textbox");
+      await user.type(textarea, "#");
+      await user.click(await screen.findByRole("option", { name: /Ship feature/i }));
+      expect(screen.getByRole("button", { name: "Runtime: Codex" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: /Codex model:/ })).toHaveTextContent("GPT 5.6 Sol");
+      fireEvent.drop(window, {
+        dataTransfer: {
+          types: ["Files"],
+          files: [new File(["png"], "bug.png", { type: "image/png" })],
+        },
+      });
+      await waitFor(() => expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledTimes(1));
+      await user.click(screen.getByRole("button", { name: "Runtime: Codex" }));
+      await user.click(screen.getByRole("button", { name: /GPT 5.5.*Coding and sharp analysis/ }));
+      expect(screen.getByText("This run only")).toBeInTheDocument();
+      await user.type(textarea, "fix this");
+      await user.click(screen.getByRole("button", { name: "Start task" }));
+      await waitFor(() =>
+        expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalledWith(
+          "ship-feature",
+          {
+            description: "#ship-feature fix this",
+            attachmentIds: ["attachment_1"],
+            stepModelOverrides: [{ id: "step_1", model: "gpt-5.5" }],
+          },
+          { scopeKey: "workspace_1" },
+        ),
+      );
+      expect(window.localStorage.getItem("opencompany-goat-main-chat-selection:user_1")).toBe(
+        "deepseek/deepseek-v4-pro",
+      );
+    },
+  );
+
   it("starts a selected workflow with uploaded attachments", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
