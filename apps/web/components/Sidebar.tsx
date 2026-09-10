@@ -511,9 +511,7 @@ function SidebarRecentChats() {
         <div className="pb-2">
           <div className="flex items-center gap-1 px-4 pb-1">
             <Pin size={9} strokeWidth={2} fill="currentColor" className="text-ink-subtle" />
-            <span className="text-[11px] font-medium uppercase tracking-wide text-ink-subtle">
-              Pinned
-            </span>
+            <span className="text-[11px] font-medium tracking-wide text-ink-subtle">Pinned</span>
           </div>
           <nav aria-label="Pinned chats" className="flex flex-col gap-px px-2">
             {pinnedChats.map(renderRow)}
@@ -522,10 +520,10 @@ function SidebarRecentChats() {
       ) : null}
       {unpinnedChats.length > 0 ? (
         <div>
-          <div className="px-4 pb-1 text-[11px] font-medium uppercase tracking-wide text-ink-subtle">
-            Recent chats
+          <div className="px-4 pb-1 text-[11px] font-medium tracking-wide text-ink-subtle">
+            Chats
           </div>
-          <nav aria-label="Recent chats" className="flex flex-col gap-px px-2">
+          <nav aria-label="Chats" className="flex flex-col gap-px px-2">
             {unpinnedChats.map(renderRow)}
           </nav>
         </div>

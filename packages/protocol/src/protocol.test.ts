@@ -384,6 +384,35 @@ describe("headless protocol", () => {
     ).toBe(false);
   });
 
+  it("limits invocation overrides to model settings on existing step references", () => {
+    const command = {
+      description: "Ship it.",
+      stepModelOverrides: [
+        {
+          id: "step_1",
+          model: "codex",
+          runtimeModel: "openai/gpt-5.6-sol",
+          reasoningEffort: "high",
+        },
+      ],
+    };
+    expect(InvokeWorkflowBodySchema.safeParse(command).success).toBe(true);
+    expect(
+      InvokeWorkflowBodySchema.safeParse({
+        ...command,
+        stepModelOverrides: [
+          { ...command.stepModelOverrides[0], instructions: "Replace the saved instructions." },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      InvokeWorkflowBodySchema.safeParse({
+        ...command,
+        stepModelOverrides: Array.from({ length: 21 }, () => command.stepModelOverrides[0]),
+      }).success,
+    ).toBe(false);
+  });
+
   it("round-trips opaque versioned event cursors", () => {
     expect(encodeEventCursor(42)).toBe("v1:42");
     expect(decodeEventCursor("v1:42")).toBe(42);

@@ -51,9 +51,13 @@ Manual, Workflow, schedule, and agent producers call shared application services
 Task, its Conversation, initial Message, and Run atomically. Follow-ups use the Message command and
 cancellation targets the active Run. The runner applies per-Conversation FIFO, fenced leases, retries,
 and terminal settlement. An opencompany Task turn uses the same host-tool contract and runtime tool
-composition as an interactive opencompany turn; the Task context adds autonomous-run instructions,
-larger call budgets, and the headless action catalog. All Task engines support one-time approval of
-connected actions set to Ask; headless callers without a durable Task still deny these requests.
+composition as an interactive opencompany turn, with task delegation and schedule tools restricted
+to main Chat conversations. The persisted host service checks the conversation kind on every call,
+so a Task cannot create another Task, start a Workflow, or manage schedules even through a direct
+tool request. Task bootstraps omit these tools and their routing instructions. The Task context adds
+autonomous-run instructions, larger call budgets, and the headless action catalog. All Task engines
+support one-time approval of connected actions set to Ask; headless callers without a durable Task
+still deny these requests.
 The opencompany engine uses its existing AI SDK approval continuation: the Run and Task pause for
 the user's decision, then the same tool call resumes with the recorded approval or denial.
 For Codex and Claude Code Tasks, the runner

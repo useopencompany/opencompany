@@ -13,11 +13,7 @@ import {
 } from "./application/engine-auth-status";
 import { getAvailableHarnessTools } from "./integrations/google-data";
 import { resolveSkillMentions, type SkillMentionRef, type WorkspaceSkill } from "./skills";
-import {
-  DEFAULT_WORKFLOW_MODEL_TOKEN,
-  isWorkflowModelToken,
-  workflowModelSelection,
-} from "./workflow-model-options";
+import { resolveWorkflowStepModelSelection } from "./workflow-model-options";
 import { extractWorkflowSkillMentionRefs } from "./workflow-skill-mentions";
 import {
   resolveWorkflowMention,
@@ -46,48 +42,14 @@ export class WorkflowPreparationError extends Error {
   }
 }
 
-const DEFAULT_WORKFLOW_SELECTION: WorkflowEngineSelection = workflowModelSelection({
-  model: DEFAULT_WORKFLOW_MODEL_TOKEN,
-});
-
-// The token must end alphanumeric so trailing punctuation ("run @sonnet-5.")
-// stays out of the capture while inner dots ("@kimi-k2.6") still match.
-const WORKFLOW_MENTION_TOKEN_PATTERN = /(^|\s)@([a-z0-9](?:[a-z0-9./-]*[a-z0-9])?)/gi;
-
-export function resolveWorkflowStepSelection(step: {
-  model: string;
-  runtimeModel?: unknown;
-  reasoningEffort?: unknown;
-  instructions: string;
-}): WorkflowEngineSelection {
-  const selectedToken = step.model.trim().toLowerCase();
-  if (selectedToken) {
-    if (!isWorkflowModelToken(selectedToken)) {
-      throw new WorkflowMentionError(
-        `This workflow step's model "${selectedToken}" is not available. Pick a model in the workflow editor.`,
-      );
-    }
-    return workflowModelSelection({
-      model: selectedToken,
-      runtimeModel: step.runtimeModel,
-      reasoningEffort: step.reasoningEffort,
-    });
+export function resolveWorkflowStepSelection(
+  step: Parameters<typeof resolveWorkflowStepModelSelection>[0],
+): WorkflowEngineSelection {
+  try {
+    return resolveWorkflowStepModelSelection(step);
+  } catch (error) {
+    throw new WorkflowMentionError(error instanceof Error ? error.message : String(error));
   }
-
-  const selected = new Map<string, WorkflowEngineSelection>();
-  for (const match of step.instructions.matchAll(WORKFLOW_MENTION_TOKEN_PATTERN)) {
-    const token = (match[2] ?? "").toLowerCase();
-    if (!isWorkflowModelToken(token)) continue;
-    selected.set(token, workflowModelSelection({ model: token }));
-  }
-  if (selected.size > 1) {
-    throw new WorkflowMentionError(
-      `This workflow step mentions more than one model (${[...selected.keys()]
-        .map((token) => `@${token}`)
-        .join(", ")}). Pick one model for the step.`,
-    );
-  }
-  return [...selected.values()][0] ?? DEFAULT_WORKFLOW_SELECTION;
 }
 
 // Retained as a compatibility name for callers that parse one legacy step.

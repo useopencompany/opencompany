@@ -477,7 +477,7 @@ describe("Sidebar", () => {
       "href",
       "/chat/goat_chat_pinned",
     );
-    const recentNav = screen.getByRole("navigation", { name: "Recent chats" });
+    const recentNav = screen.getByRole("navigation", { name: "Chats" });
     expect(within(recentNav).getByRole("link", { name: "Recent chat" })).toBeInTheDocument();
     expect(within(recentNav).queryByRole("link", { name: "Pinned chat" })).not.toBeInTheDocument();
   });

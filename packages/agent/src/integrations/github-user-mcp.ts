@@ -43,13 +43,15 @@ export async function loadGitHubUserMcpWorkerConnection(input: {
               userWorkosId: row.userWorkosId,
               integrationId: row.id,
             },
-            { forceRefresh: true },
+            { refreshIfAccessToken: accessToken },
           );
         } catch (error) {
           if (error instanceof GitHubUserAccessAuthError) return input.onAuthorizationRequired();
           throw error;
         }
-        throw new Error("GitHub MCP rejected a freshly refreshed credential.");
+        throw new Error(
+          "GitHub MCP credential changed after the connection started. Retry the action.",
+        );
       },
     }),
   } as const;

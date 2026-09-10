@@ -16,7 +16,7 @@ type CtaProps = {
 // rounded near-black block: primary is a solid ink button (white text), secondary
 // is a subtle bordered button that pairs beside it.
 export function Cta({
-  href = "https://cal.com/louis-morgner-k0wc9i/opencompany-onboarding",
+  href = "/request-demo",
   variant = "primary",
   className,
   children,

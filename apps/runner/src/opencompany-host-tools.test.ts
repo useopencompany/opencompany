@@ -1,5 +1,7 @@
+import { createProductChatToolContext } from "@opencompany/agent/chat-agent";
+import { createProductChatSystemPrompt } from "@opencompany/agent/prompts";
 import type { ChatHostBootstrap, ChatHostToolGatewayRequest } from "@opencompany/agent-runtime";
-import { describe, expect, it, vi } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 import { loadHostTools } from "./opencompany-host-tools";
 
 const bootstrap: ChatHostBootstrap = {
@@ -28,6 +30,42 @@ const bootstrap: ChatHostBootstrap = {
 };
 
 describe("loadHostTools", () => {
+  it("keeps task execution tools but removes delegation tools and routing instructions", async () => {
+    const hostTools = await loadHostTools(context(), {
+      execute: async () => ({
+        ok: true,
+        result: { ...bootstrap, taskToolsEnabled: false, workflows: [], recurringSchedules: [] },
+      }),
+    });
+    assert(hostTools);
+    const { tools } = createProductChatToolContext({
+      model: "moonshotai/kimi-k2.6" as never,
+      ...hostTools,
+      runWiki: hostTools.runWiki as never,
+    });
+    for (const name of [
+      "start_task",
+      "start_workflow",
+      "schedule_task",
+      "edit_task_schedule",
+      "delete_task_schedule",
+    ]) {
+      expect(tools).not.toHaveProperty(name);
+    }
+    expect(tools).toHaveProperty("wiki");
+    expect(tools).toHaveProperty("write_artifact");
+    expect(tools).toHaveProperty("list_skills");
+
+    const prompt = createProductChatSystemPrompt({
+      taskToolsEnabled: hostTools.bootstrap.taskToolsEnabled,
+      scheduleToolsEnabled: hostTools.bootstrap.taskToolsEnabled,
+      workflows: hostTools.bootstrap.workflows,
+    });
+    expect(prompt).not.toContain("still call the task tool instead of refusing");
+    expect(prompt).not.toContain("start_task");
+    expect(prompt).not.toContain("start_workflow");
+  });
+
   it("composes shared tools and authenticated browser profiles through one persisted service", async () => {
     const requests: ChatHostToolGatewayRequest[] = [];
     const execute = vi.fn(async ({ request }: { request: ChatHostToolGatewayRequest }) => {

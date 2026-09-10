@@ -20,6 +20,7 @@ const MODEL_IDS = [
   "openai/gpt-5.5",
   "alibaba/qwen3.8-max",
   "deepseek/deepseek-v4-pro",
+  "deepseek/deepseek-v4-flash",
   "xai/grok-4.6",
   "moonshotai/kimi-k3",
   "moonshotai/kimi-k2.6",

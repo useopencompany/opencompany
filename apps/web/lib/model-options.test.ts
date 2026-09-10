@@ -66,6 +66,18 @@ describe("opencompany model options", () => {
     expect(modelContextWindowTokens("deepseek/deepseek-v4-pro")).toBe(1_000_000);
   });
 
+  it("offers DeepSeek V4 Flash in main chat with reasoning and its full context window", () => {
+    expect(MODELS).toContainEqual(
+      expect.objectContaining({
+        id: "deepseek/deepseek-v4-flash",
+        label: "DeepSeek V4 Flash",
+        supportsReasoning: true,
+      }),
+    );
+    expect(normalizeModel("deepseek/deepseek-v4-flash")).toBe("deepseek/deepseek-v4-flash");
+    expect(modelContextWindowTokens("deepseek/deepseek-v4-flash")).toBe(1_000_000);
+  });
+
   it("offers Qwen 3.8 Max in main chat with its full context window", () => {
     expect(MODELS).toContainEqual(
       expect.objectContaining({
