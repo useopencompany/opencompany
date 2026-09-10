@@ -14,17 +14,21 @@ function integrationId(metadata: InfisicalConnectionMetadata) {
   return `infisical:${metadata.workspaceId}:${metadata.credentialGeneration}`;
 }
 
-async function loadMetadata(workspaceId: string) {
-  return loadInfisicalConnectionMetadata({ db: getDb(), workspaceId });
+async function loadMetadata(input: Identity) {
+  return loadInfisicalConnectionMetadata({
+    db: getDb(),
+    workspaceId: input.workspaceId,
+    userId: input.userWorkosId,
+  });
 }
 
-// Infisical's hosted MCP is a public documentation server. The workspace connection gates
+// Infisical's hosted MCP is a public documentation server. The personal connection gates
 // availability so the plugin and sandbox CLI share one visible lifecycle, but its encrypted CLI
 // auth bundle is deliberately never loaded or forwarded to the remote endpoint.
 export async function getInfisicalDocsMcpIntegrationState(
   input: Identity,
 ): Promise<RemoteMcpConnectionState> {
-  const metadata = await loadMetadata(input.workspaceId);
+  const metadata = await loadMetadata(input);
   const connected = metadata?.status === "connected";
   return {
     connected,
@@ -37,7 +41,7 @@ export async function getInfisicalDocsMcpIntegrationState(
 export async function loadInfisicalDocsMcpWorkerConnection(
   input: Identity & { onAuthorizationRequired: () => never },
 ): Promise<RemoteMcpWorkerConnection> {
-  const metadata = await loadMetadata(input.workspaceId);
+  const metadata = await loadMetadata(input);
   if (!metadata || metadata.status === "disconnected") {
     return { ok: false, reason: "not_connected" };
   }

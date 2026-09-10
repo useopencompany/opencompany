@@ -36,6 +36,7 @@ describe("Plugin data runtime", () => {
   it("restores data after both the sandbox and installed package are replaced", async () => {
     type StoredLease = {
       workspaceId: string;
+      userId: string;
       pluginName: string;
       blobPathname: string;
       checksum: string;
@@ -51,6 +52,7 @@ describe("Plugin data runtime", () => {
       if (record) return null;
       record = {
         workspaceId: input.workspaceId,
+        userId: input.userId,
         pluginName: input.pluginName,
         blobPathname: input.blobPathname,
         checksum: input.checksum,
@@ -126,6 +128,7 @@ describe("Plugin data runtime", () => {
     const firstSandbox = fakeSandbox(writtenArchive);
     const firstPackage = mcpPlugin("plugin_v1", "a");
     const firstRuntime = await preparePluginDataRuntime({
+      userId: "user_1",
       sandbox: firstSandbox.sandbox as never,
       workRoot: "/workspace",
       workspaceId: "workspace_1",
@@ -148,6 +151,7 @@ describe("Plugin data runtime", () => {
     const replacementSandbox = fakeSandbox(writtenArchive);
     const replacementPackage = mcpPlugin("plugin_v2", "b");
     const replacementRuntime = await preparePluginDataRuntime({
+      userId: "user_1",
       sandbox: replacementSandbox.sandbox as never,
       workRoot: "/workspace",
       workspaceId: "workspace_1",
@@ -177,6 +181,7 @@ describe("Plugin data runtime", () => {
       string,
       {
         workspaceId: string;
+        userId: string;
         pluginName: string;
         blobPathname: string;
         checksum: string;
@@ -190,6 +195,7 @@ describe("Plugin data runtime", () => {
     repositoryMocks.acquire.mockImplementation(async (_db, input) => {
       const record = {
         workspaceId: input.workspaceId,
+        userId: input.userId,
         pluginName: input.pluginName,
         blobPathname: `initial/${input.pluginName}.tar`,
         checksum: initialChecksum,
@@ -236,6 +242,7 @@ describe("Plugin data runtime", () => {
 
     const checkpointArchive = tarFile("state.txt", new TextEncoder().encode("checkpoint"));
     const sandbox = fakeSandbox(checkpointArchive, {
+      userId: "user_1",
       generation: 0,
       checksum: initialChecksum,
     });
@@ -250,6 +257,7 @@ describe("Plugin data runtime", () => {
       delete: vi.fn(async () => undefined),
     };
     const runtime = await preparePluginDataRuntime({
+      userId: "user_1",
       sandbox: sandbox.sandbox as never,
       workRoot: "/workspace",
       workspaceId: "workspace_1",
@@ -291,7 +299,7 @@ function mcpPlugin(id: string, integrityCharacter: string, name = "quality-tools
 
 function fakeSandbox(
   checkpointArchive: Uint8Array,
-  restoredState?: { generation: number; checksum: string },
+  restoredState?: { userId: string; generation: number; checksum: string },
 ) {
   const files = new Map<string, string | ArrayBuffer>();
   const restoredArchives: Array<{ path: string; bytes: Uint8Array }> = [];

@@ -54,7 +54,7 @@ export function AddCustomMcpPlugin({ canEdit }: { canEdit: boolean }) {
         />
       ) : (
         <p className="text-sm text-ink-muted">
-          Ask a workspace admin to add this plugin. Once installed, you can connect your own
+          You need plugin write permission to add this plugin. Once installed, connect your own
           account.
         </p>
       )}
@@ -380,7 +380,7 @@ export function CustomMcpPluginDetail({
         <div className="space-y-2">
           <p className="break-all text-sm text-ink-muted">{status.url}</p>
           <p className="text-xs text-ink-subtle">
-            Installed for this workspace. Each member connects their own account.
+            Installed for you. Your account and permissions are personal.
           </p>
         </div>
         {error ? (
@@ -530,7 +530,7 @@ export function CustomMcpPluginDetail({
           >
             <h2 className="text-sm font-semibold text-ink">Plugin installation</h2>
             <p className="text-xs text-ink-subtle">
-              Disabling or removing this installation affects everyone in the workspace. To use a
+              Disabling or removing this installation affects only your plugin use. To use a
               different endpoint, add a new custom plugin.
             </p>
             <div className="flex flex-wrap gap-2">

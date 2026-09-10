@@ -8,7 +8,7 @@ import {
   markInfisicalConnectionNeedsReauth,
   markInfisicalConnectionValidated,
 } from "@opencompany/db/infisical-auth";
-import { getWorkspaceRole } from "@opencompany/db/workspaces";
+import { listActivePluginGatewayRegistrations } from "@opencompany/db/plugin-gateway-repository";
 import { createLogger } from "@opencompany/observability";
 import { getDb } from "./db";
 import { createInfisicalBackupKeyEntry } from "./infisical-keyring";
@@ -42,11 +42,12 @@ export async function reconcileInfisicalSandboxAuth(input: {
   if (!input.workspaceId) return unavailableAuth();
 
   const db = getDb();
-  const role = await getWorkspaceRole(
-    { workspaceId: input.workspaceId, userWorkosId: input.userWorkosId },
-    { db },
-  );
-  if (!role) {
+  const registrations = await listActivePluginGatewayRegistrations(db, {
+    workspaceId: input.workspaceId,
+    userId: input.userWorkosId,
+    pluginName: "infisical",
+  });
+  if (registrations.length === 0) {
     await clearInfisicalAuth(input.sandbox);
     return unavailableAuth();
   }
@@ -54,6 +55,7 @@ export async function reconcileInfisicalSandboxAuth(input: {
   const metadata = await loadInfisicalConnectionMetadata({
     db,
     workspaceId: input.workspaceId,
+    userId: input.userWorkosId,
   });
   if (!metadata || metadata.status === "disconnected") {
     await reconcileDisconnectedGeneration(
@@ -69,6 +71,7 @@ export async function reconcileInfisicalSandboxAuth(input: {
   if (metadata.expiresAt && metadata.expiresAt <= new Date()) {
     await markNeedsReauth({
       workspaceId: input.workspaceId,
+      userId: input.userWorkosId,
       credentialGeneration: metadata.credentialGeneration,
       reason: "The Infisical login expired. Reconnect Infisical in workspace settings.",
     });
@@ -78,10 +81,15 @@ export async function reconcileInfisicalSandboxAuth(input: {
 
   let connection: Awaited<ReturnType<typeof loadInfisicalConnection>>;
   try {
-    connection = await loadInfisicalConnection({ db, workspaceId: input.workspaceId });
+    connection = await loadInfisicalConnection({
+      db,
+      workspaceId: input.workspaceId,
+      userId: input.userWorkosId,
+    });
   } catch {
     await markNeedsReauth({
       workspaceId: input.workspaceId,
+      userId: input.userWorkosId,
       credentialGeneration: metadata.credentialGeneration,
       reason: "Infisical credentials could not be decrypted. Reconnect Infisical in settings.",
     });
@@ -116,6 +124,7 @@ export async function reconcileInfisicalSandboxAuth(input: {
       if (!valid) {
         await markNeedsReauth({
           workspaceId: input.workspaceId,
+          userId: input.userWorkosId,
           credentialGeneration: connection.credentialGeneration,
           reason: "Infisical rejected the saved login. Reconnect Infisical in workspace settings.",
         });
@@ -126,6 +135,7 @@ export async function reconcileInfisicalSandboxAuth(input: {
       await markInfisicalConnectionValidated({
         db,
         workspaceId: input.workspaceId,
+        userId: input.userWorkosId,
         expectedCredentialGeneration: connection.credentialGeneration,
       });
     }
@@ -135,7 +145,7 @@ export async function reconcileInfisicalSandboxAuth(input: {
       redactionValues: [...redactionValues],
       promptFragment: [
         "<infisical_cli>",
-        "The Infisical CLI is authenticated for this workspace and may be used directly.",
+        "The Infisical CLI is authenticated with your personal account and may be used directly.",
         `The connected Infisical host is ${connection.host}.`,
         "Use the repository's .infisical.json or explicit flags to select a project and environment.",
         "Prefer `infisical run -- <command>` and never print, log, summarize, or expose secret values.",
@@ -330,12 +340,14 @@ async function writeGeneration(sandbox: SandboxHandle, credentialGeneration: str
 
 async function markNeedsReauth(input: {
   workspaceId: string;
+  userId: string;
   credentialGeneration: string;
   reason: string;
 }) {
   await markInfisicalConnectionNeedsReauth({
     db: getDb(),
     workspaceId: input.workspaceId,
+    userId: input.userId,
     expectedCredentialGeneration: input.credentialGeneration,
     statusReason: input.reason,
   });
@@ -350,6 +362,6 @@ function needsReauthAuth(): InfisicalSandboxAuth {
     available: false,
     redactionValues: [],
     promptFragment:
-      "Infisical needs to be reconnected by a workspace admin. Continue coding without it and tell the user if Infisical access is required.",
+      "Reconnect your personal Infisical account in Plugins. Continue coding without it and tell the user if Infisical access is required.",
   };
 }

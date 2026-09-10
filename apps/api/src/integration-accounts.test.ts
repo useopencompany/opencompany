@@ -403,32 +403,20 @@ describe("integration account service", () => {
     },
   );
 
-  it("admin-gates permission changes for the workspace Stripe connection", async () => {
+  it("rejects workspace-owned permission changes for both members and admins", async () => {
     const row = {
       id: "gint_stripe",
       provider: "stripe",
       userWorkosId: "user_admin",
       workspaceId: "workspace_1",
     };
-    const memberService = createIntegrationAccountService({ db: fakeDb([[row]]) });
-    await expect(
-      memberService.setCapabilityMode(member, "gint_stripe", "query", "on"),
-    ).rejects.toMatchObject({
-      status: 403,
-      message: "Only workspace admins can manage this integration's permissions.",
-    });
-
-    const adminService = createIntegrationAccountService({ db: fakeDb([[row]]) });
-    await expect(
-      adminService.setCapabilityMode(admin, "gint_stripe", "query", "on"),
-    ).resolves.toBeUndefined();
-    expect(applyIntegrationCapabilityMode).toHaveBeenCalledWith(
-      expect.objectContaining({
-        integrationIds: ["gint_stripe"],
-        capabilityId: "query",
-        mode: "on",
-      }),
-    );
+    for (const actor of [member, admin]) {
+      const service = createIntegrationAccountService({ db: fakeDb([[row]]) });
+      await expect(
+        service.setCapabilityMode(actor, "gint_stripe", "query", "on"),
+      ).rejects.toMatchObject({ status: 404 });
+    }
+    expect(applyIntegrationCapabilityMode).not.toHaveBeenCalled();
   });
 
   it("forwards standing action permission changes to the execution owner", async () => {

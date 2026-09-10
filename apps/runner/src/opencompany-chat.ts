@@ -1323,7 +1323,7 @@ async function resolveProductChatRuntime(input: {
       : {}),
   });
   const taskSkillBundles = taskContext
-    ? await loadWorkflowTaskSkillBundles(taskContext.harnessSpec)
+    ? await loadWorkflowTaskSkillBundles(taskContext.harnessSpec, turn.userWorkosId)
     : [];
   const taskSystemBlocks = taskContext
     ? [

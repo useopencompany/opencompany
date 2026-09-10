@@ -50,6 +50,7 @@ export async function preparePluginDataRuntime(input: {
   sandbox: SandboxHandle;
   workRoot: string;
   workspaceId: string;
+  userId: string;
   leaseOwner: string;
   mcpPlugins: EnabledPluginRuntime["mcpPlugins"];
   blobToken?: string | undefined;
@@ -76,6 +77,7 @@ export async function preparePluginDataRuntime(input: {
       await input.checkAbort();
       const lease = await acquireLease({
         workspaceId: input.workspaceId,
+        userId: input.userId,
         pluginName: plugin.name,
         leaseOwner: input.leaseOwner,
         storage,
@@ -173,6 +175,7 @@ export async function preparePluginDataRuntime(input: {
 
 async function acquireLease(input: {
   workspaceId: string;
+  userId: string;
   pluginName: string;
   leaseOwner: string;
   storage: PluginDataStorage;
@@ -183,6 +186,7 @@ async function acquireLease(input: {
   while (true) {
     const lease = await acquireWorkspacePluginDataLease(getDb(), {
       workspaceId: input.workspaceId,
+      userId: input.userId,
       pluginName: input.pluginName,
       leaseId,
       leaseOwner: input.leaseOwner,
@@ -195,11 +199,12 @@ async function acquireLease(input: {
       const bytes = EMPTY_PLUGIN_DATA_ARCHIVE;
       const checksum = checksumBytes(bytes);
       const uploaded = await input.storage.upload(
-        blobPathname(input.workspaceId, input.pluginName, 0),
+        blobPathname(input.workspaceId, input.userId, input.pluginName, 0),
         bytes,
       );
       const initialized = await initializeWorkspacePluginDataLease(getDb(), {
         workspaceId: input.workspaceId,
+        userId: input.userId,
         pluginName: input.pluginName,
         blobPathname: uploaded.pathname,
         checksum,
@@ -264,10 +269,15 @@ async function prepareDataRuntimeRoots(
 async function restoredStateMatches(sandbox: SandboxHandle, entry: LeaseEntry) {
   try {
     const parsed = JSON.parse(String(await sandbox.files.read(entry.statePath))) as {
+      userId?: unknown;
       generation?: unknown;
       checksum?: unknown;
     };
-    if (parsed.generation !== entry.lease.generation || parsed.checksum !== entry.lease.checksum) {
+    if (
+      parsed.userId !== entry.lease.userId ||
+      parsed.generation !== entry.lease.generation ||
+      parsed.checksum !== entry.lease.checksum
+    ) {
       return false;
     }
     await sandbox.commands.run(verifyManagedPathCommand(entry.dataRoot, true), {
@@ -355,6 +365,7 @@ async function checkpointPluginData(input: {
   const uploaded = await input.storage.upload(
     blobPathname(
       input.entry.lease.workspaceId,
+      input.entry.lease.userId,
       input.entry.lease.pluginName,
       input.entry.lease.generation + 1,
     ),
@@ -363,6 +374,7 @@ async function checkpointPluginData(input: {
   const previousPathname = input.entry.lease.blobPathname;
   const checkpoint = await checkpointWorkspacePluginData(getDb(), {
     workspaceId: input.entry.lease.workspaceId,
+    userId: input.entry.lease.userId,
     pluginName: input.entry.lease.pluginName,
     leaseId: input.entry.lease.leaseId,
     leaseOwner: input.entry.lease.leaseOwner,
@@ -391,7 +403,11 @@ async function writeState(sandbox: SandboxHandle, entry: LeaseEntry) {
   });
   await sandbox.files.write(
     entry.statePath,
-    JSON.stringify({ generation: entry.lease.generation, checksum: entry.lease.checksum }),
+    JSON.stringify({
+      userId: entry.lease.userId,
+      generation: entry.lease.generation,
+      checksum: entry.lease.checksum,
+    }),
     { user: SANDBOX_ROOT_USER },
   );
   await sandbox.commands.run(
@@ -440,6 +456,7 @@ function vercelPluginDataStorage(token: string | undefined): PluginDataStorage {
 async function renewLease(lease: WorkspacePluginDataLease) {
   return renewWorkspacePluginDataLease(getDb(), {
     workspaceId: lease.workspaceId,
+    userId: lease.userId,
     pluginName: lease.pluginName,
     leaseId: lease.leaseId,
     leaseOwner: lease.leaseOwner,
@@ -450,14 +467,15 @@ async function renewLease(lease: WorkspacePluginDataLease) {
 async function releaseLease(lease: WorkspacePluginDataLease) {
   await releaseWorkspacePluginDataLease(getDb(), {
     workspaceId: lease.workspaceId,
+    userId: lease.userId,
     pluginName: lease.pluginName,
     leaseId: lease.leaseId,
     leaseOwner: lease.leaseOwner,
   });
 }
 
-function blobPathname(workspaceId: string, pluginName: string, generation: number) {
-  return `plugin-data/${hashId(workspaceId)}/${pluginName}/${generation}-${randomUUID()}.tar`;
+function blobPathname(workspaceId: string, userId: string, pluginName: string, generation: number) {
+  return `plugin-data/${hashId(workspaceId)}/${hashId(userId)}/${pluginName}/${generation}-${randomUUID()}.tar`;
 }
 
 function checksumBytes(bytes: Uint8Array) {

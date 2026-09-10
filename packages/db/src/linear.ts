@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { getDb } from "./client";
 import {
   brainSources,
@@ -315,6 +315,7 @@ export async function listWorkflowEventTriggerRoutes(
   const pluginRows = await db
     .select({
       workspaceId: plugins.workspaceId,
+      ownerUserId: plugins.ownerUserId,
       name: plugins.name,
       events: plugins.events,
       eventModes: plugins.eventModes,
@@ -325,18 +326,20 @@ export async function listWorkflowEventTriggerRoutes(
         inArray(plugins.workspaceId, workspaceIds),
         eq(plugins.name, input.provider),
         eq(plugins.status, "enabled"),
+        sql`EXISTS (SELECT 1 FROM goat.workspace_members member WHERE member.workspace_id = ${plugins.workspaceId} AND member.user_workos_id = ${plugins.ownerUserId})`,
         isNull(plugins.archivedAt),
       ),
     );
   const enabledEvents = new Set<string>();
   for (const row of pluginRows as Array<{
     workspaceId: string;
+    ownerUserId: string;
     events: Array<{ id?: unknown }>;
     eventModes: Record<string, unknown>;
   }>) {
     for (const event of Array.isArray(row.events) ? row.events : []) {
       if (typeof event.id === "string" && row.eventModes?.[event.id] === true) {
-        enabledEvents.add(`${row.workspaceId}:${event.id}`);
+        enabledEvents.add(`${row.workspaceId}:${row.ownerUserId}:${event.id}`);
       }
     }
   }
@@ -358,7 +361,7 @@ export async function listWorkflowEventTriggerRoutes(
         !row.userWorkosId ||
         !row.harnessSpec ||
         connected.get(config.integrationId) !== row.userWorkosId ||
-        (!config.legacyTriageStateId && !enabledEvents.has(`${row.workspaceId}:${config.event}`))
+        !enabledEvents.has(`${row.workspaceId}:${row.userWorkosId}:${config.event}`)
       ) {
         return [];
       }

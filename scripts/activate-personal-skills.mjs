@@ -15,7 +15,7 @@ if (process.argv.length > (local ? 3 : 2)) {
 const databaseUrl = requiredEnv(local ? "DATABASE_URL" : "PRODUCTION_DATABASE_URL");
 const current = await readRollout(databaseUrl);
 if (current.personalEnabled) {
-  console.log("Personal Skills are already active.");
+  console.log("Personal Skills and plugins are already active.");
   process.exit(0);
 }
 
@@ -31,19 +31,21 @@ if (!local) {
 
 const release = local ? "local-setup" : requiredEnv("RELEASE_SHA");
 await activateRollout(databaseUrl, release);
-console.log(`Personal Skills activated for ${local ? "local development" : release.slice(0, 7)}.`);
+console.log(
+  `Personal Skills and plugins activated for ${local ? "local development" : release.slice(0, 7)}.`,
+);
 
 async function readRollout(connectionString) {
   const client = new pg.Client({ connectionString });
   await client.connect();
   try {
     const result = await client.query(
-      `SELECT personal_enabled AS "personalEnabled"
-       FROM goat.skill_scope_rollout
-       WHERE id = 'personal_skills'`,
+      `SELECT personal_enabled AS "personalEnabled" FROM goat.skill_scope_rollout WHERE id = 'personal_skills'
+       UNION ALL
+       SELECT personal_enabled AS "personalEnabled" FROM goat.plugin_ownership_rollout WHERE id = 'personal_plugins'`,
     );
-    if (result.rowCount !== 1) throw new Error("Personal Skills rollout row is missing.");
-    return result.rows[0];
+    if (result.rowCount !== 2) throw new Error("Personal ownership rollout rows are missing.");
+    return { personalEnabled: result.rows.every((row) => row.personalEnabled === true) };
   } finally {
     await client.end();
   }
@@ -67,8 +69,12 @@ async function activateRollout(connectionString, release) {
         "SELECT personal_enabled FROM goat.skill_scope_rollout WHERE id = 'personal_skills'",
       );
       if (current.rows[0]?.personal_enabled !== true)
-        throw new Error("Personal Skills rollout could not be activated.");
+        throw new Error("Personal Skills and plugins rollout could not be activated.");
     }
+    const plugins = await client.query(
+      "UPDATE goat.plugin_ownership_rollout SET personal_enabled = true WHERE id = 'personal_plugins' RETURNING id",
+    );
+    if (plugins.rowCount !== 1) throw new Error("Personal plugin rollout row is missing.");
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");

@@ -234,6 +234,7 @@ async function authorizeTicket(db: DbLike, payload: GoogleCalendarMcpTicketPaylo
   const [active, row] = await Promise.all([
     isPluginGatewayRegistrationActive(db, {
       workspaceId: payload.workspaceId,
+      userId: payload.userWorkosId,
       registrationId: payload.registrationId,
     }),
     loadGoogleCalendarIntegration({ userWorkosId: payload.userWorkosId }),

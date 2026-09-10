@@ -1845,13 +1845,7 @@ describe("Linear plugin settings", () => {
       );
       expect(screen.getByText("Stripe OAuth")).toBeInTheDocument();
       expect(screen.queryByText("Acme Payments · Test mode")).not.toBeInTheDocument();
-      const keyManagement = screen
-        .getByText("Manage existing workspace API key")
-        .closest("details");
-      expect(keyManagement).not.toHaveAttribute("open");
-      expect(
-        screen.getByText("The workspace key is used when you have no personal Stripe connection."),
-      ).toBeInTheDocument();
+      expect(screen.queryByText("Manage existing workspace API key")).not.toBeInTheDocument();
       expect(screen.getByRole("link", { name: "Connect Stripe account" })).toHaveAttribute(
         "href",
         "/api/integrations/stripe/start?returnTo=/settings/plugins/stripe",
@@ -1865,7 +1859,7 @@ describe("Linear plugin settings", () => {
     },
   );
 
-  it("maps the workspace Stripe key onto the official plugin surface", () => {
+  it("requires a personal Stripe account instead of showing the workspace key", () => {
     const stripePlugin = {
       ...plugin,
       id: "plugin_stripe",
@@ -1881,11 +1875,12 @@ describe("Linear plugin settings", () => {
       />,
     );
 
-    expect(html).toContain("Acme Payments · Test mode");
+    expect(html).not.toContain("Acme Payments · Test mode");
+    expect(html).toContain("No Stripe accounts are connected.");
     expect(html).toContain("Learn about Stripe");
     expect(html).toContain("Read Stripe data");
     expect(html).toContain("Manage Stripe");
-    expect(html).toContain("mcp.stripe.com");
+    expect(html).toContain("/api/integrations/stripe/start");
     expect(STRIPE_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/68c22e8a1ffe5eb8a83fb91c68f76f3f45705d3a/stripe",
     );

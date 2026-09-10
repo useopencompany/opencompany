@@ -53,6 +53,8 @@ export function skillBundleAccess(input: SkillReader & { chatSessionId?: string 
         SELECT 1 FROM goat.plugin_skills skill
         JOIN goat.plugins plugin ON plugin.id = skill.plugin_id AND plugin.workspace_id = skill.workspace_id
         WHERE skill.skill_bundle_id = ${skillBundles.id} AND skill.workspace_id = ${input.workspaceId}
+          AND plugin.status = 'enabled'
+          AND ${input.userId ? sql`plugin.owner_user_id = ${input.userId}` : sql`false`}
       ) ${
         input.userId && input.chatSessionId && input.skillAccess !== "company"
           ? sql`OR EXISTS (
@@ -60,6 +62,7 @@ export function skillBundleAccess(input: SkillReader & { chatSessionId?: string 
         JOIN goat.chat_sessions session ON session.id = snapshot.chat_session_id
         WHERE snapshot.bundle_id = ${skillBundles.id} AND session.id = ${input.chatSessionId}
           AND session.user_workos_id = ${input.userId}
+          AND snapshot.source_kind = 'standalone'
       )`
           : sql``
       }

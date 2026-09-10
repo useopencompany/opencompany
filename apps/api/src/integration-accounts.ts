@@ -498,11 +498,7 @@ async function requireManageableCapabilityIntegration(
   if (!row) throw new ApiError(404, "not_found", OWNER_ONLY_MESSAGE);
 
   if (row.workspaceId !== null) {
-    if (row.workspaceId !== actor.workspaceId) {
-      throw new ApiError(404, "not_found", OWNER_ONLY_MESSAGE);
-    }
-    requireAdmin(actor, "Only workspace admins can manage this integration's permissions.");
-    return row;
+    throw new ApiError(404, "not_found", OWNER_ONLY_MESSAGE);
   }
 
   if (row.userWorkosId !== actor.userId) {

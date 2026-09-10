@@ -315,7 +315,7 @@ jobs:
           if [[ "${{ needs.plan.outputs.runner }}" == "true" && -n "${{ steps.deployment-runner.outputs.deployment_id }}" ]]; then args+=(--runner); fi
           node scripts/release-render-services.mjs "${args[@]}"
 
-      - name: Activate Personal Skills after old services drain
+      - name: Activate Personal Skills and plugins after old services drain
         id: activate-personal-skills
         if: ${{ always() && !cancelled() && steps.current-before-deploy.outputs.should_release == 'true' && (needs.plan.outputs.database == 'true' || needs.plan.outputs.api == 'true' || needs.plan.outputs.runner == 'true' || needs.plan.outputs.web == 'true') && (needs.plan.outputs.database != 'true' || (steps.migrate.outcome == 'success' && steps.backfill-wiki-path-links.outcome == 'success')) && (needs.plan.outputs.api != 'true' || steps.deploy-render.outputs.api_result == 'success') && (needs.plan.outputs.runner != 'true' || steps.deploy-render.outputs.runner_result == 'success') }}
         run: node scripts/activate-personal-skills.mjs
