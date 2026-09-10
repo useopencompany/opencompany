@@ -1852,10 +1852,14 @@ describe("Linear plugin settings", () => {
       expect(
         screen.getByText("The workspace key is used when you have no personal Stripe connection."),
       ).toBeInTheDocument();
-      expect(screen.getByRole("link", { name: "Connect Stripe account" })).toHaveAttribute(
-        "href",
-        "/api/integrations/stripe/start?returnTo=/settings/plugins/stripe",
-      );
+      if (status === "connected") {
+        expect(screen.queryByRole("link", { name: "Connect Stripe account" })).toBeNull();
+      } else {
+        expect(screen.getByRole("link", { name: "Connect Stripe account" })).toHaveAttribute(
+          "href",
+          "/api/integrations/stripe/start?returnTo=/settings/plugins/stripe",
+        );
+      }
       if (status === "needs_reauth")
         expect(screen.getByRole("link", { name: "Reconnect" })).toBeInTheDocument();
       await userEvent.setup().click(screen.getByRole("button", { name: "Disconnect" }));
@@ -1913,11 +1917,15 @@ describe("Linear plugin settings", () => {
     expect(screen.getByText("a".repeat(40))).toBeInTheDocument();
     expect(screen.getByText(`sha256:${"b".repeat(64)}`)).toBeInTheDocument();
     expect(screen.queryByText("read write")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /view source/i })).toHaveAttribute(
+    const advancedDetails = screen.getByText("Advanced package details").closest("details");
+    expect(
+      within(advancedDetails as HTMLElement).getByRole("link", {
+        name: /github\.com\/useopencompany\/plugins/i,
+      }),
+    ).toHaveAttribute(
       "href",
       `https://github.com/useopencompany/plugins/tree/${"a".repeat(40)}/linear`,
     );
-    const advancedDetails = screen.getByText("Advanced package details").closest("details");
     expect(advancedDetails).not.toHaveAttribute("open");
     for (const toolDetails of screen
       .getAllByText("1 tool")
@@ -2042,6 +2050,103 @@ describe("Linear plugin settings", () => {
     await waitFor(() => expect(commands.refreshHeadlessPluginMcp).toHaveBeenCalledWith("linear"));
     expect(toasts.success).toHaveBeenCalledWith("Linear tools refreshed.");
     expect(router.refresh).toHaveBeenCalled();
+  });
+
+  const connectedLinearAccount: IntegrationAccountView<"linear"> = {
+    integrationId: "gint_linear_tools",
+    provider: "linear",
+    status: "connected",
+    connected: true,
+    accountEmail: null,
+    accountName: "Linear tool access",
+    connectionLabel: "Linear tool access",
+    statusReason: null,
+    scopes: [],
+    capabilityModes: { read: "on", write: "ask" },
+  };
+
+  it("makes connecting the account the primary action while setup is incomplete", () => {
+    render(
+      <LinearPluginDetailView
+        pluginState={{ status: "ready", plugin }}
+        accountsState={{ status: "ready", accounts: [], permissionConnection: null }}
+        toolsState={linearToolsStateFromPlugin(plugin)}
+        canEdit
+      />,
+    );
+
+    expect(screen.getByText("Requires connection")).toBeInTheDocument();
+    expect(screen.queryByText("Enabled")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", {
+        name: "Connect your Linear account to start using this plugin",
+      }),
+    ).toBeVisible();
+
+    // The connect action is promoted into the callout as a default-variant button and must not
+    // also repeat itself inside Accounts.
+    const connectLinks = screen.getAllByRole("link", { name: "Connect Linear account" });
+    expect(connectLinks).toHaveLength(1);
+    expect(connectLinks[0]).toHaveClass("bg-primary");
+  });
+
+  it("shows a single truthful header once the Linear account is connected", () => {
+    render(
+      <LinearPluginDetailView
+        pluginState={{ status: "ready", plugin }}
+        accountsState={{
+          status: "ready",
+          accounts: [{ account: connectedLinearAccount }],
+          permissionConnection: connectedLinearAccount,
+        }}
+        toolsState={linearToolsStateFromPlugin(plugin)}
+        canEdit
+      />,
+    );
+
+    expect(screen.getByText("Enabled")).toBeInTheDocument();
+    expect(screen.queryByText("Requires connection")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", {
+        name: "Connect your Linear account to start using this plugin",
+      }),
+    ).toBeNull();
+
+    // The plugin name and description belong to the page header only, and a connected row
+    // replaces the old duplicate connect button.
+    expect(screen.getAllByRole("heading", { name: "Linear" })).toHaveLength(1);
+    expect(screen.getAllByText("Plan and ship work with Linear.")).toHaveLength(1);
+    expect(screen.getByText("Connected")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Connect Linear account" })).toBeNull();
+  });
+
+  it("demotes uninstall and keeps the source link inside advanced package details", () => {
+    render(
+      <LinearPluginDetailView
+        pluginState={{ status: "ready", plugin }}
+        accountsState={{
+          status: "ready",
+          accounts: [{ account: connectedLinearAccount }],
+          permissionConnection: connectedLinearAccount,
+        }}
+        toolsState={linearToolsStateFromPlugin(plugin)}
+        canEdit
+      />,
+    );
+
+    const uninstall = screen.getByRole("button", { name: "Uninstall" });
+    expect(uninstall).toHaveClass("text-ink-subtle");
+    expect(uninstall.className).not.toContain("bg-destructive");
+
+    const advancedDetails = screen.getByText("Advanced package details").closest("details");
+    expect(
+      within(advancedDetails as HTMLElement).getByRole("link", {
+        name: /github\.com\/useopencompany\/plugins/i,
+      }),
+    ).toHaveAttribute(
+      "href",
+      `https://github.com/useopencompany/plugins/tree/${"a".repeat(40)}/linear`,
+    );
   });
 
   it("presents a missing tool account as a neutral connection-required state", () => {
@@ -2264,10 +2369,7 @@ describe("Linear plugin settings", () => {
     expect(screen.getByRole("heading", { level: 1, name: "GitHub as you" })).toBeInTheDocument();
     expect(screen.getByText("octocat")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Disconnect" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Connect GitHub account" })).toHaveAttribute(
-      "href",
-      "/api/integrations/github-user/start?returnTo=/settings/plugins/github",
-    );
+    expect(screen.queryByRole("link", { name: "Connect GitHub account" })).toBeNull();
     expect(await screen.findByRole("heading", { name: "Repository access" })).toBeVisible();
     const installationAccount = await screen.findByText("opencompany");
     expect(installationAccount).toBeVisible();
@@ -2387,10 +2489,7 @@ describe("Linear plugin settings", () => {
     expect(screen.getByText("List projects")).toBeInTheDocument();
     expect(screen.getByText("Run sql")).toBeInTheDocument();
     expect(screen.getByText("This version of the plugin contains no skills.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Connect Neon account" })).toHaveAttribute(
-      "href",
-      "/api/integrations/neon/start?returnTo=/settings/plugins/neon",
-    );
+    expect(screen.queryByRole("link", { name: "Connect Neon account" })).toBeNull();
     expect(screen.queryByText(/Configure Neon ingestion/u)).not.toBeInTheDocument();
     expect(NEON_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/neon$/u,
@@ -2436,10 +2535,7 @@ describe("Linear plugin settings", () => {
     expect(screen.getByText("Query")).toBeInTheDocument();
     expect(screen.getByText("Create monitor")).toBeInTheDocument();
     expect(screen.getByText("This version of the plugin contains no skills.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Connect Better Stack account" })).toHaveAttribute(
-      "href",
-      "/api/integrations/betterstack/start?returnTo=/settings/plugins/betterstack",
-    );
+    expect(screen.queryByRole("link", { name: "Connect Better Stack account" })).toBeNull();
     expect(BETTERSTACK_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/betterstack$/u,
     );
@@ -2475,7 +2571,7 @@ describe("Linear plugin settings", () => {
     expect(screen.getByText("Archive Co · Ada")).toBeInTheDocument();
     expect(screen.getByText("Slack tools")).toBeInTheDocument();
     expect(screen.getByText("Not active")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Connect Slack account" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Connect another Slack account" })).toHaveAttribute(
       "href",
       "/api/integrations/slack/start?returnTo=/settings/plugins/slack",
     );
@@ -2560,7 +2656,7 @@ describe("Linear plugin settings", () => {
     expect(screen.getByText("@acme · Acme")).toBeInTheDocument();
     expect(screen.getByText("X tools")).toBeInTheDocument();
     expect(screen.getByText("Legacy fallback")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Connect X account" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Connect another X account" })).toHaveAttribute(
       "href",
       "/api/integrations/x-account/start?returnTo=/settings/plugins/x",
     );
@@ -2585,10 +2681,7 @@ describe("Linear plugin settings", () => {
 
     expect(screen.getByRole("heading", { level: 1, name: "Google Calendar" })).toBeInTheDocument();
     expect(screen.getByText("ada@example.com")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Connect Google Calendar account" })).toHaveAttribute(
-      "href",
-      "/api/integrations/google-calendar/start?returnTo=/settings/plugins/google-calendar",
-    );
+    expect(screen.queryByRole("link", { name: "Connect Google Calendar account" })).toBeNull();
     for (const label of ["Check calendars", "Read calendar events", "Manage calendar events"]) {
       expect(
         within(screen.getByRole("group", { name: `${label} permission` })).getByRole("button", {
@@ -2613,10 +2706,7 @@ describe("Linear plugin settings", () => {
 
     expect(screen.getByRole("heading", { level: 1, name: "Notion" })).toBeInTheDocument();
     expect(screen.getByText("Acme workspace")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Connect Notion account" })).toHaveAttribute(
-      "href",
-      "/api/integrations/notion/start?returnTo=/settings/plugins/notion",
-    );
+    expect(screen.queryByRole("link", { name: "Connect Notion account" })).toBeNull();
     for (const label of ["Search & read Notion", "Work with Notion agents", "Change Notion"]) {
       expect(
         within(screen.getByRole("group", { name: `${label} permission` })).getByRole("button", {
@@ -2659,10 +2749,7 @@ describe("Linear plugin settings", () => {
 
     expect(screen.getByRole("heading", { level: 1, name: "Gmail" })).toBeInTheDocument();
     expect(screen.getByText("ada@example.com")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Connect Gmail account" })).toHaveAttribute(
-      "href",
-      "/api/integrations/gmail/start?access=mcp&returnTo=/settings/plugins/gmail",
-    );
+    expect(screen.queryByRole("link", { name: "Connect Gmail account" })).toBeNull();
     for (const label of ["Read Gmail", "Create drafts", "Organize Gmail"]) {
       expect(
         within(screen.getByRole("group", { name: `${label} permission` })).getByRole("button", {

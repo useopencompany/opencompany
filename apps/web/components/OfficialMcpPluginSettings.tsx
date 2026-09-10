@@ -65,17 +65,15 @@ import {
   setHeadlessPluginEventEnabled,
 } from "@/lib/headless-knowledge-commands";
 import { setIntegrationCapabilityModeAction } from "@/lib/integration-account-actions";
-import {
-  type InfisicalProviderState,
-  type IntegrationAccountView,
-  type IntegrationState,
-  type PersonalAccountProvider,
-} from "@/lib/integration-state";
-import {
-  GOOGLE_DRIVE_MCP_RECONNECT_REASON,
-  googleDriveMcpScopesSatisfied,
-} from "@/lib/integrations/google-drive-scopes";
+import { type IntegrationAccountView, type PersonalAccountProvider } from "@/lib/integration-state";
 import type { OfficialMcpPluginName } from "@/lib/official-plugins";
+import {
+  type ManagedPluginConnection,
+  type PluginAccount,
+  type PluginConnectionProvider,
+  pluginAccountsFromState,
+  pluginConnectionSatisfied,
+} from "@/lib/plugin-connection-state";
 
 const NO_CONNECTION_DISCOVERY_ERROR =
   "No usable provider connection was available for MCP discovery.";
@@ -116,13 +114,6 @@ export type PluginToolsState =
         lastDiscoveryError: string | null;
       };
     };
-
-type PluginConnectionProvider = PersonalAccountProvider | "posthog" | "stripe";
-type PluginAccount = { account: IntegrationAccountView<PluginConnectionProvider> };
-type ManagedPluginConnection = {
-  provider: "infisical";
-  integration: InfisicalProviderState;
-};
 
 type PluginSkill = {
   id: string;
@@ -845,6 +836,14 @@ function OfficialMcpPluginDetailView({
     };
   }, [config.source, shouldPreview]);
 
+  // An installed and enabled plugin whose account is missing cannot run any tools yet, so
+  // connecting becomes the page's single primary action.
+  const setupIncomplete =
+    plugin?.status === "enabled" &&
+    accountsState.status === "ready" &&
+    !pluginConnectionSatisfied(config, accountsState);
+  const Icon = config.Icon;
+
   return (
     <>
       <PluginConnectionFeedback />
@@ -852,7 +851,19 @@ function OfficialMcpPluginDetailView({
         title={config.label}
         description={plugin?.manifest.description || config.description}
         backLink={{ href: "/settings/plugins", label: "Plugins" }}
+        icon={
+          <span
+            aria-hidden="true"
+            className={`flex size-9 shrink-0 items-center justify-center rounded-lg ${config.iconClassName}`}
+          >
+            <Icon className="size-5" />
+          </span>
+        }
+        badge={<PluginStatusBadge state={pluginState} setupIncomplete={Boolean(setupIncomplete)} />}
       >
+        {setupIncomplete && accountsState.status === "ready" ? (
+          <PluginSetupCallout config={config} accounts={accountsState} canEdit={canEdit} />
+        ) : null}
         <PluginHeaderSection
           config={config}
           state={pluginState}
@@ -860,7 +871,12 @@ function OfficialMcpPluginDetailView({
           canEdit={canEdit}
         />
         {plugin ? (
-          <AccountsSection config={config} state={accountsState} canEdit={canEdit} />
+          <AccountsSection
+            config={config}
+            state={accountsState}
+            canEdit={canEdit}
+            connectPromoted={Boolean(setupIncomplete)}
+          />
         ) : null}
         {plugin?.events.length ? <EventsSection plugin={plugin} canEdit={canEdit} /> : null}
         {plugin &&
@@ -946,6 +962,65 @@ function EventsSection({ plugin, canEdit }: { plugin: PluginInstallationDto; can
   );
 }
 
+function PluginStatusBadge({
+  state,
+  setupIncomplete,
+}: {
+  state: PluginLoadState;
+  setupIncomplete: boolean;
+}) {
+  if (state.status !== "ready") return null;
+  if (!state.plugin) return <Badge variant="outline">Not installed</Badge>;
+  if (state.plugin.status !== "enabled") return <Badge variant="outline">Disabled</Badge>;
+  return setupIncomplete ? (
+    <Badge variant="warning">Requires connection</Badge>
+  ) : (
+    <Badge variant="success">Enabled</Badge>
+  );
+}
+
+function PluginSetupCallout({
+  config,
+  accounts,
+  canEdit,
+}: {
+  config: OfficialMcpPluginConfig;
+  accounts: Extract<PluginAccountsState, { status: "ready" }>;
+  canEdit: boolean;
+}) {
+  const accountLabel = config.accountLabel ?? config.label;
+  return (
+    <section
+      aria-labelledby="plugin-setup-heading"
+      className="flex flex-col gap-3 rounded-lg border border-warning-border bg-warning-bg p-4"
+    >
+      <div className="flex items-start gap-2.5">
+        <PlugZap className="mt-0.5 size-4 shrink-0 text-warning" />
+        <div className="min-w-0">
+          <h2 id="plugin-setup-heading" className="text-[13px] font-semibold leading-5 text-ink">
+            Connect your {accountLabel} account to start using this plugin
+          </h2>
+          <p className="mt-0.5 text-[12px] leading-4 text-ink-subtle">
+            {config.label} is installed, but its tools stay unavailable until an account is
+            connected.
+          </p>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <PluginConnectionControls
+          config={config}
+          permissionConnection={accounts.permissionConnection}
+          managedConnection={accounts.managedConnection}
+          stripeWorkspaceKey={accounts.stripeWorkspaceKey}
+          canEdit={canEdit}
+          connectedAccountCount={0}
+          prominence="primary"
+        />
+      </div>
+    </section>
+  );
+}
+
 function PluginHeaderSection({
   config,
   state,
@@ -986,7 +1061,6 @@ function PluginHeaderSection({
       }
     });
   };
-  const Icon = config.Icon;
   const enable = () => {
     if (!plugin) return;
     setError(null);
@@ -1014,81 +1088,36 @@ function PluginHeaderSection({
   };
 
   return (
-    <section aria-labelledby="plugin-overview-heading" className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-start gap-3 rounded-lg border border-border bg-surface p-4">
-        <span
-          className={`flex size-11 shrink-0 items-center justify-center rounded-lg ${config.iconClassName}`}
-        >
-          <Icon className="size-6" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 id="plugin-overview-heading" className="text-[15px] font-semibold text-ink">
-              {config.label}
-            </h2>
-            {plugin ? (
-              <Badge variant={plugin.status === "enabled" ? "success" : "outline"}>
-                {plugin.status === "enabled" ? "Installed" : "Disabled"}
-              </Badge>
+    <section aria-label={`${config.label} package`} className="flex flex-col gap-3">
+      {canEdit && !plugin ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            disabled={isPending || previewState.status !== "ready"}
+            onClick={install}
+          >
+            {isPending || previewState.status === "loading" ? (
+              <Loader2 className="size-3.5 animate-spin" />
             ) : (
-              <Badge variant="outline">Not installed</Badge>
+              <PlugZap className="size-3.5" />
             )}
-          </div>
-          <p className="mt-1 text-[12.5px] leading-5 text-ink-subtle">
-            {plugin?.manifest.description || config.description}
-          </p>
+            {isPending
+              ? "Installing…"
+              : previewState.status === "loading"
+                ? "Loading package…"
+                : previewState.status === "error"
+                  ? "Install unavailable"
+                  : "Install"}
+          </Button>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
-          {plugin ? (
-            <Link
-              href={pinnedSourceUrl(plugin)}
-              target="_blank"
-              rel="noreferrer"
-              className={buttonVariants({ variant: "outline", size: "sm" })}
-            >
-              View source <ExternalLink className="size-3.5" />
-            </Link>
-          ) : null}
-          {canEdit ? (
-            plugin ? (
-              <>
-                {plugin.status === "disabled" ? (
-                  <Button size="sm" disabled={isPending} onClick={enable}>
-                    <PlugZap className="size-3.5" /> Enable
-                  </Button>
-                ) : null}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={isPending}
-                  onClick={() => setConfirmingUninstall(true)}
-                >
-                  <Unplug className="size-3.5" /> Uninstall
-                </Button>
-              </>
-            ) : (
-              <Button
-                size="sm"
-                disabled={isPending || previewState.status !== "ready"}
-                onClick={install}
-              >
-                {isPending || previewState.status === "loading" ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <PlugZap className="size-3.5" />
-                )}
-                {isPending
-                  ? "Installing…"
-                  : previewState.status === "loading"
-                    ? "Loading package…"
-                    : previewState.status === "error"
-                      ? "Install unavailable"
-                      : "Install"}
-              </Button>
-            )
-          ) : null}
+      ) : null}
+      {canEdit && plugin?.status === "disabled" ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" disabled={isPending} onClick={enable}>
+            <PlugZap className="size-3.5" /> Enable
+          </Button>
         </div>
-      </div>
+      ) : null}
 
       {plugin ? (
         <details className="group rounded-lg border border-border bg-surface-muted">
@@ -1098,7 +1127,17 @@ function PluginHeaderSection({
           </summary>
           <dl className="grid grid-cols-[88px_minmax(0,1fr)] gap-x-3 gap-y-1.5 border-t border-border px-3 py-2.5 text-[11.5px] leading-4">
             <dt className="text-ink-faint">Source</dt>
-            <dd className="break-all text-ink">{plugin.source.url}</dd>
+            <dd className="break-all">
+              <Link
+                href={pinnedSourceUrl(plugin)}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-baseline gap-1 text-ink underline decoration-border underline-offset-2 hover:decoration-ink-faint"
+              >
+                {plugin.source.url}
+                <ExternalLink className="size-3 shrink-0 self-center" />
+              </Link>
+            </dd>
             <dt className="text-ink-faint">Commit</dt>
             <dd className="break-all font-mono text-ink">{plugin.source.resolvedCommit}</dd>
             <dt className="text-ink-faint">Integrity</dt>
@@ -1110,6 +1149,20 @@ function PluginHeaderSection({
           Review the package tools and skills below, then install when you are ready.
         </SectionEmpty>
       )}
+
+      {canEdit && plugin ? (
+        <div className="flex">
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={isPending}
+            onClick={() => setConfirmingUninstall(true)}
+            className="h-7 px-2 text-[12px] font-normal text-ink-subtle hover:text-destructive"
+          >
+            <Unplug className="size-3.5" /> Uninstall
+          </Button>
+        </div>
+      ) : null}
 
       {!canEdit ? (
         <p className="text-[12px] leading-4 text-ink-subtle">
@@ -1146,10 +1199,13 @@ function AccountsSection({
   config,
   state,
   canEdit,
+  connectPromoted,
 }: {
   config: OfficialMcpPluginConfig;
   state: PluginAccountsState;
   canEdit: boolean;
+  /** The setup callout above already renders the connect control, so don't repeat it here. */
+  connectPromoted: boolean;
 }) {
   const permissionConnection = state.status === "ready" ? state.permissionConnection : null;
   const legacyStripeConnection = state.status === "ready" && Boolean(state.legacyStripeConnection);
@@ -1164,6 +1220,16 @@ function AccountsSection({
           : [];
   const headingId = `${config.name}-accounts-heading`;
   const accountLabel = config.accountLabel ?? config.label;
+  const connectedAccountCount = displayedAccounts.filter(({ account }) => account.connected).length;
+  const ingestionLink =
+    config.ingestionHref && config.ingestionLabel ? (
+      <Link
+        href={config.ingestionHref}
+        className="text-[12px] text-ink-subtle underline decoration-border underline-offset-2 hover:text-ink"
+      >
+        {config.ingestionLabel}
+      </Link>
+    ) : null;
 
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-3">
@@ -1224,21 +1290,17 @@ function AccountsSection({
         </div>
       )}
       <div className="flex flex-wrap items-center gap-3">
-        <PluginConnectionControls
-          config={config}
-          permissionConnection={permissionConnection}
-          managedConnection={managedConnection}
-          stripeWorkspaceKey={state.status === "ready" ? state.stripeWorkspaceKey : undefined}
-          canEdit={canEdit}
-        />
-        {config.ingestionHref && config.ingestionLabel ? (
-          <Link
-            href={config.ingestionHref}
-            className="text-[12px] text-ink-subtle underline decoration-border underline-offset-2 hover:text-ink"
-          >
-            {config.ingestionLabel}
-          </Link>
-        ) : null}
+        {connectPromoted ? null : (
+          <PluginConnectionControls
+            config={config}
+            permissionConnection={permissionConnection}
+            managedConnection={managedConnection}
+            stripeWorkspaceKey={state.status === "ready" ? state.stripeWorkspaceKey : undefined}
+            canEdit={canEdit}
+            connectedAccountCount={connectedAccountCount}
+          />
+        )}
+        {ingestionLink}
       </div>
     </section>
   );
@@ -1278,12 +1340,17 @@ function PluginConnectionControls({
   managedConnection,
   stripeWorkspaceKey,
   canEdit,
+  connectedAccountCount,
+  prominence = "secondary",
 }: {
   stripeWorkspaceKey: { connected: boolean } | undefined;
   config: OfficialMcpPluginConfig;
   permissionConnection: IntegrationAccountView<PluginConnectionProvider> | null;
   managedConnection: ManagedPluginConnection | undefined;
   canEdit: boolean;
+  connectedAccountCount: number;
+  /** "primary" renders the connect action as the page's default-variant call to action. */
+  prominence?: "primary" | "secondary";
 }) {
   if (config.connectionUnavailableReason) return null;
   if (config.connectionProvider === "infisical") {
@@ -1300,12 +1367,29 @@ function PluginConnectionControls({
   if (config.connectionProvider === "render") {
     return <RenderApiKeyConnectionForm connected={Boolean(permissionConnection?.connected)} />;
   }
+  // A connected account row already offers reconnect and disconnect, so repeating a connect
+  // button next to it only helps providers that can keep more than one account active.
+  const supportsMultipleAccounts =
+    config.connectionProvider === "slack" || config.connectionProvider === "x_account";
+  const showConnectLink = connectedAccountCount === 0 || supportsMultipleAccounts;
+  const accountLabel = config.accountLabel ?? config.label;
+  const connectLabel =
+    connectedAccountCount > 0
+      ? `Connect another ${accountLabel} account`
+      : `Connect ${accountLabel} account`;
+  const connectClassName = buttonVariants({
+    variant: prominence === "primary" ? "default" : "outline",
+    size: "sm",
+  });
+
   if (config.connectionProvider === "stripe") {
     return (
       <div className="flex w-full flex-col gap-3">
-        <a href={config.connectHref} className={buttonVariants({ variant: "outline", size: "sm" })}>
-          Connect Stripe account
-        </a>
+        {showConnectLink ? (
+          <a href={config.connectHref} className={connectClassName}>
+            {connectLabel}
+          </a>
+        ) : null}
         {stripeWorkspaceKey ? (
           <details>
             <summary className="cursor-pointer text-[12px] text-ink-subtle">
@@ -1323,11 +1407,11 @@ function PluginConnectionControls({
       </div>
     );
   }
-  return (
-    <a href={config.connectHref} className={buttonVariants({ variant: "outline", size: "sm" })}>
-      Connect {config.accountLabel ?? config.label} account
+  return showConnectLink ? (
+    <a href={config.connectHref} className={connectClassName}>
+      {connectLabel}
     </a>
-  );
+  ) : null;
 }
 
 function ToolsSection({
@@ -1753,192 +1837,6 @@ function SectionEmpty({ icon: Icon, children }: { icon: typeof Wrench; children:
       </CardContent>
     </Card>
   );
-}
-
-function pluginAccountsFromState(
-  state: IntegrationState,
-  config: OfficialMcpPluginConfig,
-): {
-  accounts: PluginAccount[];
-  permissionConnection: IntegrationAccountView<PluginConnectionProvider> | null;
-  managedConnection?: ManagedPluginConnection;
-  legacyStripeConnection?: boolean;
-  stripeWorkspaceKey?: { connected: boolean };
-} {
-  if (config.connectionProvider === "infisical") {
-    return {
-      accounts: [],
-      permissionConnection: null,
-      managedConnection: { provider: "infisical", integration: state.infisical },
-    };
-  }
-  if (config.connectionProvider === "granola") {
-    const connection = state.granola_mcp;
-    const permissionConnection: IntegrationAccountView<"granola"> | null = connection.integrationId
-      ? {
-          integrationId: connection.integrationId,
-          provider: "granola",
-          status: connection.status === "not_connected" ? "disconnected" : connection.status,
-          connected: connection.connected,
-          accountEmail: null,
-          accountName: connection.accountName,
-          connectionLabel: connection.accountName || "Granola tool access",
-          statusReason: connection.statusReason,
-          scopes: [],
-          capabilityModes: connection.capabilityModes,
-        }
-      : null;
-    return {
-      permissionConnection,
-      accounts: permissionConnection ? [{ account: permissionConnection }] : [],
-    };
-  }
-  if (
-    config.connectionProvider === "attio" ||
-    config.connectionProvider === "betterstack" ||
-    config.connectionProvider === "fathom" ||
-    config.connectionProvider === "github_user" ||
-    config.connectionProvider === "gmail" ||
-    config.connectionProvider === "google_calendar" ||
-    config.connectionProvider === "google_drive" ||
-    config.connectionProvider === "hubspot" ||
-    config.connectionProvider === "jamie" ||
-    config.connectionProvider === "neon" ||
-    config.connectionProvider === "notion" ||
-    config.connectionProvider === "supabase" ||
-    config.connectionProvider === "resend" ||
-    config.connectionProvider === "posthog" ||
-    config.connectionProvider === "convex" ||
-    config.connectionProvider === "render" ||
-    config.connectionProvider === "vercel" ||
-    config.connectionProvider === "signoz" ||
-    config.connectionProvider === "slack" ||
-    config.connectionProvider === "stripe" ||
-    config.connectionProvider === "x_account"
-  ) {
-    if (config.connectionProvider === "stripe") {
-      const connection = state.stripe;
-      const stripeWorkspaceKey = connection.integrationId
-        ? { connected: connection.connected }
-        : undefined;
-      const oauthAccount = state.personalAccounts.stripe[0];
-      if (oauthAccount) {
-        return {
-          permissionConnection: oauthAccount,
-          accounts: [{ account: oauthAccount }],
-          ...(stripeWorkspaceKey ? { stripeWorkspaceKey } : {}),
-        };
-      }
-      const modeLabel =
-        connection.livemode === false
-          ? "Test mode"
-          : connection.livemode === true
-            ? "Live mode"
-            : null;
-      const permissionConnection: IntegrationAccountView<"stripe"> | null = connection.integrationId
-        ? {
-            integrationId: connection.integrationId,
-            provider: "stripe",
-            status: connection.status === "not_connected" ? "disconnected" : connection.status,
-            connected: connection.connected,
-            accountEmail: null,
-            accountName: connection.accountName,
-            connectionLabel: [connection.accountName, modeLabel].filter(Boolean).join(" · "),
-            statusReason: connection.statusReason,
-            scopes: [],
-            capabilityModes: connection.capabilityModes,
-          }
-        : null;
-      return {
-        permissionConnection,
-        legacyStripeConnection: Boolean(permissionConnection),
-        ...(stripeWorkspaceKey ? { stripeWorkspaceKey } : {}),
-        accounts: permissionConnection ? [{ account: permissionConnection }] : [],
-      };
-    }
-    if (
-      config.connectionProvider === "attio" ||
-      config.connectionProvider === "posthog" ||
-      config.connectionProvider === "hubspot"
-    ) {
-      const provider = config.connectionProvider;
-      const connection = state[provider];
-      const permissionConnection: IntegrationAccountView<typeof provider> | null =
-        connection.integrationId
-          ? {
-              integrationId: connection.integrationId,
-              provider,
-              status: connection.status === "not_connected" ? "disconnected" : connection.status,
-              connected: connection.connected,
-              accountEmail: null,
-              accountName: connection.accountName,
-              connectionLabel:
-                connection.accountName ||
-                `${provider === "attio" ? "Attio" : provider === "hubspot" ? "HubSpot" : "PostHog"} tool access`,
-              statusReason: connection.statusReason,
-              scopes: [],
-              capabilityModes: connection.capabilityModes,
-            }
-          : null;
-      return {
-        permissionConnection,
-        accounts: permissionConnection ? [{ account: permissionConnection }] : [],
-      };
-    }
-    const accounts = state.personalAccounts[config.connectionProvider].map((account) => ({
-      account:
-        config.connectionProvider === "google_drive" &&
-        account.status === "connected" &&
-        !googleDriveMcpScopesSatisfied(account.scopes)
-          ? {
-              ...account,
-              status: "needs_reauth" as const,
-              connected: false,
-              statusReason: GOOGLE_DRIVE_MCP_RECONNECT_REASON,
-            }
-          : account,
-    }));
-    const primaryIntegrationId =
-      config.connectionProvider === "gmail"
-        ? state.gmail.integrationId
-        : config.connectionProvider === "slack"
-          ? state.slack.integrationId
-          : config.connectionProvider === "google_calendar"
-            ? state.google_calendar.integrationId
-            : config.connectionProvider === "google_drive"
-              ? state.google_drive.integrationId
-              : config.connectionProvider === "x_account"
-                ? state.x_account.integrationId
-                : config.connectionProvider === "jamie"
-                  ? state.jamie.integrationId
-                  : null;
-    return {
-      accounts,
-      permissionConnection:
-        accounts.find(({ account }) => account.integrationId === primaryIntegrationId)?.account ??
-        accounts.find(({ account }) => account.connected)?.account ??
-        accounts[0]?.account ??
-        null,
-    };
-  }
-  const permissionConnection: IntegrationAccountView<"linear"> | null = state.linear.integrationId
-    ? {
-        integrationId: state.linear.integrationId,
-        provider: "linear",
-        status: state.linear.status === "not_connected" ? "disconnected" : state.linear.status,
-        connected: state.linear.connected,
-        accountEmail: null,
-        accountName: state.linear.accountName,
-        connectionLabel: state.linear.accountName || "Linear tool access",
-        statusReason: state.linear.statusReason,
-        scopes: [],
-        capabilityModes: state.linear.capabilityModes,
-      }
-    : null;
-  return {
-    permissionConnection,
-    accounts: permissionConnection ? [{ account: permissionConnection }] : [],
-  };
 }
 
 export function defaultLinearToolsState(): PluginToolsState {
