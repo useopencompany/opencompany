@@ -54,6 +54,7 @@ import {
   ClaudeCodeAuthStatusEnvelopeSchema,
   CodexAuthStatusEnvelopeSchema,
   CodexDeviceAuthFlowEnvelopeSchema,
+  CodexUsageEnvelopeSchema,
   CompleteInfisicalAuthBodySchema,
   ConfirmBrainImportBodySchema,
   ConversationEnvelopeSchema,
@@ -3483,6 +3484,21 @@ export const getCodexAuthRoute = createRoute({
   },
 });
 
+export const getCodexUsageRoute = createRoute({
+  method: "get",
+  path: "/v1/engine-auth/codex/usage",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description:
+        "Current subscription limits for the acting user's connected Codex account. Includes usage across apps; never includes credentials.",
+      content: { "application/json": { schema: CodexUsageEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const startCodexDeviceAuthRoute = createRoute({
   method: "post",
   path: "/v1/engine-auth/codex/device",
@@ -3914,6 +3930,7 @@ export type V1RouteHandlers = {
   saveClaudeCodeToken: RouteHandler<typeof saveClaudeCodeTokenRoute>;
   deleteClaudeCodeAuth: RouteHandler<typeof deleteClaudeCodeAuthRoute>;
   getCodexAuth: RouteHandler<typeof getCodexAuthRoute>;
+  getCodexUsage: RouteHandler<typeof getCodexUsageRoute>;
   updateCodexWorkspaceEngine: RouteHandler<typeof updateCodexWorkspaceEngineRoute>;
   startCodexDeviceAuth: RouteHandler<typeof startCodexDeviceAuthRoute>;
   pollCodexDeviceAuth: RouteHandler<typeof pollCodexDeviceAuthRoute>;
@@ -4110,6 +4127,7 @@ export function createV1Router(
       .openapi(saveClaudeCodeTokenRoute, handlers.saveClaudeCodeToken)
       .openapi(deleteClaudeCodeAuthRoute, handlers.deleteClaudeCodeAuth)
       .openapi(getCodexAuthRoute, handlers.getCodexAuth)
+      .openapi(getCodexUsageRoute, handlers.getCodexUsage)
       .openapi(updateCodexWorkspaceEngineRoute, handlers.updateCodexWorkspaceEngine)
       // POST /codex/device registers before the {flowId} poll route so the
       // static segment always wins route matching.
@@ -5611,6 +5629,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
       200,
     ),
   deleteClaudeCodeAuth: (c) => c.json({ data: { deleted: true as const }, meta }, 200),
+  getCodexUsage: (c) => c.json({ data: { windows: [], updatedAt: placeholderTime }, meta }, 200),
   getCodexAuth: (c) =>
     c.json(
       {

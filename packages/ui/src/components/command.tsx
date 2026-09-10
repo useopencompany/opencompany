@@ -12,6 +12,8 @@ import { cn } from "@opencompany/ui/lib/utils";
 import { Command as CommandPrimitive } from "cmdk";
 import type * as React from "react";
 
+export { defaultFilter } from "cmdk";
+
 function Command({ className, ...props }: React.ComponentProps<typeof CommandPrimitive>) {
   return (
     <CommandPrimitive

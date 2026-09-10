@@ -1015,6 +1015,13 @@ function PluginHeaderSection({
       <p className="text-[12px] leading-4 text-ink-subtle">
         Your personal plugin. Installing, disabling, or removing it affects only your use.
       </p>
+      {!plugin ? (
+        <p className="text-[12px] leading-5 text-ink-subtle">
+          Used this plugin before? Older workspace installations were retired when plugins became
+          personal. Install it for yourself, review its permissions, and connect your account if
+          prompted.
+        </p>
+      ) : null}
       <div className="flex flex-wrap items-start gap-3 rounded-lg border border-border bg-surface p-4">
         <span
           className={`flex size-11 shrink-0 items-center justify-center rounded-lg ${config.iconClassName}`}

@@ -238,6 +238,31 @@ describe("opencompany Chat Task host tools", () => {
     expect(createWorkspaceSkill).not.toHaveBeenCalled();
   });
 
+  it("forwards partial Skill edits to the authenticated update service", async () => {
+    const updateWorkspaceSkill = vi.fn(async () => ({
+      updated: true as const,
+      name: "renamed-skill",
+      command: "/renamed-skill",
+      bundleId: "bundle_2",
+    }));
+    await executeChatHostToolService({
+      command: {
+        operation: "edit_workspace_skill",
+        sessionId: "runtime_1",
+        runId: "turn_1",
+        toolCallId: "rename_1",
+        input: { name: "installation_1", newName: "renamed-skill", expectedBundleId: "bundle_1" },
+      },
+      dependencies: testDependencies({ updateWorkspaceSkill }),
+    });
+    expect(updateWorkspaceSkill).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "installation_1",
+        skill: { newName: "renamed-skill", expectedBundleId: "bundle_1" },
+      }),
+    );
+  });
+
   it("updates a workspace Skill as the authenticated member", async () => {
     const updateWorkspaceSkill = vi.fn(async () => ({
       updated: true as const,

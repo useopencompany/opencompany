@@ -11,10 +11,8 @@ import StarterKit from "@tiptap/starter-kit";
 import { Bold, Code, GripVertical, Heading1, Heading2, Italic } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
-import {
-  createSkillMentionDecorationPlugin,
-  createSkillMentionPlugin,
-} from "@/components/SkillMentionSuggestion";
+import { SkillMention } from "@/components/SkillMentionNode";
+import { createSkillMentionPlugin } from "@/components/SkillMentionSuggestion";
 import { WIKI_LINK_STATE_KEY, WikiLink, type WikiLinkState } from "@/components/WikiLinkNode";
 import { createWikiPageSuggestionPlugin } from "@/components/WikiPageSuggestion";
 import {
@@ -70,7 +68,7 @@ export function MarkdownBrainEditor({
   compact?: boolean;
   placeholder?: string;
   // When set, typing "@" opens an autocomplete of these skills and inserts
-  // literal `@skill/<id>` text — the same token workflow-tasks.ts already
+  // a named chip serialized as `@skill/<id>` — the token workflow-tasks.ts
   // resolves at fire time. Captured once at mount, like `content`; callers
   // that need this pass a stable, server-fetched catalog.
   skillMentions?: SkillCatalogItem[];
@@ -154,16 +152,11 @@ export function MarkdownBrainEditor({
           : []),
         ...(skillMentions
           ? [
+              SkillMention.configure({ skills: skillMentions }),
               Extension.create({
-                name: "skillMention",
+                name: "skillMentionSuggestion",
                 addProseMirrorPlugins() {
-                  // Always paint mention chips; only wire the "@" typeahead when
-                  // the field is editable.
-                  const plugins = [createSkillMentionDecorationPlugin()];
-                  if (!readOnly) {
-                    plugins.unshift(createSkillMentionPlugin(this.editor, skillMentions));
-                  }
-                  return plugins;
+                  return readOnly ? [] : [createSkillMentionPlugin(this.editor, skillMentions)];
                 },
               }),
             ]

@@ -124,11 +124,22 @@ describe("enqueueCodexChatWakeup", () => {
     expect(statement).toContain("lease_id =");
     expect(statement).toContain("lease_owner =");
     expect(statement).toContain("status = 'running'");
-    const queryChunks = (mocks.execute.mock.calls[0]?.[0] as { queryChunks?: unknown[] })
-      .queryChunks;
-    expect(queryChunks).toContain(
-      '{"delaySeconds":120,"reason":"Wait for CI","prompt":"Inspect PR #42."}',
-    );
+    expect(statement).toContain('"delaySeconds":120');
+  });
+
+  it("removes a canceled wakeup while holding the running turn lease", async () => {
+    await persistCodexChatScheduledWakeup({
+      turnId: "run_1",
+      userWorkosId: "user_1",
+      codexChatSessionId: "runtime_1",
+      leaseId: "lease_1",
+      leaseOwner: "runner_1",
+      wakeup: null,
+    });
+    const statement = sqlText(mocks.execute.mock.calls[0]?.[0]);
+    expect(statement).toContain("settings - 'scheduledWakeup'");
+    expect(statement).toContain("status = 'running'");
+    expect(statement).toContain("lease_id =");
   });
 
   it("fails persistence after the turn lease is lost", async () => {

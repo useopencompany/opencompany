@@ -4640,6 +4640,49 @@ describe("Surface chat streaming UI", () => {
     expect(routerMock.push).toHaveBeenCalledWith("/chat/chat_1");
   });
 
+  it("keeps Cmd+K matches in recency order while searching and after clearing", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={null}
+        recentChats={[
+          codexChatSummary({
+            id: "chat_newer",
+            title: "Plans for spring",
+            updatedAt: "2026-08-10T12:00:00.000Z",
+          }),
+          codexChatSummary({
+            id: "chat_older",
+            title: "Planning",
+            updatedAt: "2026-08-09T12:00:00.000Z",
+          }),
+        ]}
+      />,
+    );
+
+    await user.keyboard("{Meta>}k{/Meta}");
+    const dialog = screen.getByRole("dialog");
+    const input = within(dialog).getByRole("combobox");
+    const recentTitles = () =>
+      within(dialog)
+        .getAllByRole("option")
+        .filter((option) => option.dataset.value !== "start-new-chat")
+        .map((option) => option.querySelector("p")?.textContent);
+
+    expect(recentTitles()).toEqual(["Plans for spring", "Planning"]);
+    await user.type(input, "planning");
+    expect(recentTitles()).toEqual(["Plans for spring", "Planning"]);
+    await user.clear(input);
+    await user.type(input, "no matching work");
+    expect(within(dialog).getByText("No matching tasks or chats.")).toBeInTheDocument();
+    expect(within(dialog).getAllByRole("option")).toHaveLength(1);
+    await user.clear(input);
+    expect(recentTitles()).toEqual(["Plans for spring", "Planning"]);
+  });
+
   it("mixes archived chats into the Cmd+K palette by recency and restores them", async () => {
     const user = userEvent.setup();
 
