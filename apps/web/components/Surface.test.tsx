@@ -3215,7 +3215,9 @@ describe("Surface chat streaming UI", () => {
     expect(screen.getByTestId("optimistic-chat-summaries")).toHaveTextContent(
       `${body.newSessionId}:@codex check repo access`,
     );
-    expect(readLastChatSelection("user_1", { codexConnected: true })).toBe(DEFAULT_MODEL);
+    expect(window.localStorage.getItem("opencompany-goat-main-chat-selection:user_1")).toBe(
+      DEFAULT_MODEL,
+    );
 
     await user.keyboard("{Escape}");
     await nextAnimationFrame();
@@ -3283,7 +3285,9 @@ describe("Surface chat streaming UI", () => {
       model: CLAUDE_CHAT_DEFAULT_MODEL_ID,
       engine: { type: "claude_code", schemaVersion: 1 },
     });
-    expect(readLastChatSelection("user_1", { codexConnected: true })).toBe(DEFAULT_MODEL);
+    expect(window.localStorage.getItem("opencompany-goat-main-chat-selection:user_1")).toBe(
+      DEFAULT_MODEL,
+    );
 
     await user.keyboard("{Escape}");
     await nextAnimationFrame();
@@ -4783,7 +4787,7 @@ describe("Surface chat streaming UI", () => {
     // The model picker's popover content portals outside the dialog's DOM subtree.
     await user.click(screen.getByText("Cloud Codex sandbox"));
 
-    expect(readLastChatSelection("user_1", { codexConnected: true })).toBeNull();
+    expect(window.localStorage.getItem("opencompany-goat-main-chat-selection:user_1")).toBeNull();
   });
 
   it("searches and jumps to an existing chat from the Cmd+K palette", async () => {
