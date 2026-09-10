@@ -157,7 +157,12 @@ export type ChatHostToolServiceDependencies = {
   updateWorkspaceSkill: (input: {
     actor: Actor;
     name: string;
-    skill: { description: string; instructions: string; expectedBundleId?: string };
+    skill: {
+      newName?: string;
+      description?: string;
+      instructions?: string;
+      expectedBundleId?: string;
+    };
   }) => Promise<{ updated: true; name: string; command: string; bundleId: string }>;
   createTask: (input: {
     actorId: string;
@@ -385,8 +390,15 @@ async function executeOperation(
         name: requiredString(toolInput.name, "name"),
         skill: {
           ...(expectedBundleId ? { expectedBundleId } : {}),
-          description: requiredString(toolInput.description, "description"),
-          instructions: requiredString(toolInput.instructions, "instructions"),
+          ...(toolInput.newName !== undefined
+            ? { newName: requiredString(toolInput.newName, "newName") }
+            : {}),
+          ...(toolInput.description !== undefined
+            ? { description: requiredString(toolInput.description, "description") }
+            : {}),
+          ...(toolInput.instructions !== undefined
+            ? { instructions: requiredString(toolInput.instructions, "instructions") }
+            : {}),
         },
       });
     }

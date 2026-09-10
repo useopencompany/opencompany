@@ -155,6 +155,22 @@ describe("edit_workspace_skill tool", () => {
     ).toBe(true);
   });
 
+  it("passes a rename without requiring replacement instructions", async () => {
+    const editWorkspaceSkill = vi.fn();
+    const context = createProductChatToolContext({ model, editWorkspaceSkill });
+    const skillTool = context.tools[EDIT_WORKSPACE_SKILL_TOOL_NAME] as {
+      execute: (args: unknown, context: { toolCallId: string }) => Promise<unknown>;
+    };
+    await skillTool.execute(
+      { name: " installation_1 ", newName: " renamed-skill ", expectedBundleId: "bundle_1" },
+      { toolCallId: "rename_1" },
+    );
+    expect(editWorkspaceSkill).toHaveBeenCalledWith(
+      { name: "installation_1", newName: "renamed-skill", expectedBundleId: "bundle_1" },
+      { toolCallId: "rename_1" },
+    );
+  });
+
   it("passes the complete revised Skill and stable SDK tool-call id to the host", async () => {
     const editWorkspaceSkill = vi.fn(async () => ({
       updated: true as const,

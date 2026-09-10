@@ -939,8 +939,9 @@ export function createProductChatToolContext(input: {
           {
             ...(args.expectedBundleId ? { expectedBundleId: args.expectedBundleId } : {}),
             name: args.name.trim(),
-            description: args.description.trim(),
-            instructions: args.instructions.trim(),
+            ...(args.newName !== undefined ? { newName: args.newName.trim() } : {}),
+            ...(args.description !== undefined ? { description: args.description.trim() } : {}),
+            ...(args.instructions !== undefined ? { instructions: args.instructions.trim() } : {}),
           },
           { toolCallId },
         );
