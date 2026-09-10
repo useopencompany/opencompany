@@ -24,6 +24,7 @@ import {
   CalendarClock,
   CircleUserRound,
   ExternalLink,
+  Inbox,
   Link2,
   ListTodo,
   Loader2,
@@ -84,6 +85,7 @@ import { buildHarnessRun, type HarnessRunViewModel } from "@/lib/task-harness-ru
 import {
   updateAutoModelRoutingAction,
   updateBotsAction,
+  updateReviewInboxAction,
   updateTaskSpawningAction,
 } from "@/lib/user-preferences";
 
@@ -270,6 +272,13 @@ export function PreferencesSettingsRoute() {
           description="Let opencompany choose a model from your first message and keep it for the chat."
           checked={featureFlags.autoModelRouting}
           update={updateAutoModelRoutingAction}
+        />
+        <BetaFeatureSwitch
+          icon={Inbox}
+          label="For review"
+          description="Collect finished chats and tasks you haven't read yet in one place, and read them side by side."
+          checked={featureFlags.reviewInbox}
+          update={updateReviewInboxAction}
         />
       </section>
     </SettingsContent>
@@ -566,6 +575,31 @@ export function TasksWorkflowsDisabledRoute() {
           <p className="text-[13px] leading-5 text-ink-subtle">
             Enable Tasks &amp; Workflows in Preferences to fire workflows, run background tasks, and
             set up recurring routines.
+          </p>
+          <Link
+            href="/settings/preferences"
+            className="inline-flex w-fit rounded-md border border-border bg-surface px-3 py-2 text-[13px] font-medium text-ink hover:bg-surface-hover"
+          >
+            Open Preferences
+          </Link>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+export function ReviewInboxDisabledRoute() {
+  return (
+    <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
+      <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
+        <div className="flex w-full max-w-[720px] flex-col gap-4 pb-24 pt-16 sm:pt-24">
+          <BackLink href="/" label="Chat" />
+          <h1 className="text-[24px] font-semibold leading-tight text-ink">
+            For review is a beta feature
+          </h1>
+          <p className="text-[13px] leading-5 text-ink-subtle">
+            Enable For review in Preferences to collect finished chats and tasks you haven&apos;t
+            read yet in one place.
           </p>
           <Link
             href="/settings/preferences"

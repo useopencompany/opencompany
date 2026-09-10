@@ -753,6 +753,7 @@ export const users = productSchema.table(
     taskSpawningEnabled: boolean("task_spawning_enabled").notNull().default(false),
     autoModelRoutingEnabled: boolean("auto_model_routing_enabled").notNull().default(false),
     chatCapabilitiesBetaEnabled: boolean("chat_capabilities_beta_enabled").notNull().default(false),
+    reviewInboxEnabled: boolean("review_inbox_enabled").notNull().default(false),
     // Retained for rollback compatibility after the wiki became the default.
     // Runtime code must not read this legacy per-user preview flag.
     wikiEnabled: boolean("wiki_enabled").notNull().default(false),
@@ -5399,6 +5400,8 @@ export const taskReadModelV1 = productSchema.table(
     error: text("error"),
     reportedStatus: text("reported_status").$type<TaskReportedOutcome>(),
     outcomeComment: text("outcome_comment"),
+    // Mirrors the unread flag on the Task's conversation, which is where settlement sets it.
+    hasUnseen: boolean("has_unseen").notNull().default(false),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),

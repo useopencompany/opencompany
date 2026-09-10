@@ -16,6 +16,7 @@ type UserPreferences = {
   taskViewMode: TaskViewMode;
   taskTimeRange: TaskTimeRange;
   autoModelRoutingEnabled: boolean;
+  reviewInboxEnabled: boolean;
 };
 
 export async function updateTimezoneAction(timezone: string) {
@@ -64,6 +65,13 @@ export async function updateAutoModelRoutingAction(enabled: boolean) {
   revalidatePath("/");
   revalidatePath("/settings/preferences");
   return { ok: true, enabled: preferences.autoModelRoutingEnabled } as const;
+}
+
+export async function updateReviewInboxAction(enabled: boolean) {
+  const preferences = await patchPreferences({ reviewInboxEnabled: enabled === true });
+  revalidatePath("/");
+  revalidatePath("/settings/preferences");
+  return { ok: true, enabled: preferences.reviewInboxEnabled } as const;
 }
 
 async function patchPreferences(body: Partial<UserPreferences>): Promise<UserPreferences> {

@@ -1208,15 +1208,32 @@ export class PostgresTaskRepository implements TaskRepository {
     const now = this.options.now?.() ?? new Date();
     const archived = "archived" in input.command ? input.command.archived : null;
     const name = "name" in input.command ? input.command.name : null;
+    const markSeen = "markSeen" in input.command ? input.command.markSeen : null;
     const [row] = await this.rows<TaskUpdateRow>(sql`
       WITH authorized AS MATERIALIZED (
-        SELECT task.id
+        SELECT task.id, task.session_id
         FROM goat.tasks AS task
         JOIN goat.chat_sessions AS conversation
           ON conversation.id = task.session_id
          AND conversation.kind = 'task'
         WHERE (task.id = ${input.taskId} OR upper(task.display_id) = upper(${input.taskId}))
           AND ${taskAccessPredicate(input.actor)}
+      ),
+      -- Acknowledgment lives on the Task's conversation, which is where settlement raises the
+      -- unread flag. It deliberately leaves updated_at alone on both rows so reading a result
+      -- never resequences a queue the reader is working through.
+      acknowledged_conversation AS (
+        UPDATE goat.chat_sessions AS conversation
+        SET has_unseen = false,
+            last_seen_at = GREATEST(
+              COALESCE(conversation.last_seen_at, '-infinity'::timestamptz),
+              ${now}::timestamptz
+            )
+        FROM authorized
+        WHERE ${markSeen}::boolean IS TRUE
+          AND conversation.id = authorized.session_id
+          AND conversation.kind = 'task'
+        RETURNING conversation.id
       ),
       updated AS MATERIALIZED (
         UPDATE goat.tasks AS task

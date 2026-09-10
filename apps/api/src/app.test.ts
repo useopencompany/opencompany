@@ -3578,6 +3578,7 @@ describe("canonical Hono API", () => {
             taskViewMode: "list",
             taskTimeRange: "24h",
             autoModelRoutingEnabled: true,
+            reviewInboxEnabled: false,
           }),
         },
       });
@@ -3641,6 +3642,7 @@ describe("canonical Hono API", () => {
         taskViewMode: "board" as const,
         taskTimeRange: "7d" as const,
         autoModelRoutingEnabled: false,
+        reviewInboxEnabled: false,
       }));
       const app = testApp(fakeRepository(), {
         userSettings: { ...fakeUserSettings(), updatePreferences },
@@ -3667,6 +3669,7 @@ describe("canonical Hono API", () => {
       taskViewMode: "list" as const,
       taskTimeRange: "24h" as const,
       autoModelRoutingEnabled: true,
+      reviewInboxEnabled: false,
     }));
     const app = testApp(fakeRepository(), {
       userSettings: { ...fakeUserSettings(), updatePreferences },
