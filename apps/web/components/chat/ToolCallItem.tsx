@@ -104,9 +104,11 @@ export function ToolCallItem({
     onActionApproval
   ) {
     if (managedCapabilityActionFromTool(tool)) {
-      return <CapabilityApprovalCard tool={tool} onDecision={onActionApproval} />;
+      return (
+        <CapabilityApprovalCard tool={tool} onDecision={onActionApproval} disclosure={disclosure} />
+      );
     }
-    return <ActionApprovalCard tool={tool} onDecision={onActionApproval} />;
+    return <ActionApprovalCard tool={tool} onDecision={onActionApproval} disclosure={disclosure} />;
   }
   if (detail && detail.state !== "loaded")
     return <ToolCallRow tool={tool} detail={detail} {...disclosure} />;
@@ -136,7 +138,7 @@ export function ToolCallItem({
     );
   }
   if (tool.name === CODEX_QUESTION_TOOL_NAME && codexQuestionInput(tool.input)) {
-    return <CodexQuestionRow tool={tool} onAction={onCodexAction} />;
+    return <CodexQuestionRow tool={tool} onAction={onCodexAction} disclosure={disclosure} />;
   }
   if (
     tool.name === CODEX_APPROVAL_TOOL_NAME &&
@@ -145,7 +147,14 @@ export function ToolCallItem({
     allowActionApproval &&
     onActionApproval
   ) {
-    return <ActionApprovalCard tool={tool} onDecision={onActionApproval} allowAlways={false} />;
+    return (
+      <ActionApprovalCard
+        tool={tool}
+        onDecision={onActionApproval}
+        allowAlways={false}
+        disclosure={disclosure}
+      />
+    );
   }
   if (tool.name === USE_ACTION_TOOL_NAME && capabilityApprovalFromTool(tool)) {
     return <LegacyCapabilityApprovalRow tool={tool} />;
@@ -205,9 +214,11 @@ function LegacyCapabilityApprovalRow({ tool }: { tool: ToolCallView }) {
 
 function CapabilityApprovalCard({
   tool,
+  disclosure,
   onDecision,
 }: {
   tool: ToolCallView;
+  disclosure: ToolCallDisclosure;
   onDecision: (request: ActionApprovalRequest) => Promise<void>;
 }) {
   const approvalId = tool.approvalId;
@@ -259,7 +270,7 @@ function CapabilityApprovalCard({
     return () => controller.abort();
   }, [tool.toolCallId]);
 
-  if (!approvalId || !action) return <ToolCallRow tool={tool} />;
+  if (!approvalId || !action) return <ToolCallRow tool={tool} {...disclosure} />;
   const approvalAvailable = quote?.status === "awaiting_approval";
 
   const decide = (decision: "accept" | "decline") => {
@@ -351,10 +362,12 @@ function CapabilityApprovalCard({
 
 function ActionApprovalCard({
   tool,
+  disclosure,
   onDecision,
   allowAlways = true,
 }: {
   tool: ToolCallView;
+  disclosure: ToolCallDisclosure;
   onDecision: (request: ActionApprovalRequest) => Promise<void>;
   allowAlways?: boolean;
 }) {
@@ -366,7 +379,7 @@ function ActionApprovalCard({
   const approvalId = tool.approvalId;
   const action =
     isRecord(tool.input) && typeof tool.input.action === "string" ? tool.input.action : "";
-  if (!approvalId) return <ToolCallRow tool={tool} />;
+  if (!approvalId) return <ToolCallRow tool={tool} {...disclosure} />;
 
   const decide = (decision: ActionApprovalDecision) => {
     if (submitting) return;
@@ -695,9 +708,11 @@ type CodexQuestion = {
 
 function CodexQuestionRow({
   tool,
+  disclosure,
   onAction,
 }: {
   tool: ToolCallView;
+  disclosure: ToolCallDisclosure;
   onAction?: ((action: CodexToolAction) => Promise<void>) | undefined;
 }) {
   const input = codexQuestionInput(tool.input);
@@ -706,7 +721,7 @@ function CodexQuestionRow({
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  if (!input || tool.status !== "waiting") return <ToolCallRow tool={tool} />;
+  if (!input || tool.status !== "waiting") return <ToolCallRow tool={tool} {...disclosure} />;
 
   const submit = () => {
     if (!onAction || submitting || submitted) return;
