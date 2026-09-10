@@ -92,6 +92,7 @@ describe("headless Chat host tools", () => {
       },
       dependencies: {
         loadContext: vi.fn(async () => ({
+          taskConversation: false,
           actorId: "user_1",
           workspaceId: "workspace_1",
           workspaceName: "opencompany",

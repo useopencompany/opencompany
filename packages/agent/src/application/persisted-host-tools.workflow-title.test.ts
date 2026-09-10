@@ -60,6 +60,7 @@ describe("persisted workflow host tools", () => {
           lastName: "Lovelace",
           timezone: "Europe/London",
           taskToolsEnabled: true,
+          taskConversation: false,
           skillToolsEnabled: true,
           legacyBrainEnabled: false,
         })),

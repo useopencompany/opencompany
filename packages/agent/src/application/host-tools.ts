@@ -14,7 +14,7 @@ import { type Actor, SKILL_READ_PERMISSION, SKILL_WRITE_PERMISSION } from "@open
 import type { DeleteTaskScheduleToolOutput, EditTaskScheduleToolOutput } from "../chat-ui";
 
 export type ChatHostContext = {
-  taskConversation?: boolean;
+  taskConversation: boolean;
   actorId: string;
   workspaceId: string;
   workspaceName: string;
@@ -581,6 +581,7 @@ async function bootstrap(
   input: Record<string, unknown>,
   dependencies: ChatHostToolServiceDependencies,
 ): Promise<ChatHostBootstrap> {
+  const taskToolsEnabled = context.taskToolsEnabled && !context.taskConversation;
   const mentionedSkillIds = stringArray(input.mentionedSkillIds);
   const [mentionedSkills, skills, workflows, recurringSchedules, browserProfiles] =
     await Promise.all([
@@ -597,10 +598,10 @@ async function bootstrap(
         context.actorId,
         context.taskConversation ? "company" : undefined,
       ),
-      context.taskToolsEnabled
+      taskToolsEnabled
         ? dependencies.listWorkflowCatalog(context.workspaceId)
         : Promise.resolve([]),
-      context.taskToolsEnabled ? dependencies.listSchedules(context.actorId) : Promise.resolve([]),
+      taskToolsEnabled ? dependencies.listSchedules(context.actorId) : Promise.resolve([]),
       dependencies.browserProfilesAvailable()
         ? dependencies.listBrowserProfiles(context.actorId)
         : Promise.resolve([]),
@@ -621,7 +622,7 @@ async function bootstrap(
       timezone: context.timezone,
     },
     workspaceName: context.workspaceName,
-    taskToolsEnabled: context.taskToolsEnabled,
+    taskToolsEnabled,
     skillToolsEnabled: context.skillToolsEnabled,
     browserToolsEnabled: true,
     browserProfiles: browserProfiles.map(({ id, name, siteHost }) => ({ id, name, siteHost })),
@@ -688,6 +689,11 @@ function browserProfileResult(session: BrowserProfileSession) {
 }
 
 function assertTaskTools(context: ChatHostContext) {
+  if (context.taskConversation) {
+    throw new Error(
+      "Tasks cannot create other tasks or manage task schedules. Use a main chat instead.",
+    );
+  }
   if (!context.taskToolsEnabled) throw new Error("Task creation is not enabled for this user.");
 }
 
