@@ -5,7 +5,13 @@ import type { PluginGatewayDiscoveredTool } from "@opencompany/core";
 import { describe, expect, it, vi } from "vitest";
 import { type RemoteMcpGatewayRegistration, resolveRemoteMcpActions } from "../actions/remote-mcp";
 import type { ActionExecuteContext } from "../actions/types";
+import { executeXApiTool } from "./x-api-tools";
 import { xMcpCapabilities, xMcpDiscoverySnapshot } from "./x-mcp-catalog";
+import { createXMcpClient } from "./x-mcp-client";
+
+vi.mock("@opencompany/analytics/product/server", () => ({
+  captureProductServerEvent: vi.fn(async () => undefined),
+}));
 
 const identity = { userWorkosId: "user_1", workspaceId: "workspace_1" };
 const context = {
@@ -105,6 +111,46 @@ describe("X gateway catalog", () => {
       "plugin:x:x.get_posts_analytics",
     ]);
     expect(catalog?.actions.every((a) => a.permissionMode === "ask")).toBe(true);
+  });
+
+  it("validates, dispatches, audits, and unwraps an approved post through the real gateway and X adapter", async () => {
+    const reg = registration();
+    const apiCall = vi.fn().mockResolvedValue({ data: { id: "123", text: "" } });
+    const createRemoteClient = vi.fn();
+    const recordDispatch = vi.fn(async () => undefined);
+    reg.loadConnection = vi.fn(async () => ({
+      ok: true as const,
+      integrationId: "gint_x",
+      createClient: createXMcpClient({
+        connection: { userWorkosId: identity.userWorkosId, integrationId: "gint_x" },
+        createRemoteClient,
+        executeApiTool: (input) => executeXApiTool({ ...input, apiCall }),
+      }),
+    }));
+    const action = (await resolveRemoteMcpActions(identity, reg, { recordDispatch }))!.actions.find(
+      (entry) => entry.id === "plugin:x:x.create_posts",
+    )!;
+    expect(action.permissionMode).toBe("ask");
+    await expect(action.execute({ media_ids: ["456"] }, context)).resolves.toMatchObject({
+      data: { id: "123", url: "https://x.com/i/status/123" },
+    });
+    expect(apiCall).toHaveBeenCalledExactlyOnceWith(
+      { userWorkosId: identity.userWorkosId, integrationId: "gint_x" },
+      "POST",
+      new URL("https://api.x.com/2/tweets"),
+      { signal: context.signal, body: { text: "", media: { media_ids: ["456"] } } },
+    );
+    expect(recordDispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: "plugin:x:x",
+        integrationId: "gint_x",
+        tool: "create_posts",
+        capability: "write",
+      }),
+    );
+    expect(createRemoteClient).not.toHaveBeenCalled();
+    await expect(action.execute({ text: "hello", draft: true }, context)).rejects.toThrow();
+    expect(apiCall).toHaveBeenCalledTimes(1);
   });
 
   it.each(["disabled", "account_changed", "permission_changed", "wrong_user", "wrong_workspace"])(
