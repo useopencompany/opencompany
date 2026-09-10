@@ -81,6 +81,18 @@ export function ToolCallItem({
   readOnly?: boolean;
   detail?: HistoricalPresentationDetailController;
 }) {
+  // Keep the user's choice when historical detail switches the row renderer.
+  const [expanded, setExpanded] = useState(false);
+  useHistoricalPresentationDetail(expanded, detail);
+  const disclosure: ToolCallDisclosure = {
+    expanded,
+    onToggle: () => {
+      const next = !expanded;
+      setExpanded(next);
+      if (next && detail?.state !== "loaded") void detail?.load();
+    },
+  };
+
   // Summary-backed messages retain the approval id, action, and bounded params. The latest
   // authorized approval must use those fields before the historical-detail guard collapses it.
   if (
@@ -96,18 +108,19 @@ export function ToolCallItem({
     }
     return <ActionApprovalCard tool={tool} onDecision={onActionApproval} />;
   }
-  if (detail && detail.state !== "loaded") return <ToolCallRow tool={tool} detail={detail} />;
+  if (detail && detail.state !== "loaded")
+    return <ToolCallRow tool={tool} detail={detail} {...disclosure} />;
   // Shared transcripts are intentionally observational: repository recovery
   // acts on the signed-in viewer's private GitHub connection, so only an
   // editable conversation may render those controls.
-  if (readOnly) return <ToolCallRow tool={tool} {...(detail ? { detail } : {})} />;
+  if (readOnly) return <ToolCallRow tool={tool} {...(detail ? { detail } : {})} {...disclosure} />;
 
   if (tool.name === BRAIN_TOOL_NAME) {
-    return <BrainToolCallRow tool={tool} initiallyExpanded={Boolean(detail)} />;
+    return <BrainToolCallRow tool={tool} {...disclosure} />;
   }
   if (tool.name === CODEX_COMMAND_TOOL_NAME) {
     const target = githubInstallGapCandidate(tool);
-    const row = <CodexCommandRow tool={tool} initiallyExpanded={Boolean(detail)} />;
+    const row = <CodexCommandRow tool={tool} {...disclosure} />;
     return target ? (
       <>
         {row}
@@ -138,7 +151,7 @@ export function ToolCallItem({
     return <LegacyCapabilityApprovalRow tool={tool} />;
   }
   const target = githubInstallGapCandidate(tool);
-  const row = <ToolCallRow tool={tool} {...(detail ? { detail } : {})} />;
+  const row = <ToolCallRow tool={tool} {...(detail ? { detail } : {})} {...disclosure} />;
   return target ? (
     <>
       {row}
@@ -889,15 +902,20 @@ function codexQuestionInput(
     : null;
 }
 
+type ToolCallDisclosure = {
+  expanded: boolean;
+  onToggle: () => void;
+};
+
 function ToolCallRow({
   tool,
   detail,
+  expanded,
+  onToggle,
 }: {
   tool: ToolCallView;
   detail?: HistoricalPresentationDetailController;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  useHistoricalPresentationDetail(expanded, detail);
+} & ToolCallDisclosure) {
   const meta = getToolCallMeta(tool);
   const Icon = meta.icon;
   const hasOutput = tool.output !== undefined;
@@ -914,11 +932,7 @@ function ToolCallRow({
         <button
           type="button"
           aria-expanded={expanded}
-          onClick={() => {
-            const next = !expanded;
-            setExpanded(next);
-            if (next && detail?.state !== "loaded") void detail?.load();
-          }}
+          onClick={onToggle}
           className="flex min-w-0 items-center gap-1.5 rounded-md px-1 py-px text-left transition-colors hover:bg-surface-hover/65 hover:text-ink/75 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
         >
           <ChevronRight
@@ -1223,12 +1237,11 @@ function browserProfileProbeUrl(value: string) {
 
 function BrainToolCallRow({
   tool,
-  initiallyExpanded = false,
+  expanded,
+  onToggle,
 }: {
   tool: ToolCallView;
-  initiallyExpanded?: boolean;
-}) {
-  const [expanded, setExpanded] = useState(initiallyExpanded);
+} & ToolCallDisclosure) {
   const detail = tool.detail ?? "goat_brain";
   const commandPreview = brainOutputCommand(tool.output);
   const stdoutPreview = brainOutputStdout(tool.output);
@@ -1244,7 +1257,7 @@ function BrainToolCallRow({
         <button
           type="button"
           aria-expanded={expanded}
-          onClick={() => setExpanded((current) => !current)}
+          onClick={onToggle}
           className="flex min-w-0 items-center gap-1.5 rounded-md px-1 py-px text-left transition-colors hover:bg-surface-hover/65 hover:text-ink/75 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
         >
           <ChevronRight
@@ -1284,12 +1297,11 @@ function BrainToolCallRow({
 
 function CodexCommandRow({
   tool,
-  initiallyExpanded = false,
+  expanded,
+  onToggle,
 }: {
   tool: ToolCallView;
-  initiallyExpanded?: boolean;
-}) {
-  const [expanded, setExpanded] = useState(initiallyExpanded);
+} & ToolCallDisclosure) {
   const command = tool.detailChips[0] ?? tool.detail;
   const output = isCodexCommandToolOutput(tool.output) ? tool.output : null;
   const outputPreview = output?.outputPreview?.trim() ? output.outputPreview : null;
@@ -1302,7 +1314,7 @@ function CodexCommandRow({
         <button
           type="button"
           aria-expanded={expanded}
-          onClick={() => setExpanded((current) => !current)}
+          onClick={onToggle}
           className="flex min-w-0 items-center gap-1.5 rounded-md px-1 py-px text-left transition-colors hover:bg-surface-hover/65 hover:text-ink/75 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
         >
           <ChevronRight
