@@ -155,6 +155,7 @@ describe("headless automation commands", () => {
     const command = {
       description: "Focus on competitors.",
       skillIds: ["skill_1"],
+      stepModelOverrides: [{ id: "step_1", model: "codex", runtimeModel: "openai/gpt-5.6-sol" }],
       attachmentIds: ["attachment_1"],
     };
 
@@ -230,7 +231,12 @@ describe("headless automation commands", () => {
         fetch: fetchMock as typeof fetch,
       }),
     ).resolves.toEqual([
-      { id: "weekly-research", name: "Weekly research", description: "Track material changes" },
+      {
+        id: "weekly-research",
+        name: "Weekly research",
+        description: "Track material changes",
+        steps: workflow.steps,
+      },
     ]);
     expect(requests.map((request) => new URL(request.url).search)).toEqual([
       "?limit=100",

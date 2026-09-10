@@ -497,6 +497,7 @@ export function createApiApp(input: CreateApiAppInput) {
         description: body.description,
         ...(body.attachmentIds ? { attachmentIds: body.attachmentIds } : {}),
         ...(body.skillIds ? { skillIds: body.skillIds } : {}),
+        ...(body.stepModelOverrides ? { stepModelOverrides: body.stepModelOverrides } : {}),
       });
       return c.json({ data: taskCreationDto(result), meta }, 202);
     },
