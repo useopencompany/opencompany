@@ -340,6 +340,8 @@ export async function runProductChatTurn(input: {
           stepNumber,
           maxSteps: runtime.maxSteps,
           system: runtime.system,
+          actionCallsExhausted: runtime.toolContext.areActionCallsExhausted(),
+          toolNames: Object.keys(runtime.toolContext.tools),
         }),
       ...(runtime.toolContext.repairToolCall
         ? { experimental_repairToolCall: runtime.toolContext.repairToolCall }
@@ -1287,7 +1289,6 @@ async function resolveProductChatRuntime(input: {
           limits: {
             webSearchCallsPerTurn: 20,
             webFetchCallsPerTurn: 20,
-            actionCallsPerTurn: 20,
           },
         }
       : {}),

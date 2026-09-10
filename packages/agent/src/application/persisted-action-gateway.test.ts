@@ -693,6 +693,7 @@ describe("executeActionGateway", () => {
       ok: true,
       action: "gmail.search",
       result: { messages: [] },
+      budget: { limit: 16, used: 1, remaining: 15 },
     });
     expect(readAction.execute).toHaveBeenCalledWith(
       { query: "from:ada" },
@@ -755,11 +756,13 @@ describe("executeActionGateway", () => {
       ok: true,
       action: "linkedin.search_posts",
       result: { quotedTotalUsdMicros: 10 },
+      budget: { limit: 16, used: 1, remaining: 15 },
     });
     expect(second).toEqual({
       ok: true,
       action: "linkedin.search_posts",
       result: { quotedTotalUsdMicros: 20 },
+      budget: { limit: 16, used: 1, remaining: 15 },
     });
   });
 
