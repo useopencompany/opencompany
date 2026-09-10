@@ -550,6 +550,15 @@ describe("runCodexChatTurn over ACP", () => {
     acpMocks.runTurn.mockImplementation(completeAcpTurn);
   });
 
+  it("passes workspace billing ownership to the sandbox independently of model credentials", async () => {
+    await runCodexChatTurn({ turn: codexTurn(), session: codexSession(), env: env() });
+    expect(sandboxMocks.createOrConnectSandbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        billingOwner: { namespace: "test", workspaceId: "workspace_1", userWorkosId: "user_1" },
+      }),
+    );
+  });
+
   it.each(["goat-codex-host-tools.v4", ACTION_HOST_TOOL_CONTRACT_VERSION])(
     "keeps action discovery guidance aligned with %s",
     async (hostToolContractVersion) => {
@@ -897,6 +906,34 @@ describe("runCodexChatTurn over ACP", () => {
         failureDiagnostic: expect.stringContaining("checkpoint storage unavailable"),
       }),
     );
+  });
+
+  it("preserves infrastructure recovery when Plugin checkpointing also fails", async () => {
+    const { pluginPackage, mcpPlugin } = approvedPluginRuntime();
+    pluginRuntimeMocks.loadChatSessionPluginRuntime.mockResolvedValueOnce({
+      plugins: [pluginPackage],
+      skills: [],
+      mcpPlugins: [mcpPlugin],
+    });
+    const failure = new CodexChatRetryableInfrastructureError(
+      "Sandbox guest stopped answering",
+      new Error("probe timeout"),
+    );
+    acpMocks.runTurn.mockRejectedValueOnce(failure);
+    pluginDataMocks.checkpoint.mockRejectedValueOnce(new Error("guest checkpoint timed out"));
+
+    await expect(
+      runCodexChatTurn({
+        turn: codexTurn(),
+        session: codexSession({ workspaceId: "workspace_1" }),
+        env: env(),
+      }),
+    ).rejects.toBe(failure);
+
+    expect(pluginDataMocks.checkpoint).toHaveBeenCalledOnce();
+    expect(pluginDataMocks.release).toHaveBeenCalledOnce();
+    const projector = eventMocks.createExternalEngineProjector.mock.results.at(-1)?.value;
+    expect(projector.fail).not.toHaveBeenCalled();
   });
 
   it("bootstraps durable history after ACP invalidates a stored session", async () => {
@@ -1315,7 +1352,7 @@ function codexSession(overrides: Partial<CodexChatSession> = {}): CodexChatSessi
     engine: "codex",
     model: "gpt-5.5",
     brainRef: null,
-    workspaceId: null,
+    workspaceId: "workspace_1",
     hostToolContractVersion: null,
     sandboxId: "sbx_existing",
     codexThreadId: "thread_existing",

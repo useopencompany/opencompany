@@ -22,12 +22,14 @@ import {
   workspaceMemberCap,
 } from "@opencompany/db/billing-constants";
 import {
+  type CreditOverview,
   createPendingCheckoutRecord,
   getCreditBalanceUsdMicros,
   loadCreditOverview,
   loadSpendBreakdown,
   markCheckoutRecordFailed,
   markCheckoutRecordOpen,
+  type SpendBreakdownRow,
 } from "@opencompany/db/credits";
 import {
   type BillingCommandOperation,
@@ -57,11 +59,7 @@ export type BillingOverviewData = {
   memberCount: number;
   memberCap: number;
   spendThisMonthUsdMicros: number;
-  spendThisMonthByCategory: {
-    chat: number;
-    ingestion: number;
-    capabilities: number;
-  };
+  spendThisMonthByCategory: CreditOverview["spendThisMonthByCategory"];
   recentActivity: Array<{
     activityId: string;
     source: string;
@@ -89,13 +87,7 @@ export type BillingOverviewData = {
 };
 
 export type UsageData = {
-  breakdown: Array<{
-    day: string;
-    category: "chat" | "ingestion" | "capabilities" | "other";
-    spendUsdMicros: number;
-    providerCostUsdMicros: number;
-    platformFeeUsdMicros: number;
-  }>;
+  breakdown: SpendBreakdownRow[];
   ingestedThisMonth: number;
   pending: number;
   creditBalanceUsdMicros: number;

@@ -4775,6 +4775,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 256,
+            "pattern": "^(?:workspace_|goat_ws_)/u",
             "example": "run_019fed53"
           },
           "name": {
@@ -5042,6 +5043,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 256,
+            "pattern": "^(?:workspace_|goat_ws_)/u",
             "example": "run_019fed53"
           },
           "name": {
@@ -7458,8 +7460,8 @@
           "shareId": {
             "type": "string",
             "nullable": true,
-            "pattern": "^goat_chat_share_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu",
-            "example": "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+            "pattern": "^(?:share_|goat_chat_share_)[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu",
+            "example": "share_01234567-89ab-4cde-8f01-23456789abcd",
             "description": "Unguessable public Chat share capability."
           }
         },
@@ -8151,8 +8153,8 @@
         "properties": {
           "shareId": {
             "type": "string",
-            "pattern": "^goat_chat_share_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu",
-            "example": "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+            "pattern": "^(?:share_|goat_chat_share_)[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu",
+            "example": "share_01234567-89ab-4cde-8f01-23456789abcd",
             "description": "Unguessable public Chat share capability."
           },
           "title": {
@@ -8249,8 +8251,8 @@
         "properties": {
           "shareId": {
             "type": "string",
-            "pattern": "^goat_chat_share_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu",
-            "example": "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+            "pattern": "^(?:share_|goat_chat_share_)[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu",
+            "example": "share_01234567-89ab-4cde-8f01-23456789abcd",
             "description": "Unguessable public Chat share capability."
           },
           "title": {
@@ -11558,6 +11560,66 @@
         ],
         "additionalProperties": false
       },
+      "CodexUsageEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CodexUsage"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "CodexUsage": {
+        "type": "object",
+        "properties": {
+          "windows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "usedPercent": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "resetsAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "id",
+                "label",
+                "usedPercent",
+                "resetsAt"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "windows",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
       "UpdateCodexWorkspaceEngineBody": {
         "type": "object",
         "properties": {
@@ -11888,12 +11950,17 @@
               "capabilities": {
                 "type": "integer",
                 "minimum": 0
+              },
+              "sandbox": {
+                "type": "integer",
+                "minimum": 0
               }
             },
             "required": [
               "chat",
               "ingestion",
-              "capabilities"
+              "capabilities",
+              "sandbox"
             ],
             "additionalProperties": false
           },
@@ -12078,6 +12145,7 @@
                     "chat",
                     "ingestion",
                     "capabilities",
+                    "sandbox",
                     "other"
                   ]
                 },
@@ -20918,8 +20986,8 @@
           {
             "schema": {
               "type": "string",
-              "pattern": "^goat_chat_share_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu",
-              "example": "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+              "pattern": "^(?:share_|goat_chat_share_)[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu",
+              "example": "share_01234567-89ab-4cde-8f01-23456789abcd",
               "description": "Unguessable public Chat share capability."
             },
             "required": true,
@@ -20961,8 +21029,8 @@
           {
             "schema": {
               "type": "string",
-              "pattern": "^goat_chat_share_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu",
-              "example": "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+              "pattern": "^(?:share_|goat_chat_share_)[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu",
+              "example": "share_01234567-89ab-4cde-8f01-23456789abcd",
               "description": "Unguessable public Chat share capability."
             },
             "required": true,
@@ -21004,8 +21072,8 @@
           {
             "schema": {
               "type": "string",
-              "pattern": "^goat_chat_share_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu",
-              "example": "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+              "pattern": "^(?:share_|goat_chat_share_)[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu",
+              "example": "share_01234567-89ab-4cde-8f01-23456789abcd",
               "description": "Unguessable public Chat share capability."
             },
             "required": true,
@@ -21070,8 +21138,8 @@
           {
             "schema": {
               "type": "string",
-              "pattern": "^goat_chat_share_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu",
-              "example": "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+              "pattern": "^(?:share_|goat_chat_share_)[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu",
+              "example": "share_01234567-89ab-4cde-8f01-23456789abcd",
               "description": "Unguessable public Chat share capability."
             },
             "required": true,
@@ -23085,6 +23153,43 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/EngineAuthDisconnectEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/engine-auth/codex/usage": {
+      "get": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current subscription limits for the acting user's connected Codex account. Includes usage across apps; never includes credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodexUsageEnvelope"
                 }
               }
             }

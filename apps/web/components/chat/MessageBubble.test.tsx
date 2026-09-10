@@ -9,7 +9,12 @@ import {
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BRAIN_TOOL_PART_TYPE, type ChatUiMessage, USE_ACTION_TOOL_PART_TYPE } from "@/lib/chat-ui";
+import {
+  BRAIN_TOOL_NAME,
+  BRAIN_TOOL_PART_TYPE,
+  type ChatUiMessage,
+  USE_ACTION_TOOL_PART_TYPE,
+} from "@/lib/chat-ui";
 import { getVisibleBrainCitationCount } from "./AssistantTextBubble";
 import type { ChatTaskLookup } from "./assistant-items";
 import { MessageBubble } from "./MessageBubble";
@@ -81,6 +86,75 @@ it.each(["accept", "decline"] as const)(
 );
 
 describe("MessageBubble historical presentation details", () => {
+  it.each(
+    [CODEX_COMMAND_TOOL_NAME, BRAIN_TOOL_NAME, "history_search"].flatMap((selectedTool) =>
+      [false, true].map((closeBeforeLoad) => ({ selectedTool, closeBeforeLoad })),
+    ),
+  )(
+    "preserves only the selected $selectedTool disclosure when details load (closed while loading: $closeBeforeLoad)",
+    async ({ selectedTool, closeBeforeLoad }) => {
+      const names = [
+        CODEX_COMMAND_TOOL_NAME,
+        CODEX_COMMAND_TOOL_NAME,
+        BRAIN_TOOL_NAME,
+        "history_search",
+      ];
+      const summaryMessage = {
+        id: "assistant_disclosures",
+        role: "assistant",
+        metadata: {
+          sessionId: "conversation_1",
+          presentation: { source: "summary", updatedAt: "2026-09-10T10:00:00.000Z" },
+        },
+        parts: names.map((toolName, index) => ({
+          type: "dynamic-tool",
+          toolName,
+          toolCallId: `tool_${index}`,
+          state: "output-available",
+          input: { description: `Step ${index}`, command: `echo ${index}` },
+        })),
+      } as ChatUiMessage;
+      const fullMessage = {
+        ...summaryMessage,
+        parts: summaryMessage.parts.map((part, index) => ({
+          ...part,
+          output:
+            names[index] === BRAIN_TOOL_NAME
+              ? { ok: true, brainRef: "brain_1", exitCode: 0, stdout: "Full result", stderr: "" }
+              : { status: "completed", exitCode: 0, outputPreview: "Full result" },
+        })),
+      } as ChatUiMessage;
+      let resolvePresentation!: (message: ChatUiMessage) => void;
+      presentationMocks.load.mockReturnValueOnce(
+        new Promise<ChatUiMessage>((resolve) => {
+          resolvePresentation = resolve;
+        }),
+      );
+      render(<MessageBubble message={summaryMessage} taskLookup={emptyTaskLookup} />);
+      const disclosures = () => screen.getAllByRole("button", { expanded: true });
+      const selectedIndex = names.lastIndexOf(selectedTool);
+      await userEvent.click(screen.getAllByRole("button")[selectedIndex]!);
+      expect(disclosures()).toHaveLength(1);
+      expect(screen.getByText("Loading details…")).toBeVisible();
+      if (closeBeforeLoad) {
+        await userEvent.click(screen.getAllByRole("button")[selectedIndex]!);
+      }
+      await act(async () => resolvePresentation(fullMessage));
+      expect(presentationMocks.load).toHaveBeenCalledOnce();
+      expect(screen.queryAllByRole("button", { expanded: true })).toHaveLength(
+        closeBeforeLoad ? 0 : 1,
+      );
+      if (closeBeforeLoad) {
+        await userEvent.click(screen.getAllByRole("button")[selectedIndex]!);
+      }
+      expect(disclosures()).toHaveLength(1);
+      expect(screen.getByText(/Full result/, { selector: "pre" })).toBeVisible();
+      expect(screen.getAllByRole("button")[selectedIndex]).toHaveAttribute("aria-expanded", "true");
+      await userEvent.click(screen.getAllByRole("button")[selectedIndex]!);
+      expect(screen.queryAllByRole("button", { expanded: true })).toHaveLength(0);
+    },
+  );
+
   it("keeps expanded reasoning visible and loads detail when a live row becomes historical", async () => {
     const liveMessage = {
       id: "assistant_reasoning_transition",

@@ -1,3 +1,4 @@
+import { fetchCodexUsage } from "@opencompany/agent/codex-usage";
 import type { Actor } from "@opencompany/core";
 import {
   deleteClaudeCodeCredential,
@@ -18,6 +19,8 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createEngineAuthService } from "./engine-auth";
 import type { RunnerClient } from "./runner-client";
+
+vi.mock("@opencompany/agent/codex-usage", () => ({ fetchCodexUsage: vi.fn() }));
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -107,6 +110,27 @@ const infisicalFlow = {
 };
 
 describe("engine auth service", () => {
+  it("reads personal usage for the actor even when the workspace has a shared provider", async () => {
+    vi.mocked(fetchCodexUsage).mockResolvedValue({
+      windows: [],
+      updatedAt: "2026-09-10T12:00:00.000Z",
+    });
+    await expect(service().getCodexUsage(member)).resolves.toEqual({
+      windows: [],
+      updatedAt: "2026-09-10T12:00:00.000Z",
+    });
+    expect(fetchCodexUsage).toHaveBeenCalledWith({ db: dbSentinel, userWorkosId: member.userId });
+    expect(loadWorkspaceCodexEngineAccount).not.toHaveBeenCalled();
+  });
+
+  it("does not expose upstream errors or credentials to the caller", async () => {
+    vi.mocked(fetchCodexUsage).mockRejectedValue(new Error("secret-provider-response"));
+    await expect(service().getCodexUsage(member)).rejects.toMatchObject({
+      status: 503,
+      message: "Codex usage is temporarily unavailable. Try again shortly.",
+    });
+  });
+
   it("maps missing credentials to the retired null status DTO", async () => {
     await expect(service().getClaudeCodeStatus(member)).resolves.toEqual({
       status: null,

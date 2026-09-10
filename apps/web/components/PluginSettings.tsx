@@ -477,6 +477,8 @@ export function PluginsSettings({
         await installOfficialPlugin(config);
         toast.success(`${config.label} installed.`);
         router.push(`/settings/plugins/${config.name}`);
+        // API mutations do not invalidate the catalog cached for back navigation.
+        router.refresh();
       } catch (cause) {
         setInstallingPluginName(null);
         toast.error(`Couldn't install ${config.label}. ${errorMessage(cause)}`);
@@ -531,7 +533,7 @@ export function PluginsSettings({
   return (
     <SettingsContent
       title="Plugins"
-      description="Your plugins, accounts, and permissions are personal. Install and manage them for yourself."
+      description="Your plugins, accounts, and permissions are personal. Older workspace installations no longer appear here. If a plugin you used before is missing, reinstall it for yourself and review its permissions."
       contentClassName="max-w-[960px]"
     >
       <PluginConnectionFeedback />

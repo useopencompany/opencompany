@@ -289,8 +289,15 @@ export async function runCodexChatTurn(input: {
 
   let sandbox;
   try {
+    if (!session.workspaceId)
+      throw new Error("A billing workspace is required to run this coding workload.");
     sandbox = await createOrConnectSandbox({
       sandboxId: session.sandboxId,
+      billingOwner: {
+        workspaceId: session.workspaceId,
+        userWorkosId: turn.userWorkosId,
+        namespace: env.sandboxNamespace,
+      },
       template: env.codexE2bTemplate ?? "codex",
       envs: {},
       metadata: managedSandboxMetadata({
@@ -988,9 +995,13 @@ export async function runCodexChatTurn(input: {
           });
           await dataRuntime.release().catch(() => undefined);
           pluginDataRuntime = null;
-          effectiveError = new Error(
-            `The coding turn ended, but Plugin data checkpointing failed: ${errorMessage(checkpointError)}`,
-          );
+          // An unreachable guest also prevents checkpointing. Preserve recovery so the next
+          // claim can reboot the same sandbox and retain its local Plugin data.
+          if (!(effectiveError instanceof CodexChatRetryableInfrastructureError)) {
+            effectiveError = new Error(
+              `The coding turn ended, but Plugin data checkpointing failed: ${errorMessage(checkpointError)}`,
+            );
+          }
         }
       }
     }

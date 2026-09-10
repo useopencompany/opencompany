@@ -14,10 +14,10 @@ it("adds Google Admin to the integration vault without removing existing provide
     }
     for (const migration of [
       "0262_opencompany_convex_integration.sql",
-      "0265_google_admin_integration.sql",
+      "0266_google_admin_integration.sql",
     ]) {
       const sql = await readFile(new URL(`../../../drizzle/${migration}`, import.meta.url), "utf8");
-      if (migration.startsWith("0265")) {
+      if (migration.startsWith("0266")) {
         await expect(
           db.exec("INSERT INTO goat.integrations VALUES ('google_admin')"),
         ).rejects.toThrow();

@@ -1021,6 +1021,39 @@ export const creditBalances = productSchema.table("credit_balances", {
 
 // One-time credit top-up Checkout sessions. `fulfilled_at IS NULL` is the
 // webhook-fulfillment idempotency guard.
+export const sandboxBillingCursors = productSchema.table(
+  "sandbox_billing_cursors",
+  {
+    sandboxId: text("sandbox_id").primaryKey(),
+    namespace: text("namespace").notNull(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => users.workosUserId, { onDelete: "cascade" }),
+    billableFrom: timestamp("billable_from", { withTimezone: true }).notNull(),
+    providerStartedAt: timestamp("provider_started_at", { withTimezone: true }),
+    settledThrough: timestamp("settled_through", { withTimezone: true }),
+    nextPollAt: timestamp("next_poll_at", { withTimezone: true }).notNull().defaultNow(),
+    missingAt: timestamp("missing_at", { withTimezone: true }),
+  },
+  (table) => ({
+    dueIdx: index("sandbox_billing_cursors_due_idx")
+      .on(table.namespace, table.nextPollAt, table.sandboxId)
+      .where(sql`${table.missingAt} IS NULL`),
+    intervalCheck: check(
+      "sandbox_billing_cursors_interval_check",
+      sql`
+      (${table.providerStartedAt} IS NULL AND ${table.settledThrough} IS NULL)
+      OR (${table.providerStartedAt} IS NOT NULL AND ${table.settledThrough} IS NOT NULL
+        AND ${table.settledThrough} >= ${table.providerStartedAt}
+        AND ${table.settledThrough} >= ${table.billableFrom})
+    `,
+    ),
+  }),
+);
+
 export const stripeCheckoutSessions = productSchema.table(
   "stripe_checkout_sessions",
   {

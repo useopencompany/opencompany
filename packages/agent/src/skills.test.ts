@@ -72,6 +72,7 @@ describe("workspace Skill management", () => {
           createdByUserId: "user_1",
           canManage: true,
           name: "my-skill",
+          command: "/my-skill",
           description: "Current description.",
           enabled: false,
           source: "workspace",
@@ -120,6 +121,65 @@ describe("workspace Skill management", () => {
     expect(repository.archive).not.toHaveBeenCalled();
   });
 
+  it("renames by stable ID while preserving omitted content and guarding the read version", async () => {
+    await executeWorkspaceSkillToolForActor({
+      actor,
+      tool: "edit_workspace_skill",
+      args: { name: installation.id, newName: "renamed-skill" },
+      idempotencyKey: "rename_1",
+      db,
+    });
+    expect(repository.replace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: installation.id,
+        expectedBundleId: "latest_bundle",
+        bundle: expect.objectContaining({
+          name: "renamed-skill",
+          description: "Current description.",
+          body: "Current saved instructions.\n",
+        }),
+      }),
+    );
+  });
+
+  it.each([
+    {},
+    { newName: "" },
+    { newName: "Bad Name" },
+    { newName: "bad--name" },
+    { newName: "a".repeat(65) },
+    { description: "" },
+    { instructions: "" },
+  ])("rejects invalid or empty edits: %j", async (patch) => {
+    await expect(
+      executeWorkspaceSkillToolForActor({
+        actor,
+        tool: "edit_workspace_skill",
+        args: { name: installation.id, ...patch },
+        idempotencyKey: "invalid",
+        db,
+      }),
+    ).rejects.toThrow();
+    expect(repository.replace).not.toHaveBeenCalled();
+  });
+
+  it("refuses editing imported Skills", async () => {
+    repository.get.mockResolvedValue({
+      ...installation,
+      bundle: { ...installation.bundle, source: { type: "github" } },
+    });
+    await expect(
+      executeWorkspaceSkillToolForActor({
+        actor,
+        tool: "edit_workspace_skill",
+        args: { name: installation.id, newName: "renamed-skill" },
+        idempotencyKey: "imported",
+        db,
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(repository.replace).not.toHaveBeenCalled();
+  });
+
   it("routes engine authoring through canonical validation and passes the expected version", async () => {
     const args = {
       name: "my-skill",
@@ -148,7 +208,11 @@ describe("workspace Skill management", () => {
       db,
     });
     expect(repository.replace).toHaveBeenCalledWith(
-      expect.objectContaining({ actor, name: "my-skill", expectedBundleId: "previous_bundle" }),
+      expect.objectContaining({
+        actor,
+        name: installation.id,
+        expectedBundleId: "previous_bundle",
+      }),
     );
     await expect(
       executeWorkspaceSkillToolForActor({

@@ -26,6 +26,7 @@ describe("usage spend presentation", () => {
       chat: 0,
       ingestion: 0,
       capabilities: 0,
+      sandbox: 0,
       other: 0,
       total: 0,
     });
@@ -38,6 +39,7 @@ describe("usage spend presentation", () => {
       chat: 0,
       ingestion: 0,
       capabilities: 0,
+      sandbox: 0,
       other: 0,
       total: 0,
     });

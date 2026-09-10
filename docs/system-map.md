@@ -89,6 +89,12 @@ mounts those exact versions, and only integrity-approved stdio MCP servers are e
 Claude coding sandboxes. Plugin writable data is restored and checkpointed through bounded Blob
 archives.
 
+Session tools can edit workspace-authored Skills with `edit_workspace_skill`: `name` selects the
+installation by ID or unambiguous current name, and optional `newName`, `description`, and
+`instructions` replace only the supplied fields. `newName` also changes the slash command and
+`@skill` handle. Renames preserve the installation ID and immutable Chat/Task snapshots. Read the
+latest saved Skill first and pass its `expectedBundleId` to reject stale edits.
+
 Browser reads use typed `/v1` resources and fixed authorized API read models, including
 `integration-accounts-v1`. The generic web Electric shape proxy and the legacy `/api/skills`
 response adapter are deleted; clients cannot select physical tables or predicates.
@@ -158,3 +164,17 @@ user-authored guidance. Edits affect subsequent turns; they preserve history and
 Automatic title generation leaves bot names alone. There are no autonomous schedules or extra
 bot tools in this first version. Migration `0261_persistent_bots` is additive; application rollback
 can leave its columns and projection deployed without deleting bot conversations.
+
+## Resource ID naming
+
+New browser and server resource IDs use the shared `@opencompany/core/resource-ids` factory:
+`conversation_`, `workspace_`, `workflow_`, `task_schedule_`, `share_`, `artifact_`, and
+`artifact_version_`, followed by a full random UUID. Schedule runs use `workflow_schedule_run_`
+and `task_schedule_run_`. Tasks already use `task_` IDs and retain their human-facing display IDs.
+
+Persisted IDs are opaque: existing IDs, references, and links are not rewritten. Chat reservation,
+share, and workspace validators accept the legacy prefixes as well as the current formats. Public
+share IDs remain independent, unguessable capabilities. New share links require the updated API
+and web validators; deploy those readers before enabling new writers in a staggered release, and
+retain reader compatibility when rolling back. Physical database names, storage roots, provider
+contracts, and deterministic ingestion IDs retain their existing names.
