@@ -1,9 +1,5 @@
 // Reviewed public package pins. Update artifacts with scripts/package-official-plugins.ts.
 export const OFFICIAL_PLUGIN_SOURCES = {
-  outlook:
-    "https://github.com/useopencompany/plugins/tree/3b0687013773670bf0760fb8c117ae2cf644ed3f/outlook",
-  "outlook-calendar":
-    "https://github.com/useopencompany/plugins/tree/3b0687013773670bf0760fb8c117ae2cf644ed3f/outlook-calendar",
   convex:
     "https://github.com/useopencompany/plugins/tree/81b0f81319ad50ea4e03f20055560be4d814d3b8/convex",
   attio:
@@ -54,4 +50,8 @@ export const OFFICIAL_PLUGIN_SOURCES = {
   x: "https://github.com/useopencompany/plugins/tree/21060c09d1bbe70df85519cc3ad74cd5d097fbb6/x",
   "yc-advise":
     "https://github.com/useopencompany/plugins/tree/2e092c3bc518622f1dc4ac1a6777d87ae3695ec6/yc-advise",
+  outlook:
+    "https://github.com/useopencompany/plugins/tree/3b0687013773670bf0760fb8c117ae2cf644ed3f/outlook",
+  "outlook-calendar":
+    "https://github.com/useopencompany/plugins/tree/3b0687013773670bf0760fb8c117ae2cf644ed3f/outlook-calendar",
 } as const;

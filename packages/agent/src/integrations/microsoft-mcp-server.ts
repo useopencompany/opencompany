@@ -177,7 +177,12 @@ export function registerMicrosoftTool<Shape extends z.ZodRawShape>(
               type: "text" as const,
               text:
                 error instanceof MicrosoftAccessAuthError
-                  ? "Reconnect this Microsoft account to restore access."
+                  ? JSON.stringify({
+                      error: {
+                        code: "auth_expired",
+                        message: "Reconnect this Microsoft account to restore access.",
+                      },
+                    })
                   : error instanceof Error
                     ? error.message
                     : "Microsoft operation failed.",

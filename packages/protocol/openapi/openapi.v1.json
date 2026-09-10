@@ -10906,6 +10906,8 @@
             "enum": [
               "gmail",
               "google_calendar",
+              "outlook",
+              "outlook-calendar",
               "google_drive",
               "linear",
               "github_user",

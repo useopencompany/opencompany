@@ -295,6 +295,8 @@ describe("Electric read models", () => {
     expect(requestedUrl?.searchParams.get("params[3]")?.split(",")).toEqual([
       "gmail",
       "google_calendar",
+      "outlook",
+      "outlook-calendar",
       "google_drive",
       "linear",
       "github",

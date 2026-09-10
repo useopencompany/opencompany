@@ -3,6 +3,7 @@ import { resolvePlugin } from "@opencompany/agent-runtime";
 import { createOfficialPluginFetcher } from "@opencompany/agent-runtime/official-plugin-artifacts";
 import { OFFICIAL_PLUGIN_SOURCES } from "@opencompany/agent-runtime/official-plugin-catalog";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MicrosoftAccessAuthError } from "./microsoft-access-token";
 
 const mocks = vi.hoisted(() => ({
   active: vi.fn(),
@@ -263,6 +264,13 @@ describe.each(["outlook", "outlook-calendar"] as const)("%s MCP boundary", (prov
 });
 
 describe("Outlook Graph behavior", () => {
+  it("returns a structured reconnect envelope when auth expires during an operation", async () => {
+    mocks.api.mockRejectedValueOnce(new MicrosoftAccessAuthError("expired"));
+    const result = await call("outlook", "get_message", { messageId: "m1" });
+    expect(result.isError).toBe(true);
+    expect(decode(result)).toMatchObject({ error: { code: "auth_expired" } });
+  });
+
   it("creates a draft without a send endpoint", async () => {
     mocks.api.mockResolvedValue({ id: "draft_1", isDraft: true });
     const result = await call("outlook", "create_draft", {
