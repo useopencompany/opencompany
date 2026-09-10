@@ -297,9 +297,9 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/granola",
     );
-    expect(screen.getByRole("link", { name: /google drive/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /google admin/i })).toHaveAttribute(
       "href",
-      "/settings/plugins/google-drive",
+      "/settings/plugins/google-admin",
     );
     await user.click(screen.getByRole("button", { name: "View all featured plugins" }));
     expect(screen.getByRole("link", { name: /slack/i })).toHaveAttribute(
@@ -307,6 +307,7 @@ describe("Plugin settings", () => {
       "/settings/plugins/slack",
     );
     await user.click(screen.getByRole("button", { name: "All" }));
+
     expect(screen.getByRole("link", { name: /google calendar/i })).toHaveAttribute(
       "href",
       "/settings/plugins/google-calendar",
@@ -333,6 +334,10 @@ describe("Plugin settings", () => {
     );
     expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(18);
     await user.click(screen.getByRole("button", { name: "View all productivity plugins" }));
+    expect(screen.getByRole("link", { name: /google drive/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/google-drive",
+    );
     expect(screen.getByRole("link", { name: /jamie/i })).toHaveAttribute(
       "href",
       "/settings/plugins/jamie",

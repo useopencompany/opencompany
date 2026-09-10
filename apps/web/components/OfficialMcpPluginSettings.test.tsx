@@ -27,6 +27,7 @@ import {
   GitHubPluginDetailView,
   GmailPluginDetail,
   GmailPluginDetailView,
+  GoogleAdminPluginDetail,
   GoogleCalendarPluginDetail,
   GoogleDrivePluginDetail,
   GranolaPluginDetail,
@@ -217,6 +218,7 @@ const appData = vi.hoisted(() => ({
       integrationId: "gint_x_latest",
     },
     personalAccounts: {
+      google_admin: [] as IntegrationAccountView<"google_admin">[],
       betterstack: [],
       fathom: [
         {
@@ -1372,6 +1374,74 @@ describe("Linear plugin settings", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("uses the shared Google Admin account, OAuth, permission, and uninstall controls", async () => {
+    const adminAccount: IntegrationAccountView<"google_admin"> = {
+      integrationId: "gint_admin",
+      provider: "google_admin",
+      status: "connected",
+      connected: true,
+      accountEmail: "admin@example.com",
+      accountName: "Admin",
+      connectionLabel: "admin@example.com",
+      statusReason: null,
+      scopes: [
+        "https://www.googleapis.com/auth/admin.directory.user",
+        "https://www.googleapis.com/auth/admin.directory.group",
+      ],
+      capabilityModes: {},
+    };
+    appData.integrations.personalAccounts.google_admin = [adminAccount];
+    const adminPlugin: PluginInstallationDto = {
+      ...plugin,
+      name: "google-admin",
+      manifest: { name: "google-admin" },
+      skills: [],
+      remoteMcpServers: [
+        {
+          ...googleCalendarPlugin.remoteMcpServers[0],
+          name: "google-admin",
+          connectionProvider: "google-admin",
+          capabilities: [
+            { id: "query", label: "Read directory", defaultMode: "ask", tools: ["list_users"] },
+            {
+              id: "write",
+              label: "Manage users and groups",
+              defaultMode: "ask",
+              tools: ["create_user"],
+            },
+          ],
+          tools: [],
+        },
+      ],
+    };
+    try {
+      render(
+        <GoogleAdminPluginDetail pluginState={{ status: "ready", plugin: adminPlugin }} canEdit />,
+      );
+      expect(screen.getAllByText("admin@example.com").length).toBeGreaterThan(0);
+      expect(screen.getByRole("link", { name: /Connect Google Admin account/ })).toHaveAttribute(
+        "href",
+        "/api/integrations/google-admin/start?returnTo=/settings/plugins/google-admin",
+      );
+      expect(screen.getByText("Read directory")).toBeInTheDocument();
+      expect(screen.getByText("Manage users and groups")).toBeInTheDocument();
+      for (const label of ["Read directory permission", "Manage users and groups permission"]) {
+        expect(
+          within(screen.getByRole("group", { name: label })).getByRole("button", { name: "Ask" }),
+        ).toHaveAttribute("aria-pressed", "true");
+      }
+      await userEvent.click(screen.getByRole("button", { name: "Uninstall" }));
+      const dialog = await screen.findByRole("dialog", { name: "Uninstall Google Admin?" });
+      await userEvent.click(within(dialog).getByRole("button", { name: "Uninstall" }));
+      await waitFor(() =>
+        expect(commands.archiveHeadlessPlugin).toHaveBeenCalledWith("google-admin"),
+      );
+      expect(accountActions.disconnectIntegrationAccountAction).not.toHaveBeenCalled();
+    } finally {
+      appData.integrations.personalAccounts.google_admin = [];
+    }
   });
 
   it("server-renders account data without starting another live query", () => {
