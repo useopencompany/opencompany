@@ -94,6 +94,40 @@ function messageHeaders(idempotencyKey: string) {
 }
 
 describe("canonical Hono API", () => {
+  it("serves private Codex usage with a dedicated refresh rate limit", async () => {
+    const usage = {
+      windows: [
+        {
+          id: "codex:primary",
+          label: "5-hour",
+          usedPercent: 75,
+          resetsAt: "2026-09-11T00:00:00.000Z",
+        },
+      ],
+      updatedAt: "2026-09-10T12:00:00.000Z",
+    };
+    const getCodexUsage = vi.fn(async () => usage);
+    const buckets: string[] = [];
+    const app = testApp(fakeRepository(), {
+      engineAuth: engineAuthService({ getCodexUsage }),
+      rateLimiter: {
+        consume: async ({ bucket, limit }) => {
+          buckets.push(`${bucket}:${limit}`);
+          return { allowed: true };
+        },
+      },
+    });
+    const response = await app.request("/v1/engine-auth/codex/usage?userId=someone_else");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(getCodexUsage).toHaveBeenCalledWith(actor);
+    expect(buckets).toEqual(["codex-usage:6"]);
+    await expect(response.json()).resolves.toEqual({
+      data: usage,
+      meta: { apiVersion: "v1", protocolVersion: expect.any(String) },
+    });
+  });
+
   it("serves bots through authenticated validated canonical routes", async () => {
     const bot = { id: "bot_1", name: "Research", description: "Find customers" };
     const create = vi.fn(async () => bot);
@@ -797,7 +831,8 @@ describe("canonical Hono API", () => {
     );
     expect(replace).toHaveBeenCalledWith({
       actor,
-      name: "investigate-bug",
+      name: createdInstallation.id,
+      expectedBundleId: createdInstallation.bundle.id,
       bundle: authoredBundle,
     });
     expect(create).toHaveBeenNthCalledWith(1, {
@@ -3658,6 +3693,7 @@ describe("canonical Hono API", () => {
       ["/v1/engine-auth/claude-code", "GET"],
       ["/v1/engine-auth/claude-code", "PUT"],
       ["/v1/engine-auth/codex", "GET"],
+      ["/v1/engine-auth/codex/usage", "GET"],
       ["/v1/engine-auth/codex/device", "POST"],
       ["/v1/engine-auth/infisical", "GET"],
       ["/v1/engine-auth/infisical/start", "POST"],
@@ -5571,6 +5607,9 @@ function fakeEngineAuth(): Parameters<typeof createApiApp>[0]["engineAuth"] {
     },
     disconnectClaudeCode: async () => {
       throw new Error("Unexpected Claude Code disconnect.");
+    },
+    getCodexUsage: async () => {
+      throw new Error("Unexpected Codex usage read.");
     },
     getCodexStatus: async () => {
       throw new Error("Unexpected Codex status read.");

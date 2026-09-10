@@ -13,6 +13,7 @@ import {
   claudeCodeModelSupportsReasoningEffort,
   createAcpEventNormalizer,
   createExternalEngineGatewayTicket,
+  type HarnessNormalizedEvent,
   isActionHostToolContractVersion,
   isCodexReasoningEffort,
   isWikiHostToolContractVersion,
@@ -445,11 +446,25 @@ export async function runClaudeCodeChatTurn(input: {
 
   const acpNormalizer = createAcpEventNormalizer({ engineName: "Claude Code" });
   let redact = createKnownSecretRedactor([auth.token, env.internalToken]);
+  let scheduledWakeup = scheduledWakeupFromTurnSettings(turn.settings);
   const projector = createExternalEngineProjector({
     target: projectorTarget,
     redact: (value) => redact(value),
     initialParts,
     normalizeEvent: acpNormalizer.normalize,
+    onNormalizedEvent: async (event) => {
+      const request = extractAcpScheduleWakeup(event);
+      if (request === undefined) return;
+      await persistCodexChatScheduledWakeup({
+        turnId: turn.id,
+        userWorkosId: turn.userWorkosId,
+        codexChatSessionId: turn.codexChatSessionId,
+        leaseId,
+        leaseOwner,
+        wakeup: request,
+      });
+      scheduledWakeup = request;
+    },
   });
   const checkAbort = createTurnAbortCheck({
     turnId: turn.id,
@@ -462,9 +477,6 @@ export async function runClaudeCodeChatTurn(input: {
   let leaseLost = false;
   let pluginDataRuntime: PluginDataRuntime | null = null;
   let pluginMcpRuntime: PluginMcpLauncherRuntime | null = null;
-  // A recovery run may not replay the raw assistant event that requested this wakeup, so restore
-  // the request persisted by the previous worker before resuming the Claude session.
-  let scheduledWakeup = scheduledWakeupFromTurnSettings(turn.settings);
   let executionStage = "fence_previous_turn";
   try {
     // Fence the old adapter before any fallible preflight awaits. Otherwise repository, auth, or
@@ -598,9 +610,6 @@ export async function runClaudeCodeChatTurn(input: {
       await projector.cancelPendingInteractions();
     }
 
-    // A recovery run may not replay the raw assistant event that requested this wakeup, so restore
-    // the request persisted by the previous worker before resuming the Claude session.
-    let scheduledWakeup = scheduledWakeupFromTurnSettings(turn.settings);
     executionStage = "load_attachments";
     const attachments = await loadCodexChatAttachments(turn);
     await checkAbort();
@@ -916,22 +925,7 @@ export async function runClaudeCodeChatTurn(input: {
             setSql: sql`codex_thread_id = NULL, updated_at = ${new Date()}`,
           });
         },
-        onRuntimeEvents: async (events) => {
-          for (const event of events) {
-            const nextScheduledWakeup = extractAcpScheduleWakeup(event);
-            if (!nextScheduledWakeup) continue;
-            await persistCodexChatScheduledWakeup({
-              turnId: turn.id,
-              userWorkosId: turn.userWorkosId,
-              codexChatSessionId: turn.codexChatSessionId,
-              leaseId,
-              leaseOwner,
-              wakeup: nextScheduledWakeup,
-            });
-            scheduledWakeup = nextScheduledWakeup;
-          }
-          await projector.push(events);
-        },
+        onRuntimeEvents: (events) => projector.push(events),
         // bypassPermissions should prevent permission RPCs. Auto-approve any request that still
         // arrives (for example from a permissions.ask rule) to preserve Claude's
         // bypass-permissions behavior without surfacing an approval prompt.
@@ -1144,7 +1138,8 @@ export async function runClaudeCodeChatTurn(input: {
         });
         await dataRuntime.release().catch(() => undefined);
         pluginDataRuntime = null;
-        if (!handedOff) {
+        // Guest failures must stay recoverable even when the same outage blocks checkpointing.
+        if (!handedOff && !(effectiveError instanceof CodexChatRetryableInfrastructureError)) {
           effectiveError = new Error(
             `The coding turn ended, but Plugin data checkpointing failed: ${errorMessage(checkpointError)}`,
           );
@@ -1275,31 +1270,31 @@ function toExternalEngineSummary(summary: AcpTurnSummary): ExternalEngineTurnSum
   };
 }
 
+// ACP arguments can arrive in intermediate updates and be absent from completion. Consume the
+// shared normalizer's assembled call, and act only after a successful top-level completion.
 export function extractAcpScheduleWakeup(
-  event: Record<string, unknown>,
-): CodexChatScheduledWakeup | null {
-  if (event.method !== "session/update") return null;
-  const params = recordFromUnknown(event.params);
-  const update = recordFromUnknown(params?.update);
-  if (!update) return null;
-  const sessionUpdate = update.sessionUpdate;
-  if (sessionUpdate !== "tool_call" && sessionUpdate !== "tool_call_update") {
-    return null;
-  }
-  if (sessionUpdate === "tool_call_update" && update.status !== "completed") return null;
-  const claudeMeta = recordFromUnknown(recordFromUnknown(update._meta)?.claudeCode);
-  const rawInput = recordFromUnknown(update.rawInput);
-  const toolNames = [claudeMeta?.toolName, update.name, rawInput?.tool, rawInput?.toolName];
+  event: HarnessNormalizedEvent,
+): CodexChatScheduledWakeup | null | undefined {
+  if (event.type !== "mcp_tool.completed" || event.payload.status !== "completed") return;
+  if (event.payload.parentToolCallId) return;
+  const toolInput = recordFromUnknown(event.payload.rawInput);
+  const toolNames = [
+    event.payload.tool,
+    event.payload.toolName,
+    toolInput?.tool,
+    toolInput?.toolName,
+  ];
   if (
     !toolNames.some(
-      (value) =>
-        typeof value === "string" &&
-        (value === "ScheduleWakeup" || value.endsWith("__ScheduleWakeup")),
+      (name) =>
+        typeof name === "string" &&
+        (name === "ScheduleWakeup" || name.endsWith("__ScheduleWakeup")),
     )
-  ) {
-    return null;
-  }
-  return scheduleWakeupFromToolInput(recordFromUnknown(rawInput?.arguments) ?? rawInput);
+  )
+    return;
+  const args = recordFromUnknown(toolInput?.arguments) ?? toolInput;
+  if (args?.stop === true) return null;
+  return scheduleWakeupFromToolInput(args) ?? undefined;
 }
 
 function scheduleWakeupFromToolInput(

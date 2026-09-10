@@ -37,3 +37,25 @@ After applying migration `0238_codex_subscription_routing`:
 6. Temporarily exercise a 401 and 429 response in a non-production workspace;
    verify the reconnect/usage-limit message is shown and no gateway request is
    made.
+
+## Subscription usage
+
+The personal Codex card in **Settings → Inference → Coding subscriptions** shows
+remaining allowance and reset times for the connected user's reported limit windows,
+including additional model limits when present. These are account-wide readings,
+including usage outside opencompany; they are not workspace billing or local cost estimates.
+The shared model access card does not expose another teammate's personal usage.
+
+Usage is fetched on opening the card, every minute while the tab is visible, and on
+manual refresh. A failed refresh retains the last successful reading with an error;
+missing windows are unavailable, never interpreted as unused allowance. Passed reset
+times require a fresh reading before showing restored allowance.
+
+The authenticated `GET /v1/engine-auth/codex/usage` route reads the acting user's stored
+Codex credentials and uses the existing token refresh lease. It calls the same internal
+`https://chatgpt.com/backend-api/wham/usage` endpoint used by
+[CodexBar](https://github.com/steipete/CodexBar/blob/main/docs/codex.md), selecting the
+connected ChatGPT account explicitly. Requests time out, are limited to six refreshes
+per minute per actor, and return only normalized windows and a timestamp with private,
+non-cacheable response headers. This internal provider endpoint may change; failures
+must not disconnect an otherwise valid subscription or fall back to paid inference.

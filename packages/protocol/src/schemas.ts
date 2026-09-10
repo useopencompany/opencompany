@@ -4212,6 +4212,38 @@ export const UpdateCodexWorkspaceEngineBodySchema = z
   .strict()
   .openapi("UpdateCodexWorkspaceEngineBody");
 
+export type CodexUsage = {
+  windows: {
+    id: string;
+    label: string;
+    usedPercent: number;
+    resetsAt: string;
+  }[];
+  updatedAt: string;
+};
+
+export const CodexUsageSchema: z.ZodType<CodexUsage> = z
+  .object({
+    windows: z.array(
+      z
+        .object({
+          id: z.string(),
+          label: z.string(),
+          usedPercent: z.number().min(0).max(100),
+          resetsAt: z.string().datetime(),
+        })
+        .strict(),
+    ),
+    updatedAt: z.string().datetime(),
+  })
+  .strict()
+  .openapi("CodexUsage");
+
+export const CodexUsageEnvelopeSchema = z
+  .object({ data: CodexUsageSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("CodexUsageEnvelope");
+
 export const EngineAuthFlowIdSchema = z
   .string()
   .min(1)

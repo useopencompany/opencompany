@@ -92,6 +92,7 @@ export function createExternalEngineProjector(input: {
   redact: (value: string) => string;
   initialParts?: CodexUiMessagePart[];
   normalizeEvent?: (raw: Record<string, unknown>) => HarnessNormalizedEvent[];
+  onNormalizedEvent?: (event: HarnessNormalizedEvent) => Promise<void>;
   execution?: RunExecutionRepository;
   now?: () => number;
   assistantWriteDebounceMs?: number;
@@ -525,6 +526,7 @@ export function createExternalEngineProjector(input: {
       return serializeProjection(async () => {
         for (const raw of rawEvents) {
           for (const event of normalizeEvent(raw)) {
+            await input.onNormalizedEvent?.(event);
             await handleEvent(event);
           }
         }

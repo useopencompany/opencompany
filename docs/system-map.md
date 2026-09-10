@@ -89,6 +89,12 @@ mounts those exact versions, and only integrity-approved stdio MCP servers are e
 Claude coding sandboxes. Plugin writable data is restored and checkpointed through bounded Blob
 archives.
 
+Session tools can edit workspace-authored Skills with `edit_workspace_skill`: `name` selects the
+installation by ID or unambiguous current name, and optional `newName`, `description`, and
+`instructions` replace only the supplied fields. `newName` also changes the slash command and
+`@skill` handle. Renames preserve the installation ID and immutable Chat/Task snapshots. Read the
+latest saved Skill first and pass its `expectedBundleId` to reject stale edits.
+
 Browser reads use typed `/v1` resources and fixed authorized API read models, including
 `integration-accounts-v1`. The generic web Electric shape proxy and the legacy `/api/skills`
 response adapter are deleted; clients cannot select physical tables or predicates.

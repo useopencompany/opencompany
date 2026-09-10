@@ -118,7 +118,7 @@ export function createCodexBackendLanguageModel(input: {
   return provider.responses(stripOpenAiModelPrefix(input.modelId));
 }
 
-function createCodexTokenManager(input: {
+export function createCodexTokenManager(input: {
   db: DbLike;
   userWorkosId: string;
   fetchImpl: FetchLike;

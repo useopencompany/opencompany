@@ -157,6 +157,11 @@ export type SkillAuthoringInput = {
   instructions: string;
 };
 
+export type SkillUpdateInput = Partial<Omit<SkillAuthoringInput, "name">> & {
+  newName?: string;
+  expectedBundleId?: string;
+};
+
 export interface SkillBundleAuthor {
   create(input: SkillAuthoringInput): Promise<ResolvedSkillBundle>;
 }
@@ -209,23 +214,36 @@ export class SkillImportApplicationService {
     });
   }
 
-  async update(
-    actor: Actor,
-    nameValue: string,
-    input: Omit<SkillAuthoringInput, "name"> & { expectedBundleId?: string },
-  ) {
+  async update(actor: Actor, nameValue: string, input: SkillUpdateInput) {
     requireSkillWrite(actor);
     const name = resourceName(nameValue);
     const current = await this.repository.get({ actor, name });
     if (!current) throw new CoreError("not_found", "Skill not found.");
-    const bundle = await this.author.create(authoringInput({ ...input, name: current.name }));
+    if (current.bundle.source.type !== "workspace") {
+      throw new CoreError("conflict", "Only workspace-authored Skills can be edited.");
+    }
+    if (
+      input.newName === undefined &&
+      input.description === undefined &&
+      input.instructions === undefined
+    ) {
+      throw new CoreError("invalid_argument", "Provide a new name, description, or instructions.");
+    }
+    const bundle = await this.author.create(
+      authoringInput({
+        name: input.newName ?? current.name,
+        description: input.description ?? current.bundle.description,
+        instructions: input.instructions ?? current.bundle.body,
+      }),
+    );
     return this.repository.replace({
       actor,
-      name,
+      name: current.id,
       bundle,
-      ...(input.expectedBundleId
-        ? { expectedBundleId: bounded(input.expectedBundleId, 200, "expectedBundleId") }
-        : {}),
+      expectedBundleId:
+        input.expectedBundleId !== undefined
+          ? bounded(input.expectedBundleId, 200, "expectedBundleId")
+          : current.bundle.id,
     });
   }
 
