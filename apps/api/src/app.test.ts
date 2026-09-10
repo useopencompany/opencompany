@@ -3317,34 +3317,36 @@ describe("canonical Hono API", () => {
     expect(captureChatMessage).not.toHaveBeenCalled();
   });
 
-  it("serves public Chat presentation without actor authentication or private metadata", async () => {
-    const loadPublicShare = vi.fn(async () => ({
-      shareId: "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
-      title: "Shared Chat",
-      kind: "chat" as const,
-      engine: "codex" as const,
-      messages: [{ id: "message_1", role: "assistant" as const, parts: [] }],
-    }));
-    const app = testApp(fakeRepository(), {
-      chatResources: chatResourceService({ loadPublicShare }),
-      authenticate: async () => {
-        throw new Error("Public resources must not authenticate an actor.");
-      },
-    });
+  it.each(["share", "goat_chat_share"])(
+    "serves %s public Chat presentation without actor authentication or private metadata",
+    async (prefix) => {
+      const shareId = `${prefix}_01234567-89ab-4cde-8f01-23456789abcd`;
+      const loadPublicShare = vi.fn(async () => ({
+        shareId,
+        title: "Shared Chat",
+        kind: "chat" as const,
+        engine: "codex" as const,
+        messages: [{ id: "message_1", role: "assistant" as const, parts: [] }],
+      }));
+      const app = testApp(fakeRepository(), {
+        chatResources: chatResourceService({ loadPublicShare }),
+        authenticate: async () => {
+          throw new Error("Public resources must not authenticate an actor.");
+        },
+      });
 
-    const response = await app.request(
-      "/public/chat-shares/goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
-    );
+      const response = await app.request(`/public/chat-shares/${shareId}`);
 
-    expect(response.status).toBe(200);
-    expect(response.headers.get("cache-control")).toBe("private, no-store");
-    expect(response.headers.get("x-robots-tag")).toContain("noindex");
-    const body = await response.json();
-    expect(body).toMatchObject({
-      data: { title: "Shared Chat", engine: "codex", messages: [{ id: "message_1" }] },
-    });
-    expect(JSON.stringify(body)).not.toMatch(/sessionId|contextTokens|blob|lease|token/iu);
-  });
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("private, no-store");
+      expect(response.headers.get("x-robots-tag")).toContain("noindex");
+      const body = await response.json();
+      expect(body).toMatchObject({
+        data: { title: "Shared Chat", engine: "codex", messages: [{ id: "message_1" }] },
+      });
+      expect(JSON.stringify(body)).not.toMatch(/sessionId|contextTokens|blob|lease|token/iu);
+    },
+  );
 
   it("streams authorized Chat resource bytes with defensive headers", async () => {
     const downloadAttachment = vi.fn(async () => ({

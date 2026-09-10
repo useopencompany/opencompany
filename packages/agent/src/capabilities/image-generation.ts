@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import {
   CHAT_ARTIFACT_MAX_BYTES,
   CHAT_ARTIFACT_MAX_PER_TURN,
@@ -6,6 +6,7 @@ import {
 } from "@opencompany/agent-runtime";
 import { calculatePlatformFeeUsdMicros, USD_MICROS_PER_DOLLAR } from "@opencompany/billing";
 import { maybeTriggerAutoRefill } from "@opencompany/billing/auto-refill";
+import { newResourceId } from "@opencompany/core/resource-ids";
 import {
   consumeCapabilityApprovalByToolCall,
   createCapabilityRun,
@@ -606,8 +607,8 @@ async function publishGeneratedImage(input: {
   ) {
     throw new Error("The provider did not return a valid image file.");
   }
-  const artifactId = `goat_chat_artifact_${randomUUID()}`;
-  const artifactVersionId = `goat_chat_artifact_version_${randomUUID()}`;
+  const artifactId = newResourceId("artifact");
+  const artifactVersionId = newResourceId("artifact_version");
   const extension = imageExtension(input.mediaType);
   const filename = `generated-image.${extension}`;
   const title = input.title.trim().slice(0, 160) || "Generated image";
