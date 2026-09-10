@@ -54,6 +54,9 @@ and 300 seconds, respectively), so a dashboard or service-config drift cannot si
 graceful draining. A superseded run leaves unattempted surfaces inactive and cannot publish stale
 code.
 
+Personal plugins follow the same backend readiness and draining gate; see
+[the personal plugin cutover and rollback plan](personal-plugins-cutover.md).
+
 The Personal Skills migration starts with creation disabled and keeps the database default at
 Company so the previously deployed API can continue writing safely. After both replacement services
 advertise Personal-skill authorization, release automation waits beyond the runner's five-minute

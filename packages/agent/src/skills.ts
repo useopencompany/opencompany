@@ -98,10 +98,12 @@ export async function listSkillCatalog(
   workspaceId: string,
   db: Db = getDb(),
   userId?: string,
+  skillAccess?: "company",
 ): Promise<SkillCatalogItem[]> {
   const catalog = await resolveWorkspaceSkillCatalog(db, {
     workspaceId,
     ...(userId ? { userId } : {}),
+    ...(skillAccess ? { skillAccess } : {}),
   });
   return catalog.skills.map(({ id, name, description, scope }) => ({
     id,
@@ -278,6 +280,7 @@ export async function manageWorkspaceSkillsForActor(input: {
 export async function resolveSkillMentions(input: {
   workspaceId: string | null;
   userId?: string;
+  skillAccess?: "company";
   mentions: SkillMentionRef[];
   db?: Db;
 }): Promise<WorkspaceSkill[]> {
@@ -294,6 +297,7 @@ export async function resolveSkillMentions(input: {
   const catalog = await resolveWorkspaceSkillCatalog(input.db ?? getDb(), {
     workspaceId: input.workspaceId,
     ...(input.userId ? { userId: input.userId } : {}),
+    ...(input.skillAccess ? { skillAccess: input.skillAccess } : {}),
   });
   const byId = new Map(
     catalog.skills.map((skill) => [

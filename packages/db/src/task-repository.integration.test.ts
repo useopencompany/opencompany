@@ -323,6 +323,7 @@ describe("Postgres Task repository", () => {
         ('brain_1', 'workspace_1', 'general'),
         ('brain_2', 'workspace_2', 'general');
     `);
+    await database.exec(`ALTER TABLE goat.plugins ADD COLUMN owner_user_id text DEFAULT 'user_1';`);
     execute = async (query: SQL) => {
       const compiled = dialect.sqlToQuery(query);
       return database.query(compiled.sql, compiled.params as never[]);

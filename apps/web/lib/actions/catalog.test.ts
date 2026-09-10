@@ -114,79 +114,49 @@ describe("isChatActionsKilled", () => {
 });
 
 describe("resolveActionCatalog", () => {
-  it("includes only connected providers", async () => {
-    mocks.resolveGmailActions.mockResolvedValue(providerCatalog("gmail"));
-    mocks.resolveGoogleCalendarActions.mockResolvedValue(providerCatalog("google_calendar"));
-    mocks.resolveGoogleDriveActions.mockResolvedValue(providerCatalog("google_drive"));
-    mocks.resolveLinearActions.mockResolvedValue(providerCatalog("linear"));
-    mocks.resolvePostHogActions.mockResolvedValue(providerCatalog("posthog"));
-    mocks.resolveLatitudeActions.mockResolvedValue(providerCatalog("latitude"));
-    mocks.resolveNeonActions.mockResolvedValue(providerCatalog("neon"));
-    mocks.resolveAttioActions.mockResolvedValue(providerCatalog("attio"));
-    mocks.resolveStripeActions.mockResolvedValue(providerCatalog("stripe"));
-    mocks.resolveRevolutActions.mockResolvedValue(providerCatalog("revolut"));
-
+  it("does not expose legacy connections without a personal plugin installation", async () => {
+    for (const resolver of [
+      mocks.resolveGmailActions,
+      mocks.resolveLinearActions,
+      mocks.resolveNeonActions,
+      mocks.resolveStripeActions,
+      mocks.resolveRevolutActions,
+    ]) {
+      resolver.mockResolvedValue(providerCatalog("linear"));
+    }
     const catalog = await resolveActionCatalog({
       userWorkosId: "user_1",
       workspaceId: "workspace_1",
     });
-    expect(catalog.providers.map((provider) => provider.id)).toEqual([
-      "gmail",
-      "google_calendar",
-      "google_drive",
-      "linear",
-      "posthog",
-      "latitude",
-      "neon",
-      "attio",
-      "stripe",
-      "revolut",
-    ]);
-    expect(catalog.providers.map((provider) => provider.description)).toEqual([
-      "gmail description",
-      "google_calendar description",
-      "google_drive description",
-      "linear description",
-      "posthog description",
-      "latitude description",
-      "neon description",
-      "attio description",
-      "stripe description",
-      "revolut description",
-    ]);
-    expect(catalog.actions.map((action) => action.id)).toEqual([
-      "gmail.read_something",
-      "google_calendar.read_something",
-      "google_drive.read_something",
-      "linear.read_something",
-      "posthog.read_something",
-      "latitude.read_something",
-      "neon.read_something",
-      "attio.read_something",
-      "stripe.read_something",
-      "revolut.read_something",
-    ]);
-    expect(mocks.resolveStripeActions).toHaveBeenCalledWith("workspace_1");
-    expect(mocks.resolveRevolutActions).toHaveBeenCalledWith("workspace_1");
+    expect(catalog).toEqual({ providers: [], actions: [] });
+    expect(mocks.resolvePluginGatewayRegistrations).toHaveBeenCalledWith({
+      userWorkosId: "user_1",
+      workspaceId: "workspace_1",
+    });
+    for (const resolver of [
+      mocks.resolveGmailActions,
+      mocks.resolveLinearActions,
+      mocks.resolveNeonActions,
+      mocks.resolveStripeActions,
+      mocks.resolveRevolutActions,
+    ]) {
+      expect(resolver).not.toHaveBeenCalled();
+    }
   });
 
-  it("keeps other providers when one resolver throws", async () => {
-    mocks.resolveGmailActions.mockRejectedValue(new Error("boom"));
-    mocks.resolveGoogleCalendarActions.mockResolvedValue(providerCatalog("google_calendar"));
-    mocks.resolveGoogleDriveActions.mockResolvedValue(null);
-    mocks.resolveLinearActions.mockResolvedValue(null);
-    mocks.resolvePostHogActions.mockResolvedValue(null);
-    mocks.resolveLatitudeActions.mockResolvedValue(null);
-    mocks.resolveNeonActions.mockResolvedValue(null);
-    mocks.resolveAttioActions.mockResolvedValue(null);
-    mocks.resolveStripeActions.mockResolvedValue(null);
-    mocks.resolveRevolutActions.mockResolvedValue(null);
-
+  it("keeps other personal plugins when one resolver throws", async () => {
+    mocks.resolvePluginGatewayRegistrations.mockResolvedValue([
+      { source: "plugin:linear:linear" },
+      { source: "plugin:neon:neon" },
+    ] as never);
+    mocks.resolveRemoteMcpActions
+      .mockRejectedValueOnce(new Error("boom"))
+      .mockResolvedValueOnce(providerCatalog("neon"));
     const catalog = await resolveActionCatalog({
       userWorkosId: "user_1",
       workspaceId: "workspace_1",
     });
-    expect(catalog.providers.map((provider) => provider.id)).toEqual(["google_calendar"]);
+    expect(catalog.providers.map((provider) => provider.id)).toEqual(["neon"]);
   });
 
   it("returns an empty catalog when nothing is connected", async () => {
@@ -208,7 +178,7 @@ describe("resolveActionCatalog", () => {
     expect(catalog).toEqual({ providers: [], actions: [] });
   });
 
-  it("uses the installed Linear plugin catalog exactly once and falls back when absent", async () => {
+  it("uses the installed Linear plugin catalog exactly once and removes it when uninstalled", async () => {
     for (const resolver of [
       mocks.resolveGmailActions,
       mocks.resolveGoogleCalendarActions,
@@ -252,11 +222,11 @@ describe("resolveActionCatalog", () => {
       userWorkosId: "user_1",
       workspaceId: "workspace_1",
     });
-    expect(mocks.resolveLinearActions).toHaveBeenCalledWith("user_1");
-    expect(fallbackCatalog.actions.map((action) => action.id)).toEqual(["linear.read_something"]);
+    expect(mocks.resolveLinearActions).not.toHaveBeenCalled();
+    expect(fallbackCatalog.actions).toEqual([]);
   });
 
-  it("uses the installed Neon plugin catalog exactly once and falls back when absent", async () => {
+  it("uses the installed Neon plugin catalog exactly once and removes it when uninstalled", async () => {
     for (const resolver of [
       mocks.resolveGmailActions,
       mocks.resolveGoogleCalendarActions,
@@ -300,8 +270,8 @@ describe("resolveActionCatalog", () => {
       userWorkosId: "user_1",
       workspaceId: "workspace_1",
     });
-    expect(mocks.resolveNeonActions).toHaveBeenCalledWith("user_1");
-    expect(fallbackCatalog.actions.map((action) => action.id)).toEqual(["neon.read_something"]);
+    expect(mocks.resolveNeonActions).not.toHaveBeenCalled();
+    expect(fallbackCatalog.actions).toEqual([]);
   });
 
   it("adds enabled managed sources to the same compact catalog", async () => {
@@ -380,7 +350,7 @@ describe("resolveActionCatalog", () => {
       userWorkosId: "user_1",
       workspaceId: "workspace_1",
     });
-    expect(catalog.providers.map((source) => source.id)).toEqual(["gmail"]);
+    expect(catalog.providers).toEqual([]);
     expect(mocks.listWorkspaceCapabilities).not.toHaveBeenCalled();
   });
 });

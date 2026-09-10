@@ -128,6 +128,12 @@ import { isRecentChatActivity } from "@/lib/chat-activity";
 import { CHAT_ATTACHMENT_ACCEPT } from "@/lib/chat-attachment-formats";
 import { AUTO_MODEL_ATTACHMENT_CAPABILITIES, AUTO_MODEL_SELECTION } from "@/lib/chat-auto-model";
 import {
+  type ChatComposerDraft,
+  composerDraftKey,
+  persistComposerDraft,
+  readComposerDraft,
+} from "@/lib/chat-composer-draft";
+import {
   type ChatModelSelection,
   persistLastChatSelection,
   readLastChatSelection,
@@ -301,10 +307,6 @@ type CodexComposerUiState = {
   goalModeEnabled: boolean;
   goalObjective: string;
   goalTokenBudget: string;
-};
-type ChatComposerDraft = {
-  input: string;
-  mentions: ChatMention[];
 };
 
 function chatThreadBottomPaddingForComposerHeight(composerHeightPx: number) {
@@ -547,9 +549,10 @@ export function Surface({
     if (!initialChat || !initialChat.codexComposerSettings) return new Map();
     return new Map([[initialChat.id, initialCodexComposerUiState]]);
   });
-  const [composerDraftsByChatId, setComposerDraftsByChatId] = useState<
-    ReadonlyMap<string, ChatComposerDraft>
-  >(() => new Map());
+  const composerDraftsRef = useRef(new Map<string, ChatComposerDraft>());
+  const previousDraftTargetRef = useRef({ chatSessionId, persistedChatSessionId, draftScope: "" });
+  const [hydratedDraftScope, setHydratedDraftScope] = useState<string | null>(null);
+  const draftScope = composerDraftKey(userWorkosId, workspaceId, null);
   const [chatThreadBottomPaddingPx, setChatThreadBottomPaddingPx] = useState(
     CHAT_THREAD_MIN_BOTTOM_PADDING_PX,
   );
@@ -1345,31 +1348,65 @@ export function Surface({
     ],
   );
 
-  const saveComposerDraft = useCallback((sessionId: string | null, draft: ChatComposerDraft) => {
-    if (!sessionId) return;
-    const visibleMentions = draft.mentions.filter((mention) =>
-      chatMentionIsVisible(draft.input, mention),
-    );
-    setComposerDraftsByChatId((current) => {
-      const next = new Map(current);
-      if (draft.input.length > 0) {
-        next.set(sessionId, { input: draft.input, mentions: visibleMentions });
-      } else {
-        next.delete(sessionId);
-      }
-      return next;
-    });
-  }, []);
+  const loadComposerDraft = useCallback(
+    (sessionId: string | null) => {
+      const key = composerDraftKey(userWorkosId, workspaceId, sessionId);
+      return composerDraftsRef.current.get(key) ?? readComposerDraft(key);
+    },
+    [userWorkosId, workspaceId],
+  );
 
-  const clearComposerDraft = useCallback((sessionId: string | null) => {
-    if (!sessionId) return;
-    setComposerDraftsByChatId((current) => {
-      if (!current.has(sessionId)) return current;
-      const next = new Map(current);
-      next.delete(sessionId);
-      return next;
-    });
-  }, []);
+  const saveComposerDraft = useCallback(
+    (sessionId: string | null, draft: ChatComposerDraft) => {
+      const key = composerDraftKey(userWorkosId, workspaceId, sessionId);
+      const visibleDraft = {
+        input: draft.input,
+        mentions: draft.mentions.filter((mention) => chatMentionIsVisible(draft.input, mention)),
+      };
+      composerDraftsRef.current.set(key, visibleDraft);
+      persistComposerDraft(key, visibleDraft);
+    },
+    [userWorkosId, workspaceId],
+  );
+
+  const clearComposerDraft = useCallback(
+    (sessionId: string | null) => saveComposerDraft(sessionId, { input: "", mentions: [] }),
+    [saveComposerDraft],
+  );
+
+  useLayoutEffect(() => {
+    const draft = loadComposerDraft(routedChatSessionIdRef.current);
+    // Restore browser-only state after hydration, before painting the composer.
+    setInput(draft?.input ?? "");
+    setSelectedMentions(draft?.mentions ?? []);
+    setHydratedDraftScope(draftScope);
+  }, [draftScope, loadComposerDraft]);
+
+  useEffect(() => {
+    // The initial render must not overwrite the saved draft with an empty input.
+    if (hydratedDraftScope !== draftScope) return;
+    const previous = previousDraftTargetRef.current;
+    if (
+      previous.draftScope === draftScope &&
+      previous.chatSessionId === chatSessionId &&
+      previous.persistedChatSessionId === null &&
+      persistedChatSessionId !== null
+    ) {
+      clearComposerDraft(null);
+    }
+    previousDraftTargetRef.current = { chatSessionId, persistedChatSessionId, draftScope };
+    // Until the first send is accepted, refresh still opens Home.
+    saveComposerDraft(persistedChatSessionId, { input, mentions: selectedMentions });
+  }, [
+    chatSessionId,
+    clearComposerDraft,
+    draftScope,
+    hydratedDraftScope,
+    input,
+    persistedChatSessionId,
+    saveComposerDraft,
+    selectedMentions,
+  ]);
 
   const openChat = useCallback(
     (chat: SurfaceChatSelection) => {
@@ -1391,8 +1428,8 @@ export function Surface({
 
       const engineTarget = engineChatKindFromChat(chat);
       const nextCodexComposerState = codexComposerUiStateForChat(chat, codexComposerStateByChatId);
-      saveComposerDraft(chatSessionId, { input, mentions: selectedMentions });
-      const nextDraft = chat ? (composerDraftsByChatId.get(chat.id) ?? null) : null;
+      saveComposerDraft(persistedChatSessionId, { input, mentions: selectedMentions });
+      const nextDraft = loadComposerDraft(chat?.id ?? null);
       releaseAllOptimisticAttachmentPreviews();
       routedChatSessionIdRef.current = chat?.id ?? null;
       pendingNewSessionIdRef.current = null;
@@ -1436,7 +1473,8 @@ export function Surface({
       chatSessionId,
       clearActiveTurn,
       clearError,
-      composerDraftsByChatId,
+      loadComposerDraft,
+      persistedChatSessionId,
       codexComposerStateByChatId,
       codexGoalModeEnabled,
       codexGoalObjective,
@@ -1480,9 +1518,6 @@ export function Surface({
     if (!isActivePane) return;
     const handleHomeNavigation = () => {
       openChat(null);
-      setInput("");
-      setMentionToken(null);
-      setSelectedMentions([]);
       clearComposerAttachments();
       inputRef.current?.focus({ preventScroll: true });
     };
@@ -1969,7 +2004,7 @@ export function Surface({
           return;
         }
 
-        clearComposerDraft(chatSessionId);
+        clearComposerDraft(persistedChatSessionId);
         clearError();
         setInput("");
         setMentionToken(null);
@@ -2024,7 +2059,7 @@ export function Surface({
         return;
       }
 
-      clearComposerDraft(chatSessionId);
+      clearComposerDraft(persistedChatSessionId);
       clearError();
       setInput("");
       setMentionToken(null);
@@ -2085,7 +2120,7 @@ export function Surface({
         return;
       }
 
-      clearComposerDraft(chatSessionId);
+      clearComposerDraft(persistedChatSessionId);
       clearError();
       setInput("");
       setMentionToken(null);
@@ -2124,7 +2159,7 @@ export function Surface({
     const workflowMention = mentions.find(isWorkflowMention);
     if (workflowMention) {
       const skillMentions = mentions.filter(isSkillMention);
-      clearComposerDraft(chatSessionId);
+      clearComposerDraft(persistedChatSessionId);
       clearError();
       setInput("");
       setMentionToken(null);
@@ -2243,7 +2278,7 @@ export function Surface({
       setCodexGoalObjective("");
       setCodexGoalTokenBudget("");
     }
-    clearComposerDraft(chatSessionId);
+    clearComposerDraft(persistedChatSessionId);
     beginActiveTurn({
       engine: messageEngine.type,
       selectedModel: String(model),
@@ -5547,6 +5582,7 @@ function CodingEngineModelPicker({
   const selectedModel =
     models.find((model) => model.id === value) ?? models.find((model) => model.id === defaultValue);
   const selectedLabel = selectedModel?.label ?? `${engineLabel} model`;
+  const visibleModels = models.filter((model) => model.id !== "anthropic/claude-opus-4.8");
   const ModelIcon = provider === "anthropic" ? AnthropicIcon : OpenAIIcon;
 
   return (
@@ -5570,7 +5606,7 @@ function CodingEngineModelPicker({
         <Command className="bg-surface text-ink">
           <CommandList>
             <CommandGroup heading={`${engineLabel} models`}>
-              {models.map((model) => (
+              {visibleModels.map((model) => (
                 <CommandItem
                   key={model.id}
                   value={model.id}
@@ -6560,6 +6596,7 @@ function ModelPicker({
             ) : null}
             <CommandGroup heading="Models">
               {MODELS.map((model) => {
+                if (model.id === "anthropic/claude-opus-4.8") return null;
                 const isSelected =
                   !isAutoSelected && !isEngineSelected && model.id === selectedModel?.id;
                 return (

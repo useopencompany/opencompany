@@ -83,6 +83,14 @@ describe("Postgres immutable Skill bundle repository", () => {
     );
     for (const statement of scopeMigration.split("--> statement-breakpoint"))
       if (statement.trim()) await database.exec(statement);
+    await database.exec(`
+      ALTER TABLE goat.plugins ADD COLUMN owner_user_id text;
+      DROP INDEX goat.plugins_workspace_live_name_idx;
+      CREATE UNIQUE INDEX plugins_workspace_live_name_idx ON goat.plugins (workspace_id, owner_user_id, name) WHERE status <> 'archived';
+      ALTER TABLE goat.workspace_plugin_data ADD COLUMN owner_user_id text NOT NULL DEFAULT 'user_1';
+      ALTER TABLE goat.workspace_plugin_data DROP CONSTRAINT goat_workspace_plugin_data_workspace_id_plugin_name_pk;
+      ALTER TABLE goat.workspace_plugin_data ADD PRIMARY KEY (workspace_id, owner_user_id, plugin_name);
+    `);
     repository = new PostgresSkillBundleRepository(drizzle(database));
   });
 

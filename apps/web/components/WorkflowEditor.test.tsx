@@ -410,11 +410,14 @@ describe("WorkflowEditor", () => {
     expect(screen.getByText("Flag blockers").closest("li")).toBeInTheDocument();
   });
 
-  it("offers Claude Code as a workflow step model option", async () => {
+  it("offers Opus 5 and hides Opus 4.8 in Claude Code workflow settings", async () => {
     render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
 
     fireEvent.click(screen.getByRole("button", { name: /^Runtime:/ }));
     fireEvent.click(screen.getByRole("button", { name: /Claude Code/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Claude Code model:/ }));
+    expect(screen.queryByRole("button", { name: /Claude Opus 4\.8/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Claude Opus 5/ }));
     await advanceAutosave();
 
     expect(workflowActionsMock.update).toHaveBeenCalledWith(
@@ -424,7 +427,7 @@ describe("WorkflowEditor", () => {
           expect.objectContaining({
             id: "step-1",
             model: "claude-code",
-            runtimeModel: "anthropic/claude-sonnet-5",
+            runtimeModel: "anthropic/claude-opus-5",
             reasoningEffort: "high",
           }),
         ],

@@ -333,6 +333,7 @@ export async function resolvePluginGatewayRegistrations(
   const now = options.now ?? new Date();
   const records = await listActivePluginGatewayRegistrations(db, {
     workspaceId: identity.workspaceId,
+    userId: identity.userWorkosId,
   });
   const refreshed = await Promise.all(
     records.map((record) =>
@@ -375,6 +376,7 @@ export async function refreshPluginGatewayRegistrations(input: {
   const now = input.now ?? new Date();
   const records = await listActivePluginGatewayRegistrations(db, {
     workspaceId: input.identity.workspaceId,
+    userId: input.identity.userWorkosId,
     ...(input.pluginName ? { pluginName: input.pluginName } : {}),
     ...(input.connectionProvider ? { connectionProvider: input.connectionProvider } : {}),
   });
@@ -426,6 +428,7 @@ async function refreshRegistration(input: {
   if (!input.force) {
     const claimed = await claimPluginGatewayDiscoveryRefresh(input.db, {
       workspaceId: input.identity.workspaceId,
+      userId: input.identity.userWorkosId,
       registrationId: input.record.id,
       staleAt: input.now,
       leaseUntil: new Date(input.now.getTime() + DISCOVERY_RETRY_MS),
@@ -442,6 +445,7 @@ async function refreshRegistration(input: {
     if (!snapshot) {
       await storePluginGatewayDiscoveryFailure(input.db, {
         workspaceId: input.identity.workspaceId,
+        userId: input.identity.userWorkosId,
         registrationId: input.record.id,
         error: "No usable provider connection was available for MCP discovery.",
         retryAfter: new Date(input.now.getTime() + DISCOVERY_RETRY_MS),
@@ -452,6 +456,7 @@ async function refreshRegistration(input: {
     const refreshAfter = new Date(input.now.getTime() + DISCOVERY_TTL_MS);
     await storePluginGatewayDiscoverySnapshot(input.db, {
       workspaceId: input.identity.workspaceId,
+      userId: input.identity.userWorkosId,
       registrationId: input.record.id,
       snapshot,
       discoveredAt: input.now,
@@ -468,6 +473,7 @@ async function refreshRegistration(input: {
     const message = error instanceof Error ? error.message : String(error);
     await storePluginGatewayDiscoveryFailure(input.db, {
       workspaceId: input.identity.workspaceId,
+      userId: input.identity.userWorkosId,
       registrationId: input.record.id,
       error: message,
       retryAfter: new Date(input.now.getTime() + DISCOVERY_RETRY_MS),
@@ -547,6 +553,7 @@ function bindRegistration(
     isEnabled: () =>
       isPluginGatewayRegistrationActive(db, {
         workspaceId: identity.workspaceId,
+        userId: identity.userWorkosId,
         registrationId: record.id,
       }),
   };

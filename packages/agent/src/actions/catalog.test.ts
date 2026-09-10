@@ -95,13 +95,13 @@ describe("resolveActionCatalog plugin reconciliation", () => {
     );
   });
 
-  it("keeps Calendar fallback actions only while the official plugin is absent", async () => {
+  it("requires the personal plugin and never restores legacy actions", async () => {
     const withoutPlugin = await resolveActionCatalog(
       { userWorkosId: "user_1", workspaceId: "workspace_1" },
       { remoteMcpRegistrations: [] },
     );
-    expect(mocks.calendar).toHaveBeenCalledWith("user_1");
-    expect(withoutPlugin.actions).toContainEqual(
+    expect(mocks.calendar).not.toHaveBeenCalled();
+    expect(withoutPlugin.actions).not.toContainEqual(
       expect.objectContaining({ id: "google_calendar.list_events" }),
     );
 
@@ -129,13 +129,13 @@ describe("resolveActionCatalog plugin reconciliation", () => {
     );
   });
 
-  it("keeps legacy PostHog actions as fallback and suppresses them after plugin install", async () => {
+  it("requires the personal plugin and never restores legacy actions", async () => {
     const withoutPlugin = await resolveActionCatalog(
       { userWorkosId: "user_1", workspaceId: "workspace_1" },
       { remoteMcpRegistrations: [] },
     );
-    expect(mocks.posthog).toHaveBeenCalledWith("user_1");
-    expect(withoutPlugin.actions).toContainEqual(
+    expect(mocks.posthog).not.toHaveBeenCalled();
+    expect(withoutPlugin.actions).not.toContainEqual(
       expect.objectContaining({ id: "posthog.query-trends" }),
     );
 
@@ -163,13 +163,13 @@ describe("resolveActionCatalog plugin reconciliation", () => {
     );
   });
 
-  it("keeps legacy Latitude actions as fallback and suppresses them after plugin install", async () => {
+  it("requires the personal plugin and never restores legacy actions", async () => {
     const withoutPlugin = await resolveActionCatalog(
       { userWorkosId: "user_1", workspaceId: "workspace_1" },
       { remoteMcpRegistrations: [] },
     );
-    expect(mocks.latitude).toHaveBeenCalledWith("user_1");
-    expect(withoutPlugin.actions).toContainEqual(
+    expect(mocks.latitude).not.toHaveBeenCalled();
+    expect(withoutPlugin.actions).not.toContainEqual(
       expect.objectContaining({ id: "latitude.listTraces" }),
     );
 
@@ -197,13 +197,13 @@ describe("resolveActionCatalog plugin reconciliation", () => {
     );
   });
 
-  it("keeps legacy Stripe metrics as fallback and suppresses them after plugin install", async () => {
+  it("requires the personal plugin and never restores legacy actions", async () => {
     const withoutPlugin = await resolveActionCatalog(
       { userWorkosId: "user_1", workspaceId: "workspace_1" },
       { remoteMcpRegistrations: [] },
     );
-    expect(mocks.stripe).toHaveBeenCalledWith("workspace_1");
-    expect(withoutPlugin.actions).toContainEqual(
+    expect(mocks.stripe).not.toHaveBeenCalled();
+    expect(withoutPlugin.actions).not.toContainEqual(
       expect.objectContaining({ id: "stripe.get_balance" }),
     );
 
@@ -294,7 +294,7 @@ describe("resolveActionCatalog plugin reconciliation", () => {
     );
   });
 
-  it("keeps legacy X posting only until the official plugin is installed", async () => {
+  it("requires the personal X plugin for account posting", async () => {
     mocks.x.mockResolvedValueOnce({
       id: "x_account",
       label: "X",
@@ -305,7 +305,7 @@ describe("resolveActionCatalog plugin reconciliation", () => {
       { userWorkosId: "user_1", workspaceId: "workspace_1" },
       { remoteMcpRegistrations: [] },
     );
-    expect(withoutPlugin.actions).toContainEqual(
+    expect(withoutPlugin.actions).not.toContainEqual(
       expect.objectContaining({ id: "x_account.post_tweet" }),
     );
 
@@ -349,13 +349,13 @@ describe("resolveActionCatalog plugin reconciliation", () => {
     expect(mocks.x).not.toHaveBeenCalled();
   });
 
-  it("keeps legacy Gmail as a fallback and suppresses it once the plugin is installed", async () => {
+  it("requires the personal plugin and never restores legacy actions", async () => {
     const withoutPlugin = await resolveActionCatalog(
       { userWorkosId: "user_1", workspaceId: "workspace_1" },
       { remoteMcpRegistrations: [] },
     );
-    expect(mocks.gmail).toHaveBeenCalledWith("user_1");
-    expect(withoutPlugin.actions).toContainEqual(
+    expect(mocks.gmail).not.toHaveBeenCalled();
+    expect(withoutPlugin.actions).not.toContainEqual(
       expect.objectContaining({ id: "gmail.search_messages" }),
     );
 
@@ -383,13 +383,13 @@ describe("resolveActionCatalog plugin reconciliation", () => {
     );
   });
 
-  it("keeps legacy Drive actions as fallback and suppresses them after plugin install", async () => {
+  it("requires the personal plugin and never restores legacy actions", async () => {
     const withoutPlugin = await resolveActionCatalog(
       { userWorkosId: "user_1", workspaceId: "workspace_1" },
       { remoteMcpRegistrations: [] },
     );
-    expect(mocks.googleDrive).toHaveBeenCalledWith("user_1");
-    expect(withoutPlugin.actions).toContainEqual(
+    expect(mocks.googleDrive).not.toHaveBeenCalled();
+    expect(withoutPlugin.actions).not.toContainEqual(
       expect.objectContaining({ id: "google_drive.search_files" }),
     );
 
@@ -409,13 +409,13 @@ describe("resolveActionCatalog plugin reconciliation", () => {
     );
   });
 
-  it("keeps legacy Attio actions as fallback and suppresses them after plugin install", async () => {
+  it("requires the personal plugin and never restores legacy actions", async () => {
     const withoutPlugin = await resolveActionCatalog(
       { userWorkosId: "user_1", workspaceId: "workspace_1" },
       { remoteMcpRegistrations: [] },
     );
-    expect(mocks.attio).toHaveBeenCalledWith("user_1");
-    expect(withoutPlugin.actions).toContainEqual(
+    expect(mocks.attio).not.toHaveBeenCalled();
+    expect(withoutPlugin.actions).not.toContainEqual(
       expect.objectContaining({ id: "attio.search-records" }),
     );
 
