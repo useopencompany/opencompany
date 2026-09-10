@@ -99,7 +99,8 @@ export function executePersistedChatHostTool(input: {
     resolveActiveAgentSession: ({ actorId, conversationId }) =>
       resolveActiveAgentSession({ userWorkosId: actorId, chatSessionId: conversationId }),
     resolveSkillMentions: resolveSkillMentions,
-    listSkillCatalog: (workspaceId, userId) => listSkillCatalog(workspaceId, undefined, userId),
+    listSkillCatalog: (workspaceId, userId, skillAccess) =>
+      listSkillCatalog(workspaceId, undefined, userId, skillAccess),
     activateAndListSkills: ({
       conversationId,
       messageId,
