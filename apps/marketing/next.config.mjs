@@ -7,7 +7,7 @@ const nextConfig = {
     return [
       {
         source: "/talk",
-        destination: "https://cal.com/louis-morgner-k0wc9i/opencompany-onboarding",
+        destination: "/request-demo",
         permanent: true,
       },
       {

@@ -18,12 +18,12 @@ export function TopNav() {
 
         <div className="flex items-center justify-end gap-2">
           <Cta
-            href="https://cal.com/louis-morgner-k0wc9i/opencompany-onboarding"
+            href="/request-demo"
             variant="secondary"
             className="hidden px-3 py-1.5 text-[12px] sm:inline-flex"
             analyticsIntent="demo"
           >
-            Get a Demo
+            Request Demo
           </Cta>
           <Cta
             href="https://my.opencompany.chat"
@@ -64,12 +64,12 @@ export function TopNav() {
             >
               <TopNavLinks mobile />
               <Cta
-                href="https://cal.com/louis-morgner-k0wc9i/opencompany-onboarding"
+                href="/request-demo"
                 variant="secondary"
                 className="mt-1 w-full justify-center px-3 py-2 text-[12px]"
                 analyticsIntent="demo"
               >
-                Get a Demo
+                Request Demo
               </Cta>
               <Cta
                 href="https://my.opencompany.chat"
