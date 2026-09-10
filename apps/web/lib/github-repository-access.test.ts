@@ -91,6 +91,35 @@ describe("GitHub installation gap detection", () => {
     }
   });
 
+  it("extracts gh api repositories from the command instead of GitHub documentation URLs", () => {
+    expect(
+      githubInstallGapCandidate({
+        name: CODEX_COMMAND_TOOL_NAME,
+        status: "failed",
+        input: {
+          command:
+            "gh api repos/useopencompany/opencompany-legacy/commits/abc123/status --jq .state",
+        },
+        output: null,
+        errorText:
+          'gh: Resource not accessible by integration (HTTP 403)\n{"documentation_url":"https://docs.github.com/rest/commits/statuses#get-the-combined-status-for-a-specific-reference"}',
+      }),
+    ).toEqual({ owner: "useopencompany", repo: "opencompany-legacy" });
+  });
+
+  it("does not derive a repository from integration failure output", () => {
+    expect(
+      githubInstallGapCandidate({
+        name: CODEX_COMMAND_TOOL_NAME,
+        status: "failed",
+        input: { command: "gh api graphql -f query='query { viewer { login } }'" },
+        output: null,
+        errorText:
+          "Resource not accessible by integration. See https://docs.github.com/rest/commits/statuses",
+      }),
+    ).toBeNull();
+  });
+
   it("shares one account access sweep across repository cards", async () => {
     const fetchMock = vi.fn(async () =>
       Response.json({

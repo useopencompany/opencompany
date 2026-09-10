@@ -298,7 +298,7 @@ describe("GitHub user integration", () => {
           },
           repositorySelection: "selected",
           permissions: { metadata: "read", contents: "write" },
-          pendingPermissions: ["actions", "checks", "issues", "pull_requests"],
+          pendingPermissions: ["actions", "checks", "issues", "pull_requests", "statuses"],
           suspendedAt: null,
           repositories: [
             {
