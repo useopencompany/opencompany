@@ -61,6 +61,7 @@ export type LinearWikiSourceConfig = {
 
 export type LinearIntegrationForOrganization = {
   id: string;
+  workspaceId: string | null;
   userWorkosId: string;
   status: IntegrationStatus;
 };
@@ -176,6 +177,7 @@ export async function listLinearIntegrationsForOrganization(
     .select({
       id: integrations.id,
       userWorkosId: integrations.userWorkosId,
+      workspaceId: integrations.workspaceId,
       status: integrations.status,
     })
     .from(integrations)
@@ -283,7 +285,9 @@ export async function listWorkflowEventTriggerRoutes(
 ): Promise<WorkflowEventTriggerRoute[]> {
   const connected = new Map(
     input.integrations
-      .filter((integration) => integration.status === "connected")
+      .filter(
+        (integration) => integration.status === "connected" && integration.workspaceId === null,
+      )
       .map((integration) => [integration.id, integration.userWorkosId]),
   );
   if (connected.size === 0) return [];
