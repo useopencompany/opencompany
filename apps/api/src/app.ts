@@ -18,6 +18,7 @@ import type {
 import type { ConvexProviderState } from "@opencompany/agent/integrations/convex-mcp";
 import type { ConvexMcpService } from "@opencompany/agent/integrations/convex-mcp-server";
 import type { GmailMcpService } from "@opencompany/agent/integrations/gmail-mcp-server";
+import type { GoogleAdminMcpService } from "@opencompany/agent/integrations/google-admin-mcp-server";
 import type { GoogleCalendarMcpService } from "@opencompany/agent/integrations/google-calendar-mcp-server";
 import type { GoogleDriveMcpService } from "@opencompany/agent/integrations/google-drive-mcp-server";
 import type { RenderProviderState } from "@opencompany/agent/integrations/render-mcp";
@@ -211,6 +212,7 @@ export type CreateApiAppInput = {
   slackBotSettings: SlackBotSettingsService;
   mcp?: McpService;
   gmailMcp?: GmailMcpService;
+  googleAdminMcp?: GoogleAdminMcpService;
   googleCalendarMcp?: GoogleCalendarMcpService;
   convexMcp?: ConvexMcpService;
   googleDriveMcp?: GoogleDriveMcpService;
@@ -2836,6 +2838,9 @@ export function createApiApp(input: CreateApiAppInput) {
       input.gmailMcp!.downloadAttachment(c.req.raw),
     );
   }
+  if (input.googleAdminMcp) {
+    app.post("/mcp/plugins/google-admin", (c) => input.googleAdminMcp!.handle(c.req.raw));
+  }
   if (input.googleCalendarMcp) {
     app.post("/mcp/plugins/google-calendar", (c) => input.googleCalendarMcp!.handle(c.req.raw));
   }
@@ -2957,6 +2962,10 @@ export function createApiApp(input: CreateApiAppInput) {
     const ingress = input.googleIngress;
     app.get("/integrations/gmail/start", (c) => ingress.start("gmail", c.req.raw));
     app.get("/integrations/gmail/callback", (c) => ingress.callback("gmail", c.req.raw));
+    app.get("/integrations/google-admin/start", (c) => ingress.start("google_admin", c.req.raw));
+    app.get("/integrations/google-admin/callback", (c) =>
+      ingress.callback("google_admin", c.req.raw),
+    );
     app.get("/integrations/google-calendar/start", (c) =>
       ingress.start("google_calendar", c.req.raw),
     );

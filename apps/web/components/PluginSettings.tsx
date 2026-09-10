@@ -16,6 +16,7 @@ import {
   FathomIcon,
   GitHubIcon,
   GmailIcon,
+  GoogleAdminIcon,
   GoogleCalendarIcon,
   GoogleDriveIcon,
   GranolaIcon,
@@ -169,6 +170,11 @@ export const OFFICIAL_MCP_PLUGINS = {
     ...OFFICIAL_MCP_PLUGIN_METADATA.granola,
     Icon: GranolaIcon,
     iconClassName: "bg-[#F0EBE1] text-[#1A1714]",
+  },
+  "google-admin": {
+    ...OFFICIAL_MCP_PLUGIN_METADATA["google-admin"],
+    Icon: GoogleAdminIcon,
+    iconClassName: "bg-white",
   },
   "google-calendar": {
     ...OFFICIAL_MCP_PLUGIN_METADATA["google-calendar"],

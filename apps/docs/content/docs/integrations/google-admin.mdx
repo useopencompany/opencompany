@@ -1,0 +1,71 @@
+---
+title: Google Admin
+description: Create Google Workspace users and manage groups with approval.
+---
+
+Google Admin connects a Workspace administrator to opencompany's MCP adapter for
+Google's Admin SDK Directory API. It supports creating user accounts, creating and
+editing groups, and adding group members. This adapter is maintained by opencompany.
+
+## Connect
+
+1. Open **Settings → Plugins → Google Admin** and install the package.
+2. Select **Connect Google Admin account**.
+3. Sign in with a Google Workspace administrator who has user and group management
+   privileges, and grant the requested access. Personal Gmail accounts cannot administer a directory.
+4. Review the permissions on the plugin page. The most recently connected account powers the tools.
+
+The operator must enable **Admin SDK API** (`admin.googleapis.com`) in the Google
+Cloud project used by opencompany's existing Google OAuth client. Register
+`https://<your-web-host>/api/integrations/google-admin/callback` as an authorized
+redirect URI and configure the consent screen for `admin.directory.user` and
+`admin.directory.group`. Complete any Google verification required for those scopes.
+The group scope includes membership operations. No service-account key or domain-wide
+delegation is needed; Google's checks use the connected administrator's privileges.
+
+## Permissions
+
+Both capability groups default to **Ask**:
+
+| Capability | Tools |
+| --- | --- |
+| Read directory | List/get users, list/get groups, list direct group members |
+| Manage users and groups | Create users, create groups, edit group names/descriptions, add members |
+
+Each group or individual tool can be set to **On**, **Ask**, or **Off**. Newly
+discovered or unclassified tools require confirmation. Directory profiles and group
+membership are sensitive organization data, so reading also requires approval by default.
+
+The gateway uses short-lived tickets restricted to one operation, account, and
+installed plugin. Google OAuth tokens remain in the server-side encrypted vault and
+are used only with the fixed Google API. Disabling or uninstalling the plugin revokes
+MCP access. There is no older Google Admin integration to fall back to.
+
+## Creating accounts and groups
+
+For example: “Create alex@example.com for Alex Chen and add Alex to the engineering group.”
+
+Creating a user generates a random initial password that is never returned or stored
+by opencompany. An administrator must then **reset the password and send sign-in details
+securely through Google Admin**. The tool reports this required next step; it does not
+send an invitation. Workspace licensing settings may automatically assign a paid license.
+
+Groups inherit Google's default access policies. Review posting permissions and
+visibility in Google Admin after creating a group. Adding a member defaults to the
+**MEMBER** role; **MANAGER** and **OWNER** grant additional group privileges and should
+be approved deliberately. Listing members shows direct memberships, not the expanded
+contents of nested groups.
+
+This version does not delete or suspend users, reset passwords, grant administrator
+roles, remove members, or change group access policies. After a failed or uncertain
+write, inspect the resource before retrying to avoid duplicate changes.
+
+## Troubleshooting
+
+Reconnect if the consent grant is missing or expired. If Google rejects an operation,
+check the connected administrator's privileges, the enabled Admin SDK API, and any
+Workspace policy restricting third-party applications or external group members.
+
+See Google's [Directory API reference](https://developers.google.com/workspace/admin/directory/reference/rest),
+[scope guide](https://developers.google.com/workspace/admin/directory/v1/guides/authorizing),
+and [user-management guide](https://developers.google.com/workspace/admin/directory/v1/guides/manage-users).

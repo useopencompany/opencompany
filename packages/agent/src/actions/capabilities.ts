@@ -51,6 +51,21 @@ export const PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
+  google_admin: [
+    {
+      id: "query",
+      label: "Read directory",
+      description: "Read Workspace users, groups, and memberships.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Manage users and groups",
+      description:
+        "Create user accounts and groups, edit group details, and add group members or owners.",
+      defaultMode: "ask",
+    },
+  ],
   google_drive: [
     {
       id: "read",

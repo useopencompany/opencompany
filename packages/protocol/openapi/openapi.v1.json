@@ -10907,6 +10907,7 @@
             "type": "string",
             "enum": [
               "gmail",
+              "google_admin",
               "google_calendar",
               "google_drive",
               "linear",
