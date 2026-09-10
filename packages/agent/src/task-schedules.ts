@@ -1,9 +1,9 @@
-import { randomUUID } from "node:crypto";
 import {
   isValidFiveFieldCron,
   nextCronRunAt,
   normalizeScheduleTimezone,
 } from "@opencompany/agent-runtime";
+import { newResourceId } from "@opencompany/core/resource-ids";
 import { getDb } from "@opencompany/db/client";
 import { stringifyPostgresJson } from "@opencompany/db/postgres-json";
 import type { HarnessSpec } from "@opencompany/db/product-schema";
@@ -320,7 +320,7 @@ function taskScheduleToView(row: typeof taskSchedules.$inferSelect): TaskSchedul
 }
 
 function newTaskScheduleId() {
-  return `goat_task_schedule_${randomUUID()}`;
+  return newResourceId("task_schedule");
 }
 
 function rowsFromExecute<T>(result: unknown): T[] {
