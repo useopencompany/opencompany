@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { composerDraftKey, persistComposerDraft } from "@/lib/chat-composer-draft";
-import { persistLastChatSelection } from "@/lib/chat-composer-selection";
+import { persistLastChatSelection, readLastChatSelection } from "@/lib/chat-composer-selection";
 import {
   CHAT_COMPOSER_FOCUS_EVENT,
   HOME_NAVIGATION_EVENT,
@@ -3215,9 +3215,7 @@ describe("Surface chat streaming UI", () => {
     expect(screen.getByTestId("optimistic-chat-summaries")).toHaveTextContent(
       `${body.newSessionId}:@codex check repo access`,
     );
-    expect(window.localStorage.getItem("opencompany-goat-main-chat-selection:user_1")).toBe(
-      DEFAULT_MODEL,
-    );
+    expect(readLastChatSelection("user_1", { codexConnected: true })).toBe(DEFAULT_MODEL);
 
     await user.keyboard("{Escape}");
     await nextAnimationFrame();
@@ -3285,9 +3283,7 @@ describe("Surface chat streaming UI", () => {
       model: CLAUDE_CHAT_DEFAULT_MODEL_ID,
       engine: { type: "claude_code", schemaVersion: 1 },
     });
-    expect(window.localStorage.getItem("opencompany-goat-main-chat-selection:user_1")).toBe(
-      DEFAULT_MODEL,
-    );
+    expect(readLastChatSelection("user_1", { codexConnected: true })).toBe(DEFAULT_MODEL);
 
     await user.keyboard("{Escape}");
     await nextAnimationFrame();
@@ -3456,7 +3452,7 @@ describe("Surface chat streaming UI", () => {
           { scopeKey: "workspace_1" },
         ),
       );
-      expect(window.localStorage.getItem("opencompany-goat-main-chat-selection:user_1")).toBe(
+      expect(readLastChatSelection("user_1", { codexConnected: true })).toBe(
         "deepseek/deepseek-v4-pro",
       );
     },
@@ -4787,7 +4783,7 @@ describe("Surface chat streaming UI", () => {
     // The model picker's popover content portals outside the dialog's DOM subtree.
     await user.click(screen.getByText("Cloud Codex sandbox"));
 
-    expect(window.localStorage.getItem("opencompany-goat-main-chat-selection:user_1")).toBeNull();
+    expect(readLastChatSelection("user_1", { codexConnected: true })).toBeNull();
   });
 
   it("searches and jumps to an existing chat from the Cmd+K palette", async () => {
