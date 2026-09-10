@@ -1870,6 +1870,13 @@
       "when": 1789044252923,
       "tag": "0266_google_admin_integration",
       "breakpoints": true
+    },
+    {
+      "idx": 267,
+      "version": "7",
+      "when": 1789065137892,
+      "tag": "0267_goat_review_inbox_flag",
+      "breakpoints": true
     }
   ]
 }

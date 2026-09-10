@@ -3618,6 +3618,7 @@ export const IdentityUserSchema = z
     taskSpawningEnabled: z.boolean(),
     autoModelRoutingEnabled: z.boolean(),
     chatCapabilitiesBetaEnabled: z.boolean(),
+    reviewInboxEnabled: z.boolean(),
     /** @deprecated Wiki is always enabled. */
     wikiEnabled: z.literal(true),
     taskViewMode: TaskViewModeSchema,
@@ -3682,6 +3683,7 @@ export const UserPreferencesSchema = z
     taskViewMode: TaskViewModeSchema,
     taskTimeRange: TaskTimeRangeSchema,
     autoModelRoutingEnabled: z.boolean(),
+    reviewInboxEnabled: z.boolean(),
   })
   .strict()
   .openapi("UserPreferences");
@@ -3696,6 +3698,7 @@ export const UpdateUserPreferencesBodySchema = z
     taskViewMode: TaskViewModeSchema.optional(),
     taskTimeRange: TaskTimeRangeSchema.optional(),
     autoModelRoutingEnabled: z.boolean().optional(),
+    reviewInboxEnabled: z.boolean().optional(),
   })
   .strict()
   .refine((body: Record<string, unknown>) => Object.keys(body).length > 0, {

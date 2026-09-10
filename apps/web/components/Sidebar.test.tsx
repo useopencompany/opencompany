@@ -36,7 +36,9 @@ const featureFlagsMock = vi.hoisted(() => ({
   taskSpawning: false,
   autoModelRouting: false,
   legacyBrain: true,
+  reviewInbox: false,
 }));
+const reviewCountMock = vi.hoisted(() => ({ value: 0 }));
 const recentChatsMock = vi.hoisted(() => ({
   value: [] as Array<{
     id: string;
@@ -136,7 +138,9 @@ vi.mock("@/components/AppDataProvider", () => ({
       taskSpawning: featureFlagsMock.taskSpawning,
       autoModelRouting: featureFlagsMock.autoModelRouting,
       legacyBrain: featureFlagsMock.legacyBrain,
+      reviewInbox: featureFlagsMock.reviewInbox,
     },
+    reviewCount: reviewCountMock.value,
     mcpSetup: { preferredClient: null, completedAt: mcpSetupMock.completedAt },
   }),
 }));
@@ -150,6 +154,8 @@ describe("Sidebar", () => {
     mcpSetupMock.completedAt = null;
     featureFlagsMock.taskSpawning = false;
     featureFlagsMock.legacyBrain = true;
+    featureFlagsMock.reviewInbox = false;
+    reviewCountMock.value = 0;
     recentChatsMock.value = [];
     tasksMock.value = [];
     clearAllLocalChatStates();
@@ -874,5 +880,46 @@ describe("Sidebar", () => {
     const aside = document.querySelector("aside");
     expect(aside).toHaveAttribute("aria-hidden", "true");
     expect(aside?.className).toContain("w-0");
+  });
+
+  it("hides For review until the beta flag is on", () => {
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.queryByRole("link", { name: /For review/ })).not.toBeInTheDocument();
+  });
+
+  it("shows For review directly below Home with its unread count", () => {
+    featureFlagsMock.reviewInbox = true;
+    reviewCountMock.value = 3;
+
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    const nav = screen.getByRole("navigation", { name: "opencompany primary" });
+    const links = within(nav).getAllByRole("link");
+    expect(links[0]).toHaveTextContent("Home");
+    expect(links[1]).toHaveTextContent("For review");
+    expect(links[1]).toHaveTextContent("3");
+    expect(links[1]).toHaveAttribute("href", "/review");
+  });
+
+  it("omits the count badge when nothing is awaiting review", () => {
+    featureFlagsMock.reviewInbox = true;
+    reviewCountMock.value = 0;
+
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.getByRole("link", { name: /For review/ })).toHaveTextContent(/^For review$/);
+  });
+
+  it("marks For review as the current page on its route", () => {
+    featureFlagsMock.reviewInbox = true;
+    pathnameMock.value = "/review";
+
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.getByRole("link", { name: /For review/ })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
   });
 });

@@ -671,6 +671,7 @@ function initialData(): AppInitialData {
       taskSpawning: false,
       autoModelRouting: false,
       legacyBrain: false,
+      reviewInbox: false,
     },
     codexConnected: false,
     claudeCodeConnected: false,

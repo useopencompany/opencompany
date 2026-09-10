@@ -45,6 +45,7 @@ import {
   reconcileOptimisticChatSummaries,
   useOptimisticChatSummaries,
 } from "@/lib/optimistic-chat-summaries";
+import { countAwaitingReview, type ReviewItem, selectReviewItems } from "@/lib/review-inbox";
 import { selectSidebarChats } from "@/lib/sidebar-chats";
 import type { TaskRow } from "@/lib/task-collections";
 import { deriveTaskWorkflowSteps } from "@/lib/task-workflow-activity";
@@ -113,6 +114,11 @@ type AppData = AppInitialData & {
   // search and restore them. Derived from the same live query as recentChats —
   // closed rows already stream to the client, they're just hidden elsewhere.
   archivedChats: ChatSummaryView[];
+  // Finished agent turns the user has not read yet, across chats and Tasks. Empty unless the
+  // reviewInbox flag is on, so the disabled path costs nothing beyond the flag check.
+  reviewItems: ReviewItem[];
+  // Unread count for the sidebar badge. Never includes items held in place after being opened.
+  reviewCount: number;
 };
 
 // Keeps the command palette responsive; older archived chats are still
@@ -360,6 +366,19 @@ function AppLiveDataSubscriptions({
       }));
   }, [chatRows]);
 
+  const reviewConversations = useMemo(
+    () => (chatRows ?? []) as HeadlessChatConversationReadModel[],
+    [chatRows],
+  );
+  const reviewItems = useMemo<ReviewItem[]>(() => {
+    if (!initialData.featureFlags.reviewInbox) return [];
+    return selectReviewItems({ conversations: reviewConversations, tasks: currentTaskRows });
+  }, [currentTaskRows, initialData.featureFlags.reviewInbox, reviewConversations]);
+  const reviewCount = useMemo(() => {
+    if (!initialData.featureFlags.reviewInbox) return 0;
+    return countAwaitingReview({ conversations: reviewConversations });
+  }, [initialData.featureFlags.reviewInbox, reviewConversations]);
+
   const integrations = useMemo(() => {
     if (integrationsLoading && !integrationRows?.length) return initialData.integrations;
     const liveIntegrations = integrationStateFromRows(
@@ -392,6 +411,8 @@ function AppLiveDataSubscriptions({
       schedules,
       recentChats,
       archivedChats,
+      reviewItems,
+      reviewCount,
       integrations,
       taskRows: currentTaskRows,
       tasksReady: legacyTaskRows !== null && (!tasksLoading || (taskRows?.length ?? 0) > 0),
@@ -402,6 +423,8 @@ function AppLiveDataSubscriptions({
       initialData,
       integrations,
       recentChats,
+      reviewCount,
+      reviewItems,
       schedules,
       taskRows,
       tasks,
@@ -440,6 +463,10 @@ function initialAppData(initialData: AppInitialData): AppData {
     tasksReady: false,
     allTasks: initialData.tasks,
     archivedChats: [],
+    // The server snapshot has no conversation read-model rows yet; the queue fills in on the
+    // first live push, which is also when the sidebar badge can first be accurate.
+    reviewItems: [],
+    reviewCount: 0,
   };
 }
 

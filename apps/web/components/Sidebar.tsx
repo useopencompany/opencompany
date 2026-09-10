@@ -9,6 +9,7 @@ import {
   Check,
   ChevronsUpDown,
   House,
+  Inbox,
   ListTodo,
   Loader2,
   LogOut,
@@ -79,6 +80,7 @@ function SidebarNavRow({
   label,
   active,
   incomplete = false,
+  count,
   onClick,
 }: {
   href: string;
@@ -86,6 +88,7 @@ function SidebarNavRow({
   label: string;
   active: boolean;
   incomplete?: boolean;
+  count?: number;
   onClick?: MouseEventHandler<HTMLAnchorElement>;
 }) {
   return (
@@ -104,6 +107,11 @@ function SidebarNavRow({
         className={`shrink-0 ${active ? "text-ink" : "text-ink/60 group-hover:text-ink/80"}`}
       />
       <span className="truncate tracking-[-0.005em]">{label}</span>
+      {count ? (
+        <span className="ml-auto shrink-0 text-[12px] tabular-nums leading-none text-ink-subtle">
+          {count}
+        </span>
+      ) : null}
       {incomplete ? (
         <span aria-hidden="true" className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-warning" />
       ) : null}
@@ -120,10 +128,11 @@ export function Sidebar({
   onToggleCollapsed: () => void;
   showCollapseButton?: boolean;
 }) {
-  const { featureFlags, mcpSetup } = useAppData();
+  const { featureFlags, mcpSetup, reviewCount } = useAppData();
   const pathname = usePathname();
   const mcpSetupActive = !mcpSetup.completedAt && pathname === "/settings/mcp";
   const homeActive = pathname === "/";
+  const reviewActive = pathname === "/review";
   const tasksActive = pathname === "/tasks" || pathname.startsWith("/tasks/");
   const workflowsActive = pathname === "/workflows" || pathname.startsWith("/workflows/");
   const wikiActive = pathname === "/wiki" || pathname.startsWith("/wiki/");
@@ -176,6 +185,15 @@ export function Sidebar({
               window.dispatchEvent(new Event(HOME_NAVIGATION_EVENT));
             }}
           />
+          {featureFlags.reviewInbox ? (
+            <SidebarNavRow
+              href="/review"
+              icon={Inbox}
+              label="For review"
+              active={reviewActive}
+              count={reviewCount}
+            />
+          ) : null}
           {featureFlags.taskSpawning ? (
             <>
               <SidebarNavRow href="/tasks" icon={ListTodo} label="Tasks" active={tasksActive} />
