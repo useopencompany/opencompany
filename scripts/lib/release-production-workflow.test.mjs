@@ -39,7 +39,7 @@ test("builds Vercel outputs before migrations and rechecks main before deploys",
     "Deploy and smoke marketing",
     "Deploy and smoke docs",
     "Deploy and smoke Render services",
-    "Activate Personal Skills after old services drain",
+    "Activate Personal Skills and plugins after old services drain",
     "Deploy web",
     "Smoke web release",
   ]);

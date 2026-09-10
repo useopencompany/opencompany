@@ -1062,6 +1062,7 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       expect.anything(),
       {
         workspaceId: "workspace_1",
+        userId: "user_1",
         bundleIds: [pinnedSkill.id],
       },
     );

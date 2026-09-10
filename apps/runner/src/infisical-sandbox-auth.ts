@@ -39,7 +39,10 @@ export async function reconcileInfisicalSandboxAuth(input: {
   workspaceId: string | null;
   userWorkosId: string;
 }): Promise<InfisicalSandboxAuth> {
-  if (!input.workspaceId) return unavailableAuth();
+  if (!input.workspaceId) {
+    await clearInfisicalAuth(input.sandbox);
+    return unavailableAuth();
+  }
 
   const db = getDb();
   const registrations = await listActivePluginGatewayRegistrations(db, {
