@@ -612,6 +612,7 @@ export async function listChatSkillBundleActivations(
   }
   const enabledPluginBundleIds = await loadEnabledPluginSkillBundleIds(db, {
     workspaceId: input.workspaceId,
+    userId: input.userId,
     bundleIds: activations.flatMap((activation) =>
       activation.sourceKind === "plugin" ? [activation.bundleId] : [],
     ),
@@ -724,6 +725,7 @@ export async function readChatSkillBundleFile(
   if (row?.sourceKind === "plugin") {
     const enabledPluginBundleIds = await loadEnabledPluginSkillBundleIds(db, {
       workspaceId: input.workspaceId,
+      userId: input.userId,
       bundleIds: [row.bundleId],
     });
     if (!enabledPluginBundleIds.has(row.bundleId)) return null;

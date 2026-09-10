@@ -95,12 +95,13 @@ describe("workspace automation lifecycle", () => {
         .mockReturnValueOnce(emptyPluginBuilder),
     };
 
-    await expect(listSkillCatalog("workspace_1", db as never)).resolves.toEqual([
+    await expect(listSkillCatalog("workspace_1", db as never, "user_1")).resolves.toEqual([
       { id: "legal-review", name: "Legal review", description: "Check legal language" },
     ]);
     await expect(
       resolveSkillMentions({
         workspaceId: "workspace_1",
+        userId: "user_1",
         mentions: [{ id: "legal-review" }],
         db: db as never,
       }),

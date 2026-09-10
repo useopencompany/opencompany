@@ -400,6 +400,15 @@ async function executeRemoteMcpTool(input: {
     userWorkosId: input.context.userWorkosId,
     workspaceId: input.context.workspaceId ?? input.identity.workspaceId,
   };
+  if (
+    identity.userWorkosId !== input.identity.userWorkosId ||
+    identity.workspaceId !== input.identity.workspaceId
+  ) {
+    throw new ActionPermissionError(
+      input.registration.connectionProvider,
+      "This action belongs to another personal plugin context. Refresh your available actions.",
+    );
+  }
   const current = await input.registration.getState(identity);
   if (!current.connected || !current.integrationId) {
     throw remoteAuthError(input.registration, "not_connected");

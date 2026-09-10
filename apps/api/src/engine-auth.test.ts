@@ -239,19 +239,21 @@ describe("engine auth service", () => {
     });
   });
 
-  it("admin-gates every Infisical mutation with the retired copy", async () => {
-    const forbidden = {
-      status: 403,
-      message: "Only workspace admins can manage Infisical.",
-    };
+  it("lets members manage their own Infisical login", async () => {
+    const { runner, calls } = fakeRunner([{ ok: true, flow: infisicalFlow }]);
     await expect(
-      service().startInfisicalAuth(member, "https://app.infisical.com"),
-    ).rejects.toMatchObject(forbidden);
-    await expect(service().completeInfisicalAuth(member, "ginff_1", "token")).rejects.toMatchObject(
-      forbidden,
-    );
-    await expect(service().disconnectInfisical(member)).rejects.toMatchObject(forbidden);
-    expect(disconnectInfisicalConnection).not.toHaveBeenCalled();
+      service(runner).startInfisicalAuth(member, "https://app.infisical.com"),
+    ).resolves.toEqual(infisicalFlow);
+    expect(calls[0]?.body).toMatchObject({
+      requestedByWorkosId: member.userId,
+      workspaceId: member.workspaceId,
+    });
+    await service().disconnectInfisical(member);
+    expect(disconnectInfisicalConnection).toHaveBeenCalledWith({
+      db: dbSentinel,
+      workspaceId: member.workspaceId,
+      userId: member.userId,
+    });
   });
 
   it("keeps the Infisical status read member-visible", async () => {
@@ -272,6 +274,7 @@ describe("engine auth service", () => {
     expect(loadInfisicalConnectionMetadata).toHaveBeenCalledWith({
       db: dbSentinel,
       workspaceId: "workspace_1",
+      userId: "user_1",
     });
   });
 
@@ -377,6 +380,7 @@ describe("engine auth service", () => {
     expect(disconnectInfisicalConnection).toHaveBeenCalledWith({
       db: dbSentinel,
       workspaceId: "workspace_1",
+      userId: "user_1",
     });
   });
 });

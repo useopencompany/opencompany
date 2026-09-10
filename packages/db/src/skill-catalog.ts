@@ -1,8 +1,9 @@
 import { CoreError, type PluginSkillCollision, type SkillScope } from "@opencompany/core";
 import { and, eq, inArray, isNull } from "drizzle-orm";
+import { pluginAccess } from "./plugin-access";
 import { pluginSkills, plugins, skillBundles, skillInstallations } from "./product-schema";
 
-import { skillInstallationAccess, skillMembership } from "./skill-access";
+import { skillInstallationAccess } from "./skill-access";
 
 type DbClient = any;
 
@@ -78,7 +79,7 @@ export async function resolveWorkspaceSkillCatalog(
 
   const pluginIds = input.pluginIds ? [...new Set(input.pluginIds)] : undefined;
   const pluginPromise =
-    pluginIds?.length === 0
+    !input.userId || pluginIds?.length === 0
       ? Promise.resolve([])
       : db
           .select({
@@ -108,7 +109,7 @@ export async function resolveWorkspaceSkillCatalog(
           .where(
             and(
               eq(pluginSkills.workspaceId, input.workspaceId),
-              input.userId ? skillMembership(input) : undefined,
+              pluginAccess({ workspaceId: input.workspaceId, userId: input.userId }),
               eq(plugins.workspaceId, input.workspaceId),
               eq(plugins.status, "enabled"),
               ...(pluginIds ? [inArray(plugins.id, pluginIds)] : []),

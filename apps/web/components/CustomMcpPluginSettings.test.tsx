@@ -85,7 +85,7 @@ it("shows a connection failure and lets the user retry without installing", asyn
   expect(createCustomMcp).not.toHaveBeenCalled();
 });
 
-it("keeps personal connection controls available to members and handles refresh errors", async () => {
+it("keeps personal connection controls available without installation write permission and handles refresh errors", async () => {
   const user = userEvent.setup();
   vi.mocked(refreshCustomMcp).mockResolvedValue({
     ...status,
@@ -105,8 +105,8 @@ it("keeps personal connection controls available to members and handles refresh 
   expect(disconnectCustomMcp).toHaveBeenCalledWith(plugin.name);
 });
 
-it("explains admin installation access without exposing a setup form to members", () => {
+it("requires plugin write permission for installation", () => {
   render(<AddCustomMcpPlugin canEdit={false} />);
-  expect(screen.getByText(/Ask a workspace admin/)).toBeVisible();
+  expect(screen.getByText(/You need plugin write permission/)).toBeVisible();
   expect(screen.queryByLabelText("Server URL")).not.toBeInTheDocument();
 });

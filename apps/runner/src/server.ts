@@ -72,6 +72,7 @@ export function createServer(
       acpToolsMcp: "v3",
       brainWorkerAdmission: "postgres-v1",
       personalSkillsAuthorization: "v1",
+      personalPluginsAuthorization: "v1",
     },
     environment: process.env.OBSERVABILITY_ENV ?? process.env.NODE_ENV ?? "development",
     release:

@@ -23,6 +23,29 @@ const context: ChatHostContext = {
 };
 
 describe("opencompany Chat Task host tools", () => {
+  it("keeps the acting member when a task resolves plugin Skills and restricts standalone Skills to company scope", async () => {
+    const dependencies = testDependencies({
+      loadContext: vi.fn(async () => ({ ...context, taskConversation: true })),
+    });
+    const result = await executeChatHostToolService({
+      command: {
+        operation: "bootstrap",
+        sessionId: "runtime_1",
+        runId: "run_1",
+        input: { mentionedSkillIds: ["plugin-skill"] },
+      },
+      dependencies,
+    });
+    expect(result.ok).toBe(true);
+    expect(dependencies.resolveSkillMentions).toHaveBeenCalledWith({
+      workspaceId: "workspace_1",
+      userId: "user_1",
+      skillAccess: "company",
+      mentions: [{ id: "plugin-skill" }],
+    });
+    expect(dependencies.listSkillCatalog).toHaveBeenCalledWith("workspace_1", "user_1", "company");
+  });
+
   it("derives stable, distinct workspace Skill keys from each model tool call", () => {
     expect(workspaceSkillIdempotencyKey("turn_1", "call_1")).toBe(
       workspaceSkillIdempotencyKey("turn_1", "call_1"),

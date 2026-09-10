@@ -618,12 +618,15 @@ export async function runClaudeCodeChatTurn(input: {
     executionStage = "load_skills";
     const [sessionSkills, workflowSkills, pluginRuntime] = await Promise.all([
       loadCodexChatSessionSkills(turn, Boolean(taskContext)),
-      taskContext ? loadWorkflowTaskSkillBundles(taskContext.harnessSpec) : Promise.resolve([]),
       taskContext
-        ? loadWorkflowTaskPluginRuntime(taskContext.harnessSpec)
+        ? loadWorkflowTaskSkillBundles(taskContext.harnessSpec, turn.userWorkosId)
+        : Promise.resolve([]),
+      taskContext
+        ? loadWorkflowTaskPluginRuntime(taskContext.harnessSpec, turn.userWorkosId)
         : session.workspaceId
           ? loadChatSessionPluginRuntime(getDb(), {
               workspaceId: session.workspaceId,
+              userId: turn.userWorkosId,
               chatSessionId: session.chatSessionId,
             })
           : Promise.resolve({ plugins: [], skills: [], mcpPlugins: [] }),
@@ -642,6 +645,7 @@ export async function runClaudeCodeChatTurn(input: {
     const enabledPluginSkillBundleIds = skillWorkspaceId
       ? await loadEnabledPluginSkillBundleIds(getDb(), {
           workspaceId: skillWorkspaceId,
+          userId: turn.userWorkosId,
           bundleIds: activatedPluginBundleIds,
         })
       : new Set<string>();
@@ -679,6 +683,7 @@ export async function runClaudeCodeChatTurn(input: {
       if (!skillWorkspaceId) throw new Error("Approved Plugin MCP requires a workspace ID.");
       executionStage = "restore_plugin_data";
       pluginDataRuntime = await preparePluginDataRuntime({
+        userId: turn.userWorkosId,
         sandbox,
         workRoot: CLAUDE_CHAT_WORKDIR,
         workspaceId: skillWorkspaceId,

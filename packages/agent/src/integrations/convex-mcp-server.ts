@@ -57,6 +57,7 @@ export function createConvexMcpService(input: {
       const [active, row] = await Promise.all([
         isPluginGatewayRegistrationActive(input.db, {
           workspaceId: payload.workspaceId,
+          userId: payload.userWorkosId,
           registrationId: payload.registrationId,
         }),
         loadConvexIntegration(input.db, payload.userWorkosId),

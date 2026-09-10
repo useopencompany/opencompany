@@ -9,7 +9,7 @@ import {
   saveInfisicalConnection,
 } from "@opencompany/db/infisical-auth";
 import { infisicalAuthFlows } from "@opencompany/db/product-schema";
-import { requireWorkspaceAdmin } from "@opencompany/db/workspaces";
+import { getWorkspaceRole } from "@opencompany/db/workspaces";
 import { createLogger } from "@opencompany/observability";
 import { and, eq, inArray } from "drizzle-orm";
 import { Sandbox } from "e2b";
@@ -59,7 +59,7 @@ export async function startInfisicalAuthFlow(input: {
   host: InfisicalHost;
   env: RunnerEnv;
 }): Promise<InfisicalAuthFlowStatus> {
-  await requireRunnerWorkspaceAdmin(input.workspaceId, input.requestedByWorkosId);
+  await requireRunnerWorkspaceMember(input.workspaceId, input.requestedByWorkosId);
   if (!isInfisicalHost(input.host)) {
     throw new Error("Unsupported Infisical host.");
   }
@@ -67,7 +67,7 @@ export async function startInfisicalAuthFlow(input: {
   let sandbox: SandboxHandle | null = null;
   const id = newInfisicalAuthFlowId();
   try {
-    await supersedeActiveFlows(input.workspaceId);
+    await supersedeActiveFlows(input.workspaceId, input.requestedByWorkosId);
 
     failureStage = "create_sandbox";
     const createdSandbox = await Sandbox.create(input.env.codexE2bTemplate ?? "codex", {
@@ -152,7 +152,7 @@ export async function completeInfisicalAuthFlow(input: {
   flowId: string;
   browserToken: string;
 }): Promise<InfisicalAuthFlowStatus | null> {
-  await requireRunnerWorkspaceAdmin(input.workspaceId, input.requestedByWorkosId);
+  await requireRunnerWorkspaceMember(input.workspaceId, input.requestedByWorkosId);
   const flow = await loadFlow(input.workspaceId, input.requestedByWorkosId, input.flowId);
   if (!flow) return null;
   if (isTerminalStatus(flow.status)) return flowStatus(flow);
@@ -223,6 +223,7 @@ export async function completeInfisicalAuthFlow(input: {
       browserCredentials.privateKey,
     ]);
     await saveInfisicalConnection({
+      userId: input.requestedByWorkosId,
       db: getDb(),
       workspaceId: input.workspaceId,
       authBundle,
@@ -329,17 +330,21 @@ export function decodeInfisicalBrowserToken(browserToken: string) {
   return { email, jwt, refreshToken, privateKey };
 }
 
-async function requireRunnerWorkspaceAdmin(workspaceId: string, requestedByWorkosId: string) {
-  await requireWorkspaceAdmin({ workspaceId, userWorkosId: requestedByWorkosId }, { db: getDb() });
+async function requireRunnerWorkspaceMember(workspaceId: string, requestedByWorkosId: string) {
+  if (
+    !(await getWorkspaceRole({ workspaceId, userWorkosId: requestedByWorkosId }, { db: getDb() }))
+  )
+    throw new Error("Workspace membership is required to connect Infisical.");
 }
 
-async function supersedeActiveFlows(workspaceId: string) {
+async function supersedeActiveFlows(workspaceId: string, userId: string) {
   const activeFlows = await getDb()
     .select({ id: infisicalAuthFlows.id, sandboxId: infisicalAuthFlows.sandboxId })
     .from(infisicalAuthFlows)
     .where(
       and(
         eq(infisicalAuthFlows.workspaceId, workspaceId),
+        eq(infisicalAuthFlows.requestedByWorkosId, userId),
         inArray(infisicalAuthFlows.status, ["pending", "link_ready"]),
       ),
     );
