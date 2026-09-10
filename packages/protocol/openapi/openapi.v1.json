@@ -11887,12 +11887,17 @@
               "capabilities": {
                 "type": "integer",
                 "minimum": 0
+              },
+              "sandbox": {
+                "type": "integer",
+                "minimum": 0
               }
             },
             "required": [
               "chat",
               "ingestion",
-              "capabilities"
+              "capabilities",
+              "sandbox"
             ],
             "additionalProperties": false
           },
@@ -12077,6 +12082,7 @@
                     "chat",
                     "ingestion",
                     "capabilities",
+                    "sandbox",
                     "other"
                   ]
                 },

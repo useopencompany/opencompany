@@ -31,6 +31,7 @@ const base: BillingPanelData = {
     chat: 800_000,
     ingestion: 300_000,
     capabilities: 130_000,
+    sandbox: 0,
   },
   recentActivity: [],
   lowBalanceWarnUsdMicros: 2_000_000,
@@ -49,6 +50,33 @@ const base: BillingPanelData = {
 };
 
 describe("BillingPanel", () => {
+  it("shows sandbox usage in monthly spend and ledger activity", () => {
+    render(
+      <BillingPanel
+        data={{
+          ...base,
+          spendThisMonthByCategory: { ...base.spendThisMonthByCategory, sandbox: 100_000 },
+          recentActivity: [
+            {
+              activityId: "sandbox-entry",
+              source: "sandbox_usage",
+              amountUsdMicros: -100_000,
+              providerCostUsdMicros: 100_000,
+              platformFeeUsdMicros: 0,
+              capabilityAction: null,
+              isAutoRefill: false,
+              createdAt: new Date().toISOString(),
+            },
+          ],
+        }}
+        checkoutResult={null}
+        topupResult={null}
+      />,
+    );
+    expect(screen.getAllByText("Sandbox usage")).toHaveLength(2);
+    expect(screen.queryByText("Cloud browser")).not.toBeInTheDocument();
+  });
+
   it("shows the Hobby allowance without purchase controls", () => {
     render(<BillingPanel data={base} checkoutResult={null} topupResult={null} />);
 

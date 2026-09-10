@@ -4383,7 +4383,7 @@ describe("canonical Hono API", () => {
       memberCount: 2,
       memberCap: 10,
       spendThisMonthUsdMicros: 500_000,
-      spendThisMonthByCategory: { chat: 500_000, ingestion: 0, capabilities: 0 },
+      spendThisMonthByCategory: { chat: 500_000, ingestion: 0, capabilities: 0, sandbox: 0 },
       recentActivity: [
         {
           activityId: "billing_activity_safe",
@@ -4426,6 +4426,32 @@ describe("canonical Hono API", () => {
     });
     expect(JSON.stringify(body)).not.toMatch(/stripeCustomerId|paymentMethodId|ledgerId/u);
     expect(getOverview).toHaveBeenCalledWith(actor);
+  });
+
+  it("serves sandbox usage through the authenticated usage endpoint", async () => {
+    const getUsage = vi.fn(async () => ({
+      breakdown: [
+        {
+          day: "2026-09-10",
+          category: "sandbox" as const,
+          spendUsdMicros: 100_000,
+          providerCostUsdMicros: 100_000,
+          platformFeeUsdMicros: 0,
+        },
+      ],
+      ingestedThisMonth: 0,
+      pending: 0,
+      creditBalanceUsdMicros: 4_900_000,
+      providers: [],
+      recent: [],
+    }));
+    const app = testApp(fakeRepository(), { billing: { ...fakeBilling(), getUsage } });
+    const response = await app.request("/v1/billing/usage");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: { breakdown: [{ category: "sandbox", spendUsdMicros: 100_000 }] },
+    });
+    expect(getUsage).toHaveBeenCalledWith(actor);
   });
 
   it("reports unexpected request failures with correlation context", async () => {
