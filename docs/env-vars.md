@@ -86,8 +86,9 @@ The official GitHub Plugin uses a personal GitHub App. Put `GITHUB_USER_APP_SLUG
 ID and secret in prod `/runner` as well so sandbox sessions can refresh the same expiring user
 credential. The public callback remains
 `${OPENCOMPANY_NEXT_PUBLIC_APP_URL}/api/integrations/github-user/callback`, relayed by web to the
-API. The App must request Contents, Issues, and Pull requests read/write plus Actions, Checks, and
-Metadata read, with expiring user tokens and user authorization during installation enabled. Set
+API. The App must request Contents, Issues, and Pull requests read/write plus Actions, Checks,
+Commit statuses, and Metadata read, with expiring user tokens and user authorization during
+installation enabled. Set
 its Setup URL to
 `${OPENCOMPANY_NEXT_PUBLIC_APP_URL}/settings/plugins/github` and enable redirect-on-update so App
 updates return to opencompany.
