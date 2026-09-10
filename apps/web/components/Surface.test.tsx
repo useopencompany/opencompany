@@ -27,6 +27,7 @@ import {
 import { CLAUDE_CHAT_DEFAULT_MODEL_ID, CODEX_CHAT_DEFAULT_MODEL_ID } from "@/lib/engine-registry";
 import { updateHeadlessChatConversation } from "@/lib/headless-chat-commands";
 import { HeadlessChatTransport } from "@/lib/headless-chat-transport";
+import { alwaysAllowChatActionAction } from "@/lib/integration-account-actions";
 import { DEFAULT_MODEL } from "@/lib/model-options";
 import { buildOnboardingKickoffPrompt, queueOnboardingKickoff } from "@/lib/onboarding-kickoff";
 import {
@@ -730,6 +731,105 @@ describe("Surface chat streaming UI", () => {
     expect(chatMock.resumeStream).toHaveBeenCalledOnce();
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
   });
+
+  it.each([
+    { decision: "Always allow", save: "success", expectedIds: [0, 1] },
+    { decision: "Accept", save: "success", expectedIds: [0] },
+    { decision: "Decline", save: "success", expectedIds: [0] },
+    { decision: "Always allow", save: "failure", expectedIds: [0] },
+    { decision: "Always allow", save: "rejected", expectedIds: [0] },
+  ])(
+    "resolves pending action approvals for $decision with permission save $save",
+    async ({ decision, save, expectedIds }) => {
+      const user = userEvent.setup();
+      let finishFirstApproval: (() => void) | undefined;
+      const resolveApproval = vi
+        .spyOn(HeadlessChatTransport.prototype, "resolveApproval")
+        .mockResolvedValue()
+        .mockImplementationOnce(
+          () =>
+            new Promise<void>((resolve) => {
+              finishFirstApproval = resolve;
+            }),
+        );
+      const savePermission = vi.mocked(alwaysAllowChatActionAction);
+      if (save === "failure") {
+        savePermission.mockResolvedValueOnce({ ok: false, error: "Permission unavailable" });
+      } else if (save === "rejected") {
+        savePermission.mockRejectedValueOnce(new Error("Network unavailable"));
+      }
+      const action = "plugin:x:x.search_posts_all";
+      const pendingPart = (id: string, actionId = action) => ({
+        type: USE_ACTION_TOOL_PART_TYPE,
+        toolCallId: `tool_${id}`,
+        state: "approval-requested" as const,
+        input: { action: actionId, params: { query: id } },
+        approval: { id: `approval_${id}` },
+      });
+      render(
+        <Surface
+          tasks={[]}
+          defaultModel={DEFAULT_MODEL}
+          initialChat={{
+            id: "chat_batch_approval",
+            title: "Find founders",
+            model: DEFAULT_MODEL,
+            messages: [
+              {
+                id: "assistant_other_run",
+                role: "assistant",
+                metadata: { runId: "run_other", model: DEFAULT_MODEL },
+                parts: [pendingPart("other_run")],
+              },
+              {
+                id: "assistant_batch_approval",
+                role: "assistant",
+                metadata: { runId: "run_batch_approval", model: DEFAULT_MODEL },
+                parts: [
+                  pendingPart("batch_0"),
+                  pendingPart("batch_1"),
+                  pendingPart("other_action", "plugin:x:x.get_users_by_usernames"),
+                  {
+                    ...pendingPart("denied"),
+                    state: "approval-responded",
+                    approval: { id: "approval_denied", approved: false },
+                  },
+                ],
+              },
+            ],
+          }}
+        />,
+      );
+      await user.click(screen.getAllByRole("button", { name: decision })[0]!);
+      await waitFor(() => expect(resolveApproval).toHaveBeenCalledOnce());
+      expect(chatMock.resumeStream).not.toHaveBeenCalled();
+      await act(async () => finishFirstApproval!());
+      await waitFor(() => expect(chatMock.resumeStream).toHaveBeenCalledOnce());
+      expect(resolveApproval).toHaveBeenCalledTimes(expectedIds.length);
+      for (const index of expectedIds) {
+        expect(resolveApproval).toHaveBeenCalledWith({
+          chatId: "chat_batch_approval",
+          runId: "run_batch_approval",
+          assistantMessageId: "assistant_batch_approval",
+          model: DEFAULT_MODEL,
+          approvalId: `approval_batch_${index}`,
+          approved: decision !== "Decline",
+        });
+      }
+      if (decision === "Always allow") {
+        expect(savePermission).toHaveBeenCalledExactlyOnceWith(action);
+        expect(savePermission.mock.invocationCallOrder[0]).toBeLessThan(
+          resolveApproval.mock.invocationCallOrder[0]!,
+        );
+      } else {
+        expect(savePermission).not.toHaveBeenCalled();
+      }
+      expect(resolveApproval.mock.invocationCallOrder.at(-1)).toBeLessThan(
+        chatMock.resumeStream.mock.invocationCallOrder[0]!,
+      );
+      expect(chatMock.sendMessage).not.toHaveBeenCalled();
+    },
+  );
 
   it("starts a background chat from the main composer when the message starts with ampersand", async () => {
     const user = userEvent.setup();

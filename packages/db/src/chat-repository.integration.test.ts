@@ -1310,13 +1310,20 @@ describe("Postgres Chat repositories", () => {
     },
   );
 
-  it("resolves durable approvals once and appends their semantic event", async () => {
+  it.each([1, 2])("resolves %i approvals before requeueing", async (approvalCount) => {
     const created = await service.createMessage(actor(), {
       idempotencyKey: "send-approval",
       content: "Use the customer system",
       engine: "opencompany",
       model: "provider/model",
     });
+    const approvals = Array.from({ length: approvalCount }, (_, index) => ({
+      id: `approval_${index + 1}`,
+      toolCallId: `tool_call_${index + 1}`,
+      kind: "use_action",
+      prompt: "Approve crm.lookup?",
+      options: ["approved", "denied"],
+    }));
     await database.query(
       `UPDATE goat.codex_chat_turns
        SET status = 'running', attempts = 1, lease_id = 'lease_approval',
@@ -1328,17 +1335,22 @@ describe("Postgres Chat repositories", () => {
       `UPDATE goat.chat_messages AS message
        SET debug_trace = jsonb_build_object(
          'schemaVersion', 'opencompany.chat.debug.v1',
-         'uiMessageParts', jsonb_build_array(jsonb_build_object(
-           'type', 'tool-use_action',
-           'toolCallId', 'tool_call_1',
-           'state', 'approval-requested',
-           'input', jsonb_build_object('action', 'crm.lookup'),
-           'approval', jsonb_build_object('id', 'approval_1')
-         ))
+         'uiMessageParts', $2::jsonb
        )
        FROM goat.codex_chat_turns AS run
        WHERE run.id = $1 AND message.id = run.assistant_message_id`,
-      [created.runId],
+      [
+        created.runId,
+        JSON.stringify(
+          approvals.map((approval) => ({
+            type: "tool-use_action",
+            toolCallId: approval.toolCallId,
+            state: "approval-requested",
+            input: { action: "crm.lookup" },
+            approval: { id: approval.id },
+          })),
+        ),
+      ],
     );
     const execution = new PostgresRunExecutionRepository(
       execute,
@@ -1356,17 +1368,9 @@ describe("Postgres Chat repositories", () => {
         runId: created.runId,
         attemptId: "attempt_approval",
         leaseId: "lease_approval",
-        approvals: [
-          {
-            id: "approval_1",
-            toolCallId: "tool_call_1",
-            kind: "use_action",
-            prompt: "Approve crm.lookup?",
-            options: ["approved", "denied"],
-          },
-        ],
+        approvals,
       }),
-    ).resolves.toMatchObject([{ id: "approval_1", status: "pending" }]);
+    ).resolves.toHaveLength(approvalCount);
     await expect(service.getConversation(actor(), created.conversationId)).resolves.toMatchObject({
       activityState: "idle",
       hasUnseen: true,
@@ -1420,6 +1424,20 @@ describe("Postgres Chat repositories", () => {
         approved_at: new Date("2026-08-10T20:00:00.000Z"),
       },
     ]);
+    if (approvalCount > 1) {
+      expect(
+        (
+          await database.query<{ status: string }>(
+            "SELECT status FROM goat.codex_chat_turns WHERE id = $1",
+            [created.runId],
+          )
+        ).rows,
+      ).toEqual([{ status: "paused" }]);
+      await service.resolveApproval(actor(), {
+        ...command,
+        approvalId: "approval_2",
+      });
+    }
     expect(
       (
         await database.query<{ status: string; settings: Record<string, unknown> }>(
@@ -1435,12 +1453,14 @@ describe("Postgres Chat repositories", () => {
        WHERE run.id = $1`,
       [created.runId],
     );
-    expect(assistant.rows[0]?.debug_trace.uiMessageParts).toEqual([
-      expect.objectContaining({
-        state: "approval-responded",
-        approval: { id: "approval_1", approved: true },
-      }),
-    ]);
+    expect(assistant.rows[0]?.debug_trace.uiMessageParts).toEqual(
+      approvals.map((approval) =>
+        expect.objectContaining({
+          state: "approval-responded",
+          approval: { id: approval.id, approved: true },
+        }),
+      ),
+    );
     expect(
       (
         await database.query<{ sequence: number; type: string }>(
@@ -1448,12 +1468,14 @@ describe("Postgres Chat repositories", () => {
           [created.runId],
         )
       ).rows,
-    ).toEqual([
-      { sequence: 1, type: "run.queued" },
-      { sequence: 2, type: "approval.requested" },
-      { sequence: 3, type: "run.paused" },
-      { sequence: 4, type: "approval.resolved" },
-    ]);
+    ).toEqual(
+      [
+        "run.queued",
+        ...approvals.map(() => "approval.requested"),
+        "run.paused",
+        ...approvals.map(() => "approval.resolved"),
+      ].map((type, index) => ({ sequence: index + 1, type })),
+    );
   });
 
   it("resolves a gateway approval without pausing its running engine turn", async () => {
