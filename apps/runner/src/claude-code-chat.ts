@@ -1144,7 +1144,8 @@ export async function runClaudeCodeChatTurn(input: {
         });
         await dataRuntime.release().catch(() => undefined);
         pluginDataRuntime = null;
-        if (!handedOff) {
+        // Guest failures must stay recoverable even when the same outage blocks checkpointing.
+        if (!handedOff && !(effectiveError instanceof CodexChatRetryableInfrastructureError)) {
           effectiveError = new Error(
             `The coding turn ended, but Plugin data checkpointing failed: ${errorMessage(checkpointError)}`,
           );
