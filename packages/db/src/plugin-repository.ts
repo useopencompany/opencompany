@@ -143,12 +143,39 @@ export class PostgresPluginRepository implements PluginRepository {
           collisions: [],
         };
         const previous = await pluginByName(tx, input.actor, input.plugin.manifest.name);
+        const current = await livePlugin(tx, input.actor, input.plugin.manifest.name);
+        if (
+          current?.integrity === input.plugin.integrity &&
+          current.resolvedCommit === input.plugin.source.resolvedCommit
+        ) {
+          return { plugin: await hydratePlugin(tx, current), idempotentReplay: true };
+        }
+        if (current) {
+          const now = new Date();
+          await tx
+            .update(plugins)
+            .set({
+              status: "archived",
+              archivedAt: now,
+              updatedAt: now,
+              mcpApprovedIntegrity: null,
+            })
+            .where(and(eq(plugins.id, current.id), pluginAccess(input.actor)));
+          await tx
+            .delete(pluginGatewayRegistrations)
+            .where(
+              and(
+                eq(pluginGatewayRegistrations.workspaceId, input.actor.workspaceId),
+                eq(pluginGatewayRegistrations.pluginId, current.id),
+              ),
+            );
+        }
         await tx.insert(plugins).values({
           id: pluginId,
           workspaceId: input.actor.workspaceId,
           ownerUserId: input.actor.userId,
           name: input.plugin.manifest.name,
-          status: "enabled",
+          status: current?.status ?? "enabled",
           manifest: input.plugin.manifest,
           sourceType: input.plugin.source.type,
           sourceUrl: input.plugin.source.url,
@@ -158,7 +185,7 @@ export class PostgresPluginRepository implements PluginRepository {
           integrity: input.plugin.integrity,
           stdioMcpServers: input.plugin.stdioServers,
           events: input.plugin.events,
-          eventModes: previous?.eventModes ?? {},
+          eventModes: current?.eventModes ?? previous?.eventModes ?? {},
           installReport: initialReport,
           mcpApprovedIntegrity: null,
         });

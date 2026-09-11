@@ -24,6 +24,7 @@ import {
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
   NOTION_PLUGIN_SOURCE,
+  OFFICIAL_PLUGINS,
   OfficialSkillPluginDetail,
   PluginDetail,
   PluginsSettings,
@@ -205,12 +206,20 @@ function integrationsWithConnectedLinear(): IntegrationState {
 }
 
 function installedOfficialPlugin(name: string) {
+  const config = OFFICIAL_PLUGINS[name as keyof typeof OFFICIAL_PLUGINS];
+  const currentCommit = config.source.match(/\/tree\/([0-9a-f]{40})\//u)?.[1];
+  if (!currentCommit) throw new Error(`Official plugin ${name} is not commit-pinned.`);
   return {
     id: `plugin_${name}`,
     name,
     status: "enabled" as const,
     manifest: { name, description: `${name} workflows.` },
-    source: plugin.source,
+    source: {
+      ...plugin.source,
+      path: name,
+      ref: currentCommit,
+      resolvedCommit: currentCommit,
+    },
     integrity: plugin.integrity,
     installReport: plugin.installReport,
     mcpApprovedIntegrity: plugin.mcpApprovedIntegrity,
@@ -247,20 +256,8 @@ describe("Plugin settings", () => {
       <PluginsSettings
         plugins={[
           {
-            id: plugin.id,
-            name: "linear",
-            status: plugin.status,
+            ...installedOfficialPlugin("linear"),
             manifest: { name: "Linear", description: "Linear workflows." },
-            source: plugin.source,
-            integrity: plugin.integrity,
-            installReport: plugin.installReport,
-            mcpApprovedIntegrity: plugin.mcpApprovedIntegrity,
-            createdAt: plugin.createdAt,
-            updatedAt: plugin.updatedAt,
-            archivedAt: plugin.archivedAt,
-            fileCount: 1,
-            skillCount: 1,
-            stdioServerCount: 1,
           },
         ]}
         canEdit
@@ -632,6 +629,39 @@ describe("Plugin settings", () => {
     expect(router.push).toHaveBeenCalledBefore(router.refresh);
   });
 
+  it("updates a stale official plugin from the overview", async () => {
+    const user = userEvent.setup();
+    const current = installedOfficialPlugin("linear");
+    render(
+      <PluginsSettings
+        plugins={[
+          {
+            ...current,
+            source: {
+              ...current.source,
+              ref: "a".repeat(40),
+              resolvedCommit: "a".repeat(40),
+            },
+          },
+        ]}
+        canEdit
+        workspaceId="workspace_1"
+      />,
+    );
+
+    expect(screen.getByText("Update available")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Update" }));
+
+    await waitFor(() => expect(router.refresh).toHaveBeenCalledOnce());
+    expect(previewHeadlessPluginImport).toHaveBeenCalledWith({ url: LINEAR_PLUGIN_SOURCE });
+    expect(importHeadlessPlugin).toHaveBeenCalledWith({
+      url: LINEAR_PLUGIN_SOURCE,
+      expectedResolvedCommit: officialPreview.source.resolvedCommit,
+      expectedIntegrity: officialPreview.integrity,
+    });
+    expect(toasts.success).toHaveBeenCalledWith("Linear updated.");
+  });
+
   it.each(["preview", "import"] as const)(
     "keeps the catalog cache and allows a retry when %s fails",
     async (stage) => {
@@ -690,6 +720,34 @@ describe("Plugin settings", () => {
       expectedIntegrity: ycAdvisePreview.integrity,
     });
     expect(toasts.success).toHaveBeenCalledWith("YC Advise installed.");
+  });
+
+  it("updates an installed official skills-only package", async () => {
+    vi.mocked(previewHeadlessPluginImport).mockResolvedValue(ycAdvisePreview);
+    render(
+      <PluginDetail
+        plugin={{
+          ...plugin,
+          name: "yc-advise",
+          manifest: ycAdvisePreview.manifest,
+          source: { ...plugin.source, path: "yc-advise" },
+          stdioServers: [],
+        }}
+        canEdit
+        officialPluginName="yc-advise"
+      />,
+    );
+
+    expect(screen.getByText("Update available")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Update" }));
+
+    await waitFor(() => expect(router.refresh).toHaveBeenCalledOnce());
+    expect(importHeadlessPlugin).toHaveBeenCalledWith({
+      url: YC_ADVISE_PLUGIN_SOURCE,
+      expectedResolvedCommit: ycAdvisePreview.source.resolvedCommit,
+      expectedIntegrity: ycAdvisePreview.integrity,
+    });
+    expect(toasts.success).toHaveBeenCalledWith("YC Advise updated.");
   });
 
   it("shows the exact MCP approval boundary without exposing environment values", () => {

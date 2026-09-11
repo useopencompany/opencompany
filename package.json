@@ -35,7 +35,7 @@
     "start:web": "bun --filter @opencompany/web start",
     "lint": "bun run boundary:check && turbo lint",
     "lint:fix": "turbo lint:fix",
-    "boundary:check": "node scripts/check-web-domain-boundary.mjs && node scripts/check-wiki-db-boundary.mjs && node scripts/check-naming-boundary.mjs && node scripts/check-doc-links.mjs",
+    "boundary:check": "node scripts/check-web-domain-boundary.mjs && node scripts/check-wiki-db-boundary.mjs && node scripts/check-naming-boundary.mjs && node scripts/check-protocol-router-boundary.mjs && node scripts/check-doc-links.mjs",
     "naming:check": "node scripts/check-naming-boundary.mjs",
     "docs:links:check": "node scripts/check-doc-links.mjs",
     "format": "biome check --write .",

@@ -11,7 +11,7 @@ import type {
   GitHubRepositoryAccessDto,
   GitHubRepositoryAccessItemDto,
   GitHubRepositoryAccessTargetDto,
-} from "@opencompany/protocol";
+} from "@opencompany/protocol/schemas";
 import { and, desc, eq, isNull, ne } from "drizzle-orm";
 import { getAppUrl } from "../app-url";
 import {

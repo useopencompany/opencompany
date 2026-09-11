@@ -2,12 +2,13 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createTestPGlite } from "./test-pglite";
 
 describe("legacy Skill cutover migration", () => {
   let database: PGlite;
 
   beforeAll(async () => {
-    database = new PGlite();
+    database = await createTestPGlite();
     await database.exec(BASE_SCHEMA);
     for (const migrationName of [
       "0226_goat_immutable_skill_bundles.sql",

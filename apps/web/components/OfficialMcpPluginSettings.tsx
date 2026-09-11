@@ -65,7 +65,7 @@ import {
 } from "@/lib/headless-knowledge-commands";
 import { setIntegrationCapabilityModeAction } from "@/lib/integration-account-actions";
 import { type IntegrationAccountView, type PersonalAccountProvider } from "@/lib/integration-state";
-import type { OfficialMcpPluginName } from "@/lib/official-plugins";
+import { type OfficialMcpPluginName, officialPluginUpdateAvailable } from "@/lib/official-plugins";
 import {
   type ManagedPluginConnection,
   type PluginAccount,
@@ -834,6 +834,9 @@ function OfficialMcpPluginDetailView({
   canEdit: boolean;
 }) {
   const plugin = pluginState.status === "ready" ? pluginState.plugin : null;
+  const updateAvailable = Boolean(
+    plugin && officialPluginUpdateAvailable(plugin.source.resolvedCommit, config.source),
+  );
   const shouldPreview = pluginState.status === "ready" && !pluginState.plugin;
   const [previewState, setPreviewState] = useState<PluginPreviewState>({ status: "loading" });
 
@@ -884,6 +887,7 @@ function OfficialMcpPluginDetailView({
           config={config}
           state={pluginState}
           previewState={previewState}
+          updateAvailable={updateAvailable}
           canEdit={canEdit}
         />
         {plugin ? (
@@ -1040,11 +1044,13 @@ function PluginHeaderSection({
   config,
   state,
   previewState,
+  updateAvailable,
   canEdit,
 }: {
   config: OfficialMcpPluginConfig;
   state: PluginLoadState;
   previewState: PluginPreviewState;
+  updateAvailable: boolean;
   canEdit: boolean;
 }) {
   const router = useRouter();
@@ -1088,6 +1094,19 @@ function PluginHeaderSection({
       }
     });
   };
+  const update = () => {
+    if (!plugin || !updateAvailable || isPending) return;
+    setError(null);
+    startTransition(async () => {
+      try {
+        await installOfficialMcpPlugin(config);
+        toast.success(`${config.label} updated.`);
+        router.refresh();
+      } catch (cause) {
+        setError(errorMessage(cause));
+      }
+    });
+  };
   const uninstall = () => {
     if (!plugin) return;
     setError(null);
@@ -1113,6 +1132,26 @@ function PluginHeaderSection({
           personal. Install it for yourself, review its permissions, and connect your account if
           prompted.
         </p>
+      ) : null}
+      {updateAvailable ? (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-warning/30 bg-warning/5 px-3 py-2.5">
+          <div className="min-w-0 flex-1">
+            <p className="text-[12.5px] font-medium text-ink">Update available</p>
+            <p className="mt-0.5 text-[12px] leading-4 text-ink-subtle">
+              A newer reviewed package is ready. Your connections and plugin settings stay in place.
+            </p>
+          </div>
+          {canEdit ? (
+            <Button size="sm" disabled={isPending} onClick={update}>
+              {isPending ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="size-3.5" />
+              )}
+              {isPending ? "Updating…" : "Update"}
+            </Button>
+          ) : null}
+        </div>
       ) : null}
       {canEdit && !plugin ? (
         <div className="flex flex-wrap items-center gap-2">

@@ -93,6 +93,15 @@ body {
   overscroll-behavior: none;
 }
 
+/* Keeps a container scrollable while hiding its scrollbar, for quiet list surfaces
+   where a visible track on platforms that draw one reads as noise. */
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 .desktop-drag-region {
   -webkit-app-region: drag;
 }

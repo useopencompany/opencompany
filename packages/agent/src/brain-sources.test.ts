@@ -1,5 +1,5 @@
 import type { Actor } from "@opencompany/core";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   captureProductEvent: vi.fn(async () => undefined),
@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   listPersonalAccounts: vi.fn(async () => []),
   listSharedDrives: vi.fn(async () => []),
   listSources: vi.fn(async () => []),
+  loadCredential: vi.fn(async () => ({ payload: { access_token: "linear_token" } })),
   loadDriveAccount: vi.fn(async (_userId: string, _integrationId: string, db: unknown) => ({
     integrationId: "integration_1",
     userWorkosId: "user_1",
@@ -49,6 +50,9 @@ vi.mock("@opencompany/db/brain-sources", () => ({
 vi.mock("@opencompany/db/workspaces", () => ({
   getDefaultBrainForUser: mocks.getDefaultBrain,
   getBrainAccess: mocks.getBrainAccess,
+}));
+vi.mock("@opencompany/db/integrations", () => ({
+  loadIntegrationCredential: mocks.loadCredential,
 }));
 vi.mock("@opencompany/db/google-drive", async (importActual) => ({
   ...(await importActual<typeof import("@opencompany/db/google-drive")>()),
@@ -81,6 +85,76 @@ describe("BrainSourceApplicationService", () => {
     vi.clearAllMocks();
     mocks.getBrainAccess.mockResolvedValue({ brain: { workspaceId: "workspace_1" } } as never);
     mocks.upsertSource.mockResolvedValue({ id: "source_1", created: false });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("lets workflow readers list teams from their connected Linear account", async () => {
+    const workflowMember = { ...member, permissions: ["workflow:read"] };
+    const service = new BrainSourceApplicationService(
+      queuedDb([
+        {
+          id: "integration_1",
+          provider: "linear",
+          userWorkosId: workflowMember.userId,
+          workspaceId: null,
+          externalId: "linear_workspace_1",
+          status: "connected",
+          accountName: "Acta",
+          accountEmail: null,
+          connectionLabel: null,
+          statusReason: null,
+        },
+      ]),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          data: {
+            teams: {
+              nodes: [{ id: "team_1", key: "PRO", name: "Product", states: { nodes: [] } }],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+          },
+        }),
+      ),
+    );
+
+    await expect(
+      service.listOptions(workflowMember, "integration_1", { provider: "linear" }),
+    ).resolves.toEqual({
+      provider: "linear",
+      teams: [{ id: "team_1", key: "PRO", name: "Product" }],
+      partial: false,
+    });
+  });
+
+  it("does not grant workflow readers access to Google Drive Brain options", async () => {
+    const workflowMember = { ...member, permissions: ["workflow:read"] };
+    const service = new BrainSourceApplicationService(queuedDb());
+
+    await expect(
+      service.listOptions(workflowMember, "integration_1", { provider: "google_drive" }),
+    ).rejects.toMatchObject({ code: "forbidden", message: "Brain permission is required." });
+  });
+
+  it("does not let workflow readers list teams from another user's Linear account", async () => {
+    const workflowMember = { ...member, permissions: ["workflow:read"] };
+    const service = new BrainSourceApplicationService(queuedDb([]));
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(
+      service.listOptions(workflowMember, "another_users_integration", { provider: "linear" }),
+    ).rejects.toMatchObject({
+      code: "conflict",
+      message: "Connect Linear in your settings first.",
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.loadCredential).not.toHaveBeenCalled();
   });
 
   it("lets a member toggle their own personal source", async () => {
