@@ -262,7 +262,10 @@ describe("ReviewInboxRoute", () => {
     expect(screen.getByTestId("review-item-unread")).toBeInTheDocument();
   });
 
-  it("links a task to its task route and a chat to its chat route", async () => {
+  // The detail pane embeds the same surface the task and chat routes render, which draws the
+  // conversation's own header. A second row of host chrome above it duplicated that header and
+  // sent the reader out of the queue to an identical view.
+  it("adds no navigation chrome above the embedded conversation", async () => {
     reviewItemsMock.value = [
       taskItem("c1", "Weekly competitor scan", "2026-09-10T12:00:00.000Z"),
       chatItem("c2", "Draft the investor update", "2026-09-10T11:00:00.000Z"),
@@ -271,13 +274,12 @@ describe("ReviewInboxRoute", () => {
 
     render(<ReviewInboxRoute />);
     await userEvent.click(screen.getByRole("button", { name: /Weekly competitor scan/ }));
-    expect(screen.getByRole("link", { name: "Open task" })).toHaveAttribute(
-      "href",
-      "/tasks/task_c1",
-    );
+    expect(screen.getByTestId("task-conversation")).toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: /Draft the investor update/ }));
-    expect(screen.getByRole("link", { name: "Open chat" })).toHaveAttribute("href", "/chat/c2");
+    expect(screen.getByTestId("chat-conversation")).toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });
 
   it("returns to the list from the detail pane", async () => {

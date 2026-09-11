@@ -2,7 +2,6 @@
 
 import type { ChatEngine } from "@opencompany/core";
 import { ArrowLeft, Inbox } from "lucide-react";
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppData } from "@/components/AppDataProvider";
 import { EmptyState, formatRelativeTime } from "@/components/Routes";
@@ -214,29 +213,22 @@ function ReviewDetail({
   }, [item, onRead, readable]);
 
   const source = item.source;
-  const openHref =
-    source.kind === "task"
-      ? `/tasks/${encodeURIComponent(source.taskId)}`
-      : `/chat/${encodeURIComponent(item.conversationId)}`;
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
-      <header className="flex items-center gap-3 px-4 pt-4">
+      {/* The embedded surface renders the conversation's own header - title, status, and actions -
+          so this host adds no chrome of its own above it. Wide viewports keep the list in view and
+          leave the pane on Escape; a narrow one replaces the list with the pane and has no Escape
+          key, so it gets the one control it cannot do without. */}
+      <header className="flex items-center px-4 pt-4 md:hidden">
         <button
           type="button"
           onClick={onBack}
           aria-label="Back to the review list"
-          className="-ml-2 shrink-0 rounded-md p-1.5 text-ink/60 transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 md:hidden"
+          className="-ml-2 shrink-0 rounded-md p-1.5 text-ink/60 transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
         >
           <ArrowLeft size={15} strokeWidth={1.75} />
         </button>
-        <Link
-          href={openHref}
-          prefetch
-          className="ml-auto shrink-0 rounded-md border border-border bg-surface px-2.5 py-1.5 text-[12px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-        >
-          {source.kind === "task" ? "Open task" : "Open chat"}
-        </Link>
       </header>
       {source.kind === "task" ? (
         <ReviewTaskConversation taskId={source.taskId} onClose={onBack} />
