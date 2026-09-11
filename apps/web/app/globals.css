@@ -93,6 +93,17 @@ body {
   overscroll-behavior: none;
 }
 
+/*
+ * Hides the scrollbar on a scroll container while keeping it scrollable. Used for
+ * dense list surfaces where a visible track adds noise next to the content.
+ */
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 .desktop-drag-region {
   -webkit-app-region: drag;
 }

@@ -131,7 +131,7 @@ export function ReviewInboxRoute() {
             </span>
           ) : null}
         </header>
-        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-6 pt-1">
+        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-6 pt-1 scrollbar-none">
           {items.length === 0 ? (
             <p className="px-2 py-8 text-center text-[12.5px] leading-5 text-ink-subtle">
               Nothing to review. Finished chats and tasks land here until you archive them.
