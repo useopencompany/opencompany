@@ -45,6 +45,10 @@ import {
   reconcileOptimisticChatSummaries,
   useOptimisticChatSummaries,
 } from "@/lib/optimistic-chat-summaries";
+import {
+  reconcileOptimisticReviewArchives,
+  useOptimisticReviewArchives,
+} from "@/lib/optimistic-review-archive";
 import { countAwaitingReview, type ReviewItem, selectReviewItems } from "@/lib/review-inbox";
 import { selectSidebarChats } from "@/lib/sidebar-chats";
 import type { TaskRow } from "@/lib/task-collections";
@@ -366,14 +370,33 @@ function AppLiveDataSubscriptions({
       }));
   }, [chatRows]);
 
-  const reviewConversations = useMemo(
-    () => (chatRows ?? []) as HeadlessChatConversationReadModel[],
-    [chatRows],
-  );
+  // An archive the reader just clicked is applied to the queue's own inputs, so the list and the
+  // sidebar count both drop the item on the click instead of on the projection that follows it.
+  const optimisticallyArchived = useOptimisticReviewArchives();
+  const reviewConversations = useMemo(() => {
+    const rows = (chatRows ?? []) as HeadlessChatConversationReadModel[];
+    if (optimisticallyArchived.size === 0) return rows;
+    return rows.filter((row) => !optimisticallyArchived.has(row.id));
+  }, [chatRows, optimisticallyArchived]);
   // Task candidates come from the Task read model rather than the presentation rows: the unread
   // flag and the canonical status only exist there, and legacy compatibility rows own no
   // conversation to read a result from.
-  const reviewTasks = useMemo(() => (taskRows ?? []) as HeadlessTaskReadModel[], [taskRows]);
+  const reviewTasks = useMemo(() => {
+    const rows = (taskRows ?? []) as HeadlessTaskReadModel[];
+    if (optimisticallyArchived.size === 0) return rows;
+    return rows.filter((row) => !optimisticallyArchived.has(row.conversationId));
+  }, [optimisticallyArchived, taskRows]);
+  useEffect(() => {
+    if (optimisticallyArchived.size === 0) return;
+    const archived: string[] = [];
+    for (const row of (chatRows ?? []) as HeadlessChatConversationReadModel[]) {
+      if (row.archivedAt) archived.push(row.id);
+    }
+    for (const row of (taskRows ?? []) as HeadlessTaskReadModel[]) {
+      if (row.archivedAt) archived.push(row.conversationId);
+    }
+    reconcileOptimisticReviewArchives(archived);
+  }, [chatRows, optimisticallyArchived, taskRows]);
   const reviewItems = useMemo<ReviewItem[]>(() => {
     if (!initialData.featureFlags.reviewInbox) return [];
     return selectReviewItems({ conversations: reviewConversations, tasks: reviewTasks });

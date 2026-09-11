@@ -1,16 +1,17 @@
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { loadCreditOverview, loadSpendBreakdown, recordCreditDebit } from "./credits";
+import { snapshotPGliteSchema } from "./test-schema-snapshot";
 
 describe("workspace usage spend", () => {
   let database: PGlite;
   let db: ReturnType<typeof drizzle>;
+  let restoreDatabase: () => Promise<PGlite>;
 
-  beforeEach(async () => {
-    database = new PGlite();
-    db = drizzle(database);
-    await database.exec(`
+  beforeAll(async () => {
+    restoreDatabase = await snapshotPGliteSchema(async (database) => {
+      await database.exec(`
       CREATE SCHEMA goat;
       CREATE TABLE goat.credit_ledger (
         id serial PRIMARY KEY, workspace_id text NOT NULL, user_workos_id text,
@@ -29,6 +30,12 @@ describe("workspace usage spend", () => {
       );
       INSERT INTO goat.credit_balances VALUES ('workspace', 500, 5000000, 5000000, 0, now());
     `);
+    });
+  });
+
+  beforeEach(async () => {
+    database = await restoreDatabase();
+    db = drizzle(database);
   });
 
   afterEach(async () => {

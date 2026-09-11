@@ -2,9 +2,10 @@ import { readFile } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
 import { calculateSandboxUsageCost } from "@opencompany/billing";
 import { loadCreditOverview, loadSpendBreakdown } from "@opencompany/db/credits";
+import { snapshotPGliteSchema } from "@opencompany/db/test-schema-snapshot";
 import { drizzle } from "drizzle-orm/pglite";
 import { SandboxNotFoundError } from "e2b";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   registerSandboxBilling,
   type SandboxBillingDb,
@@ -37,11 +38,11 @@ const price = (activeMs: number, vcpu = 2, ramMiB = 16_384) =>
 describe("E2B workspace billing", () => {
   let database: PGlite;
   let db: SandboxBillingDb;
+  let restoreDatabase: () => Promise<PGlite>;
 
-  beforeEach(async () => {
-    database = new PGlite();
-    db = drizzle(database) as unknown as SandboxBillingDb;
-    await database.exec(`
+  beforeAll(async () => {
+    restoreDatabase = await snapshotPGliteSchema(async (database) => {
+      await database.exec(`
       CREATE SCHEMA goat;
       CREATE TABLE goat.users (workos_user_id text PRIMARY KEY);
       CREATE TABLE goat.workspaces (id text PRIMARY KEY);
@@ -64,12 +65,18 @@ describe("E2B workspace billing", () => {
       );
       INSERT INTO goat.credit_balances VALUES ('workspace_1', 500, 5000000, 5000000, 0, now());
     `);
-    await database.exec(
-      await readFile(
-        new URL("../../../drizzle/0265_sandbox_billing_cursors.sql", import.meta.url),
-        "utf8",
-      ),
-    );
+      await database.exec(
+        await readFile(
+          new URL("../../../drizzle/0265_sandbox_billing_cursors.sql", import.meta.url),
+          "utf8",
+        ),
+      );
+    });
+  });
+
+  beforeEach(async () => {
+    database = await restoreDatabase();
+    db = drizzle(database) as unknown as SandboxBillingDb;
     await registerSandboxBilling({ ...owner, sandboxId: "sandbox_1", billableFrom: start, db });
   });
 

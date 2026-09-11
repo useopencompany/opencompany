@@ -16,7 +16,8 @@ import {
 } from "@opencompany/core";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { snapshotPGliteSchema } from "./test-schema-snapshot";
 import { PostgresTaskScheduleRepository, PostgresWorkflowRepository } from "./workflow-repository";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -41,11 +42,12 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
     taskScheduleVersion: number;
     taskScheduleProjected: boolean;
   };
+  let restoreDatabase: () => Promise<PGlite>;
 
-  beforeEach(async () => {
-    database = new PGlite();
-    await database.exec(BASE_SCHEMA);
-    await database.exec(`
+  beforeAll(async () => {
+    restoreDatabase = await snapshotPGliteSchema(async (database) => {
+      await database.exec(BASE_SCHEMA);
+      await database.exec(`
       INSERT INTO goat.users (workos_user_id, task_spawning_enabled)
       VALUES ('migration_user', true);
       INSERT INTO goat.workspaces (id) VALUES ('migration_workspace');
@@ -67,22 +69,22 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
         '2026-08-13T09:00:00.000Z'
       );
     `);
-    for (const migrationPath of migrationPaths) {
-      const migration = await readFile(migrationPath, "utf8");
-      for (const statement of migration.split("--> statement-breakpoint")) {
-        if (statement.trim()) await database.exec(statement);
+      for (const migrationPath of migrationPaths) {
+        const migration = await readFile(migrationPath, "utf8");
+        for (const statement of migration.split("--> statement-breakpoint")) {
+          if (statement.trim()) await database.exec(statement);
+        }
       }
-    }
-    const [migrationRow] = (
-      await database.query<{
-        workflow_version: number;
-        workflow_step_instructions: string;
-        workflow_trigger_prompt: string;
-        workflow_projected: boolean;
-        workflow_schedule_projected: boolean;
-        task_schedule_version: number;
-        task_schedule_projected: boolean;
-      }>(`
+      const [migrationRow] = (
+        await database.query<{
+          workflow_version: number;
+          workflow_step_instructions: string;
+          workflow_trigger_prompt: string;
+          workflow_projected: boolean;
+          workflow_schedule_projected: boolean;
+          task_schedule_version: number;
+          task_schedule_projected: boolean;
+        }>(`
         SELECT
           workflow.version AS workflow_version,
           (
@@ -113,18 +115,18 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
         WHERE workflow.id = 'migration_workflow'
           AND schedule.id = 'migration_schedule'
       `)
-    ).rows;
-    migrationEvidence = {
-      workflowVersion: migrationRow?.workflow_version ?? 0,
-      workflowStepInstructions: migrationRow?.workflow_step_instructions ?? "",
-      workflowTriggerPrompt: migrationRow?.workflow_trigger_prompt ?? "",
-      workflowProjected: migrationRow?.workflow_projected ?? false,
-      workflowScheduleProjected: migrationRow?.workflow_schedule_projected ?? false,
-      taskScheduleVersion: migrationRow?.task_schedule_version ?? 0,
-      taskScheduleProjected: migrationRow?.task_schedule_projected ?? false,
-    };
+      ).rows;
+      migrationEvidence = {
+        workflowVersion: migrationRow?.workflow_version ?? 0,
+        workflowStepInstructions: migrationRow?.workflow_step_instructions ?? "",
+        workflowTriggerPrompt: migrationRow?.workflow_trigger_prompt ?? "",
+        workflowProjected: migrationRow?.workflow_projected ?? false,
+        workflowScheduleProjected: migrationRow?.workflow_schedule_projected ?? false,
+        taskScheduleVersion: migrationRow?.task_schedule_version ?? 0,
+        taskScheduleProjected: migrationRow?.task_schedule_projected ?? false,
+      };
 
-    await database.exec(`
+      await database.exec(`
       DELETE FROM goat.automation_command_idempotency;
       DELETE FROM goat.workflow_schedule_runs;
       DELETE FROM goat.task_schedule_runs;
@@ -142,6 +144,11 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
         ('member_2', 'workspace_2', 'user_2', 'admin'),
         ('member_disabled', 'workspace_1', 'user_disabled', 'member');
     `);
+    });
+  });
+
+  beforeEach(async () => {
+    database = await restoreDatabase();
     const execute = async (query: SQL) => {
       const compiled = dialect.sqlToQuery(query);
       return database.query(compiled.sql, compiled.params as never[]);

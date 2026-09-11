@@ -2843,6 +2843,8 @@ export function Surface({
               <QuickChatComposer
                 open={newChatCommandOpen && commandPaletteView === "compose"}
                 initialPrompt={chatSearchQuery.trim()}
+                autoFocus
+                className="p-3"
                 userWorkosId={userWorkosId}
                 defaultModel={defaultModel}
                 codexConnected={codexConnected}
@@ -3613,12 +3615,18 @@ export function Surface({
   );
 }
 
-// The Cmd+K quick-compose surface. Same controls as the main composer (attachments,
-// model/engine picker, mentions), but it always starts new background work — it
-// never adopts the result into view or navigates to it.
-function QuickChatComposer({
+/**
+ * The composer for starting something new where there is no conversation to send into: the Cmd+K
+ * compose view and the review queue's reading pane. Same controls as the main composer
+ * (attachments, model/engine picker, mentions), but it always starts new background work — it
+ * never adopts the result into view or navigates to it. `open` means the host is presenting it:
+ * the draft is seeded when that flips on and reset when it flips off.
+ */
+export function QuickChatComposer({
   open,
   initialPrompt,
+  autoFocus = false,
+  className,
   userWorkosId,
   defaultModel,
   codexConnected,
@@ -3631,6 +3639,8 @@ function QuickChatComposer({
 }: {
   open: boolean;
   initialPrompt: string;
+  autoFocus?: boolean;
+  className?: string;
   userWorkosId: string;
   defaultModel: string;
   codexConnected: boolean;
@@ -3639,7 +3649,7 @@ function QuickChatComposer({
   autoModelRoutingEnabled: boolean;
   creditBalance: ReturnType<typeof useCreditBalance>["balance"];
   workspaceId: string;
-  onSubmitted: () => void;
+  onSubmitted?: () => void;
 }) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
@@ -3781,8 +3791,9 @@ function QuickChatComposer({
     upload: uploadCanonicalAttachment,
   });
 
-  // The dialog stays mounted across opens; reset to a pristine draft each time it closes
-  // so a stale prompt, attachment, or engine choice never leaks into the next invocation.
+  // A host can hide the composer without unmounting it (the palette dialog does); reset to a
+  // pristine draft each time it does so a stale prompt, attachment, or engine choice never leaks
+  // into the next invocation.
   const clearAttachments = composerAttachments.clearAttachments;
   useEffect(() => {
     if (open) return;
@@ -3806,8 +3817,10 @@ function QuickChatComposer({
     /* eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot seed on open, not a render loop */
     setInput(initialPrompt);
     if (initialPrompt) pendingInputCaretRef.current = initialPrompt.length;
-    inputRef.current?.focus();
-  }, [open, initialPrompt]);
+    // A host that opens the composer deliberately (a dialog) takes the caret; one that keeps it
+    // on screen beside other work leaves focus where the reader put it.
+    if (autoFocus) inputRef.current?.focus();
+  }, [open, initialPrompt, autoFocus]);
 
   // Mirrors the main composer: refetch each catalog whenever its menu opens so
   // recently created Skills and workflows show up.
@@ -4116,7 +4129,7 @@ function QuickChatComposer({
       setInput("");
       setMentionToken(null);
       setSelectedMentions([]);
-      onSubmitted();
+      onSubmitted?.();
       void startAdHocTask({
         description: prompt,
         model: String(backgroundModel),
@@ -4127,7 +4140,8 @@ function QuickChatComposer({
           : {}),
       })
         .then(({ task }) => {
-          // Not gated on mountedRef: the dialog has already closed.
+          // Not gated on mountedRef: router.refresh() and toast are global, and the host may
+          // have dismissed this composer by now.
           router.refresh();
           toast.success(`Started ${task.name} in the background.`);
         })
@@ -4154,7 +4168,7 @@ function QuickChatComposer({
       setMentionToken(null);
       setSelectedMentions([]);
       composerAttachments.clearAttachments();
-      onSubmitted();
+      onSubmitted?.();
       void startWorkflowTask({
         workspaceId,
         workflow: workflowMention,
@@ -4164,8 +4178,7 @@ function QuickChatComposer({
         ...(attachmentsMetadata.length > 0 ? { attachments: attachmentsMetadata } : {}),
       })
         .then(({ task }) => {
-          // Not gated on mountedRef: the dialog (and this component) has already
-          // closed by the time this resolves — router.refresh()/toast are global.
+          // Not gated on mountedRef: see the background-task branch above.
           router.refresh();
           toast.success(`Started ${task.name} in the background.`);
         })
@@ -4186,8 +4199,8 @@ function QuickChatComposer({
 
     const targetEngine = isBackgroundChatDirective ? backgroundEngine : selectedEngine;
     if (targetEngine) {
-      // Validate before clearing attachments / closing the dialog: once onSubmitted()
-      // unmounts this component, there's no visible composer left to restore a draft into.
+      // Validate before clearing attachments and telling the host the draft is sent: once the
+      // host dismisses the composer there is no visible draft left to restore the prompt into.
       const settings =
         targetEngine === "claude_code"
           ? ({ ok: true, settings: { reasoningEffort: codexReasoningEffort } } as const)
@@ -4208,7 +4221,7 @@ function QuickChatComposer({
 
       setIsSubmitting(true);
       composerAttachments.clearAttachments();
-      onSubmitted();
+      onSubmitted?.();
       toast("Started a new chat in the background.");
 
       const engine = targetEngine;
@@ -4259,7 +4272,7 @@ function QuickChatComposer({
 
     setIsSubmitting(true);
     composerAttachments.clearAttachments();
-    onSubmitted();
+    onSubmitted?.();
     toast("Started a new chat in the background.");
 
     const newSessionId = newOptimisticChatSessionId();
@@ -4309,7 +4322,7 @@ function QuickChatComposer({
   const showEngineComposerControls = isEngineChat;
 
   return (
-    <div className="flex flex-col gap-2 p-3">
+    <div className={cn("flex flex-col gap-2", className)}>
       {mentionToken && mentionOptions.length > 0 ? (
         <div
           role="listbox"

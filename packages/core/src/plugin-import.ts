@@ -325,11 +325,13 @@ export class PluginImportApplicationService {
       idempotencyKey: idempotencyKey(input.idempotencyKey),
       plugin,
     });
-    await this.gatewayLifecycle?.refresh({
-      actor,
-      pluginName: result.plugin.name,
-      reason: "install",
-    });
+    if (result.plugin.status === "enabled") {
+      await this.gatewayLifecycle?.refresh({
+        actor,
+        pluginName: result.plugin.name,
+        reason: "install",
+      });
+    }
     return result;
   }
 
