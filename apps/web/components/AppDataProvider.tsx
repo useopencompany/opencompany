@@ -46,8 +46,13 @@ import {
   reconcileOptimisticChatSummaries,
   useOptimisticChatSummaries,
 } from "@/lib/optimistic-chat-summaries";
-import { countAwaitingReview, type ReviewItem, selectReviewItems } from "@/lib/review-inbox";
-import { selectSidebarChats } from "@/lib/sidebar-chats";
+import {
+  countAwaitingReview,
+  type ReviewItem,
+  selectReviewItems,
+  taskHasReadableResult,
+} from "@/lib/review-inbox";
+import { type SidebarTaskView, selectSidebarChats, selectSidebarTasks } from "@/lib/sidebar-items";
 import type { TaskRow } from "@/lib/task-collections";
 import { deriveTaskWorkflowSteps } from "@/lib/task-workflow-activity";
 
@@ -120,11 +125,20 @@ type AppData = AppInitialData & {
   reviewItems: ReviewItem[];
   // Unread count for the sidebar badge. Never includes items held in place after being opened.
   reviewCount: number;
+  // The Tasks the sidebar lists beside recent chats. Selected here and gated at the render site,
+  // so the section label and the rows under it can never disagree about the flag.
+  sidebarTasks: SidebarTaskView[];
+  // Every open Task whose unread flag stands for a result a reader can clear by reading it,
+  // whatever its age. The sidebar list is bounded by recency; the acknowledgment must not be.
+  unreadTaskIds: ReadonlySet<string>;
 };
 
 // Keeps the command palette responsive; older archived chats are still
 // reachable by narrowing the search (which re-filters this bounded list).
 const ARCHIVED_CHAT_LIMIT = 50;
+
+// A stable identity so the server snapshot does not invalidate memoized consumers on every render.
+const EMPTY_TASK_ID_SET: ReadonlySet<string> = new Set();
 
 const AppDataContext = createContext<AppData | null>(null);
 const subscribeToHydration = () => () => undefined;
@@ -377,8 +391,9 @@ function AppLiveDataSubscriptions({
 
   // Task candidates come from the Task read model rather than the presentation rows: the unread
   // flag and the canonical status only exist there, and legacy compatibility rows own no
-  // conversation to read a result from.
-  const reviewTasks = useMemo(() => {
+  // conversation to read a result from. A Task archived locally leaves the sidebar and the review
+  // queue together, keyed by the conversation the archive store tracks.
+  const openTaskRows = useMemo(() => {
     const rows = (taskRows ?? []) as HeadlessTaskReadModel[];
     if (optimisticallyArchived.size === 0) return rows;
     return rows.filter((row) => !optimisticallyArchived.has(row.conversationId));
@@ -396,12 +411,36 @@ function AppLiveDataSubscriptions({
   }, [chatRows, optimisticallyArchived, taskRows]);
   const reviewItems = useMemo<ReviewItem[]>(() => {
     if (!initialData.featureFlags.reviewInbox) return [];
-    return selectReviewItems({ conversations: openConversationRows, tasks: reviewTasks });
-  }, [initialData.featureFlags.reviewInbox, openConversationRows, reviewTasks]);
+    return selectReviewItems({ conversations: openConversationRows, tasks: openTaskRows });
+  }, [initialData.featureFlags.reviewInbox, openConversationRows, openTaskRows]);
   const reviewCount = useMemo(() => {
     if (!initialData.featureFlags.reviewInbox) return 0;
-    return countAwaitingReview({ conversations: openConversationRows, tasks: reviewTasks });
-  }, [initialData.featureFlags.reviewInbox, openConversationRows, reviewTasks]);
+    return countAwaitingReview({ conversations: openConversationRows, tasks: openTaskRows });
+  }, [initialData.featureFlags.reviewInbox, openConversationRows, openTaskRows]);
+
+  const sidebarTasks = useMemo<SidebarTaskView[]>(
+    () =>
+      selectSidebarTasks(openTaskRows).map((row) => ({
+        id: row.id,
+        conversationId: row.conversationId,
+        displayId: row.displayId,
+        name: row.name,
+        status: row.status,
+        hasUnseen: row.hasUnseen,
+        updatedAt: row.updatedAt,
+      })),
+    [openTaskRows],
+  );
+
+  const unreadTaskIds = useMemo<ReadonlySet<string>>(() => {
+    const ids = new Set<string>();
+    for (const row of openTaskRows) {
+      if (row.archivedAt || !row.hasUnseen) continue;
+      if (!taskHasReadableResult(row.status)) continue;
+      ids.add(row.id);
+    }
+    return ids;
+  }, [openTaskRows]);
 
   const integrations = useMemo(() => {
     if (integrationsLoading && !integrationRows?.length) return initialData.integrations;
@@ -437,6 +476,8 @@ function AppLiveDataSubscriptions({
       archivedChats,
       reviewItems,
       reviewCount,
+      sidebarTasks,
+      unreadTaskIds,
       integrations,
       taskRows: currentTaskRows,
       tasksReady: legacyTaskRows !== null && (!tasksLoading || (taskRows?.length ?? 0) > 0),
@@ -450,7 +491,9 @@ function AppLiveDataSubscriptions({
       reviewCount,
       reviewItems,
       schedules,
+      sidebarTasks,
       taskRows,
+      unreadTaskIds,
       tasks,
       tasksLoading,
       currentTaskRows,
@@ -491,6 +534,10 @@ function initialAppData(initialData: AppInitialData): AppData {
     // first live push, which is also when the sidebar badge can first be accurate.
     reviewItems: [],
     reviewCount: 0,
+    // Task metadata only reaches the client through the Electric read model, so the sidebar's
+    // Task rows and their unread state arrive with the first live push too.
+    sidebarTasks: [],
+    unreadTaskIds: EMPTY_TASK_ID_SET,
   };
 }
 

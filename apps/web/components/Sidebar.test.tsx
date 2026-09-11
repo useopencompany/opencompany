@@ -62,6 +62,17 @@ const recentChatsMock = vi.hoisted(() => ({
     pinnedAt: string | null;
   }>,
 }));
+const sidebarTasksMock = vi.hoisted(() => ({
+  value: [] as Array<{
+    id: string;
+    conversationId: string;
+    displayId: string;
+    name: string;
+    status: "queued" | "running" | "waiting" | "succeeded" | "failed" | "canceled";
+    hasUnseen: boolean;
+    updatedAt: string;
+  }>,
+}));
 const tasksMock = vi.hoisted(() => ({
   value: [] as Array<{
     id: string;
@@ -101,7 +112,13 @@ const chatCollectionMocks = vi.hoisted(() => ({
   }),
 }));
 
+const taskCommandsMock = vi.hoisted(() => ({
+  archiveHeadlessTask: vi.fn(async () => ({ id: "task_1" })),
+}));
+
 vi.mock("@/lib/headless-chat-commands", () => chatCommandsMock);
+
+vi.mock("@/lib/headless-task-commands", () => taskCommandsMock);
 
 vi.mock("@/lib/headless-chat-collections", () => chatCollectionMocks);
 
@@ -122,6 +139,15 @@ vi.mock("@/components/AppDataProvider", async () => {
             ? chats
             : chats.filter((chat) => !pendingArchives.has(chat.id)),
         [chats, pendingArchives],
+      );
+      // Tasks are hidden by their conversation, which is the key the archive store tracks.
+      const tasks = sidebarTasksMock.value;
+      const sidebarTasks = useMemo(
+        () =>
+          pendingArchives.size === 0
+            ? tasks
+            : tasks.filter((task) => !pendingArchives.has(task.conversationId)),
+        [pendingArchives, tasks],
       );
       return {
         user: {
@@ -151,6 +177,7 @@ vi.mock("@/components/AppDataProvider", async () => {
           visibility: "workspace",
         },
         tasks: tasksMock.value,
+        sidebarTasks,
         recentChats,
         featureFlags: {
           taskSpawning: featureFlagsMock.taskSpawning,
@@ -191,6 +218,7 @@ describe("Sidebar", () => {
     reviewCountMock.value = 0;
     recentChatsMock.value = [];
     tasksMock.value = [];
+    sidebarTasksMock.value = [];
     clearAllLocalChatStates();
     clearAllOptimisticChatSummaries();
     clearOptimisticArchives();
@@ -461,7 +489,10 @@ describe("Sidebar", () => {
     const tasks = within(primaryNav).getByRole("link", { name: "Tasks" });
     const workflows = within(primaryNav).getByRole("link", { name: "Workflows" });
     expect(tasks).toHaveAttribute("href", "/tasks");
-    expect(tasks).toHaveAttribute("aria-current", "page");
+    // The nav row still highlights for its subtree, but the task the reader opened owns the
+    // current-page claim, so only one element on the page can carry it.
+    expect(tasks).toHaveClass("bg-surface-active");
+    expect(tasks).not.toHaveAttribute("aria-current");
     expect(home.nextElementSibling).toBe(tasks);
     expect(tasks.nextElementSibling).toBe(workflows);
     expect(screen.queryByRole("navigation", { name: "Workflow tasks" })).not.toBeInTheDocument();
@@ -514,6 +545,163 @@ describe("Sidebar", () => {
     const recentNav = screen.getByRole("navigation", { name: "Chats" });
     expect(within(recentNav).getByRole("link", { name: "Recent chat" })).toBeInTheDocument();
     expect(within(recentNav).queryByRole("link", { name: "Pinned chat" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the list named Chats while Tasks are disabled", () => {
+    featureFlagsMock.taskSpawning = false;
+    sidebarTasksMock.value = [
+      taskRow("task_hidden", { name: "Hidden task", updatedAt: "2026-07-14T09:05:00.000Z" }),
+    ];
+    recentChatsMock.value = [chatRow("chat_only", { title: "Only chat" })];
+
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.getByRole("navigation", { name: "Chats" })).toBeInTheDocument();
+    expect(screen.queryByText("Chats and tasks")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Hidden task/ })).not.toBeInTheDocument();
+  });
+
+  it("lists chats and tasks together in one recency-ordered section", () => {
+    featureFlagsMock.taskSpawning = true;
+    recentChatsMock.value = [
+      chatRow("chat_older", {
+        title: "Older chat",
+        updatedAt: "2026-07-14T09:00:00.000Z",
+      }),
+      chatRow("chat_newer", {
+        title: "Newer chat",
+        updatedAt: "2026-07-14T09:10:00.000Z",
+      }),
+    ];
+    sidebarTasksMock.value = [
+      taskRow("task_middle", {
+        displayId: "T-12",
+        name: "Middle task",
+        updatedAt: "2026-07-14T09:05:00.000Z",
+      }),
+    ];
+
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    const workNav = screen.getByRole("navigation", { name: "Chats and tasks" });
+    expect(screen.getByText("Chats and tasks")).toBeInTheDocument();
+    expect(
+      within(workNav)
+        .getAllByRole("link")
+        .map((link) => link.getAttribute("href")),
+    ).toEqual(["/chat/chat_newer", "/tasks/T-12", "/chat/chat_older"]);
+    expect(within(workNav).getByRole("link", { name: /Middle task/ })).toHaveTextContent("T-12");
+  });
+
+  it("shows the same unread dot and working spinner for tasks as for chats", () => {
+    featureFlagsMock.taskSpawning = true;
+    sidebarTasksMock.value = [
+      taskRow("task_running", {
+        displayId: "T-1",
+        name: "Running task",
+        status: "running",
+        updatedAt: "2026-07-14T09:10:00.000Z",
+      }),
+      taskRow("task_unread", {
+        displayId: "T-2",
+        name: "Finished task",
+        status: "succeeded",
+        hasUnseen: true,
+        updatedAt: "2026-07-14T09:05:00.000Z",
+      }),
+      taskRow("task_read", {
+        displayId: "T-3",
+        name: "Read task",
+        status: "succeeded",
+        updatedAt: "2026-07-14T09:00:00.000Z",
+      }),
+    ];
+
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.getByTestId("sidebar-chat-working")).toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-chat-unseen")).toBeInTheDocument();
+    expect(screen.getAllByTestId(/sidebar-chat-/)).toHaveLength(2);
+  });
+
+  it("archives a settled task from its row and offers no archive on a running one", async () => {
+    const user = userEvent.setup();
+    featureFlagsMock.taskSpawning = true;
+    pathnameMock.value = "/tasks/T-2";
+    sidebarTasksMock.value = [
+      taskRow("task_running", {
+        displayId: "T-1",
+        name: "Running task",
+        status: "running",
+        updatedAt: "2026-07-14T09:10:00.000Z",
+      }),
+      taskRow("task_settled", {
+        displayId: "T-2",
+        name: "Settled task",
+        status: "succeeded",
+        updatedAt: "2026-07-14T09:05:00.000Z",
+      }),
+    ];
+
+    taskCommandsMock.archiveHeadlessTask.mockImplementationOnce(() => new Promise(() => {}));
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.queryByRole("button", { name: "Archive Running task" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pin Settled task" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Archive Settled task" }));
+
+    expect(taskCommandsMock.archiveHeadlessTask).toHaveBeenCalledWith("task_settled", {
+      scopeKey: workspacesMock.value[0]!.id,
+    });
+    // The row and the route move on the click, like an archived chat's, rather than a beat later
+    // when the write and its projection land.
+    expect(screen.queryByRole("link", { name: /Settled task/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Running task/ })).toBeInTheDocument();
+    expect(routerMock.push).toHaveBeenCalledWith("/tasks");
+  });
+
+  it("keeps the Tasks nav row current on the board itself", () => {
+    pathnameMock.value = "/tasks";
+    featureFlagsMock.taskSpawning = true;
+
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    const nav = screen.getByRole("navigation", { name: "opencompany primary" });
+    expect(within(nav).getByRole("link", { name: "Tasks" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+  });
+
+  it("marks a task row current on its run subroute and a lowercased display id", () => {
+    featureFlagsMock.taskSpawning = true;
+    pathnameMock.value = "/tasks/t-12/run";
+    sidebarTasksMock.value = [
+      taskRow("task_open", { displayId: "T-12", name: "Open task", status: "running" }),
+    ];
+
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.getByRole("link", { name: /Open task/ })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("restores the task row and reports the failure when archiving rejects", async () => {
+    const user = userEvent.setup();
+    featureFlagsMock.taskSpawning = true;
+    taskCommandsMock.archiveHeadlessTask.mockRejectedValueOnce(new Error("network unavailable"));
+    sidebarTasksMock.value = [
+      taskRow("task_settled", { displayId: "T-2", name: "Settled task", status: "succeeded" }),
+    ];
+
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "Archive Settled task" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("link", { name: /Settled task/ })).toBeInTheDocument(),
+    );
+    expect(routerMock.push).not.toHaveBeenCalled();
   });
 
   it("shows working and unseen chat state in recent rows", () => {
@@ -989,3 +1177,36 @@ describe("Sidebar", () => {
     );
   });
 });
+
+function chatRow(
+  id: string,
+  overrides: Partial<(typeof recentChatsMock.value)[number]> = {},
+): (typeof recentChatsMock.value)[number] {
+  return {
+    id,
+    title: `${id} title`,
+    model: "claude-sonnet-5",
+    engine: "opencompany",
+    codexComposerSettings: null,
+    preview: "Ready",
+    updatedAt: "2026-07-14T09:00:00.000Z",
+    pinnedAt: null,
+    ...overrides,
+  };
+}
+
+function taskRow(
+  id: string,
+  overrides: Partial<(typeof sidebarTasksMock.value)[number]> = {},
+): (typeof sidebarTasksMock.value)[number] {
+  return {
+    id,
+    conversationId: `conversation_${id}`,
+    displayId: id.toUpperCase(),
+    name: `${id} name`,
+    status: "succeeded",
+    hasUnseen: false,
+    updatedAt: "2026-07-14T09:00:00.000Z",
+    ...overrides,
+  };
+}
