@@ -54,6 +54,12 @@ poller, and no new public ingress, secret material, or plan requirement. Latency
 interval — five minutes for Granola — which suits "the meeting finished, do the follow-up" and
 would not suit anything interactive.
 
+Polling and pushing differ in what a resumed connection sees. A poller's cursor keeps a backlog,
+which ingestion is happy to catch up on but which an event must not replay as one agent task per
+historical resource. A poll-backed event therefore only fires for a resource the provider touched
+recently; older ones are still ingested, never triggered. This matches how the providers themselves
+behave — Granola does not replay deliveries missed while an endpoint was disabled.
+
 Folder scoping for Granola stays out. In poll delivery the platform sees a note's direct
 `folder_membership`, which cannot reproduce the subfolder semantics of Granola's own webhook filter
 without fetching the folder tree. Adding it later is a manifest edit plus a resource resolver.

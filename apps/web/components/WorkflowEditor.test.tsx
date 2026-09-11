@@ -352,6 +352,56 @@ describe("WorkflowEditor", () => {
     );
   });
 
+  it("keeps autosaving a trigger whose event the plugin no longer declares", async () => {
+    render(
+      <WorkflowEditor
+        workflow={{
+          ...workflow,
+          trigger: {
+            type: "event",
+            provider: "granola",
+            event: "meeting.notes_ready",
+            integrationId: "gint_granola_1",
+            filters: {},
+            prompt: "Draft the follow-ups.",
+          },
+        }}
+        canEdit
+        skillCatalog={[]}
+        eventProviders={[]}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Step 1 name"), { target: { value: "Edited" } });
+    await advanceAutosave();
+
+    expect(workflowActionsMock.update).toHaveBeenCalledWith(
+      "workflow_1",
+      expect.objectContaining({ steps: [expect.objectContaining({ title: "Edited" })] }),
+    );
+  });
+
+  it("does not offer an event whose provider has no account to bind it to", async () => {
+    render(
+      <WorkflowEditor
+        workflow={workflow}
+        canEdit
+        skillCatalog={[]}
+        eventProviders={[granolaEventProvider(), { ...linearEventProvider(), accounts: [] }]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("radio", { name: "On an event" }));
+    await act(async () => Promise.resolve());
+
+    expect(
+      screen.getByRole("option", { name: "Granola · Meeting notes ready" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: "Linear · Issue created" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("points at the connect step when a plugin has events on but no account", async () => {
     render(
       <WorkflowEditor

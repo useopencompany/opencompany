@@ -705,11 +705,12 @@ function EventTriggerEditor({
 }) {
   const provider = providers.find((candidate) => candidate.provider === trigger.provider);
   const selectedEvent = provider?.events.find((event) => event.id === trigger.event);
-  // A workflow can outlive the event it subscribed to: the plugin can be updated, or the event
-  // switched back off. Keep the selection visible and editable instead of silently retargeting it.
-  const eventChoices = providers.flatMap((candidate) =>
-    candidate.events.map((event) => ({ provider: candidate, event })),
-  );
+  // A workflow can outlive the event it subscribed to: the plugin can be updated, the event
+  // switched back off, or its account disconnected. Keep the selection visible and editable
+  // instead of silently retargeting it, but never offer a choice that cannot be bound.
+  const eventChoices = providers
+    .filter((candidate) => candidate.accounts.length > 0)
+    .flatMap((candidate) => candidate.events.map((event) => ({ provider: candidate, event })));
   const selectedChoiceValue = `${trigger.provider}:${trigger.event}`;
   const accounts = provider?.accounts ?? [];
   const accountOptions = accounts.some((account) => account.integrationId === trigger.integrationId)
@@ -751,11 +752,11 @@ function EventTriggerEditor({
                 ({ provider: candidate, event }) =>
                   `${candidate.provider}:${event.id}` === changed.target.value,
               );
-              if (!choice) return;
+              if (!choice?.provider.accounts[0]) return;
               const account =
                 choice.provider.provider === trigger.provider
                   ? trigger.integrationId
-                  : (choice.provider.accounts[0]?.integrationId ?? "");
+                  : choice.provider.accounts[0].integrationId;
               onChange({
                 ...trigger,
                 provider: choice.provider.provider,
@@ -1491,7 +1492,9 @@ function workflowDraftReadyToSave(
   const declaration = eventProviders
     .find((candidate) => candidate.provider === provider)
     ?.events.find((candidate) => candidate.id === event);
-  if (!declaration) return Object.values(filters).length > 0;
+  // The plugin no longer declares this event, so there is nothing to check the filters against.
+  // Let the save through: a server-side rejection is a visible error, silence is not.
+  if (!declaration) return true;
   return declaration.filters.every(
     (filter: PluginEventFilterDefinitionDto) => !filter.required || Boolean(filters[filter.id]?.id),
   );

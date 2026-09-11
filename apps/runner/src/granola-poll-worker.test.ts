@@ -336,9 +336,14 @@ describe("Granola meeting.notes_ready workflow routing", () => {
     expect(workerMocks.claimWikiEvents).not.toHaveBeenCalled();
   });
 
-  it("leaves a note without a summary for a later poll", async () => {
-    const { summary_markdown: _summary, ...unsummarized } = granolaPayload();
-    workerMocks.fetchGranolaNote.mockResolvedValue(unsummarized);
+  it.each([
+    ["missing", undefined],
+    ["empty", "   "],
+  ])("leaves a note whose summary is %s for a later poll", async (_label, summary) => {
+    workerMocks.fetchGranolaNote.mockResolvedValue({
+      ...granolaPayload(),
+      summary_markdown: summary,
+    });
 
     await expect(
       ingestMeeting({
@@ -350,12 +355,29 @@ describe("Granola meeting.notes_ready workflow routing", () => {
 
     expect(workerMocks.enqueueWorkflowEventRuns).not.toHaveBeenCalled();
   });
+
+  it("does not replay a stale backlog as one task per historical meeting", async () => {
+    await expect(
+      ingestMeeting({
+        routedBrainRefs: [],
+        routedWikiWorkspaceIds: [],
+        workflowRoutes: [meetingRoute()],
+        now: new Date("2026-08-26T11:05:00.000Z"),
+      }),
+    ).resolves.toEqual({ enqueued: false, workflowRuns: 0 });
+
+    expect(workerMocks.fetchGranolaNote).toHaveBeenCalledOnce();
+    expect(workerMocks.enqueueWorkflowEventRuns).not.toHaveBeenCalled();
+  });
 });
+
+const NOTE_UPDATED_AT = "2026-08-24T11:00:00.000Z";
 
 function ingestMeeting(routes: {
   routedBrainRefs: string[];
   routedWikiWorkspaceIds: string[];
   workflowRoutes?: WorkflowEventTriggerRoute[];
+  now?: Date;
 }) {
   return ingestGranolaNote({
     candidate: { integrationId: "gint_granola_1", userWorkosId: "user_1" },
@@ -363,9 +385,10 @@ function ingestMeeting(routes: {
     note: {
       id: "note_1",
       title: "Roadmap review",
-      updatedAt: "2026-08-24T11:00:00.000Z",
+      updatedAt: NOTE_UPDATED_AT,
       raw: {},
     },
+    now: new Date("2026-08-24T11:05:00.000Z"),
     ...routes,
     signal: new AbortController().signal,
   });

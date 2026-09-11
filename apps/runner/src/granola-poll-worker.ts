@@ -67,6 +67,10 @@ export const GRANOLA_POLL_COOLDOWN_MS = 4 * 60_000;
 // low-volume; anything beyond this is drained by later polls because the
 // cursor only advances past processed notes.
 const GRANOLA_MAX_PAGES_PER_POLL = 5;
+// How stale a finished note may be and still count as an event worth starting a task for. Normal
+// notes arrive minutes old; this leaves room for an outage without turning a resumed connection's
+// backlog into a burst of agent tasks. Notes older than this are ingested but never fire.
+const GRANOLA_EVENT_MAX_NOTE_AGE_MS = 24 * 60 * 60_000;
 
 type GranolaPollCandidate = {
   integrationId: string;
@@ -319,6 +323,7 @@ export async function ingestGranolaNote(input: {
   routedBrainRefs: readonly string[];
   routedWikiWorkspaceIds: readonly string[];
   workflowRoutes?: readonly WorkflowEventTriggerRoute[];
+  now?: Date;
   signal: AbortSignal;
   fetchNote?: typeof fetchGranolaNote;
 }): Promise<{ enqueued: boolean; workflowRuns: number }> {
@@ -368,6 +373,7 @@ export async function ingestGranolaNote(input: {
     routes: workflowRoutes,
     note,
     payload,
+    now: input.now ?? new Date(),
     db,
   });
 
@@ -458,28 +464,38 @@ export async function ingestGranolaNote(input: {
 }
 
 // The list endpoint only returns notes Granola has finished summarizing, but a note whose summary
-// is still missing is not "ready": skipping it keeps the note id free so a later poll — the
-// summary lands and bumps updated_at — is the delivery that starts the workflow.
+// is still missing or empty is not "ready": skipping it keeps the note id free so a later poll —
+// the summary lands and bumps updated_at — is the delivery that starts the workflow. This matches
+// normalizeGranolaMeetingNote, which rejects the same payload.
 async function enqueueGranolaWorkflowEventRuns(input: {
   routes: readonly WorkflowEventTriggerRoute[];
   note: GranolaNoteSummary;
   payload: Record<string, unknown>;
+  now: Date;
   db: ReturnType<typeof getDb>;
 }): Promise<number> {
   if (input.routes.length === 0) return 0;
-  const hasSummary =
-    typeof input.payload.summary_markdown === "string" ||
-    typeof input.payload.summary_text === "string";
-  if (!hasSummary) return 0;
+  if (!hasGranolaSummary(input.payload)) return 0;
   const updatedAt = input.note.updatedAt ? new Date(input.note.updatedAt) : null;
+  const eventAt = updatedAt && !Number.isNaN(updatedAt.getTime()) ? updatedAt : input.now;
+  // Ingestion is happy to catch up on a backlog; starting an agent task per historical meeting is
+  // not. A connection whose cursor froze while it had no routes — an ingestion source was
+  // disabled, an event trigger added months later — would otherwise replay every note it missed.
+  if (input.now.getTime() - eventAt.getTime() > GRANOLA_EVENT_MAX_NOTE_AGE_MS) return 0;
   return enqueueWorkflowEventRuns(
     {
       routes: input.routes,
       deliveryId: granolaWorkflowEventDeliveryId(input.note.id),
-      eventAt: updatedAt && !Number.isNaN(updatedAt.getTime()) ? updatedAt : new Date(),
+      eventAt,
       context: granolaWorkflowEventContext(input.payload),
     },
     input.db,
+  );
+}
+
+function hasGranolaSummary(payload: Record<string, unknown>) {
+  return [payload.summary_markdown, payload.summary_text].some(
+    (value) => typeof value === "string" && value.trim() !== "",
   );
 }
 
