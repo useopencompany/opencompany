@@ -8,6 +8,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
 import { drizzle } from "drizzle-orm/pglite";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { createTestPGlite } from "./test-pglite";
 import {
   addWikiTimelineEntry,
   createWikiFolder,
@@ -32,7 +33,7 @@ let pglite: PGlite;
 let db: ReturnType<typeof drizzle>;
 
 beforeAll(async () => {
-  pglite = new PGlite({ extensions: { pg_trgm } });
+  pglite = await createTestPGlite({ extensions: { pg_trgm } });
   await pglite.exec("CREATE EXTENSION IF NOT EXISTS pg_trgm;");
   await pglite.exec("CREATE SCHEMA goat;");
   await pglite.exec("CREATE TABLE goat.workspaces (id text PRIMARY KEY);");

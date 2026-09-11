@@ -17,6 +17,7 @@ import {
 import type { WikiToolInput } from "@opencompany/wiki/tool";
 import { drizzle } from "drizzle-orm/pglite";
 import { beforeAll, describe, expect, it } from "vitest";
+import { createTestPGlite } from "./test-pglite";
 import { PostgresWikiCommandRepository } from "./wiki-command-repository";
 
 const WS = "ws-wiki-command";
@@ -39,7 +40,7 @@ const run = (command: WikiToolInput) =>
   service.execute({ actor, command, idempotencyKey: `wiki-command-test:${++sequence}` });
 
 beforeAll(async () => {
-  const pglite = new PGlite({ extensions: { pg_trgm } });
+  const pglite = await createTestPGlite({ extensions: { pg_trgm } });
   await pglite.exec("CREATE EXTENSION IF NOT EXISTS pg_trgm;");
   await pglite.exec("CREATE SCHEMA goat;");
   await pglite.exec("CREATE TABLE goat.workspaces (id text PRIMARY KEY);");

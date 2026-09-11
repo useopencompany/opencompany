@@ -1,9 +1,9 @@
 import { readFile } from "node:fs/promises";
-import { PGlite } from "@electric-sql/pglite";
 import { expect, it } from "vitest";
+import { createTestPGlite } from "./test-pglite";
 
 it("adds Google Admin to the integration vault without removing existing provider rows", async () => {
-  const db = new PGlite();
+  const db = await createTestPGlite();
   try {
     await db.exec("CREATE SCHEMA goat");
     const tables = ["integrations", "integration_credentials", "integration_resources"];
