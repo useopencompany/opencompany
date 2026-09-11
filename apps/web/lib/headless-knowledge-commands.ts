@@ -36,7 +36,7 @@ type ClientOptions = {
   baseUrl?: string;
   fetch?: typeof globalThis.fetch;
 };
-type ScopedClientOptions = ClientOptions & { scopeKey: string };
+type ScopedClientOptions = ClientOptions & { wikiId: string };
 
 export async function createHeadlessBrainDocument(
   brainId: string,
@@ -372,7 +372,7 @@ function knowledgeClient(options: ClientOptions) {
 }
 
 function collectionOptions(options: ScopedClientOptions) {
-  return { scopeKey: options.scopeKey };
+  return { wikiId: options.wikiId };
 }
 
 async function responseData<T>(

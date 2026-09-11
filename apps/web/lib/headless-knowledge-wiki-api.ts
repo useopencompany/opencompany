@@ -12,7 +12,6 @@ import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-c
 export type KnowledgeClientOptions = {
   baseUrl?: string;
   fetch?: typeof globalThis.fetch;
-  scopeKey?: string;
 };
 
 export async function createWikiPageRequest(

@@ -120,72 +120,91 @@ export type WikiCommandDeleteResult = { deletedPaths: string[] };
 
 export type WikiCommandTimelineAddResult = { at: Date; text: string };
 
+/**
+ * The wiki a command runs against, already authorized. `resolveWiki` is the only
+ * way to obtain one, so no command can address a wiki the actor cannot reach.
+ */
+export type WikiCommandTarget = {
+  wikiId: string;
+  name: string;
+  slug: string;
+  /** Markdown brief describing how this wiki should be structured. */
+  instructions: string;
+};
+
+export type WikiCommandScope = { workspaceId: string; wikiId: string };
+
 export interface WikiCommandRepository {
-  getTree(input: { workspaceId: string }): Promise<WikiCommandTreeNode[]>;
-  resolvePages(input: {
+  /**
+   * The wiki the actor means — an explicit id, otherwise the workspace's default
+   * wiki — or null when it does not exist *or* the actor cannot reach it. The two
+   * are deliberately indistinguishable: telling a non-member that a restricted
+   * wiki exists is itself a leak.
+   */
+  resolveWiki(input: {
     workspaceId: string;
-    refs: string[];
-  }): Promise<{ pages: WikiCommandPage[]; missing: string[] }>;
+    userWorkosId: string;
+    wikiId?: string | undefined;
+  }): Promise<WikiCommandTarget | null>;
+  getTree(input: WikiCommandScope): Promise<WikiCommandTreeNode[]>;
+  resolvePages(
+    input: WikiCommandScope & { refs: string[] },
+  ): Promise<{ pages: WikiCommandPage[]; missing: string[] }>;
   /** Paths of pages linking to `path`. */
-  getBacklinks(input: { workspaceId: string; path: string }): Promise<string[]>;
-  grep(input: {
-    workspaceId: string;
-    pattern: string;
-    ignoreCase: boolean;
-    limit?: number;
-  }): Promise<WikiCommandGrepMatch[]>;
-  search(input: {
-    workspaceId: string;
-    text: string;
-    limit?: number;
-    offset?: number;
-  }): Promise<WikiCommandSearchHit[]>;
-  recentChanges(input: {
-    workspaceId: string;
-    since: Date;
-    limit?: number;
-  }): Promise<WikiCommandRecentChange[]>;
-  listTimeline(input: {
-    workspaceId: string;
-    path: string;
-    since?: Date;
-  }): Promise<WikiCommandTimelineItem[]>;
-  createFolder(input: {
-    workspaceId: string;
-    actorWorkosId: string;
-    idempotencyKey: string;
-    path: string;
-    title?: string;
-  }): Promise<WikiCommandFolderResult>;
-  writePage(input: {
-    workspaceId: string;
-    actorWorkosId: string;
-    idempotencyKey: string;
-    path: string;
-    body: string;
-    kind?: WikiKind;
-    title?: string;
-  }): Promise<WikiCommandWriteResult>;
-  moveNode(input: {
-    workspaceId: string;
-    actorWorkosId: string;
-    path: string;
-    newParentPath: string | null;
-  }): Promise<WikiCommandMoveResult>;
-  deletePage(input: {
-    workspaceId: string;
-    actorWorkosId: string;
-    path: string;
-    recursive?: boolean;
-  }): Promise<WikiCommandDeleteResult>;
-  addTimelineEntry(input: {
-    workspaceId: string;
-    actorWorkosId: string;
-    idempotencyKey: string;
-    path: string;
-    at: Date;
-    text: string;
-  }): Promise<WikiCommandTimelineAddResult>;
+  getBacklinks(input: WikiCommandScope & { path: string }): Promise<string[]>;
+  grep(
+    input: WikiCommandScope & { pattern: string; ignoreCase: boolean; limit?: number },
+  ): Promise<WikiCommandGrepMatch[]>;
+  search(
+    input: WikiCommandScope & { text: string; limit?: number; offset?: number },
+  ): Promise<WikiCommandSearchHit[]>;
+  recentChanges(
+    input: WikiCommandScope & { since: Date; limit?: number },
+  ): Promise<WikiCommandRecentChange[]>;
+  listTimeline(
+    input: WikiCommandScope & { path: string; since?: Date },
+  ): Promise<WikiCommandTimelineItem[]>;
+  createFolder(
+    input: WikiCommandScope & {
+      actorWorkosId: string;
+      idempotencyKey: string;
+      path: string;
+      title?: string;
+    },
+  ): Promise<WikiCommandFolderResult>;
+  writePage(
+    input: WikiCommandScope & {
+      actorWorkosId: string;
+      idempotencyKey: string;
+      path: string;
+      body: string;
+      kind?: WikiKind;
+      title?: string;
+    },
+  ): Promise<WikiCommandWriteResult>;
+  moveNode(
+    input: WikiCommandScope & {
+      actorWorkosId: string;
+      path: string;
+      newParentPath: string | null;
+    },
+  ): Promise<WikiCommandMoveResult>;
+  deletePage(
+    input: WikiCommandScope & {
+      actorWorkosId: string;
+      path: string;
+      recursive?: boolean;
+    },
+  ): Promise<WikiCommandDeleteResult>;
+  addTimelineEntry(
+    input: WikiCommandScope & {
+      actorWorkosId: string;
+      idempotencyKey: string;
+      path: string;
+      at: Date;
+      text: string;
+    },
+  ): Promise<WikiCommandTimelineAddResult>;
 }
 
 export type ExecuteWikiCommandInput = {
@@ -197,6 +216,11 @@ export type ExecuteWikiCommandInput = {
    * create or timeline entry.
    */
   idempotencyKey: string;
+  /**
+   * Which wiki to operate on. Omitted by callers that have no wiki selector yet
+   * (the agent tool contract), which resolves to the workspace's default wiki.
+   */
+  wikiId?: string | undefined;
 };
 
 export class WikiCommandApplicationService {
@@ -204,9 +228,9 @@ export class WikiCommandApplicationService {
 
   async execute(input: ExecuteWikiCommandInput): Promise<WikiToolOutput> {
     const { actor, command, idempotencyKey } = input;
-    this.authorize(actor, command.command);
+    const scope = await this.authorize(actor, command.command, input.wikiId);
     try {
-      const result = await this.dispatch(actor, command, idempotencyKey.trim());
+      const result = await this.dispatch(actor, scope, command, idempotencyKey.trim());
       return { ok: true, result };
     } catch (error) {
       if (error instanceof WikiCommandError) return { ok: false, error: error.message };
@@ -214,7 +238,17 @@ export class WikiCommandApplicationService {
     }
   }
 
-  private authorize(actor: Actor, command: WikiToolCommand) {
+  /**
+   * Two gates, in order: the workspace-level Wiki permission, then per-wiki
+   * membership. The membership check has to live here rather than in the API
+   * route because chat, the API-hosted MCP tool, and the runner all enter through
+   * this service — enforcing it at the route would leave the MCP path open.
+   */
+  private async authorize(
+    actor: Actor,
+    command: WikiToolCommand,
+    wikiId: string | undefined,
+  ): Promise<WikiCommandScope> {
     const permission = WIKI_READ_COMMANDS.includes(command)
       ? WIKI_READ_PERMISSION
       : WIKI_WRITE_PERMISSION;
@@ -225,19 +259,28 @@ export class WikiCommandApplicationService {
     ) {
       throw new CoreError("forbidden", "The actor is not allowed to access Wiki.");
     }
+    const wiki = await this.repository.resolveWiki({
+      workspaceId: actor.workspaceId,
+      userWorkosId: actor.userId,
+      wikiId,
+    });
+    // A restricted wiki the actor is not a member of is reported exactly like one
+    // that does not exist, so membership cannot be probed.
+    if (!wiki) throw new CoreError("not_found", "Wiki not found.");
+    return { workspaceId: actor.workspaceId, wikiId: wiki.wikiId };
   }
 
   private async dispatch(
     actor: Actor,
+    scope: WikiCommandScope,
     toolInput: WikiToolInput,
     idempotencyKey: string,
   ): Promise<unknown> {
-    const workspaceId = actor.workspaceId;
     const actorWorkosId = actor.userId;
     if (!idempotencyKey) throw new WikiCommandError("A stable idempotency key is required.");
     switch (toolInput.command) {
       case "tree": {
-        const tree = await this.repository.getTree({ workspaceId });
+        const tree = await this.repository.getTree(scope);
         const automaticDepthLimit =
           toolInput.depth === undefined && tree.length > WIKI_TREE_AUTO_DEPTH_THRESHOLD;
         const depth = toolInput.depth ?? (automaticDepthLimit ? 0 : undefined);
@@ -282,14 +325,14 @@ export class WikiCommandApplicationService {
         if (refs.length === 0) {
           throw new WikiCommandError('read requires "pages" (path(s) or basename(s)).');
         }
-        const tree = await this.repository.getTree({ workspaceId });
+        const tree = await this.repository.getTree(scope);
         const exactFolders = new Map(
           tree
             .filter((entry) => entry.nodeType === "folder")
             .map((entry) => [entry.path, entry] as const),
         );
         const { pages, missing } = await this.repository.resolvePages({
-          workspaceId,
+          ...scope,
           refs: refs.filter((ref) => !exactFolders.has(ref)),
         });
         const resolved = await Promise.all(
@@ -300,7 +343,7 @@ export class WikiCommandApplicationService {
             kind: page.kind,
             updatedAt: page.updatedAt.toISOString(),
             body: page.content,
-            backlinks: await this.repository.getBacklinks({ workspaceId, path: page.path }),
+            backlinks: await this.repository.getBacklinks({ ...scope, path: page.path }),
           })),
         );
         const resolvedFolderRefs = new Set<string>();
@@ -333,7 +376,7 @@ export class WikiCommandApplicationService {
         const pattern = toolInput.query?.trim();
         if (!pattern) throw new WikiCommandError('grep requires "query" (a regex pattern).');
         const matches = await this.repository.grep({
-          workspaceId,
+          ...scope,
           pattern,
           ignoreCase: toolInput.ignoreCase ?? true,
           ...(toolInput.limit !== undefined ? { limit: toolInput.limit } : {}),
@@ -344,7 +387,7 @@ export class WikiCommandApplicationService {
         const text = toolInput.query?.trim();
         if (!text) throw new WikiCommandError('search requires "query".');
         const hits = await this.repository.search({
-          workspaceId,
+          ...scope,
           text,
           ...(toolInput.limit !== undefined ? { limit: toolInput.limit } : {}),
           ...(toolInput.offset !== undefined ? { offset: toolInput.offset } : {}),
@@ -362,7 +405,7 @@ export class WikiCommandApplicationService {
       case "recent": {
         const since = resolveWikiSince(toolInput.since?.trim() || "2d");
         const changes = await this.repository.recentChanges({
-          workspaceId,
+          ...scope,
           since,
           ...(toolInput.limit !== undefined ? { limit: toolInput.limit } : {}),
         });
@@ -382,7 +425,7 @@ export class WikiCommandApplicationService {
       case "timeline": {
         const ref = requireSingleRef(toolInput, "timeline");
         const entries = await this.repository.listTimeline({
-          workspaceId,
+          ...scope,
           path: ref,
           ...(toolInput.since?.trim() ? { since: resolveWikiSince(toolInput.since.trim()) } : {}),
         });
@@ -395,7 +438,7 @@ export class WikiCommandApplicationService {
         const path = toolInput.path?.trim();
         if (!path) throw new WikiCommandError('mkdir requires "path".');
         const result = await this.repository.createFolder({
-          workspaceId,
+          ...scope,
           actorWorkosId,
           idempotencyKey,
           path,
@@ -420,7 +463,7 @@ export class WikiCommandApplicationService {
           );
         }
         const result = await this.repository.writePage({
-          workspaceId,
+          ...scope,
           actorWorkosId,
           idempotencyKey,
           path,
@@ -445,7 +488,7 @@ export class WikiCommandApplicationService {
           throw new WikiCommandError('move requires "to" (a parent path, or "/" for the root).');
         }
         const result = await this.repository.moveNode({
-          workspaceId,
+          ...scope,
           actorWorkosId,
           path: ref,
           newParentPath: to === "/" ? null : to,
@@ -461,7 +504,7 @@ export class WikiCommandApplicationService {
       case "delete": {
         const ref = requireSingleRef(toolInput, "delete");
         const result = await this.repository.deletePage({
-          workspaceId,
+          ...scope,
           actorWorkosId,
           path: ref,
           ...(toolInput.recursive !== undefined ? { recursive: toolInput.recursive } : {}),
@@ -477,7 +520,7 @@ export class WikiCommandApplicationService {
           throw new WikiCommandError(`Invalid "at" timestamp "${toolInput.at}".`);
         }
         const entry = await this.repository.addTimelineEntry({
-          workspaceId,
+          ...scope,
           actorWorkosId,
           idempotencyKey,
           path: ref,

@@ -9,6 +9,7 @@ import {
   type SkillCatalogItemDto,
   type SkillInstallationDto,
   type SkillListItemDto,
+  type WikiDto,
   type WikiPageDto,
 } from "@opencompany/protocol";
 import { headers } from "next/headers";
@@ -29,8 +30,17 @@ export async function getHeadlessBrainOverview(brainId: string): Promise<BrainOv
   return (await response.json()).data;
 }
 
-export async function listHeadlessWikiPages(): Promise<WikiPageDto[]> {
-  const response = await (await serverKnowledgeClient()).v1.wiki.pages.$get();
+/** Every wiki in the workspace the viewer may read, the default one first. */
+export async function listHeadlessWikis(): Promise<WikiDto[]> {
+  const response = await (await serverKnowledgeClient()).v1.wikis.$get();
+  if (!response.ok) throw await serverResponseError(response, "Wiki loading failed");
+  return (await response.json()).data;
+}
+
+export async function listHeadlessWikiPages(wikiId?: string): Promise<WikiPageDto[]> {
+  const response = await (await serverKnowledgeClient()).v1.wiki.pages.$get({
+    query: wikiId ? { wikiId } : {},
+  });
   if (!response.ok) throw await serverResponseError(response, "Wiki loading failed");
   return (await response.json()).data;
 }

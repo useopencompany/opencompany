@@ -80,15 +80,17 @@ describe("headless knowledge collections", () => {
     );
   });
 
-  it("uses fixed workspace-authorized Wiki shapes without caller predicates", () => {
-    const wiki = getHeadlessWikiCollections("workspace_knowledge");
+  it("scopes the Wiki shapes to one authorized wiki, not the whole workspace", () => {
+    const wiki = getHeadlessWikiCollections("goat_wiki_clevel");
 
     expect((wiki.pages as unknown as TestCollection).options).toMatchObject({
-      id: "headless-wiki-pages:v2:workspace_knowledge",
-      shapeOptions: { url: "https://api.example.test/v1/read-models/wiki-pages-v2" },
+      id: "headless-wiki-pages:v2:goat_wiki_clevel",
+      shapeOptions: {
+        url: "https://api.example.test/v1/read-models/wiki-pages-v2?wikiId=goat_wiki_clevel",
+      },
     });
     expect((wiki.timeline as unknown as TestCollection).options.shapeOptions.url).toBe(
-      "https://api.example.test/v1/read-models/wiki-timeline-v1",
+      "https://api.example.test/v1/read-models/wiki-timeline-v1?wikiId=goat_wiki_clevel",
     );
   });
 
@@ -104,12 +106,14 @@ describe("headless knowledge collections", () => {
       })
       .mockResolvedValueOnce({ page: wikiPage, transactionIds: [82] });
 
-    const first = persistHeadlessWikiPageWrites([
-      { original: wikiPage, modified: { ...wikiPage, body: "First" } },
-    ]);
-    const second = persistHeadlessWikiPageWrites([
-      { original: wikiPage, modified: { ...wikiPage, body: "Second" } },
-    ]);
+    const first = persistHeadlessWikiPageWrites(
+      [{ original: wikiPage, modified: { ...wikiPage, body: "First" } }],
+      "goat_wiki_1",
+    );
+    const second = persistHeadlessWikiPageWrites(
+      [{ original: wikiPage, modified: { ...wikiPage, body: "Second" } }],
+      "goat_wiki_1",
+    );
 
     await vi.waitFor(() => expect(updateWikiPageRequest).toHaveBeenCalledTimes(1));
     releaseFirst?.();
@@ -117,6 +121,7 @@ describe("headless knowledge collections", () => {
     await expect(first).resolves.toEqual([81]);
     await expect(second).resolves.toEqual([82]);
     expect(updateWikiPageRequest).toHaveBeenNthCalledWith(2, "wiki_page_1", {
+      wikiId: "goat_wiki_1",
       body: "Second",
       kind: "project",
       title: "Launch Plan",
@@ -130,15 +135,19 @@ describe("headless knowledge collections", () => {
     });
 
     await expect(
-      persistHeadlessWikiPageWrites([
-        {
-          original: wikiPage,
-          modified: { ...wikiPage, slug: "renamed", path: "renamed", title: "Renamed" },
-        },
-      ]),
+      persistHeadlessWikiPageWrites(
+        [
+          {
+            original: wikiPage,
+            modified: { ...wikiPage, slug: "renamed", path: "renamed", title: "Renamed" },
+          },
+        ],
+        "goat_wiki_1",
+      ),
     ).resolves.toEqual([83]);
 
     expect(updateWikiPageRequest).toHaveBeenCalledWith("wiki_page_1", {
+      wikiId: "goat_wiki_1",
       body: "Plan",
       kind: "project",
       slug: "renamed",
@@ -147,10 +156,10 @@ describe("headless knowledge collections", () => {
   });
 
   it("waits only for positive safe Wiki transaction ids", async () => {
-    const wiki = getHeadlessWikiCollections("workspace_wait");
+    const wiki = getHeadlessWikiCollections("goat_wiki_wait");
 
     await awaitHeadlessWikiTransactions([0, -1, Number.NaN, 91], {
-      scopeKey: "workspace_wait",
+      wikiId: "goat_wiki_wait",
       timeoutMs: 5_000,
     });
 

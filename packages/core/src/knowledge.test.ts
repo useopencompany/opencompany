@@ -104,12 +104,63 @@ describe("KnowledgeApplicationService", () => {
     ).rejects.toThrow("stop after capture");
     expect(updateWikiPage).toHaveBeenCalledWith({
       actor,
+      wikiId: "goat_wiki_1",
       id: "page-id",
       body: "# Updated",
       kind: "project",
       slug: "updated-page",
       title: "",
     });
+  });
+
+  it("resolves Wiki writes against the selected wiki", async () => {
+    const resolveWiki = vi.fn(async () => ({
+      wikiId: "goat_wiki_clevel",
+      name: "C-level",
+      slug: "c-level",
+      instructions: "",
+    }));
+    const updateWikiPage = vi.fn(async () => {
+      throw new Error("stop after capture");
+    });
+    const service = new KnowledgeApplicationService(repository({ resolveWiki, updateWikiPage }));
+
+    await expect(
+      service.updateWikiPage(actor, "page-id", { wikiId: " goat_wiki_clevel ", body: "# Board" }),
+    ).rejects.toThrow("stop after capture");
+    expect(resolveWiki).toHaveBeenCalledWith({ actor, wikiId: "goat_wiki_clevel" });
+    expect(updateWikiPage).toHaveBeenCalledWith({
+      actor,
+      wikiId: "goat_wiki_clevel",
+      id: "page-id",
+      body: "# Board",
+    });
+  });
+
+  it("reports an unreachable Wiki as not_found without touching page storage", async () => {
+    const updateWikiPage = vi.fn(async () => {
+      throw new Error("should not be reached");
+    });
+    const service = new KnowledgeApplicationService(
+      repository({ resolveWiki: async () => null, updateWikiPage }),
+    );
+
+    await expect(
+      service.updateWikiPage(actor, "page-id", { wikiId: "goat_wiki_other", body: "# Board" }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    expect(updateWikiPage).not.toHaveBeenCalled();
+  });
+
+  it("rejects Wiki writes without permission before resolving the wiki", async () => {
+    const resolveWiki = vi.fn(async () => defaultWiki);
+    const service = new KnowledgeApplicationService(repository({ resolveWiki }));
+
+    await expect(
+      service.updateWikiPage({ ...actor, permissions: ["wiki:read"] }, "page-id", {
+        body: "# Board",
+      }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    expect(resolveWiki).not.toHaveBeenCalled();
   });
 
   it("normalizes client-generated Wiki identities without accepting an empty timeline", async () => {
@@ -129,6 +180,7 @@ describe("KnowledgeApplicationService", () => {
     ).rejects.toThrow("stop after capture");
     expect(addWikiTimelineEntry).toHaveBeenCalledWith({
       actor,
+      wikiId: "goat_wiki_1",
       idempotencyKey: "timeline-1",
       clientEntryId: "entry_1",
       id: "page-id",
@@ -138,13 +190,23 @@ describe("KnowledgeApplicationService", () => {
   });
 });
 
+const defaultWiki = {
+  wikiId: "goat_wiki_1",
+  name: "Wiki",
+  slug: "wiki",
+  instructions: "",
+};
+
 function repository(overrides: Partial<KnowledgeRepository>): KnowledgeRepository {
-  return new Proxy(overrides, {
-    get(target, property) {
-      if (property in target) return target[property as keyof typeof target];
-      return async () => {
-        throw new Error(`Unexpected repository operation: ${String(property)}.`);
-      };
+  return new Proxy(
+    { resolveWiki: async () => defaultWiki, ...overrides },
+    {
+      get(target, property) {
+        if (property in target) return target[property as keyof typeof target];
+        return async () => {
+          throw new Error(`Unexpected repository operation: ${String(property)}.`);
+        };
+      },
     },
-  }) as KnowledgeRepository;
+  ) as KnowledgeRepository;
 }

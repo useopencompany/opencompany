@@ -1969,6 +1969,84 @@ export const BrainFolderPathEnvelopeSchema = z
   .strict()
   .openapi("BrainFolderPathEnvelope");
 
+// A wiki's access has two stored states. The UI shows three: "workspace",
+// "shared" (restricted with invites) and "private" (restricted with none), which
+// it derives from `access` plus `memberIds`.
+export const WikiAccessSchema = z.enum(["workspace", "restricted"]).openapi("WikiAccess");
+export const WikiSchema = z
+  .object({
+    id: ResourceIdSchema,
+    name: z.string().min(1).max(120),
+    slug: z.string().min(1).max(64),
+    instructions: z.string().max(20_000),
+    access: WikiAccessSchema,
+    isDefault: z.boolean(),
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("Wiki");
+export const WikiListEnvelopeSchema = z
+  .object({ data: z.array(WikiSchema).max(200), meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("WikiListEnvelope");
+export const WikiMutationEnvelopeSchema = z
+  .object({ data: WikiSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("WikiMutationEnvelope");
+export const WikiAccessEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        access: WikiAccessSchema,
+        memberIds: z.array(z.string().min(1).max(256)).max(500),
+        workspaceMembers: z
+          .array(
+            z
+              .object({
+                id: z.string().min(1).max(256),
+                email: z.string().max(320),
+                name: z.string().max(320),
+                avatarUrl: z.string().max(2_048).nullable(),
+                role: z.enum(["admin", "member"]),
+              })
+              .strict(),
+          )
+          .max(500),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("WikiAccessEnvelope");
+export const CreateWikiBodySchema = z
+  .object({
+    name: z.string().min(1).max(120),
+    access: WikiAccessSchema.default("workspace"),
+    instructions: z.string().max(20_000).optional(),
+  })
+  .strict()
+  .openapi("CreateWikiBody");
+export const UpdateWikiBodySchema = z
+  .object({
+    name: z.string().min(1).max(120).optional(),
+    instructions: z.string().max(20_000).optional(),
+  })
+  .strict()
+  .refine(
+    (body: { name?: string; instructions?: string }) =>
+      body.name !== undefined || body.instructions !== undefined,
+    { message: "A wiki name or instructions are required." },
+  )
+  .openapi("UpdateWikiBody");
+export const SetWikiAccessBodySchema = z
+  .object({
+    access: WikiAccessSchema,
+    memberIds: z.array(z.string().min(1).max(256)).max(500).default([]),
+  })
+  .strict()
+  .openapi("SetWikiAccessBody");
+
 export const WikiPageListEnvelopeSchema = z
   .object({ data: z.array(WikiPageSchema), meta: ProtocolMetadataSchema })
   .strict()
@@ -2048,6 +2126,7 @@ export const SetWikiSourceEnabledBodySchema = z
   .openapi("SetWikiSourceEnabledBody");
 export const CreateWikiPageBodySchema = z
   .object({
+    wikiId: ResourceIdSchema.optional(),
     clientPageId: ResourceIdSchema.optional(),
     nodeType: WikiNodeTypeSchema.default("page"),
     parentPath: z.string().min(1).max(512).nullable(),
@@ -2058,6 +2137,7 @@ export const CreateWikiPageBodySchema = z
   .openapi("CreateWikiPageBody");
 export const UpdateWikiPageBodySchema = z
   .object({
+    wikiId: ResourceIdSchema.optional(),
     body: z.string().max(1_000_000).optional(),
     kind: WikiKindSchema.optional(),
     slug: z.string().min(1).max(80).optional(),
@@ -2079,11 +2159,12 @@ export const UpdateWikiPageBodySchema = z
   )
   .openapi("UpdateWikiPageBody");
 export const DeleteWikiPageBodySchema = z
-  .object({ recursive: z.boolean().optional() })
+  .object({ wikiId: ResourceIdSchema.optional(), recursive: z.boolean().optional() })
   .strict()
   .openapi("DeleteWikiPageBody");
 export const AddWikiTimelineEntryBodySchema = z
   .object({
+    wikiId: ResourceIdSchema.optional(),
     clientEntryId: ResourceIdSchema.optional(),
     text: z.string().min(1).max(20_000),
     at: TimestampSchema.optional(),
@@ -2107,6 +2188,9 @@ export const InternalWikiCommandRequestSchema = z
   .object({
     userWorkosId: z.string().min(1).max(256),
     workspaceId: z.string().min(1).max(256),
+    // Which wiki to operate on. Absent means the workspace's default wiki; the
+    // agent tool contract has no wiki selector yet.
+    wikiId: z.string().min(1).max(256).optional(),
     command: WikiCommandSchema,
   })
   .strict();
@@ -4429,6 +4513,11 @@ export type WikiIngestActivityPageDto = {
 };
 export type UpsertWikiSourceBody = z.infer<typeof UpsertWikiSourceBodySchema>;
 export type SetWikiSourceEnabledBody = z.infer<typeof SetWikiSourceEnabledBodySchema>;
+export type WikiDto = z.infer<typeof WikiSchema>;
+export type WikiAccessDto = z.infer<typeof WikiAccessSchema>;
+export type CreateWikiBody = z.infer<typeof CreateWikiBodySchema>;
+export type UpdateWikiBody = z.infer<typeof UpdateWikiBodySchema>;
+export type SetWikiAccessBody = z.infer<typeof SetWikiAccessBodySchema>;
 export type CreateWikiPageBody = z.infer<typeof CreateWikiPageBodySchema>;
 export type UpdateWikiPageBody = z.infer<typeof UpdateWikiPageBodySchema>;
 export type DeleteWikiPageBody = z.infer<typeof DeleteWikiPageBodySchema>;

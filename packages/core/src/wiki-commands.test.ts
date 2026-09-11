@@ -19,6 +19,12 @@ function fakeRepository(overrides: Partial<WikiCommandRepository> = {}): {
       return result;
     };
   const repository: WikiCommandRepository = {
+    resolveWiki: record("resolveWiki", {
+      wikiId: "goat_wiki_1",
+      name: "Wiki",
+      slug: "wiki",
+      instructions: "",
+    }),
     getTree: record("getTree", []),
     resolvePages: record("resolvePages", { pages: [], missing: [] }),
     getBacklinks: record("getBacklinks", []),
@@ -71,8 +77,19 @@ function run(
   actorValue: Actor,
   command: ExecuteWikiCommandInput["command"],
   idempotencyKey = "agent-wiki:turn_1:call_1",
+  wikiId?: string,
 ) {
-  return service.execute({ actor: actorValue, command, idempotencyKey });
+  return service.execute({
+    actor: actorValue,
+    command,
+    idempotencyKey,
+    ...(wikiId ? { wikiId } : {}),
+  });
+}
+
+/** Every execute resolves the wiki first; assertions care about what follows. */
+function commandCalls(calls: Array<{ method: string; input: unknown }>) {
+  return calls.filter((call) => call.method !== "resolveWiki");
 }
 
 describe("WikiCommandApplicationService", () => {
@@ -230,11 +247,12 @@ describe("WikiCommandApplicationService", () => {
       { command: "write", path: "projects/plan", body: "# Plan", kind: "project" },
       "agent-wiki:turn_9:call_9",
     );
-    expect(calls).toEqual([
+    expect(commandCalls(calls)).toEqual([
       {
         method: "writePage",
         input: {
           workspaceId: "ws_1",
+          wikiId: "goat_wiki_1",
           actorWorkosId: "user_1",
           idempotencyKey: "agent-wiki:turn_9:call_9",
           path: "projects/plan",
@@ -255,7 +273,41 @@ describe("WikiCommandApplicationService", () => {
       kind: "bogus",
     });
     expect(output).toMatchObject({ ok: false });
-    expect(calls).toHaveLength(0);
+    expect(commandCalls(calls)).toHaveLength(0);
+  });
+
+  it("reports an unreachable wiki as not_found so membership cannot be probed", async () => {
+    const { repository, calls } = fakeRepository({ resolveWiki: async () => null });
+    const service = new WikiCommandApplicationService(repository);
+    await expect(
+      run(service, readActor, { command: "tree" }, "agent-wiki:turn_1:call_1", "goat_wiki_other"),
+    ).rejects.toMatchObject({ code: "not_found" });
+    expect(commandCalls(calls)).toHaveLength(0);
+  });
+
+  it("runs every command against the resolved wiki rather than the actor's workspace", async () => {
+    const { repository, calls } = fakeRepository({
+      resolveWiki: async () => ({
+        wikiId: "goat_wiki_clevel",
+        name: "C-level",
+        slug: "c-level",
+        instructions: "One page per board topic.",
+      }),
+    });
+    const service = new WikiCommandApplicationService(repository);
+    await run(
+      service,
+      readActor,
+      { command: "search", query: "runway" },
+      undefined,
+      "goat_wiki_clevel",
+    );
+    expect(commandCalls(calls)).toEqual([
+      {
+        method: "search",
+        input: { workspaceId: "ws_1", wikiId: "goat_wiki_clevel", text: "runway" },
+      },
+    ]);
   });
 
   it("preserves the timeline-add output shape", async () => {
