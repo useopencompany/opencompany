@@ -250,6 +250,9 @@ export type IntegrationAccountView<Provider extends string = PersonalAccountProv
   scopes: string[];
   // Sparse per-connection capability overrides; registry defaults fill gaps.
   capabilityModes: Record<string, unknown>;
+  // When the account was last connected or reconnected. Permission edits do not
+  // change it, so it stays stable while the user edits capability modes.
+  connectedAt: string | null;
 };
 
 export type PersonalAccountProvider =
@@ -327,6 +330,9 @@ type IntegrationStateRow = {
   capability_modes?: Record<string, unknown> | null;
   toolModes?: Record<string, unknown> | null;
   tool_modes?: Record<string, unknown> | null;
+  lastSyncedAt?: string | Date | null;
+  last_synced_at?: string | Date | null;
+  connectedAt?: string | null;
 };
 
 const JAMIE_MCP_EXTERNAL_ID = "jamie_mcp";
@@ -576,7 +582,48 @@ function accountViewFromRow(
             : (row.statusReason ?? row.status_reason ?? null),
     scopes,
     capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
+    connectedAt: connectionTimestamp(row),
   };
+}
+
+function connectionTimestamp(row: IntegrationStateRow): string | null {
+  const value = row.connectedAt ?? row.lastSyncedAt ?? row.last_synced_at ?? null;
+  if (value === null) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+/**
+ * The single account that powers an official plugin's tools.
+ *
+ * Plugin copy promises "the most recently connected account powers tools", and
+ * `connectedAt` is the only column that tracks exactly that: it moves on connect
+ * and reconnect but never when the user edits permissions. Settings and the MCP
+ * loaders both select through this function so the account a user edits is the
+ * account their tools actually run against, whatever order the rows arrive in.
+ * Accounts with no timestamp sort last, and the id tie-breaker keeps equal
+ * timestamps deterministic.
+ */
+export function activePluginAccount<
+  Account extends { integrationId: string; connectedAt: string | null },
+>(accounts: readonly Account[]): Account | null {
+  let active: Account | null = null;
+  for (const account of accounts) {
+    if (active === null || comparePluginAccountRecency(account, active) > 0) active = account;
+  }
+  return active;
+}
+
+type PluginAccountRecency = { integrationId: string; connectedAt: string | null };
+
+function comparePluginAccountRecency(a: PluginAccountRecency, b: PluginAccountRecency): number {
+  if (a.connectedAt !== b.connectedAt) {
+    if (a.connectedAt === null) return -1;
+    if (b.connectedAt === null) return 1;
+    return a.connectedAt < b.connectedAt ? -1 : 1;
+  }
+  if (a.integrationId === b.integrationId) return 0;
+  return a.integrationId < b.integrationId ? -1 : 1;
 }
 
 export const googleIntegrationStateFromRows = integrationStateFromRows;

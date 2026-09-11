@@ -28,7 +28,10 @@ export async function loadMicrosoftIntegration(input: {
         ne(integrations.status, "disconnected"),
       ),
     )
-    .orderBy(desc(integrations.createdAt), desc(integrations.id))
+    // Matches the settings selection in plugin-connection-state.ts: lastSyncedAt
+    // moves on connect and reconnect but not on permission edits, so reconnecting
+    // an older account makes it active without a mode change stealing the slot.
+    .orderBy(desc(integrations.lastSyncedAt), desc(integrations.id))
     .limit(1);
   return row;
 }

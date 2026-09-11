@@ -467,6 +467,9 @@ export const IntegrationAccountReadModelSchema = z
     statusReason: z.string().max(2_000).nullable(),
     scopes: z.array(z.string().max(512)).max(1_000),
     capabilityModes: z.record(z.string(), z.unknown()),
+    // Written on every OAuth connect and reconnect, and never by a permission
+    // edit, so it is the ordering key for "most recently connected account".
+    lastSyncedAt: TimestampSchema.nullable(),
   })
   .strict()
   .openapi("IntegrationAccountReadModelV1");
@@ -3889,6 +3892,7 @@ export const IntegrationAccountSchema = z
     statusReason: z.string().max(2_000).nullable(),
     scopes: z.array(z.string().max(512)).max(1_000),
     capabilityModes: z.record(z.string(), z.unknown()),
+    connectedAt: TimestampSchema.nullable(),
   })
   .strict()
   .openapi("IntegrationAccount");

@@ -432,6 +432,32 @@ describe("Outlook Calendar Graph behavior", () => {
     }
     expect(mocks.api.mock.calls.every((call) => call[1] === "GET")).toBe(true);
   });
+  it("refuses to overwrite an online meeting body but still updates its other fields", async () => {
+    mocks.api.mockResolvedValueOnce({ id: "e1", type: "singleInstance", isOnlineMeeting: true });
+    expect(
+      (await call("outlook-calendar", "update_event", { eventId: "e1", body: "New agenda" }))
+        .isError,
+    ).toBe(true);
+    expect(mocks.api.mock.calls.every((call) => call[1] === "GET")).toBe(true);
+    expect(mocks.api.mock.calls[0]![2].searchParams.get("$select")).toContain("isOnlineMeeting");
+
+    mocks.api.mockReset();
+    mocks.api
+      .mockResolvedValueOnce({ id: "e1", type: "singleInstance", isOnlineMeeting: true })
+      .mockResolvedValueOnce({ id: "e1" });
+    await call("outlook-calendar", "update_event", { eventId: "e1", subject: "Weekly sync" });
+    expect(mocks.api.mock.calls[1]![1]).toBe("PATCH");
+    expect(mocks.api.mock.calls[1]![3].body).toEqual({ subject: "Weekly sync" });
+  });
+  it("rewrites the body of an event that is not an online meeting", async () => {
+    mocks.api
+      .mockResolvedValueOnce({ id: "e1", type: "singleInstance", isOnlineMeeting: false })
+      .mockResolvedValueOnce({ id: "e1" });
+    await call("outlook-calendar", "update_event", { eventId: "e1", body: "New agenda" });
+    expect(mocks.api.mock.calls[1]![3].body).toEqual({
+      body: { contentType: "Text", content: "New agenda" },
+    });
+  });
   it("responds to an invite with explicit notification behavior", async () => {
     mocks.api
       .mockResolvedValueOnce({ id: "e1", isOrganizer: false, type: "singleInstance" })

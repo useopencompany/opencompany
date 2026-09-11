@@ -130,6 +130,7 @@ export function createIntegrationAccountService(input: {
           status: integrations.status,
           scopes: integrations.scopes,
           capabilityModes: integrations.capabilityModes,
+          lastSyncedAt: integrations.lastSyncedAt,
         })
         .from(integrations)
         .where(

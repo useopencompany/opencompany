@@ -1391,6 +1391,7 @@ describe("Linear plugin settings", () => {
         "https://www.googleapis.com/auth/admin.directory.group",
       ],
       capabilityModes: {},
+      connectedAt: null,
     };
     appData.integrations.personalAccounts.google_admin = [adminAccount];
     const adminPlugin: PluginInstallationDto = {
@@ -1895,6 +1896,7 @@ describe("Linear plugin settings", () => {
           statusReason: status === "needs_reauth" ? "Reconnect Stripe" : null,
           scopes: [],
           capabilityModes: {},
+          connectedAt: null,
         },
       ];
       render(
@@ -2126,6 +2128,7 @@ describe("Linear plugin settings", () => {
     statusReason: null,
     scopes: [],
     capabilityModes: { read: "on", write: "ask" },
+    connectedAt: null,
   };
 
   it("makes connecting the account the primary action while setup is incomplete", () => {
@@ -3048,5 +3051,6 @@ function account(
     statusReason: null,
     scopes: [],
     capabilityModes,
+    connectedAt: null,
   };
 }

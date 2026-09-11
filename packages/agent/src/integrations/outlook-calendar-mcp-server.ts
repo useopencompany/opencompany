@@ -208,7 +208,7 @@ export function createOutlookCalendarMcpService(input: MicrosoftMcpServiceInput)
       );
       register(
         "update_event",
-        "Update an existing Outlook event by its original id, preserving omitted fields. The attendees field replaces the full attendee list, so read the event first and preserve everyone the user wants to keep. Reschedule a timed event by providing both startTime and endTime with UTC offsets. Attendee changes can send updates. For recurring meetings use an occurrence id from list_events; changing an entire series or rescheduling all-day events is not supported.",
+        "Update an existing Outlook event by its original id, preserving omitted fields. The attendees field replaces the full attendee list, so read the event first and preserve everyone the user wants to keep. Reschedule a timed event by providing both startTime and endTime with UTC offsets. Attendee changes can send updates. The body of an online meeting cannot be edited here because rewriting it would drop the join details. For recurring meetings use an occurrence id from list_events; changing an entire series or rescheduling all-day events is not supported.",
         {
           eventId: graphIdSchema,
           subject: editableSchema.subject.optional(),
@@ -224,9 +224,20 @@ export function createOutlookCalendarMcpService(input: MicrosoftMcpServiceInput)
             throw new Error("Provide at least one field to update.");
           if (Boolean(startTime) !== Boolean(endTime))
             throw new Error("Provide both startTime and endTime to reschedule an event.");
-          const url = graphUrl(`events/${graphId(eventId)}`, { $select: EVENT_FIELDS });
+          const url = graphUrl(`events/${graphId(eventId)}`, {
+            $select: `${EVENT_FIELDS},isOnlineMeeting`,
+          });
           const original = graphRecord(await callGraph(context, "GET", url));
           assertSingleEvent(original, eventId);
+          // A PATCH replaces the whole body, and Microsoft stores Teams join
+          // details inside it. Writing plain text over an online meeting's body
+          // strips the join link, so v1 refuses that edit instead of silently
+          // breaking the meeting. Every other field still updates normally.
+          // https://learn.microsoft.com/en-us/graph/api/event-update#notes-for-updating-specific-properties
+          if (fields.body !== undefined && original.isOnlineMeeting === true)
+            throw new Error(
+              "This is an online meeting, and replacing its body would remove the join details. Edit the body in Outlook, or update the subject, location, attendees, or times here.",
+            );
           if (startTime && endTime) {
             if (original.isAllDay === true)
               throw new Error("Reschedule all-day events in Outlook.");

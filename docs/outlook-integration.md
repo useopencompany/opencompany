@@ -28,7 +28,9 @@ Calendar event views expand recurring occurrences. Personal-account availability
 calendar view to completion; a truncated result never implies availability. Microsoft 365 users can
 also query colleague/resource availability using get_schedule. Tools create timed events and change
 individual events/occurrences; all-day creation, recurrence creation, and series-wide writes are not
-supported. Invitations, updates, cancellations, and invite responses can notify attendees.
+supported. The body of an online meeting cannot be edited, because a Graph update replaces the whole
+body and would drop the join details; every other field on those events still updates. Invitations,
+updates, cancellations, and invite responses can notify attendees.
 
 ## Release validation
 

@@ -1,8 +1,9 @@
-import type {
-  InfisicalProviderState,
-  IntegrationAccountView,
-  IntegrationState,
-  PersonalAccountProvider,
+import {
+  activePluginAccount,
+  type InfisicalProviderState,
+  type IntegrationAccountView,
+  type IntegrationState,
+  type PersonalAccountProvider,
 } from "@/lib/integration-state";
 import {
   GOOGLE_DRIVE_MCP_RECONNECT_REASON,
@@ -65,6 +66,7 @@ export function pluginAccountsFromState(
           statusReason: connection.statusReason,
           scopes: [],
           capabilityModes: connection.capabilityModes,
+          connectedAt: null,
         }
       : null;
     return {
@@ -124,6 +126,7 @@ export function pluginAccountsFromState(
               statusReason: connection.statusReason,
               scopes: [],
               capabilityModes: connection.capabilityModes,
+              connectedAt: null,
             }
           : null;
       return {
@@ -146,7 +149,7 @@ export function pluginAccountsFromState(
     }));
     const primaryIntegrationId =
       config.connectionProvider === "outlook" || config.connectionProvider === "outlook-calendar"
-        ? accounts.at(-1)?.account.integrationId
+        ? activePluginAccount(accounts.map(({ account }) => account))?.integrationId
         : config.connectionProvider === "gmail"
           ? state.gmail.integrationId
           : config.connectionProvider === "slack"
@@ -181,6 +184,7 @@ export function pluginAccountsFromState(
         statusReason: state.linear.statusReason,
         scopes: [],
         capabilityModes: state.linear.capabilityModes,
+        connectedAt: null,
       }
     : null;
   return {
