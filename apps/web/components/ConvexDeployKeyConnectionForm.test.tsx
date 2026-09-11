@@ -17,6 +17,8 @@ describe("ConvexDeployKeyConnectionForm", () => {
     expect(screen.getByLabelText("Convex deploy key")).toHaveAttribute("type", "password");
     expect(screen.getByRole("button", { name: "Save deploy key" })).toBeDisabled();
     expect(screen.getByText(/Production supports schema/i)).toBeInTheDocument();
+    expect(screen.getByText(/deployment:functions:runInternalQueries/i)).toBeInTheDocument();
+    expect(screen.getByText(/deployment:data:view/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /create a convex deploy key/i })).toHaveAttribute(
       "href",
       "https://docs.convex.dev/cli/deploy-key-types",

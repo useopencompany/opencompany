@@ -4,9 +4,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SettingsSidebar } from "./SettingsChrome";
 
 const pathnameMock = vi.hoisted(() => ({ value: "/settings" }));
+const routerMock = vi.hoisted(() => ({ prefetch: vi.fn() }));
 
 vi.mock("next/navigation", () => ({
   usePathname: () => pathnameMock.value,
+  useRouter: () => routerMock,
 }));
 
 describe("SettingsSidebar", () => {

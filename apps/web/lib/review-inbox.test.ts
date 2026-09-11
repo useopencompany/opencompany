@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { countAwaitingReview, selectReviewItems } from "@/lib/review-inbox";
+import { countAwaitingReview, selectReviewItems, taskHasReadableResult } from "@/lib/review-inbox";
 
 type ConversationInput = Parameters<typeof selectReviewItems>[0]["conversations"][number];
 type TaskInput = Parameters<typeof selectReviewItems>[0]["tasks"][number];
@@ -30,6 +30,18 @@ function task(overrides: Partial<TaskInput> & { id: string }): TaskInput {
     ...overrides,
   };
 }
+
+describe("taskHasReadableResult", () => {
+  it("covers only the runs that settled with something to read", () => {
+    expect(taskHasReadableResult("succeeded")).toBe(true);
+    expect(taskHasReadableResult("failed")).toBe(true);
+    // An approval request is answered by approving it, not by opening the page, so the surfaces
+    // that acknowledge a read result must leave this one alone.
+    expect(taskHasReadableResult("waiting")).toBe(false);
+    expect(taskHasReadableResult("running")).toBe(false);
+    expect(taskHasReadableResult("canceled")).toBe(false);
+  });
+});
 
 describe("selectReviewItems", () => {
   it("includes finished conversations the user has not read", () => {

@@ -4865,6 +4865,39 @@ describe("Surface chat streaming UI", () => {
     expect(recentTitles()).toEqual(["Plans for spring", "Planning"]);
   });
 
+  it("bounds Cmd+K rendering while keeping older tasks searchable", async () => {
+    const user = userEvent.setup();
+    const allTasks = Array.from({ length: 636 }, (_, index) =>
+      taskView({
+        id: `task_${index}`,
+        displayId: `TASK-${index}`,
+        name: index === 635 ? "Needle in archived history" : `Routine task ${index}`,
+        prompt: `Task prompt ${index}`,
+        archivedAt: "2026-08-01T12:00:00.000Z",
+        updatedAt: new Date(Date.UTC(2026, 7, 10, 12, 0, 0) - index * 1_000).toISOString(),
+      }),
+    );
+
+    render(
+      <Surface
+        taskSpawningEnabled
+        tasks={[]}
+        allTasks={allTasks}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={null}
+      />,
+    );
+
+    await user.keyboard("{Meta>}k{/Meta}");
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getAllByRole("option")).toHaveLength(51);
+    expect(within(dialog).queryByText("Needle in archived history")).not.toBeInTheDocument();
+
+    await user.type(within(dialog).getByRole("combobox"), "needle");
+    expect(within(dialog).getByText("Needle in archived history")).toBeInTheDocument();
+    expect(within(dialog).getAllByRole("option")).toHaveLength(2);
+  });
+
   it("mixes archived chats into the Cmd+K palette by recency and restores them", async () => {
     const user = userEvent.setup();
 

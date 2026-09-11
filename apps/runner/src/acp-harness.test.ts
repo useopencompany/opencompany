@@ -350,6 +350,7 @@ describe("AcpHarness", () => {
             emitRawSDKMessages: [{ type: "system", subtype: "init" }],
             options: {
               maxTurns: 250,
+              disallowedTools: ["Monitor"],
               strictMcpConfig: true,
               mcpServers: {
                 opencompany: {
