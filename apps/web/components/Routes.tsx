@@ -271,7 +271,7 @@ export function PreferencesSettingsRoute() {
         <BetaFeatureSwitch
           icon={Inbox}
           label="For review"
-          description="Collect finished chats and tasks you haven't read yet in one place, and read them side by side."
+          description="Collect finished chats and tasks in one place, read them side by side, and archive them when you're done."
           checked={featureFlags.reviewInbox}
           update={updateReviewInboxAction}
         />

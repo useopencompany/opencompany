@@ -11,6 +11,7 @@ function conversation(overrides: Partial<ConversationInput> & { id: string }): C
     engine: "opencompany",
     updatedAt: "2026-09-10T10:00:00.000Z",
     archivedAt: null,
+    lastSeenAt: null,
     activityState: "idle",
     hasUnseen: true,
     ...overrides,
@@ -42,16 +43,31 @@ describe("selectReviewItems", () => {
         conversationId: "c1",
         title: "Draft the update",
         updatedAt: "2026-09-10T10:00:00.000Z",
+        unread: true,
         source: { kind: "chat", model: "claude-opus-5", engine: "opencompany" },
       },
     ]);
   });
 
-  it("excludes conversations that are still working, already seen, or archived", () => {
+  // Reading something is not the same as being done with it. The queue is a place to come back
+  // to, so a read item stays until the reader archives it.
+  it("keeps a read conversation in the queue and marks it read", () => {
+    const items = selectReviewItems({
+      conversations: [
+        conversation({ id: "read", hasUnseen: false, lastSeenAt: "2026-09-10T10:05:00.000Z" }),
+      ],
+      tasks: [],
+    });
+
+    expect(items.map((item) => ({ id: item.conversationId, unread: item.unread }))).toEqual([
+      { id: "read", unread: false },
+    ]);
+  });
+
+  it("excludes conversations that are still working or archived", () => {
     const items = selectReviewItems({
       conversations: [
         conversation({ id: "working", activityState: "working" }),
-        conversation({ id: "seen", hasUnseen: false }),
         conversation({ id: "archived", archivedAt: "2026-09-09T10:00:00.000Z" }),
         conversation({ id: "unread" }),
       ],
@@ -59,6 +75,17 @@ describe("selectReviewItems", () => {
     });
 
     expect(items.map((item) => item.conversationId)).toEqual(["unread"]);
+  });
+
+  // A conversation nobody has written in or been notified about never produced a result, so it is
+  // not something to review — it would only pad the queue with empty rows.
+  it("excludes a conversation that was never read and never had unread output", () => {
+    const items = selectReviewItems({
+      conversations: [conversation({ id: "untouched", hasUnseen: false, lastSeenAt: null })],
+      tasks: [],
+    });
+
+    expect(items).toEqual([]);
   });
 
   // A Task's own conversation is never projected into the conversation read model
@@ -82,6 +109,7 @@ describe("selectReviewItems", () => {
         conversationId: "c9",
         title: "Refresh the pipeline",
         updatedAt: "2026-09-10T10:00:00.000Z",
+        unread: true,
         source: { kind: "task", taskId: "t1", displayId: "TASK-42" },
       },
     ]);
@@ -98,7 +126,18 @@ describe("selectReviewItems", () => {
     ]);
   });
 
-  it("excludes tasks that are unfinished, waiting on input, seen, or archived", () => {
+  it("keeps a read task result in the queue and marks it read", () => {
+    const items = selectReviewItems({
+      conversations: [],
+      tasks: [task({ id: "read", hasUnseen: false })],
+    });
+
+    expect(items.map((item) => ({ id: item.source, unread: item.unread }))).toEqual([
+      { id: { kind: "task", taskId: "read", displayId: "TASK-read" }, unread: false },
+    ]);
+  });
+
+  it("excludes tasks that are unfinished, waiting on input, canceled, or archived", () => {
     const items = selectReviewItems({
       conversations: [],
       tasks: [
@@ -106,7 +145,6 @@ describe("selectReviewItems", () => {
         task({ id: "running", status: "running" }),
         task({ id: "waiting", status: "waiting" }),
         task({ id: "canceled", status: "canceled" }),
-        task({ id: "seen", hasUnseen: false }),
         task({ id: "archived", archivedAt: "2026-09-09T10:00:00.000Z" }),
         task({ id: "unread" }),
       ],
@@ -134,6 +172,30 @@ describe("selectReviewItems", () => {
       "older-chat",
     ]);
   });
+
+  // Read items stay until they are archived, so the list needs a tail. Unread work is never cut:
+  // it is the reason the queue exists.
+  it("keeps every unread item but drops read items past the tail", () => {
+    const read = Array.from({ length: 60 }, (_, index) =>
+      conversation({
+        id: `read-${index}`,
+        hasUnseen: false,
+        lastSeenAt: "2026-09-01T10:00:00.000Z",
+        updatedAt: `2026-09-10T10:${String(index).padStart(2, "0")}:00.000Z`,
+      }),
+    );
+    const unread = Array.from({ length: 5 }, (_, index) =>
+      conversation({ id: `unread-${index}`, updatedAt: "2026-08-01T10:00:00.000Z" }),
+    );
+
+    const items = selectReviewItems({ conversations: [...read, ...unread], tasks: [] });
+
+    expect(items.filter((item) => item.unread)).toHaveLength(5);
+    expect(items.filter((item) => !item.unread)).toHaveLength(50);
+    // The tail cuts the oldest read rows, not the newest.
+    expect(items.some((item) => item.conversationId === "read-59")).toBe(true);
+    expect(items.some((item) => item.conversationId === "read-0")).toBe(false);
+  });
 });
 
 describe("countAwaitingReview", () => {
@@ -143,7 +205,7 @@ describe("countAwaitingReview", () => {
         conversation({ id: "unread-a" }),
         conversation({ id: "unread-b" }),
         conversation({ id: "working", activityState: "working" }),
-        conversation({ id: "seen", hasUnseen: false }),
+        conversation({ id: "seen", hasUnseen: false, lastSeenAt: "2026-09-10T10:05:00.000Z" }),
         conversation({ id: "archived", archivedAt: "2026-09-09T10:00:00.000Z" }),
       ],
       tasks: [
