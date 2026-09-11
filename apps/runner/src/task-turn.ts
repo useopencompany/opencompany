@@ -53,6 +53,9 @@ const TASK_CLOSER_COMMENT_THREAD_LIMIT = 8;
 const TASK_CLOSER_COMMENT_MAX_LENGTH = 2_000;
 const TASK_CLOSER_MODEL = "openai/gpt-5.4-mini";
 const CODING_ERROR_MAX_LENGTH = 2_000;
+const EXECUTION_TURN_LIMIT_ERROR = /reached maximum number of turns \(\d+\)/i;
+const EXECUTION_TURN_LIMIT_RETRY_COMMENT =
+  "Continuing from saved work after this run reached its execution limit.";
 const logger = createLogger({ service: "opencompany-runner", runtime: "task-turn" });
 
 export type TaskTurnContext = {
@@ -603,7 +606,12 @@ export function buildTaskFailureCompletion(input: {
   decision?: TaskRunDecision | null;
 }): TaskTurnCompletion {
   const error = input.error.trim().slice(0, CODING_ERROR_MAX_LENGTH);
-  const retry = input.decision?.disposition === "retry" && input.context.task.attempts < 2;
+  const automaticDecision = executionTurnLimitRetryDecision({
+    error,
+    attempts: input.context.task.attempts,
+  });
+  const decision = automaticDecision ?? input.decision;
+  const retry = decision?.disposition === "retry" && input.context.task.attempts < 2;
   const resultModeOverride =
     input.context.harnessSpec.resultMode !== input.context.task.harnessSpec.resultMode
       ? input.context.harnessSpec.resultMode
@@ -614,14 +622,13 @@ export function buildTaskFailureCompletion(input: {
     taskName: input.context.task.name,
     harnessSpec: input.context.task.harnessSpec,
     result: "",
-    disposition: input.decision ? (retry ? "retry" : "fail") : null,
+    disposition: decision ? (retry ? "retry" : "fail") : null,
     reportedOutcome: null,
-    outcomeComment:
-      input.decision?.comment.trim().slice(0, TASK_OUTCOME_COMMENT_MAX_LENGTH) || null,
+    outcomeComment: decision?.comment.trim().slice(0, TASK_OUTCOME_COMMENT_MAX_LENGTH) || null,
     nextTurn: retry
       ? createNextTaskTurn({
           harnessSpec: input.context.task.harnessSpec,
-          prompt: taskRetryPrompt(error),
+          prompt: taskRetryPrompt(error, Boolean(automaticDecision)),
           ...(resultModeOverride
             ? {
                 settings: {
@@ -643,14 +650,20 @@ export async function orchestrateTaskFailure(input: {
   turn: CodexChatTurn;
 }) {
   const retryAvailable = input.context.task.attempts < 2;
-  const decision = await closeTaskTurn({
-    context: input.context,
-    run: { status: "failed", error: input.error, retryAvailable },
-    env: input.env,
-    session: input.session,
-    turn: input.turn,
-    signal: new AbortController().signal,
+  const automaticDecision = executionTurnLimitRetryDecision({
+    error: input.error,
+    attempts: input.context.task.attempts,
   });
+  const decision =
+    automaticDecision ??
+    (await closeTaskTurn({
+      context: input.context,
+      run: { status: "failed", error: input.error, retryAvailable },
+      env: input.env,
+      session: input.session,
+      turn: input.turn,
+      signal: new AbortController().signal,
+    }));
   return buildTaskFailureCompletion({
     context: input.context,
     error: input.error,
@@ -1468,7 +1481,18 @@ function readTaskDecision(
   };
 }
 
-function taskRetryPrompt(error: string) {
+function executionTurnLimitRetryDecision(input: {
+  error: string;
+  attempts: number;
+}): TaskRunDecision | null {
+  if (input.attempts >= 2 || !EXECUTION_TURN_LIMIT_ERROR.test(input.error)) return null;
+  return { disposition: "retry", comment: EXECUTION_TURN_LIMIT_RETRY_COMMENT };
+}
+
+function taskRetryPrompt(error: string, resumeSavedWork: boolean) {
+  if (resumeSavedWork) {
+    return "The previous run reached its execution limit. Continue from the existing sandbox and repository state. Inspect the current work first, then finish the task without repeating completed steps.";
+  }
   return `The previous attempt failed: ${error || "Unknown error"}. Continue the task.`;
 }
 

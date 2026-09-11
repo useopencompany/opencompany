@@ -299,6 +299,33 @@ describe("session-backed task turns", () => {
     ).toMatchObject({ disposition: "fail", nextTurn: null });
   });
 
+  it("resumes a task from saved state when an engine turn reaches its safety limit", () => {
+    const retry = buildTaskFailureCompletion({
+      context: context(workflowSpec()),
+      error: "Internal error: Reached maximum number of turns (250)",
+      decision: { disposition: "fail", comment: "Start over from a clean state." },
+    });
+
+    expect(retry).toMatchObject({
+      disposition: "retry",
+      outcomeComment: "Continuing from saved work after this run reached its execution limit.",
+      nextTurn: {
+        prompt:
+          "The previous run reached its execution limit. Continue from the existing sandbox and repository state. Inspect the current work first, then finish the task without repeating completed steps.",
+      },
+    });
+
+    const exhaustedContext = context(workflowSpec());
+    exhaustedContext.task.attempts = 2;
+    expect(
+      buildTaskFailureCompletion({
+        context: exhaustedContext,
+        error: "Internal error: Reached maximum number of turns (250)",
+        decision: { disposition: "fail", comment: "The retry budget is exhausted." },
+      }),
+    ).toMatchObject({ disposition: "fail", nextTurn: null });
+  });
+
   it("continues a successful workflow turn when no outcome was reported", () => {
     const completion = buildTaskTurnCompletion({
       context: context(workflowSpec()),
