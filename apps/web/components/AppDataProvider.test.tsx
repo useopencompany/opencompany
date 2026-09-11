@@ -4,6 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppDataProvider, type AppInitialData, useAppData } from "@/components/AppDataProvider";
 import { integrationStateFromRows } from "@/lib/integration-state";
 import {
+  archiveConversationOptimistically,
+  clearOptimisticArchives,
+  getOptimisticArchives,
+} from "@/lib/optimistic-archives";
+import {
   addOptimisticChatSummary,
   clearAllOptimisticChatSummaries,
 } from "@/lib/optimistic-chat-summaries";
@@ -70,6 +75,7 @@ describe("AppDataProvider", () => {
 
   afterEach(() => {
     clearAllOptimisticChatSummaries();
+    clearOptimisticArchives();
   });
 
   it("server-renders from initial data without starting live queries", () => {
@@ -564,6 +570,86 @@ describe("AppDataProvider", () => {
     expect(screen.getByTestId("recent").textContent).toBe("Live chat");
     expect(observations).not.toContain("Server refresh");
   });
+  // Archiving from the review queue is a write plus the projection it has to land in. Both the
+  // list and the sidebar badge read the same candidates, so the pending archive is applied to
+  // those candidates and the two surfaces drop the item together, on the click.
+  it("drops an optimistically archived item from the queue and the badge", async () => {
+    const data = initialData();
+    data.featureFlags.reviewInbox = true;
+    const chatRows = [reviewChatRow("chat_unread_1"), reviewChatRow("chat_unread_2")];
+    mockLiveQueryRows({ chats: chatRows });
+
+    render(
+      <AppDataProvider initialData={data}>
+        <ReviewQueueProbe />
+      </AppDataProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("review-queue").dataset.itemIds).toBe(
+        "chat_unread_1,chat_unread_2",
+      ),
+    );
+    expect(screen.getByTestId("review-queue").dataset.count).toBe("2");
+
+    act(() => {
+      archiveConversationOptimistically("chat_unread_1");
+    });
+
+    expect(screen.getByTestId("review-queue").dataset.itemIds).toBe("chat_unread_2");
+    expect(screen.getByTestId("review-queue").dataset.count).toBe("1");
+  });
+
+  // The sidebar and the review queue read the same conversation projection, so one archive has to
+  // empty the row from both rather than leaving it listed in the sidebar for the round trip.
+  it("drops an optimistically archived chat from the sidebar list", async () => {
+    const data = initialData();
+    // The sidebar keeps idle chats for seven days, so these have to be recent to be listed at all.
+    const updatedAt = new Date().toISOString();
+    mockLiveQueryRows({
+      chats: [
+        reviewChatRow("chat_open_1", { updatedAt }),
+        reviewChatRow("chat_open_2", { updatedAt: new Date(Date.now() - 1_000).toISOString() }),
+      ],
+    });
+
+    render(
+      <AppDataProvider initialData={data}>
+        <RecentChatStateProbe />
+      </AppDataProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("recent").dataset.chatIds).toBe("chat_open_1,chat_open_2"),
+    );
+
+    act(() => {
+      archiveConversationOptimistically("chat_open_1");
+    });
+
+    expect(screen.getByTestId("recent").dataset.chatIds).toBe("chat_open_2");
+  });
+
+  // The hint only covers the gap before the projection. Keeping it afterwards would hide the
+  // conversation again if it were ever restored from the archive.
+  it("releases the pending archive once the row reports archived", async () => {
+    const data = initialData();
+    data.featureFlags.reviewInbox = true;
+    mockLiveQueryRows({
+      chats: [reviewChatRow("chat_unread_1", { archivedAt: "2026-07-01T10:05:00.000Z" })],
+    });
+
+    act(() => {
+      archiveConversationOptimistically("chat_unread_1");
+    });
+    render(
+      <AppDataProvider initialData={data}>
+        <ReviewQueueProbe />
+      </AppDataProvider>,
+    );
+
+    await waitFor(() => expect(getOptimisticArchives().size).toBe(0));
+  });
 });
 
 function RecentChatsProbe() {
@@ -597,6 +683,52 @@ function RecentChatStateProbe() {
 function DataProbe() {
   const data = useAppData();
   return <div>{`${data.user.email}:${data.archivedChats.length}`}</div>;
+}
+
+function ReviewQueueProbe() {
+  const data = useAppData();
+  return (
+    <div
+      data-testid="review-queue"
+      data-item-ids={data.reviewItems.map((item) => item.conversationId).join(",")}
+      data-count={String(data.reviewCount)}
+    />
+  );
+}
+
+// A finished chat turn nobody has read: the shape the review queue is built from.
+function reviewChatRow(id: string, overrides: Record<string, unknown> = {}) {
+  return {
+    id,
+    title: `Chat ${id}`,
+    model: "anthropic/claude-sonnet-5",
+    engine: "opencompany" as const,
+    archivedAt: null,
+    pinnedAt: null,
+    lastSeenAt: null,
+    activityState: "idle" as const,
+    hasUnseen: true,
+    messageShapeEpoch: 0,
+    createdAt: "2026-07-01T10:00:00.000Z",
+    updatedAt: "2026-07-01T10:00:00.000Z",
+    ...overrides,
+  };
+}
+
+// The provider reads one live query per collection, in a fixed order, on every render.
+function mockLiveQueryRows(rows: { chats?: unknown[]; tasks?: unknown[] }) {
+  const perCollection = [
+    { data: rows.tasks ?? [], isLoading: false },
+    { data: [], isLoading: false },
+    { data: rows.chats ?? [], isLoading: false },
+    { data: [], isLoading: false },
+  ];
+  let call = 0;
+  mocks.useLiveQuery.mockImplementation(() => {
+    const result = perCollection[call % perCollection.length]!;
+    call += 1;
+    return result;
+  });
 }
 
 function GmailPrimaryProbe() {

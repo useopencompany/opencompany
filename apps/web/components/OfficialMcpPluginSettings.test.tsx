@@ -2098,6 +2098,59 @@ describe("Linear plugin settings", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
+  it("updates an installed plugin to the current official pin", async () => {
+    render(
+      <LinearPluginDetailView
+        pluginState={{ status: "ready", plugin }}
+        accountsState={accountsState}
+        toolsState={toolsState}
+        canEdit
+      />,
+    );
+
+    expect(screen.getByText("Update available")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Update" }));
+
+    await waitFor(() => expect(commands.importHeadlessPlugin).toHaveBeenCalledTimes(1));
+    expect(commands.previewHeadlessPluginImport).toHaveBeenCalledWith({
+      url: LINEAR_PLUGIN_SOURCE,
+    });
+    expect(commands.importHeadlessPlugin).toHaveBeenCalledWith({
+      url: LINEAR_PLUGIN_SOURCE,
+      expectedResolvedCommit: officialPreview.source.resolvedCommit,
+      expectedIntegrity: officialPreview.integrity,
+    });
+    expect(toasts.success).toHaveBeenCalledWith("Linear updated.");
+    expect(router.refresh).toHaveBeenCalled();
+  });
+
+  it("does not offer an update for the current official pin", () => {
+    const currentCommit = LINEAR_PLUGIN_SOURCE.match(/\/tree\/([0-9a-f]{40})\//u)?.[1];
+    expect(currentCommit).toBeDefined();
+
+    render(
+      <LinearPluginDetailView
+        pluginState={{
+          status: "ready",
+          plugin: {
+            ...plugin,
+            source: {
+              ...plugin.source,
+              ref: currentCommit!,
+              resolvedCommit: currentCommit!,
+            },
+          },
+        }}
+        accountsState={accountsState}
+        toolsState={toolsState}
+        canEdit
+      />,
+    );
+
+    expect(screen.queryByText("Update available")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Update" })).not.toBeInTheDocument();
+  });
+
   it("refreshes discovery manually and reloads the server snapshot", async () => {
     render(
       <LinearPluginDetailView

@@ -105,8 +105,9 @@ export const WORKSPACE_SKILL_EDIT_INPUT_SCHEMA = {
         "The bundleId returned by workspace_skills read. Pass it to prevent overwriting a newer edit.",
     },
   },
+  // Anthropic rejects top-level schema combinators before generation. The Skill
+  // update service enforces that at least one editable field is supplied.
   required: ["name"],
-  anyOf: [{ required: ["newName"] }, { required: ["description"] }, { required: ["instructions"] }],
 } satisfies JSONSchema7;
 
 export const WORKSPACE_SKILL_TOOL_CONTRACTS = [
