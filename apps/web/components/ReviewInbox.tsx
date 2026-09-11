@@ -18,7 +18,10 @@ import type { ReviewItem } from "@/lib/review-inbox";
 
 export function ReviewInboxRoute() {
   const { reviewItems, workspace } = useAppData();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // The open item is held rather than looked up by id: replying to it puts its conversation back
+  // to work, which takes it out of the queue, and the pane it is being read in must not close
+  // under the reader mid-reply.
+  const [openItem, setOpenItem] = useState<ReviewItem | null>(null);
   // Rows the reader has just opened. The projection lands a moment later and reports the same
   // thing; this only keeps the row from looking unread in the meantime.
   const [readItems, setReadItems] = useState<ReadonlySet<string>>(new Set());
@@ -27,21 +30,31 @@ export function ReviewInboxRoute() {
   // (Electric redelivers rows). This keeps one command in flight per conversation.
   const acknowledging = useRef(new Set<string>());
 
-  // Read items keep their place in the queue, so nothing has to be held across the acknowledgment:
-  // the selection resequences only when an item is archived, which is the reader asking for it.
-  const items = reviewItems;
+  // Read items keep their place in the queue, so the only row that ever has to be held is the open
+  // one. markSeen leaves updated_at untouched (chat-repository only bumps it on archive), so
+  // nothing resequences under the cursor when an item is read.
+  const items = useMemo(() => {
+    if (!openItem) return reviewItems;
+    if (reviewItems.some((item) => item.conversationId === openItem.conversationId)) {
+      return reviewItems;
+    }
+    return [...reviewItems, openItem].toSorted(
+      (left, right) => timestampMs(right.updatedAt) - timestampMs(left.updatedAt),
+    );
+  }, [openItem, reviewItems]);
   const isUnread = useCallback(
     (item: ReviewItem) => item.unread && !readItems.has(item.conversationId),
     [readItems],
   );
   const unreadCount = useMemo(() => items.filter(isUnread).length, [isUnread, items]);
 
+  const selectedId = openItem?.conversationId ?? null;
   const selected = selectedId
     ? (items.find((item) => item.conversationId === selectedId) ?? null)
     : null;
 
   const select = useCallback((item: ReviewItem) => {
-    setSelectedId(item.conversationId);
+    setOpenItem(item);
   }, []);
 
   // Archiving is how an item leaves the queue. It reuses the same commands the sidebar and the
@@ -57,7 +70,7 @@ export function ReviewInboxRoute() {
           : updateHeadlessChatConversation(conversationId, { archived: true });
       void archived
         .then(() => {
-          setSelectedId((current) => (current === conversationId ? null : current));
+          setOpenItem((current) => (current?.conversationId === conversationId ? null : current));
         })
         .catch(() => {
           toast.error(`Could not archive "${item.title}".`);
@@ -144,7 +157,7 @@ export function ReviewInboxRoute() {
           <ReviewDetail
             key={selected.conversationId}
             item={selected}
-            onBack={() => setSelectedId(null)}
+            onBack={() => setOpenItem(null)}
             onRead={acknowledge}
           />
         ) : (
@@ -372,4 +385,9 @@ function ReviewTaskConversation({ taskId, onClose }: { taskId: string; onClose: 
     );
   }
   return <TaskDetailPanel initialRun={run} onClosePane={onClose} />;
+}
+
+function timestampMs(value: string) {
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
 }

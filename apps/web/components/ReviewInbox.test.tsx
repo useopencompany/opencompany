@@ -268,6 +268,24 @@ describe("ReviewInboxRoute", () => {
     expect(screen.getByRole("button", { name: /^Draft the investor update/ })).toBeInTheDocument();
   });
 
+  // Replying to an item puts its conversation back to work, which takes it out of the queue. The
+  // pane the reader is replying in must not close under them when that happens.
+  it("keeps the open item on screen when it leaves the queue", async () => {
+    reviewItemsMock.value = [
+      chatItem("c1", "Draft the investor update", "2026-09-10T11:00:00.000Z"),
+    ];
+    transcriptMock.messages = [assistantReply("Here is the draft.")];
+
+    const view = render(<ReviewInboxRoute />);
+    await userEvent.click(screen.getByRole("button", { name: /^Draft the investor update/ }));
+
+    reviewItemsMock.value = [];
+    view.rerender(<ReviewInboxRoute />);
+
+    expect(screen.getByTestId("chat-conversation")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Draft the investor update/ })).toBeInTheDocument();
+  });
+
   // A read item recedes instead of disappearing, so unread work still reads as the top of the list.
   it("dims a read item and leaves an unread one at full weight", () => {
     reviewItemsMock.value = [
