@@ -1,9 +1,9 @@
 import { readFile } from "node:fs/promises";
-import { PGlite } from "@electric-sql/pglite";
 import { expect, it } from "vitest";
+import { createTestPGlite } from "./test-pglite";
 
 it("quarantines legacy plugin data and credentials without transferring ownership", async () => {
-  const database = new PGlite();
+  const database = await createTestPGlite();
   try {
     await database.exec(`
       CREATE SCHEMA goat;

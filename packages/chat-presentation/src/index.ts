@@ -1,4 +1,7 @@
-import { type PresentationDeltaFrameDto, parsePresentationDeltaFrame } from "@opencompany/protocol";
+import {
+  type PresentationDeltaFrameDto,
+  parsePresentationDeltaFrame,
+} from "@opencompany/protocol/events";
 import { createClient, type RedisClientType } from "redis";
 
 export const CHAT_PRESENTATION_STREAM_TTL_SECONDS = 5 * 60;

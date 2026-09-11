@@ -1,55 +1,87 @@
 "use client";
 
 import type { ChatEngine } from "@opencompany/core";
-import { ArrowLeft, Inbox } from "lucide-react";
+import { toast } from "@opencompany/ui/components/sonner";
+import { Archive, ArrowLeft, Inbox } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppData } from "@/components/AppDataProvider";
+import { useCreditBalance } from "@/components/chat/useCreditBalance";
 import { EmptyState, formatRelativeTime } from "@/components/Routes";
-import { Surface } from "@/components/Surface";
+import { QuickChatComposer, Surface } from "@/components/Surface";
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
 import { useHeadlessChatTranscript } from "@/components/useHeadlessChatTranscript";
 import { useTaskRun } from "@/components/useTaskRun";
 import type { ChatSessionView } from "@/lib/chat-ui";
 import { updateHeadlessChatConversation } from "@/lib/headless-chat-commands";
-import { markHeadlessTaskSeen } from "@/lib/headless-task-commands";
+import { archiveHeadlessTask, markHeadlessTaskSeen } from "@/lib/headless-task-commands";
 import { DEFAULT_MODEL, normalizeConversationModel } from "@/lib/model-options";
+import {
+  archiveConversationOptimistically,
+  restoreOptimisticArchive,
+} from "@/lib/optimistic-archives";
 import type { ReviewItem } from "@/lib/review-inbox";
 
 export function ReviewInboxRoute() {
   const { reviewItems, workspace } = useAppData();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  // Items opened during this visit. They stay in the list after being marked seen so the queue
-  // does not resequence under the cursor mid-pass; leaving the route drops them (this component
-  // unmounts with the route, which is exactly the intended lifetime).
-  const [heldItems, setHeldItems] = useState<ReadonlyMap<string, ReviewItem>>(new Map());
+  // The open item is held rather than looked up by id: replying to it puts its conversation back
+  // to work, which takes it out of the queue, and the pane it is being read in must not close
+  // under the reader mid-reply.
+  const [openItem, setOpenItem] = useState<ReviewItem | null>(null);
+  // Rows the reader has just opened. The projection lands a moment later and reports the same
+  // thing; this only keeps the row from looking unread in the meantime.
   const [readItems, setReadItems] = useState<ReadonlySet<string>>(new Set());
   // Acknowledgment is fire-and-forget and the detail pane can report readability more than once
   // (Electric redelivers rows). This keeps one command in flight per conversation.
   const acknowledging = useRef(new Set<string>());
 
+  // Read items keep their place in the queue, so the only row that ever has to be held is the open
+  // one. markSeen leaves updated_at untouched (chat-repository only bumps it on archive), so
+  // nothing resequences under the cursor when an item is read.
   const items = useMemo(() => {
-    const live = new Map(reviewItems.map((item) => [item.conversationId, item]));
-    for (const [conversationId, held] of heldItems) {
-      if (!live.has(conversationId)) live.set(conversationId, held);
+    if (!openItem) return reviewItems;
+    if (reviewItems.some((item) => item.conversationId === openItem.conversationId)) {
+      return reviewItems;
     }
-    // markSeen leaves updated_at untouched (chat-repository only bumps it on archive), so
-    // re-sorting here cannot move a row the user just opened.
-    return [...live.values()].toSorted(
+    return [...reviewItems, openItem].toSorted(
       (left, right) => timestampMs(right.updatedAt) - timestampMs(left.updatedAt),
     );
-  }, [heldItems, reviewItems]);
+  }, [openItem, reviewItems]);
+  const isUnread = useCallback(
+    (item: ReviewItem) => item.unread && !readItems.has(item.conversationId),
+    [readItems],
+  );
+  const unreadCount = useMemo(() => items.filter(isUnread).length, [isUnread, items]);
 
+  const selectedId = openItem?.conversationId ?? null;
   const selected = selectedId
     ? (items.find((item) => item.conversationId === selectedId) ?? null)
     : null;
 
   const select = useCallback((item: ReviewItem) => {
-    setSelectedId(item.conversationId);
-    setHeldItems((current) => {
-      if (current.has(item.conversationId)) return current;
-      return new Map(current).set(item.conversationId, item);
-    });
+    setOpenItem(item);
   }, []);
+
+  // Archiving is how an item leaves the queue. It reuses the same commands the sidebar and the
+  // Tasks board archive with, so a review item disappears everywhere it was listed, not just here.
+  // The row and the pane go on the click: the write and the projection behind it take about a
+  // second, and holding a decision the reader has already made for that long reads as lag. A
+  // failed write puts the item back and says so.
+  const archive = useCallback(
+    (item: ReviewItem) => {
+      const { conversationId, source } = item;
+      if (!archiveConversationOptimistically(conversationId)) return;
+      setOpenItem((current) => (current?.conversationId === conversationId ? null : current));
+      const archived =
+        source.kind === "task"
+          ? archiveHeadlessTask(source.taskId, { scopeKey: workspace.id })
+          : updateHeadlessChatConversation(conversationId, { archived: true });
+      void archived.catch(() => {
+        restoreOptimisticArchive(conversationId);
+        toast.error(`Could not archive "${item.title}".`);
+      });
+    },
+    [workspace.id],
+  );
 
   // Selecting an item is not the same as having read it. The detail pane calls this once the
   // conversation has actually rendered, so a transcript that never loads keeps its unread state
@@ -90,17 +122,16 @@ export function ReviewInboxRoute() {
           <h1 className="text-[14px] font-semibold leading-tight tracking-tight text-ink">
             For review
           </h1>
-          {items.length > 0 ? (
+          {unreadCount > 0 ? (
             <span className="ml-auto text-[12px] tabular-nums leading-none text-ink-subtle">
-              {items.length}
+              {unreadCount}
             </span>
           ) : null}
         </header>
-        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-6 pt-1">
+        <div className="min-h-0 flex-1 overflow-y-auto scrollbar-none px-2 pb-6 pt-1">
           {items.length === 0 ? (
             <p className="px-2 py-8 text-center text-[12.5px] leading-5 text-ink-subtle">
-              Nothing to review. Finished chats and tasks land here when you haven&apos;t read them
-              yet.
+              Nothing to review. Finished chats and tasks land here until you archive them.
             </p>
           ) : (
             items.map((item) => (
@@ -108,8 +139,9 @@ export function ReviewInboxRoute() {
                 key={item.conversationId}
                 item={item}
                 selected={item.conversationId === selectedId}
-                unread={!readItems.has(item.conversationId)}
+                unread={isUnread(item)}
                 onSelect={() => select(item)}
+                onArchive={() => archive(item)}
               />
             ))
           )}
@@ -121,26 +153,58 @@ export function ReviewInboxRoute() {
           <ReviewDetail
             key={selected.conversationId}
             item={selected}
-            onBack={() => setSelectedId(null)}
+            onBack={() => setOpenItem(null)}
             onRead={acknowledge}
           />
         ) : (
-          <div className="flex min-h-0 w-full items-center justify-center overflow-y-auto px-6 py-10">
-            <div className="w-full max-w-[520px]">
-              <EmptyState
-                icon={Inbox}
-                title={items.length > 0 ? "Pick something to read" : "You're all caught up"}
-                description={
-                  items.length > 0
-                    ? "Select an item on the left to pick the conversation up where it stopped."
-                    : "When a chat or task finishes and you haven't read it, it shows up here."
-                }
-              />
+          <div className="flex min-h-0 w-full flex-1 flex-col">
+            <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-6 py-10">
+              <div className="w-full max-w-[520px]">
+                <EmptyState
+                  icon={Inbox}
+                  title={items.length > 0 ? "Pick something to read" : "You're all caught up"}
+                  description={
+                    items.length > 0
+                      ? "Select an item on the left to pick the conversation up where it stopped."
+                      : "When a chat or task finishes, it shows up here until you archive it."
+                  }
+                />
+              </div>
             </div>
+            <ReviewStartComposer />
           </div>
         )}
       </div>
     </main>
+  );
+}
+
+/**
+ * Reading the queue is also where the next piece of work gets thought of, so the empty pane keeps
+ * the composer the command palette starts chats with. It runs the prompt in the background: the
+ * queue stays where it was, and the finished conversation comes back to it.
+ */
+function ReviewStartComposer() {
+  const { claudeCodeConnected, codexConnected, featureFlags, user, workspace } = useAppData();
+  const { balance: creditBalance } = useCreditBalance();
+
+  return (
+    <div className="shrink-0 px-6 pb-6">
+      <div className="mx-auto w-full max-w-[720px]">
+        <QuickChatComposer
+          open
+          initialPrompt=""
+          userWorkosId={user.workosUserId}
+          defaultModel={DEFAULT_MODEL}
+          codexConnected={codexConnected}
+          claudeCodeConnected={claudeCodeConnected}
+          taskSpawningEnabled={featureFlags.taskSpawning}
+          autoModelRoutingEnabled={featureFlags.autoModelRouting}
+          creditBalance={creditBalance}
+          workspaceId={workspace.id}
+        />
+      </div>
+    </div>
   );
 }
 
@@ -149,42 +213,59 @@ function ReviewListRow({
   selected,
   unread,
   onSelect,
+  onArchive,
 }: {
   item: ReviewItem;
   selected: boolean;
   unread: boolean;
   onSelect: () => void;
+  onArchive: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-current={selected ? "true" : undefined}
-      className={`group flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+    <div
+      className={`group flex w-full items-center rounded-md transition-colors duration-150 ${
         selected ? "bg-surface-active" : "hover:bg-surface-hover"
       }`}
     >
-      <span
-        aria-hidden="true"
-        data-testid={unread ? "review-item-unread" : "review-item-read"}
-        className={`h-1.5 w-1.5 shrink-0 rounded-full ${unread ? "bg-info" : "bg-transparent"}`}
-      />
-      <span className="min-w-0 flex-1">
-        <span className="flex min-w-0 items-baseline gap-2">
-          <span className="truncate text-[13px] font-medium leading-tight text-ink">
-            {item.title}
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-current={selected ? "true" : undefined}
+        className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md py-2 pl-2 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+      >
+        <span
+          aria-hidden="true"
+          data-testid={unread ? "review-item-unread" : "review-item-read"}
+          className={`h-1.5 w-1.5 shrink-0 rounded-full ${unread ? "bg-info" : "bg-transparent"}`}
+        />
+        {/* A read item stays in the queue until it is archived, so it recedes rather than
+            disappears: same row, less weight, so unread work still reads as the top of the list. */}
+        <span className={`min-w-0 flex-1 ${unread ? "" : "opacity-55"}`}>
+          <span className="flex min-w-0 items-baseline gap-2">
+            <span className="truncate text-[13px] font-medium leading-tight text-ink">
+              {item.title}
+            </span>
+            <span className="ml-auto shrink-0 text-[11.5px] leading-tight text-ink-faint">
+              {formatRelativeTime(item.updatedAt)}
+            </span>
           </span>
-          <span className="ml-auto shrink-0 text-[11.5px] leading-tight text-ink-faint">
-            {formatRelativeTime(item.updatedAt)}
-          </span>
+          {item.source.kind === "task" ? (
+            <span className="mt-0.5 block truncate text-[11.5px] leading-4 text-ink-subtle">
+              {item.source.displayId}
+            </span>
+          ) : null}
         </span>
-        {item.source.kind === "task" ? (
-          <span className="mt-0.5 block truncate text-[11.5px] leading-4 text-ink-subtle">
-            {item.source.displayId}
-          </span>
-        ) : null}
-      </span>
-    </button>
+      </button>
+      <button
+        type="button"
+        title="Archive"
+        aria-label={`Archive ${item.title}`}
+        onClick={onArchive}
+        className="mx-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink/50 opacity-0 transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover:opacity-100 group-focus-within:opacity-100"
+      >
+        <Archive size={13} strokeWidth={1.75} />
+      </button>
+    </div>
   );
 }
 
