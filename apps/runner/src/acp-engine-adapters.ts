@@ -47,6 +47,11 @@ export const CLAUDE_ACP_ENGINE_ADAPTER: AcpEngineAdapter = {
             : {}),
           options: {
             maxTurns: 250,
+            // Claude's native Monitor tool depends on a long-lived SDK consumer. The runner
+            // intentionally tears the ACP adapter down after each durable turn, so Monitor loses
+            // its notifications and the sandbox is parked on the ordinary idle timeout. Hide the
+            // unsupported tool so Claude follows the injected ScheduleWakeup contract instead.
+            disallowedTools: ["Monitor"],
             ...(mcpServers.length > 0 ? { strictMcpConfig: true } : {}),
             ...(coreMcpServers.length > 0
               ? {
