@@ -681,22 +681,36 @@ function LinearEventTriggerEditor({
   canEdit: boolean;
   onChange: (trigger: WorkflowTriggerDraft) => void;
 }) {
+  const needsTriageState = trigger.event === "issue_enters_triage";
   const [teamsState, setTeamsState] = useState<{
     integrationId: string;
+    includeTriageStateIds: boolean;
     result: LinearTeamListResult;
   } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    void listLinearTeamsAction(trigger.integrationId).then((result) => {
-      if (!cancelled) setTeamsState({ integrationId: trigger.integrationId, result });
+    void listLinearTeamsAction(trigger.integrationId, {
+      includeTriageStateIds: needsTriageState,
+    }).then((result) => {
+      if (!cancelled) {
+        setTeamsState({
+          integrationId: trigger.integrationId,
+          includeTriageStateIds: needsTriageState,
+          result,
+        });
+      }
     });
     return () => {
       cancelled = true;
     };
-  }, [trigger.integrationId]);
+  }, [needsTriageState, trigger.integrationId]);
 
-  const teams = teamsState?.integrationId === trigger.integrationId ? teamsState.result : null;
+  const teams =
+    teamsState?.integrationId === trigger.integrationId &&
+    teamsState.includeTriageStateIds === needsTriageState
+      ? teamsState.result
+      : null;
 
   const accountOptions = accounts.some((account) => account.integrationId === trigger.integrationId)
     ? accounts
@@ -734,8 +748,6 @@ function LinearEventTriggerEditor({
         },
         ...events,
       ];
-  const needsTriageState = trigger.event === "issue_enters_triage";
-
   return (
     <div className="mt-3 flex flex-col gap-3">
       <p className="text-[12px] leading-5 text-ink-subtle">
@@ -796,6 +808,7 @@ function LinearEventTriggerEditor({
         <label className="flex min-w-0 flex-col gap-1.5">
           <span className="text-[12px] font-medium text-ink-subtle">Team</span>
           <select
+            aria-label="Team"
             value={selectedTeam?.id ?? ""}
             disabled={!canEdit || !teams?.ok}
             onChange={(event) => {
@@ -831,6 +844,11 @@ function LinearEventTriggerEditor({
           </select>
           {teams && !teams.ok ? (
             <span className="text-[11.5px] text-warning">{teams.error}</span>
+          ) : null}
+          {teams?.ok && teams.partial ? (
+            <span className="text-[11.5px] text-warning">
+              Some Linear team details could not be loaded. Refresh to try again.
+            </span>
           ) : null}
           {needsTriageState && teams?.ok && teams.teams.every((team) => !team.triageStateId) ? (
             <span className="text-[11.5px] text-warning">
