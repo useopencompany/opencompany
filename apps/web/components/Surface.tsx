@@ -249,6 +249,7 @@ const CHAT_THREAD_COMPOSER_GAP_PX = 20;
 const BACKGROUND_CHAT_PROMPT_MAX_LENGTH = 10_000;
 const CODEX_GOAL_OBJECTIVE_MAX_LENGTH = 4_000;
 const CODEX_GOAL_TOKEN_BUDGET_MAX = 2_000_000;
+const COMMAND_PALETTE_RESULT_LIMIT = 50;
 const CODEX_MENTION: ChatMention = { kind: "engine", id: "codex" };
 const CLAUDE_MENTION: ChatMention = { kind: "engine", id: "claude" };
 const CLOUD_CODEX_ATTACHMENT_CAPABILITIES = { images: true, pdf: true } as const;
@@ -275,6 +276,20 @@ type PendingChatFirstOutputMeasurement = {
   sandboxStatusAtSend: EngineRuntimeStatus | "not_applicable" | "not_created" | "unknown";
   sendSource: "composer" | "plan_implementation";
 };
+
+type CommandPaletteItem =
+  | {
+      kind: "task";
+      task: TaskView;
+      archived: boolean;
+      searchValue: string;
+    }
+  | {
+      kind: "chat";
+      chat: ChatSummaryView;
+      archived: boolean;
+      searchValue: string;
+    };
 
 type MentionOption =
   | { kind: "engine"; token: "@codex" | "@claude"; label: string; mention: ChatMention }
@@ -381,6 +396,22 @@ export type SurfaceChatSelection = {
   codexComposerSettings?: CodexComposerSettings | null;
   runtime?: ConversationRuntimeView | null;
 } | null;
+
+function selectCommandPaletteItems(
+  items: readonly CommandPaletteItem[],
+  query: string,
+): CommandPaletteItem[] {
+  const search = query.trim();
+  if (!search) return items.slice(0, COMMAND_PALETTE_RESULT_LIMIT);
+
+  const matches: CommandPaletteItem[] = [];
+  for (const item of items) {
+    if (defaultFilter(item.searchValue, search, []) <= 0) continue;
+    matches.push(item);
+    if (matches.length === COMMAND_PALETTE_RESULT_LIMIT) break;
+  }
+  return matches;
+}
 
 export function Surface({
   tasks,
@@ -1174,7 +1205,7 @@ export function Surface({
     () => recentChats.filter((chat) => !optimisticallyArchivedChatIds.has(chat.id)),
     [optimisticallyArchivedChatIds, recentChats],
   );
-  const commandPaletteItems = useMemo(
+  const commandPaletteItems = useMemo<CommandPaletteItem[]>(
     () =>
       [
         ...(taskSpawningEnabled
@@ -1182,17 +1213,20 @@ export function Surface({
               kind: "task" as const,
               task,
               archived: Boolean(task.archivedAt),
+              searchValue: `task ${task.archivedAt ? "archived " : ""}${task.name} ${task.prompt} ${task.displayId} ${task.id}`,
             }))
           : []),
         ...paletteRecentChats.map((chat) => ({
           kind: "chat" as const,
           chat,
           archived: false,
+          searchValue: `chat ${chat.title} ${chat.id}`,
         })),
         ...archivedChats.map((chat) => ({
           kind: "chat" as const,
           chat,
           archived: true,
+          searchValue: `chat archived ${chat.title} ${chat.id}`,
         })),
       ].toSorted(
         (a, b) =>
@@ -1200,6 +1234,10 @@ export function Surface({
           new Date(a.kind === "task" ? a.task.updatedAt : a.chat.updatedAt).getTime(),
       ),
     [allTasks, archivedChats, paletteRecentChats, taskSpawningEnabled],
+  );
+  const commandPaletteResults = useMemo(
+    () => selectCommandPaletteItems(commandPaletteItems, chatSearchQuery),
+    [chatSearchQuery, commandPaletteItems],
   );
   const showEngineComposerControls = composerEngine !== null;
 
@@ -2855,13 +2893,7 @@ export function Surface({
               />
             </>
           ) : (
-            <Command
-              className="bg-surface text-ink"
-              // Equal match scores keep the recency order instead of letting cmdk rank by relevance.
-              filter={(value, search, keywords) =>
-                defaultFilter(value, search, keywords) > 0 ? 1 : 0
-              }
-            >
+            <Command className="bg-surface text-ink" shouldFilter={false}>
               <CommandInput
                 autoFocus
                 value={chatSearchQuery}
@@ -2887,14 +2919,16 @@ export function Surface({
                     </CommandShortcut>
                   </CommandItem>
                 </CommandGroup>
-                <CommandEmpty>No matching tasks or chats.</CommandEmpty>
-                {commandPaletteItems.length > 0 ? (
+                {commandPaletteResults.length === 0 ? (
+                  <CommandEmpty>No matching tasks or chats.</CommandEmpty>
+                ) : null}
+                {commandPaletteResults.length > 0 ? (
                   <CommandGroup heading="Recent">
-                    {commandPaletteItems.map((item) =>
+                    {commandPaletteResults.map((item) =>
                       item.kind === "task" ? (
                         <CommandItem
                           key={`task:${item.task.id}`}
-                          value={`task ${item.archived ? "archived " : ""}${item.task.name} ${item.task.prompt} ${item.task.displayId} ${item.task.id}`}
+                          value={item.searchValue}
                           onSelect={() => jumpToTask(item.task)}
                           className="gap-3"
                         >
@@ -2918,7 +2952,7 @@ export function Surface({
                       ) : (
                         <CommandItem
                           key={`chat:${item.chat.id}`}
-                          value={`chat ${item.archived ? "archived " : ""}${item.chat.title} ${item.chat.id}`}
+                          value={item.searchValue}
                           onSelect={() =>
                             item.archived ? restoreAndOpenChat(item.chat) : jumpToChat(item.chat)
                           }
