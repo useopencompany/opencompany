@@ -51,6 +51,7 @@ import { BrainView } from "@/components/BrainView";
 import { BrowserProfilesSettings } from "@/components/BrowserProfilesSettings";
 import { FathomIntegrationSetup } from "@/components/FathomIntegrationSetup";
 import { InferenceSettingsPanel } from "@/components/InferenceSettingsPanel";
+import { IntentPrefetchLink } from "@/components/IntentPrefetchLink";
 import { McpSetupGuide } from "@/components/McpSetupGuide";
 import { RepositorySettings } from "@/components/RepositorySettings";
 import { SettingsContent } from "@/components/SettingsChrome";
@@ -750,9 +751,8 @@ export function WorkflowsRoute({
 
 function WorkflowListRow({ workflow }: { workflow: WorkflowListItem }) {
   return (
-    <Link
+    <IntentPrefetchLink
       href={`/workflows/${encodeURIComponent(workflow.slug)}`}
-      prefetch
       className="group flex items-center gap-3 rounded-lg border border-border bg-surface px-3.5 py-3 transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
     >
       <span className="min-w-0 flex-1">
@@ -789,7 +789,7 @@ function WorkflowListRow({ workflow }: { workflow: WorkflowListItem }) {
       <span className="shrink-0 text-[11.5px] leading-4 text-ink-subtle">
         {formatRelativeTime(workflow.updatedAt)}
       </span>
-    </Link>
+    </IntentPrefetchLink>
   );
 }
 
@@ -896,9 +896,8 @@ export function SkillsSettingsRoute({
 
 function SkillListRow({ skill }: { skill: SkillListItemDto }) {
   return (
-    <Link
+    <IntentPrefetchLink
       href={`/settings/skills/${encodeURIComponent(skill.id)}`}
-      prefetch
       className="group flex items-center gap-3 rounded-lg border border-border bg-surface px-3.5 py-3 transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
     >
       <span className="min-w-0 flex-1">
@@ -919,7 +918,7 @@ function SkillListRow({ skill }: { skill: SkillListItemDto }) {
       <span className="shrink-0 text-[11.5px] leading-4 text-ink-subtle">
         {formatRelativeTime(skill.updatedAt)}
       </span>
-    </Link>
+    </IntentPrefetchLink>
   );
 }
 
