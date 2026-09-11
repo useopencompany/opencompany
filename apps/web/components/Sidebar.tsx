@@ -754,7 +754,7 @@ function SidebarTaskRow({
         aria-current={active ? "page" : undefined}
         className="flex min-w-0 flex-1 items-center gap-2 rounded-l-md py-[5px] pl-2 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
       >
-        <ChatStateIndicator state={state} surface="sidebar" />
+        <ChatStateIndicator state={state} surface="sidebar" className="mt-[7px] self-start" />
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate tracking-[-0.005em]">{task.name}</span>
           <span className="truncate text-[11px] leading-none text-ink-faint">{task.displayId}</span>
