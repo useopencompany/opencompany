@@ -1,5 +1,6 @@
 "use client";
 
+import { isSettledTaskStatus } from "@opencompany/core/tasks";
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import { toast } from "@opencompany/ui/components/sonner";
 import type { LucideIcon } from "lucide-react";
@@ -36,13 +37,24 @@ import { useAppData } from "@/components/AppDataProvider";
 import { SidebarBots } from "@/components/Bots";
 import { BrainSwitcher } from "@/components/BrainSwitcher";
 import { ChatStateIndicator } from "@/components/ChatStateIndicator";
+import { IntentPrefetchLink } from "@/components/IntentPrefetchLink";
 import { SidebarFeedback } from "@/components/SidebarFeedback";
 import { HOME_NAVIGATION_EVENT, requestChatComposerFocus } from "@/lib/chat-navigation";
 import { clearLocalChatState, useLocalChatStates } from "@/lib/chat-session-state";
 import { type ChatSummaryView, chatSummaryState } from "@/lib/chat-ui";
 import { preloadHeadlessChatMessages } from "@/lib/headless-chat-collections";
 import { updateHeadlessChatConversation } from "@/lib/headless-chat-commands";
+import { archiveHeadlessTask } from "@/lib/headless-task-commands";
+import {
+  archiveConversationOptimistically,
+  restoreOptimisticArchive,
+} from "@/lib/optimistic-archives";
 import { useOptimisticChatSummaries } from "@/lib/optimistic-chat-summaries";
+import {
+  orderSidebarWorkItems,
+  type SidebarTaskView,
+  type SidebarWorkItem,
+} from "@/lib/sidebar-items";
 import { createWorkspaceAction, switchWorkspaceAction } from "@/lib/workspace-actions";
 
 function Icon({ className }: { className?: string }) {
@@ -79,6 +91,9 @@ function SidebarNavRow({
   icon: Icon,
   label,
   active,
+  // A row highlights for its whole subtree, but only one element on a page can be the current
+  // one. The Tasks row hands that claim to the task it lists when the reader is inside a task.
+  current = active,
   incomplete = false,
   count,
   onClick,
@@ -87,16 +102,16 @@ function SidebarNavRow({
   icon: LucideIcon;
   label: string;
   active: boolean;
+  current?: boolean;
   incomplete?: boolean;
   count?: number;
   onClick?: MouseEventHandler<HTMLAnchorElement>;
 }) {
   return (
-    <Link
+    <IntentPrefetchLink
       href={href}
-      prefetch
       {...(onClick ? { onClick } : {})}
-      aria-current={active ? "page" : undefined}
+      aria-current={current ? "page" : undefined}
       className={`group flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-left text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
         active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
       }`}
@@ -115,7 +130,7 @@ function SidebarNavRow({
       {incomplete ? (
         <span aria-hidden="true" className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-warning" />
       ) : null}
-    </Link>
+    </IntentPrefetchLink>
   );
 }
 
@@ -128,12 +143,18 @@ export function Sidebar({
   onToggleCollapsed: () => void;
   showCollapseButton?: boolean;
 }) {
-  const { featureFlags, mcpSetup, reviewCount } = useAppData();
+  const { featureFlags, mcpSetup, reviewCount, sidebarTasks } = useAppData();
   const pathname = usePathname();
   const mcpSetupActive = !mcpSetup.completedAt && pathname === "/settings/mcp";
   const homeActive = pathname === "/";
   const reviewActive = pathname === "/review";
   const tasksActive = pathname === "/tasks" || pathname.startsWith("/tasks/");
+  // The Tasks row hands the current-page claim to the Task's own row, but only when the list
+  // actually holds one: an older or archived Task has no row, and the page still has to say where
+  // the reader is.
+  const openTaskHasRow =
+    featureFlags.taskSpawning &&
+    sidebarTasks.some((task) => isTaskRouteActive(pathname, taskHref(task.displayId)));
   const workflowsActive = pathname === "/workflows" || pathname.startsWith("/workflows/");
   const wikiActive = pathname === "/wiki" || pathname.startsWith("/wiki/");
   const pluginsActive =
@@ -196,7 +217,13 @@ export function Sidebar({
           ) : null}
           {featureFlags.taskSpawning ? (
             <>
-              <SidebarNavRow href="/tasks" icon={ListTodo} label="Tasks" active={tasksActive} />
+              <SidebarNavRow
+                href="/tasks"
+                icon={ListTodo}
+                label="Tasks"
+                active={tasksActive}
+                current={tasksActive && !openTaskHasRow}
+              />
               <SidebarNavRow
                 href="/workflows"
                 icon={Workflow}
@@ -226,8 +253,8 @@ export function Sidebar({
 
         <SidebarBots />
 
-        {/* Recent chats */}
-        <SidebarRecentChats />
+        {/* Chats and tasks */}
+        <SidebarWorkList />
 
         {/* Account / settings footer */}
         <div className="px-2 pb-3 pt-2">
@@ -381,8 +408,8 @@ function SidebarAccountMenu() {
   );
 }
 
-function SidebarRecentChats() {
-  const { recentChats, workspace } = useAppData();
+function SidebarWorkList() {
+  const { featureFlags, recentChats, sidebarTasks, workspace } = useAppData();
   const pathname = usePathname();
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -397,7 +424,6 @@ function SidebarRecentChats() {
       ),
     [optimisticChats, workspace.id],
   );
-  const [archivingIds, setArchivingIds] = useState<Set<string>>(() => new Set());
   const [pinningIds, setPinningIds] = useState<Set<string>>(() => new Set());
   const [pinOverrides, setPinOverrides] = useState<Map<string, boolean>>(() => new Map());
   const [previousRecentChats, setPreviousRecentChats] = useState(recentChats);
@@ -415,33 +441,55 @@ function SidebarRecentChats() {
     setPinOverrides((current) => reconcilePinOverrides(current, recentChats));
   }
 
+  const isPinned = (chat: ChatSummaryView) => pinOverrides.get(chat.id) ?? Boolean(chat.pinnedAt);
+  const pinnedChats = recentChats.filter(isPinned);
+  // Tasks follow the same flag as the Tasks nav row, and the label reads from that one condition
+  // so a workspace without the feature is never told the list holds something it cannot.
+  const showTasks = featureFlags.taskSpawning;
+  const workItems = orderSidebarWorkItems({
+    chats: recentChats.filter((chat) => !isPinned(chat)),
+    tasks: showTasks ? sidebarTasks : [],
+  });
+  const listLabel = showTasks ? "Chats and tasks" : "Chats";
+
   // Keep the footer pinned to the bottom when there is nothing to show.
-  if (recentChats.length === 0) {
+  if (pinnedChats.length === 0 && workItems.length === 0) {
     return <div className="min-h-0 flex-1" />;
   }
 
-  const isPinned = (chat: ChatSummaryView) => pinOverrides.get(chat.id) ?? Boolean(chat.pinnedAt);
-  const pinnedChats = recentChats.filter(isPinned);
-  const unpinnedChats = recentChats.filter((chat) => !isPinned(chat));
-
+  // The row goes on the click. The write and the projection behind it take about a second, and
+  // holding a chat the user has already dismissed for that long reads as lag; a failed write puts
+  // the row back and says so.
   const archiveChat = (chatId: string, chatTitle: string, href: string) => {
-    if (archivingIds.has(chatId)) return;
-    setArchivingIds((current) => new Set(current).add(chatId));
+    if (!archiveConversationOptimistically(chatId)) return;
+    // If we archived the chat we're currently viewing, drop back to home.
+    if (pathname === href) {
+      router.push("/");
+    }
     startTransition(async () => {
       try {
         await updateHeadlessChatConversation(chatId, { archived: true });
-        // If we archived the chat we're currently viewing, drop back to home.
-        if (pathname === href) {
-          router.push("/");
-        }
       } catch {
+        restoreOptimisticArchive(chatId);
         toast.error(`Could not archive "${chatTitle}".`);
-      } finally {
-        setArchivingIds((current) => {
-          const next = new Set(current);
-          next.delete(chatId);
-          return next;
-        });
+      }
+    });
+  };
+
+  // Same deal for a Task, hidden by its conversation because that is the key the archive store
+  // and the review queue share: one click empties the row from both lists.
+  const archiveTask = (task: SidebarTaskView, href: string) => {
+    if (!archiveConversationOptimistically(task.conversationId)) return;
+    // If we archived the task we're currently viewing, fall back to the board.
+    if (isTaskRouteActive(pathname, href)) {
+      router.push("/tasks");
+    }
+    startTransition(async () => {
+      try {
+        await archiveHeadlessTask(task.id, { scopeKey: workspace.id });
+      } catch {
+        restoreOptimisticArchive(task.conversationId);
+        toast.error(`Could not archive "${task.name}".`);
       }
     });
   };
@@ -473,12 +521,11 @@ function SidebarRecentChats() {
     });
   };
 
-  const renderRow = (chat: ChatSummaryView) => {
+  const renderChatRow = (chat: ChatSummaryView) => {
     const href = chatHref(chat.id);
     const pinned = isPinned(chat);
     const optimistic = optimisticChatIds.has(chat.id);
     const prefetchChat = () => {
-      router.prefetch(href);
       void preloadHeadlessChatMessages(chat.id).catch((error: unknown) => {
         console.warn("Could not preload a sidebar chat transcript.", {
           conversationId: chat.id,
@@ -495,12 +542,26 @@ function SidebarRecentChats() {
         optimistic={optimistic}
         localState={localChatStates.get(chat.id) ?? null}
         pinned={pinned}
-        archiving={archivingIds.has(chat.id)}
         pinning={pinningIds.has(chat.id)}
         onPrefetch={prefetchChat}
         onRequestComposerFocus={() => requestChatComposerFocus(chat.id)}
         onTogglePin={() => togglePin(chat.id, chat.title, pinned)}
         onArchive={() => archiveChat(chat.id, chat.title, href)}
+      />
+    );
+  };
+
+  const renderRow = (item: SidebarWorkItem) => {
+    if (item.kind === "chat") return renderChatRow(item.chat);
+    const href = taskHref(item.task.displayId);
+    return (
+      <SidebarTaskRow
+        key={item.task.id}
+        task={item.task}
+        state={item.state}
+        href={href}
+        active={isTaskRouteActive(pathname, href)}
+        onArchive={() => archiveTask(item.task, href)}
       />
     );
   };
@@ -514,17 +575,17 @@ function SidebarRecentChats() {
             <span className="text-[11px] font-medium tracking-wide text-ink-subtle">Pinned</span>
           </div>
           <nav aria-label="Pinned chats" className="flex flex-col gap-px px-2">
-            {pinnedChats.map(renderRow)}
+            {pinnedChats.map(renderChatRow)}
           </nav>
         </div>
       ) : null}
-      {unpinnedChats.length > 0 ? (
+      {workItems.length > 0 ? (
         <div>
           <div className="px-4 pb-1 text-[11px] font-medium tracking-wide text-ink-subtle">
-            Chats
+            {listLabel}
           </div>
-          <nav aria-label="Chats" className="flex flex-col gap-px px-2">
-            {unpinnedChats.map(renderRow)}
+          <nav aria-label={listLabel} className="flex flex-col gap-px px-2">
+            {workItems.map(renderRow)}
           </nav>
         </div>
       ) : null}
@@ -553,7 +614,6 @@ function SidebarChatRow({
   optimistic,
   localState,
   pinned,
-  archiving,
   pinning,
   onPrefetch,
   onRequestComposerFocus,
@@ -566,7 +626,6 @@ function SidebarChatRow({
   optimistic: boolean;
   localState: ReturnType<typeof chatSummaryState> | null;
   pinned: boolean;
-  archiving: boolean;
   pinning: boolean;
   onPrefetch: () => void;
   onRequestComposerFocus: () => void;
@@ -595,12 +654,9 @@ function SidebarChatRow({
           {content}
         </button>
       ) : (
-        <Link
+        <IntentPrefetchLink
           href={href}
-          prefetch
-          onMouseEnter={onPrefetch}
-          onFocus={onPrefetch}
-          onTouchStart={onPrefetch}
+          onIntent={onPrefetch}
           onClick={(event) => {
             if (
               event.button !== 0 ||
@@ -617,7 +673,7 @@ function SidebarChatRow({
           className="flex min-w-0 flex-1 items-center gap-2 rounded-l-md py-[5px] pl-2 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
         >
           {content}
-        </Link>
+        </IntentPrefetchLink>
       )}
       {optimistic ? null : (
         <>
@@ -634,29 +690,18 @@ function SidebarChatRow({
                 : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
             }`}
           >
-            {pinning ? (
-              <Loader2 size={12} strokeWidth={1.75} className="animate-spin" />
-            ) : (
-              <Pin size={11.5} strokeWidth={1.8} fill={pinned ? "currentColor" : "none"} />
-            )}
+            {/* The row has already moved to its new section, so the icon shows the state the user
+                asked for rather than a spinner over the one they just left. */}
+            <Pin size={11.5} strokeWidth={1.8} fill={pinned ? "currentColor" : "none"} />
           </button>
           <button
             type="button"
             title="Archive chat"
             aria-label={`Archive ${chat.title}`}
-            disabled={archiving}
             onClick={onArchive}
-            className={`mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink/50 transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed ${
-              archiving
-                ? "opacity-100"
-                : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
-            }`}
+            className="mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink/50 opacity-0 transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover:opacity-100 group-focus-within:opacity-100"
           >
-            {archiving ? (
-              <Loader2 size={13} strokeWidth={1.75} className="animate-spin" />
-            ) : (
-              <Archive size={13} strokeWidth={1.75} />
-            )}
+            <Archive size={13} strokeWidth={1.75} />
           </button>
         </>
       )}
@@ -676,8 +721,79 @@ function SidebarChatStateIndicator({ state }: { state: ReturnType<typeof chatSum
   return <ChatStateIndicator state={state} surface="sidebar" />;
 }
 
+/**
+ * A Task in the sidebar's work list.
+ *
+ * It reuses the chat row's state indicator on purpose: the dot means the same thing on both kinds
+ * of row, so it has one implementation. Tasks do not pin, so the row has no pin control, and its
+ * display id doubles as the marker that this row opens a Task rather than a chat.
+ */
+function SidebarTaskRow({
+  task,
+  state,
+  href,
+  active,
+  onArchive,
+}: {
+  task: SidebarTaskView;
+  state: ReturnType<typeof chatSummaryState>;
+  href: string;
+  active: boolean;
+  onArchive: () => void;
+}) {
+  const archivable = isSettledTaskStatus(task.status);
+  return (
+    <div
+      className={`group flex items-center rounded-md text-[13px] transition-colors duration-150 ${
+        active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
+      }`}
+    >
+      <Link
+        href={href}
+        prefetch
+        aria-current={active ? "page" : undefined}
+        className="flex min-w-0 flex-1 items-center gap-2 rounded-l-md py-[5px] pl-2 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+      >
+        <ChatStateIndicator state={state} surface="sidebar" />
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate tracking-[-0.005em]">{task.name}</span>
+          <span className="truncate text-[11px] leading-none text-ink-faint">{task.displayId}</span>
+        </span>
+      </Link>
+      {/* Empty stand-in for the chat row's pin control, so the archive icon lands in the same
+          column on every row the reader hovers down the list. */}
+      <span aria-hidden="true" className="h-6 w-6 shrink-0" />
+      <span className="mr-1 flex h-6 w-6 shrink-0 items-center justify-center">
+        {archivable ? (
+          <button
+            type="button"
+            title="Archive task"
+            aria-label={`Archive ${task.name}`}
+            onClick={onArchive}
+            className="flex h-6 w-6 items-center justify-center rounded-md text-ink/50 opacity-0 transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover:opacity-100 group-focus-within:opacity-100"
+          >
+            <Archive size={13} strokeWidth={1.75} />
+          </button>
+        ) : null}
+      </span>
+    </div>
+  );
+}
+
 function chatHref(sessionId: string) {
   return `/chat/${encodeURIComponent(sessionId)}`;
+}
+
+function taskHref(displayId: string) {
+  return `/tasks/${encodeURIComponent(displayId)}`;
+}
+
+// The Task route resolves its display id case-insensitively and has a /run child, so the row stays
+// current for both rather than only for the exact link it renders.
+function isTaskRouteActive(pathname: string, href: string) {
+  const current = pathname.toLowerCase();
+  const target = href.toLowerCase();
+  return current === target || current.startsWith(`${target}/`);
 }
 
 function WorkspaceSwitcher() {

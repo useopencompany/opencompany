@@ -4,6 +4,7 @@ import {
   actorHasPermission,
   BRAIN_READ_PERMISSION,
   CoreError,
+  WORKFLOW_READ_PERMISSION,
 } from "@opencompany/core";
 import {
   ATTIO_EVENT_TYPES,
@@ -180,7 +181,7 @@ export type BrainSourceCommand =
     };
 
 export type BrainSourceOptionsCommand =
-  | { provider: "linear" }
+  | { provider: "linear"; includeTriageStateIds?: boolean }
   | {
       provider: "google_drive";
       parentId?: string;
@@ -334,11 +335,11 @@ export class BrainSourceApplicationService {
     integrationId: string,
     command: BrainSourceOptionsCommand,
   ): Promise<BrainSourceOptions> {
-    requireBrainRead(actor);
+    requireSourceOptionsRead(actor, command.provider);
     const integration = resourceId(integrationId, "integrationId");
     switch (command.provider) {
       case "linear":
-        return this.listLinearOptions(actor, integration);
+        return this.listLinearOptions(actor, integration, command.includeTriageStateIds ?? false);
       case "google_drive":
         return this.listGoogleDriveOptions(actor, integration, command);
     }
@@ -578,6 +579,7 @@ export class BrainSourceApplicationService {
   private async listLinearOptions(
     actor: Actor,
     integrationId: string,
+    includeTriageStateIds: boolean,
   ): Promise<Extract<BrainSourceOptions, { provider: "linear" }>> {
     const integration = await this.loadSourceIntegration(actor, integrationId, "linear");
     if (!integration || integration.status !== "connected") {
@@ -597,46 +599,81 @@ export class BrainSourceApplicationService {
     const teams: LinearTeamRef[] = [];
     let cursor: string | undefined;
     let partial = false;
-    try {
-      do {
+    let loadedTeamPage = false;
+    do {
+      try {
         const page = await linearGraphqlRequest<{
           teams?: {
-            nodes?: Array<{
-              id?: string;
-              key?: string;
-              name?: string;
-              states?: { nodes?: Array<{ id?: string }> };
-            }>;
+            nodes?: Array<{ id?: string; key?: string; name?: string }>;
             pageInfo?: { hasNextPage?: boolean; endCursor?: string };
           };
         }>({
           token,
           query: `query LinearTeams($after: String) {
             teams(first: 100, after: $after) {
-              nodes {
-                id key name
-                states(first: 1, filter: { type: { eq: "triage" } }) { nodes { id } }
-              }
+              nodes { id key name }
               pageInfo { hasNextPage endCursor }
             }
           }`,
           variables: cursor ? { after: cursor } : {},
         });
-        for (const team of page.teams?.nodes ?? []) {
+        if (!page.teams) throw new Error("Linear GraphQL returned no team data.");
+        loadedTeamPage = true;
+        for (const team of page.teams.nodes ?? []) {
           if (!team.id) continue;
           teams.push({
             id: team.id,
             name: team.name?.trim() || team.key?.trim() || team.id,
             ...(team.key?.trim() ? { key: team.key.trim() } : {}),
-            ...(team.states?.nodes?.[0]?.id ? { triageStateId: team.states.nodes[0].id } : {}),
           });
         }
-        cursor = page.teams?.pageInfo?.hasNextPage
+        cursor = page.teams.pageInfo?.hasNextPage
           ? (page.teams.pageInfo.endCursor ?? undefined)
           : undefined;
-      } while (cursor);
-    } catch {
-      partial = true;
+      } catch (error) {
+        if (!loadedTeamPage) throw error;
+        partial = true;
+        cursor = undefined;
+      }
+    } while (cursor);
+
+    if (includeTriageStateIds) {
+      const triageStateByTeam = new Map<string, string>();
+      cursor = undefined;
+      try {
+        do {
+          const page: {
+            workflowStates?: {
+              nodes?: Array<{ id?: string; team?: { id?: string } }>;
+              pageInfo?: { hasNextPage?: boolean; endCursor?: string };
+            };
+          } = await linearGraphqlRequest({
+            token,
+            query: `query LinearTriageStates($after: String) {
+              workflowStates(first: 100, after: $after, filter: { type: { eq: "triage" } }) {
+                nodes { id team { id } }
+                pageInfo { hasNextPage endCursor }
+              }
+            }`,
+            variables: cursor ? { after: cursor } : {},
+          });
+          if (!page.workflowStates) {
+            throw new Error("Linear GraphQL returned no workflow-state data.");
+          }
+          for (const state of page.workflowStates.nodes ?? []) {
+            if (state.id && state.team?.id) triageStateByTeam.set(state.team.id, state.id);
+          }
+          cursor = page.workflowStates.pageInfo?.hasNextPage
+            ? (page.workflowStates.pageInfo.endCursor ?? undefined)
+            : undefined;
+        } while (cursor);
+      } catch {
+        partial = true;
+      }
+      for (const team of teams) {
+        const triageStateId = triageStateByTeam.get(team.id);
+        if (triageStateId) team.triageStateId = triageStateId;
+      }
     }
     teams.sort((a, b) => a.name.localeCompare(b.name));
     return { provider: "linear", teams, partial };
@@ -1081,6 +1118,16 @@ function requireBrainRead(actor: Actor) {
   if (!actorHasPermission(actor, BRAIN_READ_PERMISSION)) {
     throw new CoreError("forbidden", "Brain permission is required.");
   }
+}
+
+function requireSourceOptionsRead(actor: Actor, provider: BrainSourceOptionsCommand["provider"]) {
+  if (
+    actorHasPermission(actor, BRAIN_READ_PERMISSION) ||
+    (provider === "linear" && actorHasPermission(actor, WORKFLOW_READ_PERMISSION))
+  ) {
+    return;
+  }
+  throw new CoreError("forbidden", "Brain permission is required.");
 }
 
 function resourceId(value: string, field: string) {

@@ -672,7 +672,7 @@ export function createApiApp(input: CreateApiAppInput) {
     },
     listBrainSourceOptions: async (c) => {
       const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "read", 120);
+      await enforceRateLimit(rateLimiter, actor, "integration-source-options", 120);
       const options = await input.brainSources.listOptions(
         actor,
         c.req.valid("param").integrationId,
@@ -725,7 +725,7 @@ export function createApiApp(input: CreateApiAppInput) {
     },
     getBrowserProfileLiveView: async (c) => {
       const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "read", 120);
+      await enforceRateLimit(rateLimiter, actor, "browser-live-view", 120);
       const { profileId } = c.req.valid("param");
       const { sessionId } = c.req.valid("query");
       const url = await input.browserProfiles.resolveLiveViewUrl(actor, profileId, sessionId);

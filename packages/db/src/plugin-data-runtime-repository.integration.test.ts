@@ -11,13 +11,14 @@ import {
   releaseWorkspacePluginDataLease,
   renewWorkspacePluginDataLease,
 } from "./plugin-data-runtime-repository";
+import { createTestPGlite } from "./test-pglite";
 
 describe("workspace Plugin data leases", () => {
   let database: PGlite;
   let db: ReturnType<typeof drizzle>;
 
   beforeAll(async () => {
-    database = new PGlite();
+    database = await createTestPGlite();
     await database.exec(`
       CREATE SCHEMA goat;
       CREATE TABLE goat.workspaces (id text PRIMARY KEY);

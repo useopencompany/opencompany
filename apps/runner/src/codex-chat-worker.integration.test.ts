@@ -1,8 +1,9 @@
 import { PGlite } from "@electric-sql/pglite";
 import type { CodexChatSession, CodexChatTurn, Task } from "@opencompany/db/product-schema";
+import { snapshotPGliteSchema } from "@opencompany/db/test-schema-snapshot";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { CodexChatLeaseLostError } from "./codex-chat-errors";
 import {
   claimNextCodexChatTurn,
@@ -134,12 +135,12 @@ function taskContextFixture(): TaskTurnContext {
 
 describe("durable worker claims and settlement against real Postgres", () => {
   let pg: PGlite;
+  let restoreDatabase: () => Promise<PGlite>;
 
-  beforeEach(async () => {
-    vi.clearAllMocks();
-    pg = await PGlite.create();
-    await pg.exec(SCHEMA);
-    await pg.exec(`
+  beforeAll(async () => {
+    restoreDatabase = await snapshotPGliteSchema(async (database) => {
+      await database.exec(SCHEMA);
+      await database.exec(`
       INSERT INTO goat.chat_sessions (id, user_workos_id, model, engine, kind)
       VALUES ('chat_task_1', 'user_1', 'gpt-5.5', 'codex', 'task');
       INSERT INTO goat.tasks (id, user_workos_id, prompt, model, session_id, status, stage)
@@ -151,6 +152,12 @@ describe("durable worker claims and settlement against real Postgres", () => {
       INSERT INTO goat.run_attempts (id, run_id, number, status, worker_id, lease_id)
       VALUES ('attempt_1', 'turn_1', 1, 'running', 'runner_1', 'lease_1');
     `);
+    });
+  });
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    pg = await restoreDatabase();
     dbHolder.execute = async (query: SQL) => {
       const compiled = dialect.sqlToQuery(query);
       return pg.query(compiled.sql, compiled.params as never[]);

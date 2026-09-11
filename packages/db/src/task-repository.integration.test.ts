@@ -14,9 +14,10 @@ import {
 } from "@opencompany/core";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { PostgresChatAttachmentRepository } from "./chat-repository";
 import { PostgresTaskRepository, type TaskRepositoryIdFactory } from "./task-repository";
+import { snapshotPGliteSchema } from "./test-schema-snapshot";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const migrationPaths = [
@@ -59,11 +60,12 @@ describe("Postgres Task repository", () => {
     waitingStatusMisprojectedBeforeRepair: boolean;
     waitingStatusProjectedAfterRepair: boolean;
   };
+  let restoreDatabase: () => Promise<PGlite>;
 
-  beforeEach(async () => {
-    database = new PGlite();
-    await database.exec(BASE_SCHEMA);
-    await database.exec(`
+  beforeAll(async () => {
+    restoreDatabase = await snapshotPGliteSchema(async (database) => {
+      await database.exec(BASE_SCHEMA);
+      await database.exec(`
       INSERT INTO goat.users (workos_user_id, task_spawning_enabled)
       VALUES ('migration_user', true);
       INSERT INTO goat.workspaces (id) VALUES ('migration_workspace'), ('migration_other_workspace');
@@ -155,67 +157,67 @@ describe("Postgres Task repository", () => {
           'completed', 'Must stay isolated'
         );
     `);
-    let projectionWipedBeforeRepair = false;
-    let waitingStatusMisprojectedBeforeRepair = false;
-    for (const migrationPath of migrationPaths) {
-      if (migrationPath.endsWith("0205_goat_task_history_projection_repair.sql")) {
-        // Reproduce the production gap: valid physical Task history whose projection row is absent.
-        await database.exec(`
+      let projectionWipedBeforeRepair = false;
+      let waitingStatusMisprojectedBeforeRepair = false;
+      for (const migrationPath of migrationPaths) {
+        if (migrationPath.endsWith("0205_goat_task_history_projection_repair.sql")) {
+          // Reproduce the production gap: valid physical Task history whose projection row is absent.
+          await database.exec(`
           DELETE FROM goat.message_read_model_v1 WHERE id = 'migration_prior_task_message';
           DELETE FROM goat.run_read_model_v1 WHERE id = 'migration_prior_task_run';
         `);
-      }
-      if (migrationPath.endsWith("0223_goat_task_projection_preservation.sql")) {
-        // Reproduce the production wipe: under the 0216 refresh function, any Conversation-row
-        // touch (planner model bump, settlement, rename) deleted every canonical Task projection.
-        await database.exec(`
+        }
+        if (migrationPath.endsWith("0223_goat_task_projection_preservation.sql")) {
+          // Reproduce the production wipe: under the 0216 refresh function, any Conversation-row
+          // touch (planner model bump, settlement, rename) deleted every canonical Task projection.
+          await database.exec(`
           UPDATE goat.chat_sessions SET updated_at = now()
           WHERE id = 'migration_task_conversation';
         `);
-        const wiped = await database.query<{ remaining: number }>(`
+          const wiped = await database.query<{ remaining: number }>(`
           SELECT COUNT(*)::int AS remaining
           FROM goat.message_read_model_v1
           WHERE conversation_id = 'migration_task_conversation'
         `);
-        projectionWipedBeforeRepair = wiped.rows[0]?.remaining === 0;
-      }
-      if (migrationPath.endsWith("0255_goat_task_waiting_projection.sql")) {
-        // Migration 0246 added the physical waiting status without teaching the canonical read
-        // model projection about it, so the fallback silently presented waiting Tasks as failed.
-        await database.exec(`
+          projectionWipedBeforeRepair = wiped.rows[0]?.remaining === 0;
+        }
+        if (migrationPath.endsWith("0255_goat_task_waiting_projection.sql")) {
+          // Migration 0246 added the physical waiting status without teaching the canonical read
+          // model projection about it, so the fallback silently presented waiting Tasks as failed.
+          await database.exec(`
           UPDATE goat.tasks SET status = 'waiting', stage = 'completed'
           WHERE id = 'migration_canonical_task';
         `);
-        const projected = await database.query<{ status: string }>(`
+          const projected = await database.query<{ status: string }>(`
           SELECT status FROM goat.task_read_model_v1
           WHERE id = 'migration_canonical_task'
         `);
-        waitingStatusMisprojectedBeforeRepair = projected.rows[0]?.status === "failed";
-      }
-      const migration = await readFile(migrationPath, "utf8");
-      const statements = migration.split("--> statement-breakpoint");
-      for (const statement of statements) {
-        if (statement.trim()) await database.exec(statement);
-      }
-      if (migrationPath.endsWith("0205_goat_task_history_projection_repair.sql")) {
+          waitingStatusMisprojectedBeforeRepair = projected.rows[0]?.status === "failed";
+        }
+        const migration = await readFile(migrationPath, "utf8");
+        const statements = migration.split("--> statement-breakpoint");
         for (const statement of statements) {
           if (statement.trim()) await database.exec(statement);
         }
+        if (migrationPath.endsWith("0205_goat_task_history_projection_repair.sql")) {
+          for (const statement of statements) {
+            if (statement.trim()) await database.exec(statement);
+          }
+        }
       }
-    }
-    const migrationRows = await database.query<{
-      legacy_exists: boolean;
-      legacy_projected: boolean;
-      canonical_projected: boolean;
-      message_projected: boolean;
-      historical_messages_projected: number;
-      historical_runs_projected: number;
-      physical_history_untouched: boolean;
-      normal_chat_task_card_untouched: boolean;
-      cross_workspace_link_rejected: boolean;
-      cross_workspace_run_rejected: boolean;
-      waiting_status_projected: boolean;
-    }>(`
+      const migrationRows = await database.query<{
+        legacy_exists: boolean;
+        legacy_projected: boolean;
+        canonical_projected: boolean;
+        message_projected: boolean;
+        historical_messages_projected: number;
+        historical_runs_projected: number;
+        physical_history_untouched: boolean;
+        normal_chat_task_card_untouched: boolean;
+        cross_workspace_link_rejected: boolean;
+        cross_workspace_run_rejected: boolean;
+        waiting_status_projected: boolean;
+      }>(`
       SELECT
         EXISTS (
           SELECT 1 FROM goat.tasks WHERE id = 'migration_legacy_task' AND source = 'manual'
@@ -278,24 +280,24 @@ describe("Postgres Task repository", () => {
             AND status = 'waiting'
         ) AS waiting_status_projected
     `);
-    const migrationRow = migrationRows.rows[0];
-    migrationEvidence = {
-      legacyTaskExists: migrationRow?.legacy_exists ?? false,
-      legacyTaskProjected: migrationRow?.legacy_projected ?? true,
-      canonicalTaskProjected: migrationRow?.canonical_projected ?? false,
-      canonicalMessageProjected: migrationRow?.message_projected ?? false,
-      historicalMessagesProjected: migrationRow?.historical_messages_projected ?? 0,
-      historicalRunsProjected: migrationRow?.historical_runs_projected ?? 0,
-      physicalHistoryUntouched: migrationRow?.physical_history_untouched ?? false,
-      normalChatTaskCardUntouched: migrationRow?.normal_chat_task_card_untouched ?? false,
-      crossWorkspaceLinkRejected: migrationRow?.cross_workspace_link_rejected ?? false,
-      crossWorkspaceRunRejected: migrationRow?.cross_workspace_run_rejected ?? false,
-      projectionWipedBeforeRepair,
-      waitingStatusMisprojectedBeforeRepair,
-      waitingStatusProjectedAfterRepair: migrationRow?.waiting_status_projected ?? false,
-    };
+      const migrationRow = migrationRows.rows[0];
+      migrationEvidence = {
+        legacyTaskExists: migrationRow?.legacy_exists ?? false,
+        legacyTaskProjected: migrationRow?.legacy_projected ?? true,
+        canonicalTaskProjected: migrationRow?.canonical_projected ?? false,
+        canonicalMessageProjected: migrationRow?.message_projected ?? false,
+        historicalMessagesProjected: migrationRow?.historical_messages_projected ?? 0,
+        historicalRunsProjected: migrationRow?.historical_runs_projected ?? 0,
+        physicalHistoryUntouched: migrationRow?.physical_history_untouched ?? false,
+        normalChatTaskCardUntouched: migrationRow?.normal_chat_task_card_untouched ?? false,
+        crossWorkspaceLinkRejected: migrationRow?.cross_workspace_link_rejected ?? false,
+        crossWorkspaceRunRejected: migrationRow?.cross_workspace_run_rejected ?? false,
+        projectionWipedBeforeRepair,
+        waitingStatusMisprojectedBeforeRepair,
+        waitingStatusProjectedAfterRepair: migrationRow?.waiting_status_projected ?? false,
+      };
 
-    await database.exec(`
+      await database.exec(`
       DELETE FROM goat.task_command_idempotency;
       DELETE FROM goat.run_events;
       DELETE FROM goat.run_approvals;
@@ -310,7 +312,7 @@ describe("Postgres Task repository", () => {
       DELETE FROM goat.users;
       DELETE FROM goat.workspaces;
     `);
-    await database.exec(`
+      await database.exec(`
       INSERT INTO goat.users (workos_user_id, task_spawning_enabled)
       VALUES ('user_1', true), ('user_2', false), ('user_3', true);
       INSERT INTO goat.workspaces (id) VALUES ('workspace_1'), ('workspace_2');
@@ -324,7 +326,14 @@ describe("Postgres Task repository", () => {
         ('brain_1', 'workspace_1', 'general'),
         ('brain_2', 'workspace_2', 'general');
     `);
-    await database.exec(`ALTER TABLE goat.plugins ADD COLUMN owner_user_id text DEFAULT 'user_1';`);
+      await database.exec(
+        `ALTER TABLE goat.plugins ADD COLUMN owner_user_id text DEFAULT 'user_1';`,
+      );
+    });
+  });
+
+  beforeEach(async () => {
+    database = await restoreDatabase();
     execute = async (query: SQL) => {
       const compiled = dialect.sqlToQuery(query);
       return database.query(compiled.sql, compiled.params as never[]);

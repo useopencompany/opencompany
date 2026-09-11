@@ -1,4 +1,4 @@
-import type { CodexUsage } from "@opencompany/protocol";
+import type { CodexUsage } from "@opencompany/protocol/schemas";
 import * as z from "zod";
 import { CodexBackendError, createCodexTokenManager } from "./codex-backend-language-model";
 

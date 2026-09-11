@@ -96,6 +96,17 @@ export type OfficialSkillPluginMetadata = OfficialPluginMetadataBase & {
 
 export type OfficialPluginMetadata = OfficialMcpPluginMetadata | OfficialSkillPluginMetadata;
 
+const OFFICIAL_PLUGIN_SOURCE_PATTERN =
+  /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/([0-9a-f]{40})(?:\/|$)/u;
+
+export function officialPluginUpdateAvailable(
+  installedCommit: string,
+  officialSource: string,
+): boolean {
+  const expectedCommit = OFFICIAL_PLUGIN_SOURCE_PATTERN.exec(officialSource)?.[1];
+  return expectedCommit !== undefined && installedCommit !== expectedCommit;
+}
+
 // The public repository is the reviewed trust boundary. Keep every source pinned to a full commit.
 export const OFFICIAL_MCP_PLUGIN_METADATA = {
   attio: {

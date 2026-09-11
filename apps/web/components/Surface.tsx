@@ -249,6 +249,7 @@ const CHAT_THREAD_COMPOSER_GAP_PX = 20;
 const BACKGROUND_CHAT_PROMPT_MAX_LENGTH = 10_000;
 const CODEX_GOAL_OBJECTIVE_MAX_LENGTH = 4_000;
 const CODEX_GOAL_TOKEN_BUDGET_MAX = 2_000_000;
+const COMMAND_PALETTE_RESULT_LIMIT = 50;
 const CODEX_MENTION: ChatMention = { kind: "engine", id: "codex" };
 const CLAUDE_MENTION: ChatMention = { kind: "engine", id: "claude" };
 const CLOUD_CODEX_ATTACHMENT_CAPABILITIES = { images: true, pdf: true } as const;
@@ -275,6 +276,20 @@ type PendingChatFirstOutputMeasurement = {
   sandboxStatusAtSend: EngineRuntimeStatus | "not_applicable" | "not_created" | "unknown";
   sendSource: "composer" | "plan_implementation";
 };
+
+type CommandPaletteItem =
+  | {
+      kind: "task";
+      task: TaskView;
+      archived: boolean;
+      searchValue: string;
+    }
+  | {
+      kind: "chat";
+      chat: ChatSummaryView;
+      archived: boolean;
+      searchValue: string;
+    };
 
 type MentionOption =
   | { kind: "engine"; token: "@codex" | "@claude"; label: string; mention: ChatMention }
@@ -381,6 +396,22 @@ export type SurfaceChatSelection = {
   codexComposerSettings?: CodexComposerSettings | null;
   runtime?: ConversationRuntimeView | null;
 } | null;
+
+function selectCommandPaletteItems(
+  items: readonly CommandPaletteItem[],
+  query: string,
+): CommandPaletteItem[] {
+  const search = query.trim();
+  if (!search) return items.slice(0, COMMAND_PALETTE_RESULT_LIMIT);
+
+  const matches: CommandPaletteItem[] = [];
+  for (const item of items) {
+    if (defaultFilter(item.searchValue, search, []) <= 0) continue;
+    matches.push(item);
+    if (matches.length === COMMAND_PALETTE_RESULT_LIMIT) break;
+  }
+  return matches;
+}
 
 export function Surface({
   tasks,
@@ -1174,7 +1205,7 @@ export function Surface({
     () => recentChats.filter((chat) => !optimisticallyArchivedChatIds.has(chat.id)),
     [optimisticallyArchivedChatIds, recentChats],
   );
-  const commandPaletteItems = useMemo(
+  const commandPaletteItems = useMemo<CommandPaletteItem[]>(
     () =>
       [
         ...(taskSpawningEnabled
@@ -1182,17 +1213,20 @@ export function Surface({
               kind: "task" as const,
               task,
               archived: Boolean(task.archivedAt),
+              searchValue: `task ${task.archivedAt ? "archived " : ""}${task.name} ${task.prompt} ${task.displayId} ${task.id}`,
             }))
           : []),
         ...paletteRecentChats.map((chat) => ({
           kind: "chat" as const,
           chat,
           archived: false,
+          searchValue: `chat ${chat.title} ${chat.id}`,
         })),
         ...archivedChats.map((chat) => ({
           kind: "chat" as const,
           chat,
           archived: true,
+          searchValue: `chat archived ${chat.title} ${chat.id}`,
         })),
       ].toSorted(
         (a, b) =>
@@ -1200,6 +1234,10 @@ export function Surface({
           new Date(a.kind === "task" ? a.task.updatedAt : a.chat.updatedAt).getTime(),
       ),
     [allTasks, archivedChats, paletteRecentChats, taskSpawningEnabled],
+  );
+  const commandPaletteResults = useMemo(
+    () => selectCommandPaletteItems(commandPaletteItems, chatSearchQuery),
+    [chatSearchQuery, commandPaletteItems],
   );
   const showEngineComposerControls = composerEngine !== null;
 
@@ -2843,6 +2881,8 @@ export function Surface({
               <QuickChatComposer
                 open={newChatCommandOpen && commandPaletteView === "compose"}
                 initialPrompt={chatSearchQuery.trim()}
+                autoFocus
+                className="p-3"
                 userWorkosId={userWorkosId}
                 defaultModel={defaultModel}
                 codexConnected={codexConnected}
@@ -2855,13 +2895,7 @@ export function Surface({
               />
             </>
           ) : (
-            <Command
-              className="bg-surface text-ink"
-              // Equal match scores keep the recency order instead of letting cmdk rank by relevance.
-              filter={(value, search, keywords) =>
-                defaultFilter(value, search, keywords) > 0 ? 1 : 0
-              }
-            >
+            <Command className="bg-surface text-ink" shouldFilter={false}>
               <CommandInput
                 autoFocus
                 value={chatSearchQuery}
@@ -2887,14 +2921,16 @@ export function Surface({
                     </CommandShortcut>
                   </CommandItem>
                 </CommandGroup>
-                <CommandEmpty>No matching tasks or chats.</CommandEmpty>
-                {commandPaletteItems.length > 0 ? (
+                {commandPaletteResults.length === 0 ? (
+                  <CommandEmpty>No matching tasks or chats.</CommandEmpty>
+                ) : null}
+                {commandPaletteResults.length > 0 ? (
                   <CommandGroup heading="Recent">
-                    {commandPaletteItems.map((item) =>
+                    {commandPaletteResults.map((item) =>
                       item.kind === "task" ? (
                         <CommandItem
                           key={`task:${item.task.id}`}
-                          value={`task ${item.archived ? "archived " : ""}${item.task.name} ${item.task.prompt} ${item.task.displayId} ${item.task.id}`}
+                          value={item.searchValue}
                           onSelect={() => jumpToTask(item.task)}
                           className="gap-3"
                         >
@@ -2918,7 +2954,7 @@ export function Surface({
                       ) : (
                         <CommandItem
                           key={`chat:${item.chat.id}`}
-                          value={`chat ${item.archived ? "archived " : ""}${item.chat.title} ${item.chat.id}`}
+                          value={item.searchValue}
                           onSelect={() =>
                             item.archived ? restoreAndOpenChat(item.chat) : jumpToChat(item.chat)
                           }
@@ -3613,12 +3649,18 @@ export function Surface({
   );
 }
 
-// The Cmd+K quick-compose surface. Same controls as the main composer (attachments,
-// model/engine picker, mentions), but it always starts new background work — it
-// never adopts the result into view or navigates to it.
-function QuickChatComposer({
+/**
+ * The composer for starting something new where there is no conversation to send into: the Cmd+K
+ * compose view and the review queue's reading pane. Same controls as the main composer
+ * (attachments, model/engine picker, mentions), but it always starts new background work — it
+ * never adopts the result into view or navigates to it. `open` means the host is presenting it:
+ * the draft is seeded when that flips on and reset when it flips off.
+ */
+export function QuickChatComposer({
   open,
   initialPrompt,
+  autoFocus = false,
+  className,
   userWorkosId,
   defaultModel,
   codexConnected,
@@ -3631,6 +3673,8 @@ function QuickChatComposer({
 }: {
   open: boolean;
   initialPrompt: string;
+  autoFocus?: boolean;
+  className?: string;
   userWorkosId: string;
   defaultModel: string;
   codexConnected: boolean;
@@ -3639,7 +3683,7 @@ function QuickChatComposer({
   autoModelRoutingEnabled: boolean;
   creditBalance: ReturnType<typeof useCreditBalance>["balance"];
   workspaceId: string;
-  onSubmitted: () => void;
+  onSubmitted?: () => void;
 }) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
@@ -3781,8 +3825,9 @@ function QuickChatComposer({
     upload: uploadCanonicalAttachment,
   });
 
-  // The dialog stays mounted across opens; reset to a pristine draft each time it closes
-  // so a stale prompt, attachment, or engine choice never leaks into the next invocation.
+  // A host can hide the composer without unmounting it (the palette dialog does); reset to a
+  // pristine draft each time it does so a stale prompt, attachment, or engine choice never leaks
+  // into the next invocation.
   const clearAttachments = composerAttachments.clearAttachments;
   useEffect(() => {
     if (open) return;
@@ -3806,8 +3851,10 @@ function QuickChatComposer({
     /* eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot seed on open, not a render loop */
     setInput(initialPrompt);
     if (initialPrompt) pendingInputCaretRef.current = initialPrompt.length;
-    inputRef.current?.focus();
-  }, [open, initialPrompt]);
+    // A host that opens the composer deliberately (a dialog) takes the caret; one that keeps it
+    // on screen beside other work leaves focus where the reader put it.
+    if (autoFocus) inputRef.current?.focus();
+  }, [open, initialPrompt, autoFocus]);
 
   // Mirrors the main composer: refetch each catalog whenever its menu opens so
   // recently created Skills and workflows show up.
@@ -4116,7 +4163,7 @@ function QuickChatComposer({
       setInput("");
       setMentionToken(null);
       setSelectedMentions([]);
-      onSubmitted();
+      onSubmitted?.();
       void startAdHocTask({
         description: prompt,
         model: String(backgroundModel),
@@ -4127,7 +4174,8 @@ function QuickChatComposer({
           : {}),
       })
         .then(({ task }) => {
-          // Not gated on mountedRef: the dialog has already closed.
+          // Not gated on mountedRef: router.refresh() and toast are global, and the host may
+          // have dismissed this composer by now.
           router.refresh();
           toast.success(`Started ${task.name} in the background.`);
         })
@@ -4154,7 +4202,7 @@ function QuickChatComposer({
       setMentionToken(null);
       setSelectedMentions([]);
       composerAttachments.clearAttachments();
-      onSubmitted();
+      onSubmitted?.();
       void startWorkflowTask({
         workspaceId,
         workflow: workflowMention,
@@ -4164,8 +4212,7 @@ function QuickChatComposer({
         ...(attachmentsMetadata.length > 0 ? { attachments: attachmentsMetadata } : {}),
       })
         .then(({ task }) => {
-          // Not gated on mountedRef: the dialog (and this component) has already
-          // closed by the time this resolves — router.refresh()/toast are global.
+          // Not gated on mountedRef: see the background-task branch above.
           router.refresh();
           toast.success(`Started ${task.name} in the background.`);
         })
@@ -4186,8 +4233,8 @@ function QuickChatComposer({
 
     const targetEngine = isBackgroundChatDirective ? backgroundEngine : selectedEngine;
     if (targetEngine) {
-      // Validate before clearing attachments / closing the dialog: once onSubmitted()
-      // unmounts this component, there's no visible composer left to restore a draft into.
+      // Validate before clearing attachments and telling the host the draft is sent: once the
+      // host dismisses the composer there is no visible draft left to restore the prompt into.
       const settings =
         targetEngine === "claude_code"
           ? ({ ok: true, settings: { reasoningEffort: codexReasoningEffort } } as const)
@@ -4208,7 +4255,7 @@ function QuickChatComposer({
 
       setIsSubmitting(true);
       composerAttachments.clearAttachments();
-      onSubmitted();
+      onSubmitted?.();
       toast("Started a new chat in the background.");
 
       const engine = targetEngine;
@@ -4259,7 +4306,7 @@ function QuickChatComposer({
 
     setIsSubmitting(true);
     composerAttachments.clearAttachments();
-    onSubmitted();
+    onSubmitted?.();
     toast("Started a new chat in the background.");
 
     const newSessionId = newOptimisticChatSessionId();
@@ -4309,7 +4356,7 @@ function QuickChatComposer({
   const showEngineComposerControls = isEngineChat;
 
   return (
-    <div className="flex flex-col gap-2 p-3">
+    <div className={cn("flex flex-col gap-2", className)}>
       {mentionToken && mentionOptions.length > 0 ? (
         <div
           role="listbox"

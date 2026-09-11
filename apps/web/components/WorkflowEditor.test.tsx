@@ -19,6 +19,7 @@ const brainSourceActionsMock = vi.hoisted(() => ({
   listLinearTeams: vi.fn(async () => ({
     ok: true as const,
     teams: [{ id: "team_1", name: "Core", key: "CORE", triageStateId: "state_triage" }],
+    partial: false,
   })),
 }));
 
@@ -94,6 +95,7 @@ describe("WorkflowEditor", () => {
     brainSourceActionsMock.listLinearTeams.mockResolvedValue({
       ok: true,
       teams: [{ id: "team_1", name: "Core", key: "CORE", triageStateId: "state_triage" }],
+      partial: false,
     });
   });
 
@@ -263,6 +265,11 @@ describe("WorkflowEditor", () => {
   });
 
   it("saves an enabled Linear issue-created event trigger with a team filter", async () => {
+    brainSourceActionsMock.listLinearTeams.mockResolvedValueOnce({
+      ok: true,
+      teams: [{ id: "team_1", name: "Core", key: "CORE", triageStateId: "state_triage" }],
+      partial: true,
+    });
     render(
       <WorkflowEditor
         workflow={workflow}
@@ -293,6 +300,13 @@ describe("WorkflowEditor", () => {
     fireEvent.click(screen.getByRole("radio", { name: "On an event" }));
     await act(async () => Promise.resolve());
     expect(workflowActionsMock.update).not.toHaveBeenCalled();
+    expect(brainSourceActionsMock.listLinearTeams).toHaveBeenCalledWith("gint_1", {
+      includeTriageStateIds: false,
+    });
+    expect(screen.getByRole("option", { name: "CORE · Core" })).toBeInTheDocument();
+    expect(
+      screen.getByText("Some Linear team details could not be loaded. Refresh to try again."),
+    ).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Team"), { target: { value: "team_1" } });
     fireEvent.click(screen.getByRole("button", { name: "Additional run context (optional)" }));

@@ -22,6 +22,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { useAppDataOptional } from "@/components/AppDataProvider";
+import { IntentPrefetchLink } from "@/components/IntentPrefetchLink";
 
 type SettingsNavItem = {
   href: string;
@@ -129,9 +130,8 @@ const NAV_GROUPS: SettingsNavGroup[] = [
 function SettingsNavRow({ item, active }: { item: SettingsNavItem; active: boolean }) {
   const Icon = item.icon;
   return (
-    <Link
+    <IntentPrefetchLink
       href={item.href}
-      prefetch
       aria-current={active ? "page" : undefined}
       className={`group flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-left text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
         active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
@@ -148,7 +148,7 @@ function SettingsNavRow({ item, active }: { item: SettingsNavItem; active: boole
           {item.badge}
         </span>
       ) : null}
-    </Link>
+    </IntentPrefetchLink>
   );
 }
 

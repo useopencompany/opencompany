@@ -58,6 +58,68 @@ const resolved = {
 };
 
 describe("SkillImportApplicationService", () => {
+  it.each([{}, { expectedBundleId: "bundle_1" }])(
+    "rejects an edit with no changed fields before authoring or persisting: %j",
+    async (input) => {
+      const replace = vi.fn();
+      const create = vi.fn();
+      const service = new SkillImportApplicationService(
+        repository({
+          replace,
+          get: vi.fn(async () => ({ bundle: { source: { type: "workspace" } } }) as never),
+        }),
+        { resolve: vi.fn() },
+        { create },
+      );
+
+      await expect(service.update(actor, "installation_1", input)).rejects.toMatchObject({
+        code: "invalid_argument",
+        message: "Provide a new name, description, or instructions.",
+      });
+      expect(create).not.toHaveBeenCalled();
+      expect(replace).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    { newName: "renamed-skill" },
+    { description: "Revised description." },
+    { instructions: "Revised instructions." },
+  ])("preserves omitted fields and version checks for a partial edit: %j", async (input) => {
+    const replace = vi.fn();
+    const create = vi.fn(async () => resolved.bundle);
+    const service = new SkillImportApplicationService(
+      repository({
+        replace,
+        get: vi.fn(
+          async () =>
+            ({
+              id: "installation_1",
+              name: "original-skill",
+              bundle: {
+                id: "bundle_2",
+                source: { type: "workspace" },
+                description: "Original description.",
+                body: "Original instructions.",
+              },
+            }) as never,
+        ),
+      }),
+      { resolve: vi.fn() },
+      { create },
+    );
+
+    await service.update(actor, "installation_1", { ...input, expectedBundleId: "bundle_1" });
+    expect(create).toHaveBeenCalledWith({
+      name: input.newName ?? "original-skill",
+      description: input.description ?? "Original description.",
+      instructions: input.instructions ?? "Original instructions.",
+    });
+    expect(replace).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "installation_1", expectedBundleId: "bundle_1" }),
+    );
+  });
+
   it("authors workspace Skills through the same immutable install and replacement boundaries", async () => {
     const install = vi.fn(async () => ({ installation: {} as never, idempotentReplay: false }));
     const replace = vi.fn(async () => ({}) as never);

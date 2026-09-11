@@ -1,7 +1,8 @@
 import { PGlite } from "@electric-sql/pglite";
 import type { Actor } from "@opencompany/core";
+import { snapshotPGliteSchema } from "@opencompany/db/test-schema-snapshot";
 import { drizzle } from "drizzle-orm/pglite";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createBotService } from "./bots";
 import { createUserSettingsService } from "./user-settings";
 
@@ -16,9 +17,10 @@ const bot = { id: "bot_1", name: "Research", description: "Research customer nee
 describe("persistent bot storage", () => {
   let database: PGlite;
   let service: ReturnType<typeof createBotService>;
-  beforeEach(async () => {
-    database = new PGlite();
-    await database.exec(`
+  let restoreDatabase: () => Promise<PGlite>;
+  beforeAll(async () => {
+    restoreDatabase = await snapshotPGliteSchema(async (database) => {
+      await database.exec(`
       CREATE SCHEMA goat;
       CREATE TABLE goat.users (
         workos_user_id text PRIMARY KEY,
@@ -37,6 +39,10 @@ describe("persistent bot storage", () => {
       INSERT INTO goat.users VALUES ('user_1', true), ('user_2', true), ('disabled', false);
       INSERT INTO goat.workspace_members VALUES ('workspace_1', 'user_1'), ('workspace_2', 'user_1'), ('workspace_1', 'user_2'), ('workspace_1', 'disabled');
     `);
+    });
+  });
+  beforeEach(async () => {
+    database = await restoreDatabase();
     service = createBotService({ db: drizzle(database), defaultModel: "moonshotai/kimi-k3" });
   });
   afterEach(async () => {
