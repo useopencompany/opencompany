@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.26.0] - 2026-09-11
+
+### Added
+- turn on the for review beta in preferences to read chat replies and task results in one place. reply, approve actions, or continue a task without leaving the queue. recent read items stay in view, with an archive button to clear finished work (#1712, #1714, #1725) — @louis.
+- start new work from the for review reading pane on desktop when no conversation is open. send a prompt, attach a file, or run a workflow while keeping your place in the queue (#1729) — @louis.
+- start a workflow when granola finishes your meeting notes, with the meeting summary and attendees as context. connect granola with an api key in wiki sources, enable meeting notes ready in the plugin, then choose it as your workflow's event (#1741) — @louis.
+- update an official plugin in one click when update available appears. your connected accounts and event choices stay in place; review tool permissions again for the new version (#1721) — @louis.
+- publish posts, replies, polls, and images with alt text through the x plugin, then check how your posts performed. reconnect your x account if prompted to enable image uploads (#1706) — @louis.
+- choose deepseek v4 flash from the chat model picker (#1708) — @louis.
+
+### Changed
+- chats and tasks now share the sidebar, with unfinished work first. open a task to read its result and clear its unread dot (#1733) — @louis.
+- archive a row in the sidebar or for review queue and it disappears immediately. if the save fails, the row returns with an error message (#1728, #1731, #1733) — @louis.
+- selecting a workflow in the composer now shows its saved models. change a step's model or reasoning for this run without changing the workflow, and attach images or pdfs when its models support them (#1702) — @louis.
+
+### Fixed
+- reopening a paused task now shows its approval controls immediately. the complete request loads before you can approve it (#1704) — @louis.
+- linear teams now load for workflow events even with legacy brain disabled. if linear access is revoked, the editor links you to reconnect your account (#1722, #1735, #1740) — @louis.
+- skills remain available across chat turns, and codex reliably receives the skills selected for a chat or workflow. claude chats and tasks no longer fail before replying because of the skill-editing tool (#1719, #1720, #1716) — @louis.
+- claude's follow-up questions now keep suggested answers and your own answer in one control, and stay open when you send another message (#1711) — @louis.
+- codex tasks retry temporary startup timeouts, and github access in coding sessions no longer breaks when another connection refreshes its credentials (#1723, #1710) — @louis.
+- command-palette search opens faster with a large task history, while older archived work stays searchable (#1724) — @louis.
+- browsing plugins and workflows no longer uses up the request allowance needed to load connected sources or browser live views (#1730) — @louis.
+- convex setup now checks the key's required permissions before connecting and explains which permissions are missing (#1732) — @louis.
+- background tasks can no longer keep handing the same work to new tasks. start tasks, workflows, and recurring schedules from a main chat (#1705) — @louis.
+
 ## [1.25.0] - 2026-09-10
 
 ### Added
