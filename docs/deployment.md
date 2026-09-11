@@ -1,7 +1,8 @@
 # Deployment
 
 Production releases are defined by `.github/workflows/release-production.yml` and target five
-surfaces:
+application surfaces. A sixth stateful infrastructure service, Electric, is managed by the Render
+Blueprint but is not redeployed for every application release:
 
 | Surface     | Host   | Responsibility                                                                                                       |
 | ----------- | ------ | -------------------------------------------------------------------------------------------------------------------- |
@@ -10,6 +11,7 @@ surfaces:
 | Runner      | Render | durable Run execution, schedules, ingestion, integration workers, sandboxes, internal transports, and the LLM broker |
 | Marketing   | Vercel | public marketing site                                                                                                |
 | Docs        | Vercel | public product and API documentation                                                                                 |
+| Electric    | Render | private Postgres shape sync for the API-owned authorized read-model proxy                                            |
 
 The Vercel project roots are `apps/web`, `apps/marketing`, and `apps/docs`. Release automation
 verifies every value and requires a distinct project ID for each surface before building. Vercel Git
@@ -36,6 +38,11 @@ release job loads its credentials, it verifies every live managed-capability con
 production changes. The probe retries bounded transport, rate-limit, malformed-success, and upstream
 server failures; authentication failures and deterministic contract mismatches remain fail-closed.
 
+For an endpoint-not-found response, inspect a supported replacement before updating its adapter in
+`packages/agent/src/capabilities/catalog.ts`. Verify the input location, pagination types, and pricing
+contract, then rerun `bun run web:capabilities:contract`. TikTok comments use the App V3
+`/api/v1/tiktok/app/v3/fetch_video_comments` endpoint with integer cursors in `queryParams`.
+
 The workflow loads release credentials from Infisical `prod` `/release`, validates selected
 web/API/runner configuration, and builds selected Vercel artifacts in runner-local storage before
 changing production. It then rechecks the current `main` SHA, runs production migrations once when
@@ -47,6 +54,17 @@ and 300 seconds, respectively), so a dashboard or service-config drift cannot si
 graceful draining. A superseded run leaves unattempted surfaces inactive and cannot publish stale
 code.
 
+Personal plugins follow the same backend readiness and draining gate; see
+[the personal plugin cutover and rollback plan](personal-plugins-cutover.md).
+
+The Personal Skills migration starts with creation disabled and keeps the database default at
+Company so the previously deployed API can continue writing safely. After both replacement services
+advertise Personal-skill authorization, release automation waits beyond the runner's five-minute
+shutdown window, checks both services again, and activates Personal writes before deploying the web
+surface. A database trigger also records Company revision grants for installs and edits made by an
+old instance during that window. A failed or partial backend release leaves the activation closed
+and the database surface unfinished so the next release retries it.
+
 Manual dispatch from `main` forces the requested surfaces through the same verification, preflight,
 deployment, and health checks. Do not bypass preflight or branch protection.
 
@@ -56,6 +74,8 @@ deployment, and health checks. Do not bypass preflight or branch protection.
 - Docs: no runtime secrets; CI identifies the existing Vercel project through
   `DOCS_VERCEL_PROJECT_ID` in `prod` `/release`.
 - API: Infisical `prod` `/api`, synced to the `opencompany-api` Render service.
+- Electric: Infisical `prod` `/electric`, copied to the `opencompany-electric` Render service;
+  `render.yaml` owns the image, disk, region, and non-secret configuration.
 - Runner: Infisical `prod` `/runner`, synced to the runner Render service.
 - Release: Infisical `prod` `/release`, containing deployment credentials, service/project IDs,
   production URLs, and the migration database URL.
@@ -64,6 +84,9 @@ Run `bun run infisical:release:preflight` to validate the release group. The hos
 checks Vercel project metadata and required host values that cannot be verified through a normal
 environment pull. It creates `.vercel/project.json` from release credentials at runtime; the
 repository tracks only a placeholder example, never a live Vercel project or organization binding.
+
+Run `bun run infisical:electric:preflight` before changing or redeploying Electric. The service is
+image-backed and stateful, so routine application releases do not restart it.
 
 ## Migrations
 
@@ -127,6 +150,40 @@ URLs, while both API and runner use `OPENCOMPANY_API_ORIGIN` for environment-loc
 tickets bound to one plugin registration, integration, operation, and tool; the API verifies each
 ticket and rechecks the installation, connection scopes, and current permission before calling a
 stable Google REST API. Google access and refresh tokens are never used as MCP bearer credentials.
+
+The Calendar MCP supports `reschedule_event` for an existing event or a single recurring
+occurrence. It patches only the start and end times, retaining the event identity and meeting
+details. After deploying a new MCP tool, refresh the installed plugin's tools to update its
+persisted discovery snapshot. With the current pinned Calendar package, `reschedule_event` is
+unmapped and defaults to Ask until the reviewed plugin capability map includes it; existing broad
+write permissions do not silently enable new tools.
+
+The action gateway claims identical non-idempotent external writes once per turn using the action,
+source, canonical parameters, and approval context. Changing a model-generated call id cannot
+dispatch the same write twice, including after approval or a runner restart. A duplicate gets an
+explicit error rather than a second dispatch. This also prevents automatic same-input retries
+after a failed or uncertain dispatch; inspect provider state before taking another action. A new
+user turn can intentionally repeat a write. This is turn-scoped admission, not a provider result
+journal or cross-turn exactly-once delivery.
+
+## Official plugin packages
+
+Official catalog packages ship with the application as immutable release artifacts. Their reviewed
+public commit pins live in `packages/agent-runtime/src/official-plugin-catalog.ts`; the web catalog
+uses that same source. Preview and installation of those exact pins read the packaged bytes without
+contacting GitHub, including on a cold process. Other public sources, refs, and directories continue
+through the existing GitHub fetcher.
+
+To update official packages, edit the catalog pins and run `bun scripts/package-official-plugins.ts`
+with an authenticated GitHub CLI. The explicit maintenance command fetches and validates the pinned
+packages before writing `packages/agent-runtime/src/official-plugin-artifacts/`. Commit the pins and
+generated artifacts together. Builds and releases use those checked-in files and need no GitHub
+artifact credentials or package download step.
+
+At runtime, a packaged source or integrity mismatch fails closed. Bundled bytes go through the same
+manifest, path, size, Skill, MCP, capability, and event validators as public imports. Installation
+still requires the exact commit and integrity returned by preview. Tests check every catalog pin and
+artifact offline and exercise HubSpot preview and installation through the API with GitHub disabled.
 
 ## Stripe production endpoint
 

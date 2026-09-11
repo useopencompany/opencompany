@@ -33,13 +33,29 @@ import {
 } from "@opencompany/agent/integrations/linear-mcp";
 import { completeNeonMcpOAuth, startNeonMcpOAuth } from "@opencompany/agent/integrations/neon-mcp";
 import {
+  completeNotionMcpOAuth,
+  startNotionMcpOAuth,
+} from "@opencompany/agent/integrations/notion-mcp";
+import {
   completePostHogMcpOAuth,
   startPostHogMcpOAuth,
 } from "@opencompany/agent/integrations/posthog-mcp";
 import {
+  completeResendMcpOAuth,
+  startResendMcpOAuth,
+} from "@opencompany/agent/integrations/resend-mcp";
+import {
   completeSigNozMcpOAuth,
   startSigNozMcpOAuth,
 } from "@opencompany/agent/integrations/signoz-mcp";
+import {
+  completeStripeMcpOAuth,
+  startStripeMcpOAuth,
+} from "@opencompany/agent/integrations/stripe-mcp";
+import {
+  completeSupabaseMcpOAuth,
+  startSupabaseMcpOAuth,
+} from "@opencompany/agent/integrations/supabase-mcp";
 import {
   completeVercelMcpOAuth,
   startVercelMcpOAuth,
@@ -108,10 +124,31 @@ vi.mock("@opencompany/agent/integrations/neon-mcp", async (importOriginal) => ({
   startNeonMcpOAuth: vi.fn(),
   completeNeonMcpOAuth: vi.fn(),
 }));
+vi.mock("@opencompany/agent/integrations/notion-mcp", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  startNotionMcpOAuth: vi.fn(),
+  completeNotionMcpOAuth: vi.fn(),
+}));
+vi.mock("@opencompany/agent/integrations/supabase-mcp", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  startSupabaseMcpOAuth: vi.fn(),
+  completeSupabaseMcpOAuth: vi.fn(),
+}));
+vi.mock("@opencompany/agent/integrations/resend-mcp", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  startResendMcpOAuth: vi.fn(),
+  completeResendMcpOAuth: vi.fn(),
+}));
 vi.mock("@opencompany/agent/integrations/latitude-mcp", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   startLatitudeMcpOAuth: vi.fn(),
   completeLatitudeMcpOAuth: vi.fn(),
+}));
+
+vi.mock("@opencompany/agent/integrations/stripe-mcp", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  startStripeMcpOAuth: vi.fn(),
+  completeStripeMcpOAuth: vi.fn(),
 }));
 
 const STATE_SECRET = "mcp-state-secret-mcp-state-secret";
@@ -123,6 +160,10 @@ const PROVIDERS: McpOAuthProvider[] = [
   "granola",
   "posthog",
   "neon",
+  "notion",
+  "stripe",
+  "supabase",
+  "resend",
   "latitude",
   "betterstack",
   "fathom",
@@ -139,6 +180,10 @@ const flowMocks = {
   granola: { start: startGranolaMcpOAuth, complete: completeGranolaMcpOAuth },
   posthog: { start: startPostHogMcpOAuth, complete: completePostHogMcpOAuth },
   neon: { start: startNeonMcpOAuth, complete: completeNeonMcpOAuth },
+  stripe: { start: startStripeMcpOAuth, complete: completeStripeMcpOAuth },
+  notion: { start: startNotionMcpOAuth, complete: completeNotionMcpOAuth },
+  supabase: { start: startSupabaseMcpOAuth, complete: completeSupabaseMcpOAuth },
+  resend: { start: startResendMcpOAuth, complete: completeResendMcpOAuth },
   latitude: { start: startLatitudeMcpOAuth, complete: completeLatitudeMcpOAuth },
   betterstack: { start: startBetterStackMcpOAuth, complete: completeBetterStackMcpOAuth },
   fathom: { start: startFathomMcpOAuth, complete: completeFathomMcpOAuth },

@@ -51,6 +51,21 @@ export const PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
+  google_admin: [
+    {
+      id: "query",
+      label: "Read directory",
+      description: "Read Workspace users, groups, and memberships.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Manage users and groups",
+      description:
+        "Create user accounts and groups, edit group details, and add group members or owners.",
+      defaultMode: "ask",
+    },
+  ],
   google_drive: [
     {
       id: "read",
@@ -87,7 +102,7 @@ export const PROVIDER_CAPABILITIES: Partial<
     {
       id: "write",
       label: "Manage calendar events",
-      description: "Create, update, delete, and respond to events on your calendars.",
+      description: "Create events and reschedule existing meetings on your calendars.",
       defaultMode: "ask",
     },
   ],
@@ -133,6 +148,77 @@ export const PROVIDER_CAPABILITIES: Partial<
       id: "write",
       label: "Manage issues",
       description: "Create and update issues, and add comments in your Linear workspace.",
+      defaultMode: "ask",
+    },
+  ],
+  resend: [
+    {
+      id: "read",
+      label: "Inspect email configuration",
+      description: "Inspect domains, segments, topics, and contact property definitions.",
+      defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Read email and contact data",
+      description: "Read messages, attachments, contacts, campaigns, logs, and account details.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Send emails and manage content",
+      description:
+        "Send and schedule emails, manage contacts and content, and trigger automations.",
+      defaultMode: "ask",
+    },
+    {
+      id: "draft",
+      label: "Administer access and destructive actions",
+      description:
+        "Manage credentials, webhooks, domain claims, public email links, and irreversible removals.",
+      defaultMode: "off",
+    },
+  ],
+  supabase: [
+    {
+      id: "read",
+      label: "Inspect Supabase resources",
+      description: "Inspect documentation, projects, schema, and development metadata.",
+      defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Read logs, keys, and function source",
+      description: "Read sensitive diagnostics, publishable keys, and Edge Function source.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Run SQL and manage Supabase resources",
+      description:
+        "Execute SQL, apply migrations, deploy functions, and manage billable resources.",
+      defaultMode: "ask",
+    },
+  ],
+  notion: [
+    {
+      id: "query",
+      label: "Search & read Notion",
+      description:
+        "Search and read pages, databases, files, comments, members, meeting notes, and agent sessions.",
+      defaultMode: "ask",
+    },
+    {
+      id: "draft",
+      label: "Work with Notion agents",
+      description: "Start, message, wait for, or stop Custom Agent sessions in Notion.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Change Notion",
+      description:
+        "Create or change pages, databases, views, comments, attachments, folders, and Skills.",
       defaultMode: "ask",
     },
   ],
@@ -320,6 +406,35 @@ export const PROVIDER_CAPABILITIES: Partial<
       description:
         "Change monitoring, incidents, dashboards, alerts, status pages, error state, and team access.",
       defaultMode: "ask",
+    },
+  ],
+  convex: [
+    {
+      id: "read",
+      label: "Inspect Convex deployment",
+      description: "Read deployment metadata, table schemas, and function specifications.",
+      defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Read documents and logs",
+      description:
+        "Read database documents, run read-only queries, and inspect function logs in development deployments.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Run Convex functions",
+      description:
+        "Execute deployed queries, mutations, and actions in development deployments. Functions may change data or call external services.",
+      defaultMode: "ask",
+    },
+    {
+      id: "draft",
+      label: "Manage environment variables",
+      description:
+        "Read, set, or remove development deployment environment variables. Values may contain secrets.",
+      defaultMode: "off",
     },
   ],
   render: [

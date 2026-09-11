@@ -1,8 +1,13 @@
 import {
+  ACTION_DESCRIPTION_PREVIEW_LENGTH,
   ACTION_MAX_CALLS_PER_TURN,
   ACTION_MAX_PROVIDER_FAILURES_PER_TURN,
+  type ActionDescriptor,
   type ActionGatewayRequest,
   type ActionGatewayResponse,
+  type ActionSummary,
+  DESCRIBE_ACTIONS_INPUT_ERROR,
+  isDescribeActionsInput,
 } from "@opencompany/agent-runtime";
 import type { ActionSourceDescriptor } from "./types";
 
@@ -42,6 +47,7 @@ export async function serveActionRequest(input: {
     params: Record<string, unknown>;
     invocationId: string;
   }) => Promise<ActionGatewayResponse>;
+  legacyDiscovery?: boolean;
   maxCalls?: number;
   signal?: AbortSignal;
 }): Promise<ActionGatewayResponse> {
@@ -82,14 +88,46 @@ export async function serveActionRequest(input: {
       },
       actions: input.catalog.actions
         .filter((action) => action.source === source.id)
-        .map((action) => ({
-          id: action.id,
-          source: action.source,
-          description: action.description,
-          params: action.params,
-          ...(action.permissionMode ? { permissionMode: action.permissionMode } : {}),
-        })),
+        .map((action) =>
+          input.legacyDiscovery ? actionDescriptor(action) : summarizeAction(action),
+        ),
     };
+  }
+
+  if (request.operation === "describe") {
+    if (input.legacyDiscovery) {
+      return {
+        ok: false,
+        error: {
+          code: "invalid_params",
+          message:
+            "describe_actions requires host tool contract v5. Use list_actions for this contract.",
+        },
+      };
+    }
+    // Validate before deduplication: oversized batches must never be silently accepted.
+    if (!isDescribeActionsInput({ actions: request.actions })) {
+      return {
+        ok: false,
+        error: {
+          code: "invalid_params",
+          message: DESCRIBE_ACTIONS_INPUT_ERROR,
+        },
+      };
+    }
+    const actions: ActionDescriptor[] = [];
+    const not_found: string[] = [];
+    const sources = new Set<string>();
+    for (const id of new Set(request.actions)) {
+      const action = input.catalog.actions.find((entry) => entry.id === id);
+      if (!action) not_found.push(id);
+      else {
+        actions.push(actionDescriptor(action));
+        sources.add(action.source);
+      }
+    }
+    for (const source of sources) await input.governance.recordSourceDiscovery(source);
+    return { ok: true, actions, not_found };
   }
 
   const actionId = request.action;
@@ -115,29 +153,40 @@ export async function serveActionRequest(input: {
     return {
       ok: false,
       action: action.id,
+      ...(claim.reason === "call_budget"
+        ? { budget: { limit: maxCalls, used: maxCalls, remaining: 0 } }
+        : {}),
       error:
         claim.reason === "list_required"
           ? {
               code: "invalid_params",
               source: action.source,
-              message: `Call list_actions with source ${JSON.stringify(action.source)} in this chat turn before using ${JSON.stringify(action.id)}.`,
+              message: input.legacyDiscovery
+                ? `Call list_actions with source ${JSON.stringify(action.source)} in this chat turn before using ${JSON.stringify(action.id)}.`
+                : `List source ${JSON.stringify(action.source)} with list_actions or describe the action with describe_actions before using ${JSON.stringify(action.id)}.`,
             }
           : {
               code: "call_budget",
               source: action.source,
-              message: `This turn has reached its limit of ${maxCalls} action calls.`,
+              message: `This turn has reached its limit of ${maxCalls} action calls. Do not call use_action again in this turn. Complete work that can use the available information and state any coverage that remains incomplete.`,
             },
     };
   }
+  const budget = {
+    limit: maxCalls,
+    used: claim.callCount,
+    remaining: Math.max(0, maxCalls - claim.callCount),
+  };
   if (claim.duplicate) {
     return {
       ok: false,
       action: action.id,
+      budget,
       error: {
         code: "duplicate_invocation",
         source: action.source,
         message:
-          "This action invocation was already admitted, so the service did not dispatch it again.",
+          "This action invocation or identical write was already admitted in this turn, so the service did not dispatch it again. Preserve its earlier result. If the outcome is uncertain, read the provider state before proposing another change; do not retry the same write with a new call id.",
       },
     };
   }
@@ -149,10 +198,11 @@ export async function serveActionRequest(input: {
     return {
       ok: false,
       action: action.id,
+      budget,
       error: {
         code: "provider_error",
         source: action.source,
-        message: `${JSON.stringify(action.id)} reached its provider retry limit in this turn. Do not call it again now; summarize any results already available and explain what remains unverified.`,
+        message: `opencompany stopped further attempts of ${JSON.stringify(action.id)} after repeated failures in this turn. This limit is enforced by opencompany; use the earlier errors to explain the cause. Do not call it again now; summarize any results already available and explain what remains unverified.`,
       },
     };
   }
@@ -172,10 +222,41 @@ export async function serveActionRequest(input: {
     ) {
       outcome = "failure";
     }
-    return response;
+    // A host gateway retains accounting across approval resumes; its snapshot
+    // takes precedence over a freshly created model-facing wrapper.
+    const hostExhausted = !response.ok && response.error.code === "call_budget";
+    return {
+      ...response,
+      budget:
+        response.budget ??
+        (hostExhausted ? { limit: maxCalls, used: maxCalls, remaining: 0 } : budget),
+    };
   } finally {
     input.governance.completeProviderAttempt?.(action.id, outcome);
   }
+}
+
+function actionDescriptor(action: ActionDescriptor): ActionDescriptor {
+  return {
+    id: action.id,
+    source: action.source,
+    description: action.description,
+    params: action.params,
+    ...(action.permissionMode ? { permissionMode: action.permissionMode } : {}),
+  };
+}
+
+export function summarizeAction(action: ActionDescriptor): ActionSummary {
+  const description = action.description.replace(/\s+/gu, " ").trim();
+  return {
+    id: action.id,
+    source: action.source,
+    description:
+      description.length <= ACTION_DESCRIPTION_PREVIEW_LENGTH
+        ? description
+        : `${description.slice(0, ACTION_DESCRIPTION_PREVIEW_LENGTH - 1).trimEnd()}…`,
+    ...(action.permissionMode ? { permissionMode: action.permissionMode } : {}),
+  };
 }
 
 export function createInMemoryActionTurnGovernance(

@@ -14,8 +14,9 @@ import {
 } from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import { captureProductEvent } from "@opencompany/analytics/product/client";
-import type { ChatEngine as ChatEngine } from "@opencompany/core";
-import type { EngineRuntimeStatus, MessageEngine } from "@opencompany/protocol";
+import type { ChatEngine } from "@opencompany/core";
+import { isSettledTaskStatus } from "@opencompany/core/tasks";
+import type { EngineRuntimeStatus, InvokeWorkflowBody, MessageEngine } from "@opencompany/protocol";
 import {
   Command,
   CommandEmpty,
@@ -24,6 +25,7 @@ import {
   CommandItem,
   CommandList,
   CommandShortcut,
+  defaultFilter,
 } from "@opencompany/ui/components/command";
 import {
   Dialog,
@@ -92,6 +94,7 @@ import {
   useSyncExternalStore,
   useTransition,
 } from "react";
+import { BotSettingsButton } from "@/components/Bots";
 import { ChatStateIndicator } from "@/components/ChatStateIndicator";
 import {
   CodingWorkspacePanel,
@@ -114,8 +117,10 @@ import { PendingActivityIndicator, ThinkingIndicator } from "@/components/chat/T
 import type { ActionApprovalRequest, CodexToolAction } from "@/components/chat/ToolCallItem";
 import { useChatAttachments } from "@/components/chat/useChatAttachments";
 import { useCreditBalance } from "@/components/chat/useCreditBalance";
+import { useWorkflowComposer } from "@/components/chat/useWorkflowComposer";
 import { useHeadlessChatTranscript } from "@/components/useHeadlessChatTranscript";
 import { useHydrated } from "@/components/useHydrated";
+import { WorkflowComposerControls } from "@/components/WorkflowComposerControls";
 import {
   AD_HOC_TASK_ID,
   AD_HOC_TASK_TOKEN,
@@ -125,6 +130,12 @@ import {
 import { isRecentChatActivity } from "@/lib/chat-activity";
 import { CHAT_ATTACHMENT_ACCEPT } from "@/lib/chat-attachment-formats";
 import { AUTO_MODEL_ATTACHMENT_CAPABILITIES, AUTO_MODEL_SELECTION } from "@/lib/chat-auto-model";
+import {
+  type ChatComposerDraft,
+  composerDraftKey,
+  persistComposerDraft,
+  readComposerDraft,
+} from "@/lib/chat-composer-draft";
 import {
   type ChatModelSelection,
   persistLastChatSelection,
@@ -160,6 +171,7 @@ import {
   chatSummaryState,
   isChatRuntimeActive,
   textFromChatUiMessage,
+  USE_ACTION_TOOL_PART_TYPE,
 } from "@/lib/chat-ui";
 import { CHAT_OUT_OF_CREDITS_MESSAGE } from "@/lib/chat-validation";
 import {
@@ -299,10 +311,6 @@ type CodexComposerUiState = {
   goalModeEnabled: boolean;
   goalObjective: string;
   goalTokenBudget: string;
-};
-type ChatComposerDraft = {
-  input: string;
-  mentions: ChatMention[];
 };
 
 function chatThreadBottomPaddingForComposerHeight(composerHeightPx: number) {
@@ -545,9 +553,10 @@ export function Surface({
     if (!initialChat || !initialChat.codexComposerSettings) return new Map();
     return new Map([[initialChat.id, initialCodexComposerUiState]]);
   });
-  const [composerDraftsByChatId, setComposerDraftsByChatId] = useState<
-    ReadonlyMap<string, ChatComposerDraft>
-  >(() => new Map());
+  const composerDraftsRef = useRef(new Map<string, ChatComposerDraft>());
+  const previousDraftTargetRef = useRef({ chatSessionId, persistedChatSessionId, draftScope: "" });
+  const [hydratedDraftScope, setHydratedDraftScope] = useState<string | null>(null);
+  const draftScope = composerDraftKey(userWorkosId, workspaceId, null);
   const [chatThreadBottomPaddingPx, setChatThreadBottomPaddingPx] = useState(
     CHAT_THREAD_MIN_BOTTOM_PADDING_PX,
   );
@@ -889,7 +898,6 @@ export function Surface({
   const backgroundChatDirective = backgroundInputDirective;
   const backgroundDirectiveTargetEngine = backgroundLaunchSelection?.engine ?? null;
   const composerEngine = backgroundChatDirective ? backgroundDirectiveTargetEngine : activeEngine;
-  const chatSendBlocked = outOfCredits && !composerEngine;
   const lowCreditBalance = Boolean(
     creditBalance &&
       creditBalance.balanceUsdMicros > 0 &&
@@ -918,6 +926,14 @@ export function Surface({
   const selectedWorkflowMention = selectedAdHocTask
     ? null
     : (activeSelectedMentions.find(isWorkflowMention) ?? null);
+  const selectedWorkflowMentionId = selectedWorkflowMention?.id;
+  const selectedWorkflow = selectedWorkflowMention
+    ? (workflowCatalog.find((workflow) => workflow.id === selectedWorkflowMention.id) ?? null)
+    : null;
+  const workflowComposer = useWorkflowComposer(selectedWorkflow);
+  const chatSendBlocked =
+    outOfCredits && (selectedWorkflow ? workflowComposer.requiresCredits : !composerEngine);
+
   const selectedWorkflowName = selectedWorkflowMention
     ? (workflowCatalog.find((workflow) => workflow.id === selectedWorkflowMention.id)?.name ??
       selectedWorkflowMention.id)
@@ -935,11 +951,13 @@ export function Surface({
       !engineSubmitting &&
       !taskCommentSubmitting &&
       !(newChatCommandOpen && commandPaletteView === "compose"),
-    ...(composerEngine === "codex" || composerEngine === "claude_code"
-      ? { capabilities: CLOUD_CODEX_ATTACHMENT_CAPABILITIES }
-      : composerChatModel === AUTO_MODEL_SELECTION
-        ? { capabilities: AUTO_MODEL_ATTACHMENT_CAPABILITIES }
-        : {}),
+    ...(selectedWorkflow
+      ? { capabilities: workflowComposer.capabilities }
+      : composerEngine === "codex" || composerEngine === "claude_code"
+        ? { capabilities: CLOUD_CODEX_ATTACHMENT_CAPABILITIES }
+        : composerChatModel === AUTO_MODEL_SELECTION
+          ? { capabilities: AUTO_MODEL_ATTACHMENT_CAPABILITIES }
+          : {}),
     upload: uploadCanonicalAttachment,
   });
   const applyDictatedInput = useCallback(
@@ -970,7 +988,12 @@ export function Surface({
     userWorkosId && mentionToken?.sigil === "#" && workflowMentionsEnabled,
   );
   useEffect(() => {
-    if (!skillCommandMenuOpen && !workflowMentionMenuOpen) return;
+    if (
+      !skillCommandMenuOpen &&
+      !workflowMentionMenuOpen &&
+      !(selectedWorkflowMentionId && !selectedWorkflow)
+    )
+      return;
     const controller = new AbortController();
     const timer = setTimeout(() => {
       if (skillCommandMenuOpen) {
@@ -978,7 +1001,7 @@ export function Surface({
           .then(setSkillCatalog)
           .catch(() => {});
       }
-      if (workflowMentionMenuOpen) {
+      if (workflowMentionMenuOpen || (selectedWorkflowMentionId && !selectedWorkflow)) {
         void fetchBrainWorkflowCatalog(controller.signal)
           .then(setWorkflowCatalog)
           .catch(() => {});
@@ -988,7 +1011,7 @@ export function Surface({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [skillCommandMenuOpen, workflowMentionMenuOpen]);
+  }, [skillCommandMenuOpen, workflowMentionMenuOpen, selectedWorkflowMentionId, selectedWorkflow]);
 
   const attachmentFileInputRef = useRef<HTMLInputElement>(null);
   const liveTranscriptSessionId =
@@ -1343,31 +1366,65 @@ export function Surface({
     ],
   );
 
-  const saveComposerDraft = useCallback((sessionId: string | null, draft: ChatComposerDraft) => {
-    if (!sessionId) return;
-    const visibleMentions = draft.mentions.filter((mention) =>
-      chatMentionIsVisible(draft.input, mention),
-    );
-    setComposerDraftsByChatId((current) => {
-      const next = new Map(current);
-      if (draft.input.length > 0) {
-        next.set(sessionId, { input: draft.input, mentions: visibleMentions });
-      } else {
-        next.delete(sessionId);
-      }
-      return next;
-    });
-  }, []);
+  const loadComposerDraft = useCallback(
+    (sessionId: string | null) => {
+      const key = composerDraftKey(userWorkosId, workspaceId, sessionId);
+      return composerDraftsRef.current.get(key) ?? readComposerDraft(key);
+    },
+    [userWorkosId, workspaceId],
+  );
 
-  const clearComposerDraft = useCallback((sessionId: string | null) => {
-    if (!sessionId) return;
-    setComposerDraftsByChatId((current) => {
-      if (!current.has(sessionId)) return current;
-      const next = new Map(current);
-      next.delete(sessionId);
-      return next;
-    });
-  }, []);
+  const saveComposerDraft = useCallback(
+    (sessionId: string | null, draft: ChatComposerDraft) => {
+      const key = composerDraftKey(userWorkosId, workspaceId, sessionId);
+      const visibleDraft = {
+        input: draft.input,
+        mentions: draft.mentions.filter((mention) => chatMentionIsVisible(draft.input, mention)),
+      };
+      composerDraftsRef.current.set(key, visibleDraft);
+      persistComposerDraft(key, visibleDraft);
+    },
+    [userWorkosId, workspaceId],
+  );
+
+  const clearComposerDraft = useCallback(
+    (sessionId: string | null) => saveComposerDraft(sessionId, { input: "", mentions: [] }),
+    [saveComposerDraft],
+  );
+
+  useLayoutEffect(() => {
+    const draft = loadComposerDraft(routedChatSessionIdRef.current);
+    // Restore browser-only state after hydration, before painting the composer.
+    setInput(draft?.input ?? "");
+    setSelectedMentions(draft?.mentions ?? []);
+    setHydratedDraftScope(draftScope);
+  }, [draftScope, loadComposerDraft]);
+
+  useEffect(() => {
+    // The initial render must not overwrite the saved draft with an empty input.
+    if (hydratedDraftScope !== draftScope) return;
+    const previous = previousDraftTargetRef.current;
+    if (
+      previous.draftScope === draftScope &&
+      previous.chatSessionId === chatSessionId &&
+      previous.persistedChatSessionId === null &&
+      persistedChatSessionId !== null
+    ) {
+      clearComposerDraft(null);
+    }
+    previousDraftTargetRef.current = { chatSessionId, persistedChatSessionId, draftScope };
+    // Until the first send is accepted, refresh still opens Home.
+    saveComposerDraft(persistedChatSessionId, { input, mentions: selectedMentions });
+  }, [
+    chatSessionId,
+    clearComposerDraft,
+    draftScope,
+    hydratedDraftScope,
+    input,
+    persistedChatSessionId,
+    saveComposerDraft,
+    selectedMentions,
+  ]);
 
   const openChat = useCallback(
     (chat: SurfaceChatSelection) => {
@@ -1389,8 +1446,8 @@ export function Surface({
 
       const engineTarget = engineChatKindFromChat(chat);
       const nextCodexComposerState = codexComposerUiStateForChat(chat, codexComposerStateByChatId);
-      saveComposerDraft(chatSessionId, { input, mentions: selectedMentions });
-      const nextDraft = chat ? (composerDraftsByChatId.get(chat.id) ?? null) : null;
+      saveComposerDraft(persistedChatSessionId, { input, mentions: selectedMentions });
+      const nextDraft = loadComposerDraft(chat?.id ?? null);
       releaseAllOptimisticAttachmentPreviews();
       routedChatSessionIdRef.current = chat?.id ?? null;
       pendingNewSessionIdRef.current = null;
@@ -1434,7 +1491,8 @@ export function Surface({
       chatSessionId,
       clearActiveTurn,
       clearError,
-      composerDraftsByChatId,
+      loadComposerDraft,
+      persistedChatSessionId,
       codexComposerStateByChatId,
       codexGoalModeEnabled,
       codexGoalObjective,
@@ -1478,9 +1536,6 @@ export function Surface({
     if (!isActivePane) return;
     const handleHomeNavigation = () => {
       openChat(null);
-      setInput("");
-      setMentionToken(null);
-      setSelectedMentions([]);
       clearComposerAttachments();
       inputRef.current?.focus({ preventScroll: true });
     };
@@ -1811,7 +1866,7 @@ export function Surface({
     const backgroundEngine = backgroundLaunch?.engine ?? null;
     const backgroundModel = backgroundLaunch?.model ?? chatModel;
     if ((isInteractionPending && !isBackgroundSubmit) || backgroundTaskSubmitting) return;
-    if (outOfCredits && !(backgroundChat ? backgroundEngine : activeEngine)) {
+    if (chatSendBlocked) {
       toast.error(CHAT_OUT_OF_CREDITS_MESSAGE, {
         action: {
           label: "Add credits",
@@ -1912,6 +1967,12 @@ export function Surface({
 
       const workflowMention = mentions.find(isWorkflowMention);
       if (workflowMention) {
+        if (workflowComposer.error || workflowComposer.attachmentError(readyAttachments)) {
+          toast.error(
+            workflowComposer.error ?? workflowComposer.attachmentError(readyAttachments)!,
+          );
+          return;
+        }
         const skillMentions = backgroundMentions.filter(isSkillMention);
         clearError();
         setInput("");
@@ -1922,6 +1983,7 @@ export function Surface({
         void startWorkflowTask({
           workspaceId,
           workflow: workflowMention,
+          stepModelOverrides: workflowComposer.overrides,
           description: messagePrompt,
           ...(skillMentions.length > 0 ? { mentions: skillMentions } : {}),
           ...(attachmentsMetadata.length > 0 ? { attachments: attachmentsMetadata } : {}),
@@ -1935,6 +1997,7 @@ export function Surface({
           .catch((error) => {
             if (!mountedRef.current) return;
             restoreDraft();
+            workflowComposer.restore();
             toast.error(
               error instanceof Error ? error.message : "Could not start that workflow task.",
             );
@@ -1967,7 +2030,7 @@ export function Surface({
           return;
         }
 
-        clearComposerDraft(chatSessionId);
+        clearComposerDraft(persistedChatSessionId);
         clearError();
         setInput("");
         setMentionToken(null);
@@ -2022,7 +2085,7 @@ export function Surface({
         return;
       }
 
-      clearComposerDraft(chatSessionId);
+      clearComposerDraft(persistedChatSessionId);
       clearError();
       setInput("");
       setMentionToken(null);
@@ -2083,7 +2146,7 @@ export function Surface({
         return;
       }
 
-      clearComposerDraft(chatSessionId);
+      clearComposerDraft(persistedChatSessionId);
       clearError();
       setInput("");
       setMentionToken(null);
@@ -2121,8 +2184,12 @@ export function Surface({
 
     const workflowMention = mentions.find(isWorkflowMention);
     if (workflowMention) {
+      if (workflowComposer.error || workflowComposer.attachmentError(readyAttachments)) {
+        toast.error(workflowComposer.error ?? workflowComposer.attachmentError(readyAttachments)!);
+        return;
+      }
       const skillMentions = mentions.filter(isSkillMention);
-      clearComposerDraft(chatSessionId);
+      clearComposerDraft(persistedChatSessionId);
       clearError();
       setInput("");
       setMentionToken(null);
@@ -2132,6 +2199,7 @@ export function Surface({
       void startWorkflowTask({
         workspaceId,
         workflow: workflowMention,
+        stepModelOverrides: workflowComposer.overrides,
         description: prompt,
         ...(skillMentions.length > 0 ? { mentions: skillMentions } : {}),
         ...(attachmentsMetadata.length > 0 ? { attachments: attachmentsMetadata } : {}),
@@ -2146,6 +2214,7 @@ export function Surface({
           if (!mountedRef.current) return;
           setInput(prompt);
           setSelectedMentions(mentions);
+          workflowComposer.restore();
           toast.error(
             error instanceof Error ? error.message : "Could not start that workflow task.",
           );
@@ -2241,7 +2310,7 @@ export function Surface({
       setCodexGoalObjective("");
       setCodexGoalTokenBudget("");
     }
-    clearComposerDraft(chatSessionId);
+    clearComposerDraft(persistedChatSessionId);
     beginActiveTurn({
       engine: messageEngine.type,
       selectedModel: String(model),
@@ -2306,14 +2375,6 @@ export function Surface({
   }, [defaultModel]);
 
   const handleActionApproval = async ({ approvalId, action, decision }: ActionApprovalRequest) => {
-    if (decision === "accept_always") {
-      const saved = await alwaysAllowChatActionAction(action).catch(() => null);
-      if (!saved?.ok) {
-        // The one-off approval still goes through; only the standing
-        // permission failed to save.
-        toast.error("Could not save the permission. Running this action once.");
-      }
-    }
     const approvalMessage = chatMessages.findLast(
       (message) =>
         message.role === "assistant" &&
@@ -2330,14 +2391,42 @@ export function Surface({
     if (!approvalMessage || !runId) {
       throw new Error("The durable Run for this approval is no longer available.");
     }
-    await headlessTransport.resolveApproval({
-      chatId: chatInstanceKey,
-      approvalId,
-      approved: decision !== "decline",
-      runId,
-      assistantMessageId: approvalMessage.id,
-      ...(approvalMessage.metadata?.model ? { model: approvalMessage.metadata.model } : {}),
-    });
+    let allowMatchingPendingActions = false;
+    if (decision === "accept_always") {
+      const saved = await alwaysAllowChatActionAction(action).catch(() => null);
+      allowMatchingPendingActions = saved?.ok === true;
+      if (!allowMatchingPendingActions) {
+        toast.error("Could not save the permission. Running this action once.");
+      }
+    }
+
+    const approvals = new Map([[approvalId, approvalMessage]]);
+    if (allowMatchingPendingActions) {
+      for (const message of chatMessages) {
+        if (message.role !== "assistant" || message.metadata?.runId !== runId) continue;
+        for (const part of message.parts) {
+          if (
+            part.type === USE_ACTION_TOOL_PART_TYPE &&
+            part.state === "approval-requested" &&
+            part.input.action === action
+          ) {
+            approvals.set(part.approval.id, message);
+          }
+        }
+      }
+    }
+    // Each command rewrites the durable assistant message. Resolve sequentially
+    // so those writes cannot race, then reconnect after all decisions are saved.
+    for (const [pendingApprovalId, message] of approvals) {
+      await headlessTransport.resolveApproval({
+        chatId: chatInstanceKey,
+        approvalId: pendingApprovalId,
+        approved: decision !== "decline",
+        runId,
+        assistantMessageId: message.id,
+        ...(message.metadata?.model ? { model: message.metadata.model } : {}),
+      });
+    }
     await resumeStream();
   };
 
@@ -2754,6 +2843,8 @@ export function Surface({
               <QuickChatComposer
                 open={newChatCommandOpen && commandPaletteView === "compose"}
                 initialPrompt={chatSearchQuery.trim()}
+                autoFocus
+                className="p-3"
                 userWorkosId={userWorkosId}
                 defaultModel={defaultModel}
                 codexConnected={codexConnected}
@@ -2766,7 +2857,13 @@ export function Surface({
               />
             </>
           ) : (
-            <Command className="bg-surface text-ink">
+            <Command
+              className="bg-surface text-ink"
+              // Equal match scores keep the recency order instead of letting cmdk rank by relevance.
+              filter={(value, search, keywords) =>
+                defaultFilter(value, search, keywords) > 0 ? 1 : 0
+              }
+            >
               <CommandInput
                 autoFocus
                 value={chatSearchQuery}
@@ -2939,6 +3036,9 @@ export function Surface({
                     isTask={Boolean(activeTaskConversation)}
                   />
                   <div className="flex shrink-0 items-center gap-2">
+                    {!readOnly && chatSessionId ? (
+                      <BotSettingsButton key={chatSessionId} conversationId={chatSessionId} />
+                    ) : null}
                     {!readOnly &&
                     chatSessionId &&
                     persistedChatSessionId === chatSessionId &&
@@ -3402,43 +3502,53 @@ export function Surface({
                       >
                         <Mic size={15} strokeWidth={1.9} />
                       </button>
-                      <ModelPicker
-                        value={composerChatModel}
-                        onChange={(model) => {
-                          setSelectedMentions((current) =>
-                            current.filter((mention) => mention.kind !== "engine"),
-                          );
-                          setChatModelOverride(model);
-                          persistLastChatSelection(userWorkosId, model);
-                          if (model === CODEX_PICKER_VALUE && model !== composerChatModel) {
-                            setCodexReasoningEffort(DEFAULT_CODEX_CHAT_REASONING_EFFORT);
-                          } else if (model === CLAUDE_PICKER_VALUE && model !== composerChatModel) {
-                            setCodexReasoningEffort(DEFAULT_CLAUDE_CHAT_REASONING_EFFORT);
-                            setCodexPlanModeEnabled(false);
-                            setCodexGoalModeEnabled(false);
-                            setCodexGoalObjective("");
-                            setCodexGoalTokenBudget("");
-                          } else if (
-                            model !== CODEX_PICKER_VALUE &&
-                            model !== CLAUDE_PICKER_VALUE
-                          ) {
-                            setCodexPlanModeEnabled(false);
-                            setCodexGoalModeEnabled(false);
-                            setCodexGoalObjective("");
-                            setCodexGoalTokenBudget("");
+                      {selectedWorkflow ? (
+                        <WorkflowComposerControls
+                          selection={workflowComposer}
+                          disabled={backgroundTaskSubmitting || readOnly || voiceDictation.isActive}
+                        />
+                      ) : (
+                        <ModelPicker
+                          value={composerChatModel}
+                          onChange={(model) => {
+                            setSelectedMentions((current) =>
+                              current.filter((mention) => mention.kind !== "engine"),
+                            );
+                            setChatModelOverride(model);
+                            persistLastChatSelection(userWorkosId, model);
+                            if (model === CODEX_PICKER_VALUE && model !== composerChatModel) {
+                              setCodexReasoningEffort(DEFAULT_CODEX_CHAT_REASONING_EFFORT);
+                            } else if (
+                              model === CLAUDE_PICKER_VALUE &&
+                              model !== composerChatModel
+                            ) {
+                              setCodexReasoningEffort(DEFAULT_CLAUDE_CHAT_REASONING_EFFORT);
+                              setCodexPlanModeEnabled(false);
+                              setCodexGoalModeEnabled(false);
+                              setCodexGoalObjective("");
+                              setCodexGoalTokenBudget("");
+                            } else if (
+                              model !== CODEX_PICKER_VALUE &&
+                              model !== CLAUDE_PICKER_VALUE
+                            ) {
+                              setCodexPlanModeEnabled(false);
+                              setCodexGoalModeEnabled(false);
+                              setCodexGoalObjective("");
+                              setCodexGoalTokenBudget("");
+                            }
+                          }}
+                          disabled={
+                            isForegroundTurnWorking ||
+                            Boolean(chatSessionId) ||
+                            voiceDictation.isActive ||
+                            readOnly
                           }
-                        }}
-                        disabled={
-                          isForegroundTurnWorking ||
-                          Boolean(chatSessionId) ||
-                          voiceDictation.isActive ||
-                          readOnly
-                        }
-                        codexConnected={codexConnected}
-                        claudeCodeConnected={claudeCodeConnected}
-                        autoModelRoutingEnabled={autoModelRoutingEnabled}
-                      />
-                      {showEngineComposerControls ? (
+                          codexConnected={codexConnected}
+                          claudeCodeConnected={claudeCodeConnected}
+                          autoModelRoutingEnabled={autoModelRoutingEnabled}
+                        />
+                      )}
+                      {showEngineComposerControls && !selectedWorkflow ? (
                         <EngineComposerControls
                           model={
                             composerEngine === "codex"
@@ -3505,12 +3615,18 @@ export function Surface({
   );
 }
 
-// The Cmd+K quick-compose surface. Same controls as the main composer (attachments,
-// model/engine picker, mentions), but it always starts new background work — it
-// never adopts the result into view or navigates to it.
-function QuickChatComposer({
+/**
+ * The composer for starting something new where there is no conversation to send into: the Cmd+K
+ * compose view and the review queue's reading pane. Same controls as the main composer
+ * (attachments, model/engine picker, mentions), but it always starts new background work — it
+ * never adopts the result into view or navigates to it. `open` means the host is presenting it:
+ * the draft is seeded when that flips on and reset when it flips off.
+ */
+export function QuickChatComposer({
   open,
   initialPrompt,
+  autoFocus = false,
+  className,
   userWorkosId,
   defaultModel,
   codexConnected,
@@ -3523,6 +3639,8 @@ function QuickChatComposer({
 }: {
   open: boolean;
   initialPrompt: string;
+  autoFocus?: boolean;
+  className?: string;
   userWorkosId: string;
   defaultModel: string;
   codexConnected: boolean;
@@ -3531,7 +3649,7 @@ function QuickChatComposer({
   autoModelRoutingEnabled: boolean;
   creditBalance: ReturnType<typeof useCreditBalance>["balance"];
   workspaceId: string;
-  onSubmitted: () => void;
+  onSubmitted?: () => void;
 }) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
@@ -3631,7 +3749,6 @@ function QuickChatComposer({
   const outOfCredits = Boolean(
     creditBalance && creditBalance.enforcementEnabled && creditBalance.balanceUsdMicros <= 0,
   );
-  const chatSendBlocked = outOfCredits && !composerEngine;
 
   const mentionOptions = buildMentionOptions({
     token: mentionToken,
@@ -3647,6 +3764,14 @@ function QuickChatComposer({
   const selectedWorkflowMention = selectedAdHocTask
     ? null
     : (activeSelectedMentions.find(isWorkflowMention) ?? null);
+  const selectedWorkflowMentionId = selectedWorkflowMention?.id;
+  const selectedWorkflow = selectedWorkflowMention
+    ? (workflowCatalog.find((workflow) => workflow.id === selectedWorkflowMention.id) ?? null)
+    : null;
+  const workflowComposer = useWorkflowComposer(selectedWorkflow);
+  const chatSendBlocked =
+    outOfCredits && (selectedWorkflow ? workflowComposer.requiresCredits : !composerEngine);
+
   const selectedWorkflowName = selectedWorkflowMention
     ? (workflowCatalog.find((workflow) => workflow.id === selectedWorkflowMention.id)?.name ??
       selectedWorkflowMention.id)
@@ -3656,16 +3781,19 @@ function QuickChatComposer({
   const composerAttachments = useChatAttachments({
     modelName: String(composerChatModel),
     enabled: attachmentsEnabled && !isSubmitting,
-    ...(composerEngine === "codex" || composerEngine === "claude_code"
-      ? { capabilities: CLOUD_CODEX_ATTACHMENT_CAPABILITIES }
-      : composerChatModel === AUTO_MODEL_SELECTION
-        ? { capabilities: AUTO_MODEL_ATTACHMENT_CAPABILITIES }
-        : {}),
+    ...(selectedWorkflow
+      ? { capabilities: workflowComposer.capabilities }
+      : composerEngine === "codex" || composerEngine === "claude_code"
+        ? { capabilities: CLOUD_CODEX_ATTACHMENT_CAPABILITIES }
+        : composerChatModel === AUTO_MODEL_SELECTION
+          ? { capabilities: AUTO_MODEL_ATTACHMENT_CAPABILITIES }
+          : {}),
     upload: uploadCanonicalAttachment,
   });
 
-  // The dialog stays mounted across opens; reset to a pristine draft each time it closes
-  // so a stale prompt, attachment, or engine choice never leaks into the next invocation.
+  // A host can hide the composer without unmounting it (the palette dialog does); reset to a
+  // pristine draft each time it does so a stale prompt, attachment, or engine choice never leaks
+  // into the next invocation.
   const clearAttachments = composerAttachments.clearAttachments;
   useEffect(() => {
     if (open) return;
@@ -3689,8 +3817,10 @@ function QuickChatComposer({
     /* eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot seed on open, not a render loop */
     setInput(initialPrompt);
     if (initialPrompt) pendingInputCaretRef.current = initialPrompt.length;
-    inputRef.current?.focus();
-  }, [open, initialPrompt]);
+    // A host that opens the composer deliberately (a dialog) takes the caret; one that keeps it
+    // on screen beside other work leaves focus where the reader put it.
+    if (autoFocus) inputRef.current?.focus();
+  }, [open, initialPrompt, autoFocus]);
 
   // Mirrors the main composer: refetch each catalog whenever its menu opens so
   // recently created Skills and workflows show up.
@@ -3699,7 +3829,12 @@ function QuickChatComposer({
     userWorkosId && mentionToken?.sigil === "#" && workflowMentionsEnabled,
   );
   useEffect(() => {
-    if (!skillCommandMenuOpen && !workflowMentionMenuOpen) return;
+    if (
+      !skillCommandMenuOpen &&
+      !workflowMentionMenuOpen &&
+      !(selectedWorkflowMentionId && !selectedWorkflow)
+    )
+      return;
     const controller = new AbortController();
     const timer = setTimeout(() => {
       if (skillCommandMenuOpen) {
@@ -3707,7 +3842,7 @@ function QuickChatComposer({
           .then(setSkillCatalog)
           .catch(() => {});
       }
-      if (workflowMentionMenuOpen) {
+      if (workflowMentionMenuOpen || (selectedWorkflowMentionId && !selectedWorkflow)) {
         void fetchBrainWorkflowCatalog(controller.signal)
           .then(setWorkflowCatalog)
           .catch(() => {});
@@ -3717,7 +3852,7 @@ function QuickChatComposer({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [skillCommandMenuOpen, workflowMentionMenuOpen]);
+  }, [skillCommandMenuOpen, workflowMentionMenuOpen, selectedWorkflowMentionId, selectedWorkflow]);
 
   useEffect(() => {
     const el = inputRef.current;
@@ -3994,7 +4129,7 @@ function QuickChatComposer({
       setInput("");
       setMentionToken(null);
       setSelectedMentions([]);
-      onSubmitted();
+      onSubmitted?.();
       void startAdHocTask({
         description: prompt,
         model: String(backgroundModel),
@@ -4005,7 +4140,8 @@ function QuickChatComposer({
           : {}),
       })
         .then(({ task }) => {
-          // Not gated on mountedRef: the dialog has already closed.
+          // Not gated on mountedRef: router.refresh() and toast are global, and the host may
+          // have dismissed this composer by now.
           router.refresh();
           toast.success(`Started ${task.name} in the background.`);
         })
@@ -4022,23 +4158,27 @@ function QuickChatComposer({
 
     const workflowMention = mentions.find(isWorkflowMention);
     if (workflowMention) {
+      if (workflowComposer.error || workflowComposer.attachmentError(readyAttachments)) {
+        toast.error(workflowComposer.error ?? workflowComposer.attachmentError(readyAttachments)!);
+        return;
+      }
       const skillMentions = mentions.filter(isSkillMention);
       setIsSubmitting(true);
       setInput("");
       setMentionToken(null);
       setSelectedMentions([]);
       composerAttachments.clearAttachments();
-      onSubmitted();
+      onSubmitted?.();
       void startWorkflowTask({
         workspaceId,
         workflow: workflowMention,
+        stepModelOverrides: workflowComposer.overrides,
         description: prompt,
         ...(skillMentions.length > 0 ? { mentions: skillMentions } : {}),
         ...(attachmentsMetadata.length > 0 ? { attachments: attachmentsMetadata } : {}),
       })
         .then(({ task }) => {
-          // Not gated on mountedRef: the dialog (and this component) has already
-          // closed by the time this resolves — router.refresh()/toast are global.
+          // Not gated on mountedRef: see the background-task branch above.
           router.refresh();
           toast.success(`Started ${task.name} in the background.`);
         })
@@ -4059,8 +4199,8 @@ function QuickChatComposer({
 
     const targetEngine = isBackgroundChatDirective ? backgroundEngine : selectedEngine;
     if (targetEngine) {
-      // Validate before clearing attachments / closing the dialog: once onSubmitted()
-      // unmounts this component, there's no visible composer left to restore a draft into.
+      // Validate before clearing attachments and telling the host the draft is sent: once the
+      // host dismisses the composer there is no visible draft left to restore the prompt into.
       const settings =
         targetEngine === "claude_code"
           ? ({ ok: true, settings: { reasoningEffort: codexReasoningEffort } } as const)
@@ -4081,7 +4221,7 @@ function QuickChatComposer({
 
       setIsSubmitting(true);
       composerAttachments.clearAttachments();
-      onSubmitted();
+      onSubmitted?.();
       toast("Started a new chat in the background.");
 
       const engine = targetEngine;
@@ -4132,7 +4272,7 @@ function QuickChatComposer({
 
     setIsSubmitting(true);
     composerAttachments.clearAttachments();
-    onSubmitted();
+    onSubmitted?.();
     toast("Started a new chat in the background.");
 
     const newSessionId = newOptimisticChatSessionId();
@@ -4182,7 +4322,7 @@ function QuickChatComposer({
   const showEngineComposerControls = isEngineChat;
 
   return (
-    <div className="flex flex-col gap-2 p-3">
+    <div className={cn("flex flex-col gap-2", className)}>
       {mentionToken && mentionOptions.length > 0 ? (
         <div
           role="listbox"
@@ -4359,37 +4499,41 @@ function QuickChatComposer({
                 </button>
               </>
             ) : null}
-            <ModelPicker
-              value={composerChatModel}
-              onChange={(model) => {
-                // Deliberately not persisted via persistLastChatSelection: this picker
-                // only applies to this one quick-compose chat, not the app-wide "last used
-                // model" default the main composer reads on its next fresh session.
-                setSelectedMentions((current) =>
-                  current.filter((mention) => mention.kind !== "engine"),
-                );
-                setChatModelOverride(model);
-                if (model === CODEX_PICKER_VALUE && model !== composerChatModel) {
-                  setCodexReasoningEffort(DEFAULT_CODEX_CHAT_REASONING_EFFORT);
-                } else if (model === CLAUDE_PICKER_VALUE && model !== composerChatModel) {
-                  setCodexReasoningEffort(DEFAULT_CLAUDE_CHAT_REASONING_EFFORT);
-                  setCodexPlanModeEnabled(false);
-                  setCodexGoalModeEnabled(false);
-                  setCodexGoalObjective("");
-                  setCodexGoalTokenBudget("");
-                } else if (model !== CODEX_PICKER_VALUE && model !== CLAUDE_PICKER_VALUE) {
-                  setCodexPlanModeEnabled(false);
-                  setCodexGoalModeEnabled(false);
-                  setCodexGoalObjective("");
-                  setCodexGoalTokenBudget("");
-                }
-              }}
-              disabled={isSubmitting}
-              codexConnected={codexConnected}
-              claudeCodeConnected={claudeCodeConnected}
-              autoModelRoutingEnabled={autoModelRoutingEnabled}
-            />
-            {showEngineComposerControls ? (
+            {selectedWorkflow ? (
+              <WorkflowComposerControls selection={workflowComposer} disabled={isSubmitting} />
+            ) : (
+              <ModelPicker
+                value={composerChatModel}
+                onChange={(model) => {
+                  // Deliberately not persisted via persistLastChatSelection: this picker
+                  // only applies to this one quick-compose chat, not the app-wide "last used
+                  // model" default the main composer reads on its next fresh session.
+                  setSelectedMentions((current) =>
+                    current.filter((mention) => mention.kind !== "engine"),
+                  );
+                  setChatModelOverride(model);
+                  if (model === CODEX_PICKER_VALUE && model !== composerChatModel) {
+                    setCodexReasoningEffort(DEFAULT_CODEX_CHAT_REASONING_EFFORT);
+                  } else if (model === CLAUDE_PICKER_VALUE && model !== composerChatModel) {
+                    setCodexReasoningEffort(DEFAULT_CLAUDE_CHAT_REASONING_EFFORT);
+                    setCodexPlanModeEnabled(false);
+                    setCodexGoalModeEnabled(false);
+                    setCodexGoalObjective("");
+                    setCodexGoalTokenBudget("");
+                  } else if (model !== CODEX_PICKER_VALUE && model !== CLAUDE_PICKER_VALUE) {
+                    setCodexPlanModeEnabled(false);
+                    setCodexGoalModeEnabled(false);
+                    setCodexGoalObjective("");
+                    setCodexGoalTokenBudget("");
+                  }
+                }}
+                disabled={isSubmitting}
+                codexConnected={codexConnected}
+                claudeCodeConnected={claudeCodeConnected}
+                autoModelRoutingEnabled={autoModelRoutingEnabled}
+              />
+            )}
+            {showEngineComposerControls && !selectedWorkflow ? (
               <EngineComposerControls
                 model={
                   composerEngine === "codex"
@@ -5074,7 +5218,7 @@ function findActiveMentionToken(value: string, caret: number): ActiveMentionToke
 function chatMentionToken(mention: ChatMention) {
   if (mention.kind === "engine") return mention.id === "claude" ? "@claude" : "@codex";
   if (mention.kind === "workflow") return `#${mention.id}`;
-  return `/${mention.id}`;
+  return `/${mention.name ?? mention.id}`;
 }
 
 function chatMentionIsVisible(value: string, mention: ChatMention) {
@@ -5248,8 +5392,9 @@ function skillMentionsFromPastedText(input: {
   skills: SkillCatalogItem[];
 }): ChatMention[] {
   return input.skills.flatMap((skill) => {
-    if (!input.skillIds.has(skill.id)) return [];
-    const mention: ChatMention = { kind: "skill", id: skill.id };
+    if (!input.skillIds.has(skill.name) && !input.skillIds.has(skill.id)) return [];
+    if (input.skills.filter((candidate) => candidate.name === skill.name).length !== 1) return [];
+    const mention: ChatMention = { kind: "skill", id: skill.id, name: skill.name };
     return chatMentionIsVisible(input.pastedText, mention) &&
       chatMentionIsVisible(input.fullInput, mention)
       ? [mention]
@@ -5360,10 +5505,17 @@ function buildMentionOptions(input: {
       if (query && !haystack.includes(query)) continue;
       options.push({
         kind: "skill",
-        token: `/${skill.id}`,
+        token: `/${skill.name}`,
         label: skill.name,
-        description: skill.description,
-        mention: { kind: "skill", id: skill.id },
+        description: [
+          skill.scope === "personal"
+            ? "Personal"
+            : skill.scope === "company"
+              ? "Company"
+              : "Plugin",
+          skill.description,
+        ].join(" · "),
+        mention: { kind: "skill", id: skill.id, name: skill.name },
       });
     }
     return options;
@@ -5436,11 +5588,13 @@ async function startWorkflowTask(input: {
   description: string;
   mentions?: Extract<ChatMention, { kind: "skill" }>[];
   attachments?: ChatUiAttachment[];
+  stepModelOverrides?: InvokeWorkflowBody["stepModelOverrides"];
 }) {
   const payload = await invokeHeadlessWorkflow(
     input.workflow.id,
     {
       description: input.description,
+      ...(input.stepModelOverrides?.length ? { stepModelOverrides: input.stepModelOverrides } : {}),
       ...(input.mentions?.length ? { skillIds: input.mentions.map((mention) => mention.id) } : {}),
       ...(input.attachments?.length
         ? { attachmentIds: input.attachments.map((attachment) => attachment.id) }
@@ -5534,6 +5688,7 @@ function CodingEngineModelPicker({
   const selectedModel =
     models.find((model) => model.id === value) ?? models.find((model) => model.id === defaultValue);
   const selectedLabel = selectedModel?.label ?? `${engineLabel} model`;
+  const visibleModels = models.filter((model) => model.id !== "anthropic/claude-opus-4.8");
   const ModelIcon = provider === "anthropic" ? AnthropicIcon : OpenAIIcon;
 
   return (
@@ -5557,7 +5712,7 @@ function CodingEngineModelPicker({
         <Command className="bg-surface text-ink">
           <CommandList>
             <CommandGroup heading={`${engineLabel} models`}>
-              {models.map((model) => (
+              {visibleModels.map((model) => (
                 <CommandItem
                   key={model.id}
                   value={model.id}
@@ -6339,9 +6494,7 @@ function ResultRow({ task, onArchive }: { task: TaskView; onArchive: (task: Task
   const title = task.name;
   const href = `/tasks/${encodeURIComponent(task.displayId)}`;
   const prefetchTask = () => router.prefetch(href);
-  const canArchive =
-    Boolean(task.sessionId) &&
-    (task.status === "succeeded" || task.status === "failed" || task.status === "canceled");
+  const canArchive = Boolean(task.sessionId) && isSettledTaskStatus(task.status);
   return (
     <div className="group/result relative flex items-center rounded-lg px-2 py-1 transition-colors duration-150 hover:bg-surface-hover focus-within:bg-surface-hover">
       <Link
@@ -6549,6 +6702,7 @@ function ModelPicker({
             ) : null}
             <CommandGroup heading="Models">
               {MODELS.map((model) => {
+                if (model.id === "anthropic/claude-opus-4.8") return null;
                 const isSelected =
                   !isAutoSelected && !isEngineSelected && model.id === selectedModel?.id;
                 return (

@@ -9,6 +9,7 @@ import {
 import type { CodexChatSession, CodexChatTurn } from "@opencompany/db/product-schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AcpHarnessTurnInput } from "./acp-harness";
+import { loadBotIdentityPrompt } from "./bot-context";
 import {
   CodexChatInterruptedError,
   claimCodexChatRecovery,
@@ -19,7 +20,11 @@ import {
   runCodexChatTurn,
   summarizeCodexChatRecoveryProgress,
 } from "./codex-chat";
-import { CodexChatHandoffError, CodexChatRetryableInfrastructureError } from "./codex-chat-errors";
+import {
+  CodexChatHandoffError,
+  CodexChatRetryableInfrastructureError,
+  TaskActionApprovalPauseError,
+} from "./codex-chat-errors";
 import type { RunnerEnv } from "./env";
 
 const acpMocks = vi.hoisted(() => ({ runTurn: vi.fn() }));
@@ -80,6 +85,8 @@ const sandboxMocks = vi.hoisted(() => ({
 }));
 const skillMocks = vi.hoisted(() => ({ materializeCodexSkillSnapshotsForSession: vi.fn() }));
 
+vi.mock("./bot-context", () => ({ loadBotIdentityPrompt: vi.fn(async () => "") }));
+
 vi.mock("./acp-harness", () => ({
   AcpHarness: class AcpHarness {
     async runTurn(input: AcpHarnessTurnInput) {
@@ -108,13 +115,14 @@ vi.mock("./codex-cli", () => ({
   killLeftoverCodexTurnProcesses: cliMocks.killLeftoverCodexTurnProcesses,
 }));
 
-vi.mock("./coding-agent-shared", () => ({
+vi.mock("./coding-agent-shared", async (importOriginal) => ({
   GITHUB_RECONNECT_NOTICE:
     "GitHub needs reconnecting. This turn continued without GitHub access. Reconnect GitHub in Settings.",
   GITHUB_UNAVAILABLE_NOTICE:
     "GitHub access is temporarily unavailable. This turn continued without GitHub access.",
   buildGitHubCommandEnv: () => ({}),
-  createKnownSecretRedactor: () => (value: string) => value,
+  createKnownSecretRedactor: (await importOriginal<typeof import("./coding-agent-shared")>())
+    .createKnownSecretRedactor,
   gitAuthHeader: (token: string) => `Authorization: Basic ${token}`,
   githubSandboxTokenMinimumValidityMs: (turnTimeoutMs: number) => turnTimeoutMs + 600_000,
   loadGitHubAuthForUser: githubAuthMocks.loadGitHubAuthForUser,
@@ -214,6 +222,32 @@ describe("createTurnAbortCheck", () => {
     dbMocks.selectRows.length = 0;
   });
 
+  it("stops for a persisted task approval and lets cancellation take precedence", async () => {
+    const checkAbort = createTurnAbortCheck({
+      turnId: "turn_1",
+      leaseId: "lease_1",
+      leaseOwner: "runner_1",
+    });
+    dbMocks.selectRows.push([
+      {
+        interruptRequestedAt: null,
+        leaseId: "lease_1",
+        leaseOwner: "runner_1",
+        taskActionApprovalPending: true,
+      },
+    ]);
+    await expect(checkAbort(true)).rejects.toBeInstanceOf(TaskActionApprovalPauseError);
+    dbMocks.selectRows.push([
+      {
+        interruptRequestedAt: new Date(),
+        leaseId: "lease_1",
+        leaseOwner: "runner_1",
+        taskActionApprovalPending: true,
+      },
+    ]);
+    await expect(checkAbort(true)).rejects.toBeInstanceOf(CodexChatInterruptedError);
+  });
+
   it("prioritizes a durable user interrupt over a concurrent runner handoff", async () => {
     dbMocks.selectRows.push([
       {
@@ -299,6 +333,45 @@ describe("ACP elicitation translation", () => {
     },
   };
 
+  const claudeAskUserQuestionSchema = {
+    mode: "form",
+    sessionId: "session_1",
+    toolCallId: "tool_1",
+    message: "What should remove an item from the For Review list?",
+    requestedSchema: {
+      type: "object",
+      properties: {
+        question_0: {
+          type: "string",
+          title: "Clearing",
+          oneOf: [
+            {
+              const: "Just opening it (Recommended)",
+              title: "Just opening it (Recommended)",
+              description: "Mark the conversation seen when its detail opens.",
+            },
+            {
+              const: "Explicitly clearing it",
+              title: "Explicitly clearing it",
+              description: "Keep the item until the user clears it.",
+            },
+          ],
+        },
+        question_0_custom: {
+          type: "string",
+          title: "Other",
+          description: "Type your own answer instead of choosing an option above (optional).",
+          _meta: {
+            _askUserQuestionCustomAnswer: {
+              questionId: "question_0",
+              isCustomAnswer: true,
+            },
+          },
+        },
+      },
+    },
+  };
+
   it("folds Codex's hidden Other field into one logical question", () => {
     expect(
       elicitationUserInputParams({
@@ -336,6 +409,92 @@ describe("ACP elicitation translation", () => {
         answers: { branch: { answers: ["release/next"] } },
       }),
     ).toEqual({ branch_other: "release/next" });
+  });
+
+  it("folds Claude AskUserQuestion's shared custom-answer field into one logical question", () => {
+    expect(
+      elicitationUserInputParams({
+        params: claudeAskUserQuestionSchema,
+        engineSessionId: "session_1",
+        turnId: "turn_1",
+      }),
+    ).toMatchObject({
+      itemId: "tool_1",
+      questions: [
+        {
+          id: "question_0",
+          header: "Clearing",
+          question: "What should remove an item from the For Review list?",
+          isOther: true,
+          options: [
+            {
+              label: "Just opening it (Recommended)",
+              description: "Mark the conversation seen when its detail opens.",
+            },
+            {
+              label: "Explicitly clearing it",
+              description: "Keep the item until the user clears it.",
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("returns Claude AskUserQuestion selections and custom answers under the adapter fields", () => {
+    expect(
+      elicitationContent(claudeAskUserQuestionSchema, {
+        answers: { question_0: { answers: ["Explicitly clearing it"] } },
+      }),
+    ).toEqual({ question_0: "Explicitly clearing it" });
+    expect(
+      elicitationContent(claudeAskUserQuestionSchema, {
+        answers: { question_0: { answers: ["After archiving it"] } },
+      }),
+    ).toEqual({ question_0_custom: "After archiving it" });
+  });
+
+  it("does not count Claude custom-answer companions toward the logical question limit", () => {
+    const secondQuestion = {
+      question_1: {
+        type: "string",
+        title: "Timing",
+        oneOf: [{ const: "Immediately", title: "Immediately" }],
+      },
+      question_1_custom: {
+        type: "string",
+        title: "Other",
+        _meta: {
+          _askUserQuestionCustomAnswer: {
+            questionId: "question_1",
+            isCustomAnswer: true,
+          },
+        },
+      },
+    };
+    const params = {
+      ...claudeAskUserQuestionSchema,
+      requestedSchema: {
+        ...claudeAskUserQuestionSchema.requestedSchema,
+        properties: {
+          ...claudeAskUserQuestionSchema.requestedSchema.properties,
+          ...secondQuestion,
+        },
+      },
+    };
+
+    expect(
+      elicitationUserInputParams({
+        params,
+        engineSessionId: "session_1",
+        turnId: "turn_1",
+      }),
+    ).toMatchObject({
+      questions: [
+        { id: "question_0", isOther: true },
+        { id: "question_1", isOther: true },
+      ],
+    });
   });
 
   it("coerces standard MCP boolean, integer, and enum form answers", () => {
@@ -516,7 +675,36 @@ describe("runCodexChatTurn over ACP", () => {
     acpMocks.runTurn.mockImplementation(completeAcpTurn);
   });
 
+  it("passes workspace billing ownership to the sandbox independently of model credentials", async () => {
+    await runCodexChatTurn({ turn: codexTurn(), session: codexSession(), env: env() });
+    expect(sandboxMocks.createOrConnectSandbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        billingOwner: { namespace: "test", workspaceId: "workspace_1", userWorkosId: "user_1" },
+      }),
+    );
+  });
+
+  it.each(["goat-codex-host-tools.v4", ACTION_HOST_TOOL_CONTRACT_VERSION])(
+    "keeps action discovery guidance aligned with %s",
+    async (hostToolContractVersion) => {
+      await runCodexChatTurn({
+        turn: codexTurn(),
+        session: codexSession({ workspaceId: "workspace_1", hostToolContractVersion }),
+        canonicalAttemptId: "attempt_1",
+        env: env({ runnerPublicUrl: "https://runner.example.com" }),
+      });
+      const harnessInput = acpMocks.runTurn.mock.calls[0]?.[0] as AcpHarnessTurnInput;
+      expect(harnessInput.task.includes("describe_actions")).toBe(
+        hostToolContractVersion === ACTION_HOST_TOOL_CONTRACT_VERSION,
+      );
+      expect(harnessInput.task).toContain("Use list_actions to discover sources");
+    },
+  );
+
   it("uses the Codex adapter with model, reasoning, plan, goal, and the shared MCP", async () => {
+    vi.mocked(loadBotIdentityPrompt).mockResolvedValueOnce(
+      "Bot identity: customer research assistant.",
+    );
     await expect(
       runCodexChatTurn({
         turn: codexTurn({
@@ -549,7 +737,8 @@ describe("runCodexChatTurn over ACP", () => {
       }),
     );
     const harnessInput = acpMocks.runTurn.mock.calls[0]?.[0] as AcpHarnessTurnInput;
-    expect(harnessInput.task).toContain("list_actions and use_action");
+    expect(harnessInput.task).toContain("Bot identity: customer research assistant.");
+    expect(harnessInput.task).toContain("Use list_actions to discover sources");
     expect(harnessInput.task).toContain("Actions may modify connected services");
     expect(harnessInput.task).toContain("denial is a normal outcome");
     expect(harnessInput.task).not.toContain("cannot modify connected services");
@@ -572,6 +761,53 @@ describe("runCodexChatTurn over ACP", () => {
       attemptId: "attempt_1",
       leaseId: "lease_1",
     });
+  });
+
+  it.each([
+    "504: Failed to place sandbox: placement timed out after 2 attempt(s), please retry",
+    "502: Server Error",
+  ])("preserves sandbox acquisition diagnostics for %s", async (message) => {
+    const error = new Error(message);
+    error.name = "SandboxError";
+    sandboxMocks.createOrConnectSandbox.mockRejectedValueOnce(error);
+    sandboxMocks.isRetryableSandboxAcquisitionError.mockReturnValueOnce(true);
+
+    await expect(
+      runCodexChatTurn({
+        turn: codexTurn(),
+        session: codexSession(),
+        canonicalAttemptId: "attempt_1",
+        env: env(),
+      }),
+    ).rejects.toMatchObject({
+      name: CodexChatRetryableInfrastructureError.name,
+      cause: error,
+      diagnosticMessage: `[connect_sandbox] SandboxError: ${message}`,
+    });
+    expect(acpMocks.runTurn).not.toHaveBeenCalled();
+    for (const result of eventMocks.createExternalEngineProjector.mock.results) {
+      expect(result.value.fail).not.toHaveBeenCalled();
+    }
+  });
+
+  it("redacts credentials from persisted sandbox acquisition diagnostics", async () => {
+    const error = new Error("504: codex_secret runner_secret");
+    error.name = "SandboxError";
+    sandboxMocks.createOrConnectSandbox.mockRejectedValueOnce(error);
+    sandboxMocks.isRetryableSandboxAcquisitionError.mockReturnValueOnce(true);
+
+    const failure = await runCodexChatTurn({
+      turn: codexTurn(),
+      session: codexSession(),
+      canonicalAttemptId: "attempt_1",
+      env: env({ internalToken: "runner_secret" }),
+    }).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(CodexChatRetryableInfrastructureError);
+    const diagnostic = (failure as CodexChatRetryableInfrastructureError).diagnosticMessage;
+    expect(diagnostic).toContain("[connect_sandbox] SandboxError: 504:");
+    expect(diagnostic).not.toContain("codex_secret");
+    expect(diagnostic).not.toContain("runner_secret");
   });
 
   it("retries a Codex ACP setup command timeout as infrastructure failure", async () => {
@@ -795,6 +1031,34 @@ describe("runCodexChatTurn over ACP", () => {
         failureDiagnostic: expect.stringContaining("checkpoint storage unavailable"),
       }),
     );
+  });
+
+  it("preserves infrastructure recovery when Plugin checkpointing also fails", async () => {
+    const { pluginPackage, mcpPlugin } = approvedPluginRuntime();
+    pluginRuntimeMocks.loadChatSessionPluginRuntime.mockResolvedValueOnce({
+      plugins: [pluginPackage],
+      skills: [],
+      mcpPlugins: [mcpPlugin],
+    });
+    const failure = new CodexChatRetryableInfrastructureError(
+      "Sandbox guest stopped answering",
+      new Error("probe timeout"),
+    );
+    acpMocks.runTurn.mockRejectedValueOnce(failure);
+    pluginDataMocks.checkpoint.mockRejectedValueOnce(new Error("guest checkpoint timed out"));
+
+    await expect(
+      runCodexChatTurn({
+        turn: codexTurn(),
+        session: codexSession({ workspaceId: "workspace_1" }),
+        env: env(),
+      }),
+    ).rejects.toBe(failure);
+
+    expect(pluginDataMocks.checkpoint).toHaveBeenCalledOnce();
+    expect(pluginDataMocks.release).toHaveBeenCalledOnce();
+    const projector = eventMocks.createExternalEngineProjector.mock.results.at(-1)?.value;
+    expect(projector.fail).not.toHaveBeenCalled();
   });
 
   it("bootstraps durable history after ACP invalidates a stored session", async () => {
@@ -1213,7 +1477,7 @@ function codexSession(overrides: Partial<CodexChatSession> = {}): CodexChatSessi
     engine: "codex",
     model: "gpt-5.5",
     brainRef: null,
-    workspaceId: null,
+    workspaceId: "workspace_1",
     hostToolContractVersion: null,
     sandboxId: "sbx_existing",
     codexThreadId: "thread_existing",

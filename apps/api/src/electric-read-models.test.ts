@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ElectricReadModelProxy } from "./electric-read-models";
+import { ElectricReadModelProxy, parseElectricAuthMode } from "./electric-read-models";
 
 const loggerMocks = vi.hoisted(() => ({
   debug: vi.fn(),
@@ -32,6 +32,40 @@ const actor = {
 describe("Electric read models", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("selects self-hosted auth while retaining cloud credentials for rollback", async () => {
+    let requestedUrl: URL | undefined;
+    let requestedHeaders: HeadersInit | undefined;
+    const proxy = new ElectricReadModelProxy({
+      electricUrl: "https://electric.example.test",
+      authMode: "self-hosted",
+      sourceId: "retained_cloud_source",
+      sourceSecret: "retained_cloud_secret",
+      electricSecret: "self_hosted_secret",
+      token: "retained_bearer_token",
+      fetch: vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+        requestedUrl = new URL(String(input));
+        requestedHeaders = init?.headers;
+        return Response.json([]);
+      }) as typeof fetch,
+    });
+
+    await proxy.stream({
+      actor,
+      readModel: "chat-conversations-v1",
+      requestUrl: new URL("https://api.example.test/v1/read-models/chat-conversations-v1"),
+    });
+
+    expect(requestedUrl?.searchParams.get("secret")).toBe("self_hosted_secret");
+    expect(requestedUrl?.searchParams.has("source_id")).toBe(false);
+    expect(requestedHeaders).toEqual({});
+  });
+
+  it("rejects an unknown Electric auth mode", () => {
+    expect(() => parseElectricAuthMode("automatic")).toThrow(
+      "ELECTRIC_AUTH_MODE must be one of: cloud, self-hosted, bearer, insecure.",
+    );
   });
 
   it("keeps the v1 Conversation shape stable for deployed clients", async () => {
@@ -226,7 +260,7 @@ describe("Electric read models", () => {
               id: "integration_1",
               user_workos_id: "must-not-cross",
               workspace_id: "workspace_1",
-              provider: "jamie",
+              provider: "notion",
               external_id: "123456",
               connection_label: "opencompany",
               account_name: "opencompany",
@@ -253,13 +287,14 @@ describe("Electric read models", () => {
 
     expect(requestedUrl?.searchParams.get("table")).toBe("goat.integrations");
     expect(requestedUrl?.searchParams.get("where")).toBe(
-      `(("user_workos_id" = $1 AND "workspace_id" IS NULL) OR "workspace_id" = $2) ` +
+      `"user_workos_id" = $1 AND "workspace_id" IS NULL AND CAST($2 AS text) = CAST($2 AS text) ` +
         `AND CAST($3 AS text) = CAST($3 AS text)`,
     );
     expect(requestedUrl?.searchParams.get("params[1]")).toBe("user_1");
     expect(requestedUrl?.searchParams.get("params[2]")).toBe("workspace_1");
     expect(requestedUrl?.searchParams.get("params[3]")?.split(",")).toEqual([
       "gmail",
+      "google_admin",
       "google_calendar",
       "google_drive",
       "linear",
@@ -273,6 +308,7 @@ describe("Electric read models", () => {
       "fathom",
       "attio",
       "betterstack",
+      "convex",
       "render",
       "vercel",
       "signoz",
@@ -280,12 +316,15 @@ describe("Electric read models", () => {
       "latitude",
       "posthog",
       "neon",
+      "notion",
+      "supabase",
+      "resend",
       "x_account",
     ]);
     expect(requestedUrl?.searchParams.get("columns")).not.toContain("credential");
     expect((await response.json())[0]?.value).toEqual({
       id: "integration_1",
-      provider: "jamie",
+      provider: "notion",
       workspaceId: "workspace_1",
       externalId: "123456",
       connectionLabel: "opencompany",
@@ -1164,6 +1203,7 @@ describe("Electric read models", () => {
               error: null,
               reported_status: "done",
               outcome_comment: "Reviewed",
+              has_unseen: true,
               archived_at: null,
               created_at: "2026-08-11 10:00:00+00",
               updated_at: "2026-08-11 10:01:00+00",
@@ -1210,6 +1250,7 @@ describe("Electric read models", () => {
             reportedStatus: "done",
             comment: "Reviewed",
           },
+          hasUnseen: true,
           archivedAt: null,
           createdAt: "2026-08-11T10:00:00.000Z",
           updatedAt: "2026-08-11T10:01:00.000Z",

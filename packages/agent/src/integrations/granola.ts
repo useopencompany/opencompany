@@ -9,7 +9,7 @@ import { markIntegrationStatus, saveIntegrationCredential } from "@opencompany/d
 import { integrations } from "@opencompany/db/product-schema";
 import { and, desc, eq, ne, sql } from "drizzle-orm";
 import type { GranolaProviderState } from "../integration-state";
-import { captureIntegrationAddedAnalytics } from "./analytics";
+import { captureConnectionAddedAnalytics } from "./analytics";
 
 export const GRANOLA_API_BASE_URL = "https://public-api.granola.ai/v1";
 
@@ -160,7 +160,8 @@ export async function connectGranolaIntegration(input: {
     db,
   );
 
-  await captureIntegrationAddedAnalytics({
+  await captureConnectionAddedAnalytics({
+    connectionId: integration.id,
     userWorkosId: input.userWorkosId,
     provider: "granola",
   });

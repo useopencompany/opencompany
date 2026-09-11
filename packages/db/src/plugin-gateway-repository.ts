@@ -1,10 +1,12 @@
 import type { PluginCapabilityDefinition, PluginGatewayDiscoveredTool } from "@opencompany/core";
-import { and, asc, eq, lte } from "drizzle-orm";
+import { and, asc, eq, lte, sql } from "drizzle-orm";
+import { type PluginReader, pluginAccess } from "./plugin-access";
 import { pluginGatewayRegistrations, plugins } from "./product-schema";
 
 type DbLike = any;
 
 export type PluginGatewayRegistrationRecord = {
+  sourceType?: "github" | "skills.sh" | "custom_mcp";
   id: string;
   workspaceId: string;
   pluginId: string;
@@ -27,11 +29,12 @@ export type PluginGatewayRegistrationRecord = {
 
 export async function listActivePluginGatewayRegistrations(
   db: DbLike,
-  input: { workspaceId: string; pluginName?: string; connectionProvider?: string },
+  input: PluginReader & { workspaceId: string; pluginName?: string; connectionProvider?: string },
 ): Promise<PluginGatewayRegistrationRecord[]> {
   const filters = [
     eq(pluginGatewayRegistrations.workspaceId, input.workspaceId),
     eq(plugins.status, "enabled"),
+    pluginAccess(input),
   ];
   if (input.pluginName) filters.push(eq(plugins.name, input.pluginName));
   if (input.connectionProvider) {
@@ -41,6 +44,7 @@ export async function listActivePluginGatewayRegistrations(
   const rows = await db
     .select({
       id: pluginGatewayRegistrations.id,
+      sourceType: plugins.sourceType,
       workspaceId: pluginGatewayRegistrations.workspaceId,
       pluginId: pluginGatewayRegistrations.pluginId,
       pluginName: plugins.name,
@@ -69,6 +73,7 @@ export async function listActivePluginGatewayRegistrations(
 
   return rows.map((row: any) => ({
     id: row.id,
+    sourceType: row.sourceType,
     workspaceId: row.workspaceId,
     pluginId: row.pluginId,
     pluginName: row.pluginName,
@@ -94,6 +99,7 @@ export async function storePluginGatewayDiscoverySnapshot(
   db: DbLike,
   input: {
     workspaceId: string;
+    userId: string;
     registrationId: string;
     snapshot: PluginGatewayDiscoveredTool[];
     discoveredAt: Date;
@@ -113,6 +119,7 @@ export async function storePluginGatewayDiscoverySnapshot(
       and(
         eq(pluginGatewayRegistrations.id, input.registrationId),
         eq(pluginGatewayRegistrations.workspaceId, input.workspaceId),
+        sql`EXISTS (SELECT 1 FROM ${plugins} WHERE ${plugins.id} = ${pluginGatewayRegistrations.pluginId} AND ${plugins.status} = 'enabled' AND ${pluginAccess(input)})`,
       ),
     )
     .returning({ id: pluginGatewayRegistrations.id });
@@ -123,6 +130,7 @@ export async function claimPluginGatewayDiscoveryRefresh(
   db: DbLike,
   input: {
     workspaceId: string;
+    userId: string;
     registrationId: string;
     staleAt: Date;
     leaseUntil: Date;
@@ -135,6 +143,7 @@ export async function claimPluginGatewayDiscoveryRefresh(
       and(
         eq(pluginGatewayRegistrations.id, input.registrationId),
         eq(pluginGatewayRegistrations.workspaceId, input.workspaceId),
+        sql`EXISTS (SELECT 1 FROM ${plugins} WHERE ${plugins.id} = ${pluginGatewayRegistrations.pluginId} AND ${plugins.status} = 'enabled' AND ${pluginAccess(input)})`,
         lte(pluginGatewayRegistrations.refreshAfter, input.staleAt),
       ),
     )
@@ -146,6 +155,7 @@ export async function storePluginGatewayDiscoveryFailure(
   db: DbLike,
   input: {
     workspaceId: string;
+    userId: string;
     registrationId: string;
     error: string;
     retryAfter: Date;
@@ -163,13 +173,14 @@ export async function storePluginGatewayDiscoveryFailure(
       and(
         eq(pluginGatewayRegistrations.id, input.registrationId),
         eq(pluginGatewayRegistrations.workspaceId, input.workspaceId),
+        sql`EXISTS (SELECT 1 FROM ${plugins} WHERE ${plugins.id} = ${pluginGatewayRegistrations.pluginId} AND ${plugins.status} = 'enabled' AND ${pluginAccess(input)})`,
       ),
     );
 }
 
 export async function isPluginGatewayRegistrationActive(
   db: DbLike,
-  input: { workspaceId: string; registrationId: string },
+  input: PluginReader & { workspaceId: string; registrationId: string },
 ) {
   const [row] = await db
     .select({ id: pluginGatewayRegistrations.id })
@@ -186,6 +197,7 @@ export async function isPluginGatewayRegistrationActive(
         eq(pluginGatewayRegistrations.id, input.registrationId),
         eq(pluginGatewayRegistrations.workspaceId, input.workspaceId),
         eq(plugins.status, "enabled"),
+        pluginAccess(input),
       ),
     )
     .limit(1);

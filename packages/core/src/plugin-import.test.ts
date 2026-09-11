@@ -162,6 +162,27 @@ describe("PluginImportApplicationService", () => {
       reason: "explicit",
     });
   });
+
+  it("does not refresh gateway discovery when an update preserves a disabled plugin", async () => {
+    const storedPlugin = { name: "quality-tools", status: "disabled" } as never;
+    const refresh = vi.fn(async () => undefined);
+    const service = new PluginImportApplicationService(
+      repository({
+        install: vi.fn(async () => ({ plugin: storedPlugin, idempotentReplay: false })),
+      }),
+      resolver(plugin),
+      { refresh },
+    );
+
+    await service.install(actor, {
+      idempotencyKey: "plugin-update-1",
+      url: "example/plugins",
+      expectedResolvedCommit: resolvedCommit,
+      expectedIntegrity: integrity,
+    });
+
+    expect(refresh).not.toHaveBeenCalled();
+  });
 });
 
 function resolver(value: ResolvedPluginPackage): PluginImportResolver {

@@ -1,6 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { getAppUrl } from "@opencompany/agent/app-url";
-import { captureIntegrationAddedAnalytics } from "@opencompany/agent/integrations/analytics";
+import { captureConnectionAddedAnalytics } from "@opencompany/agent/integrations/analytics";
 import {
   appendGoogleIntegrationStatus,
   buildGoogleAuthorizationUrl,
@@ -155,7 +155,7 @@ async function handleCallback(
       googleOAuthRedirectUri(config),
     );
     const userInfo = await fetchGoogleUserInfo(tokens.access_token);
-    await connectGoogleIntegration({
+    const connection = await connectGoogleIntegration({
       provider,
       userWorkosId: session.userId,
       externalId: userInfo.sub,
@@ -166,7 +166,8 @@ async function handleCallback(
       scopes: readScopes(tokens.scope, authorizationConfig.scopes),
       db: input.db,
     });
-    await captureIntegrationAddedAnalytics({
+    await captureConnectionAddedAnalytics({
+      connectionId: connection.integrationId,
       userWorkosId: session.userId,
       workspaceId: session.workspaceId,
       provider,
@@ -206,7 +207,9 @@ async function refreshGooglePluginAfterConnection(
           ? "goat.google_drive_plugin_reconnect_refresh_failed"
           : provider === "gmail"
             ? "goat.gmail_plugin_reconnect_refresh_failed"
-            : "goat.google_calendar_plugin_reconnect_refresh_failed",
+            : provider === "google_admin"
+              ? "goat.google_admin_plugin_reconnect_refresh_failed"
+              : "goat.google_calendar_plugin_reconnect_refresh_failed",
       provider,
       error_message: error instanceof Error ? error.message : String(error),
     });

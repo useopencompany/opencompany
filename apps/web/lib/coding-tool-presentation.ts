@@ -198,7 +198,9 @@ function repoRelativeSandboxPath(value: string) {
   const normalized = value.replace(/\\/g, "/");
   for (const marker of [
     "/opencompany-goat/codex-chat/",
+    "/opencompany-goat/claude-chat/",
     "/codex-chat/",
+    "/claude-chat/",
     "/workspaces/",
     "/workspace/",
   ]) {
@@ -291,20 +293,23 @@ function fileChangeAction(
   kind: string | null,
   records: readonly Record<string, unknown>[],
 ) {
-  const changeKind = firstChangeKind(records) ?? kind;
+  const changeKind = commonChangeKind(records) ?? kind;
   if (identity === "write" || changeKind === "write" || changeKind === "create") return "Write";
   if (changeKind === "delete") return "Delete";
   if (changeKind === "move") return "Move";
   return "Edit";
 }
 
-function firstChangeKind(records: readonly Record<string, unknown>[]) {
+function commonChangeKind(records: readonly Record<string, unknown>[]) {
   for (const record of records) {
     if (!Array.isArray(record.changes)) continue;
+    const kinds = new Set<string>();
     for (const change of record.changes) {
       const kind = asRecord(change)?.kind;
-      if (typeof kind === "string" && kind.trim()) return kind.trim().toLowerCase();
+      if (typeof kind === "string" && kind.trim()) kinds.add(kind.trim().toLowerCase());
     }
+    if (kinds.size > 1) return "edit";
+    if (kinds.size === 1) return kinds.values().next().value;
   }
   return null;
 }
@@ -318,6 +323,9 @@ function filePaths(records: readonly Record<string, unknown>[]) {
   for (const record of records) {
     for (const key of ["file_path", "filePath", "notebook_path", "notebookPath", "path"]) {
       addPath(record[key]);
+    }
+    if (Array.isArray(record.locations)) {
+      for (const location of record.locations) addPath(asRecord(location)?.path);
     }
     if (!Array.isArray(record.changes)) continue;
     for (const change of record.changes) addPath(asRecord(change)?.path);

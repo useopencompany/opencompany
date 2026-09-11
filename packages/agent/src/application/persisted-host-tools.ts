@@ -7,6 +7,7 @@ import {
 import { getDb } from "@opencompany/db/client";
 import type { HarnessSpec } from "@opencompany/db/product-schema";
 import {
+  chatSessions,
   codexChatSessions,
   codexChatTurns,
   users,
@@ -28,6 +29,7 @@ import {
   activateAndListChatSessionSkills,
   createWorkspaceSkillForActor,
   listSkillCatalog,
+  manageWorkspaceSkillsForActor,
   readChatSkillFile,
   resolveSkillMentions,
   updateWorkspaceSkillForActor,
@@ -97,17 +99,28 @@ export function executePersistedChatHostTool(input: {
     resolveActiveAgentSession: ({ actorId, conversationId }) =>
       resolveActiveAgentSession({ userWorkosId: actorId, chatSessionId: conversationId }),
     resolveSkillMentions: resolveSkillMentions,
-    listSkillCatalog: listSkillCatalog,
-    activateAndListSkills: ({ conversationId, messageId, workspaceId, skills }) =>
+    listSkillCatalog: (workspaceId, userId, skillAccess) =>
+      listSkillCatalog(workspaceId, undefined, userId, skillAccess),
+    activateAndListSkills: ({
+      conversationId,
+      messageId,
+      workspaceId,
+      skills,
+      userId,
+      skillAccess,
+    }) =>
       activateAndListChatSessionSkills({
         chatSessionId: conversationId,
         activatedMessageId: messageId,
         workspaceId,
+        userId,
+        ...(skillAccess ? { skillAccess } : {}),
         skills,
       }),
     readSkillFile: ({ conversationId, ...skillFile }) =>
       readChatSkillFile({ chatSessionId: conversationId, ...skillFile }),
     createWorkspaceSkill: createWorkspaceSkillForActor,
+    manageWorkspaceSkills: manageWorkspaceSkillsForActor,
     updateWorkspaceSkill: updateWorkspaceSkillForActor,
     createTask: (task) =>
       createTaskForActor(
@@ -239,6 +252,7 @@ async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostCo
     command.operation === "browser_end_profile" ? undefined : eq(codexChatTurns.status, "running");
   const [row] = await getDb()
     .select({
+      conversationKind: chatSessions.kind,
       userWorkosId: codexChatSessions.userWorkosId,
       workspaceId: codexChatSessions.workspaceId,
       chatSessionId: codexChatSessions.chatSessionId,
@@ -254,6 +268,7 @@ async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostCo
       workspaceRole: workspaceMembers.role,
     })
     .from(codexChatSessions)
+    .innerJoin(chatSessions, eq(chatSessions.id, codexChatSessions.chatSessionId))
     .innerJoin(
       codexChatTurns,
       and(
@@ -282,6 +297,7 @@ async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostCo
     .limit(1);
   if (!row?.workspaceId) return null;
   return {
+    taskConversation: row.conversationKind === "task",
     actorId: row.userWorkosId,
     workspaceId: row.workspaceId,
     workspaceName: row.workspaceName,
@@ -293,7 +309,7 @@ async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostCo
     lastName: row.lastName,
     timezone: row.timezone,
     taskToolsEnabled: row.taskSpawningEnabled && row.workspaceRole === "admin",
-    skillToolsEnabled: row.workspaceRole === "admin",
+    skillToolsEnabled: true,
     legacyBrainEnabled: row.legacyBrainEnabled,
   };
 }

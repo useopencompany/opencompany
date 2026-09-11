@@ -1,6 +1,7 @@
 import { ProductAnalyticsProvider } from "@opencompany/analytics/product/client";
 import type { ReactNode } from "react";
 import { AppDataProvider, type AppInitialData } from "@/components/AppDataProvider";
+import { BotsProvider } from "@/components/Bots";
 import { loadOptionalAppShellData } from "@/lib/app-shell-loader";
 import { currentUser } from "@/lib/auth";
 import { listCurrentUserRecentChats } from "@/lib/chat";
@@ -27,7 +28,6 @@ import { getLinearIntegrationState } from "@/lib/integrations/linear-mcp";
 import { getPersonalAccounts } from "@/lib/integrations/personal-accounts";
 import { getPostHogIntegrationState } from "@/lib/integrations/posthog-mcp";
 import { getSlackIntegrationState } from "@/lib/integrations/slack";
-import { getStripeIntegrationState } from "@/lib/integrations/stripe";
 import { getXAccountIntegrationState } from "@/lib/integrations/x-account";
 import { getWorkspaceSettingsAction } from "@/lib/workspace-actions";
 
@@ -51,7 +51,6 @@ export async function AppShell({ children }: { children: ReactNode }) {
     granolaMcp,
     fathom,
     attio,
-    stripe,
     xAccount,
     codex,
     claudeCode,
@@ -112,11 +111,6 @@ export async function AppShell({ children }: { children: ReactNode }) {
       "attio_mcp_integration",
       () => getAttioMcpIntegrationState(user.workosUserId),
       emptyIntegrations.attio,
-    ),
-    loadOptionalAppShellData(
-      "stripe_integration",
-      () => getStripeIntegrationState(workspace.id),
-      emptyIntegrations.stripe,
     ),
     loadOptionalAppShellData(
       "x_account_integration",
@@ -195,7 +189,7 @@ export async function AppShell({ children }: { children: ReactNode }) {
       granolaMcp,
       fathom,
       attio,
-      stripe,
+      stripe: emptyIntegrations.stripe,
       xAccount,
       personalAccounts,
       codex: {
@@ -242,7 +236,9 @@ export async function AppShell({ children }: { children: ReactNode }) {
         lastName: user.lastName,
       }}
     >
-      <AppDataProvider initialData={initialData}>{children}</AppDataProvider>
+      <AppDataProvider initialData={initialData}>
+        <BotsProvider key={workspace.id}>{children}</BotsProvider>
+      </AppDataProvider>
     </ProductAnalyticsProvider>
   );
 }

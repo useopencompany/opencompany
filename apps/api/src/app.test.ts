@@ -1,6 +1,8 @@
 import { once } from "node:events";
 import { request as requestHttp } from "node:http";
 import { serve } from "@hono/node-server";
+import { createPluginImportResolver } from "@opencompany/agent/plugin-import";
+import { OFFICIAL_PLUGIN_SOURCES } from "@opencompany/agent-runtime/official-plugin-catalog";
 import { captureProductServerEvent } from "@opencompany/analytics/product/server";
 import type { ChatPresentationReader } from "@opencompany/chat-presentation";
 import {
@@ -11,6 +13,7 @@ import {
   type CreateMessageCommand,
   type CreateTaskCommand,
   type CreateTaskCommentCommand,
+  type CustomMcpApplicationService,
   KnowledgeApplicationService,
   type KnowledgeRepository,
   type PluginGatewayLifecycle,
@@ -52,7 +55,7 @@ import { createWorkOsApiAuthenticator } from "./auth";
 import type { BrainAssetService } from "./brain-assets";
 import type { ChatResourceService } from "./chat-resources";
 import { ApiError } from "./errors";
-import type { ApiRateLimiter } from "./rate-limit";
+import { type ApiRateLimiter, InMemoryApiRateLimiter } from "./rate-limit";
 
 vi.mock("@opencompany/analytics/product/server", () => ({
   captureProductServerEvent: vi.fn(async () => undefined),
@@ -91,6 +94,85 @@ function messageHeaders(idempotencyKey: string) {
 }
 
 describe("canonical Hono API", () => {
+  it("serves private Codex usage with a dedicated refresh rate limit", async () => {
+    const usage = {
+      windows: [
+        {
+          id: "codex:primary",
+          label: "5-hour",
+          usedPercent: 75,
+          resetsAt: "2026-09-11T00:00:00.000Z",
+        },
+      ],
+      updatedAt: "2026-09-10T12:00:00.000Z",
+    };
+    const getCodexUsage = vi.fn(async () => usage);
+    const buckets: string[] = [];
+    const app = testApp(fakeRepository(), {
+      engineAuth: engineAuthService({ getCodexUsage }),
+      rateLimiter: {
+        consume: async ({ bucket, limit }) => {
+          buckets.push(`${bucket}:${limit}`);
+          return { allowed: true };
+        },
+      },
+    });
+    const response = await app.request("/v1/engine-auth/codex/usage?userId=someone_else");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(getCodexUsage).toHaveBeenCalledWith(actor);
+    expect(buckets).toEqual(["codex-usage:6"]);
+    await expect(response.json()).resolves.toEqual({
+      data: usage,
+      meta: { apiVersion: "v1", protocolVersion: expect.any(String) },
+    });
+  });
+
+  it("serves bots through authenticated validated canonical routes", async () => {
+    const bot = { id: "bot_1", name: "Research", description: "Find customers" };
+    const create = vi.fn(async () => bot);
+    const update = vi.fn(async () => bot);
+    const app = testApp(fakeRepository(), {
+      bots: {
+        list: async () => [bot],
+        get: async () => bot,
+        create,
+        update,
+        authorizeConversation: async () => {},
+      },
+    });
+    expect((await (await app.request("/v1/bots")).json()).data).toEqual([bot]);
+    expect((await (await app.request("/v1/bots/bot_1")).json()).data).toEqual(bot);
+    const request = (body: unknown) =>
+      app.request("/v1/bots", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    expect((await request(bot)).status).toBe(200);
+    expect(create).toHaveBeenCalledWith(actor, bot);
+    for (const invalid of [
+      { ...bot, name: " " },
+      { ...bot, name: "x".repeat(81) },
+      { ...bot, description: "x".repeat(4001) },
+      { ...bot, id: "../chat" },
+      { ...bot, workspaceId: "another" },
+    ]) {
+      expect((await request(invalid)).status).toBe(400);
+    }
+    expect(create).toHaveBeenCalledOnce();
+    const patched = await app.request("/v1/bots/bot_1", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Research", description: "Find customers" }),
+    });
+    expect(patched.status).toBe(200);
+    expect(update).toHaveBeenCalledWith(actor, "bot_1", {
+      name: "Research",
+      description: "Find customers",
+    });
+    expect((await testApp(fakeRepository()).request("/v1/bots")).status).toBe(404);
+  });
   it("mounts the first-party Gmail MCP at its package endpoint", async () => {
     const handle = vi.fn(async (_request: Request) => Response.json({ ok: true }));
     const downloadAttachment = vi.fn(async (_request: Request) =>
@@ -115,6 +197,21 @@ describe("canonical Hono API", () => {
     expect(downloadAttachment).toHaveBeenCalledOnce();
   });
 
+  it("mounts the first-party Google Admin MCP at its package endpoint", async () => {
+    const handle = vi.fn(async (_request: Request) => Response.json({ ok: true }));
+    const app = testApp(fakeRepository(), { googleAdminMcp: { handle } });
+    const response = await app.request("/mcp/plugins/google-admin", {
+      method: "POST",
+      headers: { authorization: "Bearer narrow-ticket" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(handle).toHaveBeenCalledOnce();
+    expect(handle.mock.calls[0]?.[0].headers.get("authorization")).toBe("Bearer narrow-ticket");
+    expect((await app.request("/mcp/plugins/google-admin", { method: "GET" })).status).toBe(404);
+  });
+
   it("mounts the first-party Google Calendar MCP at its package endpoint", async () => {
     const handle = vi.fn(async (_request: Request) => Response.json({ ok: true }));
     const app = testApp(fakeRepository(), { googleCalendarMcp: { handle } });
@@ -130,6 +227,20 @@ describe("canonical Hono API", () => {
     expect((await app.request("/mcp/plugins/google-calendar", { method: "GET" })).status).toBe(404);
   });
 
+  it("mounts the first-party Convex MCP at its package endpoint", async () => {
+    const handle = vi.fn(async (_request: Request) => Response.json({ ok: true }));
+    const app = testApp(fakeRepository(), { convexMcp: { handle } });
+    const response = await app.request("/mcp/plugins/convex", {
+      method: "POST",
+      headers: { authorization: "Bearer narrow-ticket" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(handle).toHaveBeenCalledOnce();
+    expect(handle.mock.calls[0]?.[0].headers.get("authorization")).toBe("Bearer narrow-ticket");
+    expect((await app.request("/mcp/plugins/convex", { method: "GET" })).status).toBe(404);
+  });
   it("mounts the first-party Google Drive MCP at its package endpoint", async () => {
     const handle = vi.fn(async (_request: Request) => Response.json({ ok: true }));
     const app = testApp(fakeRepository(), { googleDriveMcp: { handle } });
@@ -155,6 +266,7 @@ describe("canonical Hono API", () => {
       await expect(response.json()).resolves.toMatchObject({
         ok: true,
         service: "opencompany-api",
+        capabilities: { personalSkillsAuthorization: "v1", personalPluginsAuthorization: "v1" },
         protocolVersion: PROTOCOL_VERSION,
         release: "api-release-sha",
         renderGitCommit: "api-release-sha",
@@ -400,6 +512,14 @@ describe("canonical Hono API", () => {
       body: JSON.stringify({
         description: "Focus on competitors.",
         skillIds: ["market-research"],
+        stepModelOverrides: [
+          {
+            id: "step_1",
+            model: "codex",
+            runtimeModel: "openai/gpt-5.6-sol",
+            reasoningEffort: "xhigh",
+          },
+        ],
       }),
     });
     expect(invoked.status).toBe(202);
@@ -407,7 +527,19 @@ describe("canonical Hono API", () => {
       data: { task: { id: "task_automation", source: "workflow" }, runId: "run_automation" },
     });
     expect(automations.prepareWorkflow).toHaveBeenCalledWith(
-      expect.objectContaining({ skillIds: ["market-research"] }),
+      expect.objectContaining({
+        skillIds: ["market-research"],
+        workflow: expect.objectContaining({
+          steps: [
+            expect.objectContaining({
+              id: "step_1",
+              model: "codex",
+              runtimeModel: "openai/gpt-5.6-sol",
+              reasoningEffort: "xhigh",
+            }),
+          ],
+        }),
+      }),
     );
 
     const createdSchedule = await app.request("/v1/schedules", {
@@ -439,7 +571,12 @@ describe("canonical Hono API", () => {
       transactionIds: [71],
     }));
     const listSkillCatalog = vi.fn(async () => [
-      { id: "research", name: "Research", description: "Find primary sources." },
+      {
+        id: "research",
+        name: "Research",
+        description: "Find primary sources.",
+        scope: "company" as const,
+      },
     ]);
     const listBrainSourceItems = vi.fn(async () => [
       {
@@ -678,7 +815,11 @@ describe("canonical Hono API", () => {
     const replace = vi.fn(async () => updatedInstallation);
     const create = vi.fn(async () => authoredBundle);
     const app = testApp(fakeRepository(), {
-      skillImports: fakeSkillImportService({ install, replace }, {}, { create }),
+      skillImports: fakeSkillImportService(
+        { install, replace, get: vi.fn(async () => createdInstallation) },
+        {},
+        { create },
+      ),
     });
 
     const created = await app.request("/v1/skills", {
@@ -725,7 +866,8 @@ describe("canonical Hono API", () => {
     );
     expect(replace).toHaveBeenCalledWith({
       actor,
-      name: "investigate-bug",
+      name: createdInstallation.id,
+      expectedBundleId: createdInstallation.bundle.id,
       bundle: authoredBundle,
     });
     expect(create).toHaveBeenNthCalledWith(1, {
@@ -906,6 +1048,36 @@ describe("canonical Hono API", () => {
     expect(update.status).toBe(400);
   });
 
+  it("changes skill visibility by stable ID with optimistic scope validation", async () => {
+    const setScope = vi.fn(async () => ({
+      ...fakeSkillInstallation(),
+      scope: "personal" as const,
+    }));
+    const app = testApp(fakeRepository(), { skillImports: fakeSkillImportService({ setScope }) });
+    const response = await app.request("/v1/skills/skill_installation_1/scope", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scope: "personal", expectedScope: "company" }),
+    });
+    expect(response.status).toBe(200);
+    expect(setScope).toHaveBeenCalledWith({
+      actor,
+      name: "skill_installation_1",
+      scope: "personal",
+      expectedScope: "company",
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      data: { id: "skill_installation_1", scope: "personal" },
+    });
+    const invalid = await app.request("/v1/skills/skill_installation_1/scope", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scope: "public" }),
+    });
+    expect(invalid.status).toBe(400);
+    expect(setScope).toHaveBeenCalledTimes(1);
+  });
+
   it("lists, inspects, reads, replaces, disables, and archives Skill installations", async () => {
     const installation = fakeSkillInstallation();
     const { createdAt: _createdAt, bundle, ...installationFields } = installation;
@@ -1003,6 +1175,133 @@ describe("canonical Hono API", () => {
     expect(archive).toHaveBeenCalledWith({ actor, name: "imported-skill" });
   });
 
+  it("does not report failed plugin previews or removals as successful activity", async () => {
+    vi.mocked(captureProductServerEvent).mockClear();
+    const app = testApp(fakeRepository(), {
+      pluginImports: fakePluginImportService(
+        {
+          archive: async () => {
+            throw new CoreError("not_found", "Plugin not found.");
+          },
+        },
+        {
+          resolve: async () => {
+            throw new CoreError("invalid_argument", "Invalid plugin.");
+          },
+        },
+      ),
+    });
+    await expect(
+      app.request("/v1/plugins/imports/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: "github.com/example/plugins" }),
+      }),
+    ).resolves.toMatchObject({ status: 400 });
+    await expect(
+      app.request("/v1/plugins/missing/archive", { method: "POST" }),
+    ).resolves.toMatchObject({ status: 404 });
+    expect(captureProductServerEvent).not.toHaveBeenCalled();
+  });
+
+  it.each(["unavailable", "rate-limited"])(
+    "previews and installs official HubSpot while GitHub is %s",
+    async (failure) => {
+      const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+        if (failure === "unavailable") throw new TypeError("Network unavailable");
+        return Response.json(
+          { message: "API rate limit exceeded" },
+          {
+            status: 403,
+            headers: { "x-ratelimit-limit": "60", "x-ratelimit-remaining": "0" },
+          },
+        );
+      });
+      try {
+        const install = vi.fn<PluginRepository["install"]>(async ({ plugin }) => ({
+          plugin: {
+            ...fakePluginInstallation(),
+            name: plugin.manifest.name,
+            manifest: plugin.manifest,
+            source: plugin.source,
+            integrity: plugin.integrity,
+            files: plugin.files.map((file) => ({
+              path: file.path,
+              executable: file.executable,
+              sizeBytes: file.content.length,
+            })),
+            skills: [],
+            stdioServers: plugin.stdioServers,
+            remoteMcpServers: [],
+            events: plugin.events,
+            installReport: { ...plugin.report, collisions: [] },
+          },
+          idempotentReplay: false,
+        }));
+        const refresh = vi.fn(async () => undefined);
+        const app = testApp(fakeRepository(), {
+          pluginImports: fakePluginImportService({ install }, createPluginImportResolver(), {
+            refresh,
+          }),
+        });
+        const url = OFFICIAL_PLUGIN_SOURCES.hubspot;
+        const response = await app.request("/v1/plugins/imports/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url }),
+        });
+        expect(response.status).toBe(200);
+        const { data: preview } = await response.json();
+        expect(preview).toMatchObject({
+          manifest: { name: "hubspot" },
+          source: {
+            path: "hubspot",
+            ref: "6b4e00b71f7d1b388fe5aa225aa86c8d35ba2578",
+            resolvedCommit: "6b4e00b71f7d1b388fe5aa225aa86c8d35ba2578",
+          },
+          remoteMcpServers: [
+            { name: "hubspot", capabilities: [{ id: "read" }, { id: "query" }, { id: "write" }] },
+          ],
+        });
+        expect(preview.files.every((file: object) => !Object.hasOwn(file, "content"))).toBe(true);
+        const command = {
+          url,
+          expectedResolvedCommit: preview.source.resolvedCommit,
+          expectedIntegrity: preview.integrity,
+        };
+        for (const mismatch of [
+          { expectedResolvedCommit: "a".repeat(40) },
+          { expectedIntegrity: `sha256:${"b".repeat(64)}` },
+        ]) {
+          const rejected = await app.request("/v1/plugins/imports", {
+            method: "POST",
+            headers: messageHeaders("hubspot-mismatch"),
+            body: JSON.stringify({ ...command, ...mismatch }),
+          });
+          expect(rejected.status).toBe(409);
+        }
+        expect(install).not.toHaveBeenCalled();
+        const installed = await app.request("/v1/plugins/imports", {
+          method: "POST",
+          headers: messageHeaders("hubspot-install"),
+          body: JSON.stringify(command),
+        });
+        expect(installed.status).toBe(201);
+        expect(await installed.json()).toMatchObject({
+          data: { plugin: { name: "hubspot", integrity: preview.integrity } },
+        });
+        expect(install).toHaveBeenCalledOnce();
+        expect(install.mock.calls[0]?.[0].plugin.remoteServers).toEqual([
+          { name: "hubspot", type: "streamable-http", url: "https://mcp.hubspot.com", headers: {} },
+        ]);
+        expect(refresh).toHaveBeenCalledWith({ actor, pluginName: "hubspot", reason: "install" });
+        expect(fetch).not.toHaveBeenCalled();
+      } finally {
+        fetch.mockRestore();
+      }
+    },
+  );
+
   it("previews and manages Plugins without exposing package bytes or MCP environment values", async () => {
     vi.mocked(captureProductServerEvent).mockClear();
     const installation = fakePluginInstallation();
@@ -1090,6 +1389,14 @@ describe("canonical Hono API", () => {
       body: JSON.stringify({ url: "github.com/example/plugins" }),
     });
     expect(preview.status).toBe(200);
+    expect(captureProductServerEvent).toHaveBeenCalledWith(
+      "plugin_import_previewed",
+      actor.userId,
+      {
+        workspace_id: actor.workspaceId,
+        plugin_name: "quality-tools",
+      },
+    );
     const previewBody = await preview.json();
     expect(previewBody).toMatchObject({
       data: {
@@ -1129,6 +1436,7 @@ describe("canonical Hono API", () => {
     expect(captureProductServerEvent).toHaveBeenCalledWith("plugin_installed", actor.userId, {
       workspace_id: actor.workspaceId,
       plugin_name: "quality-tools",
+      plugin_id: installation.id,
       plugin_kind: "mcp",
       skill_count: 0,
       mcp_server_count: 2,
@@ -1192,6 +1500,10 @@ describe("canonical Hono API", () => {
     await expect(
       app.request("/v1/plugins/quality-tools/archive", { method: "POST" }),
     ).resolves.toMatchObject({ status: 200 });
+    expect(captureProductServerEvent).toHaveBeenCalledWith("plugin_removed", actor.userId, {
+      workspace_id: actor.workspaceId,
+      plugin_name: "quality-tools",
+    });
 
     expect(setStatus).toHaveBeenCalledWith({ actor, name: "quality-tools", status: "disabled" });
     expect(setEventEnabled).toHaveBeenCalledWith({
@@ -1846,6 +2158,8 @@ describe("canonical Hono API", () => {
       ["POST", "/webhooks/attio/events", "attio.webhook"],
       ["GET", "/integrations/attio-mcp/start", "mcp.start.attio"],
       ["GET", "/integrations/attio-mcp/callback", "mcp.callback.attio"],
+      ["GET", "/integrations/stripe/start", "mcp.start.stripe"],
+      ["GET", "/integrations/stripe/callback", "mcp.callback.stripe"],
       ["GET", "/integrations/linear/start", "mcp.start.linear"],
       ["GET", "/integrations/linear/callback", "mcp.callback.linear"],
       ["GET", "/integrations/hubspot-mcp/start", "mcp.start.hubspot"],
@@ -1855,7 +2169,11 @@ describe("canonical Hono API", () => {
       ["GET", "/integrations/posthog/start", "mcp.start.posthog"],
       ["GET", "/integrations/posthog/callback", "mcp.callback.posthog"],
       ["GET", "/integrations/neon/start", "mcp.start.neon"],
+      ["GET", "/integrations/supabase/start", "mcp.start.supabase"],
+      ["GET", "/integrations/resend/start", "mcp.start.resend"],
       ["GET", "/integrations/neon/callback", "mcp.callback.neon"],
+      ["GET", "/integrations/supabase/callback", "mcp.callback.supabase"],
+      ["GET", "/integrations/resend/callback", "mcp.callback.resend"],
       ["GET", "/integrations/latitude/start", "mcp.start.latitude"],
       ["GET", "/integrations/latitude/callback", "mcp.callback.latitude"],
       ["GET", "/integrations/signoz/start", "mcp.start.signoz"],
@@ -3034,34 +3352,36 @@ describe("canonical Hono API", () => {
     expect(captureChatMessage).not.toHaveBeenCalled();
   });
 
-  it("serves public Chat presentation without actor authentication or private metadata", async () => {
-    const loadPublicShare = vi.fn(async () => ({
-      shareId: "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
-      title: "Shared Chat",
-      kind: "chat" as const,
-      engine: "codex" as const,
-      messages: [{ id: "message_1", role: "assistant" as const, parts: [] }],
-    }));
-    const app = testApp(fakeRepository(), {
-      chatResources: chatResourceService({ loadPublicShare }),
-      authenticate: async () => {
-        throw new Error("Public resources must not authenticate an actor.");
-      },
-    });
+  it.each(["share", "goat_chat_share"])(
+    "serves %s public Chat presentation without actor authentication or private metadata",
+    async (prefix) => {
+      const shareId = `${prefix}_01234567-89ab-4cde-8f01-23456789abcd`;
+      const loadPublicShare = vi.fn(async () => ({
+        shareId,
+        title: "Shared Chat",
+        kind: "chat" as const,
+        engine: "codex" as const,
+        messages: [{ id: "message_1", role: "assistant" as const, parts: [] }],
+      }));
+      const app = testApp(fakeRepository(), {
+        chatResources: chatResourceService({ loadPublicShare }),
+        authenticate: async () => {
+          throw new Error("Public resources must not authenticate an actor.");
+        },
+      });
 
-    const response = await app.request(
-      "/public/chat-shares/goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
-    );
+      const response = await app.request(`/public/chat-shares/${shareId}`);
 
-    expect(response.status).toBe(200);
-    expect(response.headers.get("cache-control")).toBe("private, no-store");
-    expect(response.headers.get("x-robots-tag")).toContain("noindex");
-    const body = await response.json();
-    expect(body).toMatchObject({
-      data: { title: "Shared Chat", engine: "codex", messages: [{ id: "message_1" }] },
-    });
-    expect(JSON.stringify(body)).not.toMatch(/sessionId|contextTokens|blob|lease|token/iu);
-  });
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("private, no-store");
+      expect(response.headers.get("x-robots-tag")).toContain("noindex");
+      const body = await response.json();
+      expect(body).toMatchObject({
+        data: { title: "Shared Chat", engine: "codex", messages: [{ id: "message_1" }] },
+      });
+      expect(JSON.stringify(body)).not.toMatch(/sessionId|contextTokens|blob|lease|token/iu);
+    },
+  );
 
   it("streams authorized Chat resource bytes with defensive headers", async () => {
     const downloadAttachment = vi.fn(async () => ({
@@ -3237,14 +3557,119 @@ describe("canonical Hono API", () => {
     expect(response.headers.get("retry-after")).toBe("7");
   });
 
+  it.each(["plugins", "skills"] as const)(
+    "keeps %s previews and imports independent of workspace writes and each other",
+    async (kind) => {
+      let now = 0;
+      const resolve = vi.fn(async () => {
+        throw new CoreError("invalid_argument", "Test source rejected by resolver.");
+      });
+      const app = testApp(fakeRepository(), {
+        rateLimiter: new InMemoryApiRateLimiter(() => now),
+        pluginImports: fakePluginImportService({}, { resolve }),
+        skillImports: fakeSkillImportService({}, { resolve }),
+        userSettings: {
+          ...fakeUserSettings(),
+          updatePreferences: async () => ({
+            timezone: "Europe/Berlin",
+            botsEnabled: false,
+            taskSpawningEnabled: true,
+            wikiEnabled: true,
+            taskViewMode: "list",
+            taskTimeRange: "24h",
+            autoModelRoutingEnabled: true,
+            reviewInboxEnabled: false,
+          }),
+        },
+      });
+      for (let index = 0; index < 10; index += 1) {
+        const write = await app.request("/v1/me/preferences", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ timezone: "Europe/Berlin" }),
+        });
+        expect(write.status).toBe(200);
+      }
+
+      const preview = () =>
+        app.request(`/v1/${kind}/imports/preview`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: "https://github.com/example/plugins" }),
+        });
+      // A resolver rejection proves the import path was reached instead of the limiter.
+      for (let index = 0; index < 10; index += 1) {
+        expect((await preview()).status).toBe(400);
+      }
+      expect(resolve).toHaveBeenCalledTimes(10);
+      const limited = await preview();
+      expect(limited.status).toBe(429);
+      expect(limited.headers.get("retry-after")).toBe("60");
+      expect(resolve).toHaveBeenCalledTimes(10);
+
+      const install = () =>
+        app.request(`/v1/${kind}/imports`, {
+          method: "POST",
+          headers: messageHeaders("rate-limit-import"),
+          body: JSON.stringify({
+            url: "https://github.com/example/plugins",
+            expectedResolvedCommit: "a".repeat(40),
+            expectedIntegrity: `sha256:${"b".repeat(64)}`,
+          }),
+        });
+      for (let index = 0; index < 10; index += 1) {
+        expect((await install()).status).toBe(400);
+      }
+      expect(resolve).toHaveBeenCalledTimes(20);
+      expect((await install()).status).toBe(429);
+      expect(resolve).toHaveBeenCalledTimes(20);
+
+      now = 60_000;
+      expect((await preview()).status).toBe(400);
+      expect((await install()).status).toBe(400);
+      expect(resolve).toHaveBeenCalledTimes(22);
+    },
+  );
+
+  it.each([true, false])(
+    "accepts the Bots preference %s through the public API",
+    async (botsEnabled) => {
+      const updatePreferences = vi.fn(async () => ({
+        timezone: "UTC",
+        botsEnabled,
+        taskSpawningEnabled: false,
+        wikiEnabled: true as const,
+        taskViewMode: "board" as const,
+        taskTimeRange: "7d" as const,
+        autoModelRoutingEnabled: false,
+        reviewInboxEnabled: false,
+      }));
+      const app = testApp(fakeRepository(), {
+        userSettings: { ...fakeUserSettings(), updatePreferences },
+      });
+
+      const response = await app.request("/v1/me/preferences", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ botsEnabled }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(updatePreferences).toHaveBeenCalledWith(actor, { botsEnabled });
+      await expect(response.json()).resolves.toMatchObject({ data: { botsEnabled } });
+    },
+  );
+
   it("updates user preferences through the typed settings command", async () => {
     const updatePreferences = vi.fn(async () => ({
       timezone: "Europe/Berlin",
+      botsEnabled: false,
       taskSpawningEnabled: true,
       wikiEnabled: true as const,
       taskViewMode: "list" as const,
       taskTimeRange: "24h" as const,
       autoModelRoutingEnabled: true,
+      reviewInboxEnabled: false,
     }));
     const app = testApp(fakeRepository(), {
       userSettings: { ...fakeUserSettings(), updatePreferences },
@@ -3306,6 +3731,7 @@ describe("canonical Hono API", () => {
       ["/v1/engine-auth/claude-code", "GET"],
       ["/v1/engine-auth/claude-code", "PUT"],
       ["/v1/engine-auth/codex", "GET"],
+      ["/v1/engine-auth/codex/usage", "GET"],
       ["/v1/engine-auth/codex/device", "POST"],
       ["/v1/engine-auth/infisical", "GET"],
       ["/v1/engine-auth/infisical/start", "POST"],
@@ -4033,7 +4459,7 @@ describe("canonical Hono API", () => {
       memberCount: 2,
       memberCap: 10,
       spendThisMonthUsdMicros: 500_000,
-      spendThisMonthByCategory: { chat: 500_000, ingestion: 0, capabilities: 0 },
+      spendThisMonthByCategory: { chat: 500_000, ingestion: 0, capabilities: 0, sandbox: 0 },
       recentActivity: [
         {
           activityId: "billing_activity_safe",
@@ -4076,6 +4502,32 @@ describe("canonical Hono API", () => {
     });
     expect(JSON.stringify(body)).not.toMatch(/stripeCustomerId|paymentMethodId|ledgerId/u);
     expect(getOverview).toHaveBeenCalledWith(actor);
+  });
+
+  it("serves sandbox usage through the authenticated usage endpoint", async () => {
+    const getUsage = vi.fn(async () => ({
+      breakdown: [
+        {
+          day: "2026-09-10",
+          category: "sandbox" as const,
+          spendUsdMicros: 100_000,
+          providerCostUsdMicros: 100_000,
+          platformFeeUsdMicros: 0,
+        },
+      ],
+      ingestedThisMonth: 0,
+      pending: 0,
+      creditBalanceUsdMicros: 4_900_000,
+      providers: [],
+      recent: [],
+    }));
+    const app = testApp(fakeRepository(), { billing: { ...fakeBilling(), getUsage } });
+    const response = await app.request("/v1/billing/usage");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: { breakdown: [{ category: "sandbox", spendUsdMicros: 100_000 }] },
+    });
+    expect(getUsage).toHaveBeenCalledWith(actor);
   });
 
   it("reports unexpected request failures with correlation context", async () => {
@@ -4154,6 +4606,89 @@ describe("canonical Hono API", () => {
     } finally {
       setExceptionReporter(undefined);
     }
+  });
+
+  it("routes custom MCP setup through the actor and strips private discovery metadata", async () => {
+    const tool = {
+      name: "send",
+      description: "Send a message",
+      inputSchema: { type: "object", private: "synthetic-secret-canary" },
+      annotations: { private: "synthetic-secret-canary" },
+      classification: {
+        capabilityId: "write",
+        capabilityLabel: "Write",
+        defaultMode: "ask",
+        bucket: "write",
+        curated: false,
+      },
+    };
+    const probe = { tools: [tool], fingerprint: "f".repeat(64) };
+    const plugin = {
+      ...fakePluginInstallation(),
+      source: {
+        type: "custom_mcp" as const,
+        url: "https://tools.example.com/mcp",
+        path: "",
+        ref: "",
+        resolvedCommit: "",
+      },
+    };
+    const preview = vi.fn(async () => probe);
+    const create = vi.fn(async () => ({ plugin, idempotentReplay: true }));
+    const status = vi.fn(async () => ({
+      label: "Company tools",
+      url: plugin.source.url,
+      enabled: true,
+      account: {
+        integrationId: "account",
+        revision: "revision",
+        connected: true,
+        tools: [tool],
+        toolModes: {},
+        checkedAt: createdAt,
+        error: null,
+      },
+    }));
+    const customMcp = { preview, create, status } as unknown as CustomMcpApplicationService;
+    const app = testApp(fakeRepository(), { customMcp });
+    const body = {
+      label: "Company tools",
+      url: plugin.source.url,
+      headers: { authorization: "synthetic-secret-canary" },
+    };
+    const tested = await app.request("/v1/plugins/custom/preview", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    expect(tested.status).toBe(200);
+    expect(await tested.text()).not.toContain("synthetic-secret-canary");
+    expect(preview).toHaveBeenCalledWith(actor, body);
+    const created = await app.request("/v1/plugins/custom", {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": "custom-key" },
+      body: JSON.stringify({ ...body, fingerprint: probe.fingerprint }),
+    });
+    expect(created.status).toBe(201);
+    expect(await created.json()).toMatchObject({
+      data: { replayed: true, plugin: { source: { type: "custom_mcp", resolvedCommit: "" } } },
+    });
+    expect(create).toHaveBeenCalledWith(actor, {
+      ...body,
+      fingerprint: probe.fingerprint,
+      idempotencyKey: "custom-key",
+    });
+    const details = await app.request("/v1/plugins/custom-test/custom-mcp");
+    expect(details.status).toBe(200);
+    expect(await details.text()).not.toContain("synthetic-secret-canary");
+    expect(status).toHaveBeenCalledWith(actor, "custom-test");
+    const invalid = await app.request("/v1/plugins/custom", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    expect(invalid.status).toBe(400);
+    expect(create).toHaveBeenCalledTimes(1);
   });
 
   it("forwards the required idempotency key to billing commands", async () => {
@@ -5085,6 +5620,9 @@ function fakeIntegrationAccounts(): Parameters<typeof createApiApp>[0]["integrat
     connectGranola: async () => {
       throw new Error("Unexpected Granola connect.");
     },
+    connectConvex: async () => {
+      throw new Error("Unexpected Convex connect.");
+    },
     connectRender: async () => {
       throw new Error("Unexpected Render connect.");
     },
@@ -5133,6 +5671,9 @@ function fakeEngineAuth(): Parameters<typeof createApiApp>[0]["engineAuth"] {
     },
     disconnectClaudeCode: async () => {
       throw new Error("Unexpected Claude Code disconnect.");
+    },
+    getCodexUsage: async () => {
+      throw new Error("Unexpected Codex usage read.");
     },
     getCodexStatus: async () => {
       throw new Error("Unexpected Codex status read.");
@@ -5460,6 +6001,7 @@ function fakeSkillImportService(
     readFile: unexpected,
     setEnabled: unexpected,
     archive: unexpected,
+    setScope: unexpected,
     ...repositoryOverrides,
   };
   const resolver: SkillImportResolver = {
@@ -5574,6 +6116,10 @@ function baseWikiPage() {
 function fakeSkillInstallation(): SkillInstallation {
   return {
     id: "skill_installation_1",
+    scope: "company",
+    createdByUserId: "user_1",
+    canEdit: true,
+    canManage: true,
     name: "imported-skill",
     enabled: true,
     archivedAt: null,

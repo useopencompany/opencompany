@@ -8,6 +8,7 @@ export type ExternalEngineToolCapability = {
 };
 
 export type ExternalEngineToolAuthorityState = {
+  conversationKind?: string;
   sessionId: string;
   turnId: string;
   attemptId: string;
@@ -32,12 +33,15 @@ export type ExternalEngineToolAuthorityState = {
   turnLeaseExpiresAt: Date | null;
   interruptRequestedAt: Date | null;
   membershipId: string;
+  workspaceRole: string;
   brainRef: string | null;
   userMessageId: string;
   assistantMessageId: string;
 };
 
 export type ExternalEngineToolAuthorizedContext = {
+  taskConversation?: boolean;
+  skillToolsEnabled: boolean;
   actorId: string;
   workspaceId: string;
   workspaceName: string;
@@ -87,6 +91,8 @@ export function authorizeExternalEngineToolCapability(input: {
     return null;
   }
   return {
+    taskConversation: state.conversationKind === "task",
+    skillToolsEnabled: true,
     actorId: state.actorId,
     workspaceId: state.workspaceId,
     workspaceName: state.workspaceName,

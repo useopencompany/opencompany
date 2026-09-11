@@ -7,7 +7,7 @@
 
 ## Prerequisites
 
-- Bun `1.3.2`
+- Bun `1.4.2`
 - Node `20.20.0` or newer
 - Infisical CLI authenticated to this project
 - Neon CLI access to the development project

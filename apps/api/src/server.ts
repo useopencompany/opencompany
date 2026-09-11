@@ -7,7 +7,10 @@ import {
 } from "@opencompany/agent/brain-imports";
 import { BrainSourceApplicationService } from "@opencompany/agent/brain-sources";
 import { BrowserProfileApplicationService } from "@opencompany/agent/browser-profiles/service";
+import { createCustomMcpService } from "@opencompany/agent/custom-mcp";
+import { createConvexMcpService } from "@opencompany/agent/integrations/convex-mcp-server";
 import { createGmailMcpService } from "@opencompany/agent/integrations/gmail-mcp-server";
+import { createGoogleAdminMcpService } from "@opencompany/agent/integrations/google-admin-mcp-server";
 import { createGoogleCalendarMcpService } from "@opencompany/agent/integrations/google-calendar-mcp-server";
 import { getAvailableHarnessTools } from "@opencompany/agent/integrations/google-data";
 import { createGoogleDriveMcpService } from "@opencompany/agent/integrations/google-drive-mcp-server";
@@ -55,12 +58,13 @@ import {
 } from "./auth";
 import { createAutomationServices } from "./automations";
 import { createBillingReconcileService } from "./billing-reconcile";
+import { createBotService } from "./bots";
 import { createBrainAssetService } from "./brain-assets";
 import { createBrainControlService } from "./brain-control";
 import { parseBrowserOrigins } from "./browser-origins";
 import { createChatResourceService } from "./chat-resources";
 import { createChatTitleService } from "./chat-title";
-import { ElectricReadModelProxy } from "./electric-read-models";
+import { ElectricReadModelProxy, parseElectricAuthMode } from "./electric-read-models";
 import { createEngineAuthService } from "./engine-auth";
 import { createEngineSessionService } from "./engine-sessions";
 import { createFeedbackService } from "./feedback";
@@ -170,6 +174,7 @@ const app = createApiApp({
   browserProfiles,
   skillImports,
   pluginImports,
+  customMcp: createCustomMcpService(database.db),
   brainAssets: createBrainAssetService({ db: database.db, knowledge }),
   chatResources: createChatResourceService({ db: database.db }),
   messagePresentations: new PostgresMessagePresentationService(execute),
@@ -205,25 +210,29 @@ const app = createApiApp({
     ),
   brainControl: createBrainControlService({ db: database.db }),
   attachments: createAttachmentUploadService({ repository: attachmentRepository }),
+  bots: createBotService({
+    db: database.db,
+    defaultModel: process.env.OPENCOMPANY_DEFAULT_CHAT_MODEL ?? "moonshotai/kimi-k3",
+  }),
   userSettings: createUserSettingsService({ db: database.db }),
   feedback: createFeedbackService({ db: database.db }),
   repoConfigs: createRepoConfigService({ db: database.db }),
   integrationAccounts: createIntegrationAccountService({
     db: database.db,
     runner: runnerClient,
+    refreshConvexPluginRegistrations: ({ userWorkosId, workspaceId }) =>
+      refreshPluginGatewayRegistrationsForWorkspaces({
+        db: database.db,
+        userWorkosId,
+        workspaceIds: [workspaceId],
+        connectionProvider: "convex",
+      }),
     refreshRenderPluginRegistrations: ({ userWorkosId, workspaceId }) =>
       refreshPluginGatewayRegistrationsForWorkspaces({
         db: database.db,
         userWorkosId,
         workspaceIds: [workspaceId],
         connectionProvider: "render",
-      }),
-    refreshStripePluginRegistrations: ({ userWorkosId, workspaceId }) =>
-      refreshPluginGatewayRegistrationsForWorkspaces({
-        db: database.db,
-        userWorkosId,
-        workspaceIds: [workspaceId],
-        connectionProvider: "stripe",
       }),
   }),
   slackBotSettings: createSlackBotSettingsService({ db: database.db }),
@@ -248,7 +257,15 @@ const app = createApiApp({
           db: database.db,
           internalSecret: process.env.API_INTERNAL_TOKEN.trim(),
         }),
+        googleAdminMcp: createGoogleAdminMcpService({
+          db: database.db,
+          internalSecret: process.env.API_INTERNAL_TOKEN.trim(),
+        }),
         googleCalendarMcp: createGoogleCalendarMcpService({
+          db: database.db,
+          internalSecret: process.env.API_INTERNAL_TOKEN.trim(),
+        }),
+        convexMcp: createConvexMcpService({
           db: database.db,
           internalSecret: process.env.API_INTERNAL_TOKEN.trim(),
         }),
@@ -313,7 +330,9 @@ const app = createApiApp({
             ? "gmail"
             : provider === "google_drive"
               ? "google-drive"
-              : "google-calendar",
+              : provider === "google_admin"
+                ? "google-admin"
+                : "google-calendar",
       }),
   }),
   slackIngress: createSlackIngress({
@@ -441,8 +460,10 @@ function createWorkOSClient() {
 function createElectricReadModels() {
   const electricUrl = process.env.ELECTRIC_URL?.trim();
   if (!electricUrl) return null;
+  const authMode = parseElectricAuthMode(process.env.ELECTRIC_AUTH_MODE);
   return new ElectricReadModelProxy({
     electricUrl,
+    ...(authMode ? { authMode } : {}),
     ...(process.env.ELECTRIC_SOURCE_ID?.trim()
       ? { sourceId: process.env.ELECTRIC_SOURCE_ID.trim() }
       : {}),

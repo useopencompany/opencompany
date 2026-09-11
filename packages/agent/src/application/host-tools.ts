@@ -10,10 +10,11 @@ import {
 } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { isBrowserToolName } from "@opencompany/browser-tools";
-import { type Actor, SKILL_WRITE_PERMISSION } from "@opencompany/core";
+import { type Actor, SKILL_READ_PERMISSION, SKILL_WRITE_PERMISSION } from "@opencompany/core";
 import type { DeleteTaskScheduleToolOutput, EditTaskScheduleToolOutput } from "../chat-ui";
 
 export type ChatHostContext = {
+  taskConversation: boolean;
   actorId: string;
   workspaceId: string;
   workspaceName: string;
@@ -54,6 +55,7 @@ type BrowserProfileSession = {
 };
 
 type MentionedSkill = {
+  scope: "personal" | "company" | null;
   id: string;
   bundleId: string;
   name: string;
@@ -108,34 +110,59 @@ export type ChatHostToolServiceDependencies = {
   }) => Promise<BrowserProfileSession | null>;
   resolveSkillMentions: (input: {
     workspaceId: string;
+    userId?: string;
+    skillAccess?: "company";
     mentions: { id: string }[];
   }) => Promise<MentionedSkill[]>;
   listSkillCatalog: (
     workspaceId: string,
+    userId?: string,
+    skillAccess?: "company",
   ) => Promise<Array<{ id: string; name: string; description: string }>>;
   activateAndListSkills: (input: {
     conversationId: string;
     messageId: string;
     workspaceId: string;
     skills: MentionedSkill[];
+    skillAccess?: "company";
+    userId: string;
   }) => Promise<ActiveSkill[]>;
   readSkillFile: (input: {
     workspaceId: string;
     conversationId: string;
+    skillAccess?: "company";
+    userId: string;
     skill: string;
     path: string;
     offset?: number;
     maxBytes?: number;
   }) => Promise<ChatHostSkillFileChunk>;
+  manageWorkspaceSkills: (input: {
+    actor: Actor;
+    command: string;
+    name?: string;
+    scope?: "personal" | "company";
+    expectedScope?: "personal" | "company";
+  }) => Promise<unknown>;
   createWorkspaceSkill: (input: {
     actor: Actor;
     idempotencyKey: string;
-    skill: { name: string; description: string; instructions: string };
+    skill: {
+      name: string;
+      description: string;
+      instructions: string;
+      scope?: "personal" | "company";
+    };
   }) => Promise<{ created: true; name: string; command: string; bundleId: string }>;
   updateWorkspaceSkill: (input: {
     actor: Actor;
     name: string;
-    skill: { description: string; instructions: string };
+    skill: {
+      newName?: string;
+      description?: string;
+      instructions?: string;
+      expectedBundleId?: string;
+    };
   }) => Promise<{ updated: true; name: string; command: string; bundleId: string }>;
   createTask: (input: {
     actorId: string;
@@ -269,6 +296,8 @@ async function executeOperation(
       const skill = requiredString(toolInput.skill, "skill");
       const [resolved] = await dependencies.resolveSkillMentions({
         workspaceId: context.workspaceId,
+        userId: context.actorId,
+        ...(context.taskConversation ? { skillAccess: "company" as const } : {}),
         mentions: [{ id: skill }],
       });
       if (!resolved) throw new Error(`Skill "@skill/${skill}" is unavailable or incomplete.`);
@@ -276,9 +305,11 @@ async function executeOperation(
         conversationId: context.conversationId,
         messageId: context.messageId,
         workspaceId: context.workspaceId,
+        userId: context.actorId,
+        ...(context.taskConversation ? { skillAccess: "company" as const } : {}),
         skills: [resolved],
       });
-      const fixed = active.find((candidate) => candidate.skillId === skill);
+      const fixed = active.find((candidate) => candidate.name === resolved.name);
       if (!fixed) throw new Error(`Skill "@skill/${skill}" could not be activated.`);
       return {
         ok: true,
@@ -295,11 +326,33 @@ async function executeOperation(
       const maxBytes = optionalInteger(toolInput.maxBytes, "maxBytes");
       return dependencies.readSkillFile({
         workspaceId: context.workspaceId,
+        userId: context.actorId,
+        ...(context.taskConversation ? { skillAccess: "company" as const } : {}),
         conversationId: context.conversationId,
         skill: requiredString(toolInput.skill, "skill"),
         path: requiredString(toolInput.path, "path"),
         ...(offset !== undefined ? { offset } : {}),
         ...(maxBytes !== undefined ? { maxBytes } : {}),
+      });
+    }
+    case "workspace_skills": {
+      assertSkillTools(context);
+      const name = optionalString(toolInput.name);
+      return dependencies.manageWorkspaceSkills({
+        actor: {
+          userId: context.actorId,
+          workspaceId: context.workspaceId,
+          ...(context.taskConversation ? { skillAccess: "company" as const } : {}),
+          role: "member",
+          permissions: [SKILL_READ_PERMISSION, SKILL_WRITE_PERMISSION],
+          authenticationMethod: "service",
+        },
+        command: requiredString(toolInput.command, "command"),
+        ...(toolInput.scope !== undefined ? { scope: skillScope(toolInput.scope) } : {}),
+        ...(toolInput.expectedScope !== undefined
+          ? { expectedScope: skillScope(toolInput.expectedScope) }
+          : {}),
+        ...(name ? { name } : {}),
       });
     }
     case "create_workspace_skill": {
@@ -308,13 +361,15 @@ async function executeOperation(
         actor: {
           userId: context.actorId,
           workspaceId: context.workspaceId,
-          role: "admin",
+          ...(context.taskConversation ? { skillAccess: "company" as const } : {}),
+          role: "member",
           permissions: [SKILL_WRITE_PERMISSION],
           authenticationMethod: "service",
         },
         idempotencyKey: workspaceSkillIdempotencyKey(command.runId, command.toolCallId),
         skill: {
           name: requiredString(toolInput.name, "name"),
+          ...(toolInput.scope !== undefined ? { scope: skillScope(toolInput.scope) } : {}),
           description: requiredString(toolInput.description, "description"),
           instructions: requiredString(toolInput.instructions, "instructions"),
         },
@@ -322,18 +377,28 @@ async function executeOperation(
     }
     case "edit_workspace_skill": {
       assertSkillTools(context);
+      const expectedBundleId = optionalString(toolInput.expectedBundleId);
       return dependencies.updateWorkspaceSkill({
         actor: {
           userId: context.actorId,
           workspaceId: context.workspaceId,
-          role: "admin",
+          ...(context.taskConversation ? { skillAccess: "company" as const } : {}),
+          role: "member",
           permissions: [SKILL_WRITE_PERMISSION],
           authenticationMethod: "service",
         },
         name: requiredString(toolInput.name, "name"),
         skill: {
-          description: requiredString(toolInput.description, "description"),
-          instructions: requiredString(toolInput.instructions, "instructions"),
+          ...(expectedBundleId ? { expectedBundleId } : {}),
+          ...(toolInput.newName !== undefined
+            ? { newName: requiredString(toolInput.newName, "newName") }
+            : {}),
+          ...(toolInput.description !== undefined
+            ? { description: requiredString(toolInput.description, "description") }
+            : {}),
+          ...(toolInput.instructions !== undefined
+            ? { instructions: requiredString(toolInput.instructions, "instructions") }
+            : {}),
         },
       });
     }
@@ -516,20 +581,27 @@ async function bootstrap(
   input: Record<string, unknown>,
   dependencies: ChatHostToolServiceDependencies,
 ): Promise<ChatHostBootstrap> {
+  const taskToolsEnabled = context.taskToolsEnabled && !context.taskConversation;
   const mentionedSkillIds = stringArray(input.mentionedSkillIds);
   const [mentionedSkills, skills, workflows, recurringSchedules, browserProfiles] =
     await Promise.all([
       mentionedSkillIds.length
         ? dependencies.resolveSkillMentions({
             workspaceId: context.workspaceId,
+            userId: context.actorId,
+            ...(context.taskConversation ? { skillAccess: "company" as const } : {}),
             mentions: mentionedSkillIds.map((id) => ({ id })),
           })
         : Promise.resolve([]),
-      dependencies.listSkillCatalog(context.workspaceId),
-      context.taskToolsEnabled
+      dependencies.listSkillCatalog(
+        context.workspaceId,
+        context.actorId,
+        context.taskConversation ? "company" : undefined,
+      ),
+      taskToolsEnabled
         ? dependencies.listWorkflowCatalog(context.workspaceId)
         : Promise.resolve([]),
-      context.taskToolsEnabled ? dependencies.listSchedules(context.actorId) : Promise.resolve([]),
+      taskToolsEnabled ? dependencies.listSchedules(context.actorId) : Promise.resolve([]),
       dependencies.browserProfilesAvailable()
         ? dependencies.listBrowserProfiles(context.actorId)
         : Promise.resolve([]),
@@ -538,6 +610,8 @@ async function bootstrap(
     conversationId: context.conversationId,
     messageId: context.messageId,
     workspaceId: context.workspaceId,
+    userId: context.actorId,
+    ...(context.taskConversation ? { skillAccess: "company" as const } : {}),
     skills: mentionedSkills,
   });
   return {
@@ -548,7 +622,7 @@ async function bootstrap(
       timezone: context.timezone,
     },
     workspaceName: context.workspaceName,
-    taskToolsEnabled: context.taskToolsEnabled,
+    taskToolsEnabled,
     skillToolsEnabled: context.skillToolsEnabled,
     browserToolsEnabled: true,
     browserProfiles: browserProfiles.map(({ id, name, siteHost }) => ({ id, name, siteHost })),
@@ -615,12 +689,17 @@ function browserProfileResult(session: BrowserProfileSession) {
 }
 
 function assertTaskTools(context: ChatHostContext) {
+  if (context.taskConversation) {
+    throw new Error(
+      "Tasks cannot create other tasks or manage task schedules. Use a main chat instead.",
+    );
+  }
   if (!context.taskToolsEnabled) throw new Error("Task creation is not enabled for this user.");
 }
 
 function assertSkillTools(context: ChatHostContext) {
   if (!context.skillToolsEnabled) {
-    throw new Error("Only workspace admins can manage Skills from Chat.");
+    throw new Error("Skill tools are unavailable for this user.");
   }
 }
 
@@ -728,4 +807,9 @@ function normalizeLookup(value: string) {
 
 function failure(error: string): ChatHostToolGatewayResponse {
   return { ok: false, error };
+}
+
+function skillScope(value: unknown): "personal" | "company" {
+  if (value !== "personal" && value !== "company") throw new Error("Choose Personal or Company.");
+  return value;
 }

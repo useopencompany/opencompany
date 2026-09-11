@@ -384,6 +384,25 @@ describe("opencompany Google Drive MCP server", () => {
               },
             },
             {
+              deleteParagraphBullets: {
+                range: { startIndex: 1, endIndex: 2, tabId: "t.child" },
+              },
+            },
+            {
+              updateParagraphStyle: {
+                range: { startIndex: 1, endIndex: 2, tabId: "t.child" },
+                paragraphStyle: { namedStyleType: "NORMAL_TEXT" },
+                fields: expect.stringContaining("indentStart"),
+              },
+            },
+            {
+              updateTextStyle: {
+                range: { startIndex: 1, endIndex: 2, tabId: "t.child" },
+                textStyle: {},
+                fields: expect.stringContaining("strikethrough"),
+              },
+            },
+            {
               insertText: {
                 location: { index: 1, tabId: "t.child" },
                 text: "New plan",
@@ -446,6 +465,23 @@ describe("opencompany Google Drive MCP server", () => {
       writeControl: { requiredRevisionId: string };
     };
     expect(update.requests[1]).toEqual({
+      deleteParagraphBullets: {
+        range: { startIndex: 1, endIndex: 2, tabId: "t.0" },
+      },
+    });
+    expect(update.requests[2]).toEqual({
+      updateParagraphStyle: expect.objectContaining({
+        range: { startIndex: 1, endIndex: 2, tabId: "t.0" },
+        paragraphStyle: { namedStyleType: "NORMAL_TEXT" },
+      }),
+    });
+    expect(update.requests[3]).toEqual({
+      updateTextStyle: expect.objectContaining({
+        range: { startIndex: 1, endIndex: 2, tabId: "t.0" },
+        textStyle: {},
+      }),
+    });
+    expect(update.requests[4]).toEqual({
       insertText: {
         location: { index: 1, tabId: "t.0" },
         text: "Sat, September 5th\nTasks\nopen source repo",
@@ -484,6 +520,50 @@ describe("opencompany Google Drive MCP server", () => {
         revisionId: "rev_8",
       },
     });
+  });
+
+  it("clears the undeletable body paragraph before inserting into a blank document", async () => {
+    mocks.apiCall
+      .mockResolvedValueOnce({
+        documentId: "doc_blank",
+        revisionId: "rev_1",
+        tabs: [
+          {
+            tabProperties: { tabId: "t.0" },
+            documentTab: {
+              body: { content: [{ startIndex: 1, endIndex: 2, paragraph: { bullet: {} } }] },
+            },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        documentId: "doc_blank",
+        writeControl: { requiredRevisionId: "rev_2" },
+      });
+
+    const response = await service().handle(
+      request(
+        { type: "tools/call", tool: "replace_document_contents", capability: "write" },
+        "tools/call",
+        {
+          name: "replace_document_contents",
+          arguments: { fileId: "doc_blank", text: "New plan" },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await responseJson(response);
+    expect(body.result).not.toMatchObject({ isError: true });
+    const update = mocks.apiCall.mock.calls[1]?.[3]?.body as {
+      requests: Array<Record<string, any>>;
+    };
+    expect(update.requests.map((entry) => Object.keys(entry)[0])).toEqual([
+      "deleteParagraphBullets",
+      "updateParagraphStyle",
+      "updateTextStyle",
+      "insertText",
+    ]);
   });
 
   it("rejects ambiguous full-document replacement input before writing", async () => {

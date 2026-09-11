@@ -1,10 +1,15 @@
 import { PGlite } from "@electric-sql/pglite";
 import type { CodexChatSession, CodexChatTurn, Task } from "@opencompany/db/product-schema";
+import { snapshotPGliteSchema } from "@opencompany/db/test-schema-snapshot";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { CodexChatLeaseLostError } from "./codex-chat-errors";
-import { forceFailClaimedTurn } from "./codex-chat-worker";
+import {
+  claimNextCodexChatTurn,
+  forceFailClaimedTurn,
+  heartbeatCodexChatTurn,
+} from "./codex-chat-worker";
 import type { TaskTurnContext } from "./task-turn";
 
 // The forced settlement is the last line of defense against the lease-reclaim loop:
@@ -128,14 +133,14 @@ function taskContextFixture(): TaskTurnContext {
   };
 }
 
-describe("forceFailClaimedTurn against real Postgres", () => {
+describe("durable worker claims and settlement against real Postgres", () => {
   let pg: PGlite;
+  let restoreDatabase: () => Promise<PGlite>;
 
-  beforeEach(async () => {
-    vi.clearAllMocks();
-    pg = await PGlite.create();
-    await pg.exec(SCHEMA);
-    await pg.exec(`
+  beforeAll(async () => {
+    restoreDatabase = await snapshotPGliteSchema(async (database) => {
+      await database.exec(SCHEMA);
+      await database.exec(`
       INSERT INTO goat.chat_sessions (id, user_workos_id, model, engine, kind)
       VALUES ('chat_task_1', 'user_1', 'gpt-5.5', 'codex', 'task');
       INSERT INTO goat.tasks (id, user_workos_id, prompt, model, session_id, status, stage)
@@ -147,6 +152,12 @@ describe("forceFailClaimedTurn against real Postgres", () => {
       INSERT INTO goat.run_attempts (id, run_id, number, status, worker_id, lease_id)
       VALUES ('attempt_1', 'turn_1', 1, 'running', 'runner_1', 'lease_1');
     `);
+    });
+  });
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    pg = await restoreDatabase();
     dbHolder.execute = async (query: SQL) => {
       const compiled = dialect.sqlToQuery(query);
       return pg.query(compiled.sql, compiled.params as never[]);
@@ -156,6 +167,103 @@ describe("forceFailClaimedTurn against real Postgres", () => {
   afterEach(async () => {
     dbHolder.execute = undefined;
     await pg.close();
+  });
+
+  async function prepareClaimSchema() {
+    await pg.exec(`
+      ALTER TABLE goat.chat_sessions ADD COLUMN closed_at timestamptz;
+      ALTER TABLE goat.tasks ADD COLUMN archived_at timestamptz, ADD COLUMN reported_outcome text, ADD COLUMN outcome_comment text;
+      ALTER TABLE goat.codex_chat_sessions ADD COLUMN host_tool_contract_version text, ADD COLUMN sandbox_timeout_armed_at timestamptz;
+      ALTER TABLE goat.codex_chat_turns
+        ADD COLUMN lease_expires_at timestamptz, ADD COLUMN run_after timestamptz,
+        ADD COLUMN settings jsonb DEFAULT '{}', ADD COLUMN created_at timestamptz DEFAULT now(),
+        ADD COLUMN attempts integer DEFAULT 1, ADD COLUMN recovery_attempts integer DEFAULT 0,
+        ADD COLUMN engine_recovery_required boolean DEFAULT false, ADD COLUMN engine_turn_baseline_ids jsonb,
+        ADD COLUMN event_sequence integer DEFAULT 0, ADD COLUMN interrupt_requested_at timestamptz,
+        ADD COLUMN user_message_id text, ADD COLUMN assistant_message_id text, ADD COLUMN codex_turn_id text;
+    `);
+  }
+
+  it("recovers cancellation after the heartbeat releases a canceled task's lease", async () => {
+    await prepareClaimSchema();
+    await pg.exec(`
+      UPDATE goat.tasks SET status='canceled', stage='canceled';
+      UPDATE goat.codex_chat_turns SET lease_expires_at=now() - interval '1 second';
+    `);
+    expect(
+      await claimNextCodexChatTurn({ leaseOwner: "other_worker", leaseTtlMs: 60_000 }),
+    ).toBeNull();
+    await pg.exec(`
+      UPDATE goat.codex_chat_turns SET interrupt_requested_at=now(), lease_expires_at=now() + interval '1 minute';
+    `);
+    expect(
+      await heartbeatCodexChatTurn({
+        turnId: "turn_1",
+        leaseId: "lease_1",
+        leaseOwner: "runner_1",
+        leaseTtlMs: 60_000,
+      }),
+    ).toBe(false);
+    const claimed = await claimNextCodexChatTurn({
+      leaseOwner: "cleanup_worker",
+      leaseTtlMs: 60_000,
+    });
+    expect(claimed).toMatchObject({
+      id: "turn_1",
+      status: "running",
+      leaseOwner: "cleanup_worker",
+    });
+    expect(claimed?.interruptRequestedAt).toBeInstanceOf(Date);
+    expect(
+      await heartbeatCodexChatTurn({
+        turnId: claimed!.id,
+        leaseId: claimed!.leaseId!,
+        leaseOwner: "cleanup_worker",
+        leaseTtlMs: 60_000,
+        cancellationRecovery: true,
+      }),
+    ).toBe(true);
+    expect((await pg.query("SELECT status,stage FROM goat.tasks")).rows).toEqual([
+      { status: "canceled", stage: "canceled" },
+    ]);
+    expect(
+      await claimNextCodexChatTurn({ leaseOwner: "other_worker", leaseTtlMs: 60_000 }),
+    ).toBeNull();
+    await pg.exec(
+      "UPDATE goat.codex_chat_turns SET lease_expires_at=now() - interval '1 second'; UPDATE goat.tasks SET archived_at=now()",
+    );
+    expect(
+      await claimNextCodexChatTurn({ leaseOwner: "archive_cleanup_worker", leaseTtlMs: 60_000 }),
+    ).toMatchObject({ id: "turn_1", interruptRequestedAt: claimed!.interruptRequestedAt });
+    await pg.exec(
+      "UPDATE goat.codex_chat_turns SET lease_expires_at=now() - interval '1 second', interrupt_requested_at=NULL",
+    );
+    expect(
+      await claimNextCodexChatTurn({ leaseOwner: "other_worker", leaseTtlMs: 60_000 }),
+    ).toBeNull();
+  });
+
+  it("claims an approved continuation left waiting by an older API, without waking other waiting or archived tasks", async () => {
+    await prepareClaimSchema();
+    await pg.exec(`
+      UPDATE goat.tasks SET status='waiting';
+      UPDATE goat.codex_chat_turns SET status='queued';
+    `);
+    const claim = () => claimNextCodexChatTurn({ leaseOwner: "new_worker", leaseTtlMs: 60_000 });
+    expect(await claim()).toBeNull();
+    await pg.exec(
+      `UPDATE goat.codex_chat_turns SET settings='{"approvalContinuation":true}'; UPDATE goat.tasks SET archived_at=now();`,
+    );
+    expect(await claim()).toBeNull();
+    await pg.exec("UPDATE goat.tasks SET archived_at=NULL");
+    expect(await claim()).toMatchObject({
+      id: "turn_1",
+      status: "running",
+      leaseOwner: "new_worker",
+    });
+    expect((await pg.query("SELECT status,stage FROM goat.tasks WHERE id='task_1'")).rows).toEqual([
+      { status: "queued", stage: "queued" },
+    ]);
   });
 
   it("fails the turn, attempt, runtime, and task in one statement", async () => {

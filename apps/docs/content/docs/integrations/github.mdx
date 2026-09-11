@@ -1,20 +1,46 @@
 ---
 title: GitHub
-description: Connect your GitHub account through the official plugin.
+description: Give opencompany access to repositories, issues, pull requests, and cloud coding.
 ---
 
-## What connecting does
-
-GitHub is a personal connection provided by the official **GitHub as you** Plugin. It lets
-opencompany work with repositories, issues, and pull requests using the GitHub identity you
-authorize, including repository-aware coding work.
-
-## Scopes and permissions
-
-Repository installation scope is the outer boundary. Review the selected repositories and GitHub's
-installation permission screen when connecting or changing access.
+The **GitHub as you** Plugin lets opencompany work through your personal GitHub identity. It
+provides repository tools and authenticated Git access for coding sessions.
 
 ## Connect GitHub
 
-Open **Plugins**, choose **GitHub as you**, install the plugin, and authorize the GitHub App. GitHub
-workspace ingestion is no longer available; use the plugin whenever opencompany needs GitHub access.
+1. Open **Plugins → GitHub as you**, or its page under **Settings → Plugins**.
+2. Ask a workspace admin to install it if needed.
+3. Complete the GitHub App installation and account authorization flow.
+4. Select the repositories opencompany should be able to reach.
+5. Return to the Plugin page and check the connected identity and available repositories.
+
+Access is the intersection of your GitHub account's permissions and the App installations and
+repositories available to it. An organization may require an owner to approve installation.
+
+## Try it
+
+```text
+List the open pull requests in OWNER/REPO.
+For each, include its title, author, review state, and link.
+```
+
+Replace `OWNER/REPO` with an accessible repository. Review the Plugin's tool permission groups
+before asking it to create or change issues and pull requests.
+
+## Use it for coding
+
+Connect a coding subscription under **Settings → Inference**, then name the repository in a Codex
+or Claude Code Chat. GitHub authorization makes authenticated Git and GitHub CLI access available
+to the coding sandbox.
+
+A workspace admin can save environment and setup instructions under **Settings → Repositories**.
+Follow [Cloud coding](/docs/guides/cloud-coding) for the complete path.
+
+## Fix missing repository access
+
+Open the Plugin's authorization flow to grant access to missing repositories, then recheck the
+available repositories. Confirm the signed-in GitHub identity and any organization approval.
+Reconnecting the coding engine alone won't change GitHub access.
+
+The former workspace GitHub ingestion integration is retired. Use the Plugin for GitHub tools;
+GitHub isn't offered by the current Wiki source picker.

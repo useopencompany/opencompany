@@ -1,12 +1,17 @@
 {
-  "title": "Core concepts",
+  "title": "Use opencompany",
   "pages": [
     "index",
     "chat-and-engines",
     "tasks",
     "workflows-and-schedules",
-    "brain",
+    "wiki",
+    "---Customize---",
+    "skills-and-plugins",
+    "plugins",
     "integrations",
-    "skills-and-plugins"
+    "models-and-usage",
+    "---Legacy---",
+    "brain"
   ]
 }

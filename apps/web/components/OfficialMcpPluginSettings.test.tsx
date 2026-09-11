@@ -27,6 +27,7 @@ import {
   GitHubPluginDetailView,
   GmailPluginDetail,
   GmailPluginDetailView,
+  GoogleAdminPluginDetail,
   GoogleCalendarPluginDetail,
   GoogleDrivePluginDetail,
   GranolaPluginDetail,
@@ -43,12 +44,15 @@ import {
   LinearPluginDetailView,
   linearToolsStateFromPlugin,
   NeonPluginDetailView,
+  NotionPluginDetail,
   neonToolsStateFromPlugin,
   type PluginToolsState,
   PostHogPluginDetail,
+  ResendPluginDetail,
   SigNozPluginDetail,
   SlackPluginDetail,
   StripePluginDetail,
+  SupabasePluginDetail,
   slackToolsStateFromPlugin,
   uncuratedPluginToolGroups,
   VercelPluginDetail,
@@ -69,6 +73,7 @@ import {
   LATITUDE_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
+  NOTION_PLUGIN_SOURCE,
   POSTHOG_PLUGIN_SOURCE,
   SLACK_PLUGIN_SOURCE,
   STRIPE_PLUGIN_SOURCE,
@@ -213,6 +218,7 @@ const appData = vi.hoisted(() => ({
       integrationId: "gint_x_latest",
     },
     personalAccounts: {
+      google_admin: [] as IntegrationAccountView<"google_admin">[],
       betterstack: [],
       fathom: [
         {
@@ -329,6 +335,23 @@ const appData = vi.hoisted(() => ({
         },
       ],
       neon: [],
+      stripe: [] as IntegrationAccountView<"stripe">[],
+      supabase: [],
+      resend: [],
+      notion: [
+        {
+          integrationId: "gint_notion_mcp",
+          provider: "notion",
+          status: "connected",
+          connected: true,
+          accountEmail: null,
+          accountName: "Notion",
+          connectionLabel: "Acme workspace",
+          statusReason: null,
+          scopes: ["default"],
+          capabilityModes: { query: "ask", draft: "ask", write: "ask" },
+        },
+      ],
       signoz: [
         {
           integrationId: "gint_signoz",
@@ -1162,6 +1185,87 @@ const googleCalendarPlugin = {
   ],
 } as const satisfies PluginInstallationDto;
 
+const notionPlugin = {
+  ...googleCalendarPlugin,
+  id: "plugin_notion",
+  name: "notion",
+  manifest: {
+    name: "notion",
+    description: "Search, read, and change Notion workspace content.",
+  },
+  source: {
+    ...plugin.source,
+    path: "notion",
+    resolvedCommit: "fb207086016a74e2e5724386c524d275771e5db6",
+  },
+  remoteMcpServers: [
+    {
+      name: "notion",
+      type: "streamable-http",
+      connectionProvider: "notion",
+      capabilities: [
+        {
+          id: "query",
+          label: "Search & read Notion",
+          defaultMode: "ask",
+          tools: ["notion-search"],
+        },
+        {
+          id: "draft",
+          label: "Work with Notion agents",
+          defaultMode: "ask",
+          tools: ["notion-spawn-session"],
+        },
+        {
+          id: "write",
+          label: "Change Notion",
+          defaultMode: "ask",
+          tools: ["notion-update-page"],
+        },
+      ],
+      tools: [
+        {
+          name: "notion-search",
+          description: "Search workspace content.",
+          classification: {
+            capabilityId: "query",
+            capabilityLabel: "Search & read Notion",
+            defaultMode: "ask",
+            bucket: "read",
+            curated: true,
+          },
+        },
+        {
+          name: "notion-spawn-session",
+          description: "Start a Custom Agent session.",
+          classification: {
+            capabilityId: "draft",
+            capabilityLabel: "Work with Notion agents",
+            defaultMode: "ask",
+            bucket: "write",
+            curated: true,
+          },
+        },
+        {
+          name: "notion-update-page",
+          description: "Update a page.",
+          classification: {
+            capabilityId: "write",
+            capabilityLabel: "Change Notion",
+            defaultMode: "ask",
+            bucket: "write",
+            curated: true,
+          },
+        },
+      ],
+      discoveryStatus: "ready",
+      discoveredAt: "2026-09-07T08:00:00.000Z",
+      refreshAfter: "2026-09-07T09:00:00.000Z",
+      lastDiscoveryError: null,
+    },
+  ],
+} as const satisfies PluginInstallationDto;
+
 const slackPreview = {
   ...officialPreview,
   manifest: slackPlugin.manifest,
@@ -1247,6 +1351,7 @@ const gmailPlugin = {
 
 describe("Linear plugin settings", () => {
   beforeEach(() => {
+    appData.integrations.personalAccounts.stripe = [];
     router.push.mockReset();
     router.refresh.mockReset();
     for (const command of Object.values(commands)) command.mockReset();
@@ -1269,6 +1374,71 @@ describe("Linear plugin settings", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("uses the shared Google Admin account, OAuth, permission, and uninstall controls", async () => {
+    const adminAccount: IntegrationAccountView<"google_admin"> = {
+      integrationId: "gint_admin",
+      provider: "google_admin",
+      status: "connected",
+      connected: true,
+      accountEmail: "admin@example.com",
+      accountName: "Admin",
+      connectionLabel: "admin@example.com",
+      statusReason: null,
+      scopes: [
+        "https://www.googleapis.com/auth/admin.directory.user",
+        "https://www.googleapis.com/auth/admin.directory.group",
+      ],
+      capabilityModes: {},
+    };
+    appData.integrations.personalAccounts.google_admin = [adminAccount];
+    const adminPlugin: PluginInstallationDto = {
+      ...plugin,
+      name: "google-admin",
+      manifest: { name: "google-admin" },
+      skills: [],
+      remoteMcpServers: [
+        {
+          ...googleCalendarPlugin.remoteMcpServers[0],
+          name: "google-admin",
+          connectionProvider: "google-admin",
+          capabilities: [
+            { id: "query", label: "Read directory", defaultMode: "ask", tools: ["list_users"] },
+            {
+              id: "write",
+              label: "Manage users and groups",
+              defaultMode: "ask",
+              tools: ["create_user"],
+            },
+          ],
+          tools: [],
+        },
+      ],
+    };
+    try {
+      render(
+        <GoogleAdminPluginDetail pluginState={{ status: "ready", plugin: adminPlugin }} canEdit />,
+      );
+      expect(screen.getAllByText("admin@example.com").length).toBeGreaterThan(0);
+      expect(screen.queryByRole("link", { name: /Connect Google Admin account/ })).toBeNull();
+      expect(screen.getByText("Read directory")).toBeInTheDocument();
+      expect(screen.getByText("Manage users and groups")).toBeInTheDocument();
+      for (const label of ["Read directory permission", "Manage users and groups permission"]) {
+        expect(
+          within(screen.getByRole("group", { name: label })).getByRole("button", { name: "Ask" }),
+        ).toHaveAttribute("aria-pressed", "true");
+      }
+      await userEvent.click(screen.getByRole("button", { name: "Uninstall" }));
+      const dialog = await screen.findByRole("dialog", { name: "Uninstall Google Admin?" });
+      await userEvent.click(within(dialog).getByRole("button", { name: "Uninstall" }));
+      await waitFor(() =>
+        expect(commands.archiveHeadlessPlugin).toHaveBeenCalledWith("google-admin"),
+      );
+      expect(accountActions.disconnectIntegrationAccountAction).not.toHaveBeenCalled();
+    } finally {
+      appData.integrations.personalAccounts.google_admin = [];
+    }
   });
 
   it("server-renders account data without starting another live query", () => {
@@ -1344,6 +1514,7 @@ describe("Linear plugin settings", () => {
       "https://eu.infisical.com/login?callback_port=23456",
     );
 
+    await waitFor(() => expect(screen.getByLabelText("Browser token")).toBeEnabled());
     await user.type(screen.getByLabelText("Browser token"), "browser-token");
     await user.click(screen.getByRole("button", { name: "Finish connection" }));
 
@@ -1709,7 +1880,58 @@ describe("Linear plugin settings", () => {
     expect(useLiveQuery).not.toHaveBeenCalled();
   });
 
-  it("maps the workspace Stripe key onto the official plugin surface", () => {
+  it.each(["connected", "needs_reauth"] as const)(
+    "prefers the %s Stripe OAuth account in settings",
+    async (status) => {
+      appData.integrations.personalAccounts.stripe = [
+        {
+          integrationId: "stripe_oauth",
+          provider: "stripe",
+          status,
+          connected: status === "connected",
+          accountEmail: null,
+          accountName: "Stripe OAuth",
+          connectionLabel: "Stripe OAuth",
+          statusReason: status === "needs_reauth" ? "Reconnect Stripe" : null,
+          scopes: [],
+          capabilityModes: {},
+        },
+      ];
+      render(
+        <StripePluginDetail
+          pluginState={{
+            status: "ready",
+            plugin: {
+              ...plugin,
+              name: "stripe",
+              manifest: { name: "stripe", description: "Work with Stripe." },
+            },
+          }}
+          toolsState={defaultStripeToolsState()}
+          canEdit
+        />,
+      );
+      expect(screen.getByText("Stripe OAuth")).toBeInTheDocument();
+      expect(screen.queryByText("Acme Payments · Test mode")).not.toBeInTheDocument();
+      expect(screen.queryByText("Manage existing workspace API key")).not.toBeInTheDocument();
+      if (status === "connected") {
+        expect(screen.queryByRole("link", { name: "Connect Stripe account" })).toBeNull();
+      } else {
+        expect(screen.getByRole("link", { name: "Connect Stripe account" })).toHaveAttribute(
+          "href",
+          "/api/integrations/stripe/start?returnTo=/settings/plugins/stripe",
+        );
+      }
+      if (status === "needs_reauth")
+        expect(screen.getByRole("link", { name: "Reconnect" })).toBeInTheDocument();
+      await userEvent.setup().click(screen.getByRole("button", { name: "Disconnect" }));
+      expect(accountActions.disconnectIntegrationAccountAction).toHaveBeenCalledWith(
+        "stripe_oauth",
+      );
+    },
+  );
+
+  it("requires a personal Stripe account instead of showing the workspace key", () => {
     const stripePlugin = {
       ...plugin,
       id: "plugin_stripe",
@@ -1725,11 +1947,12 @@ describe("Linear plugin settings", () => {
       />,
     );
 
-    expect(html).toContain("Acme Payments · Test mode");
+    expect(html).not.toContain("Acme Payments · Test mode");
+    expect(html).toContain("No Stripe accounts are connected.");
     expect(html).toContain("Learn about Stripe");
     expect(html).toContain("Read Stripe data");
     expect(html).toContain("Manage Stripe");
-    expect(html).toContain("mcp.stripe.com");
+    expect(html).toContain("/api/integrations/stripe/start");
     expect(STRIPE_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/68c22e8a1ffe5eb8a83fb91c68f76f3f45705d3a/stripe",
     );
@@ -1757,11 +1980,15 @@ describe("Linear plugin settings", () => {
     expect(screen.getByText("a".repeat(40))).toBeInTheDocument();
     expect(screen.getByText(`sha256:${"b".repeat(64)}`)).toBeInTheDocument();
     expect(screen.queryByText("read write")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /view source/i })).toHaveAttribute(
+    const advancedDetails = screen.getByText("Advanced package details").closest("details");
+    expect(
+      within(advancedDetails as HTMLElement).getByRole("link", {
+        name: /github\.com\/useopencompany\/plugins/i,
+      }),
+    ).toHaveAttribute(
       "href",
       `https://github.com/useopencompany/plugins/tree/${"a".repeat(40)}/linear`,
     );
-    const advancedDetails = screen.getByText("Advanced package details").closest("details");
     expect(advancedDetails).not.toHaveAttribute("open");
     for (const toolDetails of screen
       .getAllByText("1 tool")
@@ -1871,6 +2098,59 @@ describe("Linear plugin settings", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
+  it("updates an installed plugin to the current official pin", async () => {
+    render(
+      <LinearPluginDetailView
+        pluginState={{ status: "ready", plugin }}
+        accountsState={accountsState}
+        toolsState={toolsState}
+        canEdit
+      />,
+    );
+
+    expect(screen.getByText("Update available")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Update" }));
+
+    await waitFor(() => expect(commands.importHeadlessPlugin).toHaveBeenCalledTimes(1));
+    expect(commands.previewHeadlessPluginImport).toHaveBeenCalledWith({
+      url: LINEAR_PLUGIN_SOURCE,
+    });
+    expect(commands.importHeadlessPlugin).toHaveBeenCalledWith({
+      url: LINEAR_PLUGIN_SOURCE,
+      expectedResolvedCommit: officialPreview.source.resolvedCommit,
+      expectedIntegrity: officialPreview.integrity,
+    });
+    expect(toasts.success).toHaveBeenCalledWith("Linear updated.");
+    expect(router.refresh).toHaveBeenCalled();
+  });
+
+  it("does not offer an update for the current official pin", () => {
+    const currentCommit = LINEAR_PLUGIN_SOURCE.match(/\/tree\/([0-9a-f]{40})\//u)?.[1];
+    expect(currentCommit).toBeDefined();
+
+    render(
+      <LinearPluginDetailView
+        pluginState={{
+          status: "ready",
+          plugin: {
+            ...plugin,
+            source: {
+              ...plugin.source,
+              ref: currentCommit!,
+              resolvedCommit: currentCommit!,
+            },
+          },
+        }}
+        accountsState={accountsState}
+        toolsState={toolsState}
+        canEdit
+      />,
+    );
+
+    expect(screen.queryByText("Update available")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Update" })).not.toBeInTheDocument();
+  });
+
   it("refreshes discovery manually and reloads the server snapshot", async () => {
     render(
       <LinearPluginDetailView
@@ -1886,6 +2166,103 @@ describe("Linear plugin settings", () => {
     await waitFor(() => expect(commands.refreshHeadlessPluginMcp).toHaveBeenCalledWith("linear"));
     expect(toasts.success).toHaveBeenCalledWith("Linear tools refreshed.");
     expect(router.refresh).toHaveBeenCalled();
+  });
+
+  const connectedLinearAccount: IntegrationAccountView<"linear"> = {
+    integrationId: "gint_linear_tools",
+    provider: "linear",
+    status: "connected",
+    connected: true,
+    accountEmail: null,
+    accountName: "Linear tool access",
+    connectionLabel: "Linear tool access",
+    statusReason: null,
+    scopes: [],
+    capabilityModes: { read: "on", write: "ask" },
+  };
+
+  it("makes connecting the account the primary action while setup is incomplete", () => {
+    render(
+      <LinearPluginDetailView
+        pluginState={{ status: "ready", plugin }}
+        accountsState={{ status: "ready", accounts: [], permissionConnection: null }}
+        toolsState={linearToolsStateFromPlugin(plugin)}
+        canEdit
+      />,
+    );
+
+    expect(screen.getByText("Requires connection")).toBeInTheDocument();
+    expect(screen.queryByText("Enabled")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", {
+        name: "Connect your Linear account to start using this plugin",
+      }),
+    ).toBeVisible();
+
+    // The connect action is promoted into the callout as a default-variant button and must not
+    // also repeat itself inside Accounts.
+    const connectLinks = screen.getAllByRole("link", { name: "Connect Linear account" });
+    expect(connectLinks).toHaveLength(1);
+    expect(connectLinks[0]).toHaveClass("bg-primary");
+  });
+
+  it("shows a single truthful header once the Linear account is connected", () => {
+    render(
+      <LinearPluginDetailView
+        pluginState={{ status: "ready", plugin }}
+        accountsState={{
+          status: "ready",
+          accounts: [{ account: connectedLinearAccount }],
+          permissionConnection: connectedLinearAccount,
+        }}
+        toolsState={linearToolsStateFromPlugin(plugin)}
+        canEdit
+      />,
+    );
+
+    expect(screen.getByText("Enabled")).toBeInTheDocument();
+    expect(screen.queryByText("Requires connection")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", {
+        name: "Connect your Linear account to start using this plugin",
+      }),
+    ).toBeNull();
+
+    // The plugin name and description belong to the page header only, and a connected row
+    // replaces the old duplicate connect button.
+    expect(screen.getAllByRole("heading", { name: "Linear" })).toHaveLength(1);
+    expect(screen.getAllByText("Plan and ship work with Linear.")).toHaveLength(1);
+    expect(screen.getByText("Connected")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Connect Linear account" })).toBeNull();
+  });
+
+  it("demotes uninstall and keeps the source link inside advanced package details", () => {
+    render(
+      <LinearPluginDetailView
+        pluginState={{ status: "ready", plugin }}
+        accountsState={{
+          status: "ready",
+          accounts: [{ account: connectedLinearAccount }],
+          permissionConnection: connectedLinearAccount,
+        }}
+        toolsState={linearToolsStateFromPlugin(plugin)}
+        canEdit
+      />,
+    );
+
+    const uninstall = screen.getByRole("button", { name: "Uninstall" });
+    expect(uninstall).toHaveClass("text-ink-subtle");
+    expect(uninstall.className).not.toContain("bg-destructive");
+
+    const advancedDetails = screen.getByText("Advanced package details").closest("details");
+    expect(
+      within(advancedDetails as HTMLElement).getByRole("link", {
+        name: /github\.com\/useopencompany\/plugins/i,
+      }),
+    ).toHaveAttribute(
+      "href",
+      `https://github.com/useopencompany/plugins/tree/${"a".repeat(40)}/linear`,
+    );
   });
 
   it("presents a missing tool account as a neutral connection-required state", () => {
@@ -2108,10 +2485,7 @@ describe("Linear plugin settings", () => {
     expect(screen.getByRole("heading", { level: 1, name: "GitHub as you" })).toBeInTheDocument();
     expect(screen.getByText("octocat")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Disconnect" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Connect GitHub account" })).toHaveAttribute(
-      "href",
-      "/api/integrations/github-user/start?returnTo=/settings/plugins/github",
-    );
+    expect(screen.queryByRole("link", { name: "Connect GitHub account" })).toBeNull();
     expect(await screen.findByRole("heading", { name: "Repository access" })).toBeVisible();
     const installationAccount = await screen.findByText("opencompany");
     expect(installationAccount).toBeVisible();
@@ -2231,10 +2605,7 @@ describe("Linear plugin settings", () => {
     expect(screen.getByText("List projects")).toBeInTheDocument();
     expect(screen.getByText("Run sql")).toBeInTheDocument();
     expect(screen.getByText("This version of the plugin contains no skills.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Connect Neon account" })).toHaveAttribute(
-      "href",
-      "/api/integrations/neon/start?returnTo=/settings/plugins/neon",
-    );
+    expect(screen.queryByRole("link", { name: "Connect Neon account" })).toBeNull();
     expect(screen.queryByText(/Configure Neon ingestion/u)).not.toBeInTheDocument();
     expect(NEON_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/neon$/u,
@@ -2280,10 +2651,7 @@ describe("Linear plugin settings", () => {
     expect(screen.getByText("Query")).toBeInTheDocument();
     expect(screen.getByText("Create monitor")).toBeInTheDocument();
     expect(screen.getByText("This version of the plugin contains no skills.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Connect Better Stack account" })).toHaveAttribute(
-      "href",
-      "/api/integrations/betterstack/start?returnTo=/settings/plugins/betterstack",
-    );
+    expect(screen.queryByRole("link", { name: "Connect Better Stack account" })).toBeNull();
     expect(BETTERSTACK_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/betterstack$/u,
     );
@@ -2319,7 +2687,7 @@ describe("Linear plugin settings", () => {
     expect(screen.getByText("Archive Co · Ada")).toBeInTheDocument();
     expect(screen.getByText("Slack tools")).toBeInTheDocument();
     expect(screen.getByText("Not active")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Connect Slack account" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Connect another Slack account" })).toHaveAttribute(
       "href",
       "/api/integrations/slack/start?returnTo=/settings/plugins/slack",
     );
@@ -2404,7 +2772,7 @@ describe("Linear plugin settings", () => {
     expect(screen.getByText("@acme · Acme")).toBeInTheDocument();
     expect(screen.getByText("X tools")).toBeInTheDocument();
     expect(screen.getByText("Legacy fallback")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Connect X account" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Connect another X account" })).toHaveAttribute(
       "href",
       "/api/integrations/x-account/start?returnTo=/settings/plugins/x",
     );
@@ -2429,10 +2797,7 @@ describe("Linear plugin settings", () => {
 
     expect(screen.getByRole("heading", { level: 1, name: "Google Calendar" })).toBeInTheDocument();
     expect(screen.getByText("ada@example.com")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Connect Google Calendar account" })).toHaveAttribute(
-      "href",
-      "/api/integrations/google-calendar/start?returnTo=/settings/plugins/google-calendar",
-    );
+    expect(screen.queryByRole("link", { name: "Connect Google Calendar account" })).toBeNull();
     for (const label of ["Check calendars", "Read calendar events", "Manage calendar events"]) {
       expect(
         within(screen.getByRole("group", { name: `${label} permission` })).getByRole("button", {
@@ -2450,6 +2815,22 @@ describe("Linear plugin settings", () => {
         { id: "write", defaultMode: "ask" },
       ],
     });
+  });
+
+  it("presents Notion with personal OAuth and every capability gated on Ask", () => {
+    render(<NotionPluginDetail pluginState={{ status: "ready", plugin: notionPlugin }} canEdit />);
+
+    expect(screen.getByRole("heading", { level: 1, name: "Notion" })).toBeInTheDocument();
+    expect(screen.getByText("Acme workspace")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Connect Notion account" })).toBeNull();
+    for (const label of ["Search & read Notion", "Work with Notion agents", "Change Notion"]) {
+      expect(
+        within(screen.getByRole("group", { name: `${label} permission` })).getByRole("button", {
+          name: "Ask",
+        }),
+      ).toHaveAttribute("aria-pressed", "true");
+    }
+    expect(NOTION_PLUGIN_SOURCE).toContain("/tree/fb207086016a74e2e5724386c524d275771e5db6/notion");
   });
 
   it("reviews and installs Slack from the pinned package on its detail page", async () => {
@@ -2484,10 +2865,7 @@ describe("Linear plugin settings", () => {
 
     expect(screen.getByRole("heading", { level: 1, name: "Gmail" })).toBeInTheDocument();
     expect(screen.getByText("ada@example.com")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Connect Gmail account" })).toHaveAttribute(
-      "href",
-      "/api/integrations/gmail/start?access=mcp&returnTo=/settings/plugins/gmail",
-    );
+    expect(screen.queryByRole("link", { name: "Connect Gmail account" })).toBeNull();
     for (const label of ["Read Gmail", "Create drafts", "Organize Gmail"]) {
       expect(
         within(screen.getByRole("group", { name: `${label} permission` })).getByRole("button", {
@@ -2530,6 +2908,47 @@ describe("Linear plugin settings", () => {
     );
   });
 
+  it("reflects an Always allow update after editing the permission in settings", async () => {
+    const connection = account("gint_gmail", "ada@example.com", { query: "on" }, "gmail");
+    const view = (mode: string) => (
+      <GmailPluginDetailView
+        pluginState={{ status: "ready", plugin: gmailPlugin }}
+        accountsState={{
+          status: "ready",
+          accounts: [{ account: connection }],
+          permissionConnection: { ...connection, capabilityModes: { query: mode } },
+        }}
+        toolsState={gmailToolsStateFromPlugin(gmailPlugin)}
+        canEdit
+      />
+    );
+    const { rerender } = render(view("on"));
+    const modes = () => within(screen.getByRole("group", { name: "Read Gmail permission" }));
+    await userEvent.click(modes().getByRole("button", { name: "Ask" }));
+    await waitFor(() => expect(router.refresh).toHaveBeenCalled());
+    rerender(view("ask"));
+    expect(modes().getByRole("button", { name: "Ask" })).toHaveAttribute("aria-pressed", "true");
+
+    // The integration subscription receives the standing permission saved from chat.
+    rerender(view("on"));
+    expect(modes().getByRole("button", { name: "On" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("restores the persisted permission when saving an optimistic change fails", async () => {
+    accountActions.setIntegrationCapabilityModeAction.mockResolvedValueOnce({
+      ok: false,
+      error: "Permission could not be saved.",
+    } as never);
+    render(<GmailPluginDetail pluginState={{ status: "ready", plugin: gmailPlugin }} canEdit />);
+    const modes = within(screen.getByRole("group", { name: "Read Gmail permission" }));
+    await userEvent.click(modes.getByRole("button", { name: "On" }));
+    await waitFor(() =>
+      expect(toasts.error).toHaveBeenCalledWith("Permission could not be saved."),
+    );
+    expect(modes.getByRole("button", { name: "Ask" })).toHaveAttribute("aria-pressed", "true");
+    expect(router.refresh).not.toHaveBeenCalled();
+  });
+
   it("prompts older Gmail connections to grant the full MCP scope", () => {
     const oldGrant = {
       ...account("gint_gmail_old", "ada@example.com", {}, "gmail"),
@@ -2570,6 +2989,98 @@ describe("Linear plugin settings", () => {
         tools: [{ id: "mutate" }],
       },
     ]);
+  });
+  it("offers the shared account connection on its plugin page", () => {
+    const supabasePlugin = {
+      ...notionPlugin,
+      id: "plugin_supabase",
+      name: "supabase",
+      manifest: { name: "supabase" },
+      remoteMcpServers: [
+        {
+          ...notionPlugin.remoteMcpServers[0],
+          name: "supabase",
+          connectionProvider: "supabase",
+          capabilities: [
+            {
+              id: "read",
+              label: "Inspect Supabase resources",
+              defaultMode: "on",
+              tools: ["list_tables"],
+            },
+            {
+              id: "query",
+              label: "Read logs, keys, and function source",
+              defaultMode: "ask",
+              tools: ["query_logs"],
+            },
+            {
+              id: "write",
+              label: "Run SQL and manage Supabase resources",
+              defaultMode: "ask",
+              tools: ["execute_sql"],
+            },
+          ],
+          tools: [],
+        },
+      ],
+    } as const satisfies PluginInstallationDto;
+    render(
+      <SupabasePluginDetail pluginState={{ status: "ready", plugin: supabasePlugin }} canEdit />,
+    );
+    expect(screen.getByRole("link", { name: /connect supabase account/i })).toHaveAttribute(
+      "href",
+      "/api/integrations/supabase/start?returnTo=/settings/plugins/supabase",
+    );
+    expect(screen.getByText(/SQL can read or change data/)).toBeInTheDocument();
+  });
+  it("offers the shared Resend account connection and conservative permission groups", () => {
+    const resendPlugin = {
+      ...notionPlugin,
+      id: "plugin_resend",
+      name: "resend",
+      manifest: { name: "resend" },
+      remoteMcpServers: [
+        {
+          ...notionPlugin.remoteMcpServers[0],
+          name: "resend",
+          connectionProvider: "resend",
+          capabilities: [
+            {
+              id: "read",
+              label: "Inspect email configuration",
+              defaultMode: "on",
+              tools: ["list-domains"],
+            },
+            {
+              id: "query",
+              label: "Read email and contact data",
+              defaultMode: "ask",
+              tools: ["list-api-keys"],
+            },
+            {
+              id: "write",
+              label: "Send emails and manage content",
+              defaultMode: "ask",
+              tools: ["create-automation"],
+            },
+            {
+              id: "draft",
+              label: "Administer access and destructive actions",
+              defaultMode: "off",
+              tools: ["create-api-key"],
+            },
+          ],
+          tools: [],
+        },
+      ],
+    } as const satisfies PluginInstallationDto;
+    render(<ResendPluginDetail pluginState={{ status: "ready", plugin: resendPlugin }} canEdit />);
+    expect(screen.getByRole("link", { name: /connect resend account/i })).toHaveAttribute(
+      "href",
+      "/api/integrations/resend/start?returnTo=/settings/plugins/resend",
+    );
+    expect(screen.getByText(/Sending and sensitive reads require approval/)).toBeInTheDocument();
   });
 });
 

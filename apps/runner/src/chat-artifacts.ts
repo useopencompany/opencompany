@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { authorizePersistedExternalEngineToolCapability } from "@opencompany/agent/application/persisted-external-engine-capability";
 import {
@@ -13,6 +13,7 @@ import {
   shellQuote,
   type WriteArtifactToolInput,
 } from "@opencompany/agent-runtime";
+import { newResourceId } from "@opencompany/core/resource-ids";
 import {
   type CodexChatEngine,
   chatArtifacts,
@@ -232,8 +233,8 @@ async function publishChatArtifactBytes(input: {
     throw new Error("expected_version is required when publishing a new version.");
   }
 
-  const artifactId = existing?.id ?? `goat_chat_artifact_${randomUUID()}`;
-  const artifactVersionId = `goat_chat_artifact_version_${randomUUID()}`;
+  const artifactId = existing?.id ?? newResourceId("artifact");
+  const artifactVersionId = newResourceId("artifact_version");
   const version = (existing?.currentVersion ?? 0) + 1;
   const title = boundedText(input.input.title, 160) ?? existing?.title ?? input.input.filename;
   const description =

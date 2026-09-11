@@ -123,6 +123,145 @@ describe("WorkflowEditor", () => {
     expect(screen.getByText("Saved")).toBeInTheDocument();
   });
 
+  it("saves an empty legacy active workflow as a draft when selecting a schedule", async () => {
+    render(
+      <WorkflowEditor
+        workflow={{
+          ...workflow,
+          status: "active",
+          steps: [{ ...workflow.steps[0]!, instructions: "" }],
+        }}
+        canEdit
+        skillCatalog={[]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("radio", { name: "On a schedule" }));
+    await advanceAutosave();
+
+    expect(workflowActionsMock.update).toHaveBeenCalledWith(
+      "workflow_1",
+      expect.objectContaining({
+        status: "draft",
+        trigger: expect.objectContaining({ type: "schedule" }),
+      }),
+    );
+    expect(screen.getByRole("button", { name: "Status: Draft" })).toBeInTheDocument();
+    expect(screen.getByText("Saved")).toBeInTheDocument();
+    expect(
+      screen.getByText("Add instructions to this step before activating the workflow."),
+    ).toBeInTheDocument();
+  });
+
+  it("blocks activation until every step has instructions and requires explicit activation", async () => {
+    render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Add step" }));
+    fireEvent.click(screen.getByRole("button", { name: "Status: Draft" }));
+    expect(screen.getByRole("button", { name: "Active" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Active" })).toHaveAttribute(
+      "title",
+      "Add instructions to step 2 before activating this workflow.",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Draft" }));
+    fireEvent.change(screen.getAllByLabelText("Describe what this step should do...")[1]!, {
+      target: { value: "Summarize the findings." },
+    });
+    await advanceAutosave();
+    expect(workflowActionsMock.update).toHaveBeenLastCalledWith(
+      "workflow_1",
+      expect.objectContaining({ status: "draft" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Status: Draft" }));
+    fireEvent.click(screen.getByRole("button", { name: "Active" }));
+    await advanceAutosave();
+    expect(workflowActionsMock.update).toHaveBeenLastCalledWith(
+      "workflow_1",
+      expect.objectContaining({ status: "active" }),
+    );
+  });
+
+  it.each(["add", "clear"])(
+    "returns an active schedule to draft when an edit makes a step empty: %s",
+    async (edit) => {
+      render(
+        <WorkflowEditor
+          workflow={{
+            ...workflow,
+            status: "active",
+            trigger: {
+              type: "schedule",
+              cron: "0 9 * * 1",
+              timezone: "UTC",
+              prompt: "Run this workflow.",
+              enabled: true,
+              lastRunAt: null,
+              nextRunAt: "2026-08-17T09:00:00.000Z",
+            },
+          }}
+          canEdit
+          skillCatalog={[]}
+        />,
+      );
+      if (edit === "add") {
+        fireEvent.click(screen.getByRole("button", { name: "Add step" }));
+      } else {
+        fireEvent.change(screen.getByLabelText("Describe what this step should do..."), {
+          target: { value: "  " },
+        });
+      }
+      await advanceAutosave();
+      expect(workflowActionsMock.update).toHaveBeenLastCalledWith(
+        "workflow_1",
+        expect.objectContaining({ status: "draft" }),
+      );
+      expect(screen.getByRole("button", { name: "Run now" })).toBeDisabled();
+      expect(screen.getByText("Saved")).toBeInTheDocument();
+    },
+  );
+
+  it("uses step instructions by default and keeps existing custom run context editable", async () => {
+    const { unmount } = render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
+    fireEvent.click(screen.getByRole("radio", { name: "On a schedule" }));
+    expect(screen.queryByLabelText("Task request")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Run context")).not.toBeInTheDocument();
+    await advanceAutosave();
+    expect(workflowActionsMock.update).toHaveBeenLastCalledWith(
+      "workflow_1",
+      expect.objectContaining({
+        trigger: expect.objectContaining({ prompt: "Run this workflow." }),
+        steps: workflow.steps,
+      }),
+    );
+    unmount();
+    render(
+      <WorkflowEditor
+        workflow={{
+          ...workflow,
+          trigger: {
+            type: "schedule",
+            cron: "0 9 * * 1",
+            timezone: "UTC",
+            prompt: "Focus on Europe.",
+            enabled: true,
+            lastRunAt: null,
+            nextRunAt: null,
+          },
+        }}
+        canEdit
+        skillCatalog={[]}
+      />,
+    );
+    expect(screen.getByLabelText("Run context")).toHaveValue("Focus on Europe.");
+    fireEvent.change(screen.getByLabelText("Run context"), { target: { value: "" } });
+    await advanceAutosave();
+    expect(workflowActionsMock.update).toHaveBeenLastCalledWith(
+      "workflow_1",
+      expect.objectContaining({
+        trigger: expect.objectContaining({ prompt: "" }),
+      }),
+    );
+  });
+
   it("saves an enabled Linear issue-created event trigger with a team filter", async () => {
     render(
       <WorkflowEditor
@@ -156,7 +295,8 @@ describe("WorkflowEditor", () => {
     expect(workflowActionsMock.update).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByLabelText("Team"), { target: { value: "team_1" } });
-    fireEvent.change(screen.getByLabelText("Task request"), {
+    fireEvent.click(screen.getByRole("button", { name: "Additional run context (optional)" }));
+    fireEvent.change(screen.getByLabelText("Run context"), {
       target: { value: "Investigate the issue and propose the next step." },
     });
     await advanceAutosave();
@@ -270,11 +410,14 @@ describe("WorkflowEditor", () => {
     expect(screen.getByText("Flag blockers").closest("li")).toBeInTheDocument();
   });
 
-  it("offers Claude Code as a workflow step model option", async () => {
+  it("offers Opus 5 and hides Opus 4.8 in Claude Code workflow settings", async () => {
     render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
 
     fireEvent.click(screen.getByRole("button", { name: /^Runtime:/ }));
     fireEvent.click(screen.getByRole("button", { name: /Claude Code/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Claude Code model:/ }));
+    expect(screen.queryByRole("button", { name: /Claude Opus 4\.8/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Claude Opus 5/ }));
     await advanceAutosave();
 
     expect(workflowActionsMock.update).toHaveBeenCalledWith(
@@ -284,7 +427,7 @@ describe("WorkflowEditor", () => {
           expect.objectContaining({
             id: "step-1",
             model: "claude-code",
-            runtimeModel: "anthropic/claude-sonnet-5",
+            runtimeModel: "anthropic/claude-opus-5",
             reasoningEffort: "high",
           }),
         ],
@@ -331,7 +474,8 @@ describe("WorkflowEditor", () => {
     fireEvent.change(screen.getByLabelText("Timezone"), {
       target: { value: "America/New_York" },
     });
-    fireEvent.change(screen.getByLabelText("Task request"), {
+    fireEvent.click(screen.getByRole("button", { name: "Additional run context (optional)" }));
+    fireEvent.change(screen.getByLabelText("Run context"), {
       target: { value: "Draft the weekday update." },
     });
     await advanceAutosave();
@@ -355,7 +499,8 @@ describe("WorkflowEditor", () => {
     fireEvent.click(screen.getByRole("radio", { name: "On a schedule" }));
     fireEvent.change(screen.getByLabelText("Frequency"), { target: { value: "hours" } });
     fireEvent.change(screen.getByLabelText("Every"), { target: { value: "6" } });
-    fireEvent.change(screen.getByLabelText("Task request"), {
+    fireEvent.click(screen.getByRole("button", { name: "Additional run context (optional)" }));
+    fireEvent.change(screen.getByLabelText("Run context"), {
       target: { value: "Check for updates." },
     });
     await advanceAutosave();
@@ -379,7 +524,8 @@ describe("WorkflowEditor", () => {
     fireEvent.click(screen.getByRole("radio", { name: "On a schedule" }));
     fireEvent.change(screen.getByLabelText("Frequency"), { target: { value: "custom" } });
     fireEvent.change(screen.getByLabelText("Cron"), { target: { value: "13 9 1 * *" } });
-    fireEvent.change(screen.getByLabelText("Task request"), {
+    fireEvent.click(screen.getByRole("button", { name: "Additional run context (optional)" }));
+    fireEvent.change(screen.getByLabelText("Run context"), {
       target: { value: "Run the monthly report." },
     });
     await advanceAutosave();

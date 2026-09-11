@@ -1,0 +1,100 @@
+---
+title: Troubleshooting
+description: Resolve missing tools, connection problems, waiting tasks, and stale knowledge.
+---
+
+Start with the visible status or error and check the relevant connection or setting. For work that
+was already accepted, reopen the existing Chat or Task before submitting it again.
+
+## I can't find Tasks or Workflows
+
+Enable **Tasks & Workflows** in **Settings → Preferences → Beta features**. This preference belongs
+to your account. An active Workflow should then be selectable by typing `#` in Chat.
+
+If a particular Workflow is missing, check whether it is **Draft** or archived.
+
+## A Plugin is installed but the agent can't use it
+
+1. Open the Plugin page and check that it is enabled.
+2. Confirm that your account is connected and has the expected identity.
+3. Review the relevant tool group's permission.
+4. Check the provider account's access to the specific resource.
+
+In built-in interactive Chat, **Ask** tools require approval. Persistent coding sessions receive
+Plugin tools set to **On**. Background work cannot depend on a live approval prompt. A Plugin
+update or new permission may need a new turn or session before it becomes available.
+
+See [Permissions](/docs/core-concepts/integrations).
+
+## The connection needs reauthorization
+
+Open the provider's Plugin page and reconnect the affected account. Complete the provider consent
+flow, return to opencompany, and check the resulting status.
+
+Use **Settings → Inference** for Codex and Claude Code credentials. A saved connection row doesn't
+guarantee that its credential is still valid.
+
+## GitHub can't find my repository
+
+Check both your personal GitHub access and the repositories included in the GitHub App installation.
+Use the GitHub Plugin's authorization flow to grant missing access, then recheck from the Plugin
+page. An organization may require an owner to approve the installation.
+
+Repository setup under Settings can't grant access to a repository. See
+[GitHub](/docs/integrations/github).
+
+## A coding session can't start or run the project
+
+- Check the engine connection in **Settings → Inference**.
+- Check GitHub access for the requested repository.
+- For setup failures, read the reported command error and review the repository's environment and
+  setup instructions under **Settings → Repositories**.
+- If a preview won't load, confirm the app's server started successfully in the sandbox.
+
+Give the agent the failing step and expected behavior. Preserve the existing session when its files
+or partial work are still useful.
+
+## A Task is Waiting for you
+
+Open the Task and read its latest result or question. Reply with the missing input or decision.
+The follow-up continues the same Task.
+
+If you no longer need the job, you can archive a Task that is waiting. Archiving preserves its
+question and history; it doesn't answer the question or restart work.
+
+## A scheduled or event Workflow didn't run
+
+Check that Tasks & Workflows is enabled, the Workflow is **Active**, and the latest edit is saved.
+For a schedule, verify the frequency, timezone, and task request. Use **Run now** to test a saved
+scheduled Workflow.
+
+For an event, check the connected account, enabled Plugin event, and selected team. Events are
+configured per workspace. An older triage trigger also needs the team's Triage state. See
+[Workflows and schedules](/docs/core-concepts/workflows-and-schedules).
+
+## My Wiki isn't receiving updates
+
+Open **Wiki → Sources**. Check the source's connection, enabled state, selected scope, and ingestion
+activity. The current picker supports Gmail, Linear, and Granola. A Plugin connection alone doesn't
+enable ingestion, and Granola's MCP login doesn't replace its ingestion API key.
+
+For older material, inspect the options under **Import company context**. Live ingestion doesn't
+promise a complete historical import.
+
+## An edited Skill still uses old instructions
+
+Existing Chats and Tasks retain captured Skill versions. Start a new Chat to test the revised
+Skill. If you edited a local `SKILL.md` in a coding sandbox, update the workspace Skill through
+Settings or Chat to share the revision.
+
+## A reload interrupted the visible response
+
+Reopen the same conversation and inspect its status and activity. Work persists independently of
+the browser stream. If the run failed, read the error and retained partial result before asking it
+to continue. For a stale-client error, refresh the app before sending a new message.
+
+## Report an unresolved issue
+
+Include the Chat or Task URL, approximate time and timezone, engine, provider, steps to reproduce,
+expected behavior, and visible error. Omit credentials and private source content. Repository
+contributors can use the [support guide](https://github.com/useopencompany/opencompany/blob/main/SUPPORT.md).

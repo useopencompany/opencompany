@@ -150,10 +150,55 @@ describe("WorkflowApplicationService", () => {
         status: "active",
         trigger: { type: "schedule", cron: "0 9 * * 1" },
       }),
-    ).rejects.toThrow(/need instructions/i);
+    ).rejects.toThrow("Add instructions to step 1 before activating this workflow.");
     expect(planner.prepareWorkflow).not.toHaveBeenCalled();
     expect(repository.updateWorkflow).not.toHaveBeenCalled();
   });
+
+  it.each([
+    { type: "manual" as const },
+    { type: "schedule" as const, cron: "0 9 * * 1" },
+    {
+      type: "event" as const,
+      provider: "linear",
+      event: "issue.created",
+      integrationId: "gint_1",
+      filters: {},
+      prompt: "Run this workflow.",
+    },
+  ])(
+    "saves incomplete $type drafts but rejects activation without planning or persistence",
+    async (trigger) => {
+      const repository = fakeWorkflowRepository();
+      const planner = fakePlanner();
+      const service = workflowService(repository, { planner });
+      const input = {
+        expectedVersion: 1,
+        name: "Research",
+        description: "",
+        steps: [
+          workflow().steps[0]!,
+          { ...workflow().steps[0]!, id: "step_empty", instructions: "  " },
+        ],
+        status: "draft" as const,
+        trigger,
+      };
+      await service.updateWorkflow(actor(), "workflow_1", input);
+      expect(repository.updateWorkflow).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: "draft",
+          steps: [input.steps[0], expect.objectContaining({ instructions: "" })],
+        }),
+      );
+      expect(planner.prepareWorkflow).not.toHaveBeenCalled();
+      repository.updateWorkflow.mockClear();
+      await expect(
+        service.updateWorkflow(actor(), "workflow_1", { ...input, status: "active" }),
+      ).rejects.toThrow("Add instructions to step 2 before activating this workflow.");
+      expect(planner.prepareWorkflow).not.toHaveBeenCalled();
+      expect(repository.updateWorkflow).not.toHaveBeenCalled();
+    },
+  );
 
   it("plans a durable Linear event trigger before persisting it", async () => {
     const repository = fakeWorkflowRepository();
@@ -297,6 +342,73 @@ describe("WorkflowApplicationService", () => {
       taskId: "task_1",
       occurredAt: now,
     });
+  });
+
+  it("applies model overrides to the invocation snapshot without editing saved steps", async () => {
+    const saved = workflow({
+      steps: [
+        {
+          id: "step_1",
+          title: " Build ",
+          model: "codex",
+          runtimeModel: "openai/gpt-5.6-sol",
+          reasoningEffort: "high",
+          instructions: "  Build it.\n",
+        },
+        { id: "step_2", title: "Review", model: "sonnet-5", instructions: "Review it." },
+      ],
+    });
+    const repository = fakeWorkflowRepository({ workflow: saved });
+    const planner = fakePlanner();
+    const service = workflowService(repository, { planner });
+    await service.invokeWorkflow(actor(), saved.id, {
+      idempotencyKey: "override-1",
+      description: "Ship it.",
+      stepModelOverrides: [{ id: "step_1", model: "gpt-5.5" }],
+    });
+    expect(planner.prepareWorkflow).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        workflow: {
+          ...saved,
+          steps: [
+            { id: "step_1", title: " Build ", model: "gpt-5.5", instructions: "  Build it.\n" },
+            saved.steps[1],
+          ],
+        },
+      }),
+    );
+    expect(saved.steps[0]).toMatchObject({
+      model: "codex",
+      runtimeModel: "openai/gpt-5.6-sol",
+      reasoningEffort: "high",
+    });
+    expect(repository.updateWorkflow).not.toHaveBeenCalled();
+    await service.invokeWorkflow(actor(), saved.id, {
+      idempotencyKey: "default-1",
+      description: "Again.",
+    });
+    expect(planner.prepareWorkflow).toHaveBeenLastCalledWith(
+      expect.objectContaining({ workflow: saved }),
+    );
+  });
+
+  it.each([
+    [{ id: "missing", model: "codex" }],
+    [
+      { id: "step_1", model: "codex" },
+      { id: "step_1", model: "gpt-5.5" },
+    ],
+  ])("rejects unknown or duplicate model override steps", async (...stepModelOverrides) => {
+    const planner = fakePlanner();
+    const service = workflowService(fakeWorkflowRepository(), { planner });
+    await expect(
+      service.invokeWorkflow(actor(), "workflow_1", {
+        idempotencyKey: "invalid-override",
+        description: "Run it.",
+        stepModelOverrides,
+      }),
+    ).rejects.toMatchObject({ code: "invalid_argument" });
+    expect(planner.prepareWorkflow).not.toHaveBeenCalled();
   });
 
   it("rejects more than sixteen distinct invocation skills before planning", async () => {

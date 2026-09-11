@@ -9,7 +9,7 @@ import { markIntegrationStatus, saveIntegrationCredential } from "@opencompany/d
 import { integrations } from "@opencompany/db/product-schema";
 import { and, desc, eq, ne, sql } from "drizzle-orm";
 import type { FathomProviderState } from "../integration-state";
-import { captureIntegrationAddedAnalytics } from "./analytics";
+import { captureConnectionAddedAnalytics } from "./analytics";
 
 export const FATHOM_API_BASE_URL = "https://api.fathom.ai/external/v1";
 
@@ -144,7 +144,8 @@ export async function connectFathomIntegration(input: {
     db,
   );
 
-  await captureIntegrationAddedAnalytics({
+  await captureConnectionAddedAnalytics({
+    connectionId: integration.id,
     userWorkosId: input.userWorkosId,
     provider: "fathom",
   });

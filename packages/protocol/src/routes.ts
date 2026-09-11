@@ -13,6 +13,10 @@ import {
   BillingOverviewEnvelopeSchema,
   BillingRedirectEnvelopeSchema,
   BillingUsageEnvelopeSchema,
+  BotBodySchema,
+  BotEnvelopeSchema,
+  BotListEnvelopeSchema,
+  BotSchema,
   BrainAccessEnvelopeSchema,
   BrainAccessMutationEnvelopeSchema,
   BrainAssetMutationEnvelopeSchema,
@@ -50,11 +54,13 @@ import {
   ClaudeCodeAuthStatusEnvelopeSchema,
   CodexAuthStatusEnvelopeSchema,
   CodexDeviceAuthFlowEnvelopeSchema,
+  CodexUsageEnvelopeSchema,
   CompleteInfisicalAuthBodySchema,
   ConfirmBrainImportBodySchema,
   ConversationEnvelopeSchema,
   ConversationPageSchema,
   ConversationShareEnvelopeSchema,
+  ConvexAccountStateEnvelopeSchema,
   CreateBillingTopUpBodySchema,
   CreateBrainBodySchema,
   CreateBrainDocumentBodySchema,
@@ -72,6 +78,12 @@ import {
   CreateWorkspaceBodySchema,
   CreateWorkspaceSkillBodySchema,
   CursorSchema,
+  CustomMcpCreateBodySchema,
+  CustomMcpCredentialsSchema,
+  CustomMcpDefinitionBodySchema,
+  CustomMcpPermissionBodySchema,
+  CustomMcpProbeEnvelopeSchema,
+  CustomMcpStatusEnvelopeSchema,
   DeleteBrainFolderBodySchema,
   DeleteWikiPageBodySchema,
   EngineAuthDisconnectEnvelopeSchema,
@@ -143,6 +155,7 @@ import {
   SetPluginEventEnabledBodySchema,
   SetRepoConfigEnvBodySchema,
   SetRepoConfigSetupBodySchema,
+  SetSkillScopeBodySchema,
   SetSlackBotDestinationBodySchema,
   SetWikiSourceEnabledBodySchema,
   SetWorkspaceCapabilityBodySchema,
@@ -1270,7 +1283,8 @@ export const listSkillsRoute = createRoute({
   security: actorSecurity,
   responses: {
     200: {
-      description: "Workspace skill settings list.",
+      description:
+        "Standalone skills visible to the current member: their Personal skills and Company skills.",
       content: { "application/json": { schema: SkillListEnvelopeSchema } },
     },
     default: errorResponse,
@@ -1371,7 +1385,7 @@ export const updateWorkspaceSkillRoute = createRoute({
   tags: ["Skills"],
   security: actorSecurity,
   request: {
-    params: z.object({ slug: WorkspaceSkillNameSchema }),
+    params: z.object({ slug: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,199}$/u) }),
     body: {
       required: true,
       content: { "application/json": { schema: UpdateWorkspaceSkillBodySchema } },
@@ -1380,6 +1394,24 @@ export const updateWorkspaceSkillRoute = createRoute({
   responses: {
     200: {
       description: "Workspace-authored Skill moved to a new immutable bundle version.",
+      content: { "application/json": { schema: SkillInstallationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const setSkillScopeRoute = createRoute({
+  method: "post",
+  path: "/v1/skills/{slug}/scope",
+  tags: ["Skills"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ slug: ResourceIdSchema }),
+    body: { required: true, content: { "application/json": { schema: SetSkillScopeBodySchema } } },
+  },
+  responses: {
+    200: {
+      description: "Personal or Company visibility updated on the same skill.",
       content: { "application/json": { schema: SkillInstallationEnvelopeSchema } },
     },
     default: errorResponse,
@@ -1438,7 +1470,10 @@ export const replaceSkillRoute = createRoute({
   security: actorSecurity,
   request: {
     params: z.object({ slug: ResourceIdSchema }),
-    body: { required: true, content: { "application/json": { schema: ImportSkillBodySchema } } },
+    body: {
+      required: true,
+      content: { "application/json": { schema: ImportSkillBodySchema.omit({ scope: true }) } },
+    },
   },
   responses: {
     200: {
@@ -1471,6 +1506,128 @@ export const readSkillFileRoute = createRoute({
     200: {
       description: "One bounded chunk of an authorized Skill bundle file.",
       content: { "application/json": { schema: SkillFileChunkEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const previewCustomMcpRoute = createRoute({
+  method: "post",
+  path: "/v1/plugins/custom/preview",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: CustomMcpDefinitionBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Custom MCP connection and tools for the acting user.",
+      content: { "application/json": { schema: CustomMcpProbeEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+export const createCustomMcpRoute = createRoute({
+  method: "post",
+  path: "/v1/plugins/custom",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: {
+    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: CustomMcpCreateBodySchema } },
+    },
+  },
+  responses: {
+    201: {
+      description: "Custom MCP connection and tools for the acting user.",
+      content: { "application/json": { schema: PluginImportEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+export const getCustomMcpRoute = createRoute({
+  method: "get",
+  path: "/v1/plugins/{name}/custom-mcp",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: { params: z.object({ name: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Custom MCP connection and tools for the acting user.",
+      content: { "application/json": { schema: CustomMcpStatusEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+export const connectCustomMcpRoute = createRoute({
+  method: "post",
+  path: "/v1/plugins/{name}/custom-mcp/connect",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ name: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: CustomMcpCredentialsSchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Custom MCP connection and tools for the acting user.",
+      content: { "application/json": { schema: CustomMcpStatusEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+export const refreshCustomMcpRoute = createRoute({
+  method: "post",
+  path: "/v1/plugins/{name}/custom-mcp/refresh",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: { params: z.object({ name: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Custom MCP connection and tools for the acting user.",
+      content: { "application/json": { schema: CustomMcpStatusEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+export const disconnectCustomMcpRoute = createRoute({
+  method: "post",
+  path: "/v1/plugins/{name}/custom-mcp/disconnect",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: { params: z.object({ name: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Custom MCP connection and tools for the acting user.",
+      content: { "application/json": { schema: CustomMcpStatusEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+export const setCustomMcpPermissionRoute = createRoute({
+  method: "post",
+  path: "/v1/plugins/{name}/custom-mcp/permissions",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ name: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: CustomMcpPermissionBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Custom MCP connection and tools for the acting user.",
+      content: { "application/json": { schema: CustomMcpStatusEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -1670,6 +1827,66 @@ export const setPluginEventEnabledRoute = createRoute({
     200: {
       description: "Plugin event subscription setting updated for the workspace.",
       content: { "application/json": { schema: PluginInstallationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const listBotsRoute = createRoute({
+  method: "get",
+  path: "/v1/bots",
+  tags: ["Bots"],
+  security: actorSecurity,
+  request: {},
+  responses: {
+    200: {
+      description: "Your persistent bots.",
+      content: { "application/json": { schema: BotListEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+export const createBotRoute = createRoute({
+  method: "post",
+  path: "/v1/bots",
+  tags: ["Bots"],
+  security: actorSecurity,
+  request: { body: { required: true, content: { "application/json": { schema: BotSchema } } } },
+  responses: {
+    200: {
+      description: "Create a bot and its conversation.",
+      content: { "application/json": { schema: BotEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+export const getBotRoute = createRoute({
+  method: "get",
+  path: "/v1/bots/{botId}",
+  tags: ["Bots"],
+  security: actorSecurity,
+  request: { params: z.object({ botId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "A persistent bot.",
+      content: { "application/json": { schema: BotEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+export const updateBotRoute = createRoute({
+  method: "patch",
+  path: "/v1/bots/{botId}",
+  tags: ["Bots"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ botId: ResourceIdSchema }),
+    body: { required: true, content: { "application/json": { schema: BotBodySchema } } },
+  },
+  responses: {
+    200: {
+      description: "Update bot identity for subsequent turns.",
+      content: { "application/json": { schema: BotEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -2956,6 +3173,27 @@ export const connectGranolaAccountRoute = createRoute({
   },
 });
 
+export const connectConvexAccountRoute = createRoute({
+  method: "put",
+  path: "/v1/integration-accounts/convex",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: IntegrationApiKeyBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description:
+        "Convex connected (or reconnected) for the acting user. The API key never appears in the response.",
+      content: { "application/json": { schema: ConvexAccountStateEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const connectRenderAccountRoute = createRoute({
   method: "put",
   path: "/v1/integration-accounts/render",
@@ -3241,6 +3479,21 @@ export const getCodexAuthRoute = createRoute({
       description:
         "Codex connection status for the acting user. Never includes stored credentials.",
       content: { "application/json": { schema: CodexAuthStatusEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getCodexUsageRoute = createRoute({
+  method: "get",
+  path: "/v1/engine-auth/codex/usage",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description:
+        "Current subscription limits for the acting user's connected Codex account. Includes usage across apps; never includes credentials.",
+      content: { "application/json": { schema: CodexUsageEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -3591,11 +3844,19 @@ export type V1RouteHandlers = {
   listSkillCatalog: RouteHandler<typeof listSkillCatalogRoute>;
   getSkill: RouteHandler<typeof getSkillRoute>;
   updateWorkspaceSkill: RouteHandler<typeof updateWorkspaceSkillRoute>;
+  setSkillScope: RouteHandler<typeof setSkillScopeRoute>;
   archiveSkill: RouteHandler<typeof archiveSkillRoute>;
   enableSkill: RouteHandler<typeof enableSkillRoute>;
   disableSkill: RouteHandler<typeof disableSkillRoute>;
   replaceSkill: RouteHandler<typeof replaceSkillRoute>;
   readSkillFile: RouteHandler<typeof readSkillFileRoute>;
+  previewCustomMcp: RouteHandler<typeof previewCustomMcpRoute>;
+  createCustomMcp: RouteHandler<typeof createCustomMcpRoute>;
+  getCustomMcp: RouteHandler<typeof getCustomMcpRoute>;
+  connectCustomMcp: RouteHandler<typeof connectCustomMcpRoute>;
+  refreshCustomMcp: RouteHandler<typeof refreshCustomMcpRoute>;
+  disconnectCustomMcp: RouteHandler<typeof disconnectCustomMcpRoute>;
+  setCustomMcpPermission: RouteHandler<typeof setCustomMcpPermissionRoute>;
   listPlugins: RouteHandler<typeof listPluginsRoute>;
   previewPluginImport: RouteHandler<typeof previewPluginImportRoute>;
   importPlugin: RouteHandler<typeof importPluginRoute>;
@@ -3608,6 +3869,10 @@ export type V1RouteHandlers = {
   refreshPluginMcp: RouteHandler<typeof refreshPluginMcpRoute>;
   deletePluginData: RouteHandler<typeof deletePluginDataRoute>;
   setPluginEventEnabled: RouteHandler<typeof setPluginEventEnabledRoute>;
+  listBots: RouteHandler<typeof listBotsRoute>;
+  createBot: RouteHandler<typeof createBotRoute>;
+  getBot: RouteHandler<typeof getBotRoute>;
+  updateBot: RouteHandler<typeof updateBotRoute>;
   listConversations: RouteHandler<typeof listConversationsRoute>;
   getConversation: RouteHandler<typeof getConversationRoute>;
   updateConversation: RouteHandler<typeof updateConversationRoute>;
@@ -3647,6 +3912,7 @@ export type V1RouteHandlers = {
   disconnectAttioAccount: RouteHandler<typeof disconnectAttioAccountRoute>;
   connectFathomAccount: RouteHandler<typeof connectFathomAccountRoute>;
   connectGranolaAccount: RouteHandler<typeof connectGranolaAccountRoute>;
+  connectConvexAccount: RouteHandler<typeof connectConvexAccountRoute>;
   connectRenderAccount: RouteHandler<typeof connectRenderAccountRoute>;
   connectStripeAccount: RouteHandler<typeof connectStripeAccountRoute>;
   disconnectStripeAccount: RouteHandler<typeof disconnectStripeAccountRoute>;
@@ -3664,6 +3930,7 @@ export type V1RouteHandlers = {
   saveClaudeCodeToken: RouteHandler<typeof saveClaudeCodeTokenRoute>;
   deleteClaudeCodeAuth: RouteHandler<typeof deleteClaudeCodeAuthRoute>;
   getCodexAuth: RouteHandler<typeof getCodexAuthRoute>;
+  getCodexUsage: RouteHandler<typeof getCodexUsageRoute>;
   updateCodexWorkspaceEngine: RouteHandler<typeof updateCodexWorkspaceEngineRoute>;
   startCodexDeviceAuth: RouteHandler<typeof startCodexDeviceAuthRoute>;
   pollCodexDeviceAuth: RouteHandler<typeof pollCodexDeviceAuthRoute>;
@@ -3790,11 +4057,16 @@ export function createV1Router(
       .openapi(listSkillCatalogRoute, handlers.listSkillCatalog)
       .openapi(getSkillRoute, handlers.getSkill)
       .openapi(updateWorkspaceSkillRoute, handlers.updateWorkspaceSkill)
+      .openapi(setSkillScopeRoute, handlers.setSkillScope)
       .openapi(archiveSkillRoute, handlers.archiveSkill)
       .openapi(enableSkillRoute, handlers.enableSkill)
       .openapi(disableSkillRoute, handlers.disableSkill)
       .openapi(replaceSkillRoute, handlers.replaceSkill)
       .openapi(readSkillFileRoute, handlers.readSkillFile)
+      .openapi(listBotsRoute, handlers.listBots)
+      .openapi(createBotRoute, handlers.createBot)
+      .openapi(getBotRoute, handlers.getBot)
+      .openapi(updateBotRoute, handlers.updateBot)
       .openapi(listConversationsRoute, handlers.listConversations)
       .openapi(getConversationRoute, handlers.getConversation)
       .openapi(updateConversationRoute, handlers.updateConversation)
@@ -3837,6 +4109,7 @@ export function createV1Router(
       .openapi(disconnectAttioAccountRoute, handlers.disconnectAttioAccount)
       .openapi(connectFathomAccountRoute, handlers.connectFathomAccount)
       .openapi(connectGranolaAccountRoute, handlers.connectGranolaAccount)
+      .openapi(connectConvexAccountRoute, handlers.connectConvexAccount)
       .openapi(connectRenderAccountRoute, handlers.connectRenderAccount)
       .openapi(connectStripeAccountRoute, handlers.connectStripeAccount)
       .openapi(disconnectStripeAccountRoute, handlers.disconnectStripeAccount)
@@ -3854,6 +4127,7 @@ export function createV1Router(
       .openapi(saveClaudeCodeTokenRoute, handlers.saveClaudeCodeToken)
       .openapi(deleteClaudeCodeAuthRoute, handlers.deleteClaudeCodeAuth)
       .openapi(getCodexAuthRoute, handlers.getCodexAuth)
+      .openapi(getCodexUsageRoute, handlers.getCodexUsage)
       .openapi(updateCodexWorkspaceEngineRoute, handlers.updateCodexWorkspaceEngine)
       // POST /codex/device registers before the {flowId} poll route so the
       // static segment always wins route matching.
@@ -3872,6 +4146,13 @@ export function createV1Router(
       .openapi(createBillingPortalSessionRoute, handlers.createBillingPortalSession)
       .openapi(updateBillingAutoRefillRoute, handlers.updateBillingAutoRefill)
       .openapi(listPluginsRoute, handlers.listPlugins)
+      .openapi(previewCustomMcpRoute, handlers.previewCustomMcp)
+      .openapi(createCustomMcpRoute, handlers.createCustomMcp)
+      .openapi(getCustomMcpRoute, handlers.getCustomMcp)
+      .openapi(connectCustomMcpRoute, handlers.connectCustomMcp)
+      .openapi(refreshCustomMcpRoute, handlers.refreshCustomMcp)
+      .openapi(disconnectCustomMcpRoute, handlers.disconnectCustomMcp)
+      .openapi(setCustomMcpPermissionRoute, handlers.setCustomMcpPermission)
       .openapi(previewPluginImportRoute, handlers.previewPluginImport)
       .openapi(importPluginRoute, handlers.importPlugin)
       .openapi(getPluginRoute, handlers.getPlugin)
@@ -4094,6 +4375,10 @@ const placeholderSkillBundle = {
   createdAt: placeholderTime,
 };
 const placeholderSkillInstallation = {
+  scope: "company" as const,
+  createdByUserId: null,
+  canEdit: true,
+  canManage: true,
   id: "skill_installation_contract",
   name: "contract-skill",
   enabled: true,
@@ -4519,7 +4804,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
     c.json(
       {
         data: {
-          workspace: { id: "goat_ws_contract", name: "Contract Workspace" },
+          workspace: { id: "workspace_contract", name: "Contract Workspace" },
           role: "admin" as const,
           plan: "hobby" as const,
           memberCap: 1,
@@ -4531,7 +4816,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
       200,
     ),
   renameWorkspace: (c) =>
-    c.json({ data: { id: "goat_ws_contract", name: "Contract Workspace" }, meta }, 200),
+    c.json({ data: { id: "workspace_contract", name: "Contract Workspace" }, meta }, 200),
   inviteWorkspaceMember: (c) => c.json({ data: { completed: true as const }, meta }, 201),
   revokeWorkspaceInvitation: (c) => c.json({ data: { completed: true as const }, meta }, 200),
   removeWorkspaceMember: (c) => c.json({ data: { completed: true as const }, meta }, 200),
@@ -4539,7 +4824,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
     c.json(
       {
         data: {
-          workspaceId: "goat_ws_contract",
+          workspaceId: "workspace_contract",
           organizationId: "org_contract",
           brainId: "brain_contract",
         },
@@ -4551,7 +4836,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
     c.json(
       {
         data: {
-          workspaceId: "goat_ws_contract",
+          workspaceId: "workspace_contract",
           organizationId: "org_contract",
           brainId: "brain_contract",
         },
@@ -4578,7 +4863,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
     c.json(
       {
         data: {
-          workspaceId: "goat_ws_contract",
+          workspaceId: "workspace_contract",
           organizationId: "org_contract",
           brainId: "brain_contract",
           createdByCaller: true,
@@ -4756,7 +5041,8 @@ const contractDocumentHandlers: V1RouteHandlers = {
       {
         data: [
           {
-            id: placeholderSkillInstallation.name,
+            id: placeholderSkillInstallation.id,
+            scope: placeholderSkillInstallation.scope,
             name: placeholderSkillBundle.name,
             description: placeholderSkillBundle.description,
           },
@@ -4767,6 +5053,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
     ),
   getSkill: (c) => c.json({ data: placeholderSkillInstallation, meta }, 200),
   updateWorkspaceSkill: (c) => c.json({ data: placeholderSkillInstallation, meta }, 200),
+  setSkillScope: (c) => c.json({ data: placeholderSkillInstallation, meta }, 200),
   archiveSkill: (c) => c.json({ data: { name: placeholderSkillInstallation.name }, meta }, 200),
   enableSkill: (c) => c.json({ data: placeholderSkillInstallation, meta }, 200),
   disableSkill: (c) =>
@@ -4803,6 +5090,49 @@ const contractDocumentHandlers: V1RouteHandlers = {
             stdioServerCount: 1,
           },
         ],
+        meta,
+      },
+      200,
+    ),
+  previewCustomMcp: (c) => c.json({ data: { tools: [], fingerprint: "a".repeat(64) }, meta }, 200),
+  createCustomMcp: (c) =>
+    c.json({ data: { plugin: placeholderPlugin, replayed: false }, meta }, 201),
+  getCustomMcp: (c) =>
+    c.json(
+      {
+        data: { label: "Custom MCP", url: "https://example.com/mcp", enabled: true, account: null },
+        meta,
+      },
+      200,
+    ),
+  connectCustomMcp: (c) =>
+    c.json(
+      {
+        data: { label: "Custom MCP", url: "https://example.com/mcp", enabled: true, account: null },
+        meta,
+      },
+      200,
+    ),
+  refreshCustomMcp: (c) =>
+    c.json(
+      {
+        data: { label: "Custom MCP", url: "https://example.com/mcp", enabled: true, account: null },
+        meta,
+      },
+      200,
+    ),
+  disconnectCustomMcp: (c) =>
+    c.json(
+      {
+        data: { label: "Custom MCP", url: "https://example.com/mcp", enabled: true, account: null },
+        meta,
+      },
+      200,
+    ),
+  setCustomMcpPermission: (c) =>
+    c.json(
+      {
+        data: { label: "Custom MCP", url: "https://example.com/mcp", enabled: true, account: null },
         meta,
       },
       200,
@@ -4858,6 +5188,13 @@ const contractDocumentHandlers: V1RouteHandlers = {
   deletePluginData: (c) =>
     c.json({ data: { name: placeholderPlugin.name, deleted: true }, meta }, 200),
   setPluginEventEnabled: (c) => c.json({ data: placeholderPlugin, meta }, 200),
+  listBots: (c) => c.json({ data: [], meta }, 200),
+  createBot: (c) =>
+    c.json({ data: { id: "bot_example", name: "Assistant", description: "" }, meta }, 200),
+  getBot: (c) =>
+    c.json({ data: { id: "bot_example", name: "Assistant", description: "" }, meta }, 200),
+  updateBot: (c) =>
+    c.json({ data: { id: "bot_example", name: "Assistant", description: "" }, meta }, 200),
   listConversations: (c) => c.json({ data: [], nextCursor: null, meta }, 200),
   getConversation: (c) => c.json({ data: placeholderConversation, meta }, 200),
   updateConversation: (c) =>
@@ -4869,7 +5206,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
       {
         data: {
           conversationId: "conversation_contract",
-          shareId: "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+          shareId: "share_01234567-89ab-4cde-8f01-23456789abcd",
         },
         meta,
       },
@@ -4963,7 +5300,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
     c.json(
       {
         data: {
-          shareId: "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+          shareId: "share_01234567-89ab-4cde-8f01-23456789abcd",
           title: "Shared conversation",
           kind: "chat" as const,
           engine: "opencompany" as const,
@@ -4977,7 +5314,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
     c.json(
       {
         data: {
-          shareId: "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+          shareId: "share_01234567-89ab-4cde-8f01-23456789abcd",
           title: "Shared conversation",
           kind: "chat" as const,
           engine: "opencompany" as const,
@@ -5054,6 +5391,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
           taskViewMode: "board" as const,
           taskTimeRange: "7d" as const,
           autoModelRoutingEnabled: false,
+          reviewInboxEnabled: false,
         },
         meta,
       },
@@ -5150,6 +5488,25 @@ const contractDocumentHandlers: V1RouteHandlers = {
             accountEmail: null,
             accountName: null,
             statusReason: null,
+          },
+        },
+        meta,
+      },
+      200,
+    ),
+  connectConvexAccount: (c) =>
+    c.json(
+      {
+        data: {
+          state: {
+            provider: "convex" as const,
+            connected: true,
+            status: "connected" as const,
+            integrationId: "gint_contract",
+            accountName: "Contract",
+            statusReason: null,
+            capabilityModes: {},
+            toolModes: {},
           },
         },
         meta,
@@ -5273,6 +5630,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
       200,
     ),
   deleteClaudeCodeAuth: (c) => c.json({ data: { deleted: true as const }, meta }, 200),
+  getCodexUsage: (c) => c.json({ data: { windows: [], updatedAt: placeholderTime }, meta }, 200),
   getCodexAuth: (c) =>
     c.json(
       {
@@ -5418,7 +5776,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
           memberCount: 1,
           memberCap: 1,
           spendThisMonthUsdMicros: 0,
-          spendThisMonthByCategory: { chat: 0, ingestion: 0, capabilities: 0 },
+          spendThisMonthByCategory: { chat: 0, ingestion: 0, capabilities: 0, sandbox: 0 },
           recentActivity: [],
           lowBalanceWarnUsdMicros: 1_000_000,
           includedUsagePerSeatCents: 2_000,
@@ -5487,6 +5845,7 @@ function contractIdentity() {
       taskSpawningEnabled: true,
       autoModelRoutingEnabled: false,
       chatCapabilitiesBetaEnabled: false,
+      reviewInboxEnabled: false,
       wikiEnabled: true as const,
       taskViewMode: "board" as const,
       taskTimeRange: "7d" as const,
@@ -5498,18 +5857,18 @@ function contractIdentity() {
     },
     workspaces: [
       {
-        id: "goat_ws_contract",
+        id: "workspace_contract",
         name: "Contract Workspace",
         slug: "contract-workspace",
         role: "admin" as const,
         legacyBrainEnabled: false,
       },
     ],
-    activeWorkspaceId: "goat_ws_contract",
+    activeWorkspaceId: "workspace_contract",
     brains: [
       {
         id: "brain_contract",
-        workspaceId: "goat_ws_contract",
+        workspaceId: "workspace_contract",
         name: "General",
         slug: "general",
         description: null,

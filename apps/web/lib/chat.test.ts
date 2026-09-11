@@ -114,6 +114,33 @@ describe("canonical Chat server reads", () => {
     ]);
   });
 
+  it("preserves DeepSeek V4 Flash in detail and sidebar reload views", async () => {
+    const flashConversation = {
+      ...conversation,
+      model: "deepseek/deepseek-v4-flash",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: URL | RequestInfo) => {
+        const request = input instanceof Request ? input : new Request(input);
+        return new URL(request.url).pathname === "/v1/conversations"
+          ? Response.json({ data: [flashConversation], nextCursor: null, meta })
+          : Response.json({ data: flashConversation, meta });
+      }),
+    );
+
+    await expect(loadCurrentChatSessionById(flashConversation.id)).resolves.toMatchObject({
+      engine: "opencompany",
+      model: "deepseek/deepseek-v4-flash",
+    });
+    await expect(listCurrentUserRecentChats()).resolves.toEqual([
+      expect.objectContaining({
+        engine: "opencompany",
+        model: "deepseek/deepseek-v4-flash",
+      }),
+    ]);
+  });
+
   it("returns null only for a canonical not-found response", async () => {
     vi.stubGlobal(
       "fetch",

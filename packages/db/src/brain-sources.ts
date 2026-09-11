@@ -5,9 +5,11 @@ import { getDb } from "./client";
 import {
   type BrainSourceConfigProvider,
   brainSources,
+  brains,
   type IntegrationStatus,
   integrations,
   users,
+  workspaces,
 } from "./product-schema";
 
 type DbLike = any;
@@ -98,7 +100,15 @@ export async function listEnabledBrainRefsForIntegration(
   const rows = await db
     .select({ brainRef: brainSources.brainId })
     .from(brainSources)
-    .where(and(eq(brainSources.integrationId, integrationId), eq(brainSources.enabled, true)));
+    .innerJoin(brains, eq(brains.id, brainSources.brainId))
+    .innerJoin(workspaces, eq(workspaces.id, brains.workspaceId))
+    .where(
+      and(
+        eq(brainSources.integrationId, integrationId),
+        eq(brainSources.enabled, true),
+        eq(workspaces.legacyBrainEnabled, true),
+      ),
+    );
   return rows.map((row: { brainRef: string }) => row.brainRef);
 }
 

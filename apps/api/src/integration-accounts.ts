@@ -24,6 +24,13 @@ import {
   validateAttioApiKey,
 } from "@opencompany/agent/integrations/attio";
 import {
+  type ConvexProviderState,
+  connectConvexMcpIntegration,
+  getConvexIntegrationState,
+  validateConvexApiKey,
+} from "@opencompany/agent/integrations/convex-mcp";
+import { parseConvexDeployKey } from "@opencompany/agent/integrations/convex-policy";
+import {
   connectFathomIntegration,
   getFathomIntegrationState,
   isValidFathomApiKey,
@@ -42,13 +49,8 @@ import {
   type RenderProviderState,
   validateRenderApiKey,
 } from "@opencompany/agent/integrations/render-mcp";
-import {
-  connectStripeIntegration,
-  disconnectStripeIntegration,
-  getStripeIntegrationState,
-  isValidStripeRestrictedApiKey,
-  validateStripeRestrictedApiKey,
-} from "@opencompany/agent/integrations/stripe";
+import { disconnectStripeIntegration } from "@opencompany/agent/integrations/stripe";
+import { captureProductServerEvent } from "@opencompany/analytics/product/server";
 import type { Actor } from "@opencompany/core";
 import {
   ATTIO_CREDENTIAL_KIND,
@@ -92,6 +94,7 @@ export type IntegrationAccountService = {
   disconnectAttio(actor: Actor, integrationId: string): Promise<void>;
   connectFathom(actor: Actor, apiKey: string): Promise<FathomProviderState>;
   connectGranola(actor: Actor, apiKey: string): Promise<GranolaProviderState>;
+  connectConvex(actor: Actor, apiKey: string): Promise<ConvexProviderState>;
   connectRender(actor: Actor, apiKey: string): Promise<RenderProviderState>;
   connectStripe(actor: Actor, apiKey: string): Promise<StripeProviderState>;
   disconnectStripe(actor: Actor): Promise<void>;
@@ -101,11 +104,11 @@ export function createIntegrationAccountService(input: {
   db: DbLike;
   now?: () => Date;
   runner?: RunnerClient;
-  refreshRenderPluginRegistrations?: (input: {
+  refreshConvexPluginRegistrations?: (input: {
     userWorkosId: string;
     workspaceId: string;
   }) => Promise<void>;
-  refreshStripePluginRegistrations?: (input: {
+  refreshRenderPluginRegistrations?: (input: {
     userWorkosId: string;
     workspaceId: string;
   }) => Promise<void>;
@@ -321,6 +324,41 @@ export function createIntegrationAccountService(input: {
       }
     },
 
+    async connectConvex(actor, apiKey) {
+      const trimmed = apiKey.trim();
+      if (!parseConvexDeployKey(trimmed)) {
+        throw new ApiError(
+          400,
+          "invalid_request",
+          "Use a deployment-scoped Convex key starting with dev: or prod:.",
+        );
+      }
+      try {
+        const validation = await validateConvexApiKey(trimmed);
+        if (!validation.ok) throw new ApiError(400, "invalid_request", validation.error);
+        await connectConvexMcpIntegration({
+          userWorkosId: actor.userId,
+          apiKey: trimmed,
+          deployment: validation.deployment,
+          db,
+        });
+        await input
+          .refreshConvexPluginRegistrations?.({
+            userWorkosId: actor.userId,
+            workspaceId: actor.workspaceId,
+          })
+          .catch((error) => {
+            logger.warn("Convex connected but plugin discovery refresh failed", {
+              event: "opencompany.convex_plugin_refresh_failed",
+              error_message: error instanceof Error ? error.message : String(error),
+            });
+          });
+        return await getConvexIntegrationState(actor.userId, db);
+      } catch (error) {
+        throw commandFailure(error, "Could not save the Convex API key.", "convex_connect");
+      }
+    },
+
     async connectRender(actor, apiKey) {
       const trimmed = apiKey.trim();
       if (!isValidRenderApiKey(trimmed)) {
@@ -356,45 +394,12 @@ export function createIntegrationAccountService(input: {
       }
     },
 
-    async connectStripe(actor, apiKey) {
-      requireAdmin(actor, STRIPE_ADMIN_ONLY_MESSAGE);
-      const trimmed = apiKey.trim();
-      if (!isValidStripeRestrictedApiKey(trimmed)) {
-        throw new ApiError(
-          400,
-          "invalid_request",
-          "Use a restricted Stripe key beginning with rk_test_ or rk_live_. Unrestricted sk_ keys are not accepted.",
-        );
-      }
-      try {
-        const validation = await validateStripeRestrictedApiKey(trimmed);
-        if (!validation.ok) throw new ApiError(400, "invalid_request", validation.error);
-        await connectStripeIntegration({
-          userWorkosId: actor.userId,
-          workspaceId: actor.workspaceId,
-          apiKey: trimmed,
-          identity: validation.identity,
-          db,
-        });
-        await input
-          .refreshStripePluginRegistrations?.({
-            userWorkosId: actor.userId,
-            workspaceId: actor.workspaceId,
-          })
-          .catch((error) => {
-            logger.warn("Stripe connected but plugin discovery refresh failed", {
-              event: "opencompany.stripe_plugin_refresh_failed",
-              error_message: error instanceof Error ? error.message : String(error),
-            });
-          });
-        return await getStripeIntegrationState(actor.workspaceId, db);
-      } catch (error) {
-        throw commandFailure(
-          error,
-          "Could not connect Stripe. Check the restricted key and try again.",
-          "stripe_connect",
-        );
-      }
+    async connectStripe() {
+      throw new ApiError(
+        410,
+        "invalid_request",
+        "Workspace Stripe keys are retired. Connect your personal Stripe account in Plugins settings.",
+      );
     },
 
     async disconnectStripe(actor) {
@@ -408,6 +413,10 @@ export function createIntegrationAccountService(input: {
       if (!disconnected) {
         throw new ApiError(404, "not_found", "Stripe is not connected.");
       }
+      await captureProductServerEvent("connection_removed", actor.userId, {
+        workspace_id: actor.workspaceId,
+        provider: "stripe",
+      });
     },
   };
 }
@@ -446,11 +455,7 @@ async function requireManageableCapabilityIntegration(
   if (!row) throw new ApiError(404, "not_found", OWNER_ONLY_MESSAGE);
 
   if (row.workspaceId !== null) {
-    if (row.workspaceId !== actor.workspaceId) {
-      throw new ApiError(404, "not_found", OWNER_ONLY_MESSAGE);
-    }
-    requireAdmin(actor, "Only workspace admins can manage this integration's permissions.");
-    return row;
+    throw new ApiError(404, "not_found", OWNER_ONLY_MESSAGE);
   }
 
   if (row.userWorkosId !== actor.userId) {
@@ -460,6 +465,7 @@ async function requireManageableCapabilityIntegration(
 }
 
 async function disconnectOwnedPersonalIntegration(db: DbLike, actor: Actor, integrationId: string) {
+  const connection = await requireOwnPersonalIntegration(db, actor, integrationId);
   let deleted: boolean;
   try {
     deleted = await disconnectPersonalIntegration({
@@ -471,6 +477,11 @@ async function disconnectOwnedPersonalIntegration(db: DbLike, actor: Actor, inte
     throw commandFailure(error, "Could not disconnect this account.", "disconnect");
   }
   if (!deleted) throw new ApiError(404, "not_found", OWNER_ONLY_MESSAGE);
+  await captureProductServerEvent("connection_removed", actor.userId, {
+    workspace_id: actor.workspaceId,
+    provider: connection.provider,
+    connection_id: connection.id,
+  });
 }
 
 function requireAdmin(actor: Actor, message: string) {

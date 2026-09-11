@@ -172,10 +172,15 @@ describe("ChatApplicationService", () => {
     const repository = fakeRepository();
     const service = new ChatApplicationService(repository);
 
-    await service.createMessage(actor(), command({ mentions: [{ kind: "skill", id: " sales " }] }));
+    await service.createMessage(
+      actor(),
+      command({ mentions: [{ kind: "skill", id: " skill_installation_sales ", name: "sales" }] }),
+    );
     expect(repository.createMessageAndRun).toHaveBeenCalledWith(
       expect.objectContaining({
-        command: expect.objectContaining({ mentions: [{ kind: "skill", id: "sales" }] }),
+        command: expect.objectContaining({
+          mentions: [{ kind: "skill", id: "skill_installation_sales", name: "sales" }],
+        }),
       }),
     );
     expect(() =>

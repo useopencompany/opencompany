@@ -21,6 +21,7 @@ export type AgentModelId =
   | "anthropic/claude-sonnet-5"
   | "anthropic/claude-opus-4.7"
   | "anthropic/claude-opus-4.8"
+  | "anthropic/claude-opus-5"
   | "anthropic/claude-fable-5"
   | "google/gemini-3-flash"
   | "google/gemini-3.1-flash-lite-preview"

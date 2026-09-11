@@ -9,7 +9,12 @@ import {
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BRAIN_TOOL_PART_TYPE, type ChatUiMessage, USE_ACTION_TOOL_PART_TYPE } from "@/lib/chat-ui";
+import {
+  BRAIN_TOOL_NAME,
+  BRAIN_TOOL_PART_TYPE,
+  type ChatUiMessage,
+  USE_ACTION_TOOL_PART_TYPE,
+} from "@/lib/chat-ui";
 import { getVisibleBrainCitationCount } from "./AssistantTextBubble";
 import type { ChatTaskLookup } from "./assistant-items";
 import { MessageBubble } from "./MessageBubble";
@@ -31,7 +36,313 @@ afterEach(() => {
   presentationMocks.load.mockReset();
 });
 
+it.each(
+  (["accept", "decline"] as const).flatMap((decision) =>
+    [false, true].map((summary) => ({ decision, summary })),
+  ),
+)(
+  "reviews a persisted task draft with a one-time $decision decision (summary: $summary)",
+  async ({ decision, summary }) => {
+    const onActionApproval = vi.fn(async () => undefined);
+    const message: ChatUiMessage = {
+      id: "assistant_task_approval",
+      role: "assistant",
+      ...(summary
+        ? {
+            metadata: {
+              sessionId: "conversation_1",
+              presentation: { source: "summary" as const, updatedAt: "2026-09-10T16:06:23Z" },
+            },
+          }
+        : {}),
+      parts: [
+        { type: "text", text: "The draft is ready. Approval is needed to continue." },
+        {
+          type: "dynamic-tool",
+          toolName: "codex_approval",
+          toolCallId: "task_action_draft",
+          state: "approval-requested",
+          approval: { id: "approval_task_action_draft" },
+          input: {
+            action: "plugin:gmail:gmail.create_draft",
+            params: {
+              to: "recipient@example.com",
+              subject: "Ready to launch",
+              body: "The feature is live.",
+            },
+          },
+        },
+      ],
+    };
+    if (summary) presentationMocks.load.mockResolvedValueOnce(message);
+    render(
+      <MessageBubble
+        message={message}
+        taskLookup={emptyTaskLookup}
+        allowActionApproval
+        onActionApproval={onActionApproval}
+      />,
+    );
+    if (summary) {
+      expect(screen.getByRole("button", { name: "Approve once" })).toBeDisabled();
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Approve once" })).toBeEnabled(),
+      );
+      expect(presentationMocks.load).toHaveBeenCalledOnce();
+    } else {
+      expect(presentationMocks.load).not.toHaveBeenCalled();
+    }
+    expect(screen.getByText("recipient@example.com")).toBeVisible();
+    expect(screen.getByText("Ready to launch")).toBeVisible();
+    expect(screen.getByText("The feature is live.")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Always allow" })).not.toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole("button", { name: decision === "accept" ? "Approve once" : "Deny" }),
+    );
+    expect(onActionApproval).toHaveBeenCalledExactlyOnceWith({
+      approvalId: "approval_task_action_draft",
+      action: "plugin:gmail:gmail.create_draft",
+      decision,
+    });
+    expect(screen.getByRole("button", { name: "Deny" })).toBeDisabled();
+  },
+);
+
+it.each([
+  { readOnly: true, allowActionApproval: true },
+  { readOnly: false, allowActionApproval: false },
+])("keeps summary task approvals inert when $readOnly / $allowActionApproval", (access) => {
+  const onActionApproval = vi.fn(async () => undefined);
+  const message: ChatUiMessage = {
+    id: "assistant_task_approval_history",
+    role: "assistant",
+    metadata: {
+      presentation: { source: "summary", updatedAt: "2026-09-10T16:06:23Z" },
+    },
+    parts: [
+      {
+        type: "dynamic-tool",
+        toolName: CODEX_APPROVAL_TOOL_NAME,
+        toolCallId: "task_action_branch",
+        state: "approval-requested",
+        approval: { id: "approval_task_action_branch" },
+        input: {
+          action: "plugin:github:github.create_branch",
+          params: { owner: "useopencompany", repo: "opencompany", branch: "docs/changelog" },
+        },
+      },
+    ],
+  };
+  render(
+    <MessageBubble
+      message={message}
+      taskLookup={emptyTaskLookup}
+      onActionApproval={onActionApproval}
+      {...access}
+    />,
+  );
+  expect(screen.queryByRole("button", { name: "Approve once" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Deny" })).not.toBeInTheDocument();
+  expect(screen.getByTestId("chat-tool-call-codex_approval")).toBeVisible();
+  expect(onActionApproval).not.toHaveBeenCalled();
+  expect(presentationMocks.load).not.toHaveBeenCalled();
+});
+
+it.each([CODEX_APPROVAL_TOOL_NAME, "use_action"])(
+  "loads omitted %s approval params before enabling approval",
+  async (toolName) => {
+    const onActionApproval = vi.fn(async () => undefined);
+    const recipients = Array.from({ length: 9 }, (_, index) => `recipient-${index}@example.com`);
+    const body = `${"A".repeat(160)} Full payment instructions.`;
+    const part = {
+      type: "dynamic-tool" as const,
+      toolName,
+      toolCallId: "task_action_draft",
+      state: "approval-requested" as const,
+      approval: { id: "approval_task_action_draft" },
+      input: {
+        action: "plugin:gmail:gmail.create_draft",
+        params: { to: recipients, body },
+      },
+    };
+    const message: ChatUiMessage = {
+      id: "assistant_task_approval",
+      role: "assistant",
+      metadata: {
+        sessionId: "conversation_1",
+        presentation: { source: "summary", updatedAt: "2026-09-10T16:06:23Z" },
+      },
+      // The persisted summary truncates strings at 160 characters and arrays at eight items.
+      parts: [
+        {
+          ...part,
+          input: {
+            ...part.input,
+            params: { to: recipients.slice(0, 8), body: body.slice(0, 160) },
+          },
+        },
+      ],
+    };
+    let resolvePresentation!: (message: ChatUiMessage) => void;
+    presentationMocks.load.mockReturnValueOnce(
+      new Promise<ChatUiMessage>((resolve) => {
+        resolvePresentation = resolve;
+      }),
+    );
+    render(
+      <MessageBubble
+        message={message}
+        taskLookup={emptyTaskLookup}
+        allowActionApproval
+        onActionApproval={onActionApproval}
+      />,
+    );
+
+    expect(screen.getByTestId("chat-action-approval")).toBeVisible();
+    expect(screen.getByText("Loading details…")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Approve once" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Deny" })).toBeEnabled();
+    await userEvent.click(screen.getByRole("button", { name: "Approve once" }));
+    expect(onActionApproval).not.toHaveBeenCalled();
+
+    await act(async () => resolvePresentation({ ...message, parts: [part] }));
+    expect(screen.getByText(recipients.join(", "))).toBeVisible();
+    expect(screen.getByText(body)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Approve once" })).toBeEnabled();
+    await userEvent.click(screen.getByRole("button", { name: "Approve once" }));
+    expect(onActionApproval).toHaveBeenCalledExactlyOnceWith({
+      approvalId: "approval_task_action_draft",
+      action: "plugin:gmail:gmail.create_draft",
+      decision: "accept",
+    });
+  },
+);
+
+it.each(["retry", "deny"])(
+  "allows %s when full task approval details fail to load",
+  async (nextAction) => {
+    const onActionApproval = vi.fn(async () => undefined);
+    const message: ChatUiMessage = {
+      id: "assistant_task_approval_error",
+      role: "assistant",
+      metadata: {
+        sessionId: "conversation_1",
+        presentation: { source: "summary", updatedAt: "2026-09-10T16:06:23Z" },
+      },
+      parts: [
+        {
+          type: "dynamic-tool",
+          toolName: CODEX_APPROVAL_TOOL_NAME,
+          toolCallId: "task_action_draft",
+          state: "approval-requested",
+          approval: { id: "approval_task_action_draft" },
+          input: { action: "plugin:gmail:gmail.create_draft", params: { body: "Draft" } },
+        },
+      ],
+    };
+    presentationMocks.load.mockRejectedValueOnce(new Error("Could not load the request."));
+    render(
+      <MessageBubble
+        message={message}
+        taskLookup={emptyTaskLookup}
+        allowActionApproval
+        onActionApproval={onActionApproval}
+      />,
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load the request.");
+    expect(screen.getByRole("button", { name: "Approve once" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Deny" })).toBeEnabled();
+    if (nextAction === "retry") {
+      presentationMocks.load.mockResolvedValueOnce(message);
+      await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Approve once" })).toBeEnabled(),
+      );
+      expect(presentationMocks.load).toHaveBeenCalledTimes(2);
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(onActionApproval).not.toHaveBeenCalled();
+    } else {
+      await userEvent.click(screen.getByRole("button", { name: "Deny" }));
+      expect(onActionApproval).toHaveBeenCalledExactlyOnceWith({
+        approvalId: "approval_task_action_draft",
+        action: "plugin:gmail:gmail.create_draft",
+        decision: "decline",
+      });
+      expect(screen.getByRole("button", { name: "Deny" })).toBeDisabled();
+    }
+  },
+);
+
 describe("MessageBubble historical presentation details", () => {
+  it.each(
+    [CODEX_COMMAND_TOOL_NAME, BRAIN_TOOL_NAME, "history_search"].flatMap((selectedTool) =>
+      [false, true].map((closeBeforeLoad) => ({ selectedTool, closeBeforeLoad })),
+    ),
+  )(
+    "preserves only the selected $selectedTool disclosure when details load (closed while loading: $closeBeforeLoad)",
+    async ({ selectedTool, closeBeforeLoad }) => {
+      const names = [
+        CODEX_COMMAND_TOOL_NAME,
+        CODEX_COMMAND_TOOL_NAME,
+        BRAIN_TOOL_NAME,
+        "history_search",
+      ];
+      const summaryMessage = {
+        id: "assistant_disclosures",
+        role: "assistant",
+        metadata: {
+          sessionId: "conversation_1",
+          presentation: { source: "summary", updatedAt: "2026-09-10T10:00:00.000Z" },
+        },
+        parts: names.map((toolName, index) => ({
+          type: "dynamic-tool",
+          toolName,
+          toolCallId: `tool_${index}`,
+          state: "output-available",
+          input: { description: `Step ${index}`, command: `echo ${index}` },
+        })),
+      } as ChatUiMessage;
+      const fullMessage = {
+        ...summaryMessage,
+        parts: summaryMessage.parts.map((part, index) => ({
+          ...part,
+          output:
+            names[index] === BRAIN_TOOL_NAME
+              ? { ok: true, brainRef: "brain_1", exitCode: 0, stdout: "Full result", stderr: "" }
+              : { status: "completed", exitCode: 0, outputPreview: "Full result" },
+        })),
+      } as ChatUiMessage;
+      let resolvePresentation!: (message: ChatUiMessage) => void;
+      presentationMocks.load.mockReturnValueOnce(
+        new Promise<ChatUiMessage>((resolve) => {
+          resolvePresentation = resolve;
+        }),
+      );
+      render(<MessageBubble message={summaryMessage} taskLookup={emptyTaskLookup} />);
+      const disclosures = () => screen.getAllByRole("button", { expanded: true });
+      const selectedIndex = names.lastIndexOf(selectedTool);
+      await userEvent.click(screen.getAllByRole("button")[selectedIndex]!);
+      expect(disclosures()).toHaveLength(1);
+      expect(screen.getByText("Loading details…")).toBeVisible();
+      if (closeBeforeLoad) {
+        await userEvent.click(screen.getAllByRole("button")[selectedIndex]!);
+      }
+      await act(async () => resolvePresentation(fullMessage));
+      expect(presentationMocks.load).toHaveBeenCalledOnce();
+      expect(screen.queryAllByRole("button", { expanded: true })).toHaveLength(
+        closeBeforeLoad ? 0 : 1,
+      );
+      if (closeBeforeLoad) {
+        await userEvent.click(screen.getAllByRole("button")[selectedIndex]!);
+      }
+      expect(disclosures()).toHaveLength(1);
+      expect(screen.getByText(/Full result/, { selector: "pre" })).toBeVisible();
+      expect(screen.getAllByRole("button")[selectedIndex]).toHaveAttribute("aria-expanded", "true");
+      await userEvent.click(screen.getAllByRole("button")[selectedIndex]!);
+      expect(screen.queryAllByRole("button", { expanded: true })).toHaveLength(0);
+    },
+  );
+
   it("keeps expanded reasoning visible and loads detail when a live row becomes historical", async () => {
     const liveMessage = {
       id: "assistant_reasoning_transition",
@@ -88,8 +399,9 @@ describe("MessageBubble historical presentation details", () => {
     expect(screen.queryByText("Loading details…")).not.toBeInTheDocument();
   });
 
-  it("renders a summary-backed pending use_action approval without loading historical detail", () => {
+  it("keeps a summary-backed use_action approval visible while loading its full request", () => {
     const onActionApproval = vi.fn(async () => undefined);
+    presentationMocks.load.mockReturnValueOnce(new Promise(() => {}));
     const summaryMessage = {
       id: "assistant_pending_approval_summary",
       role: "assistant",
@@ -129,7 +441,10 @@ describe("MessageBubble historical presentation details", () => {
     expect(screen.getByRole("button", { name: "Accept" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Always allow" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Decline" })).toBeVisible();
-    expect(presentationMocks.load).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Accept" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Always allow" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Decline" })).toBeEnabled();
+    expect(presentationMocks.load).toHaveBeenCalledOnce();
     expect(onActionApproval).not.toHaveBeenCalled();
 
     rerender(
@@ -145,7 +460,7 @@ describe("MessageBubble historical presentation details", () => {
     expect(screen.queryByRole("button", { name: "Accept" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Always allow" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Decline" })).not.toBeInTheDocument();
-    expect(presentationMocks.load).not.toHaveBeenCalled();
+    expect(presentationMocks.load).toHaveBeenCalledOnce();
   });
 
   it("shows loading and retry states before replacing a compact tool summary with full detail", async () => {
@@ -996,7 +1311,7 @@ describe("MessageBubble assistant errors", () => {
     expect(await screen.findByText("Expired")).toBeVisible();
   });
 
-  it("renders a native paid capability approval with cost and distinguishing params", async () => {
+  it.each([false, true])("gates paid approval on full input (summary: %s)", async (summary) => {
     const user = userEvent.setup();
     vi.stubGlobal(
       "fetch",
@@ -1019,7 +1334,12 @@ describe("MessageBubble assistant errors", () => {
     const message: ChatUiMessage = {
       id: "assistant_native_approval",
       role: "assistant",
-      metadata: { sessionId: "goat_chat_1" },
+      metadata: {
+        sessionId: "goat_chat_1",
+        ...(summary
+          ? { presentation: { source: "summary" as const, updatedAt: "2026-09-10T16:06:23Z" } }
+          : {}),
+      },
       parts: [
         {
           type: USE_ACTION_TOOL_PART_TYPE,
@@ -1034,6 +1354,14 @@ describe("MessageBubble assistant errors", () => {
       ],
     };
 
+    let resolvePresentation!: (message: ChatUiMessage) => void;
+    if (summary) {
+      presentationMocks.load.mockReturnValueOnce(
+        new Promise<ChatUiMessage>((resolve) => {
+          resolvePresentation = resolve;
+        }),
+      );
+    }
     render(
       <MessageBubble
         message={message}
@@ -1047,6 +1375,12 @@ describe("MessageBubble assistant errors", () => {
     expect(await screen.findByText(/Up to \$0\.36/)).toBeVisible();
     expect(screen.getByText("ada@example.com")).toBeVisible();
     expect(screen.getByText(/session's \$0\.10 budget/)).toBeVisible();
+    if (summary) {
+      expect(screen.getByRole("button", { name: "Approve for $0.36" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
+      expect(presentationMocks.load).toHaveBeenCalledOnce();
+      await act(async () => resolvePresentation(message));
+    }
     await user.click(screen.getByRole("button", { name: "Approve for $0.36" }));
     await waitFor(() =>
       expect(onActionApproval).toHaveBeenCalledWith({

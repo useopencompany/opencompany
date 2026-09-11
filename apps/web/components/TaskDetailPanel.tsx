@@ -14,34 +14,58 @@ import { legacyHarnessRunToChatMessages } from "@/lib/legacy-task-chat-messages"
 import { normalizeModel } from "@/lib/model-options";
 import type { HarnessRunViewModel } from "@/lib/task-harness-run";
 
-export function TaskDetailPanel({ initialRun }: { initialRun: HarnessRunViewModel }) {
+// Pane contract, forwarded to Surface: an embedded host (the review queue) detaches this view
+// itself instead of letting it navigate home and cancel a run that is still going.
+export type TaskDetailPaneProps = {
+  onClosePane?: () => void;
+};
+
+export function TaskDetailPanel({
+  initialRun,
+  ...pane
+}: { initialRun: HarnessRunViewModel } & TaskDetailPaneProps) {
   if (initialRun.task.sessionId) {
-    return <CanonicalTaskDetailPanel run={initialRun} conversationId={initialRun.task.sessionId} />;
+    return (
+      <CanonicalTaskDetailPanel
+        run={initialRun}
+        conversationId={initialRun.task.sessionId}
+        {...pane}
+      />
+    );
   }
-  return <LegacyTaskDetailPanel initialRun={initialRun} />;
+  return <LegacyTaskDetailPanel initialRun={initialRun} {...pane} />;
 }
 
 function CanonicalTaskDetailPanel({
   run,
   conversationId,
+  ...pane
 }: {
   run: HarnessRunViewModel;
   conversationId: string;
-}) {
+} & TaskDetailPaneProps) {
   const hydrated = useHydrated();
   if (!hydrated) {
-    return <CanonicalTaskDetailView run={run} conversationId={conversationId} activeRun={null} />;
+    return (
+      <CanonicalTaskDetailView
+        run={run}
+        conversationId={conversationId}
+        activeRun={null}
+        {...pane}
+      />
+    );
   }
-  return <LiveCanonicalTaskDetailPanel run={run} conversationId={conversationId} />;
+  return <LiveCanonicalTaskDetailPanel run={run} conversationId={conversationId} {...pane} />;
 }
 
 function LiveCanonicalTaskDetailPanel({
   run,
   conversationId,
+  ...pane
 }: {
   run: HarnessRunViewModel;
   conversationId: string;
-}) {
+} & TaskDetailPaneProps) {
   const runsCollection = useMemo(() => getHeadlessChatRuns(conversationId), [conversationId]);
   const { data: runRows } = useLiveQuery(
     (query) => query.from({ run: runsCollection }),
@@ -56,7 +80,12 @@ function LiveCanonicalTaskDetailPanel({
   );
 
   return (
-    <CanonicalTaskDetailView run={run} conversationId={conversationId} activeRun={activeRun} />
+    <CanonicalTaskDetailView
+      run={run}
+      conversationId={conversationId}
+      activeRun={activeRun}
+      {...pane}
+    />
   );
 }
 
@@ -64,11 +93,12 @@ function CanonicalTaskDetailView({
   run,
   conversationId,
   activeRun,
+  ...pane
 }: {
   run: HarnessRunViewModel;
   conversationId: string;
   activeRun: HeadlessChatRunReadModel | null;
-}) {
+} & TaskDetailPaneProps) {
   const data = useAppData();
   const userName = data.user.firstName?.trim() || data.user.email.split("@")[0] || "there";
   const liveTask = data.tasks?.find((task) => task.id === run.task.id);
@@ -99,9 +129,16 @@ function CanonicalTaskDetailView({
       workspaceId={data.workspace.id}
       userName={userName}
       userWorkosId={data.user.workosUserId}
+      {...pane}
       taskConversation={{
         taskId: run.task.id,
-        status: activeRun ? "running" : (liveTask?.status ?? run.task.status),
+        status: activeRun
+          ? activeRun.status === "paused"
+            ? "waiting"
+            : activeRun.status === "queued"
+              ? "queued"
+              : "running"
+          : (liveTask?.status ?? run.task.status),
         startedAtMs: taskActivityStartedAtMs(run),
         activeRunId: activeRun?.id ?? null,
       }}
@@ -109,7 +146,10 @@ function CanonicalTaskDetailView({
   );
 }
 
-function LegacyTaskDetailPanel({ initialRun }: { initialRun: HarnessRunViewModel }) {
+function LegacyTaskDetailPanel({
+  initialRun,
+  ...pane
+}: { initialRun: HarnessRunViewModel } & TaskDetailPaneProps) {
   const data = useAppData();
   const userName = data.user.firstName?.trim() || data.user.email.split("@")[0] || "there";
   const title = taskDetailTitle(initialRun);
@@ -137,6 +177,7 @@ function LegacyTaskDetailPanel({ initialRun }: { initialRun: HarnessRunViewModel
       workspaceId={data.workspace.id}
       userName={userName}
       userWorkosId={data.user.workosUserId}
+      {...pane}
       taskConversation={{
         taskId: initialRun.task.id,
         status: initialRun.task.status,

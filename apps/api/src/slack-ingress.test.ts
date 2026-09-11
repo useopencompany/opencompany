@@ -1,4 +1,4 @@
-import { captureIntegrationAddedAnalytics } from "@opencompany/agent/integrations/analytics";
+import { captureConnectionAddedAnalytics } from "@opencompany/agent/integrations/analytics";
 import {
   createSlackIntegrationState,
   exchangeSlackCode,
@@ -25,7 +25,7 @@ vi.mock("@opencompany/observability", async (importOriginal) => ({
 }));
 
 vi.mock("@opencompany/agent/integrations/analytics", () => ({
-  captureIntegrationAddedAnalytics: vi.fn(async () => undefined),
+  captureConnectionAddedAnalytics: vi.fn(async () => undefined),
 }));
 vi.mock("@opencompany/agent/integrations/slack", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -269,10 +269,10 @@ describe("Slack plugin OAuth ingress", () => {
         vi.mocked(connectSlackIntegration).mockRejectedValueOnce(new Error("database unavailable")),
     },
     {
-      stage: "integration_analytics",
+      stage: "connection_analytics",
       fail: () =>
         vi
-          .mocked(captureIntegrationAddedAnalytics)
+          .mocked(captureConnectionAddedAnalytics)
           .mockRejectedValueOnce(new Error("analytics unavailable")),
     },
   ])("logs $stage as the callback failure stage", async ({ stage, fail }) => {

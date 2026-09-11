@@ -15,6 +15,7 @@ takes precedence. Codex availability is separate from the opencompany engine's G
 | `dev` `/runner` | local runner | runner tokens, provider credentials, sandbox configuration |
 | `prod` `/web` | Vercel web | browser auth, first-party origins, public URL and cron relays, email sender, and telemetry |
 | `prod` `/api` | Render product API | database, auth, billing/Stripe, provider ingress, managed capabilities, Auto-routing gateway, Blob, Electric, Redis, and telemetry configuration |
+| `prod` `/electric` | Render Electric sync service | direct production database URL, service auth, persistent storage path, and replication-stream identity |
 | `prod` `/runner` | Render runner | production worker and broker configuration |
 | `prod` `/release` | GitHub Actions | production URLs, project/service IDs, deploy tokens, DB URL |
 | `prod` `/ci/turbo` | GitHub Actions | optional Turborepo remote-cache credentials |
@@ -53,6 +54,9 @@ contracts include:
   persistence relays, the runner token/URL for the engine-auth control calls, and
   `API_INTERNAL_TOKEN` to validate the runner→API internal wiki command endpoint. The retained
   generic PostHog compatibility sink remains optional.
+- Electric: direct database, service auth, persistent storage, and a stable replication-stream ID.
+  `DATABASE_URL` must not use Neon's pooled hostname. Keep the stream ID and disk contents paired;
+  changing either requires the recovery procedure in [Electric read models](./electric-sync.md).
 - Runner: database, internal/stream tokens, `OPENCOMPANY_API_ORIGIN` and `API_INTERNAL_TOKEN` for
   the internal wiki command endpoint (agent wiki writes cross the canonical API, never the wiki
   database directly), opencompany origin, allowed origins, integration encryption, an explicitly
@@ -87,8 +91,9 @@ The official GitHub Plugin uses a personal GitHub App. Put `GITHUB_USER_APP_SLUG
 ID and secret in prod `/runner` as well so sandbox sessions can refresh the same expiring user
 credential. The public callback remains
 `${OPENCOMPANY_NEXT_PUBLIC_APP_URL}/api/integrations/github-user/callback`, relayed by web to the
-API. The App must request Contents, Issues, and Pull requests read/write plus Actions, Checks, and
-Metadata read, with expiring user tokens and user authorization during installation enabled. Set
+API. The App must request Contents, Issues, and Pull requests read/write plus Actions, Checks,
+Commit statuses, and Metadata read, with expiring user tokens and user authorization during
+installation enabled. Set
 its Setup URL to
 `${OPENCOMPANY_NEXT_PUBLIC_APP_URL}/settings/plugins/github` and enable redirect-on-update so App
 updates return to opencompany.

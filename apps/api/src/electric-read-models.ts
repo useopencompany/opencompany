@@ -94,8 +94,11 @@ export interface ReadModelService {
   }): Promise<Response>;
 }
 
+export type ElectricAuthMode = "cloud" | "self-hosted" | "bearer" | "insecure";
+
 type ElectricReadModelProxyOptions = {
   electricUrl: string;
+  authMode?: ElectricAuthMode;
   sourceId?: string;
   sourceSecret?: string;
   electricSecret?: string;
@@ -104,11 +107,22 @@ type ElectricReadModelProxyOptions = {
 };
 
 export class ElectricReadModelProxy implements ReadModelService {
+  private readonly authMode: ElectricAuthMode;
   private readonly fetchImpl: typeof globalThis.fetch;
 
   constructor(private readonly options: ElectricReadModelProxyOptions) {
     if (Boolean(options.sourceId) !== Boolean(options.sourceSecret)) {
       throw new Error("Electric source credentials must be configured together.");
+    }
+    this.authMode = options.authMode ?? inferElectricAuthMode(options);
+    if (this.authMode === "cloud" && (!options.sourceId || !options.sourceSecret)) {
+      throw new Error("Electric cloud auth requires source credentials.");
+    }
+    if (this.authMode === "self-hosted" && !options.electricSecret) {
+      throw new Error("Self-hosted Electric auth requires ELECTRIC_SECRET.");
+    }
+    if (this.authMode === "bearer" && !options.token) {
+      throw new Error("Electric bearer auth requires ELECTRIC_TOKEN.");
     }
     this.fetchImpl = options.fetch ?? globalThis.fetch;
   }
@@ -136,19 +150,17 @@ export class ElectricReadModelProxy implements ReadModelService {
     origin.searchParams.set("replica", "default");
     shape.params.forEach((value, index) => origin.searchParams.set(`params[${index + 1}]`, value));
 
-    const usesQuerySecret = Boolean(
-      (this.options.sourceId && this.options.sourceSecret) || this.options.electricSecret,
-    );
-    if (this.options.sourceId && this.options.sourceSecret) {
-      origin.searchParams.set("source_id", this.options.sourceId);
-      origin.searchParams.set("secret", this.options.sourceSecret);
-    } else if (this.options.electricSecret) {
-      origin.searchParams.set("secret", this.options.electricSecret);
+    const usesQuerySecret = this.authMode === "cloud" || this.authMode === "self-hosted";
+    if (this.authMode === "cloud") {
+      origin.searchParams.set("source_id", this.options.sourceId!);
+      origin.searchParams.set("secret", this.options.sourceSecret!);
+    } else if (this.authMode === "self-hosted") {
+      origin.searchParams.set("secret", this.options.electricSecret!);
     }
 
     const upstream = await this.fetchImpl(origin, {
       headers:
-        !usesQuerySecret && this.options.token
+        !usesQuerySecret && this.authMode === "bearer" && this.options.token
           ? { Authorization: `Bearer ${this.options.token}` }
           : {},
     });
@@ -184,6 +196,22 @@ export class ElectricReadModelProxy implements ReadModelService {
   }
 }
 
+export function parseElectricAuthMode(value: string | undefined): ElectricAuthMode | undefined {
+  const mode = value?.trim();
+  if (!mode) return undefined;
+  if (mode === "cloud" || mode === "self-hosted" || mode === "bearer" || mode === "insecure") {
+    return mode;
+  }
+  throw new Error("ELECTRIC_AUTH_MODE must be one of: cloud, self-hosted, bearer, insecure.");
+}
+
+function inferElectricAuthMode(options: ElectricReadModelProxyOptions): ElectricAuthMode {
+  if (options.sourceId && options.sourceSecret) return "cloud";
+  if (options.electricSecret) return "self-hosted";
+  if (options.token) return "bearer";
+  return "insecure";
+}
+
 function readModelShape(input: {
   actor: Actor;
   readModel: ReadModel;
@@ -207,7 +235,7 @@ function readModelShape(input: {
           "created_at",
           "updated_at",
         ],
-        where: `"actor_id" = $1 AND ("workspace_id" = $2 OR "workspace_id" IS NULL)`,
+        where: `"is_bot" = false AND "actor_id" = $1 AND ("workspace_id" = $2 OR "workspace_id" IS NULL)`,
         params: [input.actor.userId, input.actor.workspaceId],
       };
     case "chat-conversations-v2":
@@ -326,6 +354,7 @@ function readModelShape(input: {
           "error",
           "reported_status",
           "outcome_comment",
+          "has_unseen",
           "archived_at",
           "created_at",
           "updated_at",
@@ -430,7 +459,7 @@ function readModelShape(input: {
           "capability_modes",
         ],
         where:
-          `(("user_workos_id" = $1 AND "workspace_id" IS NULL) OR "workspace_id" = $2) ` +
+          `"user_workos_id" = $1 AND "workspace_id" IS NULL AND CAST($2 AS text) = CAST($2 AS text) ` +
           `AND CAST($3 AS text) = CAST($3 AS text)`,
         params: [
           input.actor.userId,
@@ -628,7 +657,7 @@ function conversationReadModelShape(
   return {
     table: "goat.conversation_read_model_v1",
     columns,
-    where: `"actor_id" = $1 AND ("workspace_id" = $2 OR "workspace_id" IS NULL)`,
+    where: `"is_bot" = false AND "actor_id" = $1 AND ("workspace_id" = $2 OR "workspace_id" IS NULL)`,
     params: [input.actor.userId, input.actor.workspaceId],
   };
 }
@@ -1168,6 +1197,7 @@ const READ_MODEL_COLUMN_NAMES = {
     error: "",
     reported_status: "",
     outcome_comment: "",
+    has_unseen: "hasUnseen",
     archived_at: "archivedAt",
     created_at: "createdAt",
     updated_at: "updatedAt",

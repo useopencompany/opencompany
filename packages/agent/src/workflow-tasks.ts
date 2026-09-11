@@ -13,17 +13,16 @@ import {
 } from "./application/engine-auth-status";
 import { getAvailableHarnessTools } from "./integrations/google-data";
 import { resolveSkillMentions, type SkillMentionRef, type WorkspaceSkill } from "./skills";
-import {
-  DEFAULT_WORKFLOW_MODEL_TOKEN,
-  isWorkflowModelToken,
-  workflowModelSelection,
-} from "./workflow-model-options";
+import { resolveWorkflowStepModelSelection } from "./workflow-model-options";
+import { extractWorkflowSkillMentionRefs } from "./workflow-skill-mentions";
 import {
   resolveWorkflowMention,
   WorkflowMentionError,
   type WorkflowMentionRef,
   type WorkspaceWorkflow,
 } from "./workflows";
+
+export { extractWorkflowSkillMentionRefs } from "./workflow-skill-mentions";
 
 export type WorkflowEngineSelection = {
   engine: HarnessEngine;
@@ -43,49 +42,14 @@ export class WorkflowPreparationError extends Error {
   }
 }
 
-const DEFAULT_WORKFLOW_SELECTION: WorkflowEngineSelection = workflowModelSelection({
-  model: DEFAULT_WORKFLOW_MODEL_TOKEN,
-});
-
-// The token must end alphanumeric so trailing punctuation ("run @sonnet-5.")
-// stays out of the capture while inner dots ("@kimi-k2.6") still match.
-const WORKFLOW_MENTION_TOKEN_PATTERN = /(^|\s)@([a-z0-9](?:[a-z0-9./-]*[a-z0-9])?)/gi;
-const WORKFLOW_SKILL_MENTION_PATTERN = /(^|\s)@skill\/([a-z0-9][a-z0-9-]{0,79})(?![a-z0-9-])/gi;
-
-export function resolveWorkflowStepSelection(step: {
-  model: string;
-  runtimeModel?: unknown;
-  reasoningEffort?: unknown;
-  instructions: string;
-}): WorkflowEngineSelection {
-  const selectedToken = step.model.trim().toLowerCase();
-  if (selectedToken) {
-    if (!isWorkflowModelToken(selectedToken)) {
-      throw new WorkflowMentionError(
-        `This workflow step's model "${selectedToken}" is not available. Pick a model in the workflow editor.`,
-      );
-    }
-    return workflowModelSelection({
-      model: selectedToken,
-      runtimeModel: step.runtimeModel,
-      reasoningEffort: step.reasoningEffort,
-    });
+export function resolveWorkflowStepSelection(
+  step: Parameters<typeof resolveWorkflowStepModelSelection>[0],
+): WorkflowEngineSelection {
+  try {
+    return resolveWorkflowStepModelSelection(step);
+  } catch (error) {
+    throw new WorkflowMentionError(error instanceof Error ? error.message : String(error));
   }
-
-  const selected = new Map<string, WorkflowEngineSelection>();
-  for (const match of step.instructions.matchAll(WORKFLOW_MENTION_TOKEN_PATTERN)) {
-    const token = (match[2] ?? "").toLowerCase();
-    if (!isWorkflowModelToken(token)) continue;
-    selected.set(token, workflowModelSelection({ model: token }));
-  }
-  if (selected.size > 1) {
-    throw new WorkflowMentionError(
-      `This workflow step mentions more than one model (${[...selected.keys()]
-        .map((token) => `@${token}`)
-        .join(", ")}). Pick one model for the step.`,
-    );
-  }
-  return [...selected.values()][0] ?? DEFAULT_WORKFLOW_SELECTION;
 }
 
 // Retained as a compatibility name for callers that parse one legacy step.
@@ -103,15 +67,6 @@ export function parseWorkflowEngineSelection(step: {
   });
 }
 
-export function extractWorkflowSkillMentionRefs(instructions: string): SkillMentionRef[] {
-  const ids = new Set<string>();
-  for (const match of instructions.matchAll(WORKFLOW_SKILL_MENTION_PATTERN)) {
-    const id = match[2]?.toLowerCase();
-    if (id) ids.add(id);
-  }
-  return [...ids].map((id) => ({ id }));
-}
-
 export function compileWorkflowHarnessSpec(input: {
   workflow: WorkspaceWorkflow;
   workspaceId: string;
@@ -121,6 +76,10 @@ export function compileWorkflowHarnessSpec(input: {
   description: string;
 }): WorkflowHarnessSpec {
   const skillById = new Map(input.skills.map((skill) => [skill.id, skill]));
+  for (const skill of input.skills) {
+    if (input.skills.filter((candidate) => candidate.name === skill.name).length === 1)
+      skillById.set(skill.name, skill);
+  }
   const invokedSkillIds = new Set(input.invokedSkillIds ?? []);
   const steps = input.workflow.steps.map((step, index) => {
     const selection = resolveWorkflowStepSelection(step);

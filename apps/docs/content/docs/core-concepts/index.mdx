@@ -1,18 +1,44 @@
 ---
-title: Core concepts
-description: A map of the durable objects and product surfaces used by opencompany.
+title: How opencompany fits together
+description: Choose the right place for a conversation, a job, a repeatable process, or shared knowledge.
 ---
 
-opencompany uses the same durable execution model whether work begins in Chat, a Task, a Workflow,
-or a schedule.
+Start with Chat to work interactively. Add a Task when you want to delegate and track a job, or a
+Workflow when that job should follow a reusable sequence.
 
-- A **Conversation** owns ordered user and assistant Messages.
-- A **Message** is a durable entry in that Conversation.
-- Sending a Message creates a **Run**, the unit of accepted work you can observe or cancel.
-- A **Task** adds a name, goal, source, status, and outcome around exactly one Conversation.
-- A **Workflow** is a reusable ordered definition. Invoking it creates a Task.
-- A **schedule** invokes a Workflow or recurring Task at a configured time and timezone.
+| Surface | What it holds | Example |
+| --- | --- | --- |
+| [Chat](/docs/core-concepts/chat-and-engines) | A conversation with an agent | Investigate why a release is blocked. |
+| [Task](/docs/core-concepts/tasks) | One job, its activity, status, and result | Investigate the release in the background. |
+| [Workflow](/docs/core-concepts/workflows-and-schedules) | Ordered instructions for repeated jobs | Check every release with the same process. |
+| [Skill](/docs/core-concepts/skills-and-plugins) | Reusable instructions the agent can apply | Follow your team's release-review method. |
+| [Plugin](/docs/core-concepts/plugins) | A package of Skills, tools, or supported events | Read release issues through Linear. |
+| [Wiki](/docs/core-concepts/wiki) | Shared pages and company knowledge | Keep the release checklist and decisions. |
 
-Integrations provide live actions or source material. Brain stores the knowledge that should outlive
-one Conversation. Keeping those roles separate lets you connect a service without ingesting it, or
-capture a durable fact without turning all chat history into knowledge.
+## Follow one job through the product
+
+Suppose you want a weekly engineering update. The Linear and GitHub Plugins provide the live issue
+and pull-request data. Wiki provides your project context. A Skill describes how your team writes
+updates. A scheduled Workflow gathers the evidence and writes the update. Each invocation creates
+a separate Task where you can inspect the result and leave a follow-up.
+
+You can also do the whole job interactively in Chat before making any part of it reusable.
+
+## What persists
+
+A Chat retains its messages and results. A Task adds a tracked outcome and activity history. Codex
+and Claude Code Chats also have a persistent cloud sandbox for files and commands. Wiki pages are
+shared workspace knowledge; saving a conversation doesn't automatically create a Wiki page.
+
+For API users, a **Conversation** contains **Messages**, and sending a message starts a **Run**.
+A Task has its own Conversation; follow-ups continue that history. See the
+[API reference](/docs/api-reference) for the HTTP resources.
+
+## Two kinds of reusable instructions
+
+Use a **Skill** to teach a method that applies during work. Use a **Workflow** to define a job's
+steps and how the job starts. A Workflow step can select Skills, so you can reuse the same method
+in interactive and scheduled work.
+
+Next, choose an [engine](/docs/core-concepts/chat-and-engines) and
+[connect the tools](/docs/getting-started/connecting-sources) the job needs.

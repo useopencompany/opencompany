@@ -155,7 +155,9 @@ export type ChatModelRoutingErrorCategory =
   | "unknown";
 
 export type IntegrationProvider =
+  | "custom_mcp"
   | "gmail"
+  | "google_admin"
   | "google_calendar"
   | "google_drive"
   | "linear"
@@ -169,6 +171,7 @@ export type IntegrationProvider =
   | "fathom"
   | "attio"
   | "betterstack"
+  | "convex"
   | "render"
   | "vercel"
   | "signoz"
@@ -176,10 +179,13 @@ export type IntegrationProvider =
   | "latitude"
   | "posthog"
   | "neon"
+  | "notion"
+  | "supabase"
+  | "resend"
   | "x_account";
 // Ownership is a property of the integration's binding, not a per-connect
 // choice. Identity-bound connections (OAuth acting as a person: Gmail,
-// Calendar, Slack user token, Linear, GitHub user token, PostHog, Neon, Better Stack, Render, Vercel, SigNoz, X) are always personal. Installation-bound
+// Calendar, Slack user token, Linear, GitHub user token, PostHog, Neon, Notion, Better Stack, Render, Vercel, SigNoz, X) are always personal. Installation-bound
 // connections (Jamie webhook secrets and the Slack answer-bot install) are
 // workspace plumbing: they carry no human identity,
 // must survive the connecting admin leaving, and are manageable by any
@@ -366,6 +372,7 @@ export type TaskToolName =
   | "web_search"
   | "web_fetch"
   | "list_actions"
+  | "describe_actions"
   | "use_action"
   | "update_task_status";
 
@@ -673,6 +680,7 @@ export const CODEX_CHAT_EVENT_TYPES: readonly CodexChatEventType[] =
   );
 
 export type CodexChatTurnSettings = {
+  taskActionApprovalPending?: true;
   approvalContinuation?: boolean;
   mentions?: Array<{ kind: "skill"; id: string }>;
   taskResultMode?: TaskResultMode;
@@ -741,9 +749,11 @@ export const users = productSchema.table(
     lastName: text("last_name"),
     avatarUrl: text("avatar_url"),
     timezone: text("timezone").notNull().default("UTC"),
+    botsEnabled: boolean("bots_enabled").notNull().default(false),
     taskSpawningEnabled: boolean("task_spawning_enabled").notNull().default(false),
     autoModelRoutingEnabled: boolean("auto_model_routing_enabled").notNull().default(false),
     chatCapabilitiesBetaEnabled: boolean("chat_capabilities_beta_enabled").notNull().default(false),
+    reviewInboxEnabled: boolean("review_inbox_enabled").notNull().default(false),
     // Retained for rollback compatibility after the wiki became the default.
     // Runtime code must not read this legacy per-user preview flag.
     wikiEnabled: boolean("wiki_enabled").notNull().default(false),
@@ -1012,6 +1022,39 @@ export const creditBalances = productSchema.table("credit_balances", {
 
 // One-time credit top-up Checkout sessions. `fulfilled_at IS NULL` is the
 // webhook-fulfillment idempotency guard.
+export const sandboxBillingCursors = productSchema.table(
+  "sandbox_billing_cursors",
+  {
+    sandboxId: text("sandbox_id").primaryKey(),
+    namespace: text("namespace").notNull(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => users.workosUserId, { onDelete: "cascade" }),
+    billableFrom: timestamp("billable_from", { withTimezone: true }).notNull(),
+    providerStartedAt: timestamp("provider_started_at", { withTimezone: true }),
+    settledThrough: timestamp("settled_through", { withTimezone: true }),
+    nextPollAt: timestamp("next_poll_at", { withTimezone: true }).notNull().defaultNow(),
+    missingAt: timestamp("missing_at", { withTimezone: true }),
+  },
+  (table) => ({
+    dueIdx: index("sandbox_billing_cursors_due_idx")
+      .on(table.namespace, table.nextPollAt, table.sandboxId)
+      .where(sql`${table.missingAt} IS NULL`),
+    intervalCheck: check(
+      "sandbox_billing_cursors_interval_check",
+      sql`
+      (${table.providerStartedAt} IS NULL AND ${table.settledThrough} IS NULL)
+      OR (${table.providerStartedAt} IS NOT NULL AND ${table.settledThrough} IS NOT NULL
+        AND ${table.settledThrough} >= ${table.providerStartedAt}
+        AND ${table.settledThrough} >= ${table.billableFrom})
+    `,
+    ),
+  }),
+);
+
 export const stripeCheckoutSessions = productSchema.table(
   "stripe_checkout_sessions",
   {
@@ -1652,7 +1695,7 @@ export const integrations = productSchema.table(
     ),
     providerCheck: check(
       "goat_integrations_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'render', 'vercel', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'x_account')`,
+      sql`${table.provider} IN ('gmail', 'google_admin', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'convex', 'render', 'vercel', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'resend', 'x_account', 'custom_mcp')`,
     ),
     statusCheck: check(
       "goat_integrations_status_check",
@@ -1702,7 +1745,7 @@ export const integrationCredentials = productSchema.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_credentials_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'render', 'vercel', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'x_account')`,
+      sql`${table.provider} IN ('gmail', 'google_admin', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'convex', 'render', 'vercel', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'resend', 'x_account', 'custom_mcp')`,
     ),
     kindCheck: check(
       "goat_integration_credentials_kind_check",
@@ -1752,7 +1795,7 @@ export const integrationResources = productSchema.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_resources_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'render', 'vercel', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'x_account')`,
+      sql`${table.provider} IN ('gmail', 'google_admin', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'convex', 'render', 'vercel', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'resend', 'x_account', 'custom_mcp')`,
     ),
     statusCheck: check(
       "goat_integration_resources_status_check",
@@ -3268,6 +3311,10 @@ export const skillInstallations = productSchema.table(
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
+    // Keep the physical default compatible with application revisions deployed before Personal
+    // Skills. New writers always choose a scope after checking the rollout boundary below.
+    scope: text("scope").$type<"personal" | "company">().notNull().default("company"),
+    createdByUserId: text("created_by_user_id"),
     bundleId: text("bundle_id").notNull(),
     enabled: boolean("enabled").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -3277,7 +3324,14 @@ export const skillInstallations = productSchema.table(
   (table) => ({
     workspaceLiveNameIdx: uniqueIndex("skill_installations_workspace_live_name_idx")
       .on(table.workspaceId, table.name)
-      .where(sql`${table.archivedAt} IS NULL`),
+      .where(sql`${table.archivedAt} IS NULL AND ${table.scope} = 'company'`),
+    personalLiveNameIdx: uniqueIndex("skill_installations_personal_live_name_idx")
+      .on(table.workspaceId, table.createdByUserId, table.name)
+      .where(sql`${table.archivedAt} IS NULL AND ${table.scope} = 'personal'`),
+    scopeCheck: check(
+      "skill_installations_scope_check",
+      sql`${table.scope} IN ('personal', 'company') AND (${table.scope} = 'company' OR ${table.createdByUserId} IS NOT NULL)`,
+    ),
     workspaceUpdatedIdx: index("skill_installations_workspace_updated_idx").on(
       table.workspaceId,
       table.archivedAt,
@@ -3292,9 +3346,51 @@ export const skillInstallations = productSchema.table(
   }),
 );
 
+// Personal rows become writable only after the release workflow confirms that every API and
+// runner instance enforces their authorization boundary and the previous revisions have drained.
+export const skillScopeRollout = productSchema.table(
+  "skill_scope_rollout",
+  {
+    id: text("id").primaryKey(),
+    personalEnabled: boolean("personal_enabled").notNull().default(false),
+    activatedAt: timestamp("activated_at", { withTimezone: true }),
+    activatedRelease: text("activated_release"),
+  },
+  (table) => ({
+    idCheck: check("skill_scope_rollout_id_check", sql`${table.id} = 'personal_skills'`),
+    activationCheck: check(
+      "skill_scope_rollout_activation_check",
+      sql`(${table.personalEnabled} AND ${table.activatedAt} IS NOT NULL AND ${table.activatedRelease} IS NOT NULL) OR (NOT ${table.personalEnabled} AND ${table.activatedAt} IS NULL AND ${table.activatedRelease} IS NULL)`,
+    ),
+  }),
+);
+
+// Retain the installation's access boundary across immutable bundle revisions.
+export const skillInstallationVersions = productSchema.table(
+  "skill_installation_versions",
+  {
+    companyShared: boolean("company_shared").notNull().default(false),
+    installationId: text("installation_id")
+      .notNull()
+      .references(() => skillInstallations.id, { onDelete: "cascade" }),
+    bundleId: text("bundle_id")
+      .notNull()
+      .references(() => skillBundles.id, { onDelete: "restrict" }),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.installationId, table.bundleId] }),
+    bundleIdx: index("skill_installation_versions_bundle_idx").on(table.bundleId),
+  }),
+);
+
 // One immutable Agent Plugin package. Only administrative status and the future integrity-bound
 // MCP approval can change after installation; replacing a package archives this row and inserts a
 // new one. Package bytes and parsed components remain attached to this exact ID.
+export const pluginOwnershipRollout = productSchema.table("plugin_ownership_rollout", {
+  id: text("id").primaryKey(),
+  personalEnabled: boolean("personal_enabled").notNull().default(false),
+});
+
 export const plugins = productSchema.table(
   "plugins",
   {
@@ -3302,10 +3398,13 @@ export const plugins = productSchema.table(
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
+    ownerUserId: text("owner_user_id").references(() => users.workosUserId, {
+      onDelete: "cascade",
+    }),
     name: text("name").notNull(),
     status: text("status").$type<PluginStatus>().notNull().default("enabled"),
     manifest: jsonb("manifest").$type<PluginManifest>().notNull(),
-    sourceType: text("source_type").$type<ExternalArtifactSourceType>().notNull(),
+    sourceType: text("source_type").$type<ExternalArtifactSourceType | "custom_mcp">().notNull(),
     sourceUrl: text("source_url").notNull(),
     sourcePath: text("source_path").notNull(),
     sourceRef: text("source_ref").notNull(),
@@ -3329,7 +3428,7 @@ export const plugins = productSchema.table(
   (table) => ({
     workspaceIdIdx: uniqueIndex("plugins_workspace_id_idx").on(table.workspaceId, table.id),
     workspaceLiveNameIdx: uniqueIndex("plugins_workspace_live_name_idx")
-      .on(table.workspaceId, table.name)
+      .on(table.workspaceId, table.ownerUserId, table.name)
       .where(sql`${table.status} <> 'archived'`),
     workspaceStatusUpdatedIdx: index("plugins_workspace_status_updated_idx").on(
       table.workspaceId,
@@ -3355,9 +3454,12 @@ export const plugins = productSchema.table(
     manifestCheck: check("plugins_manifest_check", sql`jsonb_typeof(${table.manifest}) = 'object'`),
     sourceTypeCheck: check(
       "plugins_source_type_check",
-      sql`${table.sourceType} IN ('github', 'skills.sh')`,
+      sql`${table.sourceType} IN ('github', 'skills.sh', 'custom_mcp')`,
     ),
-    commitCheck: check("plugins_commit_check", sql`${table.resolvedCommit} ~ '^[0-9a-f]{40}$'`),
+    commitCheck: check(
+      "plugins_commit_check",
+      sql`(${table.sourceType} <> 'custom_mcp' AND ${table.resolvedCommit} ~ '^[0-9a-f]{40}$') OR (${table.sourceType} = 'custom_mcp' AND ${table.resolvedCommit} = '' AND ${table.sourceRef} = '' AND ${table.sourcePath} = '')`,
+    ),
     integrityCheck: check(
       "plugins_integrity_check",
       sql`${table.integrity} ~ '^sha256:[0-9a-f]{64}$'`,
@@ -3457,6 +3559,42 @@ export const pluginGatewayRegistrations = productSchema.table(
   }),
 );
 
+// Discovery and health belong to the personal account: a server may expose different tools for
+// different credentials. Removing a custom installation deletes its dedicated personal accounts.
+export const customMcpAccounts = productSchema.table(
+  "custom_mcp_accounts",
+  {
+    integrationId: text("integration_id")
+      .primaryKey()
+      .references(() => integrations.id, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    pluginName: text("plugin_name").notNull(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => users.workosUserId, { onDelete: "cascade" }),
+    revision: text("revision").notNull(),
+    tools: jsonb("tools")
+      .$type<PluginGatewayDiscoveredTool[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
+    error: text("error"),
+  },
+  (table) => ({
+    ownerPluginIdx: uniqueIndex("custom_mcp_accounts_owner_plugin_idx").on(
+      table.workspaceId,
+      table.pluginName,
+      table.userWorkosId,
+    ),
+    toolsCheck: check(
+      "custom_mcp_accounts_tools_check",
+      sql`jsonb_typeof(${table.tools}) = 'array'`,
+    ),
+  }),
+);
+
 export const pluginFiles = productSchema.table(
   "plugin_files",
   {
@@ -3522,6 +3660,7 @@ export const workspacePluginData = productSchema.table(
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
+    ownerUserId: text("owner_user_id").notNull(),
     pluginName: text("plugin_name").notNull(),
     blobPathname: text("blob_pathname").notNull(),
     checksum: text("checksum").notNull(),
@@ -3534,7 +3673,7 @@ export const workspacePluginData = productSchema.table(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
-    pk: primaryKey({ columns: [table.workspaceId, table.pluginName] }),
+    pk: primaryKey({ columns: [table.workspaceId, table.ownerUserId, table.pluginName] }),
     blobPathnameIdx: uniqueIndex("workspace_plugin_data_blob_pathname_idx").on(table.blobPathname),
     leaseExpiryIdx: index("workspace_plugin_data_lease_expiry_idx")
       .on(table.leaseExpiresAt)
@@ -4112,6 +4251,8 @@ export const chatSessions = productSchema.table(
       .notNull()
       .references(() => users.workosUserId, { onDelete: "cascade" }),
     title: text("title").notNull().default("New chat"),
+    botName: text("bot_name"),
+    botDescription: text("bot_description"),
     model: text("model").$type<AgentModelId>().notNull(),
     engine: text("engine").$type<ChatEngine>().notNull().default("opencompany"),
     kind: text("kind").$type<ChatSessionKind>().notNull().default("chat"),
@@ -4133,6 +4274,10 @@ export const chatSessions = productSchema.table(
       sql`${table.engine} IN ('opencompany', 'codex', 'claude_code')`,
     ),
     kindCheck: check("goat_chat_sessions_kind_check", sql`${table.kind} IN ('chat', 'task')`),
+    botIdentityCheck: check(
+      "chat_sessions_bot_identity_check",
+      sql`(${table.botName} IS NULL AND ${table.botDescription} IS NULL) OR (${table.botName} IS NOT NULL AND ${table.botDescription} IS NOT NULL AND length(btrim(${table.botName})) BETWEEN 1 AND 80 AND length(${table.botDescription}) <= 4000 AND ${table.kind} = 'chat')`,
+    ),
   }),
 );
 
@@ -5130,6 +5275,7 @@ export const conversationReadModelV1 = productSchema.table(
     actorId: text("actor_id").notNull(),
     workspaceId: text("workspace_id"),
     title: text("title").notNull(),
+    isBot: boolean("is_bot").notNull().default(false),
     engine: text("engine").$type<ChatEngine>().notNull(),
     model: text("model").notNull(),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
@@ -5254,6 +5400,8 @@ export const taskReadModelV1 = productSchema.table(
     error: text("error"),
     reportedStatus: text("reported_status").$type<TaskReportedOutcome>(),
     outcomeComment: text("outcome_comment"),
+    // Mirrors the unread flag on the Task's conversation, which is where settlement sets it.
+    hasUnseen: boolean("has_unseen").notNull().default(false),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
@@ -5828,8 +5976,9 @@ export const infisicalConnections = productSchema.table(
   "infisical_connections",
   {
     workspaceId: text("workspace_id")
-      .primaryKey()
+      .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
+    ownerUserId: text("owner_user_id").notNull(),
     encryptedAuthBundle:
       jsonb("encrypted_auth_bundle").$type<IntegrationCredentialEncryptedPayload>(),
     encryptionKeyVersion: integer("encryption_key_version"),
@@ -5850,6 +5999,7 @@ export const infisicalConnections = productSchema.table(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
+    pk: primaryKey({ columns: [table.workspaceId, table.ownerUserId] }),
     statusIdx: index("goat_infisical_connections_status_idx").on(table.status),
     connectedByIdx: index("goat_infisical_connections_connected_by_idx").on(
       table.connectedByWorkosId,

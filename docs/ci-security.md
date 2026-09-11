@@ -44,7 +44,8 @@ revisit the policy separately after designing a credential-free, cache-safe publ
 - no production environment or self-hosted runner;
 - `persist-credentials: false` on every checkout;
 - cache restore for PRs, with cache save restricted to trusted `main` release runs;
-- third-party actions pinned to full commit SHAs; and
+- third-party actions pinned to full commit SHAs;
+- a full dependency audit with no ignored advisories, in addition to review of dependency changes; and
 - a single required `PR gate` result that fails unless every verification job succeeds.
 
 GitHub's default CodeQL setup separately scans trusted pull requests and the default branch. It is
@@ -136,3 +137,22 @@ especially workflow, dependency, install-script, and build-script changes. Use *
 to run** only when executing that commit under the credential-free PR boundary is acceptable. Do
 not add secrets, write permissions, production environments, or privileged follow-up triggers to
 make an external run work.
+
+## Dependency maintenance
+
+Run `bun run dependencies:audit` to audit the entire committed dependency graph, including build and
+release tooling. The Policy job runs the same audit for PRs and production verification, and fails
+for any reported advisory or an unavailable advisory service. Dependency review separately rejects
+new high- and critical-severity vulnerabilities. Neither check replaces the other.
+
+Bun 1.4.2 is required for the version-scoped overrides in `package.json` and lockfile version 3.
+These overrides update vulnerable transitive copies while preserving compatible major versions for
+other consumers. OpenTelemetry's LangChain instrumentation is updated before its core dependency;
+`package-json` moves to its compatible CommonJS v7 API to pick up patched Got v11; UUID v11 retains
+CommonJS exports for the Google clients; and Vercel's Undici v5 copies move to patched v6.
+The Rolldown override keeps Vite's resolved bundler within its declared version range when the
+dependency graph is re-resolved. Compatibility tests check that range and the telemetry SDK's
+core dependency, along with the affected desktop and Vercel APIs.
+
+Keep the audit free of blanket ignores. When an upstream release removes a vulnerable pin, remove
+the corresponding override after verifying the full audit and affected CLI/runtime behavior.

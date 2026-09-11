@@ -18,6 +18,7 @@ import {
   type PluginImportPreviewBody,
   type RenameBrainDocumentBody,
   type RenameBrainFolderBody,
+  type SetSkillScopeBody,
   type SkillImportPreviewBody,
   type UpdateBrainDocumentBody,
   type UpdateWorkspaceSkillBody,
@@ -391,4 +392,81 @@ async function knowledgeResponseError(response: Response, fallback: string) {
   return new Error(
     `${message ?? `${fallback} with HTTP ${response.status}.`}${requestId ? ` (request ${requestId})` : ""}`,
   );
+}
+
+export async function previewCustomMcp(
+  command: import("@opencompany/protocol").CustomMcpDefinitionBody,
+  options: ClientOptions = {},
+) {
+  return responseData(
+    await knowledgeClient(options).v1.plugins.custom.preview.$post({ json: command }),
+    "Could not test the MCP connection",
+  );
+}
+export async function createCustomMcp(
+  command: import("@opencompany/protocol").CustomMcpDefinitionBody & { fingerprint: string },
+  idempotencyKey: string,
+  options: ClientOptions = {},
+) {
+  return responseData(
+    await knowledgeClient(options).v1.plugins.custom.$post({
+      json: command,
+      header: { "idempotency-key": idempotencyKey },
+    }),
+    "Could not add the custom plugin",
+  );
+}
+export async function connectCustomMcp(
+  name: string,
+  command: { headers: Record<string, string> },
+  options: ClientOptions = {},
+) {
+  return responseData(
+    await knowledgeClient(options).v1.plugins[":name"]["custom-mcp"].connect.$post({
+      param: { name },
+      json: command,
+    }),
+    "Could not connect your account",
+  );
+}
+export async function refreshCustomMcp(name: string, options: ClientOptions = {}) {
+  return responseData(
+    await knowledgeClient(options).v1.plugins[":name"]["custom-mcp"].refresh.$post({
+      param: { name },
+    }),
+    "Could not refresh the tools",
+  );
+}
+export async function disconnectCustomMcp(name: string, options: ClientOptions = {}) {
+  return responseData(
+    await knowledgeClient(options).v1.plugins[":name"]["custom-mcp"].disconnect.$post({
+      param: { name },
+    }),
+    "Could not disconnect your account",
+  );
+}
+export async function setCustomMcpToolMode(
+  name: string,
+  command: { tool: string; mode: "on" | "ask" | "off"; revision: string },
+  options: ClientOptions = {},
+) {
+  return responseData(
+    await knowledgeClient(options).v1.plugins[":name"]["custom-mcp"].permissions.$post({
+      param: { name },
+      json: command,
+    }),
+    "Could not update this tool permission",
+  );
+}
+
+export async function setHeadlessSkillScope(
+  slug: string,
+  command: SetSkillScopeBody,
+  options: ClientOptions = {},
+) {
+  const response = await knowledgeClient(options).v1.skills[":slug"].scope.$post({
+    param: { slug },
+    json: command,
+  });
+  return responseData(response, "Skill visibility update failed");
 }

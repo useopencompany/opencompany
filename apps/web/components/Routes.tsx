@@ -1,9 +1,6 @@
 "use client";
 
 import type {
-  LegacyTaskHistoryDto,
-  LegacyTaskHistoryEventDto,
-  LegacyTaskHistoryMessageDto,
   SkillBundleFileMetadataDto,
   SkillImportCandidateDto,
   SkillImportFileMetadataDto,
@@ -12,17 +9,23 @@ import type {
   SkillListItemDto,
   SkillSourceDto,
 } from "@opencompany/protocol";
+import { Button } from "@opencompany/ui/components/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@opencompany/ui/components/tooltip";
+import { cn } from "@opencompany/ui/lib/utils";
 import { useLiveQuery } from "@tanstack/react-db";
 import type { LucideIcon } from "lucide-react";
 import {
   Archive,
   ArrowLeft,
+  Bot,
   CalendarClock,
   CircleUserRound,
   ExternalLink,
+  Inbox,
   Link2,
   ListTodo,
   Loader2,
+  LockKeyhole,
   Mail,
   Monitor,
   Moon,
@@ -55,6 +58,8 @@ import { Surface } from "@/components/Surface";
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
 import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
 import { useHydrated } from "@/components/useHydrated";
+import { useTaskRun } from "@/components/useTaskRun";
+import { useTaskSeenAcknowledgement } from "@/components/useTaskSeenAcknowledgement";
 import type { ChatSessionView } from "@/lib/chat-ui";
 import { getHeadlessWorkflows } from "@/lib/headless-automation-collections";
 import { createHeadlessWorkflow } from "@/lib/headless-automation-commands";
@@ -67,15 +72,18 @@ import {
   importHeadlessSkill,
   previewHeadlessSkillImport,
   replaceHeadlessSkill,
+  setHeadlessSkillScope,
   updateHeadlessWorkspaceSkill,
 } from "@/lib/headless-knowledge-commands";
 import type { BrainOverviewStats, BrainSnapshot } from "@/lib/headless-knowledge-types";
-import { legacyTaskDtoToRow, taskReadModelToRow } from "@/lib/headless-task-collections";
-import { getHeadlessTask, getLegacyTaskCompatibilityHistory } from "@/lib/headless-task-commands";
 import { DEFAULT_MODEL } from "@/lib/model-options";
 import type { RepoConfigView, WorkspaceRepository } from "@/lib/repo-config-actions";
-import { buildHarnessRun, type HarnessRunViewModel } from "@/lib/task-harness-run";
-import { updateAutoModelRoutingAction, updateTaskSpawningAction } from "@/lib/user-preferences";
+import {
+  updateAutoModelRoutingAction,
+  updateBotsAction,
+  updateReviewInboxAction,
+  updateTaskSpawningAction,
+} from "@/lib/user-preferences";
 
 export function HomeRoute({
   chatId,
@@ -241,6 +249,13 @@ export function PreferencesSettingsRoute() {
           Beta features
         </h2>
         <BetaFeatureSwitch
+          icon={Bot}
+          label="Bots"
+          description="Create named bots for ongoing work and return to their conversations from the sidebar."
+          checked={featureFlags.bots === true}
+          update={updateBotsAction}
+        />
+        <BetaFeatureSwitch
           icon={ListTodo}
           label="Tasks & Workflows"
           description="Fire workflows, run tracked background tasks, and schedule recurring routines."
@@ -253,6 +268,13 @@ export function PreferencesSettingsRoute() {
           description="Let opencompany choose a model from your first message and keep it for the chat."
           checked={featureFlags.autoModelRouting}
           update={updateAutoModelRoutingAction}
+        />
+        <BetaFeatureSwitch
+          icon={Inbox}
+          label="For review"
+          description="Collect finished chats and tasks in one place, read them side by side, and archive them when you're done."
+          checked={featureFlags.reviewInbox}
+          update={updateReviewInboxAction}
         />
       </section>
     </SettingsContent>
@@ -442,6 +464,10 @@ function BrainSettingsRoute({ brain }: { brain: BrainSummaryView }) {
 export function TaskDetailRoute({ taskId }: { taskId: string }) {
   const run = useTaskRun(taskId);
   const { featureFlags } = useAppData();
+  // The route resolves a display id as well as a canonical id, so the acknowledgment keys off the
+  // run's own identifier rather than the one in the URL. A disabled workspace renders the beta
+  // notice instead of a result, so there is nothing there to acknowledge.
+  useTaskSeenAcknowledgement(featureFlags.taskSpawning ? (run?.task.id ?? null) : null);
 
   if (!featureFlags.taskSpawning) return <TasksWorkflowsDisabledRoute />;
 
@@ -450,91 +476,6 @@ export function TaskDetailRoute({ taskId }: { taskId: string }) {
       {run ? <TaskDetailPanel initialRun={run} /> : <TaskRouteSkeleton label="Loading task" />}
     </main>
   );
-}
-
-function useTaskRun(taskId: string) {
-  const { featureFlags, tasks, taskRows } = useAppData();
-  const [serverState, setServerState] = useState<{
-    taskId: string;
-    run: HarnessRunViewModel | null;
-    notFound: boolean;
-  } | null>(null);
-  const normalizedTaskId = taskId.trim().toUpperCase();
-  const liveTask = useMemo(
-    () =>
-      taskRows.find((task) => task.id === taskId || task.display_id === normalizedTaskId) ??
-      tasks.find((task) => task.id === taskId || task.displayId === normalizedTaskId) ??
-      null,
-    [normalizedTaskId, taskId, taskRows, tasks],
-  );
-  const placeholderRun = useMemo(
-    () => (liveTask ? buildHarnessRun({ task: liveTask, messages: [], events: [] }) : null),
-    [liveTask],
-  );
-
-  useEffect(() => {
-    if (!featureFlags.taskSpawning) return;
-    const controller = new AbortController();
-    void getHeadlessTask(taskId, {
-      fetch: (input, init) => fetch(input, { ...init, signal: controller.signal }),
-    })
-      .then((task) => {
-        if (task) {
-          return buildHarnessRun({
-            task: taskReadModelToRow(task),
-            messages: [],
-            events: [],
-          });
-        }
-        return getLegacyTaskCompatibilityHistory(taskId, {
-          fetch: (input, init) => fetch(input, { ...init, signal: controller.signal }),
-        }).then((history: LegacyTaskHistoryDto | null) => {
-          if (!history) {
-            setServerState({ taskId, run: null, notFound: true });
-            return null;
-          }
-          return buildHarnessRun({
-            task: legacyTaskDtoToRow(history.task),
-            messages: history.messages.map((message: LegacyTaskHistoryMessageDto) => ({
-              id: message.id,
-              task_id: history.task.id,
-              user_workos_id: "",
-              role: message.role,
-              status: message.status,
-              content: message.content,
-              model_message: null,
-              tool_name: message.toolName,
-              tool_call_id: message.toolCallId,
-              response_to_message_id: null,
-              created_at: message.createdAt,
-              updated_at: message.updatedAt,
-              completed_at: message.completedAt,
-            })),
-            events: history.events.map((event: LegacyTaskHistoryEventDto) => ({
-              id: event.id,
-              task_id: history.task.id,
-              user_workos_id: "",
-              message_id: event.messageId,
-              type: event.type,
-              payload: event.payload,
-              created_at: event.createdAt,
-            })),
-          });
-        });
-      })
-      .then((run) => {
-        if (run) setServerState({ taskId, run, notFound: false });
-      })
-      .catch((error) => {
-        if (error instanceof DOMException && error.name === "AbortError") return;
-      });
-    return () => controller.abort();
-  }, [featureFlags.taskSpawning, taskId]);
-
-  const currentServerState = serverState?.taskId === taskId ? serverState : null;
-  if (currentServerState?.run) return currentServerState.run;
-  if (currentServerState?.notFound && !placeholderRun) return null;
-  return placeholderRun;
 }
 
 export function TasksWorkflowsDisabledRoute() {
@@ -549,6 +490,31 @@ export function TasksWorkflowsDisabledRoute() {
           <p className="text-[13px] leading-5 text-ink-subtle">
             Enable Tasks &amp; Workflows in Preferences to fire workflows, run background tasks, and
             set up recurring routines.
+          </p>
+          <Link
+            href="/settings/preferences"
+            className="inline-flex w-fit rounded-md border border-border bg-surface px-3 py-2 text-[13px] font-medium text-ink hover:bg-surface-hover"
+          >
+            Open Preferences
+          </Link>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+export function ReviewInboxDisabledRoute() {
+  return (
+    <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
+      <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
+        <div className="flex w-full max-w-[720px] flex-col gap-4 pb-24 pt-16 sm:pt-24">
+          <BackLink href="/" label="Chat" />
+          <h1 className="text-[24px] font-semibold leading-tight text-ink">
+            For review is a beta feature
+          </h1>
+          <p className="text-[13px] leading-5 text-ink-subtle">
+            Enable For review in Preferences to collect finished chats and tasks you haven&apos;t
+            read yet in one place.
           </p>
           <Link
             href="/settings/preferences"
@@ -834,6 +800,13 @@ function WorkflowListRow({ workflow }: { workflow: WorkflowListItem }) {
 
 // --- Skills (settings) -------------------------------------------------------
 
+type SkillScope = "personal" | "company";
+const SKILL_SCOPE_FILTERS = [
+  { value: "all", label: "All" },
+  { value: "company", label: "Company" },
+  { value: "personal", label: "Personal" },
+] as const;
+
 export function SkillsSettingsRoute({
   skills,
   canEdit,
@@ -844,46 +817,63 @@ export function SkillsSettingsRoute({
   const router = useRouter();
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [scopeFilter, setScopeFilter] = useState<"all" | SkillScope>("all");
+  const creationScope = scopeFilter === "company" ? "company" : "personal";
+  const visibleSkills = skills.filter(
+    (skill) => scopeFilter === "all" || skill.scope === scopeFilter,
+  );
 
   return (
-    <SettingsContent
-      title="Skills"
-      description="Portable Agent Skills created in this workspace or installed from a public source."
-    >
-      {canEdit ? (
-        <div className="-mt-2 flex gap-2">
-          <button
-            type="button"
-            onClick={() => setCreating(true)}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-ink bg-ink px-3 text-[13px] font-medium text-canvas transition-colors duration-150 hover:bg-ink/90 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-          >
-            <Plus size={14} strokeWidth={2} />
-            New skill
-          </button>
-          <button
-            type="button"
-            onClick={() => setImporting(true)}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[13px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-          >
-            <Link2 size={14} strokeWidth={2} />
-            Import skill
-          </button>
+    <SettingsContent title="Skills">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div role="group" aria-label="Skill scope" className="flex flex-wrap items-center gap-2">
+          {SKILL_SCOPE_FILTERS.map((filter) => (
+            <Button
+              key={filter.value}
+              variant={scopeFilter === filter.value ? "default" : "secondary"}
+              size="sm"
+              aria-pressed={scopeFilter === filter.value}
+              onClick={() => setScopeFilter(filter.value)}
+              className={cn(
+                "h-8 rounded-full px-3 text-[13px] font-normal shadow-none",
+                scopeFilter !== filter.value && "text-ink-muted hover:text-ink",
+              )}
+            >
+              {filter.label}
+            </Button>
+          ))}
         </div>
-      ) : null}
+        {canEdit ? (
+          <div className="ml-auto flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setImporting(true)}
+              className="font-normal text-ink-muted hover:text-ink"
+            >
+              Import skill
+            </Button>
+            <Button size="sm" onClick={() => setCreating(true)}>
+              <Plus size={14} strokeWidth={2} />
+              New {creationScope} skill
+            </Button>
+          </div>
+        ) : null}
+      </div>
 
-      {skills.length === 0 ? (
+      {visibleSkills.length === 0 ? (
         <EmptyState
           icon={Sparkles}
-          title="No skills yet"
+          title={scopeFilter === "all" ? "No skills yet" : `No ${scopeFilter} skills yet`}
           description={
             canEdit
-              ? "Create a workspace Skill or import one from GitHub or skills.sh."
-              : "Workspace admins can create and install Agent Skills."
+              ? "Create a skill or import one to get started."
+              : "Skills shared with you appear here."
           }
         />
       ) : (
         <ul className="flex flex-col gap-2">
-          {skills.map((skill) => (
+          {visibleSkills.map((skill) => (
             <li key={skill.id}>
               <SkillListRow skill={skill} />
             </li>
@@ -893,12 +883,14 @@ export function SkillsSettingsRoute({
 
       {importing ? (
         <ImportSkillDialog
+          initialScope={creationScope}
           onClose={() => setImporting(false)}
           onInstalled={(name) => router.push(`/settings/skills/${encodeURIComponent(name)}`)}
         />
       ) : null}
       {creating ? (
         <WorkspaceSkillDialog
+          initialScope={creationScope}
           onClose={() => setCreating(false)}
           onSaved={(name) => router.push(`/settings/skills/${encodeURIComponent(name)}`)}
         />
@@ -910,7 +902,7 @@ export function SkillsSettingsRoute({
 function SkillListRow({ skill }: { skill: SkillListItemDto }) {
   return (
     <Link
-      href={`/settings/skills/${encodeURIComponent(skill.name)}`}
+      href={`/settings/skills/${encodeURIComponent(skill.id)}`}
       prefetch
       className="group flex items-center gap-3 rounded-lg border border-border bg-surface px-3.5 py-3 transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
     >
@@ -919,8 +911,9 @@ function SkillListRow({ skill }: { skill: SkillListItemDto }) {
           <span className="truncate text-[14px] font-medium leading-tight text-ink">
             {skill.bundle.name}
           </span>
+          <SkillScopeBadge scope={skill.scope} />
           <InstallationStatusBadge enabled={skill.enabled} />
-          {skill.bundle.source.type === "workspace" ? <WorkspaceBadge /> : <ImportedBadge />}
+          {skill.bundle.source.type !== "workspace" ? <ImportedBadge /> : null}
         </span>
         {skill.bundle.description.trim() ? (
           <span className="mt-0.5 block truncate text-[12.5px] leading-5 text-ink-subtle">
@@ -944,7 +937,6 @@ export function SkillBundleRoute({
 }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
-  const [editing, setEditing] = useState(false);
   const [replacing, setReplacing] = useState(false);
   const [isMutating, startMutation] = useTransition();
   const bundle = installation.bundle;
@@ -953,8 +945,8 @@ export function SkillBundleRoute({
     setError(null);
     startMutation(async () => {
       try {
-        if (enabled) await enableHeadlessSkill(installation.name);
-        else await disableHeadlessSkill(installation.name);
+        if (enabled) await enableHeadlessSkill(installation.id);
+        else await disableHeadlessSkill(installation.id);
         router.refresh();
       } catch (cause) {
         setError(errorMessage(cause));
@@ -966,7 +958,7 @@ export function SkillBundleRoute({
     setError(null);
     startMutation(async () => {
       try {
-        await archiveHeadlessSkill(installation.name);
+        await archiveHeadlessSkill(installation.id);
         router.push("/settings/skills");
       } catch (cause) {
         setError(errorMessage(cause));
@@ -977,57 +969,80 @@ export function SkillBundleRoute({
   return (
     <SettingsContent
       title={bundle.name}
-      description={`Invoke this immutable bundle with /${installation.name} in chat.`}
+      description={`Use /${installation.name} in chat.`}
       backLink={{ href: "/settings/skills", label: "Skills" }}
     >
-      <SkillSourceNotice source={bundle.source} />
-      {!canEdit ? (
-        <p className="text-[13px] leading-5 text-ink-subtle">
-          Only workspace admins can manage skill installations.
-        </p>
-      ) : null}
+      {bundle.source.type !== "workspace" ? <SkillSourceNotice source={bundle.source} /> : null}
+      {installation.scope ? (
+        <SkillScopeField
+          scope={installation.scope}
+          canManage={installation.canManage && canEdit}
+          disabled={isMutating}
+          onChange={(scope) => {
+            setError(null);
+            startMutation(async () => {
+              try {
+                const updated = await setHeadlessSkillScope(installation.id, {
+                  scope,
+                  expectedScope: installation.scope!,
+                });
+                if (!updated.canEdit) router.push("/settings/skills");
+                else router.refresh();
+              } catch (cause) {
+                setError(errorMessage(cause));
+              }
+            });
+          }}
+        />
+      ) : (
+        <p className="text-[13px] text-ink-subtle">Managed by its plugin.</p>
+      )}
 
-      <div className="flex flex-col gap-5">
-        <EditorField label="Status">
-          <div className="flex items-center gap-2">
-            <InstallationStatusBadge enabled={installation.enabled} />
-            <span className="font-mono text-[11.5px] text-ink-subtle">{bundle.integrity}</span>
-          </div>
-        </EditorField>
+      {bundle.source.type === "workspace" ? (
+        <WorkspaceSkillEditor key={installation.id} installation={installation} canEdit={canEdit} />
+      ) : (
+        <div className="flex flex-col gap-5">
+          <EditorField label="Status">
+            <div className="flex items-center gap-2">
+              <InstallationStatusBadge enabled={installation.enabled} />
+              <span className="font-mono text-[11.5px] text-ink-subtle">{bundle.integrity}</span>
+            </div>
+          </EditorField>
 
-        <EditorField label="Description">
-          <div className="rounded-lg border border-border bg-surface px-3 py-2.5 text-[13px] leading-5 text-ink">
-            {bundle.description}
-          </div>
-        </EditorField>
+          <EditorField label="Description">
+            <div className="rounded-lg border border-border bg-surface px-3 py-2.5 text-[13px] leading-5 text-ink">
+              {bundle.description}
+            </div>
+          </EditorField>
 
-        <EditorField label="Instructions">
-          <div className="max-h-[360px] overflow-y-auto whitespace-pre-wrap rounded-lg border border-border bg-canvas px-3 py-2.5 font-mono text-[12.5px] leading-5 text-ink">
-            {bundle.body || <span className="text-ink-subtle">No Markdown body.</span>}
-          </div>
-        </EditorField>
+          <EditorField label="Instructions">
+            <div className="max-h-[360px] overflow-y-auto whitespace-pre-wrap rounded-lg border border-border bg-canvas px-3 py-2.5 font-mono text-[12.5px] leading-5 text-ink">
+              {bundle.body || <span className="text-ink-subtle">No Markdown body.</span>}
+            </div>
+          </EditorField>
 
-        <EditorField label={`Bundle files (${bundle.files.length})`}>
-          <ul className="overflow-hidden rounded-lg border border-border bg-surface">
-            {bundle.files.map((file: SkillBundleFileMetadataDto) => (
-              <li
-                key={file.path}
-                className="flex items-center gap-3 border-b border-border px-3 py-2.5 last:border-b-0"
-              >
-                <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-ink">
-                  {file.path}
-                </span>
-                {file.executable ? (
-                  <span className="text-[11px] text-ink-subtle">executable</span>
-                ) : null}
-                <span className="shrink-0 text-[11.5px] text-ink-subtle">
-                  {formatBytes(file.sizeBytes)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </EditorField>
-      </div>
+          <EditorField label={`Bundle files (${bundle.files.length})`}>
+            <ul className="overflow-hidden rounded-lg border border-border bg-surface">
+              {bundle.files.map((file: SkillBundleFileMetadataDto) => (
+                <li
+                  key={file.path}
+                  className="flex items-center gap-3 border-b border-border px-3 py-2.5 last:border-b-0"
+                >
+                  <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-ink">
+                    {file.path}
+                  </span>
+                  {file.executable ? (
+                    <span className="text-[11px] text-ink-subtle">executable</span>
+                  ) : null}
+                  <span className="shrink-0 text-[11.5px] text-ink-subtle">
+                    {formatBytes(file.sizeBytes)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </EditorField>
+        </div>
+      )}
 
       {error ? <div className="text-[12.5px] leading-5 text-warning">{error}</div> : null}
 
@@ -1041,16 +1056,7 @@ export function SkillBundleRoute({
           >
             {installation.enabled ? "Disable" : "Enable"}
           </button>
-          {bundle.source.type === "workspace" ? (
-            <button
-              type="button"
-              disabled={isMutating}
-              onClick={() => setEditing(true)}
-              className="inline-flex h-9 items-center rounded-md border border-border bg-surface px-3 text-[13px] font-medium text-ink transition-colors hover:bg-surface-hover disabled:opacity-60"
-            >
-              Edit skill
-            </button>
-          ) : (
+          {bundle.source.type !== "workspace" ? (
             <button
               type="button"
               disabled={isMutating}
@@ -1059,22 +1065,25 @@ export function SkillBundleRoute({
             >
               Replace bundle
             </button>
-          )}
-          <button
-            type="button"
-            disabled={isMutating}
-            onClick={archive}
-            className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[13px] font-medium text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink disabled:opacity-60"
-          >
-            {isMutating ? <Loader2 size={14} className="animate-spin" /> : <Archive size={14} />}
-            Archive
-          </button>
+          ) : null}
+          {installation.canManage ? (
+            <button
+              type="button"
+              disabled={isMutating}
+              onClick={archive}
+              className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[13px] font-medium text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink disabled:opacity-60"
+            >
+              {isMutating ? <Loader2 size={14} className="animate-spin" /> : <Archive size={14} />}
+              Archive
+            </button>
+          ) : null}
         </div>
       ) : null}
 
       {replacing ? (
         <ImportSkillDialog
           replaceName={installation.name}
+          replaceId={installation.id}
           initialUrl={skillSourceInput(bundle.source, bundle.name)}
           initialSelectedPath={bundle.source.path}
           onClose={() => setReplacing(false)}
@@ -1084,31 +1093,156 @@ export function SkillBundleRoute({
           }}
         />
       ) : null}
-      {editing ? (
-        <WorkspaceSkillDialog
-          skillName={installation.name}
-          initialDescription={bundle.description}
-          initialInstructions={bundle.body}
-          onClose={() => setEditing(false)}
-          onSaved={() => {
-            setEditing(false);
-            router.refresh();
-          }}
-        />
-      ) : null}
     </SettingsContent>
   );
 }
 
-function SkillSourceNotice({ source }: { source: SkillSourceDto }) {
-  if (source.type === "workspace") {
-    return (
-      <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-muted px-3 py-2.5 text-[12.5px] leading-5 text-ink-subtle">
-        <Sparkles size={14} strokeWidth={2} className="shrink-0" />
-        Created in this workspace. Each save creates a new immutable standard Skill bundle.
+function WorkspaceSkillEditor({
+  installation,
+  canEdit,
+}: {
+  installation: SkillInstallationDto;
+  canEdit: boolean;
+}) {
+  const router = useRouter();
+  const initial = {
+    description: installation.bundle.description,
+    instructions: installation.bundle.body.trim(),
+  };
+  const [saved, setSaved] = useState(initial);
+  const [savedBundleId, setSavedBundleId] = useState(installation.bundle.id);
+  const [draft, setDraft] = useState(initial);
+  const [error, setError] = useState<string | null>(null);
+  const [savedNotice, setSavedNotice] = useState(false);
+  const [isSaving, startSaving] = useTransition();
+  const isDirty =
+    draft.description !== saved.description || draft.instructions !== saved.instructions;
+
+  useEffect(() => {
+    if (!isDirty) return;
+    const beforeUnload = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", beforeUnload);
+    return () => window.removeEventListener("beforeunload", beforeUnload);
+  }, [isDirty]);
+
+  const save = () => {
+    if (!isDirty || isSaving || !canEdit) return;
+    const next = { description: draft.description.trim(), instructions: draft.instructions.trim() };
+    if (!next.description || !next.instructions) {
+      setError("Add a description and instructions before saving.");
+      return;
+    }
+    setError(null);
+    startSaving(async () => {
+      try {
+        const updated = await updateHeadlessWorkspaceSkill(installation.id, {
+          ...next,
+          expectedBundleId: savedBundleId,
+        });
+        setSavedBundleId(updated.bundle.id);
+        setDraft(next);
+        setSaved(next);
+        setSavedNotice(true);
+        router.refresh();
+      } catch (cause) {
+        setError(errorMessage(cause));
+      }
+    });
+  };
+
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        save();
+      }}
+      className="flex flex-col gap-4"
+    >
+      <div className="flex items-center gap-2">
+        <InstallationStatusBadge enabled={installation.enabled} />
       </div>
-    );
-  }
+      <label className="flex flex-col gap-1.5">
+        <span className="text-[12px] font-medium text-ink-subtle">When to use this skill</span>
+        <input
+          value={draft.description}
+          readOnly={!canEdit}
+          disabled={isSaving}
+          maxLength={1024}
+          onChange={(event) => {
+            setDraft({ ...draft, description: event.target.value });
+            setSavedNotice(false);
+          }}
+          className={EDITOR_INPUT_CLASS}
+        />
+      </label>
+      <div className="overflow-hidden rounded-lg border border-border bg-surface">
+        <label
+          htmlFor="workspace-skill-instructions"
+          className="flex items-center justify-between border-b border-border bg-surface-muted px-3 py-2"
+        >
+          <span className="font-mono text-[12px] text-ink">SKILL.md</span>
+          <span className="text-[11.5px] text-ink-subtle">Markdown</span>
+        </label>
+        <textarea
+          id="workspace-skill-instructions"
+          aria-label="Skill instructions"
+          value={draft.instructions}
+          readOnly={!canEdit}
+          disabled={isSaving}
+          spellCheck={false}
+          maxLength={512 * 1024}
+          onChange={(event) => {
+            setDraft({ ...draft, instructions: event.target.value });
+            setSavedNotice(false);
+          }}
+          onKeyDown={(event) => {
+            if ((event.metaKey || event.ctrlKey) && event.key === "s") {
+              event.preventDefault();
+              save();
+            }
+          }}
+          placeholder="Write the instructions the agent should follow…"
+          className="block min-h-[420px] w-full resize-y bg-transparent p-4 font-mono text-[13px] leading-6 text-ink outline-none focus:ring-1 focus:ring-inset focus:ring-ink/20 disabled:opacity-60"
+        />
+      </div>
+      {error ? (
+        <p role="alert" className="text-[12.5px] text-warning">
+          {error}
+        </p>
+      ) : null}
+      {canEdit ? (
+        <div className="flex items-center gap-2">
+          <button
+            type="submit"
+            disabled={!isDirty || isSaving}
+            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-ink bg-ink px-3 text-[13px] font-medium text-canvas hover:bg-ink/90 disabled:opacity-50"
+          >
+            {isSaving ? <Loader2 size={14} className="animate-spin" /> : null}
+            {isSaving ? "Saving…" : "Save changes"}
+          </button>
+          {isDirty ? (
+            <button
+              type="button"
+              disabled={isSaving}
+              onClick={() => {
+                setDraft(saved);
+                setError(null);
+              }}
+              className="inline-flex h-9 items-center rounded-md px-3 text-[13px] text-ink-muted hover:bg-surface-hover disabled:opacity-50"
+            >
+              Discard changes
+            </button>
+          ) : null}
+          <span role="status" className="ml-auto text-[12px] text-ink-subtle">
+            {isSaving ? "Saving…" : isDirty ? "Unsaved changes" : savedNotice ? "Saved" : ""}
+          </span>
+        </div>
+      ) : null}
+    </form>
+  );
+}
+
+function SkillSourceNotice({ source }: { source: Exclude<SkillSourceDto, { type: "workspace" }> }) {
   const shortCommit = source.resolvedCommit ? source.resolvedCommit.slice(0, 7) : null;
   return (
     <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-muted px-3 py-2.5 text-[12.5px] leading-5 text-ink-subtle">
@@ -1186,15 +1320,6 @@ function ImportedBadge() {
     <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-surface-muted px-1.5 py-px text-[10.5px] font-medium leading-4 text-ink-subtle">
       <Link2 size={10} strokeWidth={2} />
       Imported
-    </span>
-  );
-}
-
-function WorkspaceBadge() {
-  return (
-    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-surface-muted px-1.5 py-px text-[10.5px] font-medium leading-4 text-ink-subtle">
-      <Sparkles size={10} strokeWidth={2} />
-      Workspace
     </span>
   );
 }
@@ -1373,24 +1498,20 @@ type ImportPreviewState = {
 };
 
 function WorkspaceSkillDialog({
+  initialScope,
   onClose,
   onSaved,
-  skillName,
-  initialDescription = "",
-  initialInstructions = "",
 }: {
+  initialScope: SkillScope;
   onClose: () => void;
   onSaved: (name: string) => void;
-  skillName?: string;
-  initialDescription?: string;
-  initialInstructions?: string;
 }) {
-  const [name, setName] = useState(skillName ?? "");
-  const [description, setDescription] = useState(initialDescription);
-  const [instructions, setInstructions] = useState(initialInstructions.trim());
+  const [name, setName] = useState("");
+  const [scope, setScope] = useState<SkillScope>(initialScope);
+  const [description, setDescription] = useState("");
+  const [instructions, setInstructions] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSaving, startSaving] = useTransition();
-  const editing = skillName !== undefined;
 
   useEffect(() => {
     const onKey = (event: globalThis.KeyboardEvent) => {
@@ -1419,19 +1540,13 @@ function WorkspaceSkillDialog({
     setError(null);
     startSaving(async () => {
       try {
-        if (editing) {
-          await updateHeadlessWorkspaceSkill(skillName, {
-            description: normalizedDescription,
-            instructions: normalizedInstructions,
-          });
-        } else {
-          await createHeadlessWorkspaceSkill({
-            name: normalizedName,
-            description: normalizedDescription,
-            instructions: normalizedInstructions,
-          });
-        }
-        onSaved(normalizedName);
+        const result = await createHeadlessWorkspaceSkill({
+          scope,
+          name: normalizedName,
+          description: normalizedDescription,
+          instructions: normalizedInstructions,
+        });
+        onSaved(result.installation.id);
       } catch (cause) {
         setError(errorMessage(cause));
       }
@@ -1449,22 +1564,18 @@ function WorkspaceSkillDialog({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label={editing ? "Edit skill" : "New skill"}
+        aria-label="New skill"
         className="shadow-ring-xl relative flex max-h-[90vh] w-full max-w-[640px] flex-col overflow-hidden rounded-xl bg-surface p-5"
       >
-        <h2 className="text-[15px] font-semibold leading-tight text-ink">
-          {editing ? "Edit skill" : "New skill"}
-        </h2>
-        <p className="mt-1 text-[12.5px] leading-5 text-ink-subtle">
-          Creates a portable Agent Skills SKILL.md. Saving an edit publishes a new immutable bundle.
-        </p>
+        <h2 className="text-[15px] font-semibold leading-tight text-ink">New skill</h2>
         <div className="mt-4 flex flex-col gap-3 overflow-y-auto">
+          <SkillScopeField scope={scope} onChange={setScope} disabled={isSaving} />
           <label className="flex flex-col gap-1.5">
             <span className="text-[12px] font-medium text-ink-subtle">Name</span>
             <input
-              autoFocus={!editing}
+              autoFocus
               value={name}
-              disabled={editing || isSaving}
+              disabled={isSaving}
               onChange={(event) => {
                 setName(event.target.value.toLowerCase().replace(/\s+/gu, "-"));
                 if (error) setError(null);
@@ -1522,7 +1633,7 @@ function WorkspaceSkillDialog({
             className="inline-flex h-8 items-center gap-1.5 rounded-md border border-ink bg-ink px-3 text-[13px] font-medium text-canvas transition-colors hover:bg-ink/90 disabled:opacity-60"
           >
             {isSaving ? <Loader2 size={13} strokeWidth={2} className="animate-spin" /> : null}
-            {editing ? "Save new version" : "Create skill"}
+            Create skill
           </button>
         </div>
       </div>
@@ -1531,18 +1642,23 @@ function WorkspaceSkillDialog({
 }
 
 function ImportSkillDialog({
+  initialScope = "personal",
   onClose,
   onInstalled,
   replaceName,
+  replaceId,
   initialUrl = "",
   initialSelectedPath,
 }: {
+  initialScope?: SkillScope;
   onClose: () => void;
   onInstalled: (name: string) => void;
   replaceName?: string;
+  replaceId?: string;
   initialUrl?: string;
   initialSelectedPath?: string;
 }) {
+  const [scope, setScope] = useState<SkillScope>(initialScope);
   const [url, setUrl] = useState(initialUrl);
   const [selectedPath, setSelectedPath] = useState<string | undefined>(initialSelectedPath);
   const [candidates, setCandidates] = useState<SkillImportCandidateDto[] | null>(null);
@@ -1617,11 +1733,11 @@ function ImportSkillDialog({
           expectedIntegrity: confirmedPreview.integrity,
         };
         if (replaceName) {
-          const result = await replaceHeadlessSkill(replaceName, command);
-          onInstalled(result.name);
+          const result = await replaceHeadlessSkill(replaceId ?? replaceName, command);
+          onInstalled(result.id);
         } else {
-          const result = await importHeadlessSkill(command);
-          onInstalled(result.installation.name);
+          const result = await importHeadlessSkill({ ...command, scope });
+          onInstalled(result.installation.id);
         }
       } catch (cause) {
         setError(errorMessage(cause));
@@ -1649,11 +1765,13 @@ function ImportSkillDialog({
           {replaceName ? "Replace skill bundle" : "Import a skill"}
         </h2>
         <p className="mt-1 text-[12.5px] leading-5 text-ink-subtle">
-          Preview a public GitHub or skills.sh source, then install the exact resolved commit and
-          integrity. Preview never returns file contents.
+          Paste a GitHub or skills.sh link to preview the skill.
         </p>
 
         <div className="mt-4 flex flex-col gap-3 overflow-y-auto">
+          {!replaceName ? (
+            <SkillScopeField scope={scope} onChange={setScope} disabled={pending} />
+          ) : null}
           <label className="flex flex-col gap-1.5">
             <span className="text-[12px] font-medium text-ink-subtle">URL</span>
             <div className="flex gap-2">
@@ -1819,4 +1937,56 @@ export function formatRelativeTime(value: Date | string) {
   const elapsedDays = Math.floor(elapsedHours / 24);
   if (elapsedDays < 7) return `${elapsedDays}d ago`;
   return new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(timestamp);
+}
+
+function SkillScopeBadge({ scope }: { scope: "personal" | "company" | null }) {
+  return (
+    <span className="rounded bg-surface-muted px-1.5 py-0.5 text-[11px] text-ink-subtle">
+      {scope === "personal" ? "Personal" : scope === "company" ? "Company" : "Plugin"}
+    </span>
+  );
+}
+
+function SkillScopeField({
+  scope,
+  onChange,
+  disabled,
+  canManage = true,
+}: {
+  scope: SkillScope;
+  onChange: (scope: SkillScope) => void;
+  disabled?: boolean;
+  canManage?: boolean;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      <span className="text-[12px] font-medium text-ink-subtle">Visibility</span>
+      {canManage ? (
+        <select
+          aria-label="Visibility"
+          value={scope}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.value as SkillScope)}
+          className={cn(EDITOR_INPUT_CLASS, "w-auto")}
+        >
+          <option value="personal">Personal</option>
+          <option value="company">Company</option>
+        </select>
+      ) : (
+        <Tooltip>
+          <TooltipTrigger
+            aria-label="Visibility managed by the creator or an admin"
+            className="inline-flex h-9 items-center gap-2 rounded-md bg-surface-muted px-2.5 text-[13px] text-ink-subtle"
+          >
+            {scope === "company" ? "Company" : "Personal"}
+            <LockKeyhole size={12} aria-hidden="true" />
+          </TooltipTrigger>
+          <TooltipContent>Only the creator or an admin can change visibility.</TooltipContent>
+        </Tooltip>
+      )}
+      <span className="text-[12px] leading-5 text-ink-subtle">
+        {scope === "personal" ? "Only you" : "Everyone can use and edit"}
+      </span>
+    </div>
+  );
 }

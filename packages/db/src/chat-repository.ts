@@ -1,5 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import { hostToolContractVersionForEngine } from "@opencompany/agent-runtime";
+import {
+  ACTION_HOST_TOOL_CONTRACT_VERSION,
+  hostToolContractVersionForEngine,
+} from "@opencompany/agent-runtime";
 import {
   type Actor,
   type ChatAttachmentFormat,
@@ -22,10 +25,16 @@ import {
   type RunExecutionRepository,
   type RunStatus,
 } from "@opencompany/core";
+import { newResourceId } from "@opencompany/core/resource-ids";
 import { type SQL, sql } from "drizzle-orm";
 import { stringifyPostgresJson } from "./postgres-json";
 import type { ChatMessageAttachment } from "./product-schema";
-import { type ResolvedWorkspaceSkill, resolveSkillCandidates } from "./skill-catalog";
+import {
+  conflictingChatSkillNames,
+  isChatSkillNameConflict,
+  preserveChatSkillBundle,
+} from "./skill-access";
+import { type ResolvedWorkspaceSkill, resolveSkillCandidates, selectSkill } from "./skill-catalog";
 
 export const RUN_EVENT_NOTIFY_CHANNEL = "goat_run_events_v1";
 
@@ -93,7 +102,7 @@ export type ChatRepositoryIdFactory = {
 
 const defaultIds: ChatRepositoryIdFactory = {
   command: () => `command_${randomUUID()}`,
-  conversation: () => `conversation_${randomUUID()}`,
+  conversation: () => newResourceId("conversation"),
   message: () => `message_${randomUUID()}`,
   runtime: () => `runtime_${randomUUID()}`,
   run: () => `run_${randomUUID()}`,
@@ -337,6 +346,7 @@ export class PostgresChatRepository implements ChatRepository {
       FROM goat.conversation_read_model_v1 AS conversation
       WHERE conversation.actor_id = ${input.actor.userId}
         AND conversation.archived_at IS NULL
+        AND conversation.is_bot = false
         AND (conversation.workspace_id IS NULL OR conversation.workspace_id = ${input.actor.workspaceId})
         AND EXISTS (
           SELECT 1 FROM goat.workspace_members AS member
@@ -737,16 +747,39 @@ export class PostgresChatRepository implements ChatRepository {
       ...(input.command.mentions?.length ? { mentions: input.command.mentions } : {}),
     });
     const resolvedMentionSkills = await this.resolveMentionedSkills(
-      input.actor.workspaceId,
+      input.actor,
       input.command.mentions?.flatMap((mention) =>
         mention.kind === "skill" ? [mention.id] : [],
       ) ?? [],
+      conversationId,
     );
+    if (
+      new Set(resolvedMentionSkills.map((skill) => skill.name)).size !==
+      resolvedMentionSkills.length
+    )
+      throw new CoreError(
+        "conflict",
+        "Choose one Personal or Company skill for each name in a chat.",
+      );
+    if (resolvedMentionSkills.length > 0) {
+      const [result] = await this.rows<{ conflict: boolean }>(
+        sql`SELECT ${conflictingChatSkillNames(
+          conversationId,
+          resolvedMentionSkills.map((skill) => skill.bundleId),
+        )} AS conflict`,
+      );
+      if (result?.conflict)
+        throw new CoreError(
+          "conflict",
+          "This chat already uses another skill with this name. Start a new chat to use the selected skill.",
+        );
+    }
     const resolvedMentionSkillsJson = stringifyPostgresJson(
       resolvedMentionSkills.map((skill) => ({
         bundle_id: skill.bundleId,
         source_kind: skill.sourceKind,
         plugin_id: skill.pluginId,
+        installation_id: skill.installationId,
       })),
     );
     const runtimeModel = input.command.runtimeModel ?? input.command.model;
@@ -1120,6 +1153,7 @@ export class PostgresChatRepository implements ChatRepository {
         JOIN goat.plugins AS plugin
           ON plugin.workspace_id = ${input.actor.workspaceId}
          AND plugin.status = 'enabled'
+         AND plugin.owner_user_id = ${input.actor.userId}
         WHERE ${input.command.engine !== "opencompany"}::boolean
           AND NOT EXISTS (
             SELECT 1
@@ -1140,18 +1174,18 @@ export class PostgresChatRepository implements ChatRepository {
         JOIN target_chat ON true
         CROSS JOIN jsonb_to_recordset(
           ${resolvedMentionSkillsJson}::jsonb
-        ) AS resolved_skill(bundle_id text, source_kind text)
+        ) AS resolved_skill(bundle_id text, source_kind text, installation_id text)
         JOIN goat.skill_bundles AS bundle
           ON bundle.id = resolved_skill.bundle_id
          AND bundle.workspace_id = ${input.actor.workspaceId}
-        WHERE NOT EXISTS (
-            SELECT 1
-            FROM goat.chat_session_skill_bundles AS fixed
-            JOIN goat.skill_bundles AS fixed_bundle ON fixed_bundle.id = fixed.bundle_id
-            WHERE fixed.chat_session_id = target_chat.id
-              AND fixed_bundle.name = bundle.name
-        )
-        ON CONFLICT (chat_session_id, name) DO NOTHING
+        WHERE (resolved_skill.source_kind = 'plugin' OR EXISTS (
+          SELECT 1 FROM goat.skill_installations installation
+          WHERE installation.id = resolved_skill.installation_id
+            AND installation.bundle_id = bundle.id AND installation.workspace_id = ${input.actor.workspaceId}
+            AND installation.enabled AND installation.archived_at IS NULL
+            AND (installation.scope = 'company' OR (installation.created_by_user_id = ${input.actor.userId} AND target_chat.task_id IS NULL))
+        ))
+        ON CONFLICT (chat_session_id, name) DO UPDATE SET bundle_id = ${preserveChatSkillBundle()}
         RETURNING bundle_id
       ),
       captured_activated_skill_plugins AS MATERIALIZED (
@@ -1170,6 +1204,7 @@ export class PostgresChatRepository implements ChatRepository {
           ON plugin.id = plugin_skill.plugin_id
          AND plugin.workspace_id = plugin_skill.workspace_id
          AND plugin.status = 'enabled'
+         AND plugin.owner_user_id = ${input.actor.userId}
         WHERE resolved_skill.source_kind = 'plugin'
           AND resolved_skill.bundle_id = activated.bundle_id
         ON CONFLICT (chat_session_id, plugin_id) DO NOTHING
@@ -1266,6 +1301,11 @@ export class PostgresChatRepository implements ChatRepository {
       FROM reservation
       `);
     } catch (error) {
+      if (isChatSkillNameConflict(error))
+        throw new CoreError(
+          "conflict",
+          "This chat already uses another skill with this name. Start a new chat to use the selected skill.",
+        );
       if (attachmentIds.length > 0 && isUnmaterializedGuardError(error)) {
         throw new CoreError("invalid_argument", "An attachment is unavailable or has expired.");
       }
@@ -1456,7 +1496,7 @@ export class PostgresChatRepository implements ChatRepository {
         FROM authorized, changed
         WHERE authorized.id = changed.id
           AND task.id = authorized.task_id
-          AND task.status IN ('queued', 'running')
+          AND task.status IN ('queued', 'running', 'waiting')
         RETURNING task.id
       ),
       status_changed_activity AS MATERIALIZED (
@@ -1592,6 +1632,9 @@ export class PostgresChatRepository implements ChatRepository {
             )
           )
           AND chat.closed_at IS NULL
+          AND run.status IN ('running', 'paused', 'queued', 'completed')
+          AND run.interrupt_requested_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM goat.tasks AS task WHERE task.session_id = chat.id AND task.archived_at IS NOT NULL)
           AND EXISTS (
             SELECT 1 FROM goat.workspace_members AS member
             WHERE member.workspace_id = ${input.actor.workspaceId}
@@ -1607,6 +1650,7 @@ export class PostgresChatRepository implements ChatRepository {
             updated_at = ${now}
         WHERE approval.id IN (SELECT id FROM authorized)
           AND approval.status = 'pending'
+          AND EXISTS (SELECT 1 FROM goat.codex_chat_turns AS run WHERE run.id = approval.run_id AND run.status IN ('running', 'paused'))
         RETURNING approval.id, approval.run_id, approval.tool_call_id, approval.kind
       ),
       resolved_action_approval AS MATERIALIZED (
@@ -1748,6 +1792,16 @@ export class PostgresChatRepository implements ChatRepository {
         WHERE runtime.id = run.codex_chat_session_id
           AND run.status = 'queued'
         RETURNING runtime.id
+      ),
+      queued_task AS MATERIALIZED (
+        UPDATE goat.tasks AS task
+        SET status = 'queued', stage = 'queued', reported_outcome = NULL,
+            outcome_comment = NULL, updated_at = ${now}
+        FROM advanced_run AS advanced
+        JOIN goat.codex_chat_turns AS run ON run.id = advanced.id
+        WHERE task.session_id = run.chat_session_id AND advanced.status = 'queued'
+          AND task.status = 'waiting' AND task.archived_at IS NULL
+        RETURNING task.id
       ),
       inserted_event AS (
         INSERT INTO goat.run_events (
@@ -1927,8 +1981,9 @@ export class PostgresChatRepository implements ChatRepository {
   }
 
   private async resolveMentionedSkills(
-    workspaceId: string,
+    actor: Actor,
     mentionedSkillIds: readonly string[],
+    conversationId: string,
   ): Promise<ResolvedWorkspaceSkill[]> {
     const skillIds = [...new Set(mentionedSkillIds)];
     if (skillIds.length === 0) return [];
@@ -1938,7 +1993,8 @@ export class PostgresChatRepository implements ChatRepository {
     );
     const candidates = await this.rows<ResolvedWorkspaceSkill>(sql`
       SELECT
-        installation.name AS id,
+        installation.id AS id,
+        installation.scope,
         bundle.id AS "bundleId",
         bundle.name,
         bundle.description,
@@ -1951,13 +2007,15 @@ export class PostgresChatRepository implements ChatRepository {
       JOIN goat.skill_bundles AS bundle
         ON bundle.id = installation.bundle_id
        AND bundle.workspace_id = installation.workspace_id
-      WHERE installation.workspace_id = ${workspaceId}
+      WHERE installation.workspace_id = ${actor.workspaceId}
         AND installation.enabled
         AND installation.archived_at IS NULL
-        AND installation.name IN (${skillIdList})
+        AND (installation.scope = 'company' OR (installation.created_by_user_id = ${actor.userId} AND NOT EXISTS (SELECT 1 FROM goat.chat_sessions session WHERE session.id = ${conversationId} AND session.kind = 'task')))
+        AND (installation.name IN (${skillIdList}) OR installation.id IN (${skillIdList}))
       UNION ALL
       SELECT
         plugin_skill.skill_name AS id,
+        NULL::text AS scope,
         bundle.id AS "bundleId",
         bundle.name,
         bundle.description,
@@ -1973,14 +2031,20 @@ export class PostgresChatRepository implements ChatRepository {
       JOIN goat.skill_bundles AS bundle
         ON bundle.id = plugin_skill.skill_bundle_id
        AND bundle.workspace_id = plugin_skill.workspace_id
-      WHERE plugin_skill.workspace_id = ${workspaceId}
+      WHERE plugin_skill.workspace_id = ${actor.workspaceId}
         AND plugin.status = 'enabled'
+        AND plugin.owner_user_id = ${actor.userId}
         AND plugin_skill.skill_name IN (${skillIdList})
     `);
-    return resolveSkillCandidates(
+    const catalog = resolveSkillCandidates(
       candidates.filter((candidate) => candidate.sourceKind === "standalone"),
       candidates.filter((candidate) => candidate.sourceKind === "plugin"),
     ).skills;
+    return skillIds.map((id) => {
+      const skill = selectSkill(catalog, id);
+      if (!skill) throw new CoreError("not_found", "A selected skill is unavailable.");
+      return skill;
+    });
   }
 
   private async rows<Row>(query: SQL): Promise<Row[]> {
@@ -2025,7 +2089,7 @@ export class PostgresRunExecutionRepository implements RunExecutionRepository {
 
   async startAttempt(input: Parameters<RunExecutionRepository["startAttempt"]>[0]) {
     const startedAt = this.now();
-    const [row] = await this.rows<RunAttemptRow>(sql`
+    const [row] = await this.rows<RunAttemptRow & { previous_infrastructure_failures: number }>(sql`
       WITH fenced_run AS MATERIALIZED (
         SELECT id, attempts
         FROM goat.codex_chat_turns
@@ -2041,6 +2105,14 @@ export class PostgresRunExecutionRepository implements RunExecutionRepository {
         WHERE attempt.lease_id IS DISTINCT FROM ${input.leaseId}
         ORDER BY attempt.number DESC
         LIMIT 1
+      ),
+      infrastructure_failures AS MATERIALIZED (
+        SELECT COUNT(*)::integer AS previous_infrastructure_failures
+        FROM goat.run_attempts AS attempt
+        INNER JOIN fenced_run ON fenced_run.id = attempt.run_id
+        WHERE attempt.status = 'failed'
+          AND attempt.error_code = 'retryable_infrastructure'
+          AND attempt.lease_id IS DISTINCT FROM ${input.leaseId}
       ),
       abandoned AS (
         UPDATE goat.run_attempts AS attempt
@@ -2066,19 +2138,28 @@ export class PostgresRunExecutionRepository implements RunExecutionRepository {
         ON CONFLICT DO NOTHING
         RETURNING *
       )
-      SELECT inserted.*, previous_attempt.deploy_version AS previous_deploy_version
+      SELECT inserted.*, previous_attempt.deploy_version AS previous_deploy_version,
+             infrastructure_failures.previous_infrastructure_failures
       FROM inserted
       LEFT JOIN previous_attempt ON true
+      CROSS JOIN infrastructure_failures
       UNION ALL
-      SELECT attempt.*, previous_attempt.deploy_version AS previous_deploy_version
+      SELECT attempt.*, previous_attempt.deploy_version AS previous_deploy_version,
+             infrastructure_failures.previous_infrastructure_failures
       FROM goat.run_attempts AS attempt
       JOIN fenced_run ON fenced_run.id = attempt.run_id
       LEFT JOIN previous_attempt ON true
+      CROSS JOIN infrastructure_failures
       WHERE attempt.lease_id = ${input.leaseId}
         AND NOT EXISTS (SELECT 1 FROM inserted)
       LIMIT 1
     `);
-    return row ? mapRunAttempt(row) : null;
+    return row
+      ? {
+          ...mapRunAttempt(row),
+          previousInfrastructureFailures: row.previous_infrastructure_failures,
+        }
+      : null;
   }
 
   async appendEvents(input: Parameters<RunExecutionRepository["appendEvents"]>[0]) {
@@ -2163,6 +2244,7 @@ export class PostgresRunExecutionRepository implements RunExecutionRepository {
           kind: approval.kind,
           prompt: approval.prompt,
           ...(approval.action ? { action: approval.action } : {}),
+          ...(approval.input ? { input: approval.input } : {}),
           ...(approval.options ? { options: approval.options } : {}),
         },
       })),
@@ -2225,6 +2307,7 @@ export class PostgresRunExecutionRepository implements RunExecutionRepository {
       paused_run AS MATERIALIZED (
         UPDATE goat.codex_chat_turns AS run
         SET status = 'paused',
+            settings = settings - 'taskActionApprovalPending',
             lease_id = NULL,
             lease_owner = NULL,
             lease_expires_at = NULL,
@@ -2240,6 +2323,36 @@ export class PostgresRunExecutionRepository implements RunExecutionRepository {
           )
         RETURNING run.id, run.event_sequence - ${eventDrafts.length} AS base_sequence,
                   run.codex_chat_session_id
+      ),
+      waiting_task AS MATERIALIZED (
+        UPDATE goat.tasks AS task
+        SET status = 'waiting', stage = 'completed', reported_outcome = 'needs_attention',
+            outcome_comment = 'Needs approval. Review the requested action to continue.', updated_at = ${pausedAt}
+        FROM paused_run AS run
+        JOIN goat.codex_chat_turns AS source ON source.id = run.id
+        WHERE task.session_id = source.chat_session_id AND task.status IN ('queued', 'running')
+        RETURNING task.id
+      ),
+      approval_message AS MATERIALIZED (
+        UPDATE goat.chat_messages AS message
+        SET debug_trace = jsonb_set(COALESCE(message.debug_trace, '{}'::jsonb), '{uiMessageParts}',
+              COALESCE(${input.settledMessageParts ? stringifyPostgresJson(input.settledMessageParts) : null}::jsonb, message.debug_trace -> 'uiMessageParts', '[]'::jsonb) || ${stringifyPostgresJson(
+                input.approvals
+                  .filter((approval) => input.settledMessageParts !== undefined && approval.input)
+                  .map((approval) => ({
+                    type: "dynamic-tool",
+                    toolName: "codex_approval",
+                    toolCallId: approval.toolCallId,
+                    state: "approval-requested",
+                    input: approval.input,
+                    approval: { id: approval.id },
+                  })),
+              )}::jsonb), updated_at = ${pausedAt}
+        FROM paused_run AS run
+        JOIN goat.codex_chat_turns AS source ON source.id = run.id
+        WHERE message.id = source.assistant_message_id
+          AND ${input.settledMessageParts !== undefined}::boolean
+        RETURNING message.id
       ),
       event_input AS MATERIALIZED (
         SELECT
@@ -2263,7 +2376,9 @@ export class PostgresRunExecutionRepository implements RunExecutionRepository {
       ),
       idled_runtime AS MATERIALIZED (
         UPDATE goat.codex_chat_sessions AS runtime
-        SET status = 'idle', active_turn_id = NULL, updated_at = ${pausedAt}
+        SET status = 'idle', active_turn_id = NULL, updated_at = ${pausedAt},
+            host_tool_contract_version = CASE WHEN ${input.settledMessageParts !== undefined}::boolean
+              THEN ${ACTION_HOST_TOOL_CONTRACT_VERSION} ELSE runtime.host_tool_contract_version END
         FROM paused_run AS run
         WHERE runtime.id = run.codex_chat_session_id
         RETURNING runtime.id, runtime.chat_session_id

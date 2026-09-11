@@ -13,6 +13,7 @@ export type FirstPartyMcpTicketPayload<Audience extends string> = {
   integrationId: string;
   registrationId: string;
   operation: RemoteMcpOperation;
+  connectionVersion?: string;
   expiresAt: number;
 };
 
@@ -24,6 +25,7 @@ export function createFirstPartyMcpTicket<Audience extends string>(input: {
   integrationId: string;
   registrationId: string;
   operation: RemoteMcpOperation;
+  connectionVersion?: string;
   secret: string;
   now?: number;
   ttlMs?: number;
@@ -36,6 +38,7 @@ export function createFirstPartyMcpTicket<Audience extends string>(input: {
     integrationId: input.integrationId,
     registrationId: input.registrationId,
     operation: input.operation,
+    ...(input.connectionVersion ? { connectionVersion: input.connectionVersion } : {}),
     expiresAt: (input.now ?? Date.now()) + (input.ttlMs ?? TICKET_TTL_MS),
   } satisfies FirstPartyMcpTicketPayload<Audience>;
   const encodedPayload = Buffer.from(JSON.stringify(payload)).toString("base64url");
@@ -76,6 +79,7 @@ export function verifyFirstPartyMcpTicket<Audience extends string>(input: {
       typeof value.expiresAt !== "number" ||
       !Number.isSafeInteger(value.expiresAt) ||
       value.expiresAt <= (input.now ?? Date.now()) ||
+      (value.connectionVersion !== undefined && !boundedString(value.connectionVersion, 128)) ||
       !validOperation(value.operation)
     ) {
       return null;

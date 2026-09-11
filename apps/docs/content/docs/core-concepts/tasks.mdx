@@ -1,27 +1,69 @@
 ---
 title: Tasks
-description: Track durable background work with a goal, status, Conversation, and outcome.
+description: Delegate a job, follow its progress, and continue from its result.
 ---
 
-A Task is tracked work around exactly one Conversation. The Task owns its name, goal, source,
-lifecycle status, optional Workflow or schedule link, and final outcome. Its Conversation owns the
-Messages; Runs perform the work.
+A Task is a job with a request, status, activity history, and result. Use it when you want work to
+continue in the background and have a clear place to return to.
 
-Tasks can be created manually or by a Workflow, schedule, or agent action. Each new Task starts with
-an initial Message and queued Run, then moves through states such as queued, running, waiting,
-blocked, succeeded, failed, or canceled.
+Enable **Tasks & Workflows** under **Settings → Preferences → Beta features** first.
 
-## Continue or intervene
+## Start a Task
 
-Open a Task to read its Conversation and Run activity. A follow-up is another Message in the same
-Conversation, so it keeps the Task's identity and history. Cancel the active Run when execution
-should stop.
+From Home or a built-in opencompany Chat, type `#task` in the composer and describe the job:
 
-Archiving is organization, not execution control. A Task can be archived after it is terminal;
-archiving does not cancel active work or delete its history.
+```text
+#task Review the open pull requests in OWNER/REPO.
+Identify any missing test evidence or unresolved review comments.
+Return a short report with a link to each PR and its next action.
+```
 
-## When to use a Task
+This example needs a connected GitHub Plugin with the relevant read tools available. Replace
+`OWNER/REPO` with your repository. A [Workflow](/docs/core-concepts/workflows-and-schedules) or
+schedule also creates a Task each time it runs.
 
-Use a Task when you care about a durable goal and outcome, want work to continue away from the
-foreground composer, or expect to return to the same job later. Use an ordinary Chat for quick
-interactive work. Use a Workflow when the Task shape itself should be reusable.
+Specify the deliverable and what counts as done. If a decision is required, say what the agent
+should prepare before asking you to decide. Background work cannot rely on live tool approvals;
+see [Permissions](/docs/core-concepts/integrations#background-and-coding-work).
+
+Starting a `#task` currently doesn't support attachments. Put the required context in the request
+or identify an accessible source. You can attach files to follow-ups in the Task's conversation.
+
+## Follow progress
+
+Open **Tasks** to browse the board or list. Filter by Workflow or time range to find the relevant
+run. Open a Task to see its **Activity**, status, result, and recorded cost. **View run** opens the
+execution conversation.
+
+| State | What to do |
+| --- | --- |
+| Queued or running | Follow the activity or open the run to see current work. |
+| Waiting for you | Read the question or proposed result and reply with the missing input. |
+| Done | Review the result and any remaining items marked as needing attention. |
+| Failed | Read the error, resolve its cause, and provide a follow-up when ready. |
+| Canceled | Inspect what finished before cancellation before deciding to continue. |
+
+A completed run can still report that the outcome needs attention. Read the result before treating
+the underlying job as finished.
+
+## Continue the same job
+
+Leave a comment on the Task or send a message in its conversation. The follow-up continues the
+same job and history. For example:
+
+```text
+The missing test run is now linked on PR 42. Recheck that PR and update the report.
+```
+
+Use the active run's cancel control when you want execution to stop. Canceling doesn't undo actions
+that already completed in a connected service.
+
+## Archive a Task
+
+You can archive a Task once its run has settled, including a Task **Waiting for you**, a completed
+Task, or one that failed or was canceled. Archiving preserves its history and outcome, including
+any outstanding question. It doesn't resume work. Queued or running Tasks must settle before they
+can be archived.
+
+Use Chat for work you want to steer turn by turn. When the same Task keeps coming up, turn its
+process into a [Workflow](/docs/core-concepts/workflows-and-schedules).

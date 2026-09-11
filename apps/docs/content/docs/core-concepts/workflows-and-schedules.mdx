@@ -1,37 +1,83 @@
 ---
 title: Workflows and schedules
-description: Define reusable ordered work and invoke it manually, on a schedule, or from an event.
+description: Turn a repeatable job into ordered steps and run it manually, on a schedule, or from an event.
 ---
 
-A Workflow is a workspace-owned, reusable ordered definition. Each step has instructions and an
-engine/model configuration. Running the Workflow creates a Task, which gives that invocation its own
-Conversation, Run history, status, and outcome.
+A Workflow defines a reusable job. Each step has instructions and a model configuration, and can
+use installed Skills. Every invocation creates a Task with its own progress and result.
 
-Workspace admins create and edit Workflows. In Chat, type `#` to attach and fire an active Workflow.
-The resulting work appears under Tasks instead of being hidden inside the foreground Chat.
+Enable **Tasks & Workflows** under **Settings → Preferences → Beta features** to use this surface.
 
-## Manual, scheduled, and event triggers
+## Create a Workflow
 
-A Workflow can be manual or scheduled. A schedule records a cron expression, timezone, prompt, and
-enabled state, along with its last and next run times. When a scheduled trigger is due, opencompany
-creates the same canonical Task and Run that a manual invocation would create.
+1. Open **Workflows** and select **New workflow**.
+2. Give it a name and description that identify the job, such as `release-review`.
+3. Start with a **Manual** trigger.
+4. Write the first step's instructions. Choose its model and any Skills it needs.
+5. Use **Add step** when the next part needs a distinct handoff or model.
+6. Wait for the save indicator, then set the Workflow to **Active** when it is ready to run.
 
-Recurring Tasks are actor-owned schedules for a repeated prompt. Workflow schedules are tied to the
-reusable Workflow definition. In both cases, disabling the schedule stops future invocations; it
-does not erase Tasks that were already accepted.
+Keep each step's output explicit. For a release review, two steps could be:
 
-An event trigger starts the Workflow when a matching connected-app event arrives. The first
-available event is **Linear issue enters triage**: choose a connected Linear account, a team with
-Triage enabled, and the task request that should accompany the issue. Both issues created directly
-in Triage and issues later moved into Triage start exactly one Task per Linear webhook delivery.
+| Step | Instructions |
+| --- | --- |
+| Gather evidence | Read the supplied release scope, linked GitHub PRs, and test results. Produce an evidence list with source links and unanswered questions. |
+| Write the review | Use the evidence from the previous step to write a release recommendation. Separate verified checks from missing evidence. Return the review for a person to approve. |
 
-Event deliveries are accepted into a durable queue before opencompany starts the Task. This keeps
-the provider webhook fast and prevents transient runner failures or deploys from dropping accepted
-work.
+Include the needed context or artifact in the handoff. A later step should be able to understand
+what to do from its instructions, the task request, and the previous step's output.
 
-## Editing safely
+## Run it from Chat
 
-Workflow definitions are versioned. An invocation records the version it used, so later edits do not
-rewrite an already-created Task. Keep instructions specific, use separate steps when the handoff is
-meaningful, and inspect a completed Task before placing a new Workflow on a recurring or event
-trigger.
+Type `#` in Chat, select an active Workflow, and add the request for this invocation:
+
+```text
+#release-review Review the release in OWNER/REPO from v1.2.0 to v1.3.0.
+Use the linked test report and list anything that still needs verification.
+```
+
+Selecting a Workflow shows its saved model settings in the composer. For workflows with multiple
+steps, each step has its own controls. Change a model or reasoning effort to override it for
+**this run only**, or select **Reset** to return to the Workflow defaults. These changes do not
+update the saved Workflow or your usual Chat model. Image and PDF uploads are checked against
+the models selected for the Workflow. Removing the hashtag restores the normal Chat controls.
+
+The work appears in **Tasks**. Inspect one complete run and refine the instructions before
+scheduling it. Editing a Workflow doesn't rewrite the definition captured by an existing Task.
+
+## Run on a schedule
+
+In **Trigger**, choose **On a schedule**. Set the frequency and timezone, then fill in the
+**Task request** with context that will make sense at each invocation. For a weekly update, use
+“the previous seven days” instead of a fixed date range.
+
+The schedule stores a cron expression and timezone. Check both before relying on a local-time
+routine. A scheduled Workflow also has **Run now** so you can test it immediately after saving.
+Set the Workflow back to **Draft** to stop automatic invocation while you revise it. Previously
+created Tasks keep their own status and history.
+
+For a recurring prompt that doesn't need multiple steps, you can also ask the agent to create a
+recurring Task. Specify the timezone and have it confirm the schedule it created.
+
+## Run from a Plugin event
+
+1. Install and connect the **Linear** Plugin.
+2. On its Plugin page, enable the event you want for the current workspace.
+3. In the Workflow, choose **On an event**.
+4. Select the available event, connected account, and team, then write the **Task request**.
+5. Save and activate the Workflow.
+
+The current Linear Plugin supports **Issue created**. The event choices come from the installed
+Plugin version and its enabled events. Existing **issue enters triage** triggers may also appear;
+those require a team with Triage enabled. If the event option is unavailable, follow the editor's
+link to connect Linear or enable an event.
+
+Event delivery starts background work. Ensure the account has access and the needed tools are
+enabled before relying on an event-driven Workflow.
+
+## Plan for unattended work
+
+Tasks don't have a person answering each tool prompt. Keep the job within its available permissions,
+and have it return a concrete draft or question if it reaches a decision that needs you. See
+[Permissions](/docs/core-concepts/integrations#background-and-coding-work) and
+[Troubleshooting](/docs/guides/troubleshooting).

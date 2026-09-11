@@ -14,9 +14,10 @@ import {
 } from "@opencompany/core";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { PostgresChatAttachmentRepository } from "./chat-repository";
 import { PostgresTaskRepository, type TaskRepositoryIdFactory } from "./task-repository";
+import { snapshotPGliteSchema } from "./test-schema-snapshot";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const migrationPaths = [
@@ -36,6 +37,7 @@ const migrationPaths = [
   "0246_goat_task_waiting_status.sql",
   "0248_goat_chat_attachment_upload_idempotency.sql",
   "0255_goat_task_waiting_projection.sql",
+  "0268_goat_task_review_unseen.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -58,11 +60,12 @@ describe("Postgres Task repository", () => {
     waitingStatusMisprojectedBeforeRepair: boolean;
     waitingStatusProjectedAfterRepair: boolean;
   };
+  let restoreDatabase: () => Promise<PGlite>;
 
-  beforeEach(async () => {
-    database = new PGlite();
-    await database.exec(BASE_SCHEMA);
-    await database.exec(`
+  beforeAll(async () => {
+    restoreDatabase = await snapshotPGliteSchema(async (database) => {
+      await database.exec(BASE_SCHEMA);
+      await database.exec(`
       INSERT INTO goat.users (workos_user_id, task_spawning_enabled)
       VALUES ('migration_user', true);
       INSERT INTO goat.workspaces (id) VALUES ('migration_workspace'), ('migration_other_workspace');
@@ -154,67 +157,67 @@ describe("Postgres Task repository", () => {
           'completed', 'Must stay isolated'
         );
     `);
-    let projectionWipedBeforeRepair = false;
-    let waitingStatusMisprojectedBeforeRepair = false;
-    for (const migrationPath of migrationPaths) {
-      if (migrationPath.endsWith("0205_goat_task_history_projection_repair.sql")) {
-        // Reproduce the production gap: valid physical Task history whose projection row is absent.
-        await database.exec(`
+      let projectionWipedBeforeRepair = false;
+      let waitingStatusMisprojectedBeforeRepair = false;
+      for (const migrationPath of migrationPaths) {
+        if (migrationPath.endsWith("0205_goat_task_history_projection_repair.sql")) {
+          // Reproduce the production gap: valid physical Task history whose projection row is absent.
+          await database.exec(`
           DELETE FROM goat.message_read_model_v1 WHERE id = 'migration_prior_task_message';
           DELETE FROM goat.run_read_model_v1 WHERE id = 'migration_prior_task_run';
         `);
-      }
-      if (migrationPath.endsWith("0223_goat_task_projection_preservation.sql")) {
-        // Reproduce the production wipe: under the 0216 refresh function, any Conversation-row
-        // touch (planner model bump, settlement, rename) deleted every canonical Task projection.
-        await database.exec(`
+        }
+        if (migrationPath.endsWith("0223_goat_task_projection_preservation.sql")) {
+          // Reproduce the production wipe: under the 0216 refresh function, any Conversation-row
+          // touch (planner model bump, settlement, rename) deleted every canonical Task projection.
+          await database.exec(`
           UPDATE goat.chat_sessions SET updated_at = now()
           WHERE id = 'migration_task_conversation';
         `);
-        const wiped = await database.query<{ remaining: number }>(`
+          const wiped = await database.query<{ remaining: number }>(`
           SELECT COUNT(*)::int AS remaining
           FROM goat.message_read_model_v1
           WHERE conversation_id = 'migration_task_conversation'
         `);
-        projectionWipedBeforeRepair = wiped.rows[0]?.remaining === 0;
-      }
-      if (migrationPath.endsWith("0255_goat_task_waiting_projection.sql")) {
-        // Migration 0246 added the physical waiting status without teaching the canonical read
-        // model projection about it, so the fallback silently presented waiting Tasks as failed.
-        await database.exec(`
+          projectionWipedBeforeRepair = wiped.rows[0]?.remaining === 0;
+        }
+        if (migrationPath.endsWith("0255_goat_task_waiting_projection.sql")) {
+          // Migration 0246 added the physical waiting status without teaching the canonical read
+          // model projection about it, so the fallback silently presented waiting Tasks as failed.
+          await database.exec(`
           UPDATE goat.tasks SET status = 'waiting', stage = 'completed'
           WHERE id = 'migration_canonical_task';
         `);
-        const projected = await database.query<{ status: string }>(`
+          const projected = await database.query<{ status: string }>(`
           SELECT status FROM goat.task_read_model_v1
           WHERE id = 'migration_canonical_task'
         `);
-        waitingStatusMisprojectedBeforeRepair = projected.rows[0]?.status === "failed";
-      }
-      const migration = await readFile(migrationPath, "utf8");
-      const statements = migration.split("--> statement-breakpoint");
-      for (const statement of statements) {
-        if (statement.trim()) await database.exec(statement);
-      }
-      if (migrationPath.endsWith("0205_goat_task_history_projection_repair.sql")) {
+          waitingStatusMisprojectedBeforeRepair = projected.rows[0]?.status === "failed";
+        }
+        const migration = await readFile(migrationPath, "utf8");
+        const statements = migration.split("--> statement-breakpoint");
         for (const statement of statements) {
           if (statement.trim()) await database.exec(statement);
         }
+        if (migrationPath.endsWith("0205_goat_task_history_projection_repair.sql")) {
+          for (const statement of statements) {
+            if (statement.trim()) await database.exec(statement);
+          }
+        }
       }
-    }
-    const migrationRows = await database.query<{
-      legacy_exists: boolean;
-      legacy_projected: boolean;
-      canonical_projected: boolean;
-      message_projected: boolean;
-      historical_messages_projected: number;
-      historical_runs_projected: number;
-      physical_history_untouched: boolean;
-      normal_chat_task_card_untouched: boolean;
-      cross_workspace_link_rejected: boolean;
-      cross_workspace_run_rejected: boolean;
-      waiting_status_projected: boolean;
-    }>(`
+      const migrationRows = await database.query<{
+        legacy_exists: boolean;
+        legacy_projected: boolean;
+        canonical_projected: boolean;
+        message_projected: boolean;
+        historical_messages_projected: number;
+        historical_runs_projected: number;
+        physical_history_untouched: boolean;
+        normal_chat_task_card_untouched: boolean;
+        cross_workspace_link_rejected: boolean;
+        cross_workspace_run_rejected: boolean;
+        waiting_status_projected: boolean;
+      }>(`
       SELECT
         EXISTS (
           SELECT 1 FROM goat.tasks WHERE id = 'migration_legacy_task' AND source = 'manual'
@@ -277,24 +280,24 @@ describe("Postgres Task repository", () => {
             AND status = 'waiting'
         ) AS waiting_status_projected
     `);
-    const migrationRow = migrationRows.rows[0];
-    migrationEvidence = {
-      legacyTaskExists: migrationRow?.legacy_exists ?? false,
-      legacyTaskProjected: migrationRow?.legacy_projected ?? true,
-      canonicalTaskProjected: migrationRow?.canonical_projected ?? false,
-      canonicalMessageProjected: migrationRow?.message_projected ?? false,
-      historicalMessagesProjected: migrationRow?.historical_messages_projected ?? 0,
-      historicalRunsProjected: migrationRow?.historical_runs_projected ?? 0,
-      physicalHistoryUntouched: migrationRow?.physical_history_untouched ?? false,
-      normalChatTaskCardUntouched: migrationRow?.normal_chat_task_card_untouched ?? false,
-      crossWorkspaceLinkRejected: migrationRow?.cross_workspace_link_rejected ?? false,
-      crossWorkspaceRunRejected: migrationRow?.cross_workspace_run_rejected ?? false,
-      projectionWipedBeforeRepair,
-      waitingStatusMisprojectedBeforeRepair,
-      waitingStatusProjectedAfterRepair: migrationRow?.waiting_status_projected ?? false,
-    };
+      const migrationRow = migrationRows.rows[0];
+      migrationEvidence = {
+        legacyTaskExists: migrationRow?.legacy_exists ?? false,
+        legacyTaskProjected: migrationRow?.legacy_projected ?? true,
+        canonicalTaskProjected: migrationRow?.canonical_projected ?? false,
+        canonicalMessageProjected: migrationRow?.message_projected ?? false,
+        historicalMessagesProjected: migrationRow?.historical_messages_projected ?? 0,
+        historicalRunsProjected: migrationRow?.historical_runs_projected ?? 0,
+        physicalHistoryUntouched: migrationRow?.physical_history_untouched ?? false,
+        normalChatTaskCardUntouched: migrationRow?.normal_chat_task_card_untouched ?? false,
+        crossWorkspaceLinkRejected: migrationRow?.cross_workspace_link_rejected ?? false,
+        crossWorkspaceRunRejected: migrationRow?.cross_workspace_run_rejected ?? false,
+        projectionWipedBeforeRepair,
+        waitingStatusMisprojectedBeforeRepair,
+        waitingStatusProjectedAfterRepair: migrationRow?.waiting_status_projected ?? false,
+      };
 
-    await database.exec(`
+      await database.exec(`
       DELETE FROM goat.task_command_idempotency;
       DELETE FROM goat.run_events;
       DELETE FROM goat.run_approvals;
@@ -309,7 +312,7 @@ describe("Postgres Task repository", () => {
       DELETE FROM goat.users;
       DELETE FROM goat.workspaces;
     `);
-    await database.exec(`
+      await database.exec(`
       INSERT INTO goat.users (workos_user_id, task_spawning_enabled)
       VALUES ('user_1', true), ('user_2', false), ('user_3', true);
       INSERT INTO goat.workspaces (id) VALUES ('workspace_1'), ('workspace_2');
@@ -323,6 +326,14 @@ describe("Postgres Task repository", () => {
         ('brain_1', 'workspace_1', 'general'),
         ('brain_2', 'workspace_2', 'general');
     `);
+      await database.exec(
+        `ALTER TABLE goat.plugins ADD COLUMN owner_user_id text DEFAULT 'user_1';`,
+      );
+    });
+  });
+
+  beforeEach(async () => {
+    database = await restoreDatabase();
     execute = async (query: SQL) => {
       const compiled = dialect.sqlToQuery(query);
       return database.query(compiled.sql, compiled.params as never[]);
@@ -1293,35 +1304,59 @@ describe("Postgres Task repository", () => {
     ).toMatchObject({ rows: [{ count: 0 }] });
   });
 
-  it("archives only terminal Tasks and reflects the lifecycle in the read model", async () => {
+  it.each(["queued", "running"])("rejects archiving %s Tasks", async (status) => {
     const created = await service.createTask(actor(), {
-      idempotencyKey: "task-archive",
+      idempotencyKey: "task-archive-active",
       goal: "Finish before archive",
       engine: "opencompany",
       model: "moonshotai/kimi-k3",
       source: "manual",
     });
+    await database.query("UPDATE goat.tasks SET status = $1 WHERE id = $2", [
+      status,
+      created.task.id,
+    ]);
+
     await expect(
       service.updateTask(actor(), created.task.id, { archived: true }),
     ).rejects.toMatchObject({ code: "invalid_argument" });
-    await database.query(
-      `UPDATE goat.tasks SET status = 'succeeded', stage = 'completed' WHERE id = $1`,
-      [created.task.id],
-    );
-    await expect(
-      service.updateTask(actor(), created.task.id, { archived: true }),
-    ).resolves.toMatchObject({
-      task: { id: created.task.id, status: "archived" },
-    });
-    expect(
-      (
-        await database.query<{ status: string }>(
-          "SELECT status FROM goat.task_read_model_v1 WHERE id = $1",
-          [created.task.id],
-        )
-      ).rows,
-    ).toEqual([{ status: "archived" }]);
+    expect((await service.getTask(actor(), created.task.id)).archivedAt).toBeNull();
   });
+
+  it.each(["waiting", "succeeded", "failed", "canceled"])(
+    "archives and restores %s Tasks without changing their outcome",
+    async (status) => {
+      const created = await service.createTask(actor(), {
+        idempotencyKey: "task-archive",
+        goal: "Review the deployment",
+        engine: "opencompany",
+        model: "moonshotai/kimi-k3",
+        source: "manual",
+      });
+      await database.query(
+        `UPDATE goat.tasks SET status = $1, stage = 'completed',
+          reported_outcome = 'needs_attention', outcome_comment = 'Review requested' WHERE id = $2`,
+        [status, created.task.id],
+      );
+      const outcome = (await service.getTask(actor(), created.task.id)).outcome;
+
+      for (const archived of [true, true, false]) {
+        await expect(
+          service.updateTask(actor(), created.task.id, { archived }),
+        ).resolves.toMatchObject({
+          task: { id: created.task.id, status: archived ? "archived" : status, outcome },
+        });
+        expect(
+          (
+            await database.query<{ status: string }>(
+              "SELECT status FROM goat.task_read_model_v1 WHERE id = $1",
+              [created.task.id],
+            )
+          ).rows,
+        ).toEqual([{ status: archived ? "archived" : status }]);
+      }
+    },
+  );
 
   it("renames Task metadata and its one canonical Conversation together", async () => {
     const created = await service.createTask(actor(), {
@@ -1345,6 +1380,107 @@ describe("Postgres Task repository", () => {
       ),
     ).resolves.toMatchObject({
       rows: [{ task_name: "Launch brief", conversation_title: "Launch brief" }],
+    });
+  });
+
+  // The review queue reads Task results from the Task projection because the conversation
+  // projection deliberately drops conversations of kind 'task'. These cover that contract end to
+  // end: settlement raises the flag on the projection, acknowledgment clears it through an
+  // authorized command, and a stranger cannot clear it at all.
+  describe("Task result unread state", () => {
+    async function settledTask(idempotencyKey: string) {
+      const created = await service.createTask(actor(), {
+        idempotencyKey,
+        goal: "Scan the competitors",
+        engine: "opencompany",
+        model: "moonshotai/kimi-k3",
+        source: "manual",
+      });
+      // How apps/runner/src/task-turn.ts settles a completed Task run.
+      await database.query(`UPDATE goat.chat_sessions SET has_unseen = true WHERE id = $1`, [
+        created.task.conversationId,
+      ]);
+      return created.task;
+    }
+
+    it("projects a settled Task as unread, where the conversation projection cannot", async () => {
+      const task = await settledTask("task-unseen-projection");
+
+      await expect(
+        database.query<{ has_unseen: boolean }>(
+          `SELECT has_unseen FROM goat.task_read_model_v1 WHERE id = $1`,
+          [task.id],
+        ),
+      ).resolves.toMatchObject({ rows: [{ has_unseen: true }] });
+      await expect(
+        database.query(`SELECT 1 FROM goat.conversation_read_model_v1 WHERE id = $1`, [
+          task.conversationId,
+        ]),
+      ).resolves.toMatchObject({ rows: [] });
+    });
+
+    it("clears the flag on acknowledgment without resequencing the queue", async () => {
+      const task = await settledTask("task-unseen-ack");
+      const before = await database.query<{ task_updated_at: Date; conversation_updated_at: Date }>(
+        `SELECT task.updated_at AS task_updated_at,
+                conversation.updated_at AS conversation_updated_at
+         FROM goat.tasks AS task
+         JOIN goat.chat_sessions AS conversation ON conversation.id = task.session_id
+         WHERE task.id = $1`,
+        [task.id],
+      );
+
+      await expect(service.updateTask(actor(), task.id, { markSeen: true })).resolves.toMatchObject(
+        { task: { id: task.id } },
+      );
+
+      await expect(
+        database.query<{ has_unseen: boolean; last_seen_at: Date | null }>(
+          `SELECT projection.has_unseen, conversation.last_seen_at
+           FROM goat.task_read_model_v1 AS projection
+           JOIN goat.chat_sessions AS conversation ON conversation.id = projection.conversation_id
+           WHERE projection.id = $1`,
+          [task.id],
+        ),
+      ).resolves.toMatchObject({ rows: [{ has_unseen: false }] });
+      const [seen] = (
+        await database.query<{ last_seen_at: Date | null }>(
+          `SELECT conversation.last_seen_at
+           FROM goat.tasks AS task
+           JOIN goat.chat_sessions AS conversation ON conversation.id = task.session_id
+           WHERE task.id = $1`,
+          [task.id],
+        )
+      ).rows;
+      expect(seen?.last_seen_at).not.toBeNull();
+
+      // Reading a result must not move the row the reader is working through.
+      await expect(
+        database.query<{ task_updated_at: Date; conversation_updated_at: Date }>(
+          `SELECT task.updated_at AS task_updated_at,
+                  conversation.updated_at AS conversation_updated_at
+           FROM goat.tasks AS task
+           JOIN goat.chat_sessions AS conversation ON conversation.id = task.session_id
+           WHERE task.id = $1`,
+          [task.id],
+        ),
+      ).resolves.toMatchObject({ rows: [before.rows[0]] });
+    });
+
+    it("refuses to acknowledge a Task the actor does not own", async () => {
+      const task = await settledTask("task-unseen-foreign");
+
+      await expect(
+        service.updateTask(actor({ userId: "user_2", workspaceId: "workspace_2" }), task.id, {
+          markSeen: true,
+        }),
+      ).rejects.toThrow(/not found/i);
+      await expect(
+        database.query<{ has_unseen: boolean }>(
+          `SELECT has_unseen FROM goat.task_read_model_v1 WHERE id = $1`,
+          [task.id],
+        ),
+      ).resolves.toMatchObject({ rows: [{ has_unseen: true }] });
     });
   });
 });

@@ -11,7 +11,7 @@ export const PLATFORM_FEE_BPS = 0;
 
 const TOKENS_PER_MILLION = 1_000_000;
 const GPT_5_4_LONG_CONTEXT_INPUT_TOKEN_THRESHOLD = 272_000;
-const MODEL_PRICING_VERSION = "2026-09-04.standard.1";
+const MODEL_PRICING_VERSION = "2026-09-10.standard.1";
 
 type PricingProvider =
   | "openai"
@@ -240,6 +240,7 @@ const MODEL_PRICING: Partial<Record<BillableModelId, ModelPricing>> = {
     cacheWriteUsdMicrosPerMillion: 435_000,
     outputUsdMicrosPerMillion: 870_000,
   },
+  // verified 2026-09-10 against DeepSeek's published rates and Vercel AI Gateway route
   "deepseek/deepseek-v4-flash": {
     model: "deepseek/deepseek-v4-flash",
     provider: "deepseek",
@@ -661,8 +662,8 @@ export function calculateHostedToolUsageCost(input: {
 // --- E2B sandbox compute pricing ---------------------------------------------
 // E2B bills sandbox compute per second of *running* (non-paused) time, scaled by the
 // sandbox's allocated vCPU and RAM. Rates are expressed in USD micros per second.
-// ⚠️ Confirm these against E2B's current published compute pricing before relying on
-// the billed amounts — bump SANDBOX_PRICING_VERSION when they change.
+// Verified 2026-09-10 against https://e2b.dev/pricing. Bump SANDBOX_PRICING_VERSION
+// when these rates change.
 export const SANDBOX_VCPU_USD_MICROS_PER_SECOND = 14; // $0.000014 per vCPU-second
 export const SANDBOX_RAM_GIB_USD_MICROS_PER_SECOND = 4.5; // $0.0000045 per GiB-second
 const SANDBOX_PRICING_VERSION = "e2b.2026-06.standard";
@@ -673,8 +674,8 @@ export type SandboxResourceConfig = {
   ramMiB: number;
 };
 
-// E2B base sandbox allocation. Templates that change CPU/RAM should resolve their own
-// resources before pricing (see the runner's resolveSandboxResources).
+// Legacy default allocation. Runtime billing uses the actual CPU/RAM reported by E2B
+// in sandbox-billing.ts rather than assuming a template allocation.
 export const DEFAULT_SANDBOX_RESOURCES: SandboxResourceConfig = { vcpu: 2, ramMiB: 512 };
 
 export type SandboxUsageCostInput = {

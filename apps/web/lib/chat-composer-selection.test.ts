@@ -7,10 +7,10 @@ import { DEFAULT_MODEL } from "@/lib/model-options";
 describe("normalizeStoredChatSelection", () => {
   it("restores supported opencompany models", () => {
     expect(
-      normalizeStoredChatSelection("moonshotai/kimi-k3", {
+      normalizeStoredChatSelection("deepseek/deepseek-v4-flash", {
         codexConnected: false,
       }),
-    ).toBe("moonshotai/kimi-k3");
+    ).toBe("deepseek/deepseek-v4-flash");
   });
 
   it("restores only engines that are currently available", () => {

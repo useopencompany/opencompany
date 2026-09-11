@@ -83,7 +83,11 @@ export const MessageEngineSchema = z
   ])
   .openapi("MessageEngineV1");
 export const MessageMentionSchema = z
-  .object({ kind: z.literal("skill"), id: ResourceIdSchema })
+  .object({
+    kind: z.literal("skill"),
+    id: ResourceIdSchema,
+    name: z.string().min(1).max(64).optional(),
+  })
   .strict()
   .openapi("MessageMention");
 export const RunStatusSchema = z.enum([
@@ -140,9 +144,11 @@ export const ConversationSchema = z
 
 export const ChatShareIdSchema = z
   .string()
-  .regex(/^goat_chat_share_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu)
+  .regex(
+    /^(?:share_|goat_chat_share_)[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu,
+  )
   .openapi({
-    example: "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+    example: "share_01234567-89ab-4cde-8f01-23456789abcd",
     description: "Unguessable public Chat share capability.",
   });
 
@@ -422,6 +428,7 @@ export const IntegrationAccountReadModelSchema = z
     id: z.string().min(1).max(128),
     provider: z.enum([
       "gmail",
+      "google_admin",
       "google_calendar",
       "google_drive",
       "linear",
@@ -435,6 +442,7 @@ export const IntegrationAccountReadModelSchema = z
       "fathom",
       "attio",
       "betterstack",
+      "convex",
       "render",
       "vercel",
       "signoz",
@@ -442,6 +450,9 @@ export const IntegrationAccountReadModelSchema = z
       "latitude",
       "posthog",
       "neon",
+      "notion",
+      "supabase",
+      "resend",
       "x_account",
     ]),
     workspaceId: z.string().min(1).max(128).nullable(),
@@ -584,7 +595,11 @@ export const EngineRuntimeAccessEnvelopeSchema = z
   .strict()
   .openapi("EngineRuntimeAccessEnvelope");
 
-export const TaskReadModelSchema = TaskSchema.openapi("TaskReadModelV1");
+// The streamed Task projection carries the unread flag that the Task resource itself does not:
+// it belongs to the Task's conversation and only ever matters to surfaces reading a live queue.
+export const TaskReadModelSchema = TaskSchema.extend({ hasUnseen: z.boolean() }).openapi(
+  "TaskReadModelV1",
+);
 export const TaskActivityAuthorSchema = z.enum(["user", "orchestrator", "system"]);
 export const TaskActivityKindSchema = z.enum([
   "created",
@@ -1377,9 +1392,19 @@ export const SkillBundleSchema = SkillBundleSummarySchema.extend({
   .strict()
   .openapi("SkillBundle");
 
+export const SkillScopeSchema = z.enum(["personal", "company"]).openapi("SkillScope");
+export const SetSkillScopeBodySchema = z
+  .object({ scope: SkillScopeSchema, expectedScope: SkillScopeSchema })
+  .strict()
+  .openapi("SetSkillScopeBody");
+
 export const SkillListItemSchema = z
   .object({
     id: ResourceIdSchema,
+    scope: SkillScopeSchema.nullable(),
+    createdByUserId: z.string().nullable(),
+    canEdit: z.boolean(),
+    canManage: z.boolean(),
     name: z.string().min(1).max(64),
     enabled: z.boolean(),
     archivedAt: TimestampSchema.nullable(),
@@ -1397,7 +1422,8 @@ export const SkillInstallationSchema = SkillListItemSchema.extend({
   .openapi("SkillInstallation");
 export const SkillCatalogItemSchema = z
   .object({
-    id: z.string().min(1).max(64),
+    id: ResourceIdSchema,
+    scope: SkillScopeSchema.nullable(),
     name: z.string().min(1).max(64),
     description: z.string().max(1_024),
   })
@@ -1476,7 +1502,20 @@ export const PluginManifestSchema = z
   .strict()
   .openapi("PluginManifest");
 
-export const PluginSourceSchema = ExternalSkillSourceSchema.openapi("PluginSource");
+export const PluginSourceSchema = z
+  .union([
+    ExternalSkillSourceSchema,
+    z
+      .object({
+        type: z.literal("custom_mcp"),
+        url: z.string().url().max(2048),
+        ref: z.literal(""),
+        path: z.literal(""),
+        resolvedCommit: z.literal(""),
+      })
+      .strict(),
+  ])
+  .openapi("PluginSource");
 
 export const PluginFileMetadataSchema = z
   .object({
@@ -1678,6 +1717,57 @@ export const PluginDiscoveredToolSchema = z
   })
   .strict()
   .openapi("PluginDiscoveredTool");
+
+export const CustomMcpCredentialsSchema = z
+  .object({
+    headers: z.record(z.string().min(1).max(100), z.string().min(1).max(8192)).default({}),
+  })
+  .strict();
+export const CustomMcpDefinitionBodySchema = CustomMcpCredentialsSchema.extend({
+  label: z.string().trim().min(1).max(100),
+  url: z.string().trim().url().max(2048),
+}).strict();
+export const CustomMcpCreateBodySchema = CustomMcpDefinitionBodySchema.extend({
+  fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+}).strict();
+export const CustomMcpPermissionBodySchema = z
+  .object({
+    tool: z.string().min(1).max(128),
+    mode: z.enum(["on", "ask", "off"]),
+    revision: z.string().uuid(),
+  })
+  .strict();
+export const CustomMcpProbeSchema = z
+  .object({ tools: z.array(PluginDiscoveredToolSchema).max(500), fingerprint: z.string() })
+  .strict();
+export const CustomMcpStatusSchema = z
+  .object({
+    label: z.string(),
+    url: z.string(),
+    enabled: z.boolean(),
+    account: z
+      .object({
+        integrationId: ResourceIdSchema,
+        revision: z.string(),
+        connected: z.boolean(),
+        tools: z.array(PluginDiscoveredToolSchema).max(500),
+        toolModes: z.record(z.string(), z.enum(["on", "ask", "off"])),
+        checkedAt: TimestampSchema,
+        error: z.string().nullable(),
+      })
+      .strict()
+      .nullable(),
+  })
+  .strict();
+export const CustomMcpProbeEnvelopeSchema = z
+  .object({ data: CustomMcpProbeSchema, meta: ProtocolMetadataSchema })
+  .strict();
+export const CustomMcpStatusEnvelopeSchema = z
+  .object({ data: CustomMcpStatusSchema, meta: ProtocolMetadataSchema })
+  .strict();
+export type CustomMcpStatusDto = z.infer<typeof CustomMcpStatusSchema>;
+export type CustomMcpProbeDto = z.infer<typeof CustomMcpProbeSchema>;
+export type CustomMcpDefinitionBody = z.infer<typeof CustomMcpDefinitionBodySchema>;
 
 export const PluginRemoteMcpServerSchema = z
   .object({
@@ -2049,6 +2139,7 @@ export const SkillImportPreviewEnvelopeSchema = z
   .strict()
   .openapi("SkillImportPreviewEnvelope");
 export const ImportSkillBodySchema = SkillImportPreviewBodySchema.extend({
+  scope: SkillScopeSchema.optional(),
   expectedResolvedCommit: z.string().regex(/^[0-9a-f]{40}$/iu),
   expectedIntegrity: z.string().regex(/^sha256:[0-9a-f]{64}$/iu),
 })
@@ -2062,6 +2153,7 @@ export const WorkspaceSkillNameSchema = z
 export const CreateWorkspaceSkillBodySchema = z
   .object({
     name: WorkspaceSkillNameSchema,
+    scope: SkillScopeSchema.optional(),
     description: z
       .string()
       .trim()
@@ -2081,7 +2173,11 @@ export const CreateWorkspaceSkillBodySchema = z
   })
   .strict()
   .openapi("CreateWorkspaceSkillBody");
-export const UpdateWorkspaceSkillBodySchema = CreateWorkspaceSkillBodySchema.omit({ name: true })
+export const UpdateWorkspaceSkillBodySchema = CreateWorkspaceSkillBodySchema.omit({
+  name: true,
+  scope: true,
+})
+  .extend({ expectedBundleId: z.string().trim().min(1).max(200).optional() })
   .strict()
   .openapi("UpdateWorkspaceSkillBody");
 export const SkillImportEnvelopeSchema = z
@@ -2307,6 +2403,7 @@ export const BillingOverviewSchema = z
         chat: z.number().int().min(0),
         ingestion: z.number().int().min(0),
         capabilities: z.number().int().min(0),
+        sandbox: z.number().int().min(0),
       })
       .strict(),
     recentActivity: z.array(
@@ -2349,7 +2446,7 @@ export const BillingUsageSchema = z
       z
         .object({
           day: z.string().min(1).max(32),
-          category: z.enum(["chat", "ingestion", "capabilities", "other"]),
+          category: z.enum(["chat", "ingestion", "capabilities", "sandbox", "other"]),
           spendUsdMicros: z.number().int().min(0),
           providerCostUsdMicros: z.number().int().min(0),
           platformFeeUsdMicros: z.number().int().min(0),
@@ -2542,11 +2639,21 @@ export const WorkflowArchiveEnvelopeSchema = z
   .strict()
   .openapi("WorkflowArchiveEnvelope");
 
+export const WorkflowStepModelOverrideSchema = WorkflowStepSchema.pick({
+  id: true,
+  model: true,
+  runtimeModel: true,
+  reasoningEffort: true,
+})
+  .strict()
+  .openapi("WorkflowStepModelOverride");
+
 export const InvokeWorkflowBodySchema = z
   .object({
     description: z.string().min(1).max(10_000),
     attachmentIds: z.array(ResourceIdSchema).max(5).optional(),
     skillIds: z.array(ResourceIdSchema).max(16).optional(),
+    stepModelOverrides: z.array(WorkflowStepModelOverrideSchema).max(20).optional(),
   })
   .strict()
   .openapi("InvokeWorkflowBody");
@@ -2776,6 +2883,7 @@ export const UpdateTaskBodySchema = z
   .union([
     z.object({ archived: z.boolean() }).strict(),
     z.object({ name: z.string().min(1).max(160) }).strict(),
+    z.object({ markSeen: z.literal(true) }).strict(),
   ])
   .openapi("UpdateTaskBody");
 
@@ -3357,11 +3465,13 @@ export const WorkspaceCommandEnvelopeSchema = z
   .strict()
   .openapi("WorkspaceCommandEnvelope");
 
+const WorkspaceCreationIdSchema = ResourceIdSchema.regex(/^(?:workspace_|goat_ws_)/u, {
+  message: "workspaceId must be an opencompany workspace id.",
+});
+
 export const CreateWorkspaceBodySchema = z
   .object({
-    workspaceId: ResourceIdSchema.refine((value: string) => value.startsWith("goat_ws_"), {
-      message: "workspaceId must be an opencompany workspace id.",
-    }),
+    workspaceId: WorkspaceCreationIdSchema,
     name: z.string().trim().min(1).max(80),
   })
   .strict()
@@ -3442,9 +3552,7 @@ export const SaveOnboardingProfileBodySchema = z
 
 export const SaveOnboardingWorkspaceBodySchema = z
   .object({
-    workspaceId: ResourceIdSchema.refine((value: string) => value.startsWith("goat_ws_"), {
-      message: "workspaceId must be an opencompany workspace id.",
-    }),
+    workspaceId: WorkspaceCreationIdSchema,
     name: z.string().trim().min(1).max(80),
     slug: z
       .string()
@@ -3523,9 +3631,11 @@ export const IdentityUserSchema = z
     lastName: z.string().max(128).nullable(),
     avatarUrl: z.string().max(4_096).nullable(),
     timezone: z.string().min(1).max(100),
+    botsEnabled: z.boolean().optional(),
     taskSpawningEnabled: z.boolean(),
     autoModelRoutingEnabled: z.boolean(),
     chatCapabilitiesBetaEnabled: z.boolean(),
+    reviewInboxEnabled: z.boolean(),
     /** @deprecated Wiki is always enabled. */
     wikiEnabled: z.literal(true),
     taskViewMode: TaskViewModeSchema,
@@ -3582,6 +3692,7 @@ export const IdentityEnvelopeSchema = z
 
 export const UserPreferencesSchema = z
   .object({
+    botsEnabled: z.boolean(),
     timezone: z.string().min(1).max(100),
     taskSpawningEnabled: z.boolean(),
     /** @deprecated Wiki is always enabled. */
@@ -3589,12 +3700,14 @@ export const UserPreferencesSchema = z
     taskViewMode: TaskViewModeSchema,
     taskTimeRange: TaskTimeRangeSchema,
     autoModelRoutingEnabled: z.boolean(),
+    reviewInboxEnabled: z.boolean(),
   })
   .strict()
   .openapi("UserPreferences");
 
 export const UpdateUserPreferencesBodySchema = z
   .object({
+    botsEnabled: z.boolean().optional(),
     timezone: z.string().min(1).max(100).optional(),
     taskSpawningEnabled: z.boolean().optional(),
     /** @deprecated Accepted for compatibility and ignored; Wiki is always enabled. */
@@ -3602,6 +3715,7 @@ export const UpdateUserPreferencesBodySchema = z
     taskViewMode: TaskViewModeSchema.optional(),
     taskTimeRange: TaskTimeRangeSchema.optional(),
     autoModelRoutingEnabled: z.boolean().optional(),
+    reviewInboxEnabled: z.boolean().optional(),
   })
   .strict()
   .refine((body: Record<string, unknown>) => Object.keys(body).length > 0, {
@@ -3739,6 +3853,7 @@ export const IntegrationAccountStatusSchema = z.enum([
 
 export const PersonalIntegrationProviderSchema = z.enum([
   "gmail",
+  "google_admin",
   "google_calendar",
   "google_drive",
   "linear",
@@ -3749,11 +3864,14 @@ export const PersonalIntegrationProviderSchema = z.enum([
   "fathom",
   "attio",
   "betterstack",
+  "convex",
   "render",
   "vercel",
   "signoz",
   "latitude",
   "neon",
+  "supabase",
+  "resend",
   "x_account",
 ]);
 
@@ -3912,6 +4030,28 @@ export const IntegrationApiKeyBodySchema = z
   .object({ apiKey: z.string().min(1).max(4_000) })
   .strict()
   .openapi("IntegrationApiKeyBody");
+
+export const ConvexAccountStateSchema = z
+  .object({
+    provider: z.literal("convex"),
+    connected: z.boolean(),
+    status: IntegrationAccountStatusSchema,
+    integrationId: IntegrationAccountIdSchema.nullable(),
+    accountName: z.string().nullable(),
+    statusReason: z.string().nullable(),
+    capabilityModes: z.record(z.string(), z.unknown()),
+    toolModes: z.record(z.string(), z.unknown()),
+  })
+  .strict()
+  .openapi("ConvexAccountState");
+
+export const ConvexAccountStateEnvelopeSchema = z
+  .object({
+    data: z.object({ state: ConvexAccountStateSchema }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("ConvexAccountStateEnvelope");
 
 export const RenderAccountStateSchema = z
   .object({
@@ -4094,6 +4234,38 @@ export const UpdateCodexWorkspaceEngineBodySchema = z
   .object({ enabled: z.boolean() })
   .strict()
   .openapi("UpdateCodexWorkspaceEngineBody");
+
+export type CodexUsage = {
+  windows: {
+    id: string;
+    label: string;
+    usedPercent: number;
+    resetsAt: string;
+  }[];
+  updatedAt: string;
+};
+
+export const CodexUsageSchema: z.ZodType<CodexUsage> = z
+  .object({
+    windows: z.array(
+      z
+        .object({
+          id: z.string(),
+          label: z.string(),
+          usedPercent: z.number().min(0).max(100),
+          resetsAt: z.string().datetime(),
+        })
+        .strict(),
+    ),
+    updatedAt: z.string().datetime(),
+  })
+  .strict()
+  .openapi("CodexUsage");
+
+export const CodexUsageEnvelopeSchema = z
+  .object({ data: CodexUsageSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("CodexUsageEnvelope");
 
 export const EngineAuthFlowIdSchema = z
   .string()
@@ -4363,7 +4535,12 @@ export type BillingOverviewDto = {
   memberCount: number;
   memberCap: number;
   spendThisMonthUsdMicros: number;
-  spendThisMonthByCategory: { chat: number; ingestion: number; capabilities: number };
+  spendThisMonthByCategory: {
+    chat: number;
+    ingestion: number;
+    capabilities: number;
+    sandbox: number;
+  };
   recentActivity: Array<{
     activityId: string;
     source: string;
@@ -4392,7 +4569,7 @@ export type BillingOverviewDto = {
 export type BillingUsageDto = {
   breakdown: Array<{
     day: string;
-    category: "chat" | "ingestion" | "capabilities" | "other";
+    category: "chat" | "ingestion" | "capabilities" | "sandbox" | "other";
     spendUsdMicros: number;
     providerCostUsdMicros: number;
     platformFeeUsdMicros: number;
@@ -4431,3 +4608,20 @@ export type AttioAccountStateDto = z.infer<typeof AttioAccountStateSchema>;
 export type FathomAccountStateDto = z.infer<typeof FathomAccountStateSchema>;
 export type GranolaAccountStateDto = z.infer<typeof GranolaAccountStateSchema>;
 export type StripeAccountStateDto = z.infer<typeof StripeAccountStateSchema>;
+
+export const BotBodySchema = z
+  .object({
+    name: z.string().trim().min(1).max(80),
+    description: z.string().trim().max(4000),
+  })
+  .strict();
+export const BotSchema = BotBodySchema.extend({ id: ResourceIdSchema.regex(/^[a-zA-Z0-9_-]+$/) });
+export type BotDto = z.infer<typeof BotSchema>;
+export const BotEnvelopeSchema = z
+  .object({ data: BotSchema, meta: ProtocolMetadataSchema })
+  .strict();
+export const BotListEnvelopeSchema = z
+  .object({ data: z.array(BotSchema), meta: ProtocolMetadataSchema })
+  .strict();
+
+export type SetSkillScopeBody = z.infer<typeof SetSkillScopeBodySchema>;

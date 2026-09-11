@@ -13,6 +13,7 @@ import {
 import { PostgresPluginRepository } from "./plugin-repository";
 import { loadChatSessionPluginRuntime } from "./plugin-runtime-repository";
 import { PostgresSkillBundleRepository } from "./skill-bundle-repository";
+import { createTestPGlite } from "./test-pglite";
 
 describe("Postgres immutable Plugin repository", () => {
   let database: PGlite;
@@ -22,11 +23,15 @@ describe("Postgres immutable Plugin repository", () => {
   const deletePluginDataBlob = vi.fn(async () => undefined);
 
   beforeAll(async () => {
-    database = new PGlite();
+    database = await createTestPGlite();
     await database.exec(`
       CREATE SCHEMA goat;
+      CREATE TABLE goat.plugin_ownership_rollout (id text PRIMARY KEY, personal_enabled boolean NOT NULL);
+      INSERT INTO goat.plugin_ownership_rollout VALUES ('personal_plugins', true);
       CREATE TABLE goat.workspaces (id text PRIMARY KEY);
       CREATE TABLE goat.chat_sessions (id text PRIMARY KEY);
+      CREATE TABLE goat.workspace_members (workspace_id text, user_workos_id text, role text);
+      INSERT INTO goat.workspace_members VALUES ('workspace_1', 'user_1', 'admin'), ('workspace_2', 'user_1', 'admin');
       CREATE TABLE goat.integrations (id text PRIMARY KEY);
       INSERT INTO goat.workspaces (id) VALUES ('workspace_1'), ('workspace_2');
       INSERT INTO goat.chat_sessions (id) VALUES ('chat_1');
@@ -36,6 +41,7 @@ describe("Postgres immutable Plugin repository", () => {
       "0228_goat_plugins.sql",
       "0232_workspace_authored_skills.sql",
       "0234_goat_plugin_gateway_registrations.sql",
+      "0263_personal_company_skills.sql",
     ]) {
       const migration = await readFile(
         path.resolve(import.meta.dirname, "../../..", `drizzle/${migrationName}`),
@@ -48,6 +54,14 @@ describe("Postgres immutable Plugin repository", () => {
     await database.exec(`
       ALTER TABLE goat.plugins ADD COLUMN events jsonb NOT NULL DEFAULT '[]'::jsonb;
       ALTER TABLE goat.plugins ADD COLUMN event_modes jsonb NOT NULL DEFAULT '{}'::jsonb;
+    `);
+    await database.exec(`
+      ALTER TABLE goat.plugins ADD COLUMN owner_user_id text;
+      DROP INDEX goat.plugins_workspace_live_name_idx;
+      CREATE UNIQUE INDEX plugins_workspace_live_name_idx ON goat.plugins (workspace_id, owner_user_id, name) WHERE status <> 'archived';
+      ALTER TABLE goat.workspace_plugin_data ADD COLUMN owner_user_id text NOT NULL DEFAULT 'user_1';
+      ALTER TABLE goat.workspace_plugin_data DROP CONSTRAINT goat_workspace_plugin_data_workspace_id_plugin_name_pk;
+      ALTER TABLE goat.workspace_plugin_data ADD PRIMARY KEY (workspace_id, owner_user_id, plugin_name);
     `);
     db = drizzle(database);
     repository = new PostgresPluginRepository(db, {
@@ -73,6 +87,102 @@ describe("Postgres immutable Plugin repository", () => {
 
   afterAll(async () => {
     await database.close();
+  });
+
+  it("keeps a legacy installation hidden and intact when its member reinstalls personally", async () => {
+    const member = actor();
+    const plugin = await resolvedPlugin("linear", "review", "Linear review.");
+    const legacy = await repository.install({
+      actor: member,
+      plugin,
+      idempotencyKey: "legacy-linear",
+    });
+    await database.query("UPDATE goat.plugins SET owner_user_id = NULL WHERE id = $1", [
+      legacy.plugin.id,
+    ]);
+
+    expect(await repository.list({ actor: member })).toEqual([]);
+    expect(await repository.get({ actor: member, name: "linear" })).toBeNull();
+
+    const personal = await repository.install({
+      actor: member,
+      plugin,
+      idempotencyKey: "personal-linear",
+    });
+    expect(personal.plugin.id).not.toBe(legacy.plugin.id);
+    expect((await repository.list({ actor: member })).map((item) => item.id)).toEqual([
+      personal.plugin.id,
+    ]);
+    expect(
+      (
+        await database.query(
+          "SELECT owner_user_id, status, archived_at FROM goat.plugins WHERE id = $1",
+          [legacy.plugin.id],
+        )
+      ).rows,
+    ).toEqual([{ owner_user_id: null, status: "enabled", archived_at: null }]);
+  });
+
+  it("isolates two members' installations, events, discovery, saved data, and pinned runtime", async () => {
+    await database.exec(
+      "INSERT INTO goat.workspace_members VALUES ('workspace_1', 'user_2', 'member')",
+    );
+    const alice = actor();
+    const bob = actor({ userId: "user_2", role: "member" });
+    const plugin = await resolvedPlugin("linear", "review", "Personal review.", {
+      events: true,
+      mcp: true,
+      remoteMcp: true,
+    });
+    const first = await repository.install({ actor: alice, plugin, idempotencyKey: "same-key" });
+    expect(await repository.list({ actor: bob })).toEqual([]);
+    expect(await repository.get({ actor: bob, name: "linear" })).toBeNull();
+    await expect(
+      repository.setStatus({ actor: bob, name: "linear", status: "disabled" }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    const second = await repository.install({ actor: bob, plugin, idempotencyKey: "same-key" });
+    expect(second.plugin.id).not.toBe(first.plugin.id);
+    expect((await repository.list({ actor: alice })).map((p) => p.id)).toEqual([first.plugin.id]);
+    expect((await repository.list({ actor: bob })).map((p) => p.id)).toEqual([second.plugin.id]);
+    await repository.setEventEnabled({
+      actor: alice,
+      name: "linear",
+      eventId: "issue.created",
+      enabled: true,
+    });
+    expect((await repository.get({ actor: bob, name: "linear" }))?.eventModes).toEqual({});
+    const [registration] = await listActivePluginGatewayRegistrations(db, alice);
+    expect(
+      await storePluginGatewayDiscoveryFailure(db, {
+        ...bob,
+        registrationId: registration!.id,
+        error: "Teammate write",
+        attemptedAt: new Date(),
+        retryAfter: new Date(),
+      }),
+    ).toBeUndefined();
+    expect(
+      (await listActivePluginGatewayRegistrations(db, alice))[0]?.lastDiscoveryError,
+    ).toBeNull();
+    await database.query(
+      "INSERT INTO goat.chat_session_plugins (chat_session_id, plugin_id) VALUES ($1, $2)",
+      ["chat_1", first.plugin.id],
+    );
+    expect(await loadChatSessionPluginRuntime(db, { ...bob, chatSessionId: "chat_1" })).toEqual({
+      plugins: [],
+      skills: [],
+      mcpPlugins: [],
+    });
+    await repository.archive({ actor: alice, name: "linear" });
+    expect((await repository.get({ actor: bob, name: "linear" }))?.status).toBe("enabled");
+    expect(await skillRepository.listCatalog({ actor: alice })).toEqual([]);
+    expect(await skillRepository.listCatalog({ actor: bob })).toHaveLength(1);
+    await database.exec("DELETE FROM goat.workspace_members WHERE user_workos_id = 'user_2'");
+    expect(await repository.list({ actor: bob })).toEqual([]);
+    expect(await listActivePluginGatewayRegistrations(db, bob)).toEqual([]);
+    await expect(
+      repository.install({ actor: bob, plugin, idempotencyKey: "revoked" }),
+    ).rejects.toMatchObject({ code: "not_found" });
   });
 
   it("installs package bytes and valid skill bundles atomically without standalone projection", async () => {
@@ -136,7 +246,7 @@ describe("Postgres immutable Plugin repository", () => {
       ],
     });
     await expect(skillRepository.listCatalog({ actor: actor() })).resolves.toEqual([
-      { id: "review", name: "review", description: "Review from plugin." },
+      { id: "review", name: "review", description: "Review from plugin.", scope: null },
     ]);
     await expect(skillRepository.get({ actor: actor(), name: "review" })).resolves.toMatchObject({
       name: "review",
@@ -171,16 +281,22 @@ describe("Postgres immutable Plugin repository", () => {
       },
     ]);
     await expect(skillRepository.listCatalog({ actor: actor() })).resolves.toEqual([
-      { id: "shared", name: "shared", description: "From dash." },
+      { id: "shared", name: "shared", description: "From dash.", scope: null },
     ]);
 
     const standalone = await skillRepository.install({
+      scope: "company",
       actor: actor(),
       idempotencyKey: "standalone",
       bundle: await resolvedSkill("shared", "Standalone wins."),
     });
     await expect(skillRepository.listCatalog({ actor: actor() })).resolves.toEqual([
-      { id: "shared", name: "shared", description: "Standalone wins." },
+      {
+        id: standalone.installation.id,
+        name: "shared",
+        description: "Standalone wins.",
+        scope: "company",
+      },
     ]);
     const inspected = await repository.get({ actor: actor(), name: "a-tools" });
     expect(inspected?.installReport.collisions).toEqual([
@@ -196,7 +312,7 @@ describe("Postgres immutable Plugin repository", () => {
       enabled: false,
     });
     await expect(skillRepository.listCatalog({ actor: actor() })).resolves.toEqual([
-      { id: "shared", name: "shared", description: "From dash." },
+      { id: "shared", name: "shared", description: "From dash.", scope: null },
     ]);
     await expect(skillRepository.get({ actor: actor(), name: "shared" })).resolves.toMatchObject({
       id: standalone.installation.id,
@@ -219,7 +335,11 @@ describe("Postgres immutable Plugin repository", () => {
     const db = drizzle(database);
 
     await expect(
-      loadChatSessionPluginRuntime(db, { workspaceId: "workspace_1", chatSessionId: "chat_1" }),
+      loadChatSessionPluginRuntime(db, {
+        userId: "user_1",
+        workspaceId: "workspace_1",
+        chatSessionId: "chat_1",
+      }),
     ).resolves.toMatchObject({
       plugins: [{ id: installed.plugin.id, name: "quality-tools" }],
       skills: [{ name: "review", body: "Use review." }],
@@ -227,7 +347,11 @@ describe("Postgres immutable Plugin repository", () => {
 
     await repository.setStatus({ actor: actor(), name: "quality-tools", status: "disabled" });
     await expect(
-      loadChatSessionPluginRuntime(db, { workspaceId: "workspace_1", chatSessionId: "chat_1" }),
+      loadChatSessionPluginRuntime(db, {
+        userId: "user_1",
+        workspaceId: "workspace_1",
+        chatSessionId: "chat_1",
+      }),
     ).resolves.toEqual({ plugins: [], skills: [], mcpPlugins: [] });
 
     await repository.setStatus({ actor: actor(), name: "quality-tools", status: "enabled" });
@@ -239,7 +363,11 @@ describe("Postgres immutable Plugin repository", () => {
     });
     expect(replacement.plugin.id).not.toBe(installed.plugin.id);
     await expect(
-      loadChatSessionPluginRuntime(db, { workspaceId: "workspace_1", chatSessionId: "chat_1" }),
+      loadChatSessionPluginRuntime(db, {
+        userId: "user_1",
+        workspaceId: "workspace_1",
+        chatSessionId: "chat_1",
+      }),
     ).resolves.toEqual({ plugins: [], skills: [], mcpPlugins: [] });
   });
 
@@ -258,7 +386,11 @@ describe("Postgres immutable Plugin repository", () => {
     const db = drizzle(database);
 
     await expect(
-      loadChatSessionPluginRuntime(db, { workspaceId: "workspace_1", chatSessionId: "chat_1" }),
+      loadChatSessionPluginRuntime(db, {
+        userId: "user_1",
+        workspaceId: "workspace_1",
+        chatSessionId: "chat_1",
+      }),
     ).resolves.toMatchObject({ mcpPlugins: [] });
     await expect(
       repository.approveMcp({
@@ -275,7 +407,11 @@ describe("Postgres immutable Plugin repository", () => {
     });
     expect(approved.mcpApprovedIntegrity).toBe(installed.plugin.integrity);
     await expect(
-      loadChatSessionPluginRuntime(db, { workspaceId: "workspace_1", chatSessionId: "chat_1" }),
+      loadChatSessionPluginRuntime(db, {
+        userId: "user_1",
+        workspaceId: "workspace_1",
+        chatSessionId: "chat_1",
+      }),
     ).resolves.toMatchObject({
       mcpPlugins: [
         {
@@ -299,7 +435,11 @@ describe("Postgres immutable Plugin repository", () => {
     const revoked = await repository.revokeMcp({ actor: actor(), name: "quality-tools" });
     expect(revoked.mcpApprovedIntegrity).toBeNull();
     await expect(
-      loadChatSessionPluginRuntime(db, { workspaceId: "workspace_1", chatSessionId: "chat_1" }),
+      loadChatSessionPluginRuntime(db, {
+        userId: "user_1",
+        workspaceId: "workspace_1",
+        chatSessionId: "chat_1",
+      }),
     ).resolves.toMatchObject({ mcpPlugins: [] });
 
     await repository.approveMcp({
@@ -342,7 +482,11 @@ describe("Postgres immutable Plugin repository", () => {
     expect(replacement.plugin.integrity).not.toBe(installed.plugin.integrity);
     expect(replacement.plugin.mcpApprovedIntegrity).toBeNull();
     await expect(
-      loadChatSessionPluginRuntime(db, { workspaceId: "workspace_1", chatSessionId: "chat_1" }),
+      loadChatSessionPluginRuntime(db, {
+        userId: "user_1",
+        workspaceId: "workspace_1",
+        chatSessionId: "chat_1",
+      }),
     ).resolves.toMatchObject({
       plugins: [{ id: replacement.plugin.id }],
       mcpPlugins: [],
@@ -365,6 +509,7 @@ describe("Postgres immutable Plugin repository", () => {
     const db = drizzle(database);
 
     const runtime = await loadChatSessionPluginRuntime(db, {
+      userId: "user_1",
       workspaceId: "workspace_1",
       chatSessionId: "chat_1",
     });
@@ -379,7 +524,11 @@ describe("Postgres immutable Plugin repository", () => {
       integrity: installed.plugin.integrity,
     });
     await expect(
-      loadChatSessionPluginRuntime(db, { workspaceId: "workspace_1", chatSessionId: "chat_1" }),
+      loadChatSessionPluginRuntime(db, {
+        userId: "user_1",
+        workspaceId: "workspace_1",
+        chatSessionId: "chat_1",
+      }),
     ).resolves.toMatchObject({
       mcpPlugins: [
         {
@@ -406,6 +555,7 @@ describe("Postgres immutable Plugin repository", () => {
     `);
 
     const [registration] = await listActivePluginGatewayRegistrations(db, {
+      userId: "user_1",
       workspaceId: "workspace_1",
       pluginName: "linear",
     });
@@ -429,6 +579,7 @@ describe("Postgres immutable Plugin repository", () => {
     const discoveredAt = new Date("2026-08-26T12:00:00.000Z");
     const refreshAfter = new Date("2026-08-26T13:00:00.000Z");
     await storePluginGatewayDiscoverySnapshot(db, {
+      userId: "user_1",
       workspaceId: "workspace_1",
       registrationId: registration!.id,
       discoveredAt,
@@ -449,6 +600,7 @@ describe("Postgres immutable Plugin repository", () => {
     });
     await expect(
       listActivePluginGatewayRegistrations(db, {
+        userId: "user_1",
         workspaceId: "workspace_1",
         pluginName: "linear",
       }),
@@ -480,6 +632,7 @@ describe("Postgres immutable Plugin repository", () => {
 
     const attemptedAt = new Date("2026-08-26T12:30:00.000Z");
     await storePluginGatewayDiscoveryFailure(db, {
+      userId: "user_1",
       workspaceId: "workspace_1",
       registrationId: registration!.id,
       error: "Provider discovery timed out.",
@@ -498,7 +651,7 @@ describe("Postgres immutable Plugin repository", () => {
 
     await repository.setStatus({ actor: actor(), name: "linear", status: "disabled" });
     await expect(
-      listActivePluginGatewayRegistrations(db, { workspaceId: "workspace_1" }),
+      listActivePluginGatewayRegistrations(db, { userId: "user_1", workspaceId: "workspace_1" }),
     ).resolves.toEqual([]);
     await expect(
       database.query<{ count: number }>(
@@ -554,6 +707,72 @@ describe("Postgres immutable Plugin repository", () => {
     await expect(
       database.query<{ plugins: number }>("SELECT COUNT(*)::int AS plugins FROM goat.plugins"),
     ).resolves.toMatchObject({ rows: [{ plugins: 2 }] });
+  });
+
+  it("atomically replaces a live package while preserving its status and event settings", async () => {
+    const installed = await repository.install({
+      actor: actor(),
+      idempotencyKey: "update-first",
+      plugin: await resolvedPlugin("quality-tools", "review", "First.", {
+        events: true,
+        mcp: true,
+        remoteMcp: true,
+      }),
+    });
+    await repository.setEventEnabled({
+      actor: actor(),
+      name: "quality-tools",
+      eventId: "issue.created",
+      enabled: true,
+    });
+    await repository.setStatus({ actor: actor(), name: "quality-tools", status: "disabled" });
+
+    const nextPackage = await resolvedPlugin("quality-tools", "review", "Second.", {
+      events: true,
+      mcp: true,
+      remoteMcp: true,
+    });
+    nextPackage.source = {
+      ...nextPackage.source,
+      ref: "b".repeat(40),
+      resolvedCommit: "b".repeat(40),
+    };
+    const replacement = await repository.install({
+      actor: actor(),
+      idempotencyKey: "update-second",
+      plugin: nextPackage,
+    });
+
+    expect(replacement).toMatchObject({
+      idempotentReplay: false,
+      plugin: {
+        status: "disabled",
+        eventModes: { "issue.created": true },
+        mcpApprovedIntegrity: null,
+      },
+    });
+    expect(replacement.plugin.id).not.toBe(installed.plugin.id);
+    await expect(
+      database.query<{ status: string; archived: boolean }>(
+        "SELECT status, archived_at IS NOT NULL AS archived FROM goat.plugins WHERE id = $1",
+        [installed.plugin.id],
+      ),
+    ).resolves.toMatchObject({
+      rows: [{ status: "archived", archived: true }],
+    });
+    await expect(
+      database.query<{ status: string; archived: boolean }>(
+        "SELECT status, archived_at IS NOT NULL AS archived FROM goat.plugins WHERE id = $1",
+        [replacement.plugin.id],
+      ),
+    ).resolves.toMatchObject({
+      rows: [{ status: "disabled", archived: false }],
+    });
+    await expect(
+      database.query<{ plugin_id: string }>(
+        "SELECT plugin_id FROM goat.plugin_gateway_registrations",
+      ),
+    ).resolves.toMatchObject({ rows: [{ plugin_id: replacement.plugin.id }] });
   });
 
   it("deletes archived plugin data rows before their private blobs", async () => {

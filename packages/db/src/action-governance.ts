@@ -26,6 +26,7 @@ export type ActionCapabilityQuoteRecord = {
 };
 
 export type ActionApprovalRecord = {
+  paramsHash?: string;
   actionId: string;
   sourceId: string;
   capabilityId: string;
@@ -45,6 +46,7 @@ export async function registerActionApproval(input: {
   capabilityId: string;
   params: Record<string, unknown>;
   decision?: "pending" | "denied";
+  approvalContext?: string;
   now?: Date;
   db?: DbLike;
 }): Promise<ActionApprovalRecord | null> {
@@ -55,7 +57,9 @@ export async function registerActionApproval(input: {
     actionId: input.actionId,
     sourceId: input.sourceId,
     capabilityId: input.capabilityId,
-    inputHash: actionApprovalInputHash(input.params),
+    inputHash: actionApprovalInputHash(input.params, input.approvalContext),
+    // Task staging matches parameters; dispatch still checks the full revision-bound hash.
+    ...(input.approvalContext ? { paramsHash: actionApprovalInputHash(input.params) } : {}),
     status: input.decision ?? "pending",
     requestedAt: now.toISOString(),
     ...(input.decision === "denied" ? { resolvedAt: now.toISOString() } : {}),
@@ -166,8 +170,10 @@ export async function resolveActionApproval(input: {
     : { ok: false, reason: "conflict" };
 }
 
-export function actionApprovalInputHash(params: Record<string, unknown>) {
-  return createHash("sha256").update(stableJson(params)).digest("hex");
+export function actionApprovalInputHash(params: Record<string, unknown>, approvalContext?: string) {
+  return createHash("sha256")
+    .update(stableJson(approvalContext ? { params, approvalContext } : params))
+    .digest("hex");
 }
 
 export async function recordActionSourceDiscovery(input: {
@@ -197,6 +203,7 @@ export async function claimActionInvocation(input: {
   sourceId: string;
   invocationId: string;
   maxCalls: number;
+  deduplicationKey?: string;
   db?: DbLike;
 }): Promise<
   | { ok: true; callCount: number; duplicate: boolean }
@@ -205,20 +212,19 @@ export async function claimActionInvocation(input: {
   const db = input.db ?? getDb();
   await ensureActionTurn(input.turn, db);
   const sourceIds = stringifyPostgresJson([input.sourceId]);
-  const invocationIds = stringifyPostgresJson([input.invocationId]);
+  const claimKeys = [
+    input.invocationId,
+    ...(input.deduplicationKey ? [input.deduplicationKey] : []),
+  ];
+  const invocationIds = stringifyPostgresJson(claimKeys);
+  const alreadyClaimed = sql`(${actionTurns.invocationIds} ? ${input.invocationId}
+    OR (${input.deduplicationKey ?? null}::text IS NOT NULL
+      AND ${actionTurns.invocationIds} ? ${input.deduplicationKey ?? null}::text))`;
   const [claimed] = await db
     .update(actionTurns)
     .set({
-      actionCallCount: sql`CASE
-        WHEN ${actionTurns.invocationIds} @> ${invocationIds}::jsonb
-          THEN ${actionTurns.actionCallCount}
-        ELSE ${actionTurns.actionCallCount} + 1
-      END`,
-      invocationIds: sql`CASE
-        WHEN ${actionTurns.invocationIds} @> ${invocationIds}::jsonb
-          THEN ${actionTurns.invocationIds}
-        ELSE ${actionTurns.invocationIds} || ${invocationIds}::jsonb
-      END`,
+      actionCallCount: sql`${actionTurns.actionCallCount} + 1`,
+      invocationIds: sql`${actionTurns.invocationIds} || ${invocationIds}::jsonb`,
       updatedAt: new Date(),
       expiresAt: actionTurnExpiresAt(),
     })
@@ -226,7 +232,7 @@ export async function claimActionInvocation(input: {
       and(
         actionTurnMatches(input.turn),
         sql`${actionTurns.listedSourceIds} @> ${sourceIds}::jsonb`,
-        sql`NOT (${actionTurns.invocationIds} @> ${invocationIds}::jsonb)`,
+        sql`NOT ${alreadyClaimed}`,
         sql`${actionTurns.actionCallCount} < ${input.maxCalls}`,
       ),
     )
@@ -242,7 +248,7 @@ export async function claimActionInvocation(input: {
     .from(actionTurns)
     .where(actionTurnMatches(input.turn))
     .limit(1);
-  if (state?.invocationIds.includes(input.invocationId)) {
+  if (state && claimKeys.some((key) => state.invocationIds.includes(key))) {
     return { ok: true, callCount: state.actionCallCount, duplicate: true };
   }
   return state?.listedSourceIds.includes(input.sourceId)
@@ -476,6 +482,7 @@ function actionApprovalRecord(value: unknown): ActionApprovalRecord | null {
     sourceId: record.sourceId,
     capabilityId: record.capabilityId,
     inputHash: record.inputHash,
+    ...(typeof record.paramsHash === "string" ? { paramsHash: record.paramsHash } : {}),
     status: record.status,
     requestedAt: record.requestedAt,
     ...(typeof record.resolvedAt === "string" ? { resolvedAt: record.resolvedAt } : {}),

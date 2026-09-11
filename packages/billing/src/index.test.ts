@@ -266,7 +266,7 @@ describe("fees and hosted tools", () => {
       providerCostUsdMicros: 11_565,
       costBasis: {
         costSource: "platform_model_pricing",
-        pricingVersion: "2026-09-04.standard.1",
+        pricingVersion: "2026-09-10.standard.1",
       },
     });
   });
@@ -287,7 +287,7 @@ describe("fees and hosted tools", () => {
       totalCostUsdMicros: 1_000_000,
       costBasis: {
         costSource: "broker_metered",
-        pricingVersion: "2026-09-04.standard.1",
+        pricingVersion: "2026-09-10.standard.1",
       },
     });
   });

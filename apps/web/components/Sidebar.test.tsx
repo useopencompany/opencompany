@@ -8,6 +8,7 @@ import {
   HOME_NAVIGATION_EVENT,
 } from "@/lib/chat-navigation";
 import { clearAllLocalChatStates, setLocalChatState } from "@/lib/chat-session-state";
+import { clearOptimisticArchives } from "@/lib/optimistic-archives";
 import {
   addOptimisticChatSummary,
   clearAllOptimisticChatSummaries,
@@ -36,7 +37,9 @@ const featureFlagsMock = vi.hoisted(() => ({
   taskSpawning: false,
   autoModelRouting: false,
   legacyBrain: true,
+  reviewInbox: false,
 }));
+const reviewCountMock = vi.hoisted(() => ({ value: 0 }));
 const recentChatsMock = vi.hoisted(() => ({
   value: [] as Array<{
     id: string;
@@ -57,6 +60,17 @@ const recentChatsMock = vi.hoisted(() => ({
     updatedAt: string;
     lastSeenAt?: string | null;
     pinnedAt: string | null;
+  }>,
+}));
+const sidebarTasksMock = vi.hoisted(() => ({
+  value: [] as Array<{
+    id: string;
+    conversationId: string;
+    displayId: string;
+    name: string;
+    status: "queued" | "running" | "waiting" | "succeeded" | "failed" | "canceled";
+    hasUnseen: boolean;
+    updatedAt: string;
   }>,
 }));
 const tasksMock = vi.hoisted(() => ({
@@ -98,48 +112,98 @@ const chatCollectionMocks = vi.hoisted(() => ({
   }),
 }));
 
+const taskCommandsMock = vi.hoisted(() => ({
+  archiveHeadlessTask: vi.fn(async () => ({ id: "task_1" })),
+}));
+
 vi.mock("@/lib/headless-chat-commands", () => chatCommandsMock);
+
+vi.mock("@/lib/headless-task-commands", () => taskCommandsMock);
 
 vi.mock("@/lib/headless-chat-collections", () => chatCollectionMocks);
 
-vi.mock("@/components/AppDataProvider", () => ({
-  useAppData: () => ({
-    user: {
-      email: "ada@example.com",
-      firstName: "Ada",
-      lastName: "Lovelace",
-      avatarUrl: null,
+// The provider applies the user's pending archives to the chat list it publishes, so the mock does
+// the same: these tests are about what the sidebar shows between the click and the projection.
+vi.mock("@/components/AppDataProvider", async () => {
+  const { useMemo } = await import("react");
+  const { useOptimisticArchives } = await import("@/lib/optimistic-archives");
+  return {
+    useAppData: () => {
+      const pendingArchives = useOptimisticArchives();
+      // Memoized like the provider's own list: the sidebar syncs pin overrides against the chat
+      // list by identity, so a fresh array on every render would loop.
+      const chats = recentChatsMock.value;
+      const recentChats = useMemo(
+        () =>
+          pendingArchives.size === 0
+            ? chats
+            : chats.filter((chat) => !pendingArchives.has(chat.id)),
+        [chats, pendingArchives],
+      );
+      // Tasks are hidden by their conversation, which is the key the archive store tracks.
+      const tasks = sidebarTasksMock.value;
+      const sidebarTasks = useMemo(
+        () =>
+          pendingArchives.size === 0
+            ? tasks
+            : tasks.filter((task) => !pendingArchives.has(task.conversationId)),
+        [pendingArchives, tasks],
+      );
+      return {
+        user: {
+          email: "ada@example.com",
+          firstName: "Ada",
+          lastName: "Lovelace",
+          avatarUrl: null,
+        },
+        workspace: { id: "goat_ws_1", name: "Ada's Workspace", role: workspaceRoleMock.value },
+        plan: "hobby",
+        workspaces: workspacesMock.value,
+        workspaceMembers: [],
+        brains: [
+          {
+            id: "goat_brain_1",
+            name: "General",
+            slug: "general",
+            description: null,
+            visibility: "workspace",
+          },
+        ],
+        activeBrain: {
+          id: "goat_brain_1",
+          name: "General",
+          slug: "general",
+          description: null,
+          visibility: "workspace",
+        },
+        tasks: tasksMock.value,
+        sidebarTasks,
+        recentChats,
+        featureFlags: {
+          taskSpawning: featureFlagsMock.taskSpawning,
+          autoModelRouting: featureFlagsMock.autoModelRouting,
+          legacyBrain: featureFlagsMock.legacyBrain,
+          reviewInbox: featureFlagsMock.reviewInbox,
+        },
+        reviewCount: reviewCountMock.value,
+        mcpSetup: { preferredClient: null, completedAt: mcpSetupMock.completedAt },
+      };
     },
-    workspace: { id: "goat_ws_1", name: "Ada's Workspace", role: workspaceRoleMock.value },
-    plan: "hobby",
-    workspaces: workspacesMock.value,
-    workspaceMembers: [],
-    brains: [
-      {
-        id: "goat_brain_1",
-        name: "General",
-        slug: "general",
-        description: null,
-        visibility: "workspace",
-      },
-    ],
-    activeBrain: {
-      id: "goat_brain_1",
-      name: "General",
-      slug: "general",
-      description: null,
-      visibility: "workspace",
-    },
-    tasks: tasksMock.value,
-    recentChats: recentChatsMock.value,
-    featureFlags: {
-      taskSpawning: featureFlagsMock.taskSpawning,
-      autoModelRouting: featureFlagsMock.autoModelRouting,
-      legacyBrain: featureFlagsMock.legacyBrain,
-    },
-    mcpSetup: { preferredClient: null, completedAt: mcpSetupMock.completedAt },
-  }),
-}));
+  };
+});
+
+function archivableChat(id: string, title: string) {
+  return {
+    id,
+    title,
+    model: "claude-sonnet-5",
+    engine: "opencompany" as const,
+    codexComposerSettings: null,
+    preview: "Ready",
+    updatedAt: "2026-07-14T09:00:00.000Z",
+    pinnedAt: null,
+  };
+}
 
 describe("Sidebar", () => {
   afterEach(() => {
@@ -150,10 +214,14 @@ describe("Sidebar", () => {
     mcpSetupMock.completedAt = null;
     featureFlagsMock.taskSpawning = false;
     featureFlagsMock.legacyBrain = true;
+    featureFlagsMock.reviewInbox = false;
+    reviewCountMock.value = 0;
     recentChatsMock.value = [];
     tasksMock.value = [];
+    sidebarTasksMock.value = [];
     clearAllLocalChatStates();
     clearAllOptimisticChatSummaries();
+    clearOptimisticArchives();
     consumePendingChatComposerFocus("goat_chat_focus");
   });
 
@@ -421,6 +489,7 @@ describe("Sidebar", () => {
     const tasks = within(primaryNav).getByRole("link", { name: "Tasks" });
     const workflows = within(primaryNav).getByRole("link", { name: "Workflows" });
     expect(tasks).toHaveAttribute("href", "/tasks");
+    // No row is listed for this Task, so the nav row keeps the current-page claim.
     expect(tasks).toHaveAttribute("aria-current", "page");
     expect(home.nextElementSibling).toBe(tasks);
     expect(tasks.nextElementSibling).toBe(workflows);
@@ -471,9 +540,189 @@ describe("Sidebar", () => {
       "href",
       "/chat/goat_chat_pinned",
     );
-    const recentNav = screen.getByRole("navigation", { name: "Recent chats" });
+    const recentNav = screen.getByRole("navigation", { name: "Chats" });
     expect(within(recentNav).getByRole("link", { name: "Recent chat" })).toBeInTheDocument();
     expect(within(recentNav).queryByRole("link", { name: "Pinned chat" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the list named Chats while Tasks are disabled", () => {
+    featureFlagsMock.taskSpawning = false;
+    sidebarTasksMock.value = [
+      taskRow("task_hidden", { name: "Hidden task", updatedAt: "2026-07-14T09:05:00.000Z" }),
+    ];
+    recentChatsMock.value = [chatRow("chat_only", { title: "Only chat" })];
+
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.getByRole("navigation", { name: "Chats" })).toBeInTheDocument();
+    expect(screen.queryByText("Chats and tasks")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Hidden task/ })).not.toBeInTheDocument();
+  });
+
+  it("lists chats and tasks together in one recency-ordered section", () => {
+    featureFlagsMock.taskSpawning = true;
+    recentChatsMock.value = [
+      chatRow("chat_older", {
+        title: "Older chat",
+        updatedAt: "2026-07-14T09:00:00.000Z",
+      }),
+      chatRow("chat_newer", {
+        title: "Newer chat",
+        updatedAt: "2026-07-14T09:10:00.000Z",
+      }),
+    ];
+    sidebarTasksMock.value = [
+      taskRow("task_middle", {
+        displayId: "T-12",
+        name: "Middle task",
+        updatedAt: "2026-07-14T09:05:00.000Z",
+      }),
+    ];
+
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    const workNav = screen.getByRole("navigation", { name: "Chats and tasks" });
+    expect(screen.getByText("Chats and tasks")).toBeInTheDocument();
+    expect(
+      within(workNav)
+        .getAllByRole("link")
+        .map((link) => link.getAttribute("href")),
+    ).toEqual(["/chat/chat_newer", "/tasks/T-12", "/chat/chat_older"]);
+    expect(within(workNav).getByRole("link", { name: /Middle task/ })).toHaveTextContent("T-12");
+  });
+
+  it("shows the same unread dot and working spinner for tasks as for chats", () => {
+    featureFlagsMock.taskSpawning = true;
+    sidebarTasksMock.value = [
+      taskRow("task_running", {
+        displayId: "T-1",
+        name: "Running task",
+        status: "running",
+        updatedAt: "2026-07-14T09:10:00.000Z",
+      }),
+      taskRow("task_unread", {
+        displayId: "T-2",
+        name: "Finished task",
+        status: "succeeded",
+        hasUnseen: true,
+        updatedAt: "2026-07-14T09:05:00.000Z",
+      }),
+      taskRow("task_read", {
+        displayId: "T-3",
+        name: "Read task",
+        status: "succeeded",
+        updatedAt: "2026-07-14T09:00:00.000Z",
+      }),
+    ];
+
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.getByTestId("sidebar-chat-working")).toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-chat-unseen")).toBeInTheDocument();
+    expect(screen.getAllByTestId(/sidebar-chat-/)).toHaveLength(2);
+  });
+
+  it("archives a settled task from its row and offers no archive on a running one", async () => {
+    const user = userEvent.setup();
+    featureFlagsMock.taskSpawning = true;
+    pathnameMock.value = "/tasks/T-2";
+    sidebarTasksMock.value = [
+      taskRow("task_running", {
+        displayId: "T-1",
+        name: "Running task",
+        status: "running",
+        updatedAt: "2026-07-14T09:10:00.000Z",
+      }),
+      taskRow("task_settled", {
+        displayId: "T-2",
+        name: "Settled task",
+        status: "succeeded",
+        updatedAt: "2026-07-14T09:05:00.000Z",
+      }),
+    ];
+
+    taskCommandsMock.archiveHeadlessTask.mockImplementationOnce(() => new Promise(() => {}));
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.queryByRole("button", { name: "Archive Running task" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pin Settled task" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Archive Settled task" }));
+
+    expect(taskCommandsMock.archiveHeadlessTask).toHaveBeenCalledWith("task_settled", {
+      scopeKey: workspacesMock.value[0]!.id,
+    });
+    // The row and the route move on the click, like an archived chat's, rather than a beat later
+    // when the write and its projection land.
+    expect(screen.queryByRole("link", { name: /Settled task/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Running task/ })).toBeInTheDocument();
+    expect(routerMock.push).toHaveBeenCalledWith("/tasks");
+  });
+
+  it("keeps the Tasks nav row current on the board itself", () => {
+    pathnameMock.value = "/tasks";
+    featureFlagsMock.taskSpawning = true;
+
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    const nav = screen.getByRole("navigation", { name: "opencompany primary" });
+    expect(within(nav).getByRole("link", { name: "Tasks" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+  });
+
+  // An older or archived Task has no row in a list bounded by recency, so the nav row keeps the
+  // claim rather than leaving the page with nothing marked current.
+  it("keeps the Tasks nav row current on a task the list does not hold", () => {
+    pathnameMock.value = "/tasks/T-99";
+    featureFlagsMock.taskSpawning = true;
+    sidebarTasksMock.value = [taskRow("task_other", { displayId: "T-1", name: "Other task" })];
+
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    const nav = screen.getByRole("navigation", { name: "opencompany primary" });
+    expect(within(nav).getByRole("link", { name: "Tasks" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(screen.getAllByText("Other task")).toHaveLength(1);
+  });
+
+  it("marks a task row current on its run subroute and a lowercased display id", () => {
+    featureFlagsMock.taskSpawning = true;
+    pathnameMock.value = "/tasks/t-12/run";
+    sidebarTasksMock.value = [
+      taskRow("task_open", { displayId: "T-12", name: "Open task", status: "running" }),
+    ];
+
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.getByRole("link", { name: /Open task/ })).toHaveAttribute("aria-current", "page");
+    // Exactly one element claims the page: the nav row still highlights for its subtree but
+    // defers to the row for the Task actually open.
+    const nav = screen.getByRole("navigation", { name: "opencompany primary" });
+    const tasksNavRow = within(nav).getByRole("link", { name: "Tasks" });
+    expect(tasksNavRow).toHaveClass("bg-surface-active");
+    expect(tasksNavRow).not.toHaveAttribute("aria-current");
+  });
+
+  it("restores the task row and reports the failure when archiving rejects", async () => {
+    const user = userEvent.setup();
+    featureFlagsMock.taskSpawning = true;
+    taskCommandsMock.archiveHeadlessTask.mockRejectedValueOnce(new Error("network unavailable"));
+    sidebarTasksMock.value = [
+      taskRow("task_settled", { displayId: "T-2", name: "Settled task", status: "succeeded" }),
+    ];
+
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "Archive Settled task" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("link", { name: /Settled task/ })).toBeInTheDocument(),
+    );
+    expect(routerMock.push).not.toHaveBeenCalled();
   });
 
   it("shows working and unseen chat state in recent rows", () => {
@@ -824,6 +1073,11 @@ describe("Sidebar", () => {
     expect(chatCommandsMock.updateHeadlessChatConversation).toHaveBeenCalledTimes(2);
     expect(screen.getByRole("button", { name: "Unpin Recent chat" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Pin Pinned chat" })).toBeDisabled();
+    // The rows have already moved between sections, so the toggles show the state the user asked
+    // for rather than a spinner over the one they just left.
+    expect(
+      screen.getByRole("button", { name: "Unpin Recent chat" }).querySelector(".animate-spin"),
+    ).toBeNull();
 
     await act(async () => resolvePin({ transactionId: "1" }));
     await waitFor(() =>
@@ -836,33 +1090,60 @@ describe("Sidebar", () => {
     );
   });
 
-  it("keeps the sidebar usable when archiving a chat rejects", async () => {
+  // The write and the projection behind it take about a second. The user has already dismissed the
+  // chat, so the row leaves on the click rather than sitting there under a spinner.
+  it("drops an archived chat row before the write settles", async () => {
+    const user = userEvent.setup();
+    let settleArchive!: (value: { transactionId: string }) => void;
+    chatCommandsMock.updateHeadlessChatConversation.mockImplementationOnce(
+      () => new Promise((resolve) => (settleArchive = resolve)),
+    );
+    recentChatsMock.value = [
+      archivableChat("conversation_archive", "Archive me"),
+      archivableChat("conversation_keep", "Keep me"),
+    ];
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "Archive Archive me" }));
+
+    expect(screen.queryByRole("link", { name: /Archive me/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Keep me/ })).toBeInTheDocument();
+    await act(async () => settleArchive({ transactionId: "1" }));
+  });
+
+  // Leaving the archived chat open would keep a conversation on screen that is no longer listed
+  // anywhere, so the route moves with the row rather than after the write.
+  it("leaves the archived chat's route on the click", async () => {
+    const user = userEvent.setup();
+    pathnameMock.value = "/chat/conversation_archive";
+    chatCommandsMock.updateHeadlessChatConversation.mockImplementationOnce(
+      () => new Promise(() => {}),
+    );
+    recentChatsMock.value = [archivableChat("conversation_archive", "Archive me")];
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "Archive Archive me" }));
+
+    expect(routerMock.push).toHaveBeenCalledWith("/");
+  });
+
+  it("restores the row and reports the failure when archiving rejects", async () => {
     const user = userEvent.setup();
     chatCommandsMock.updateHeadlessChatConversation.mockRejectedValueOnce(
       new Error("network unavailable"),
     );
-    recentChatsMock.value = [
-      {
-        id: "goat_chat_archive",
-        title: "Archive me",
-        model: "claude-sonnet-5",
-        engine: "opencompany",
-        codexComposerSettings: null,
-        preview: "Ready",
-        updatedAt: "2026-07-14T09:00:00.000Z",
-        pinnedAt: null,
-      },
-    ];
+    recentChatsMock.value = [archivableChat("goat_chat_archive", "Archive me")];
     render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
-    const archiveButton = screen.getByRole("button", { name: "Archive Archive me" });
-    await user.click(archiveButton);
+    await user.click(screen.getByRole("button", { name: "Archive Archive me" }));
 
     expect(chatCommandsMock.updateHeadlessChatConversation).toHaveBeenCalledWith(
       "goat_chat_archive",
       { archived: true },
     );
-    await waitFor(() => expect(archiveButton).toBeEnabled());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Archive Archive me" })).toBeInTheDocument(),
+    );
     expect(routerMock.push).not.toHaveBeenCalled();
   });
 
@@ -875,4 +1156,78 @@ describe("Sidebar", () => {
     expect(aside).toHaveAttribute("aria-hidden", "true");
     expect(aside?.className).toContain("w-0");
   });
+
+  it("hides For review until the beta flag is on", () => {
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.queryByRole("link", { name: /For review/ })).not.toBeInTheDocument();
+  });
+
+  it("shows For review directly below Home with its unread count", () => {
+    featureFlagsMock.reviewInbox = true;
+    reviewCountMock.value = 3;
+
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    const nav = screen.getByRole("navigation", { name: "opencompany primary" });
+    const links = within(nav).getAllByRole("link");
+    expect(links[0]).toHaveTextContent("Home");
+    expect(links[1]).toHaveTextContent("For review");
+    expect(links[1]).toHaveTextContent("3");
+    expect(links[1]).toHaveAttribute("href", "/review");
+  });
+
+  it("omits the count badge when nothing is awaiting review", () => {
+    featureFlagsMock.reviewInbox = true;
+    reviewCountMock.value = 0;
+
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.getByRole("link", { name: /For review/ })).toHaveTextContent(/^For review$/);
+  });
+
+  it("marks For review as the current page on its route", () => {
+    featureFlagsMock.reviewInbox = true;
+    pathnameMock.value = "/review";
+
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.getByRole("link", { name: /For review/ })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+  });
 });
+
+function chatRow(
+  id: string,
+  overrides: Partial<(typeof recentChatsMock.value)[number]> = {},
+): (typeof recentChatsMock.value)[number] {
+  return {
+    id,
+    title: `${id} title`,
+    model: "claude-sonnet-5",
+    engine: "opencompany",
+    codexComposerSettings: null,
+    preview: "Ready",
+    updatedAt: "2026-07-14T09:00:00.000Z",
+    pinnedAt: null,
+    ...overrides,
+  };
+}
+
+function taskRow(
+  id: string,
+  overrides: Partial<(typeof sidebarTasksMock.value)[number]> = {},
+): (typeof sidebarTasksMock.value)[number] {
+  return {
+    id,
+    conversationId: `conversation_${id}`,
+    displayId: id.toUpperCase(),
+    name: `${id} name`,
+    status: "succeeded",
+    hasUnseen: false,
+    updatedAt: "2026-07-14T09:00:00.000Z",
+    ...overrides,
+  };
+}

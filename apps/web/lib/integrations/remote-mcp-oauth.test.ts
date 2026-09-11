@@ -29,6 +29,7 @@ import {
   verifyLinearMcpState,
 } from "@/lib/integrations/linear-mcp";
 import { startNeonMcpOAuth, verifyNeonMcpState } from "@/lib/integrations/neon-mcp";
+import { startNotionMcpOAuth, verifyNotionMcpState } from "@/lib/integrations/notion-mcp";
 import { startPostHogMcpOAuth, verifyPostHogMcpState } from "@/lib/integrations/posthog-mcp";
 import { startSigNozMcpOAuth, verifySigNozMcpState } from "@/lib/integrations/signoz-mcp";
 import { startVercelMcpOAuth, verifyVercelMcpState } from "@/lib/integrations/vercel-mcp";
@@ -72,7 +73,7 @@ vi.mock("@opencompany/db/integrations", () => ({
 }));
 
 vi.mock("@opencompany/agent/integrations/analytics", () => ({
-  captureIntegrationAddedAnalytics: vi.fn(async () => undefined),
+  captureConnectionAddedAnalytics: vi.fn(async () => undefined),
 }));
 
 vi.mock("@opencompany/agent/app-url", () => ({
@@ -205,6 +206,31 @@ describe("opencompany remote MCP OAuth", () => {
       provider: "attio",
       userWorkosId: "user_1",
       returnTo: "/settings/plugins/attio",
+    });
+  });
+
+  it("connects Notion through dynamic OAuth with its documented endpoint and scope", async () => {
+    await startNotionMcpOAuth({
+      userWorkosId: "user_1",
+      returnTo: "/settings/plugins/notion",
+    });
+
+    expect(auth).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ serverUrl: "https://mcp.notion.com/mcp" }),
+    );
+    expect(observed.callbackUrl).toBe(
+      "https://opencompany.example/api/integrations/notion/callback",
+    );
+    expect(observed.clientMetadata).toMatchObject({
+      scope: "default",
+      grant_types: ["authorization_code", "refresh_token"],
+    });
+    expect(observed.clientInformation).toBeUndefined();
+    expect(verifyNotionMcpState(observed.state)).toMatchObject({
+      provider: "notion",
+      userWorkosId: "user_1",
+      returnTo: "/settings/plugins/notion",
     });
   });
 
@@ -392,7 +418,7 @@ describe("opencompany remote MCP OAuth", () => {
       state: observed.state,
       db: {
         update: () => ({
-          set: () => ({ where: async () => [] }),
+          set: () => ({ where: () => ({ returning: async () => [{ id: "gint_remote_mcp" }] }) }),
         }),
       },
     });
@@ -548,7 +574,7 @@ describe("opencompany remote MCP OAuth", () => {
     expect(markIntegrationStatus).not.toHaveBeenCalled();
   });
 
-  it("prefers the acting user's connection and falls back to the workspace connection", async () => {
+  it("uses only the acting user's connection even when a workspace connection exists", async () => {
     observed.dbResults = [
       [
         {
@@ -587,9 +613,9 @@ describe("opencompany remote MCP OAuth", () => {
     await expect(
       getLinearIntegrationState({ userWorkosId: "user_1", workspaceId: "workspace_1" }),
     ).resolves.toMatchObject({
-      integrationId: "gint_workspace",
-      accountName: "Workspace Linear",
-      capabilityModes: { read: "ask" },
+      integrationId: null,
+      accountName: null,
+      capabilityModes: {},
     });
 
     observed.dbResults = [
@@ -614,12 +640,8 @@ describe("opencompany remote MCP OAuth", () => {
           throw new Error("authorization required");
         },
       }),
-    ).resolves.toEqual({ ok: false, reason: "needs_reauth" });
-    expect(loadIntegrationCredential).toHaveBeenLastCalledWith(
-      expect.objectContaining({ userWorkosId: "workspace_admin" }),
-    );
-    expect(markIntegrationStatus).toHaveBeenLastCalledWith(
-      expect.objectContaining({ userWorkosId: "workspace_admin" }),
-    );
+    ).resolves.toEqual({ ok: false, reason: "not_connected" });
+    expect(loadIntegrationCredential).not.toHaveBeenCalled();
+    expect(markIntegrationStatus).not.toHaveBeenCalled();
   });
 });

@@ -1,3 +1,4 @@
+import { fetchCodexUsage } from "@opencompany/agent/codex-usage";
 import type { Actor } from "@opencompany/core";
 import {
   deleteClaudeCodeCredential,
@@ -18,6 +19,8 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createEngineAuthService } from "./engine-auth";
 import type { RunnerClient } from "./runner-client";
+
+vi.mock("@opencompany/agent/codex-usage", () => ({ fetchCodexUsage: vi.fn() }));
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -107,6 +110,27 @@ const infisicalFlow = {
 };
 
 describe("engine auth service", () => {
+  it("reads personal usage for the actor even when the workspace has a shared provider", async () => {
+    vi.mocked(fetchCodexUsage).mockResolvedValue({
+      windows: [],
+      updatedAt: "2026-09-10T12:00:00.000Z",
+    });
+    await expect(service().getCodexUsage(member)).resolves.toEqual({
+      windows: [],
+      updatedAt: "2026-09-10T12:00:00.000Z",
+    });
+    expect(fetchCodexUsage).toHaveBeenCalledWith({ db: dbSentinel, userWorkosId: member.userId });
+    expect(loadWorkspaceCodexEngineAccount).not.toHaveBeenCalled();
+  });
+
+  it("does not expose upstream errors or credentials to the caller", async () => {
+    vi.mocked(fetchCodexUsage).mockRejectedValue(new Error("secret-provider-response"));
+    await expect(service().getCodexUsage(member)).rejects.toMatchObject({
+      status: 503,
+      message: "Codex usage is temporarily unavailable. Try again shortly.",
+    });
+  });
+
   it("maps missing credentials to the retired null status DTO", async () => {
     await expect(service().getClaudeCodeStatus(member)).resolves.toEqual({
       status: null,
@@ -239,19 +263,21 @@ describe("engine auth service", () => {
     });
   });
 
-  it("admin-gates every Infisical mutation with the retired copy", async () => {
-    const forbidden = {
-      status: 403,
-      message: "Only workspace admins can manage Infisical.",
-    };
+  it("lets members manage their own Infisical login", async () => {
+    const { runner, calls } = fakeRunner([{ ok: true, flow: infisicalFlow }]);
     await expect(
-      service().startInfisicalAuth(member, "https://app.infisical.com"),
-    ).rejects.toMatchObject(forbidden);
-    await expect(service().completeInfisicalAuth(member, "ginff_1", "token")).rejects.toMatchObject(
-      forbidden,
-    );
-    await expect(service().disconnectInfisical(member)).rejects.toMatchObject(forbidden);
-    expect(disconnectInfisicalConnection).not.toHaveBeenCalled();
+      service(runner).startInfisicalAuth(member, "https://app.infisical.com"),
+    ).resolves.toEqual(infisicalFlow);
+    expect(calls[0]?.body).toMatchObject({
+      requestedByWorkosId: member.userId,
+      workspaceId: member.workspaceId,
+    });
+    await service().disconnectInfisical(member);
+    expect(disconnectInfisicalConnection).toHaveBeenCalledWith({
+      db: dbSentinel,
+      workspaceId: member.workspaceId,
+      userId: member.userId,
+    });
   });
 
   it("keeps the Infisical status read member-visible", async () => {
@@ -272,6 +298,7 @@ describe("engine auth service", () => {
     expect(loadInfisicalConnectionMetadata).toHaveBeenCalledWith({
       db: dbSentinel,
       workspaceId: "workspace_1",
+      userId: "user_1",
     });
   });
 
@@ -377,6 +404,7 @@ describe("engine auth service", () => {
     expect(disconnectInfisicalConnection).toHaveBeenCalledWith({
       db: dbSentinel,
       workspaceId: "workspace_1",
+      userId: "user_1",
     });
   });
 });

@@ -2,9 +2,12 @@ import {
   ACTION_TOOL_CONTRACT,
   type ActionExecutionResponse,
   type ActionGatewayResponse,
+  type ActionSummary,
   CHAT_ARTIFACT_DATA_PART_TYPE,
   type CodexCommandToolInput,
   type CodexCommandToolOutput,
+  type DescribeActionsInput,
+  type DescribeActionsResponse,
   type PublishedChatArtifact,
   parsePublishedChatArtifact,
 } from "@opencompany/agent-runtime";
@@ -27,6 +30,7 @@ import type {
 } from "./actions/types";
 import { finiteDurationMs } from "./chat-timing";
 import type { CodexComposerSettingsView } from "./codex-chat-settings";
+import type { WorkspaceSkillsInput } from "./workspace-skill-tools";
 
 export {
   CODEX_APPROVAL_TOOL_NAME,
@@ -65,6 +69,8 @@ export const WEB_SEARCH_TOOL_NAME = "web_search";
 export const WEB_SEARCH_TOOL_PART_TYPE = `tool-${WEB_SEARCH_TOOL_NAME}` as const;
 export const LIST_ACTIONS_TOOL_NAME = ACTION_TOOL_CONTRACT.list.name;
 export const LIST_ACTIONS_TOOL_PART_TYPE = `tool-${LIST_ACTIONS_TOOL_NAME}` as const;
+export const DESCRIBE_ACTIONS_TOOL_NAME = ACTION_TOOL_CONTRACT.describe.name;
+export const DESCRIBE_ACTIONS_TOOL_PART_TYPE = `tool-${DESCRIBE_ACTIONS_TOOL_NAME}` as const;
 export const USE_ACTION_TOOL_NAME = ACTION_TOOL_CONTRACT.execute.name;
 export const USE_ACTION_TOOL_PART_TYPE = `tool-${USE_ACTION_TOOL_NAME}` as const;
 export const LIST_SKILLS_TOOL_NAME = "list_skills";
@@ -139,9 +145,10 @@ export type ChatMention =
       id: "codex" | "claude";
     }
   | {
-      // `id` is the workspace-scoped skill slug (the @skill/<id> handle).
+      // Stable installation ID; name is display text, never an authorization input.
       kind: "skill";
       id: string;
+      name?: string;
     }
   | {
       // `id` is the workspace-scoped workflow slug (the # handle).
@@ -431,7 +438,7 @@ export type ListActionsToolOutput =
   | {
       ok: true;
       source: ActionSourceDescriptor;
-      actions: ChatActionCatalog["actions"];
+      actions: (ActionSummary | ChatActionCatalog["actions"][number])[];
     }
   | {
       ok: false;
@@ -441,6 +448,11 @@ export type ListActionsToolOutput =
         availableSources: ActionSourceId[];
       };
     };
+
+export type DescribeActionsToolInput = DescribeActionsInput;
+export type DescribeActionsToolOutput =
+  | (Omit<DescribeActionsResponse, "actions"> & { actions: ChatActionCatalog["actions"] })
+  | Extract<ActionGatewayResponse, { ok: false }>;
 
 export type UseActionToolInput = {
   action: string;
@@ -509,6 +521,7 @@ export type ReadSkillFileToolOutput = {
 };
 
 export type CreateWorkspaceSkillToolInput = {
+  scope?: "personal" | "company";
   name: string;
   description: string;
   instructions: string;
@@ -522,9 +535,11 @@ export type CreateWorkspaceSkillToolOutput = {
 };
 
 export type EditWorkspaceSkillToolInput = {
+  expectedBundleId?: string;
   name: string;
-  description: string;
-  instructions: string;
+  newName?: string;
+  description?: string;
+  instructions?: string;
 };
 
 export type EditWorkspaceSkillToolOutput = {
@@ -586,6 +601,10 @@ export type ChatTools = {
     input: ListActionsToolInput;
     output: ListActionsToolOutput;
   };
+  describe_actions: {
+    input: DescribeActionsToolInput;
+    output: DescribeActionsToolOutput;
+  };
   use_action: {
     input: UseActionToolInput;
     output: UseActionToolOutput;
@@ -601,6 +620,10 @@ export type ChatTools = {
   read_skill_file: {
     input: ReadSkillFileToolInput;
     output: ReadSkillFileToolOutput;
+  };
+  workspace_skills: {
+    input: WorkspaceSkillsInput;
+    output: unknown;
   };
   create_workspace_skill: {
     input: CreateWorkspaceSkillToolInput;
@@ -635,6 +658,13 @@ export function listedActionSourceIdsFromMessages(
         "source" in part.output
       ) {
         sourceIds.add(part.output.source.id);
+      }
+      if (
+        part.type === DESCRIBE_ACTIONS_TOOL_PART_TYPE &&
+        part.state === "output-available" &&
+        part.output.ok
+      ) {
+        for (const action of part.output.actions) sourceIds.add(action.source);
       }
     }
   }

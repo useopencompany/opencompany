@@ -116,6 +116,14 @@
       "types": "./src/wiki.ts",
       "default": "./src/wiki.ts"
     },
+    "./test-schema-snapshot": {
+      "types": "./src/test-schema-snapshot.ts",
+      "default": "./src/test-schema-snapshot.ts"
+    },
+    "./test-pglite": {
+      "types": "./src/test-pglite.ts",
+      "default": "./src/test-pglite.ts"
+    },
     "./wiki-migrate": {
       "types": "./src/wiki-migrate.ts",
       "default": "./src/wiki-migrate.ts"
@@ -223,6 +231,14 @@
     "./worker-admission": {
       "types": "./src/worker-admission.ts",
       "default": "./src/worker-admission.ts"
+    },
+    "./custom-mcp-repository": {
+      "types": "./src/custom-mcp-repository.ts",
+      "default": "./src/custom-mcp-repository.ts"
+    },
+    "./task-action-approvals": {
+      "types": "./src/task-action-approvals.ts",
+      "default": "./src/task-action-approvals.ts"
     }
   },
   "scripts": {

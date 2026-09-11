@@ -3,8 +3,10 @@ import type { JSONSchema7 } from "ai";
 import type { CapabilityId } from "./capabilities";
 
 export type ActionProviderId =
+  | "custom_mcp"
   | "slack"
   | "gmail"
+  | "google_admin"
   | "google_calendar"
   | "google_drive"
   | "granola"
@@ -19,7 +21,11 @@ export type ActionProviderId =
   | "revolut"
   | "latitude"
   | "neon"
+  | "notion"
+  | "supabase"
+  | "resend"
   | "betterstack"
+  | "convex"
   | "render"
   | "vercel"
   | "signoz"
@@ -79,7 +85,7 @@ export const ACTION_EFFECTS_METERED_READ = {
   uncertainAfterDispatch: true,
 } as const satisfies ActionEffects;
 
-// What discovery (list_actions) exposes for one action. The params schema is
+// What full discovery (describe_actions or legacy list_actions) exposes for one action. The params schema is
 // documentation for the model; each action's execute is the enforcement.
 export type ActionDescriptor = {
   id: string;
@@ -99,6 +105,7 @@ export type ActionProviderDescriptor = {
 };
 
 export type ActionSourceDescriptor = {
+  unavailable?: boolean;
   id: ActionSourceId;
   kind?: "integration" | "managed";
   label: string;
@@ -163,6 +170,8 @@ export type ActionExecuteContext = {
 };
 
 export type ResolvedAction = ActionDescriptor & {
+  // Binds durable approval to the connection and definitions used during discovery.
+  approvalContext?: string;
   timeoutMs?: number;
   // Internal-only larger result allowance for deliberately bounded actions
   // such as a validated full transcript. The executor still applies its hard cap.

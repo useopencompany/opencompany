@@ -1,0 +1,45 @@
+---
+title: Notion
+description: Search, read, and change Notion workspace content through the official MCP plugin.
+---
+
+## What the Plugin does
+
+The official Notion Plugin connects opencompany to [Notion's hosted MCP server](https://developers.notion.com/guides/mcp/overview).
+It can search and read pages, databases, comments, meeting notes, members, and files. With approval,
+it can create or change workspace content and interact with Notion Custom Agents.
+
+The Plugin is installed once for a workspace. Each person connects their own Notion account, and
+Notion limits every result and action to content that account can access.
+
+## Connect Notion
+
+1. Ask a workspace admin to install Notion under **Settings → Plugins → Notion**.
+2. On the Notion Plugin page, choose **Connect Notion account**.
+3. Sign in to Notion and approve the requested access.
+4. Return to the Plugin page and confirm tool discovery is ready.
+
+OAuth credentials remain encrypted and server-side. The Plugin gateway sends them only to Notion's
+reviewed `https://mcp.notion.com/mcp` endpoint.
+
+## Permission defaults
+
+- **Search & read Notion** is **Ask** because pages, comments, files, people, meeting notes, and
+  agent-session history may contain sensitive workspace information.
+- **Work with Notion agents** is **Ask** because a session can perform work in the connected
+  workspace.
+- **Change Notion** is **Ask** for pages, databases, views, comments, files, folders, and Skills.
+
+New or unrecognized Notion tools require confirmation until opencompany reviews and classifies
+them. Keep change permissions on **Ask** unless automatic edits are appropriate for that account.
+
+## Provider limitations and safety
+
+Notion MCP has the same workspace access as the person who authorizes it. Content returned by Notion
+can contain untrusted instructions, so review proposed changes and any request to share workspace
+data with another service. Some search, meeting-note, and Custom Agent features also depend on the
+connected workspace's Notion plan and Notion AI access.
+
+Notion applies provider rate limits across tool calls. If a task is rate-limited, reduce repeated or
+parallel searches and try again later. Disconnect the Notion account or uninstall the Plugin to stop
+future access.

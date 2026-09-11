@@ -14,6 +14,7 @@ import {
   type RemoteMcpGatewayDependencies,
   type RemoteMcpGatewayRegistration,
 } from "./actions/remote-mcp";
+import { bindCustomMcpRegistration } from "./custom-mcp";
 import {
   ATTIO_MCP_ENDPOINT_URL,
   getAttioMcpIntegrationState,
@@ -24,6 +25,12 @@ import {
   getBetterStackIntegrationState,
   loadBetterStackMcpWorkerConnection,
 } from "./integrations/betterstack-mcp";
+import {
+  CONVEX_MCP_ENDPOINT_URL,
+  convexMcpRuntimeEndpointUrl,
+  getConvexIntegrationState,
+  loadConvexMcpWorkerConnection,
+} from "./integrations/convex-mcp";
 import {
   FATHOM_MCP_ENDPOINT_URL,
   getFathomMcpIntegrationState,
@@ -40,6 +47,12 @@ import {
   gmailMcpRuntimeEndpointUrl,
   loadGmailMcpWorkerConnection,
 } from "./integrations/gmail-mcp";
+import {
+  GOOGLE_ADMIN_MCP_ENDPOINT_URL,
+  getGoogleAdminMcpIntegrationState,
+  googleAdminMcpRuntimeEndpointUrl,
+  loadGoogleAdminMcpWorkerConnection,
+} from "./integrations/google-admin-mcp";
 import {
   GOOGLE_CALENDAR_MCP_ENDPOINT_URL,
   getGoogleCalendarMcpIntegrationState,
@@ -88,6 +101,11 @@ import {
   NEON_MCP_ENDPOINT_URL,
 } from "./integrations/neon-mcp";
 import {
+  getNotionMcpIntegrationState,
+  loadNotionMcpWorkerConnection,
+  NOTION_MCP_ENDPOINT_URL,
+} from "./integrations/notion-mcp";
+import {
   getPostHogIntegrationState,
   loadPostHogMcpWorkerConnection,
   POSTHOG_MCP_ENDPOINT_URL,
@@ -97,6 +115,11 @@ import {
   loadRenderMcpWorkerConnection,
   RENDER_MCP_ENDPOINT_URL,
 } from "./integrations/render-mcp";
+import {
+  getResendMcpIntegrationState,
+  loadResendMcpWorkerConnection,
+  RESEND_MCP_ENDPOINT_URL,
+} from "./integrations/resend-mcp";
 import {
   getSigNozIntegrationState,
   loadSigNozMcpWorkerConnection,
@@ -113,6 +136,11 @@ import {
   STRIPE_MCP_ENDPOINT_URL,
 } from "./integrations/stripe";
 import {
+  getSupabaseMcpIntegrationState,
+  loadSupabaseMcpWorkerConnection,
+  SUPABASE_MCP_ENDPOINT_URL,
+} from "./integrations/supabase-mcp";
+import {
   getVercelIntegrationState,
   loadVercelMcpWorkerConnection,
   VERCEL_MCP_ENDPOINT_URL,
@@ -122,6 +150,7 @@ import {
   loadXMcpWorkerConnection,
   X_MCP_ENDPOINT_URL,
 } from "./integrations/x-mcp";
+import { xMcpCapabilities, xMcpDiscoverySnapshot } from "./integrations/x-mcp-catalog";
 
 const DISCOVERY_TTL_MS = 60 * 60 * 1_000;
 const DISCOVERY_RETRY_MS = 5 * 60 * 1_000;
@@ -174,11 +203,23 @@ const providerBindings = {
     getState: getGranolaMcpIntegrationState,
     loadConnection: loadGranolaMcpWorkerConnection,
   },
+  "google-admin": {
+    provider: "google_admin",
+    endpointUrl: GOOGLE_ADMIN_MCP_ENDPOINT_URL,
+    getState: getGoogleAdminMcpIntegrationState,
+    loadConnection: loadGoogleAdminMcpWorkerConnection,
+  },
   "google-calendar": {
     provider: "google_calendar",
     endpointUrl: GOOGLE_CALENDAR_MCP_ENDPOINT_URL,
     getState: getGoogleCalendarMcpIntegrationState,
     loadConnection: loadGoogleCalendarMcpWorkerConnection,
+  },
+  convex: {
+    provider: "convex",
+    endpointUrl: CONVEX_MCP_ENDPOINT_URL,
+    getState: getConvexIntegrationState,
+    loadConnection: loadConvexMcpWorkerConnection,
   },
   "google-drive": {
     provider: "google_drive",
@@ -215,6 +256,24 @@ const providerBindings = {
     endpointUrl: NEON_MCP_ENDPOINT_URL,
     getState: getNeonIntegrationState,
     loadConnection: loadNeonMcpWorkerConnection,
+  },
+  notion: {
+    provider: "notion",
+    endpointUrl: NOTION_MCP_ENDPOINT_URL,
+    getState: getNotionMcpIntegrationState,
+    loadConnection: loadNotionMcpWorkerConnection,
+  },
+  supabase: {
+    provider: "supabase",
+    endpointUrl: SUPABASE_MCP_ENDPOINT_URL,
+    getState: getSupabaseMcpIntegrationState,
+    loadConnection: loadSupabaseMcpWorkerConnection,
+  },
+  resend: {
+    provider: "resend",
+    endpointUrl: RESEND_MCP_ENDPOINT_URL,
+    getState: getResendMcpIntegrationState,
+    loadConnection: loadResendMcpWorkerConnection,
   },
   latitude: {
     provider: "latitude",
@@ -287,6 +346,7 @@ export async function resolvePluginGatewayRegistrations(
   const now = options.now ?? new Date();
   const records = await listActivePluginGatewayRegistrations(db, {
     workspaceId: identity.workspaceId,
+    userId: identity.userWorkosId,
   });
   const refreshed = await Promise.all(
     records.map((record) =>
@@ -304,10 +364,16 @@ export async function resolvePluginGatewayRegistrations(
         : record,
     ),
   );
-  return refreshed.flatMap((record) => {
-    const registration = bindRegistration(db, identity, record);
-    return registration ? [registration] : [];
-  });
+  const registrations = await Promise.all(
+    refreshed.map((record) =>
+      record.sourceType === "custom_mcp"
+        ? bindCustomMcpRegistration(db, identity, record)
+        : bindRegistration(db, identity, record),
+    ),
+  );
+  return registrations.filter(
+    (registration): registration is RemoteMcpGatewayRegistration => registration !== null,
+  );
 }
 
 export async function refreshPluginGatewayRegistrations(input: {
@@ -323,6 +389,7 @@ export async function refreshPluginGatewayRegistrations(input: {
   const now = input.now ?? new Date();
   const records = await listActivePluginGatewayRegistrations(db, {
     workspaceId: input.identity.workspaceId,
+    userId: input.identity.userWorkosId,
     ...(input.pluginName ? { pluginName: input.pluginName } : {}),
     ...(input.connectionProvider ? { connectionProvider: input.connectionProvider } : {}),
   });
@@ -374,6 +441,7 @@ async function refreshRegistration(input: {
   if (!input.force) {
     const claimed = await claimPluginGatewayDiscoveryRefresh(input.db, {
       workspaceId: input.identity.workspaceId,
+      userId: input.identity.userWorkosId,
       registrationId: input.record.id,
       staleAt: input.now,
       leaseUntil: new Date(input.now.getTime() + DISCOVERY_RETRY_MS),
@@ -390,6 +458,7 @@ async function refreshRegistration(input: {
     if (!snapshot) {
       await storePluginGatewayDiscoveryFailure(input.db, {
         workspaceId: input.identity.workspaceId,
+        userId: input.identity.userWorkosId,
         registrationId: input.record.id,
         error: "No usable provider connection was available for MCP discovery.",
         retryAfter: new Date(input.now.getTime() + DISCOVERY_RETRY_MS),
@@ -400,6 +469,7 @@ async function refreshRegistration(input: {
     const refreshAfter = new Date(input.now.getTime() + DISCOVERY_TTL_MS);
     await storePluginGatewayDiscoverySnapshot(input.db, {
       workspaceId: input.identity.workspaceId,
+      userId: input.identity.userWorkosId,
       registrationId: input.record.id,
       snapshot,
       discoveredAt: input.now,
@@ -416,6 +486,7 @@ async function refreshRegistration(input: {
     const message = error instanceof Error ? error.message : String(error);
     await storePluginGatewayDiscoveryFailure(input.db, {
       workspaceId: input.identity.workspaceId,
+      userId: input.identity.userWorkosId,
       registrationId: input.record.id,
       error: message,
       retryAfter: new Date(input.now.getTime() + DISCOVERY_RETRY_MS),
@@ -464,7 +535,15 @@ function bindRegistration(
   }
   let loadConnection = binding.loadConnection as RemoteMcpGatewayRegistration["loadConnection"];
   let server = record.server;
-  if (record.pluginName === "google-calendar") {
+  if (record.pluginName === "convex") {
+    loadConnection = (input) =>
+      loadConvexMcpWorkerConnection({ ...input, registrationId: record.id });
+    server = { ...record.server, url: convexMcpRuntimeEndpointUrl() };
+  } else if (record.pluginName === "google-admin") {
+    loadConnection = (input) =>
+      loadGoogleAdminMcpWorkerConnection({ ...input, registrationId: record.id });
+    server = { ...record.server, url: googleAdminMcpRuntimeEndpointUrl() };
+  } else if (record.pluginName === "google-calendar") {
     loadConnection = (input) =>
       loadGoogleCalendarMcpWorkerConnection({ ...input, registrationId: record.id });
     server = { ...record.server, url: googleCalendarMcpRuntimeEndpointUrl() };
@@ -477,19 +556,26 @@ function bindRegistration(
       loadGmailMcpWorkerConnection({ ...input, registrationId: record.id });
     server = { ...record.server, url: gmailMcpRuntimeEndpointUrl() };
   }
+  const capabilities =
+    record.pluginName === "x" ? xMcpCapabilities(record.capabilities) : record.capabilities;
   return {
+    pluginName: record.pluginName,
     source: `plugin:${record.pluginName}:${record.server.name}`,
     connectionProvider: binding.provider,
     label: displayName(record.pluginName),
     description: record.pluginDescription,
     server,
-    capabilities: record.capabilities,
-    discoverySnapshot: record.discoverySnapshot,
+    capabilities,
+    discoverySnapshot:
+      record.pluginName === "x"
+        ? xMcpDiscoverySnapshot(record.discoverySnapshot, capabilities)
+        : record.discoverySnapshot,
     getState: binding.getState,
     loadConnection,
     isEnabled: () =>
       isPluginGatewayRegistrationActive(db, {
         workspaceId: identity.workspaceId,
+        userId: identity.userWorkosId,
         registrationId: record.id,
       }),
   };

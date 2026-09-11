@@ -1,8 +1,11 @@
-import type {
-  ActionGatewayRequest,
-  ActionGatewayResponse,
-  ActionHostGatewayRequest,
+import {
+  ACTION_HOST_TOOL_CONTRACT_VERSION,
+  type ActionGatewayRequest,
+  type ActionGatewayResponse,
+  type ActionHostGatewayRequest,
+  supportsCompactActionDiscovery,
 } from "@opencompany/agent-runtime";
+import { actionApprovalInputHash } from "@opencompany/db/action-governance";
 import type { CodexChatEngine } from "@opencompany/db/product-schema";
 import { createLogger } from "@opencompany/observability";
 import { type ActionCatalogPolicyName, projectActionCatalog } from "../actions/policy";
@@ -12,6 +15,8 @@ import type { CapabilityTurnState, ResolvedActionCatalog } from "../actions/type
 const logger = createLogger({ service: "opencompany-agent", runtime: "action-gateway" });
 
 export type ActionPrincipal = {
+  durableTaskApprovals?: boolean;
+  hostToolContractVersion?: string;
   actorId: string;
   workspaceId: string;
   conversationId: string;
@@ -74,6 +79,7 @@ export type ActionGatewayServiceDependencies = {
     sourceId: string;
     invocationId: string;
     maxCalls: number;
+    deduplicationKey?: string;
   }) => Promise<ActionInvocationClaim>;
   registerApproval: (input: {
     run: ActionServiceRunRef;
@@ -83,6 +89,7 @@ export type ActionGatewayServiceDependencies = {
     capabilityId: string;
     params: Record<string, unknown>;
     decision?: "pending" | "denied";
+    approvalContext?: string;
   }) => Promise<ActionGatewayApprovalRecord | null>;
   evaluateApproval: (input: {
     request: Extract<ActionServiceRequest, { operation: "approval" }>;
@@ -94,7 +101,7 @@ export type ActionGatewayServiceDependencies = {
 };
 
 export function executeActionGatewayService(input: {
-  request: Extract<ActionServiceRequest, { operation: "list" | "execute" }>;
+  request: Extract<ActionServiceRequest, { operation: "list" | "describe" | "execute" }>;
   signal: AbortSignal;
   dependencies: ActionGatewayServiceDependencies;
 }): Promise<ActionGatewayResponse> {
@@ -130,9 +137,15 @@ export async function executeActionHostGatewayService(input: {
   }
 
   const run = actionRunRef(input.request, context);
+  const denyHeadlessApproval = run.policy === "headless" && !context.durableTaskApprovals;
   try {
     const serviceCatalog = {
-      sources: catalog.providers,
+      sources: catalog.providers.map(({ id, kind, label, description }) => ({
+        id,
+        kind: kind ?? "integration",
+        label,
+        description,
+      })),
       actions: catalog.actions.map((action) => ({
         id: action.id,
         source: action.provider,
@@ -161,7 +174,8 @@ export async function executeActionHostGatewayService(input: {
           sourceId: action.provider,
           capabilityId: action.capability,
           params: approvalRequest.params,
-          ...(run.policy === "headless" ? { decision: "denied" as const } : {}),
+          ...(action.approvalContext ? { approvalContext: action.approvalContext } : {}),
+          ...(denyHeadlessApproval ? { decision: "denied" as const } : {}),
         });
         if (!approval) {
           return gatewayError(
@@ -171,7 +185,7 @@ export async function executeActionHostGatewayService(input: {
         }
         return {
           ok: true,
-          needsApproval: run.policy !== "headless" && approval.status === "pending",
+          needsApproval: !denyHeadlessApproval && approval.status === "pending",
         };
       }
       await dependencies.recordSourceDiscovery({ run, sourceId: action.provider });
@@ -196,7 +210,8 @@ export async function executeActionHostGatewayService(input: {
           sourceId: action.provider,
           capabilityId: action.capability,
           params: executeRequest.params,
-          ...(run.policy === "headless" ? { decision: "denied" as const } : {}),
+          ...(action.approvalContext ? { approvalContext: action.approvalContext } : {}),
+          ...(denyHeadlessApproval ? { decision: "denied" as const } : {}),
         });
         if (!approval) {
           return gatewayError(
@@ -222,10 +237,9 @@ export async function executeActionHostGatewayService(input: {
             error: {
               code: "not_permitted",
               source: action.provider,
-              message:
-                run.policy === "headless"
-                  ? `Headless turns cannot approve ${JSON.stringify(action.id)}, so it was denied.`
-                  : `The user denied approval for ${JSON.stringify(action.id)}.`,
+              message: denyHeadlessApproval
+                ? `Headless turns cannot approve ${JSON.stringify(action.id)}, so it was denied.`
+                : `The user denied approval for ${JSON.stringify(action.id)}.`,
             },
           };
         }
@@ -234,10 +248,34 @@ export async function executeActionHostGatewayService(input: {
     return await serveActionRequest({
       request: gatewayRequest(input.request),
       catalog: serviceCatalog,
+      legacyDiscovery: !supportsCompactActionDiscovery(
+        context.hostToolContractVersion ?? ACTION_HOST_TOOL_CONTRACT_VERSION,
+      ),
       governance: {
         recordSourceDiscovery: (sourceId) => dependencies.recordSourceDiscovery({ run, sourceId }),
-        claimInvocation: ({ sourceId, invocationId, maxCalls }) =>
-          dependencies.claimInvocation({ run, sourceId, invocationId, maxCalls }),
+        claimInvocation: ({ sourceId, invocationId, maxCalls }) => {
+          const request = input.request;
+          const action =
+            request.operation === "execute"
+              ? catalog.actions.find((candidate) => candidate.id === request.action)
+              : undefined;
+          // Model-generated call ids change when an approval continuation repeats a write.
+          // The durable, atomic turn claim must identify the operation independently of those
+          // ids. Keep the original call id for approval binding and provider result correlation.
+          const deduplicationKey =
+            action?.effects.mutatesExternalSystem &&
+            !action.effects.idempotent &&
+            request.operation === "execute"
+              ? `write:${actionApprovalInputHash({ action: action.id, source: action.provider, params: request.params }, action.approvalContext)}`
+              : undefined;
+          return dependencies.claimInvocation({
+            run,
+            sourceId,
+            invocationId,
+            maxCalls,
+            ...(deduplicationKey ? { deduplicationKey } : {}),
+          });
+        },
       },
       execute: ({ action, params, invocationId }) =>
         dependencies.executeAction({
@@ -284,8 +322,12 @@ function actionRunRef(request: ActionServiceRequest, context: ActionPrincipal) {
 }
 
 function gatewayRequest(request: ActionServiceRequest): ActionGatewayRequest {
-  if (request.operation !== "list" && request.operation !== "execute") {
-    throw new Error("Only list and execute requests can reach the action executor.");
+  if (
+    request.operation !== "list" &&
+    request.operation !== "describe" &&
+    request.operation !== "execute"
+  ) {
+    throw new Error("Only list, describe, and execute requests can reach the action executor.");
   }
   const { runId, ...input } = request;
   return { ...input, turnId: runId };

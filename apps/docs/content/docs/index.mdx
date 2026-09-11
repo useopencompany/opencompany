@@ -1,20 +1,38 @@
 ---
 title: opencompany documentation
-description: Use opencompany to chat, delegate durable work, build recurring workflows, and work with connected company context.
+description: Work with AI across your tools, code, and company knowledge.
 ---
 
-opencompany is an AI workspace for conversations, durable Tasks and Workflows, connected
-integrations, Brain knowledge, and cloud coding sessions. Work happens inside a workspace so the
-people, connections, knowledge, and automation involved stay in the same access boundary.
+opencompany is an AI workspace for getting work done across your company. Ask questions, work with
+connected tools, edit code in a cloud sandbox, and delegate tasks that continue while you're away.
+Save what your team learns in Wiki and turn repeatable work into Skills and Workflows.
 
 ## Start here
 
-- [Getting started](/docs/getting-started) explains the product, workspaces, and how to connect a
-  source without accidentally ingesting more than you intended.
-- [Core concepts](/docs/core-concepts) explains Chat engines, Tasks, Workflows and schedules, Brain,
-  and integrations.
-- [Integrations](/docs/integrations) lists the providers represented in the current product UI.
-- [API reference](/docs/api-reference) renders the current opencompany OpenAPI contract.
+Follow the [Quickstart](/docs/getting-started) to produce your first useful result. You can start with
+a prompt and a file; connect an account when the work needs it.
 
-These docs describe the product as it works today. Contributor setup and architecture decisions
-remain in the main repository documentation.
+## What do you want to do?
+
+| Goal | Guide |
+| --- | --- |
+| Ask questions, analyze files, or write a document | [Chat and engines](/docs/core-concepts/chat-and-engines) |
+| Work with GitHub, Linear, Gmail, or other tools | [Connect your tools](/docs/getting-started/connecting-sources) |
+| Fix a bug or build a feature | [Cloud coding](/docs/guides/cloud-coding) |
+| Hand off work and return to the result | [Tasks](/docs/core-concepts/tasks) |
+| Run the same process again or on a schedule | [Workflows and schedules](/docs/core-concepts/workflows-and-schedules) |
+| Give the agent a reusable way of working | [Skills](/docs/core-concepts/skills-and-plugins) |
+| Build shared company knowledge | [Wiki](/docs/core-concepts/wiki) |
+
+## Understand your workspace
+
+Start with [How opencompany fits together](/docs/core-concepts) for the relationship between Chat,
+Tasks, Workflows, Skills, Plugins, and Wiki. See [Workspaces](/docs/getting-started/workspaces) for
+shared settings and personal accounts, and [Permissions](/docs/core-concepts/integrations) for what
+an agent can do through a connection.
+
+Returning after an update? See [What's moved](/docs/getting-started/whats-moved). For a missing tool,
+waiting task, or connection problem, use [Troubleshooting](/docs/guides/troubleshooting).
+
+The [API reference](/docs/api-reference) documents the product's HTTP contract. Contributor setup
+lives in the [repository](https://github.com/useopencompany/opencompany).

@@ -65,6 +65,24 @@ describe("alwaysAllowAction", () => {
     });
   });
 
+  it("keeps custom MCP standing grants in per-tool settings rather than broad capabilities", async () => {
+    const catalog = await vi.mocked(resolveActionCatalog)({
+      userWorkosId: "user_1",
+      workspaceId: "workspace_1",
+    });
+    const action = catalog.actions[0]!;
+    action.permission!.provider = "custom_mcp";
+    vi.mocked(resolveActionCatalog).mockResolvedValue(catalog);
+    await expect(
+      alwaysAllowAction({
+        userWorkosId: "user_1",
+        workspaceId: "workspace_1",
+        actionId: action.id,
+      }),
+    ).rejects.toThrow("individual custom MCP tools in Plugins");
+    expect(applyIntegrationCapabilityMode).not.toHaveBeenCalled();
+  });
+
   it("fails closed after workspace membership is revoked", async () => {
     vi.mocked(getWorkspaceRole).mockResolvedValue(null);
     await expect(
@@ -77,8 +95,13 @@ describe("alwaysAllowAction", () => {
     expect(resolveActionCatalog).not.toHaveBeenCalled();
   });
 
-  it("is a safe no-op when the action no longer needs a standing permission", async () => {
-    vi.mocked(resolveActionCatalog).mockResolvedValue({ providers: [], actions: [] });
+  it("is a safe no-op when the action is already allowed", async () => {
+    const catalog = await resolveActionCatalog({
+      userWorkosId: "user_1",
+      workspaceId: "workspace_1",
+    });
+    catalog.actions[0]!.permissionMode = "on";
+    delete catalog.actions[0]!.permission;
     await expect(
       alwaysAllowAction({
         userWorkosId: "user_1",
@@ -86,6 +109,18 @@ describe("alwaysAllowAction", () => {
         actionId: "gmail.send_email",
       }),
     ).resolves.toEqual({ changed: false });
+    expect(applyIntegrationCapabilityMode).not.toHaveBeenCalled();
+  });
+
+  it("reports a save failure when the action disappears from the catalog", async () => {
+    vi.mocked(resolveActionCatalog).mockResolvedValue({ providers: [], actions: [] });
+    await expect(
+      alwaysAllowAction({
+        userWorkosId: "user_1",
+        workspaceId: "workspace_1",
+        actionId: "gmail.send_email",
+      }),
+    ).rejects.toThrow("no longer available");
     expect(applyIntegrationCapabilityMode).not.toHaveBeenCalled();
   });
 });

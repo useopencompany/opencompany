@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import type { IntegrationProvider } from "@opencompany/db/product-schema";
 import { getAppUrl } from "../app-url";
 import { GMAIL_COMPOSE_SCOPE, GMAIL_MODIFY_SCOPE, GMAIL_READ_SCOPE } from "./gmail-scopes";
+import { GOOGLE_ADMIN_SCOPES } from "./google-admin-scopes";
 import { GOOGLE_CALENDAR_EVENTS_SCOPE, GOOGLE_CALENDAR_READ_SCOPE } from "./google-calendar-scopes";
 import {
   GOOGLE_DOCS_WRITE_SCOPE,
@@ -12,7 +13,7 @@ import {
 
 export type GoogleIntegrationProvider = Extract<
   IntegrationProvider,
-  "gmail" | "google_calendar" | "google_drive"
+  "gmail" | "google_calendar" | "google_drive" | "google_admin"
 >;
 
 export type GoogleProviderConfig = {
@@ -32,6 +33,12 @@ export const GOOGLE_PROVIDER_CONFIG: Record<GoogleIntegrationProvider, GooglePro
     routeSegment: "gmail",
     displayName: "Gmail",
     scopes: [GMAIL_READ_SCOPE, GMAIL_COMPOSE_SCOPE, ...OPENID_SCOPES],
+  },
+  google_admin: {
+    provider: "google_admin",
+    routeSegment: "google-admin",
+    displayName: "Google Admin",
+    scopes: [...GOOGLE_ADMIN_SCOPES, ...OPENID_SCOPES],
   },
   google_calendar: {
     provider: "google_calendar",
@@ -287,6 +294,7 @@ function isGoogleIntegrationStatePayload(
   return (
     (record.provider === "gmail" ||
       record.provider === "google_calendar" ||
+      record.provider === "google_admin" ||
       record.provider === "google_drive") &&
     (record.access === undefined ||
       record.access === "default" ||

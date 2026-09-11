@@ -15,7 +15,10 @@ import type {
   GranolaProviderState,
   StripeProviderState,
 } from "@opencompany/agent/integration-state";
+import type { ConvexProviderState } from "@opencompany/agent/integrations/convex-mcp";
+import type { ConvexMcpService } from "@opencompany/agent/integrations/convex-mcp-server";
 import type { GmailMcpService } from "@opencompany/agent/integrations/gmail-mcp-server";
+import type { GoogleAdminMcpService } from "@opencompany/agent/integrations/google-admin-mcp-server";
 import type { GoogleCalendarMcpService } from "@opencompany/agent/integrations/google-calendar-mcp-server";
 import type { GoogleDriveMcpService } from "@opencompany/agent/integrations/google-drive-mcp-server";
 import type { RenderProviderState } from "@opencompany/agent/integrations/render-mcp";
@@ -26,6 +29,11 @@ import {
   CHAT_PRESENTATION_READ_LIMIT,
   type ChatPresentationReader,
 } from "@opencompany/chat-presentation";
+import type {
+  CustomMcpApplicationService,
+  CustomMcpProbe,
+  CustomMcpStatus,
+} from "@opencompany/core";
 import {
   type Actor,
   type BrainDocument,
@@ -83,6 +91,7 @@ import type { AttachmentUploadService } from "./attachments";
 import type { AttioIngressService } from "./attio-ingress";
 import type { ApiAuthenticator, ApiIdentity, ApiIdentityVerifier } from "./auth";
 import type { BillingReconcileService } from "./billing-reconcile";
+import type { BotService } from "./bots";
 import type { BrainAssetService } from "./brain-assets";
 import type { BrainControlService } from "./brain-control";
 import type { ChatResourceDownload, ChatResourceService } from "./chat-resources";
@@ -173,6 +182,7 @@ export type CreateApiAppInput = {
   >;
   skillImports: SkillImportApplicationService;
   pluginImports: PluginImportApplicationService;
+  customMcp?: CustomMcpApplicationService;
   brainAssets: BrainAssetService;
   chatResources?: ChatResourceService;
   messagePresentations?: MessagePresentationService;
@@ -194,6 +204,7 @@ export type CreateApiAppInput = {
   }) => Promise<unknown> | unknown;
   brainControl: BrainControlService;
   attachments: AttachmentUploadService;
+  bots?: BotService;
   userSettings: UserSettingsService;
   feedback: FeedbackService;
   repoConfigs: RepoConfigService;
@@ -201,7 +212,9 @@ export type CreateApiAppInput = {
   slackBotSettings: SlackBotSettingsService;
   mcp?: McpService;
   gmailMcp?: GmailMcpService;
+  googleAdminMcp?: GoogleAdminMcpService;
   googleCalendarMcp?: GoogleCalendarMcpService;
+  convexMcp?: ConvexMcpService;
   googleDriveMcp?: GoogleDriveMcpService;
   engineAuth: EngineAuthService;
   engineSessions: EngineSessionService;
@@ -484,6 +497,7 @@ export function createApiApp(input: CreateApiAppInput) {
         description: body.description,
         ...(body.attachmentIds ? { attachmentIds: body.attachmentIds } : {}),
         ...(body.skillIds ? { skillIds: body.skillIds } : {}),
+        ...(body.stepModelOverrides ? { stepModelOverrides: body.stepModelOverrides } : {}),
       });
       return c.json({ data: taskCreationDto(result), meta }, 202);
     },
@@ -1269,13 +1283,13 @@ export function createApiApp(input: CreateApiAppInput) {
     },
     previewSkillImport: async (c) => {
       const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      await enforceRateLimit(rateLimiter, actor, "artifact-preview", 10);
       const preview = await input.skillImports.preview(actor, c.req.valid("json"));
       return c.json({ data: preview, meta }, 200);
     },
     importSkill: async (c) => {
       const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      await enforceRateLimit(rateLimiter, actor, "artifact-import", 10);
       const result = await input.skillImports.install(actor, {
         idempotencyKey: c.req.valid("header")["idempotency-key"],
         ...c.req.valid("json"),
@@ -1312,6 +1326,16 @@ export function createApiApp(input: CreateApiAppInput) {
       );
       return c.json({ data: skillInstallationDto(installation), meta }, 200);
     },
+    setSkillScope: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const installation = await input.skillImports.setScope(
+        actor,
+        c.req.valid("param").slug,
+        c.req.valid("json"),
+      );
+      return c.json({ data: skillInstallationDto(installation), meta }, 200);
+    },
     archiveSkill: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 60);
@@ -1341,7 +1365,7 @@ export function createApiApp(input: CreateApiAppInput) {
     },
     replaceSkill: async (c) => {
       const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      await enforceRateLimit(rateLimiter, actor, "artifact-import", 10);
       const installation = await input.skillImports.replace(
         actor,
         c.req.valid("param").slug,
@@ -1360,6 +1384,93 @@ export function createApiApp(input: CreateApiAppInput) {
       });
       return c.json({ data: chunk, meta }, 200);
     },
+    previewCustomMcp: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "artifact-preview", 10);
+      const probe = await requireCustomMcp(input.customMcp).preview(actor, c.req.valid("json"));
+      return c.json({ data: customMcpProbeDto(probe), meta }, 200);
+    },
+    createCustomMcp: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "artifact-import", 10);
+      const result = await requireCustomMcp(input.customMcp).create(actor, {
+        ...c.req.valid("json"),
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+      });
+      return c.json(
+        {
+          data: {
+            plugin: publicPluginInstallation(result.plugin),
+            replayed: result.idempotentReplay,
+          },
+          meta,
+        },
+        201,
+      );
+    },
+    getCustomMcp: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      return c.json(
+        {
+          data: customMcpStatusDto(
+            await requireCustomMcp(input.customMcp).status(actor, c.req.valid("param").name),
+          ),
+          meta,
+        },
+        200,
+      );
+    },
+    connectCustomMcp: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "artifact-preview", 10);
+      return c.json(
+        {
+          data: customMcpStatusDto(
+            await requireCustomMcp(input.customMcp).connect(
+              actor,
+              c.req.valid("param").name,
+              c.req.valid("json"),
+            ),
+          ),
+          meta,
+        },
+        200,
+      );
+    },
+    refreshCustomMcp: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "artifact-preview", 10);
+      return c.json(
+        {
+          data: customMcpStatusDto(
+            await requireCustomMcp(input.customMcp).refresh(actor, c.req.valid("param").name),
+          ),
+          meta,
+        },
+        200,
+      );
+    },
+    disconnectCustomMcp: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const service = requireCustomMcp(input.customMcp);
+      await service.disconnect(actor, c.req.valid("param").name);
+      return c.json(
+        { data: customMcpStatusDto(await service.status(actor, c.req.valid("param").name)), meta },
+        200,
+      );
+    },
+    setCustomMcpPermission: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const service = requireCustomMcp(input.customMcp);
+      await service.setToolMode(actor, c.req.valid("param").name, c.req.valid("json"));
+      return c.json(
+        { data: customMcpStatusDto(await service.status(actor, c.req.valid("param").name)), meta },
+        200,
+      );
+    },
     listPlugins: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);
@@ -1367,13 +1478,17 @@ export function createApiApp(input: CreateApiAppInput) {
     },
     previewPluginImport: async (c) => {
       const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      await enforceRateLimit(rateLimiter, actor, "artifact-preview", 10);
       const preview = await input.pluginImports.preview(actor, c.req.valid("json"));
+      await captureProductServerEvent("plugin_import_previewed", actor.userId, {
+        workspace_id: actor.workspaceId,
+        plugin_name: preview.manifest.name,
+      });
       return c.json({ data: preview, meta }, 200);
     },
     importPlugin: async (c) => {
       const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      await enforceRateLimit(rateLimiter, actor, "artifact-import", 10);
       const result = await input.pluginImports.install(actor, {
         idempotencyKey: c.req.valid("header")["idempotency-key"],
         ...c.req.valid("json"),
@@ -1385,6 +1500,7 @@ export function createApiApp(input: CreateApiAppInput) {
         await captureProductServerEvent("plugin_installed", actor.userId, {
           workspace_id: actor.workspaceId,
           plugin_name: result.plugin.name,
+          plugin_id: result.plugin.id,
           plugin_kind:
             skillCount > 0 && mcpServerCount > 0
               ? "hybrid"
@@ -1419,6 +1535,10 @@ export function createApiApp(input: CreateApiAppInput) {
       await enforceRateLimit(rateLimiter, actor, "write", 60);
       const name = c.req.valid("param").name;
       await input.pluginImports.archive(actor, name);
+      await captureProductServerEvent("plugin_removed", actor.userId, {
+        workspace_id: actor.workspaceId,
+        plugin_name: name,
+      });
       return c.json({ data: { name }, meta }, 200);
     },
     enablePlugin: async (c) => {
@@ -1475,6 +1595,36 @@ export function createApiApp(input: CreateApiAppInput) {
       );
       return c.json({ data: publicPluginInstallation(plugin), meta }, 200);
     },
+    listBots: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      if (!input.bots) throw new ApiError(404, "not_found", "Bots are not enabled.");
+      return c.json({ data: await input.bots.list(actor), meta }, 200);
+    },
+    getBot: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      if (!input.bots) throw new ApiError(404, "not_found", "Bots are not enabled.");
+      return c.json({ data: await input.bots.get(actor, c.req.valid("param").botId), meta }, 200);
+    },
+    createBot: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 30);
+      if (!input.bots) throw new ApiError(404, "not_found", "Bots are not enabled.");
+      return c.json({ data: await input.bots.create(actor, c.req.valid("json")), meta }, 200);
+    },
+    updateBot: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      if (!input.bots) throw new ApiError(404, "not_found", "Bots are not enabled.");
+      return c.json(
+        {
+          data: await input.bots.update(actor, c.req.valid("param").botId, c.req.valid("json")),
+          meta,
+        },
+        200,
+      );
+    },
     listConversations: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);
@@ -1492,6 +1642,7 @@ export function createApiApp(input: CreateApiAppInput) {
     getConversation: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);
+      await input.bots?.authorizeConversation(actor, c.req.valid("param").conversationId);
       const conversation = await input.chat.getConversation(
         actor,
         c.req.valid("param").conversationId,
@@ -1568,6 +1719,7 @@ export function createApiApp(input: CreateApiAppInput) {
         ...(body.conversationId ? { conversation_id: body.conversationId } : {}),
       });
       const idempotencyKey = c.req.valid("header")["idempotency-key"];
+      if (body.conversationId) await input.bots?.authorizeConversation(actor, body.conversationId);
       const existingTarget = body.conversationId
         ? await getConversationOrTask(input, actor, body.conversationId)
         : null;
@@ -2245,6 +2397,15 @@ export function createApiApp(input: CreateApiAppInput) {
       );
       return c.json({ data: { state: granolaStateDto(state) }, meta }, 200);
     },
+    connectConvexAccount: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const state = await input.integrationAccounts.connectConvex(
+        actor,
+        c.req.valid("json").apiKey,
+      );
+      return c.json({ data: { state: convexStateDto(state) }, meta }, 200);
+    },
     connectRenderAccount: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 60);
@@ -2380,6 +2541,13 @@ export function createApiApp(input: CreateApiAppInput) {
       await enforceRateLimit(rateLimiter, actor, "read", 300);
       const status = await input.engineAuth.getCodexStatus(actor);
       return c.json({ data: status, meta }, 200);
+    },
+    getCodexUsage: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "codex-usage", 6);
+      c.header("Cache-Control", "private, no-store");
+      const usage = await input.engineAuth.getCodexUsage(actor);
+      return c.json({ data: usage, meta }, 200);
     },
     updateCodexWorkspaceEngine: async (c) => {
       const actor = actorFrom(c);
@@ -2650,6 +2818,7 @@ export function createApiApp(input: CreateApiAppInput) {
     c.json({
       ok: true,
       service: "opencompany-api",
+      capabilities: { personalSkillsAuthorization: "v1", personalPluginsAuthorization: "v1" },
       environment: process.env.OBSERVABILITY_ENV ?? process.env.NODE_ENV ?? "development",
       protocolVersion: PROTOCOL_VERSION,
       release:
@@ -2670,8 +2839,14 @@ export function createApiApp(input: CreateApiAppInput) {
       input.gmailMcp!.downloadAttachment(c.req.raw),
     );
   }
+  if (input.googleAdminMcp) {
+    app.post("/mcp/plugins/google-admin", (c) => input.googleAdminMcp!.handle(c.req.raw));
+  }
   if (input.googleCalendarMcp) {
     app.post("/mcp/plugins/google-calendar", (c) => input.googleCalendarMcp!.handle(c.req.raw));
+  }
+  if (input.convexMcp) {
+    app.post("/mcp/plugins/convex", (c) => input.convexMcp!.handle(c.req.raw));
   }
   if (input.googleDriveMcp) {
     app.post("/mcp/plugins/google-drive", (c) => input.googleDriveMcp!.handle(c.req.raw));
@@ -2788,6 +2963,10 @@ export function createApiApp(input: CreateApiAppInput) {
     const ingress = input.googleIngress;
     app.get("/integrations/gmail/start", (c) => ingress.start("gmail", c.req.raw));
     app.get("/integrations/gmail/callback", (c) => ingress.callback("gmail", c.req.raw));
+    app.get("/integrations/google-admin/start", (c) => ingress.start("google_admin", c.req.raw));
+    app.get("/integrations/google-admin/callback", (c) =>
+      ingress.callback("google_admin", c.req.raw),
+    );
     app.get("/integrations/google-calendar/start", (c) =>
       ingress.start("google_calendar", c.req.raw),
     );
@@ -2848,6 +3027,14 @@ export function createApiApp(input: CreateApiAppInput) {
     app.get("/integrations/posthog/callback", (c) => ingress.callback("posthog", c.req.raw));
     app.get("/integrations/neon/start", (c) => ingress.start("neon", c.req.raw));
     app.get("/integrations/neon/callback", (c) => ingress.callback("neon", c.req.raw));
+    app.get("/integrations/stripe/start", (c) => ingress.start("stripe", c.req.raw));
+    app.get("/integrations/stripe/callback", (c) => ingress.callback("stripe", c.req.raw));
+    app.get("/integrations/notion/start", (c) => ingress.start("notion", c.req.raw));
+    app.get("/integrations/supabase/start", (c) => ingress.start("supabase", c.req.raw));
+    app.get("/integrations/resend/start", (c) => ingress.start("resend", c.req.raw));
+    app.get("/integrations/notion/callback", (c) => ingress.callback("notion", c.req.raw));
+    app.get("/integrations/supabase/callback", (c) => ingress.callback("supabase", c.req.raw));
+    app.get("/integrations/resend/callback", (c) => ingress.callback("resend", c.req.raw));
     app.get("/integrations/latitude/start", (c) => ingress.start("latitude", c.req.raw));
     app.get("/integrations/latitude/callback", (c) => ingress.callback("latitude", c.req.raw));
     app.get("/integrations/jamie-mcp/start", (c) => ingress.start("jamie", c.req.raw));
@@ -3513,6 +3700,19 @@ function granolaStateDto(state: GranolaProviderState) {
   };
 }
 
+function convexStateDto(state: ConvexProviderState) {
+  return {
+    provider: state.provider,
+    connected: state.connected,
+    status: integrationAccountStatusDto(state.status),
+    integrationId: state.integrationId,
+    accountName: state.accountName,
+    statusReason: state.statusReason,
+    capabilityModes: state.capabilityModes,
+    toolModes: state.toolModes,
+  };
+}
+
 function renderStateDto(state: RenderProviderState) {
   return {
     provider: state.provider,
@@ -3551,4 +3751,31 @@ function runEventDto(event: RunEvent) {
     payload: event.payload,
     occurredAt: event.createdAt.toISOString(),
   });
+}
+
+function requireCustomMcp(service: CustomMcpApplicationService | undefined) {
+  if (!service) throw new ApiError(503, "unavailable", "Custom MCP connections are unavailable.");
+  return service;
+}
+function customMcpProbeDto(probe: CustomMcpProbe) {
+  return {
+    fingerprint: probe.fingerprint,
+    tools: probe.tools.map(({ name, description, classification }) => ({
+      name,
+      ...(description !== undefined ? { description } : {}),
+      classification,
+    })),
+  };
+}
+function customMcpStatusDto(status: CustomMcpStatus) {
+  return {
+    ...status,
+    account: status.account
+      ? {
+          ...status.account,
+          checkedAt: status.account.checkedAt.toISOString(),
+          tools: customMcpProbeDto({ tools: status.account.tools, fingerprint: "" }).tools,
+        }
+      : null,
+  };
 }

@@ -19,6 +19,13 @@ export const TASK_STATUSES = [
 ] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
+// Waiting tasks have finished their run and can be archived without resuming them.
+export const SETTLED_TASK_STATUSES = ["waiting", "succeeded", "failed", "canceled"] as const;
+
+export function isSettledTaskStatus(status: TaskStatus): boolean {
+  return SETTLED_TASK_STATUSES.some((settledStatus) => settledStatus === status);
+}
+
 export const TASK_SOURCES = ["manual", "workflow", "schedule", "agent"] as const;
 export type TaskSource = (typeof TASK_SOURCES)[number];
 
@@ -135,7 +142,7 @@ export type CreateTaskCommentResult = {
   idempotentReplay: boolean;
 };
 
-export type UpdateTaskCommand = { archived: boolean } | { name: string };
+export type UpdateTaskCommand = { archived: boolean } | { name: string } | { markSeen: true };
 
 export type UpdateTaskResult = {
   task: Task;
@@ -357,6 +364,11 @@ export class TaskApplicationService {
         throw new CoreError("invalid_argument", "A Task archive update is required.");
       }
       normalizedCommand = { archived: command.archived };
+    } else if ("markSeen" in command) {
+      if (command.markSeen !== true) {
+        throw new CoreError("invalid_argument", "A Task can only be marked as seen.");
+      }
+      normalizedCommand = { markSeen: true };
     } else {
       normalizedCommand = { name: boundedTaskName(command.name) };
     }

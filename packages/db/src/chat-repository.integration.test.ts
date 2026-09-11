@@ -13,7 +13,8 @@ import {
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/pglite";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { actionApprovalInputHash } from "./action-governance";
 import {
   type ChatRepositoryIdFactory,
   PostgresChatAttachmentRepository,
@@ -22,6 +23,11 @@ import {
 } from "./chat-repository";
 import { loadChatSessionPluginRuntime } from "./plugin-runtime-repository";
 import { listChatSkillBundleActivations, readChatSkillBundleFile } from "./skill-bundle-repository";
+import {
+  PostgresTaskActionApprovalRepository,
+  taskActionInvocationId,
+} from "./task-action-approvals";
+import { snapshotPGliteSchema } from "./test-schema-snapshot";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const migrationPaths = [
@@ -43,6 +49,8 @@ const migrationPaths = [
   "0245_goat_task_activities.sql",
   "0247_preserve_assistant_message_boundaries.sql",
   "0248_goat_chat_attachment_upload_idempotency.sql",
+  "0261_persistent_bots.sql",
+  "0263_personal_company_skills.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -54,11 +62,12 @@ describe("Postgres Chat repositories", () => {
   let legacySurvivedMigration: boolean;
   let legacyRuntimeSurvivedMigration: boolean;
   let legacyAttachmentSurvivedMigration: boolean;
+  let restoreDatabase: () => Promise<PGlite>;
 
-  beforeEach(async () => {
-    database = new PGlite();
-    await database.exec(BASE_SCHEMA);
-    await database.exec(`
+  beforeAll(async () => {
+    restoreDatabase = await snapshotPGliteSchema(async (database) => {
+      await database.exec(BASE_SCHEMA);
+      await database.exec(`
       INSERT INTO goat.users (workos_user_id) VALUES ('migration_user');
       INSERT INTO goat.workspaces (id) VALUES ('migration_workspace');
       INSERT INTO goat.chat_sessions (id, user_workos_id, model)
@@ -81,9 +90,9 @@ describe("Postgres Chat repositories", () => {
         'migration_message', 'migration_assistant', 'Preserve me'
       );
     `);
-    for (const migrationPath of migrationPaths) {
-      if (migrationPath.endsWith("0248_goat_chat_attachment_upload_idempotency.sql")) {
-        await database.exec(`
+      for (const migrationPath of migrationPaths) {
+        if (migrationPath.endsWith("0248_goat_chat_attachment_upload_idempotency.sql")) {
+          await database.exec(`
           INSERT INTO goat.chat_attachment_uploads (
             id, user_workos_id, workspace_id, format, media_type, filename, size_bytes,
             blob_pathname, blob_url, expires_at
@@ -93,42 +102,42 @@ describe("Postgres Chat repositories", () => {
             'https://blob.invalid/preserve', now() + interval '1 day'
           )
         `);
+        }
+        const migration = await readFile(migrationPath, "utf8");
+        for (const statement of migration.split("--> statement-breakpoint")) {
+          if (statement.trim()) await database.exec(statement);
+        }
       }
-      const migration = await readFile(migrationPath, "utf8");
-      for (const statement of migration.split("--> statement-breakpoint")) {
-        if (statement.trim()) await database.exec(statement);
-      }
-    }
-    const migrated = await database.query<{ id: string; event_sequence: number }>(`
+      const migrated = await database.query<{ id: string; event_sequence: number }>(`
       SELECT id, event_sequence FROM goat.codex_chat_turns WHERE id = 'migration_run'
     `);
-    const migratedProjection = await database.query<{ id: string; content: string }>(`
+      const migratedProjection = await database.query<{ id: string; content: string }>(`
       SELECT id, content FROM goat.message_read_model_v1 WHERE id = 'migration_message'
     `);
-    const migratedConversationProjection = await database.query<{
-      runtime_status: string | null;
-      active_run_id: string | null;
-      runtime_has_error: boolean | null;
-    }>(`
+      const migratedConversationProjection = await database.query<{
+        runtime_status: string | null;
+        active_run_id: string | null;
+        runtime_has_error: boolean | null;
+      }>(`
       SELECT runtime_status, active_run_id, runtime_has_error
       FROM goat.conversation_read_model_v1
       WHERE id = 'migration_conversation'
     `);
-    legacySurvivedMigration =
-      migrated.rows[0]?.id === "migration_run" &&
-      migrated.rows[0].event_sequence === 0 &&
-      migratedProjection.rows[0]?.content === "Preserve me";
-    legacyRuntimeSurvivedMigration =
-      migratedConversationProjection.rows[0]?.runtime_status === "queued" &&
-      migratedConversationProjection.rows[0]?.active_run_id === null &&
-      migratedConversationProjection.rows[0]?.runtime_has_error === false;
-    legacyAttachmentSurvivedMigration =
-      (
-        await database.query<{ count: number }>(
-          "SELECT count(*)::int AS count FROM goat.chat_attachment_uploads WHERE id = 'migration_attachment'",
-        )
-      ).rows[0]?.count === 1;
-    await database.exec(`
+      legacySurvivedMigration =
+        migrated.rows[0]?.id === "migration_run" &&
+        migrated.rows[0].event_sequence === 0 &&
+        migratedProjection.rows[0]?.content === "Preserve me";
+      legacyRuntimeSurvivedMigration =
+        migratedConversationProjection.rows[0]?.runtime_status === "queued" &&
+        migratedConversationProjection.rows[0]?.active_run_id === null &&
+        migratedConversationProjection.rows[0]?.runtime_has_error === false;
+      legacyAttachmentSurvivedMigration =
+        (
+          await database.query<{ count: number }>(
+            "SELECT count(*)::int AS count FROM goat.chat_attachment_uploads WHERE id = 'migration_attachment'",
+          )
+        ).rows[0]?.count === 1;
+      await database.exec(`
       DELETE FROM goat.codex_chat_turns;
       DELETE FROM goat.codex_chat_sessions;
       DELETE FROM goat.chat_messages;
@@ -136,7 +145,7 @@ describe("Postgres Chat repositories", () => {
       DELETE FROM goat.users;
       DELETE FROM goat.workspaces;
     `);
-    await database.exec(`
+      await database.exec(`
       INSERT INTO goat.users (workos_user_id) VALUES ('user_1'), ('user_2'), ('user_3');
       INSERT INTO goat.workspaces (id) VALUES ('workspace_1'), ('workspace_2');
       INSERT INTO goat.workspace_members (id, workspace_id, user_workos_id, role)
@@ -145,6 +154,14 @@ describe("Postgres Chat repositories", () => {
         ('member_2', 'workspace_2', 'user_2', 'admin'),
         ('member_3', 'workspace_1', 'user_3', 'member');
     `);
+      await database.exec(
+        `ALTER TABLE goat.plugins ADD COLUMN owner_user_id text DEFAULT 'user_1';`,
+      );
+    });
+  });
+
+  beforeEach(async () => {
+    database = await restoreDatabase();
     execute = async (query) => {
       const compiled = dialect.sqlToQuery(query);
       return database.query(compiled.sql, compiled.params as never[]);
@@ -158,6 +175,116 @@ describe("Postgres Chat repositories", () => {
 
   afterEach(async () => {
     await database.close();
+  });
+
+  it("enforces Personal visibility for explicit chat mentions and excludes them from shared Tasks", async () => {
+    await seedTerminalTask(database);
+    await database.exec(
+      "UPDATE goat.skill_installations SET scope = 'personal', created_by_user_id = 'user_1' WHERE id = 'skill_review';",
+    );
+    const message = {
+      idempotencyKey: "private-mention",
+      content: "/review Check this.",
+      engine: "opencompany" as const,
+      model: "provider/model",
+      mentions: [{ kind: "skill" as const, id: "skill_review", name: "review" }],
+    };
+    const created = await service.createMessage(actor(), message);
+    await expect(
+      listChatSkillBundleActivations(drizzle(database), {
+        workspaceId: "workspace_1",
+        userId: "user_1",
+        chatSessionId: created.conversationId,
+      }),
+    ).resolves.toEqual([expect.objectContaining({ bundleId: "skill_bundle_review" })]);
+    await expect(
+      service.createMessage(actor({ userId: "user_3", role: "member" }), {
+        ...message,
+        idempotencyKey: "other-private-mention",
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      service.createMessage(actor(), {
+        ...message,
+        idempotencyKey: "task-private-mention",
+        conversationId: "task_conversation_1",
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await database.exec(
+      "UPDATE goat.skill_installations SET scope = 'company' WHERE id = 'skill_review'; UPDATE goat.skill_installation_versions SET company_shared = true WHERE installation_id = 'skill_review';",
+    );
+    await expect(
+      service.createMessage(actor(), {
+        ...message,
+        idempotencyKey: "task-company-mention",
+        conversationId: "task_conversation_1",
+      }),
+    ).resolves.toMatchObject({ conversationId: "task_conversation_1" });
+  });
+
+  it("rejects competing same-name selections even when both preflight reads see an empty Chat", async () => {
+    await seedStandaloneReviewSkill(database);
+    await database.exec(`
+      UPDATE goat.skill_installations SET scope = 'personal', created_by_user_id = 'user_1' WHERE id = 'skill_review';
+      INSERT INTO goat.skill_bundles (id, workspace_id, integrity, name, description, body, source_type, source_url, source_path, source_ref, resolved_commit)
+      VALUES ('company_bundle', 'workspace_1', 'sha256:${"b".repeat(64)}', 'review', 'Company review', 'Different company instructions', 'github', 'https://github.com/example/company', 'review', 'main', '${"b".repeat(40)}');
+      INSERT INTO goat.skill_installations (id, workspace_id, name, bundle_id, scope) VALUES ('company_review', 'workspace_1', 'review', 'company_bundle', 'company');
+    `);
+    const created = await service.createMessage(actor(), {
+      idempotencyKey: "empty-skill-chat",
+      content: "Start a review.",
+      engine: "codex",
+      model: "provider/model",
+    });
+    let preflightReads = 0;
+    let release!: () => void;
+    const bothRead = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const racing = new ChatApplicationService(
+      new PostgresChatRepository(async (query) => {
+        const rows = await execute(query);
+        if (dialect.sqlToQuery(query).sql.includes("AS conflict")) {
+          preflightReads += 1;
+          if (preflightReads === 2) release();
+          await bothRead;
+        }
+        return rows;
+      }),
+    );
+    const results = await Promise.allSettled(
+      ["skill_review", "company_review"].map((id) =>
+        racing.createMessage(actor(), {
+          idempotencyKey: `race-${id}`,
+          conversationId: created.conversationId,
+          content: "/review Run this.",
+          engine: "codex",
+          model: "provider/model",
+          mentions: [{ kind: "skill", id }],
+        }),
+      ),
+    );
+    expect(preflightReads).toBe(2);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.find((result) => result.status === "rejected")).toMatchObject({
+      reason: { code: "conflict" },
+    });
+    expect(
+      (
+        await database.query(
+          "SELECT count(*)::int AS count FROM goat.chat_session_skill_bundles WHERE chat_session_id = $1",
+          [created.conversationId],
+        )
+      ).rows,
+    ).toEqual([{ count: 1 }]);
+    expect(
+      (
+        await database.query(
+          "SELECT count(*)::int AS count FROM goat.chat_messages WHERE session_id = $1 AND role = 'user'",
+          [created.conversationId],
+        )
+      ).rows,
+    ).toEqual([{ count: 2 }]);
   });
 
   it("keeps pre-existing durable rows while adding the canonical event cursor", () => {
@@ -539,6 +666,38 @@ describe("Postgres Chat repositories", () => {
         created.messageId,
       ]),
     ).rejects.toThrow(/chat_messages_attachment_texts_object_check/u);
+  });
+
+  it("keeps bots out of recent chats while preserving the shared message and run path", async () => {
+    const first = await service.createMessage(actor(), {
+      idempotencyKey: "bot-first",
+      content: "Research",
+      engine: "opencompany",
+      model: "provider/model",
+    });
+    await database.query(
+      "UPDATE goat.chat_sessions SET bot_name = 'Research', bot_description = 'Find customers', title = 'Research' WHERE id = $1",
+      [first.conversationId],
+    );
+    expect((await service.listConversations(actor(), {})).conversations).toEqual([]);
+    expect(await service.getConversation(actor(), first.conversationId)).toMatchObject({
+      id: first.conversationId,
+      title: "Research",
+    });
+    const next = await service.createMessage(actor(), {
+      idempotencyKey: "bot-next",
+      conversationId: first.conversationId,
+      content: "Continue",
+      engine: "opencompany",
+      model: "provider/model",
+    });
+    expect(next.conversationId).toBe(first.conversationId);
+    expect(next.runId).not.toBe(first.runId);
+    expect((await service.listConversations(actor(), {})).conversations).toEqual([]);
+    expect(
+      (await service.listMessages(actor(), { conversationId: first.conversationId })).messages
+        .length,
+    ).toBeGreaterThanOrEqual(2);
   });
 
   it("atomically creates and idempotently replays the first durable Message and Run", async () => {
@@ -995,13 +1154,185 @@ describe("Postgres Chat repositories", () => {
     ).rejects.toMatchObject({ code: "not_found" });
   });
 
-  it("resolves durable approvals once and appends their semantic event", async () => {
+  it.each(["approved", "denied", "canceled"] as const)(
+    "durably pauses and resumes a task action: %s",
+    async (resolution) => {
+      const created = await service.createMessage(actor(), {
+        idempotencyKey: "task-approval",
+        content: "Create a Gmail draft",
+        engine: "opencompany",
+        model: "provider/model",
+      });
+      await database.query("UPDATE goat.chat_sessions SET kind = 'task' WHERE id = $1", [
+        created.conversationId,
+      ]);
+      await database.query(
+        `INSERT INTO goat.tasks (id, user_workos_id, workspace_id, session_id, status)
+      VALUES ('task_approval', 'user_1', 'workspace_1', $1, 'running')`,
+        [created.conversationId],
+      );
+      await database.query(
+        `UPDATE goat.codex_chat_turns SET status = 'running', attempts = 1,
+      lease_id = 'lease_approval', lease_owner = 'worker_approval' WHERE id = $1`,
+        [created.runId],
+      );
+      const action = "plugin:gmail:gmail.create_draft";
+      const params = {
+        to: "recipient@example.com",
+        subject: "Ready",
+        body: "The feature is live.",
+      };
+      const invocationId = taskActionInvocationId(created.runId, action, params);
+      expect(
+        taskActionInvocationId(created.runId, action, {
+          body: params.body,
+          subject: params.subject,
+          to: params.to,
+        }),
+      ).toBe(invocationId);
+      expect(
+        taskActionInvocationId(created.runId, action, { ...params, body: "Changed" }),
+      ).not.toBe(invocationId);
+      await database.query(
+        `INSERT INTO goat.action_turns (id, session_id, turn_id, user_workos_id, workspace_id, policy, approval_records, expires_at)
+      SELECT 'action_turn', codex_chat_session_id, id, 'user_1', 'workspace_1', 'foregroundInteractive', $2::jsonb, now() + interval '6 hours'
+      FROM goat.codex_chat_turns WHERE id = $1`,
+        [
+          created.runId,
+          JSON.stringify({
+            [invocationId]: {
+              actionId: action,
+              sourceId: "plugin:gmail:gmail",
+              capabilityId: "write",
+              status: "pending",
+              inputHash: actionApprovalInputHash(params),
+            },
+          }),
+        ],
+      );
+      let actions = new PostgresTaskActionApprovalRepository(execute);
+      const lease = { runId: created.runId, leaseId: "lease_approval", invocationId };
+      expect(await actions.stage({ ...lease, params: { ...params, body: "Changed" } })).toBe(false);
+      expect(await actions.stage({ ...lease, params })).toBe(true);
+      expect(await actions.stage({ ...lease, params })).toBe(false);
+      expect(await actions.claim(lease)).toBe(false);
+      const execution = new PostgresRunExecutionRepository(execute);
+      await execution.startAttempt({
+        worker: { workerId: "worker_approval" },
+        runId: created.runId,
+        attemptId: "attempt_approval",
+        leaseId: lease.leaseId,
+      });
+      const draft = {
+        id: `approval_${invocationId}`,
+        toolCallId: invocationId,
+        kind: "use_action",
+        action,
+        prompt: "Create Gmail draft?",
+        input: { action, params },
+        options: ["approved", "denied"],
+      };
+      expect(
+        await execution.pauseForApprovals({
+          worker: { workerId: "worker_approval" },
+          runId: created.runId,
+          attemptId: "attempt_approval",
+          leaseId: lease.leaseId,
+          approvals: [draft],
+          settledMessageParts: [],
+        }),
+      ).toHaveLength(1);
+      expect(
+        (
+          await database.query(
+            "SELECT host_tool_contract_version FROM goat.codex_chat_sessions WHERE chat_session_id=$1",
+            [created.conversationId],
+          )
+        ).rows,
+      ).toEqual([{ host_tool_contract_version: "goat-codex-host-tools.v5" }]);
+      const paused = (
+        await database.query(
+          `SELECT run.status, run.lease_id, task.status AS task_status,
+      message.debug_trace -> 'uiMessageParts' AS parts FROM goat.codex_chat_turns AS run
+      JOIN goat.tasks AS task ON task.session_id = run.chat_session_id
+      JOIN goat.chat_messages AS message ON message.id = run.assistant_message_id WHERE run.id = $1`,
+          [created.runId],
+        )
+      ).rows[0];
+      expect(paused).toMatchObject({
+        status: "paused",
+        lease_id: null,
+        task_status: "waiting",
+        parts: [
+          expect.objectContaining({ input: { action, params }, state: "approval-requested" }),
+        ],
+      });
+      // A new repository represents a restarted runner: the original inputs and approval survive.
+      actions = new PostgresTaskActionApprovalRepository(execute);
+      expect(await actions.requests(created.runId)).toMatchObject([
+        { params, decision: "pending" },
+      ]);
+      const command = { runId: created.runId, approvalId: draft.id, resolution };
+      await expect(
+        service.resolveApproval(actor({ userId: "user_2", workspaceId: "workspace_2" }), command),
+      ).rejects.toMatchObject({ code: "not_found" });
+      if (resolution === "canceled") {
+        await service.cancelRun(actor(), created.runId);
+        expect(await actions.claim(lease)).toBe(false);
+        await expect(
+          service.resolveApproval(actor(), { ...command, resolution: "approved" }),
+        ).rejects.toMatchObject({ code: "not_found" });
+        expect(
+          (await database.query("SELECT status FROM goat.tasks WHERE id = 'task_approval'")).rows,
+        ).toEqual([{ status: "canceled" }]);
+        return;
+      }
+      await expect(service.resolveApproval(actor(), command)).resolves.toMatchObject({
+        idempotentReplay: false,
+      });
+      await expect(service.resolveApproval(actor(), command)).resolves.toMatchObject({
+        idempotentReplay: true,
+      });
+      expect(
+        (await database.query("SELECT status FROM goat.tasks WHERE id = 'task_approval'")).rows,
+      ).toEqual([{ status: "queued" }]);
+      expect(await actions.requests(created.runId)).toMatchObject([
+        { decision: resolution, executionStatus: "pending" },
+      ]);
+      await database.query(
+        `UPDATE goat.codex_chat_turns SET status = 'running', lease_id = 'lease_resumed', lease_owner = 'worker_resumed' WHERE id = $1`,
+        [created.runId],
+      );
+      expect(await actions.claim(lease)).toBe(false);
+      const resumed = { ...lease, leaseId: "lease_resumed" };
+      expect(await actions.claim(resumed)).toBe(true);
+      expect(await new PostgresTaskActionApprovalRepository(execute).claim(resumed)).toBe(false);
+      const result =
+        resolution === "approved"
+          ? { ok: true as const, action, result: { draftId: "draft_1" } }
+          : { ok: false as const, action, error: { code: "not_permitted", message: "Denied" } };
+      expect(await actions.complete({ ...resumed, result })).toBe(true);
+      expect(await actions.requests(created.runId)).toMatchObject([
+        { executionStatus: "completed", result },
+      ]);
+      expect(await actions.claim(resumed)).toBe(false);
+    },
+  );
+
+  it.each([1, 2])("resolves %i approvals before requeueing", async (approvalCount) => {
     const created = await service.createMessage(actor(), {
       idempotencyKey: "send-approval",
       content: "Use the customer system",
       engine: "opencompany",
       model: "provider/model",
     });
+    const approvals = Array.from({ length: approvalCount }, (_, index) => ({
+      id: `approval_${index + 1}`,
+      toolCallId: `tool_call_${index + 1}`,
+      kind: "use_action",
+      prompt: "Approve crm.lookup?",
+      options: ["approved", "denied"],
+    }));
     await database.query(
       `UPDATE goat.codex_chat_turns
        SET status = 'running', attempts = 1, lease_id = 'lease_approval',
@@ -1013,17 +1344,22 @@ describe("Postgres Chat repositories", () => {
       `UPDATE goat.chat_messages AS message
        SET debug_trace = jsonb_build_object(
          'schemaVersion', 'opencompany.chat.debug.v1',
-         'uiMessageParts', jsonb_build_array(jsonb_build_object(
-           'type', 'tool-use_action',
-           'toolCallId', 'tool_call_1',
-           'state', 'approval-requested',
-           'input', jsonb_build_object('action', 'crm.lookup'),
-           'approval', jsonb_build_object('id', 'approval_1')
-         ))
+         'uiMessageParts', $2::jsonb
        )
        FROM goat.codex_chat_turns AS run
        WHERE run.id = $1 AND message.id = run.assistant_message_id`,
-      [created.runId],
+      [
+        created.runId,
+        JSON.stringify(
+          approvals.map((approval) => ({
+            type: "tool-use_action",
+            toolCallId: approval.toolCallId,
+            state: "approval-requested",
+            input: { action: "crm.lookup" },
+            approval: { id: approval.id },
+          })),
+        ),
+      ],
     );
     const execution = new PostgresRunExecutionRepository(
       execute,
@@ -1041,17 +1377,9 @@ describe("Postgres Chat repositories", () => {
         runId: created.runId,
         attemptId: "attempt_approval",
         leaseId: "lease_approval",
-        approvals: [
-          {
-            id: "approval_1",
-            toolCallId: "tool_call_1",
-            kind: "use_action",
-            prompt: "Approve crm.lookup?",
-            options: ["approved", "denied"],
-          },
-        ],
+        approvals,
       }),
-    ).resolves.toMatchObject([{ id: "approval_1", status: "pending" }]);
+    ).resolves.toHaveLength(approvalCount);
     await expect(service.getConversation(actor(), created.conversationId)).resolves.toMatchObject({
       activityState: "idle",
       hasUnseen: true,
@@ -1105,6 +1433,20 @@ describe("Postgres Chat repositories", () => {
         approved_at: new Date("2026-08-10T20:00:00.000Z"),
       },
     ]);
+    if (approvalCount > 1) {
+      expect(
+        (
+          await database.query<{ status: string }>(
+            "SELECT status FROM goat.codex_chat_turns WHERE id = $1",
+            [created.runId],
+          )
+        ).rows,
+      ).toEqual([{ status: "paused" }]);
+      await service.resolveApproval(actor(), {
+        ...command,
+        approvalId: "approval_2",
+      });
+    }
     expect(
       (
         await database.query<{ status: string; settings: Record<string, unknown> }>(
@@ -1120,12 +1462,14 @@ describe("Postgres Chat repositories", () => {
        WHERE run.id = $1`,
       [created.runId],
     );
-    expect(assistant.rows[0]?.debug_trace.uiMessageParts).toEqual([
-      expect.objectContaining({
-        state: "approval-responded",
-        approval: { id: "approval_1", approved: true },
-      }),
-    ]);
+    expect(assistant.rows[0]?.debug_trace.uiMessageParts).toEqual(
+      approvals.map((approval) =>
+        expect.objectContaining({
+          state: "approval-responded",
+          approval: { id: approval.id, approved: true },
+        }),
+      ),
+    );
     expect(
       (
         await database.query<{ sequence: number; type: string }>(
@@ -1133,12 +1477,14 @@ describe("Postgres Chat repositories", () => {
           [created.runId],
         )
       ).rows,
-    ).toEqual([
-      { sequence: 1, type: "run.queued" },
-      { sequence: 2, type: "approval.requested" },
-      { sequence: 3, type: "run.paused" },
-      { sequence: 4, type: "approval.resolved" },
-    ]);
+    ).toEqual(
+      [
+        "run.queued",
+        ...approvals.map(() => "approval.requested"),
+        "run.paused",
+        ...approvals.map(() => "approval.resolved"),
+      ].map((type, index) => ({ sequence: index + 1, type })),
+    );
   });
 
   it("resolves a gateway approval without pausing its running engine turn", async () => {
@@ -1429,6 +1775,7 @@ describe("Postgres Chat repositories", () => {
     });
     await expect(
       loadChatSessionPluginRuntime(drizzle(database), {
+        userId: "user_1",
         workspaceId: "workspace_1",
         chatSessionId: first.conversationId,
       }),
@@ -1489,6 +1836,7 @@ describe("Postgres Chat repositories", () => {
     const db = drizzle(database);
     await expect(
       listChatSkillBundleActivations(db, {
+        userId: "user_1",
         workspaceId: "workspace_1",
         chatSessionId: created.conversationId,
       }),
@@ -1507,14 +1855,15 @@ describe("Postgres Chat repositories", () => {
       );
       INSERT INTO goat.skill_bundle_files (bundle_id, path, content, executable, size_bytes)
       VALUES ('skill_bundle_standalone_review', 'SKILL.md', ''::bytea, false, 0);
-      INSERT INTO goat.skill_installations (id, workspace_id, name, bundle_id)
+      INSERT INTO goat.skill_installations (id, workspace_id, name, bundle_id, scope)
       VALUES (
         'skill_installation_standalone_review', 'workspace_1',
-        'review', 'skill_bundle_standalone_review'
+        'review', 'skill_bundle_standalone_review', 'company'
       );
     `);
     await expect(
       listChatSkillBundleActivations(db, {
+        userId: "user_1",
         workspaceId: "workspace_1",
         chatSessionId: created.conversationId,
       }),
@@ -1523,6 +1872,7 @@ describe("Postgres Chat repositories", () => {
     ]);
     await expect(
       readChatSkillBundleFile(db, {
+        userId: "user_1",
         workspaceId: "workspace_1",
         chatSessionId: created.conversationId,
         skillName: "review",
@@ -1532,12 +1882,14 @@ describe("Postgres Chat repositories", () => {
     await database.exec("UPDATE goat.plugins SET status = 'disabled' WHERE id = 'plugin_review'");
     await expect(
       listChatSkillBundleActivations(db, {
+        userId: "user_1",
         workspaceId: "workspace_1",
         chatSessionId: created.conversationId,
       }),
     ).resolves.toEqual([]);
     await expect(
       readChatSkillBundleFile(db, {
+        userId: "user_1",
         workspaceId: "workspace_1",
         chatSessionId: created.conversationId,
         skillName: "review",
@@ -1723,6 +2075,68 @@ describe("Postgres Chat repositories", () => {
         deploy_version: "deploy_new",
       },
     ]);
+  });
+
+  it("counts infrastructure failures independently from handoffs and expired lease reclaims", async () => {
+    const created = await service.createMessage(actor(), {
+      idempotencyKey: "send-infrastructure-retries",
+      content: "Recover this",
+      engine: "opencompany",
+      model: "provider/model",
+    });
+    const execution = new PostgresRunExecutionRepository(execute);
+    const claims = [
+      { expected: 0, status: "abandoned", errorCode: "worker_handoff" },
+      { expected: 0, status: null, errorCode: null },
+      { expected: 0, status: "failed", errorCode: "retryable_infrastructure" },
+      { expected: 1, status: "abandoned", errorCode: "worker_handoff" },
+      { expected: 1, status: "failed", errorCode: "retryable_infrastructure" },
+      { expected: 2, status: "failed", errorCode: "execution_failed" },
+      { expected: 2, status: null, errorCode: null },
+    ] as const;
+
+    for (const [index, claim] of claims.entries()) {
+      const number = index + 1;
+      const input = {
+        worker: { workerId: `worker_${number}` },
+        runId: created.runId,
+        attemptId: `attempt_${number}`,
+        leaseId: `lease_${number}`,
+      };
+      await database.query(
+        `UPDATE goat.codex_chat_turns
+         SET status = 'running', attempts = $2, lease_id = $3, lease_owner = $4
+         WHERE id = $1`,
+        [created.runId, number, input.leaseId, input.worker.workerId],
+      );
+      await expect(execution.startAttempt(input)).resolves.toMatchObject({
+        number,
+        previousInfrastructureFailures: claim.expected,
+      });
+      // Re-reading a claimed Attempt must return the same budget, without counting itself.
+      await expect(execution.startAttempt(input)).resolves.toMatchObject({
+        previousInfrastructureFailures: claim.expected,
+      });
+      if (claim.status) {
+        await execution.finishAttempt({
+          ...input,
+          status: claim.status,
+          errorCode: claim.errorCode,
+        });
+      }
+    }
+    expect(
+      (await database.query("SELECT error_code FROM goat.run_attempts WHERE id = 'attempt_2'"))
+        .rows,
+    ).toEqual([{ error_code: "lease_reclaimed" }]);
+    await expect(
+      execution.startAttempt({
+        worker: { workerId: "worker_stale" },
+        runId: created.runId,
+        attemptId: "attempt_stale",
+        leaseId: "lease_stale",
+      }),
+    ).resolves.toBeNull();
   });
 
   it("projects queued cancellation to the assistant, runtime, and semantic log", async () => {
@@ -2219,8 +2633,8 @@ async function seedStandaloneReviewSkill(database: PGlite) {
     );
     INSERT INTO goat.skill_bundle_files (bundle_id, path, content, executable, size_bytes)
     VALUES ('skill_bundle_review', 'SKILL.md', ''::bytea, false, 0);
-    INSERT INTO goat.skill_installations (id, workspace_id, name, bundle_id)
-    VALUES ('skill_review', 'workspace_1', 'review', 'skill_bundle_review');
+    INSERT INTO goat.skill_installations (id, workspace_id, name, bundle_id, scope)
+    VALUES ('skill_review', 'workspace_1', 'review', 'skill_bundle_review', 'company');
   `);
 }
 

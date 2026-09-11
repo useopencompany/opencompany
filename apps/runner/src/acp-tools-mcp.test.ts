@@ -35,6 +35,7 @@ const capability = {
 };
 const apps: ReturnType<typeof Fastify>[] = [];
 const authorized = {
+  skillToolsEnabled: false,
   actorId: "user_1",
   workspaceId: "workspace_1",
   workspaceName: "Acme",
@@ -55,6 +56,45 @@ afterEach(async () => {
 });
 
 describe("runner ACP tools MCP", () => {
+  it.each(["codex", "claude_code"] as const)(
+    "saves a %s task approval without executing or holding an interactive waiter",
+    async (engine) => {
+      const deps = {
+        executeAction: vi.fn(),
+        evaluateApproval: vi.fn(async () => ({ ok: true as const, needsApproval: true })),
+        requestApproval: vi.fn(),
+        waitForApproval: vi.fn(),
+        resolveApproval: vi.fn(),
+        taskActions: { requests: vi.fn(async () => []), stage: vi.fn(async () => true) },
+      };
+      const result = await executeExternalActionWithApproval({
+        request: {
+          operation: "execute",
+          sessionId: capability.codexChatSessionId,
+          turnId: capability.codexChatTurnId,
+          invocationId: "http_request_7",
+          action: "plugin:gmail:gmail.create_draft",
+          params: { subject: "Ready" },
+        },
+        signal: new AbortController().signal,
+        capability: { ...capability, v: 2, expiresAt: Date.now() + 60_000 },
+        authorizedContext: { ...authorized, engine, taskConversation: true },
+        authorizeOperation: async () => authorized,
+        dependencies: deps,
+      });
+      expect(result).toMatchObject({ ok: false, error: { code: "approval_required" } });
+      expect(deps.taskActions.stage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          invocationId: expect.stringMatching(/^task_action_/),
+          params: { subject: "Ready" },
+        }),
+      );
+      expect(deps.executeAction).not.toHaveBeenCalled();
+      expect(deps.requestApproval).not.toHaveBeenCalled();
+      expect(deps.waitForApproval).not.toHaveBeenCalled();
+    },
+  );
+
   it("rejects a missing sandbox capability", async () => {
     const app = Fastify();
     apps.push(app);
@@ -128,6 +168,7 @@ describe("runner ACP tools MCP", () => {
       expect(tools.tools.map((tool) => tool.name)).toEqual([
         "publish_artifact",
         "list_actions",
+        "describe_actions",
         "use_action",
         "wiki",
       ]);
@@ -143,6 +184,75 @@ describe("runner ACP tools MCP", () => {
       await client.close();
     }
   });
+
+  it.each(["codex", "claude_code"] as const)(
+    "exposes Skill management to %s members and rechecks authority on execution",
+    async (engine) => {
+      const member = { ...authorized, engine, taskConversation: false, skillToolsEnabled: true };
+      const authorize = vi.fn(async () => member);
+      const executeSkillTool = vi.fn(async () => ({ archived: true, name: "my-skill" }));
+      const app = Fastify();
+      apps.push(app);
+      registerAcpToolsMcpRoute(app, env, { authorize, executeSkillTool });
+      await app.listen({ host: "127.0.0.1", port: 0 });
+      const address = app.server.address();
+      if (!address || typeof address === "string") throw new Error("Expected a TCP test server.");
+      const ticket = createExternalEngineGatewayTicket({
+        ...capability,
+        secret: env.internalToken,
+      }).ticket;
+      const client = new Client({ name: "skills-test", version: "1" });
+      const transport = new StreamableHTTPClientTransport(
+        new URL(`http://127.0.0.1:${address.port}/internal/goat/acp-tools`),
+        { requestInit: { headers: { "x-opencompany-tool-ticket": ticket } } },
+      );
+      try {
+        await client.connect(transport as Parameters<typeof client.connect>[0]);
+        expect((await client.listTools()).tools.map(({ name }) => name)).toEqual(
+          expect.arrayContaining([
+            "workspace_skills",
+            "create_workspace_skill",
+            "edit_workspace_skill",
+          ]),
+        );
+        const result = await client.callTool({
+          name: "workspace_skills",
+          arguments: { command: "archive", name: "my-skill" },
+        });
+        expect(result.isError).not.toBe(true);
+        expect(executeSkillTool).toHaveBeenCalledWith(
+          expect.objectContaining({
+            actor: {
+              userId: "user_1",
+              workspaceId: "workspace_1",
+              role: "member",
+              permissions: ["skill:read", "skill:write"],
+              authenticationMethod: "service",
+            },
+            tool: "workspace_skills",
+            args: { command: "archive", name: "my-skill" },
+          }),
+        );
+        authorize.mockResolvedValue({ ...member, taskConversation: true });
+        await client.callTool({ name: "workspace_skills", arguments: { command: "list" } });
+        expect(executeSkillTool).toHaveBeenLastCalledWith(
+          expect.objectContaining({ actor: expect.objectContaining({ skillAccess: "company" }) }),
+        );
+        executeSkillTool.mockClear();
+        authorize
+          .mockResolvedValueOnce(member)
+          .mockResolvedValueOnce({ ...member, skillToolsEnabled: false });
+        const revoked = await client.callTool({
+          name: "workspace_skills",
+          arguments: { command: "archive", name: "my-skill" },
+        });
+        expect(revoked.isError).toBe(true);
+        expect(executeSkillTool).not.toHaveBeenCalled();
+      } finally {
+        await client.close();
+      }
+    },
+  );
 
   it("dispatches execute operations through the persisted action gateway", async () => {
     const catalog: ResolvedActionCatalog = {
@@ -214,6 +324,7 @@ describe("runner ACP tools MCP", () => {
       ok: true,
       action: "gmail.search",
       result: { messages: [] },
+      budget: { limit: 16, used: 1, remaining: 15 },
     });
     expect(executeAction).toHaveBeenCalledWith({ request, signal });
     expect(providerExecuteAction).toHaveBeenCalledOnce();
@@ -299,6 +410,7 @@ describe("runner ACP tools MCP", () => {
       expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([
         "publish_artifact",
         "list_actions",
+        "describe_actions",
         "use_action",
         "wiki",
       ]);
@@ -603,6 +715,7 @@ describe("runner ACP tools MCP", () => {
       expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([
         "publish_artifact",
         "list_actions",
+        "describe_actions",
         "use_action",
         "wiki",
         "goat_brain",

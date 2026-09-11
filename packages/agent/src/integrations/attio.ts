@@ -15,7 +15,7 @@ import { type AttioObjectType, integrations } from "@opencompany/db/product-sche
 import { and, desc, eq, ne, sql } from "drizzle-orm";
 import { getAppUrl } from "../app-url";
 import type { AttioProviderState } from "../integration-state";
-import { captureIntegrationAddedAnalytics } from "./analytics";
+import { captureConnectionAddedAnalytics } from "./analytics";
 
 export const ATTIO_API_BASE_URL = "https://api.attio.com/v2";
 
@@ -382,7 +382,8 @@ export async function connectAttioIntegration(input: {
     throw error;
   }
 
-  await captureIntegrationAddedAnalytics({
+  await captureConnectionAddedAnalytics({
+    connectionId: integration.id,
     userWorkosId: input.userWorkosId,
     provider: "attio",
   });

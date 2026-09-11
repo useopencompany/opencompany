@@ -1,4 +1,8 @@
 import { createMCPClient, type OAuthClientProvider } from "@ai-sdk/mcp";
+import { resolvePlugin } from "@opencompany/agent-runtime";
+import { createOfficialPluginFetcher } from "@opencompany/agent-runtime/official-plugin-artifacts";
+import { OFFICIAL_PLUGIN_SOURCES } from "@opencompany/agent-runtime/official-plugin-catalog";
+import { captureProductServerEvent } from "@opencompany/analytics/product/server";
 import type { PluginGatewayDiscoveredTool } from "@opencompany/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createRemoteMcpStaticBearerAuthProvider } from "../integrations/remote-mcp-static-bearer";
@@ -10,6 +14,10 @@ import {
   resolveRemoteMcpActions,
 } from "./remote-mcp";
 import { ActionAuthError, type ActionExecuteContext, ActionPermissionError } from "./types";
+
+vi.mock("@opencompany/analytics/product/server", () => ({
+  captureProductServerEvent: vi.fn(async () => undefined),
+}));
 
 const authProvider = {} as OAuthClientProvider;
 const identity = { userWorkosId: "user_1", workspaceId: "workspace_1" };
@@ -62,6 +70,7 @@ function registration(
   overrides: Partial<RemoteMcpGatewayRegistration> = {},
 ): RemoteMcpGatewayRegistration {
   return {
+    pluginName: "linear",
     source: "plugin:linear:linear",
     connectionProvider: "linear",
     label: "Linear",
@@ -452,6 +461,20 @@ describe("resolveRemoteMcpActions", () => {
     await expect(action?.execute({ team: "Platform" }, context)).resolves.toEqual({
       issues: [{ id: "issue_1" }],
     });
+    expect(captureProductServerEvent).toHaveBeenCalledExactlyOnceWith(
+      "plugin_tool_call_completed",
+      "user_1",
+      {
+        workspace_id: "workspace_1",
+        plugin_name: "linear",
+        connection_id: "gint_linear_1",
+        provider: "linear",
+        capability: "read",
+        outcome: "success",
+        duration_ms: expect.any(Number),
+        engine: "codex",
+      },
+    );
     expect(loadConnection).toHaveBeenCalledOnce();
     expect(createClient).toHaveBeenCalledOnce();
     expect(execution.listTools).not.toHaveBeenCalled();
@@ -610,6 +633,7 @@ describe("resolveRemoteMcpActions", () => {
     await expect(catalog?.actions[0]?.execute({}, context)).rejects.toBeInstanceOf(
       ActionPermissionError,
     );
+    expect(captureProductServerEvent).not.toHaveBeenCalled();
     expect(loadConnection).not.toHaveBeenCalled();
     expect(createClient).not.toHaveBeenCalled();
 
@@ -695,5 +719,256 @@ describe("resolveRemoteMcpActions", () => {
     expect(withToolDisabled?.actions.map((action) => action.id)).toEqual([
       "plugin:linear:linear.other",
     ]);
+  });
+});
+
+describe("plugin tool outcome analytics", () => {
+  it.each(["provider", "transport"])("records %s errors once without payloads", async (failure) => {
+    const execution = client({
+      result: { isError: true, content: [{ type: "text", text: "private provider error" }] },
+    });
+    if (failure === "transport")
+      execution.callTool.mockRejectedValueOnce(new Error("private transport error"));
+    const catalog = await resolveRemoteMcpActions(identity, registration(), {
+      createClient: vi.fn(async () => execution),
+      recordDispatch: vi.fn(async () => {}),
+    });
+    await expect(
+      catalog?.actions[0]?.execute({ query: "private input" }, context),
+    ).rejects.toThrow();
+    expect(captureProductServerEvent).toHaveBeenCalledExactlyOnceWith(
+      "plugin_tool_call_completed",
+      "user_1",
+      {
+        workspace_id: "workspace_1",
+        plugin_name: "linear",
+        connection_id: "gint_linear_1",
+        provider: "linear",
+        capability: "read",
+        outcome: "error",
+        duration_ms: expect.any(Number),
+        engine: "codex",
+      },
+    );
+    expect(execution.close).toHaveBeenCalledOnce();
+  });
+});
+
+describe("reviewed Resend package permissions", () => {
+  it("imports the pinned package and gates sensitive data, sends, administration, and drift", async () => {
+    const url = OFFICIAL_PLUGIN_SOURCES.resend;
+    const plugin = await resolvePlugin({
+      url,
+      fetcher: (await createOfficialPluginFetcher({ url }))!,
+      trustedCapabilitySources: ["useopencompany/plugins"],
+    });
+    expect(plugin.remoteServers).toEqual([
+      { name: "resend", type: "streamable-http", url: "https://mcp.resend.com/mcp", headers: {} },
+    ]);
+    expect(plugin.report.capabilities).toMatchObject({ status: "parsed", issues: [] });
+    const tools = plugin.capabilities.flatMap((group) => group.tools);
+    expect(tools).toHaveLength(103);
+    expect(new Set(tools).size).toBe(tools.length);
+    for (const [id, mode, names] of [
+      ["read", "on", ["list-domains", "get-domain", "list-segments", "list-topics"]],
+      [
+        "query",
+        "ask",
+        [
+          "list-emails",
+          "get-received-email",
+          "get-sent-email-attachment",
+          "get-contact",
+          "list-broadcast-recipients",
+          "get-log",
+          "get-webhook",
+          "list-api-keys",
+        ],
+      ],
+      [
+        "write",
+        "ask",
+        [
+          "send-email",
+          "send-batch-emails",
+          "send-broadcast",
+          "send-event",
+          "update-automation",
+          "get-tiptap-json-content",
+          "create-contact-import",
+          "replay-webhook-event",
+        ],
+      ],
+      [
+        "draft",
+        "off",
+        [
+          "create-api-key",
+          "revoke-oauth-grant",
+          "create-webhook",
+          "share-email",
+          "create-domain-claim",
+          "remove-domain",
+          "remove-suppression",
+          "manage-events",
+        ],
+      ],
+    ] as const) {
+      for (const name of names) {
+        // Editor presence and other effects override vendor read-only annotations.
+        expect(
+          classifyRemoteTool({ name, annotations: { readOnlyHint: true } }, plugin.capabilities),
+        ).toMatchObject({
+          curated: true,
+          capability: { id, defaultMode: mode },
+          bucket: id === "read" || id === "query" ? "read" : "write",
+        });
+      }
+    }
+    const discovery = client({
+      pages: [
+        {
+          tools: [...tools, "new-reader"].map((name) => ({
+            name,
+            inputSchema: { type: "object" },
+            annotations: { readOnlyHint: true },
+          })),
+        },
+      ],
+    });
+    const createClient = vi.fn(async () => discovery);
+    const recordDispatch = vi.fn(async () => {});
+    const resend = registration({
+      pluginName: "resend",
+      source: "plugin:resend:resend",
+      connectionProvider: "resend",
+      label: "Resend",
+      server: plugin.remoteServers[0]!,
+      capabilities: plugin.capabilities,
+    });
+    const snapshot = await discoverRemoteMcpSnapshot(identity, resend, {
+      createClient,
+      recordDispatch,
+    });
+    const catalog = await resolveRemoteMcpActions(
+      identity,
+      { ...resend, discoverySnapshot: snapshot! },
+      { createClient, recordDispatch },
+    );
+    for (const [name, mode] of [
+      ["list-domains", "on"],
+      ["send-email", "ask"],
+      ["get-email", "ask"],
+    ]) {
+      expect(
+        catalog?.actions.find((action) => action.id.endsWith(`.${name}`))?.permissionMode,
+      ).toBe(mode);
+    }
+    for (const name of ["create-api-key", "remove-contact", "share-email", "manage-events"]) {
+      expect(catalog?.actions.some((action) => action.id.endsWith(`.${name}`))).toBe(false);
+    }
+    const enabled = await resolveRemoteMcpActions(
+      identity,
+      {
+        ...resend,
+        discoverySnapshot: snapshot!,
+        getState: async () => connectedState({ read: "on", write: "on" }),
+      },
+      { createClient, recordDispatch },
+    );
+    expect(
+      enabled?.actions.find((action) => action.id.endsWith(".new-reader"))?.permissionMode,
+    ).toBe("ask");
+    const uninstalled = await resolveRemoteMcpActions(
+      identity,
+      {
+        ...resend,
+        discoverySnapshot: snapshot!,
+        isEnabled: async () => false,
+      },
+      { createClient, recordDispatch },
+    );
+    await expect(
+      uninstalled?.actions
+        .find((action) => action.id.endsWith(".list-domains"))
+        ?.execute({}, context),
+    ).rejects.toBeInstanceOf(ActionPermissionError);
+    expect(discovery.callTool).not.toHaveBeenCalled();
+  });
+});
+
+describe("reviewed Supabase package permissions", () => {
+  it("imports the pinned package and gates sensitive reads, SQL, costs, and drift", async () => {
+    const url = OFFICIAL_PLUGIN_SOURCES.supabase;
+    const plugin = await resolvePlugin({
+      url,
+      fetcher: (await createOfficialPluginFetcher({ url }))!,
+      trustedCapabilitySources: ["useopencompany/plugins"],
+    });
+    expect(plugin.remoteServers).toEqual([
+      {
+        name: "supabase",
+        type: "streamable-http",
+        url: "https://mcp.supabase.com/mcp",
+        headers: {},
+      },
+    ]);
+    expect(plugin.report.capabilities).toMatchObject({ status: "parsed", issues: [] });
+    const tools = plugin.capabilities.flatMap((group) => group.tools);
+    expect(tools).toHaveLength(33);
+    expect(new Set(tools).size).toBe(tools.length);
+    for (const name of [
+      "search_docs",
+      "list_tables",
+      "list_projects",
+      "generate_typescript_types",
+    ]) {
+      expect(classifyRemoteTool({ name }, plugin.capabilities)).toMatchObject({
+        curated: true,
+        bucket: "read",
+        capability: { id: "read", defaultMode: "on" },
+      });
+    }
+    for (const name of [
+      "query_logs",
+      "get_logs",
+      "get_advisors",
+      "get_publishable_keys",
+      "get_edge_function",
+    ]) {
+      expect(classifyRemoteTool({ name }, plugin.capabilities)).toMatchObject({
+        curated: true,
+        bucket: "read",
+        capability: { id: "query", defaultMode: "ask" },
+      });
+    }
+    for (const name of [
+      "execute_sql",
+      "apply_migration",
+      "confirm_cost",
+      "create_project",
+      "create_branch",
+      "merge_branch",
+      "deploy_edge_function",
+      "update_storage_config",
+    ]) {
+      // Cost confirmation reports readOnlyHint but authorizes spending; the reviewed map wins.
+      expect(
+        classifyRemoteTool({ name, annotations: { readOnlyHint: true } }, plugin.capabilities),
+      ).toMatchObject({
+        curated: true,
+        bucket: "write",
+        capability: { id: "write", defaultMode: "ask" },
+      });
+    }
+    expect(
+      classifyRemoteTool(
+        { name: "new_reader", annotations: { readOnlyHint: true } },
+        plugin.capabilities,
+      ),
+    ).toMatchObject({
+      curated: false,
+      capability: { defaultMode: "ask" },
+    });
   });
 });

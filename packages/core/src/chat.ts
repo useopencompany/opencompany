@@ -108,6 +108,7 @@ export type MessageAttachment = {
 export type MessageMention = {
   kind: "skill";
   id: string;
+  name?: string;
 };
 
 export type Run = {
@@ -224,6 +225,7 @@ export type RunEventDraft = {
 };
 
 export type RunApprovalDraft = {
+  input?: Record<string, unknown>;
   id: string;
   toolCallId: string;
   kind: string;
@@ -240,7 +242,7 @@ export interface RunExecutionRepository {
     runId: string;
     attemptId: string;
     leaseId: string;
-  }): Promise<RunAttempt | null>;
+  }): Promise<(RunAttempt & { previousInfrastructureFailures: number }) | null>;
   appendEvents(input: {
     worker: WorkerIdentity;
     runId: string;
@@ -254,6 +256,7 @@ export interface RunExecutionRepository {
     attemptId: string;
     leaseId: string;
     approvals: readonly RunApprovalDraft[];
+    settledMessageParts?: readonly unknown[];
   }): Promise<readonly RunApproval[]>;
   finishAttempt(input: {
     worker: WorkerIdentity;
@@ -425,6 +428,7 @@ export class ChatApplicationService {
     const mentions = (input.mentions ?? []).map((mention) => ({
       kind: mention.kind,
       id: resourceId(mention.id, "mention.id"),
+      ...(mention.name !== undefined ? { name: boundedValue(mention.name, "mention.name") } : {}),
     }));
     if (mentions.length > MAX_MESSAGE_MENTIONS) {
       throw new CoreError(

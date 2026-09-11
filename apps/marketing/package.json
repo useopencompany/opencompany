@@ -10,6 +10,7 @@
     "start": "next start --port 3003",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -17,7 +18,7 @@
     "@opencompany/ui": "workspace:*",
     "github-slugger": "^2.0.0",
     "gray-matter": "^4.0.3",
-    "next": "16.2.11",
+    "next": "16.3.3",
     "next-mdx-remote": "^6.0.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
@@ -33,6 +34,7 @@
     "eslint-config-next": "16.2.6",
     "postcss": "8.5.28",
     "tailwindcss": "^4.3.0",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.11"
   }
 }

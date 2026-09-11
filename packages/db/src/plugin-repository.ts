@@ -23,6 +23,13 @@ import {
 import { del } from "@vercel/blob";
 import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import {
+  assertPersonalPluginWritesEnabled,
+  type PluginReader,
+  pluginAccess,
+} from "./plugin-access";
+import {
+  customMcpAccounts,
+  integrations,
   pluginFiles,
   pluginGatewayRegistrations,
   pluginSkills,
@@ -30,6 +37,7 @@ import {
   skillBundles,
   workspacePluginData,
 } from "./product-schema";
+import { skillMembership } from "./skill-access";
 import { storeSkillBundle } from "./skill-bundle-repository";
 import { resolveWorkspaceSkillCatalog } from "./skill-catalog";
 
@@ -38,10 +46,11 @@ type DbClient = any;
 type PluginRow = {
   id: string;
   workspaceId: string;
+  ownerUserId: string;
   name: string;
   status: "enabled" | "disabled" | "archived";
   manifest: PluginInstallation["manifest"];
-  sourceType: "github" | "skills.sh";
+  sourceType: "github" | "skills.sh" | "custom_mcp";
   sourceUrl: string;
   sourcePath: string;
   sourceRef: string;
@@ -60,6 +69,7 @@ type PluginRow = {
 const pluginSelection = {
   id: plugins.id,
   workspaceId: plugins.workspaceId,
+  ownerUserId: plugins.ownerUserId,
   name: plugins.name,
   status: plugins.status,
   manifest: plugins.manifest,
@@ -106,8 +116,14 @@ export class PostgresPluginRepository implements PluginRepository {
     );
     try {
       return await this.db.transaction(async (tx: DbClient) => {
+        await assertPersonalPluginWritesEnabled(tx);
+        const membership = await tx.execute(
+          sql`SELECT ${skillMembership(input.actor)} AS authorized`,
+        );
+        if (!(membership.rows ?? membership)[0]?.authorized)
+          throw new CoreError("not_found", "Workspace membership not found.");
         await validateResolvedPlugin(input.plugin);
-        const replay = await pluginById(tx, input.actor.workspaceId, pluginId);
+        const replay = await pluginById(tx, input.actor, pluginId);
         if (replay) {
           if (
             replay.name !== input.plugin.manifest.name ||
@@ -126,16 +142,40 @@ export class PostgresPluginRepository implements PluginRepository {
           ...input.plugin.report,
           collisions: [],
         };
-        const previous = await pluginByName(
-          tx,
-          input.actor.workspaceId,
-          input.plugin.manifest.name,
-        );
+        const previous = await pluginByName(tx, input.actor, input.plugin.manifest.name);
+        const current = await livePlugin(tx, input.actor, input.plugin.manifest.name);
+        if (
+          current?.integrity === input.plugin.integrity &&
+          current.resolvedCommit === input.plugin.source.resolvedCommit
+        ) {
+          return { plugin: await hydratePlugin(tx, current), idempotentReplay: true };
+        }
+        if (current) {
+          const now = new Date();
+          await tx
+            .update(plugins)
+            .set({
+              status: "archived",
+              archivedAt: now,
+              updatedAt: now,
+              mcpApprovedIntegrity: null,
+            })
+            .where(and(eq(plugins.id, current.id), pluginAccess(input.actor)));
+          await tx
+            .delete(pluginGatewayRegistrations)
+            .where(
+              and(
+                eq(pluginGatewayRegistrations.workspaceId, input.actor.workspaceId),
+                eq(pluginGatewayRegistrations.pluginId, current.id),
+              ),
+            );
+        }
         await tx.insert(plugins).values({
           id: pluginId,
           workspaceId: input.actor.workspaceId,
+          ownerUserId: input.actor.userId,
           name: input.plugin.manifest.name,
-          status: "enabled",
+          status: current?.status ?? "enabled",
           manifest: input.plugin.manifest,
           sourceType: input.plugin.source.type,
           sourceUrl: input.plugin.source.url,
@@ -145,7 +185,7 @@ export class PostgresPluginRepository implements PluginRepository {
           integrity: input.plugin.integrity,
           stdioMcpServers: input.plugin.stdioServers,
           events: input.plugin.events,
-          eventModes: previous?.eventModes ?? {},
+          eventModes: current?.eventModes ?? previous?.eventModes ?? {},
           installReport: initialReport,
           mcpApprovedIntegrity: null,
         });
@@ -185,18 +225,18 @@ export class PostgresPluginRepository implements PluginRepository {
           });
         }
 
-        const collisions = await currentSkillCollisions(tx, input.actor.workspaceId);
+        const collisions = await currentSkillCollisions(tx, input.actor);
         await tx
           .update(plugins)
           .set({ installReport: { ...initialReport, collisions } })
-          .where(and(eq(plugins.id, pluginId), eq(plugins.workspaceId, input.actor.workspaceId)));
-        const created = await pluginById(tx, input.actor.workspaceId, pluginId);
+          .where(and(eq(plugins.id, pluginId), pluginAccess(input.actor)));
+        const created = await pluginById(tx, input.actor, pluginId);
         if (!created) throw new CoreError("conflict", "Could not install the Plugin.");
         return { plugin: await hydratePlugin(tx, created), idempotentReplay: false };
       });
     } catch (error) {
       if (isUniqueViolation(error)) {
-        const replay = await pluginById(this.db, input.actor.workspaceId, pluginId);
+        const replay = await pluginById(this.db, input.actor, pluginId);
         if (
           replay?.name === input.plugin.manifest.name &&
           replay.integrity === input.plugin.integrity &&
@@ -213,7 +253,7 @@ export class PostgresPluginRepository implements PluginRepository {
     actor: Parameters<PluginRepository["list"]>[0]["actor"];
   }): Promise<PluginInstallationListItem[]> {
     const rows = (await pluginQuery(this.db)
-      .where(and(eq(plugins.workspaceId, input.actor.workspaceId), ne(plugins.status, "archived")))
+      .where(and(pluginAccess(input.actor), ne(plugins.status, "archived")))
       .orderBy(desc(plugins.updatedAt))) as PluginRow[];
     const hydrated = await Promise.all(rows.map((row) => hydratePlugin(this.db, row)));
     return hydrated.map(({ files, skills, stdioServers, remoteMcpServers: _, ...plugin }) => ({
@@ -225,7 +265,7 @@ export class PostgresPluginRepository implements PluginRepository {
   }
 
   async get(input: { actor: Parameters<PluginRepository["get"]>[0]["actor"]; name: string }) {
-    const row = await livePlugin(this.db, input.actor.workspaceId, input.name);
+    const row = await livePlugin(this.db, input.actor, input.name);
     return row ? hydratePlugin(this.db, row) : null;
   }
 
@@ -239,14 +279,14 @@ export class PostgresPluginRepository implements PluginRepository {
       .set({ status: input.status, updatedAt: new Date() })
       .where(
         and(
-          eq(plugins.workspaceId, input.actor.workspaceId),
+          pluginAccess(input.actor),
           eq(plugins.name, input.name),
           inArray(plugins.status, ["enabled", "disabled"]),
         ),
       )
       .returning({ id: plugins.id });
     if (!updated) throw new CoreError("not_found", "Plugin not found.");
-    const row = await pluginById(this.db, input.actor.workspaceId, updated.id);
+    const row = await pluginById(this.db, input.actor, updated.id);
     if (!row) throw new CoreError("not_found", "Plugin not found.");
     return hydratePlugin(this.db, row);
   }
@@ -257,7 +297,7 @@ export class PostgresPluginRepository implements PluginRepository {
     eventId: string;
     enabled: boolean;
   }) {
-    const plugin = await livePlugin(this.db, input.actor.workspaceId, input.name);
+    const plugin = await livePlugin(this.db, input.actor, input.name);
     if (!plugin) throw new CoreError("not_found", "Plugin not found.");
     if (!plugin.events.some((event) => event.id === input.eventId)) {
       throw new CoreError("invalid_argument", "That event is not declared by this Plugin.");
@@ -271,13 +311,13 @@ export class PostgresPluginRepository implements PluginRepository {
       .where(
         and(
           eq(plugins.id, plugin.id),
-          eq(plugins.workspaceId, input.actor.workspaceId),
+          pluginAccess(input.actor),
           inArray(plugins.status, ["enabled", "disabled"]),
         ),
       )
       .returning({ id: plugins.id });
     if (!updated) throw new CoreError("not_found", "Plugin not found.");
-    const row = await pluginById(this.db, input.actor.workspaceId, updated.id);
+    const row = await pluginById(this.db, input.actor, updated.id);
     if (!row) throw new CoreError("not_found", "Plugin not found.");
     return hydratePlugin(this.db, row);
   }
@@ -292,7 +332,7 @@ export class PostgresPluginRepository implements PluginRepository {
       .set({ mcpApprovedIntegrity: input.integrity, updatedAt: new Date() })
       .where(
         and(
-          eq(plugins.workspaceId, input.actor.workspaceId),
+          pluginAccess(input.actor),
           eq(plugins.name, input.name),
           eq(plugins.integrity, input.integrity),
           eq(plugins.status, "enabled"),
@@ -300,7 +340,7 @@ export class PostgresPluginRepository implements PluginRepository {
       )
       .returning({ id: plugins.id });
     if (!updated) {
-      const plugin = await livePlugin(this.db, input.actor.workspaceId, input.name);
+      const plugin = await livePlugin(this.db, input.actor, input.name);
       if (!plugin) throw new CoreError("not_found", "Plugin not found.");
       if (plugin.status === "disabled") {
         throw new CoreError("conflict", "The Plugin is disabled. Enable it before approving MCP.");
@@ -310,7 +350,7 @@ export class PostgresPluginRepository implements PluginRepository {
         "The Plugin package changed before MCP approval. Review the installed package again.",
       );
     }
-    const row = await pluginById(this.db, input.actor.workspaceId, updated.id);
+    const row = await pluginById(this.db, input.actor, updated.id);
     if (!row) throw new CoreError("not_found", "Plugin not found.");
     return hydratePlugin(this.db, row);
   }
@@ -324,14 +364,14 @@ export class PostgresPluginRepository implements PluginRepository {
       .set({ mcpApprovedIntegrity: null, updatedAt: new Date() })
       .where(
         and(
-          eq(plugins.workspaceId, input.actor.workspaceId),
+          pluginAccess(input.actor),
           eq(plugins.name, input.name),
           inArray(plugins.status, ["enabled", "disabled"]),
         ),
       )
       .returning({ id: plugins.id });
     if (!updated) throw new CoreError("not_found", "Plugin not found.");
-    const row = await pluginById(this.db, input.actor.workspaceId, updated.id);
+    const row = await pluginById(this.db, input.actor, updated.id);
     if (!row) throw new CoreError("not_found", "Plugin not found.");
     return hydratePlugin(this.db, row);
   }
@@ -352,13 +392,32 @@ export class PostgresPluginRepository implements PluginRepository {
         })
         .where(
           and(
-            eq(plugins.workspaceId, input.actor.workspaceId),
+            pluginAccess(input.actor),
             eq(plugins.name, input.name),
             inArray(plugins.status, ["enabled", "disabled"]),
           ),
         )
-        .returning({ id: plugins.id });
+        .returning({ id: plugins.id, sourceType: plugins.sourceType });
       if (rows.length === 0) throw new CoreError("not_found", "Plugin not found.");
+      if (rows.some((row: { sourceType: string }) => row.sourceType === "custom_mcp")) {
+        // A URL installation cannot be reimported by name. Remove its dedicated accounts and
+        // encrypted credentials with it so no owner is left with an unreachable connection.
+        await tx.delete(integrations).where(
+          inArray(
+            integrations.id,
+            tx
+              .select({ id: customMcpAccounts.integrationId })
+              .from(customMcpAccounts)
+              .where(
+                and(
+                  eq(customMcpAccounts.workspaceId, input.actor.workspaceId),
+                  eq(customMcpAccounts.userWorkosId, input.actor.userId),
+                  eq(customMcpAccounts.pluginName, input.name),
+                ),
+              ),
+          ),
+        );
+      }
       await tx.delete(pluginGatewayRegistrations).where(
         and(
           eq(pluginGatewayRegistrations.workspaceId, input.actor.workspaceId),
@@ -375,7 +434,7 @@ export class PostgresPluginRepository implements PluginRepository {
     actor: Parameters<PluginRepository["deleteData"]>[0]["actor"];
     name: string;
   }) {
-    const plugin = await pluginByName(this.db, input.actor.workspaceId, input.name);
+    const plugin = await pluginByName(this.db, input.actor, input.name);
     if (!plugin) throw new CoreError("not_found", "Plugin not found.");
     const [data] = await this.db
       .select({
@@ -387,6 +446,7 @@ export class PostgresPluginRepository implements PluginRepository {
       .where(
         and(
           eq(workspacePluginData.workspaceId, input.actor.workspaceId),
+          eq(workspacePluginData.ownerUserId, input.actor.userId),
           eq(workspacePluginData.pluginName, input.name),
         ),
       )
@@ -398,6 +458,7 @@ export class PostgresPluginRepository implements PluginRepository {
       .where(
         and(
           eq(workspacePluginData.workspaceId, input.actor.workspaceId),
+          eq(workspacePluginData.ownerUserId, input.actor.userId),
           eq(workspacePluginData.pluginName, input.name),
           eq(workspacePluginData.blobPathname, data.blobPathname),
           eq(workspacePluginData.checksum, data.checksum),
@@ -419,18 +480,18 @@ function pluginQuery(db: DbClient) {
   return db.select(pluginSelection).from(plugins);
 }
 
-async function pluginById(db: DbClient, workspaceId: string, id: string) {
+async function pluginById(db: DbClient, actor: PluginReader, id: string) {
   const [row] = (await pluginQuery(db)
-    .where(and(eq(plugins.id, id), eq(plugins.workspaceId, workspaceId)))
+    .where(and(eq(plugins.id, id), pluginAccess(actor)))
     .limit(1)) as PluginRow[];
   return row ?? null;
 }
 
-async function livePlugin(db: DbClient, workspaceId: string, name: string) {
+async function livePlugin(db: DbClient, actor: PluginReader, name: string) {
   const [row] = (await pluginQuery(db)
     .where(
       and(
-        eq(plugins.workspaceId, workspaceId),
+        pluginAccess(actor),
         eq(plugins.name, name),
         inArray(plugins.status, ["enabled", "disabled"]),
       ),
@@ -439,9 +500,9 @@ async function livePlugin(db: DbClient, workspaceId: string, name: string) {
   return row ?? null;
 }
 
-async function pluginByName(db: DbClient, workspaceId: string, name: string) {
+async function pluginByName(db: DbClient, actor: PluginReader, name: string) {
   const [row] = (await pluginQuery(db)
-    .where(and(eq(plugins.workspaceId, workspaceId), eq(plugins.name, name)))
+    .where(and(pluginAccess(actor), eq(plugins.name, name)))
     .orderBy(desc(plugins.updatedAt))
     .limit(1)) as PluginRow[];
   return row ?? null;
@@ -503,7 +564,7 @@ async function hydratePlugin(db: DbClient, row: PluginRow): Promise<PluginInstal
         ),
       )
       .orderBy(asc(pluginGatewayRegistrations.serverName)),
-    currentSkillCollisions(db, row.workspaceId),
+    currentSkillCollisions(db, { workspaceId: row.workspaceId, userId: row.ownerUserId }),
   ]);
   const relevantCollisions = collisions.filter(
     (collision) =>
@@ -557,16 +618,20 @@ function pluginDiscoveryStatus(server: {
 
 export async function currentSkillCollisions(
   db: DbClient,
-  workspaceId: string,
+  actor: PluginReader,
 ): Promise<PluginSkillCollision[]> {
-  return (await resolveWorkspaceSkillCatalog(db, { workspaceId })).collisions;
+  return (await resolveWorkspaceSkillCatalog(db, actor)).collisions;
 }
 
 async function validateResolvedPlugin(plugin: ResolvedPluginPackage) {
   if (!/^sha256:[0-9a-f]{64}$/u.test(plugin.integrity)) {
     throw new CoreError("invalid_argument", "The Plugin package integrity is invalid.");
   }
-  if (!/^[0-9a-f]{40}$/u.test(plugin.source.resolvedCommit)) {
+  if (
+    plugin.source.type === "custom_mcp"
+      ? plugin.source.resolvedCommit !== "" || plugin.source.ref !== "" || plugin.source.path !== ""
+      : !/^[0-9a-f]{40}$/u.test(plugin.source.resolvedCommit)
+  ) {
     throw new CoreError("invalid_argument", "The Plugin source commit is invalid.");
   }
   if (plugin.source.path) assertSafePluginPath(plugin.source.path);
@@ -728,7 +793,7 @@ function pluginWriteError(error: unknown, name: string) {
   if (isUniqueViolation(error)) {
     return new CoreError(
       "conflict",
-      `A live Plugin named ${JSON.stringify(name)} is already installed in this workspace. Archive it before installing a replacement.`,
+      `A live Plugin named ${JSON.stringify(name)} is already installed for you in this workspace. Archive it before installing a replacement.`,
     );
   }
   return error;

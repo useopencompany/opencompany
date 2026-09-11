@@ -81,7 +81,7 @@ describe("opencompany Google Calendar MCP server", () => {
     mocks.apiCall.mockResolvedValue({ items: [] });
   });
 
-  it("discovers only the four reviewed Google-compatible tools", async () => {
+  it("discovers the supported calendar tools, including rescheduling", async () => {
     const response = await service().handle(request({ type: "tools/list" }, "tools/list"));
     expect(response.status).toBe(200);
     const body = await responseJson(response);
@@ -90,6 +90,7 @@ describe("opencompany Google Calendar MCP server", () => {
       "list_events",
       "get_event",
       "create_event",
+      "reschedule_event",
     ]);
     expect(mocks.apiCall).not.toHaveBeenCalled();
   });
@@ -127,6 +128,7 @@ describe("opencompany Google Calendar MCP server", () => {
           { name: "list_events" },
           { name: "get_event" },
           { name: "create_event" },
+          { name: "reschedule_event" },
         ],
       });
     } finally {
@@ -170,6 +172,58 @@ describe("opencompany Google Calendar MCP server", () => {
       summary: "Planning",
       attendees: [{ email: "ada@example.com", optional: true }],
     });
+  });
+
+  it("reschedules the original event without creating copies or replacing its meeting details", async () => {
+    const original = {
+      id: "event/1",
+      status: "confirmed",
+      summary: "Planning",
+      start: { dateTime: "2026-09-09T16:30:00+02:00", timeZone: "Europe/Berlin" },
+      end: { dateTime: "2026-09-09T17:00:00+02:00", timeZone: "Europe/Berlin" },
+      attendees: [{ email: "ada@example.com", responseStatus: "accepted" }],
+      hangoutLink: "https://meet.google.com/abc-defg-hij",
+    };
+    const events = new Map([[original.id, original]]);
+    mocks.apiCall.mockImplementation(async (_connection, method, url, options) => {
+      const id = decodeURIComponent(url.pathname.split("/").at(-1)!);
+      if (method === "GET") return events.get(id);
+      if (method !== "PATCH") throw new Error("Rescheduling must only patch the existing event");
+      expect(url.searchParams.get("sendUpdates")).toBe("all");
+      expect(Object.keys(options.body).sort()).toEqual(["end", "start"]);
+      const updated = { ...events.get(id)!, ...options.body };
+      events.set(id, updated);
+      return updated;
+    });
+    const operation = {
+      type: "tools/call",
+      tool: "reschedule_event",
+      capability: "write",
+    } as const;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await service().handle(
+        request(operation, "tools/call", {
+          name: "reschedule_event",
+          arguments: {
+            calendarId: "team@example.com",
+            eventId: original.id,
+            startTime: "2026-09-10T16:00:00+02:00",
+            endTime: "2026-09-10T16:30:00+02:00",
+          },
+        }),
+      );
+      expect(response.status).toBe(200);
+      const body = await responseJson(response);
+      expect(body.result.isError).not.toBe(true);
+    }
+    expect(events.size).toBe(1);
+    expect(events.get(original.id)).toMatchObject({
+      id: original.id,
+      start: { dateTime: "2026-09-10T16:00:00+02:00", timeZone: "Europe/Berlin" },
+      attendees: original.attendees,
+      hangoutLink: original.hangoutLink,
+    });
+    expect(mocks.apiCall.mock.calls.filter((call) => call[1] === "PATCH")).toHaveLength(1);
   });
 
   it("maps all three read tools to the stable Calendar REST API", async () => {
@@ -218,6 +272,101 @@ describe("opencompany Google Calendar MCP server", () => {
     expect(mocks.apiCall.mock.calls[2]?.[2].toString()).toContain(
       "/calendars/team%40example.com/events/event%2F1",
     );
+  });
+
+  it.each([
+    { original: { recurrence: ["RRULE:FREQ=WEEKLY"] }, expected: "specific recurring occurrence" },
+    { original: { status: "cancelled" }, expected: "unavailable or cancelled" },
+    { original: { start: { date: "2026-09-09" } }, expected: "timed or all-day" },
+  ])("refuses unsafe rescheduling: $expected", async ({ original, expected }) => {
+    mocks.apiCall.mockResolvedValueOnce({
+      id: "event_1",
+      start: { dateTime: "2026-09-09T10:00:00Z" },
+      end: { dateTime: "2026-09-09T11:00:00Z" },
+      ...original,
+    });
+    const response = await service().handle(
+      request({ type: "tools/call", tool: "reschedule_event", capability: "write" }, "tools/call", {
+        name: "reschedule_event",
+        arguments: {
+          eventId: "event_1",
+          startTime: "2026-09-10T10:00:00Z",
+          endTime: "2026-09-10T11:00:00Z",
+        },
+      }),
+    );
+    const body = await responseJson(response);
+    expect(body.result.isError).toBe(true);
+    expect(JSON.stringify(body.result.content)).toContain(expected);
+    expect(mocks.apiCall).toHaveBeenCalledOnce();
+    expect(mocks.apiCall.mock.calls[0]![1]).toBe("GET");
+  });
+
+  it("moves one all-day recurring occurrence using exclusive end dates", async () => {
+    mocks.apiCall
+      .mockResolvedValueOnce({
+        id: "series_20260909",
+        recurringEventId: "series",
+        start: { date: "2026-09-09" },
+        end: { date: "2026-09-10" },
+      })
+      .mockResolvedValueOnce({
+        id: "series_20260909",
+        start: { date: "2026-09-10" },
+        end: { date: "2026-09-11" },
+      });
+    const response = await service().handle(
+      request({ type: "tools/call", tool: "reschedule_event", capability: "write" }, "tools/call", {
+        name: "reschedule_event",
+        arguments: {
+          eventId: "series_20260909",
+          startTime: "2026-09-10",
+          endTime: "2026-09-10",
+          notificationLevel: "EXTERNAL_ONLY",
+        },
+      }),
+    );
+    expect((await responseJson(response)).result.isError).not.toBe(true);
+    const [, method, url, options] = mocks.apiCall.mock.calls[1]!;
+    expect(method).toBe("PATCH");
+    expect(url.pathname).toContain("/events/series_20260909");
+    expect(url.searchParams.get("sendUpdates")).toBe("externalOnly");
+    expect(options.body).toEqual({ start: { date: "2026-09-10" }, end: { date: "2026-09-11" } });
+  });
+
+  it("returns provider failures without creating a replacement", async () => {
+    mocks.apiCall.mockRejectedValueOnce(new Error("Google API request failed with 403"));
+    const response = await service().handle(
+      request({ type: "tools/call", tool: "reschedule_event", capability: "write" }, "tools/call", {
+        name: "reschedule_event",
+        arguments: {
+          eventId: "event_1",
+          startTime: "2026-09-10T10:00:00Z",
+          endTime: "2026-09-10T11:00:00Z",
+        },
+      }),
+    );
+    expect((await responseJson(response)).result.isError).toBe(true);
+    expect(mocks.apiCall).toHaveBeenCalledOnce();
+  });
+
+  it("enforces rescheduling permissions before calling Google", async () => {
+    mocks.loadIntegration.mockResolvedValueOnce({
+      ...connectedRow,
+      toolModes: { reschedule_event: "off" },
+    });
+    const response = await service().handle(
+      request({ type: "tools/call", tool: "reschedule_event", capability: "write" }, "tools/call", {
+        name: "reschedule_event",
+        arguments: {
+          eventId: "event_1",
+          startTime: "2026-09-10T10:00:00Z",
+          endTime: "2026-09-10T11:00:00Z",
+        },
+      }),
+    );
+    expect(response.status).toBe(403);
+    expect(mocks.apiCall).not.toHaveBeenCalled();
   });
 
   it("returns a trusted reconnect envelope when Google revokes access during a call", async () => {

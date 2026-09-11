@@ -23,7 +23,7 @@ import {
   users,
   workspaceMembers,
 } from "@opencompany/db/product-schema";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { isChatActionsKilled, resolveActionCatalog } from "../actions/catalog";
 import { executeAction } from "../actions/execute";
 import type { CapabilityQuote, CapabilityTurnState } from "../actions/types";
@@ -208,6 +208,7 @@ async function loadCodexActionContext(
   const [row] = await getDb()
     .select({
       userWorkosId: codexChatSessions.userWorkosId,
+      hostToolContractVersion: codexChatSessions.hostToolContractVersion,
       workspaceId: codexChatSessions.workspaceId,
       chatSessionId: codexChatSessions.chatSessionId,
       userTimezone: users.timezone,
@@ -241,6 +242,7 @@ async function loadCodexActionContext(
           ...CHAT_HOST_TOOL_CONTRACT_VERSIONS,
         ]),
         eq(codexChatTurns.status, "running"),
+        isNull(codexChatTurns.interruptRequestedAt),
       ),
     )
     .limit(1);
@@ -248,12 +250,16 @@ async function loadCodexActionContext(
   if (!row?.workspaceId) return null;
   return {
     actorId: row.userWorkosId,
+    ...(row.hostToolContractVersion
+      ? { hostToolContractVersion: row.hostToolContractVersion }
+      : {}),
     workspaceId: row.workspaceId,
     conversationId: row.chatSessionId,
     userTimezone: row.userTimezone,
     engine: row.engine,
     assistantMessageId: row.assistantMessageId,
     policy: row.chatKind === "task" ? "headless" : "foregroundInteractive",
+    durableTaskApprovals: row.chatKind === "task",
   };
 }
 
@@ -269,7 +275,7 @@ function actionTurnRef(run: ActionServiceRunRef) {
 
 function actionServiceRequest(
   request: ActionGatewayRequest,
-): Extract<ActionServiceRequest, { operation: "list" | "execute" }>;
+): Extract<ActionServiceRequest, { operation: "list" | "describe" | "execute" }>;
 function actionServiceRequest(request: ActionHostGatewayRequest): ActionServiceRequest;
 function actionServiceRequest(request: ActionHostGatewayRequest): ActionServiceRequest {
   const { turnId, ...input } = request;

@@ -6,6 +6,7 @@ import {
 } from "@opencompany/agent-runtime";
 import { describe, expect, it } from "vitest";
 import {
+  CLAUDE_CODE_MODELS,
   DEFAULT_MODEL,
   MODELS,
   modelContextWindowTokens,
@@ -14,6 +15,21 @@ import {
 } from "@/lib/model-options";
 
 describe("opencompany model options", () => {
+  it("offers Opus 5 in Claude Code sandboxes with its full context window", () => {
+    expect(CLAUDE_CODE_MODELS).toContainEqual(
+      expect.objectContaining({
+        id: "anthropic/claude-opus-5",
+        label: "Claude Opus 5",
+        supportsImages: true,
+        supportsReasoning: true,
+      }),
+    );
+    expect(normalizeConversationModel("claude_code", "anthropic/claude-opus-5")).toBe(
+      "anthropic/claude-opus-5",
+    );
+    expect(modelContextWindowTokens("anthropic/claude-opus-5")).toBe(1_000_000);
+  });
+
   it("defaults new chats to Kimi K3", () => {
     expect(DEFAULT_MODEL).toBe("moonshotai/kimi-k3");
     expect(normalizeModel(undefined)).toBe("moonshotai/kimi-k3");
@@ -48,6 +64,18 @@ describe("opencompany model options", () => {
     );
     expect(normalizeModel("deepseek/deepseek-v4-pro")).toBe("deepseek/deepseek-v4-pro");
     expect(modelContextWindowTokens("deepseek/deepseek-v4-pro")).toBe(1_000_000);
+  });
+
+  it("offers DeepSeek V4 Flash in main chat with reasoning and its full context window", () => {
+    expect(MODELS).toContainEqual(
+      expect.objectContaining({
+        id: "deepseek/deepseek-v4-flash",
+        label: "DeepSeek V4 Flash",
+        supportsReasoning: true,
+      }),
+    );
+    expect(normalizeModel("deepseek/deepseek-v4-flash")).toBe("deepseek/deepseek-v4-flash");
+    expect(modelContextWindowTokens("deepseek/deepseek-v4-flash")).toBe(1_000_000);
   });
 
   it("offers Qwen 3.8 Max in main chat with its full context window", () => {

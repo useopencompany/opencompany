@@ -59,7 +59,7 @@
     "jose": "^6.2.11",
     "lucide-react": "1.40.0",
     "mcp-handler": "^1.1.0",
-    "next": "16.2.11",
+    "next": "16.3.3",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-markdown": "^10.1.0",

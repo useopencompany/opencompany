@@ -355,6 +355,77 @@ describe("Attio integration state", () => {
   });
 });
 
+describe("Notion integration state", () => {
+  it("exposes the personal MCP connection to plugin settings", () => {
+    const state = integrationStateFromRows([
+      {
+        id: "gint_notion_mcp",
+        provider: "notion",
+        externalId: "notion_mcp",
+        accountName: "Notion",
+        connectionLabel: "Acme workspace",
+        status: "connected",
+        scopes: ["default"],
+        capabilityModes: { query: "ask", draft: "ask", write: "ask" },
+      },
+    ]);
+
+    expect(state.personalAccounts.notion).toEqual([
+      expect.objectContaining({
+        integrationId: "gint_notion_mcp",
+        connectionLabel: "Acme workspace",
+      }),
+    ]);
+  });
+});
+
+describe("Supabase integration state", () => {
+  it("exposes the personal MCP connection to plugin settings", () => {
+    const state = integrationStateFromRows([
+      {
+        id: "gint_supabase_mcp",
+        provider: "supabase",
+        externalId: "supabase_mcp",
+        accountName: "Supabase",
+        connectionLabel: "Acme workspace",
+        status: "connected",
+        scopes: [],
+        capabilityModes: { read: "on", query: "ask", write: "ask" },
+      },
+    ]);
+
+    expect(state.personalAccounts.supabase).toEqual([
+      expect.objectContaining({
+        integrationId: "gint_supabase_mcp",
+        connectionLabel: "Acme workspace",
+      }),
+    ]);
+  });
+});
+describe("Resend integration state", () => {
+  it("exposes the personal MCP connection to plugin settings", () => {
+    const state = integrationStateFromRows([
+      {
+        id: "gint_resend_mcp",
+        provider: "resend",
+        externalId: "resend_mcp",
+        accountName: "Resend",
+        connectionLabel: "Acme workspace",
+        status: "connected",
+        scopes: [],
+        capabilityModes: { read: "on", query: "ask", write: "ask" },
+      },
+    ]);
+
+    expect(state.personalAccounts.resend).toEqual([
+      expect.objectContaining({
+        integrationId: "gint_resend_mcp",
+        connectionLabel: "Acme workspace",
+      }),
+    ]);
+  });
+});
+
 describe("Granola integration state", () => {
   it("keeps MCP tool authorization separate from legacy API ingestion", () => {
     const state = integrationStateFromRows([
@@ -389,5 +460,33 @@ describe("Granola integration state", () => {
     expect(state.personalAccounts.granola).toEqual([
       expect.objectContaining({ integrationId: "gint_granola_ingest" }),
     ]);
+  });
+});
+
+it("exposes personal Stripe MCP OAuth and excludes retired workspace keys", () => {
+  const state = integrationStateFromRows([
+    {
+      id: "stripe_key",
+      provider: "stripe",
+      workspaceId: "workspace_1",
+      externalId: "acct_123",
+      status: "connected",
+      accountType: "stripe_test_restricted_key",
+    },
+    {
+      id: "stripe_oauth",
+      provider: "stripe",
+      externalId: "stripe_mcp",
+      status: "needs_reauth",
+      accountName: "Stripe",
+    },
+    { id: "stripe_old", provider: "stripe", externalId: "acct_old", status: "connected" },
+  ]);
+  expect(state.personalAccounts.stripe).toEqual([
+    expect.objectContaining({ integrationId: "stripe_oauth", connected: false }),
+  ]);
+  expect(state.stripe).toMatchObject({
+    integrationId: null,
+    connected: false,
   });
 });

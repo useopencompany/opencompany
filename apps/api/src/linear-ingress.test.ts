@@ -90,7 +90,7 @@ describe("Linear ingress", () => {
     vi.stubEnv("OPENCOMPANY_LINEAR_STATE_SECRET", "linear-state-secret-linear-state-secret");
     vi.stubEnv("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY", "a".repeat(44));
     vi.mocked(listLinearIntegrationsForOrganization).mockResolvedValue([
-      { id: "gint_1", userWorkosId: "user_1", status: "connected" },
+      { id: "gint_1", workspaceId: null, userWorkosId: "user_1", status: "connected" },
     ] as never);
     vi.mocked(listEnabledLinearBrainSourceRoutes).mockResolvedValue([
       {

@@ -1,4 +1,12 @@
-import { ACTION_MAX_CALLS_PER_TURN, type ActionGatewayRequest } from "@opencompany/agent-runtime";
+import {
+  ACTION_HOST_TOOL_CONTRACT_VERSION_V2,
+  ACTION_HOST_TOOL_CONTRACT_VERSION_V3,
+  ACTION_HOST_TOOL_CONTRACT_VERSION_V4,
+  ACTION_MAX_CALLS_PER_TURN,
+  type ActionGatewayRequest,
+  CHAT_HOST_TOOL_CONTRACT_VERSION_V3,
+  CHAT_HOST_TOOL_CONTRACT_VERSION_V4,
+} from "@opencompany/agent-runtime";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ACTION_EFFECTS_METERED_READ,
@@ -7,6 +15,7 @@ import {
   type ResolvedAction,
   type ResolvedActionCatalog,
 } from "../actions/types";
+import type { ActionGatewayServiceDependencies } from "./action-gateway";
 import {
   createActionGateway,
   createActionHostGateway,
@@ -35,15 +44,224 @@ const interactiveContext = {
 };
 
 describe("executeActionGateway", () => {
+  it("admits an identical non-idempotent write only once across fresh tool ids and gateway instances", async () => {
+    const action = {
+      ...createReadAction(),
+      effects: ACTION_EFFECTS_WRITE,
+      capability: "write" as const,
+    };
+    const admitted = new Set<string>();
+    const claimInvocation = vi.fn<ActionGatewayServiceDependencies["claimInvocation"]>(
+      async ({ run, invocationId, deduplicationKey }) => {
+        const keys = [invocationId, ...(deduplicationKey ? [deduplicationKey] : [])].map(
+          (key) => `${run.runId}:${key}`,
+        );
+        const duplicate = keys.some((key) => admitted.has(key));
+        if (!duplicate) for (const key of keys) admitted.add(key);
+        return { ok: true as const, duplicate, callCount: admitted.size };
+      },
+    );
+    const executeAction = vi.fn(async () => ({
+      ok: true as const,
+      action: action.id,
+      result: { id: "original_result" },
+    }));
+    const dependencies = {
+      loadContext: vi.fn(async () => interactiveContext),
+      resolveCatalog: vi.fn(async () => ({
+        providers: [{ id: "gmail" as const, label: "Gmail", description: "Email" }],
+        actions: [action],
+      })),
+      claimInvocation,
+      executeAction,
+    };
+    const call = (invocationId: string, params: Record<string, unknown>, turnId = "turn_1") =>
+      createActionGateway(dependencies)({
+        request: {
+          operation: "execute",
+          sessionId: "session_1",
+          turnId,
+          action: action.id,
+          invocationId,
+          params,
+        },
+        signal: new AbortController().signal,
+      });
+    const results = await Promise.all([
+      call("approved_call", { title: "Planning", time: "10:00" }),
+      call("regenerated_call", { time: "10:00", title: "Planning" }),
+    ]);
+    expect(results.filter((result) => result.ok)).toHaveLength(1);
+    expect(results).toContainEqual(
+      expect.objectContaining({
+        ok: false,
+        error: expect.objectContaining({ code: "duplicate_invocation" }),
+      }),
+    );
+    expect(executeAction).toHaveBeenCalledOnce();
+    expect(executeAction).toHaveBeenCalledWith(
+      expect.objectContaining({ toolCallId: "approved_call" }),
+    );
+    expect((await call("approved_call", { title: "Changed input", time: "12:00" })).ok).toBe(false);
+    expect((await call("different_write", { title: "Planning", time: "11:00" })).ok).toBe(true);
+    expect((await call("next_turn", { title: "Planning", time: "10:00" }, "turn_2")).ok).toBe(true);
+    expect(executeAction).toHaveBeenCalledTimes(3);
+  });
+
   beforeEach(() => {
     vi.unstubAllEnvs();
+  });
+
+  it.each([ACTION_EFFECTS_READ, { ...ACTION_EFFECTS_WRITE, idempotent: true }])(
+    "retains invocation-based admission for retry-safe effects %j",
+    async (effects) => {
+      const action = { ...createReadAction(), effects };
+      const claimInvocation = vi.fn<ActionGatewayServiceDependencies["claimInvocation"]>(
+        async () => ({
+          ok: true as const,
+          callCount: 1,
+          duplicate: false,
+        }),
+      );
+      const gateway = createActionGateway({
+        loadContext: vi.fn(async () => interactiveContext),
+        resolveCatalog: vi.fn(async () => ({
+          providers: [{ id: "gmail" as const, label: "Gmail", description: "Email" }],
+          actions: [action],
+        })),
+        claimInvocation,
+        executeAction: vi.fn(async () => ({ ok: true as const, action: action.id, result: {} })),
+      });
+      for (const invocationId of ["call_1", "call_2"]) {
+        expect(
+          (
+            await gateway({
+              request: {
+                operation: "execute",
+                sessionId: "session_1",
+                turnId: "turn_1",
+                invocationId,
+                action: action.id,
+                params: {},
+              },
+              signal: new AbortController().signal,
+            })
+          ).ok,
+        ).toBe(true);
+      }
+      for (const [claim] of claimInvocation.mock.calls) {
+        expect(claim).not.toHaveProperty("deduplicationKey");
+      }
+    },
+  );
+
+  it.each([
+    ACTION_HOST_TOOL_CONTRACT_VERSION_V2,
+    ACTION_HOST_TOOL_CONTRACT_VERSION_V3,
+    ACTION_HOST_TOOL_CONTRACT_VERSION_V4,
+    CHAT_HOST_TOOL_CONTRACT_VERSION_V3,
+    CHAT_HOST_TOOL_CONTRACT_VERSION_V4,
+  ])(
+    "preserves full listing definitions for persisted %s sessions",
+    async (hostToolContractVersion) => {
+      const action = createReadAction();
+      const gateway = createActionGateway({
+        loadContext: vi.fn(async () => ({ ...context, hostToolContractVersion })),
+        resolveCatalog: vi.fn(async () => ({
+          providers: [{ id: "gmail" as const, label: "Gmail", description: "Email" }],
+          actions: [action],
+        })),
+        recordSourceDiscovery: vi.fn(),
+      });
+      const response = await gateway({
+        request: listRequest("gmail"),
+        signal: new AbortController().signal,
+      });
+      expect(response).toMatchObject({
+        ok: true,
+        actions: [
+          {
+            id: action.id,
+            description: action.description,
+            params: action.params,
+            permissionMode: action.permissionMode,
+          },
+        ],
+      });
+      expect(
+        await gateway({
+          request: {
+            operation: "describe",
+            sessionId: "session",
+            turnId: "turn",
+            actions: [action.id],
+          },
+          signal: new AbortController().signal,
+        }),
+      ).toMatchObject({ ok: false, error: { code: "invalid_params" } });
+    },
+  );
+
+  it("describes only policy-available definitions and records discovery without approval or execution", async () => {
+    const read = createReadAction();
+    const write = {
+      ...createReadAction("linkedin.search", "linkedin"),
+      effects: ACTION_EFFECTS_METERED_READ,
+      permissionMode: "ask" as const,
+    };
+    const recordSourceDiscovery = vi.fn();
+    const claimInvocation = vi.fn();
+    const executeAction = vi.fn();
+    const registerApproval = vi.fn();
+    const resolveCatalog = vi.fn(async () => ({
+      providers: [
+        { id: "gmail" as const, label: "Gmail", description: "Email" },
+        {
+          id: "linkedin" as const,
+          kind: "managed" as const,
+          label: "LinkedIn",
+          description: "People",
+        },
+      ],
+      actions: [read, write],
+    }));
+    const gateway = createActionGateway({
+      loadContext: vi.fn(async () => ({ ...context, policy: "headless" as const })),
+      resolveCatalog,
+      recordSourceDiscovery,
+      claimInvocation,
+      executeAction,
+      registerApproval,
+    });
+    const response = await gateway({
+      request: {
+        operation: "describe",
+        sessionId: "session",
+        turnId: "turn",
+        actions: [read.id, write.id, "missing", read.id],
+      },
+      signal: new AbortController().signal,
+    });
+    expect(response).toMatchObject({
+      ok: true,
+      actions: [{ id: read.id, params: read.params }],
+      not_found: [write.id, "missing"],
+    });
+    expect(recordSourceDiscovery).toHaveBeenCalledTimes(1);
+    expect(recordSourceDiscovery).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceId: "gmail" }),
+    );
+    expect(resolveCatalog).toHaveBeenCalledTimes(1);
+    expect(claimInvocation).not.toHaveBeenCalled();
+    expect(executeAction).not.toHaveBeenCalled();
+    expect(registerApproval).not.toHaveBeenCalled();
   });
 
   it("lists the full interactive catalog for external engines", async () => {
     const readAction = createReadAction();
     const catalog: ResolvedActionCatalog = {
       providers: [
-        { id: "gmail", label: "Gmail", description: "Email" },
+        { id: "gmail" as const, label: "Gmail", description: "Email" },
         {
           id: "plugin:slack:slack",
           kind: "integration",
@@ -231,57 +449,112 @@ describe("executeActionGateway", () => {
     });
   });
 
-  it("persists ask approval before interactive execution and dispatches only after approval", async () => {
-    const action = createReadAction("gmail.send");
-    action.capability = "write";
-    action.effects = ACTION_EFFECTS_WRITE;
-    action.permissionMode = "ask";
-    const catalog: ResolvedActionCatalog = {
-      providers: [{ id: "gmail", kind: "integration", label: "Gmail", description: "Email" }],
-      actions: [action],
+  it.each([false, true])(
+    "persists ask approval and dispatches only after approval (durable task: %s)",
+    async (durableTaskApprovals) => {
+      const action = createReadAction("gmail.send");
+      action.capability = "write";
+      action.effects = ACTION_EFFECTS_WRITE;
+      action.permissionMode = "ask";
+      const catalog: ResolvedActionCatalog = {
+        providers: [{ id: "gmail", kind: "integration", label: "Gmail", description: "Email" }],
+        actions: [action],
+      };
+      const registerApproval = vi
+        .fn()
+        .mockResolvedValueOnce({
+          actionId: action.id,
+          sourceId: action.provider,
+          capabilityId: action.capability,
+          inputHash: "input_hash",
+          status: "pending" as const,
+        })
+        .mockResolvedValueOnce({
+          actionId: action.id,
+          sourceId: action.provider,
+          capabilityId: action.capability,
+          inputHash: "input_hash",
+          status: "approved" as const,
+        });
+      const request = {
+        operation: "execute" as const,
+        sessionId: "session_approval",
+        turnId: "turn_approval",
+        action: action.id,
+        params: { to: "customer@example.com" },
+        invocationId: "call_approval",
+      };
+      const dependencies = {
+        loadContext: vi.fn(async () => ({
+          ...interactiveContext,
+          policy: durableTaskApprovals ? ("headless" as const) : ("foregroundInteractive" as const),
+          durableTaskApprovals,
+        })),
+        resolveCatalog: vi.fn(async () => catalog),
+        registerApproval,
+        claimInvocation: admittedInvocation,
+      };
+      const gateway = createActionGateway(dependencies);
+
+      await expect(
+        gateway({ request, signal: new AbortController().signal }),
+      ).resolves.toMatchObject({ ok: false, error: { code: "approval_required" } });
+      expect(action.execute).not.toHaveBeenCalled();
+
+      await expect(
+        gateway({ request, signal: new AbortController().signal }),
+      ).resolves.toMatchObject({ ok: true, action: action.id });
+      expect(action.execute).toHaveBeenCalledOnce();
+      expect(registerApproval).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("binds custom MCP approvals to the current connection revision", async () => {
+    const action = {
+      ...createReadAction("plugin:custom-test:mcp.send"),
+      provider: "plugin:custom-test:mcp" as const,
+      permissionMode: "ask" as const,
+      approvalContext: "revision-1",
     };
-    const registerApproval = vi
-      .fn()
-      .mockResolvedValueOnce({
-        actionId: action.id,
-        sourceId: action.provider,
-        capabilityId: action.capability,
-        inputHash: "input_hash",
-        status: "pending" as const,
-      })
-      .mockResolvedValueOnce({
-        actionId: action.id,
-        sourceId: action.provider,
-        capabilityId: action.capability,
-        inputHash: "input_hash",
-        status: "approved" as const,
-      });
-    const request = {
-      operation: "execute" as const,
-      sessionId: "session_approval",
-      turnId: "turn_approval",
-      action: action.id,
-      params: { to: "customer@example.com" },
-      invocationId: "call_approval",
-    };
-    const dependencies = {
+    const registerApproval = vi.fn(async ({ approvalContext }: { approvalContext?: string }) =>
+      approvalContext === "revision-1"
+        ? {
+            actionId: action.id,
+            sourceId: action.provider,
+            capabilityId: action.capability,
+            inputHash: "hash",
+            status: "pending" as const,
+          }
+        : null,
+    );
+    const gateway = createActionGateway({
       loadContext: vi.fn(async () => interactiveContext),
-      resolveCatalog: vi.fn(async () => catalog),
+      resolveCatalog: vi.fn(async () => ({
+        providers: [{ id: action.provider, label: "Custom", description: "Custom tools" }],
+        actions: [action],
+      })),
       registerApproval,
       claimInvocation: admittedInvocation,
+    });
+    const request = {
+      operation: "execute" as const,
+      sessionId: "session",
+      turnId: "turn",
+      action: action.id,
+      params: {},
+      invocationId: "invocation",
     };
-    const gateway = createActionGateway(dependencies);
-
     await expect(gateway({ request, signal: new AbortController().signal })).resolves.toMatchObject(
       { ok: false, error: { code: "approval_required" } },
     );
-    expect(action.execute).not.toHaveBeenCalled();
-
-    await expect(gateway({ request, signal: new AbortController().signal })).resolves.toMatchObject(
-      { ok: true, action: action.id },
+    expect(registerApproval).toHaveBeenCalledWith(
+      expect.objectContaining({ approvalContext: "revision-1" }),
     );
-    expect(action.execute).toHaveBeenCalledOnce();
-    expect(registerApproval).toHaveBeenCalledTimes(2);
+    action.approvalContext = "revision-2";
+    await expect(gateway({ request, signal: new AbortController().signal })).resolves.toMatchObject(
+      { ok: false, error: { code: "invalid_params" } },
+    );
+    expect(action.execute).not.toHaveBeenCalled();
   });
 
   it("does not ask again when an invocation is already approved", async () => {
@@ -420,6 +693,7 @@ describe("executeActionGateway", () => {
       ok: true,
       action: "gmail.search",
       result: { messages: [] },
+      budget: { limit: 16, used: 1, remaining: 15 },
     });
     expect(readAction.execute).toHaveBeenCalledWith(
       { query: "from:ada" },
@@ -482,18 +756,20 @@ describe("executeActionGateway", () => {
       ok: true,
       action: "linkedin.search_posts",
       result: { quotedTotalUsdMicros: 10 },
+      budget: { limit: 16, used: 1, remaining: 15 },
     });
     expect(second).toEqual({
       ok: true,
       action: "linkedin.search_posts",
       result: { quotedTotalUsdMicros: 20 },
+      budget: { limit: 16, used: 1, remaining: 15 },
     });
   });
 
   it("rejects call 17 through the shared gateway budget", async () => {
     const readAction = createReadAction();
     const catalog: ResolvedActionCatalog = {
-      providers: [{ id: "gmail", label: "Gmail", description: "Email" }],
+      providers: [{ id: "gmail" as const, label: "Gmail", description: "Email" }],
       actions: [readAction],
     };
     let count = 0;

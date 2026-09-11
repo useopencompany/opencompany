@@ -1,6 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import type { SkillImportPreviewDto } from "@opencompany/protocol";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BrainView } from "@/components/BrainView";
@@ -33,9 +33,11 @@ const appDataMock = vi.hoisted(() => ({
     workspaces: [{ id: "goat_ws_1", name: "Ada's Workspace", role: "admin" }],
     workspaceMembers: [],
     featureFlags: {
+      bots: false,
       taskSpawning: false,
       autoModelRouting: false,
       legacyBrain: true,
+      reviewInbox: false,
     },
     integrations: {},
     mcpSetup: { preferredClient: null, completedAt: null },
@@ -43,8 +45,10 @@ const appDataMock = vi.hoisted(() => ({
 }));
 
 const userPreferencesMock = vi.hoisted(() => ({
+  updateBotsAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateTaskSpawningAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateAutoModelRoutingAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
+  updateReviewInboxAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
 }));
 
 const workflowActionsMock = vi.hoisted(() => ({
@@ -59,6 +63,7 @@ const workflowLiveQueryMock = vi.hoisted(() => ({
 const surfaceMock = vi.hoisted(() => ({ props: null as Record<string, unknown> | null }));
 
 const skillActionsMock = vi.hoisted(() => ({
+  setHeadlessSkillScope: vi.fn(async () => ({ canEdit: true })),
   archiveHeadlessSkill: vi.fn(async () => ({ name: "test-skill" })),
   enableHeadlessSkill: vi.fn(async () => ({ name: "test-skill" })),
   disableHeadlessSkill: vi.fn(async () => ({ name: "test-skill" })),
@@ -83,14 +88,17 @@ const skillActionsMock = vi.hoisted(() => ({
     }),
   ),
   importHeadlessSkill: vi.fn(async () => ({
-    installation: { name: "imported-skill" },
+    installation: { id: "imported_id", name: "imported-skill" },
     replayed: false,
   })),
   createHeadlessWorkspaceSkill: vi.fn(async () => ({
-    installation: { name: "investigate-bug" },
+    installation: { id: "created_id", name: "investigate-bug" },
     replayed: false,
   })),
-  updateHeadlessWorkspaceSkill: vi.fn(async () => ({ name: "investigate-bug" })),
+  updateHeadlessWorkspaceSkill: vi.fn(async () => ({
+    name: "investigate-bug",
+    bundle: { id: "bundle_2" },
+  })),
 }));
 
 const themeMock = vi.hoisted(() => ({
@@ -160,8 +168,10 @@ vi.mock("@/components/InferenceSettingsPanel", () => ({
 }));
 
 vi.mock("@/lib/user-preferences", () => ({
+  updateBotsAction: userPreferencesMock.updateBotsAction,
   updateTaskSpawningAction: userPreferencesMock.updateTaskSpawningAction,
   updateAutoModelRoutingAction: userPreferencesMock.updateAutoModelRoutingAction,
+  updateReviewInboxAction: userPreferencesMock.updateReviewInboxAction,
 }));
 
 vi.mock("@/lib/headless-automation-commands", () => ({
@@ -169,6 +179,7 @@ vi.mock("@/lib/headless-automation-commands", () => ({
 }));
 
 vi.mock("@/lib/headless-knowledge-commands", () => ({
+  setHeadlessSkillScope: skillActionsMock.setHeadlessSkillScope,
   archiveHeadlessSkill: skillActionsMock.archiveHeadlessSkill,
   enableHeadlessSkill: skillActionsMock.enableHeadlessSkill,
   disableHeadlessSkill: skillActionsMock.disableHeadlessSkill,
@@ -281,6 +292,8 @@ describe("SettingsRoute", () => {
     themeMock.value = "system";
     themeMock.setTheme.mockClear();
     routerMock.refresh.mockReset();
+    userPreferencesMock.updateBotsAction.mockReset();
+    appDataMock.value.featureFlags.bots = false;
     userPreferencesMock.updateTaskSpawningAction.mockClear();
     userPreferencesMock.updateAutoModelRoutingAction.mockClear();
     appDataMock.value.featureFlags.taskSpawning = false;
@@ -344,6 +357,19 @@ describe("SettingsRoute", () => {
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
   });
 
+  it("shows the For review switch off by default and persists opt-in", async () => {
+    const user = userEvent.setup();
+    render(<PreferencesSettingsRoute />);
+
+    const toggle = screen.getByRole("switch", { name: "For review" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+
+    await user.click(toggle);
+
+    expect(userPreferencesMock.updateReviewInboxAction).toHaveBeenCalledWith(true);
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+  });
+
   it("shows an error when a preference update is rejected", async () => {
     userPreferencesMock.updateTaskSpawningAction.mockRejectedValueOnce(
       new Error("database unavailable"),
@@ -354,6 +380,37 @@ describe("SettingsRoute", () => {
     await user.click(screen.getByRole("switch", { name: "Tasks & Workflows" }));
 
     expect(await screen.findByText("Could not update this preference.")).toBeInTheDocument();
+    expect(routerMock.refresh).not.toHaveBeenCalled();
+  });
+
+  it("shows Bots off by default and lets the user enable and disable it", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<PreferencesSettingsRoute />);
+    const toggle = screen.getByRole("switch", { name: "Bots" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+
+    await user.click(toggle);
+    expect(userPreferencesMock.updateBotsAction).toHaveBeenCalledWith(true);
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
+
+    appDataMock.value.featureFlags.bots = true;
+    rerender(<PreferencesSettingsRoute />);
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    await user.click(toggle);
+    expect(userPreferencesMock.updateBotsAction).toHaveBeenLastCalledWith(false);
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(2));
+  });
+
+  it("keeps Bots disabled and shows an error when saving fails", async () => {
+    userPreferencesMock.updateBotsAction.mockRejectedValueOnce(new Error("API unavailable"));
+    const user = userEvent.setup();
+    render(<PreferencesSettingsRoute />);
+    const toggle = screen.getByRole("switch", { name: "Bots" });
+
+    await user.click(toggle);
+
+    expect(await screen.findByText("Could not update this preference.")).toBeInTheDocument();
+    expect(toggle).toHaveAttribute("aria-checked", "false");
     expect(routerMock.refresh).not.toHaveBeenCalled();
   });
 
@@ -465,6 +522,33 @@ describe("BrainRoute", () => {
   });
 });
 
+const workspaceSkillFixture: import("@opencompany/protocol").SkillInstallationDto = {
+  id: "installation_1",
+  scope: "company",
+  createdByUserId: "user_1",
+  canEdit: true,
+  canManage: true,
+  name: "investigate-bug",
+  enabled: true,
+  archivedAt: null,
+  createdAt: "2026-08-25T05:00:00.000Z",
+  updatedAt: "2026-08-25T05:00:00.000Z",
+  bundle: {
+    id: "bundle_1",
+    name: "investigate-bug",
+    description: "Reproduce and diagnose reported bugs.",
+    body: "Reproduce the issue first.\n",
+    license: null,
+    compatibility: null,
+    metadata: null,
+    allowedTools: null,
+    integrity: `sha256:${"b".repeat(64)}`,
+    source: { type: "workspace" },
+    files: [{ path: "SKILL.md", executable: false, sizeBytes: 128 }],
+    createdAt: "2026-08-25T05:00:00.000Z",
+  },
+};
+
 describe("SkillBundleRoute", () => {
   beforeEach(() => {
     skillActionsMock.disableHeadlessSkill.mockClear();
@@ -476,6 +560,10 @@ describe("SkillBundleRoute", () => {
       <SkillBundleRoute
         installation={{
           id: "installation_1",
+          scope: "company",
+          createdByUserId: "user_1",
+          canEdit: true,
+          canManage: true,
           name: "imported-skill",
           enabled: true,
           archivedAt: null,
@@ -515,57 +603,85 @@ describe("SkillBundleRoute", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Disable" }));
     await waitFor(() =>
-      expect(skillActionsMock.disableHeadlessSkill).toHaveBeenCalledWith("imported-skill"),
+      expect(skillActionsMock.disableHeadlessSkill).toHaveBeenCalledWith("installation_1"),
     );
   });
 
-  it("edits a workspace-authored Skill by publishing a new immutable version", async () => {
-    render(
-      <SkillBundleRoute
-        installation={{
-          id: "installation_1",
-          name: "investigate-bug",
-          enabled: true,
-          archivedAt: null,
-          createdAt: "2026-08-25T05:00:00.000Z",
-          updatedAt: "2026-08-25T05:00:00.000Z",
-          bundle: {
-            id: "bundle_1",
-            name: "investigate-bug",
-            description: "Reproduce and diagnose reported bugs.",
-            body: "Reproduce the issue first.\n",
-            license: null,
-            compatibility: null,
-            metadata: null,
-            allowedTools: null,
-            integrity: `sha256:${"b".repeat(64)}`,
-            source: { type: "workspace" },
-            files: [{ path: "SKILL.md", executable: false, sizeBytes: 128 }],
-            createdAt: "2026-08-25T05:00:00.000Z",
-          },
-        }}
-        canEdit
-      />,
+  it("changes visibility on the same skill using the last observed scope", async () => {
+    render(<SkillBundleRoute installation={workspaceSkillFixture} canEdit />);
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: /Visibility/ }), "personal");
+    await waitFor(() =>
+      expect(skillActionsMock.setHeadlessSkillScope).toHaveBeenCalledWith("installation_1", {
+        scope: "personal",
+        expectedScope: "company",
+      }),
     );
+  });
 
-    expect(screen.getByText(/Created in this workspace/)).toBeInTheDocument();
+  it("lets teammates edit company instructions while reserving visibility and archive for managers", async () => {
+    render(
+      <SkillBundleRoute installation={{ ...workspaceSkillFixture, canManage: false }} canEdit />,
+    );
+    expect(screen.getByRole("textbox", { name: "Skill instructions" })).not.toHaveAttribute(
+      "readonly",
+    );
+    expect(screen.queryByRole("combobox", { name: "Visibility" })).not.toBeInTheDocument();
+    await userEvent.tab();
+    await userEvent.tab();
+    expect(screen.getByRole("button", { name: /Visibility managed/ })).toHaveFocus();
+    expect(
+      await screen.findByText("Only the creator or an admin can change visibility."),
+    ).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Archive" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Disable" })).toBeEnabled();
+  });
+
+  it("edits workspace instructions directly and protects the saved version", async () => {
+    render(<SkillBundleRoute installation={workspaceSkillFixture} canEdit />);
+
     expect(screen.queryByRole("button", { name: "Replace bundle" })).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Edit skill" }));
-    const instructions = screen.getByLabelText("Instructions");
+    expect(screen.queryByRole("button", { name: "Edit skill" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/sha256:/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    const instructions = screen.getByRole("textbox", { name: "Skill instructions" });
     await userEvent.clear(instructions);
     await userEvent.type(instructions, "Reproduce, isolate, and explain the root cause.");
-    await userEvent.click(screen.getByRole("button", { name: "Save new version" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() =>
-      expect(skillActionsMock.updateHeadlessWorkspaceSkill).toHaveBeenCalledWith(
-        "investigate-bug",
-        {
-          description: "Reproduce and diagnose reported bugs.",
-          instructions: "Reproduce, isolate, and explain the root cause.",
-        },
-      ),
+      expect(skillActionsMock.updateHeadlessWorkspaceSkill).toHaveBeenCalledWith("installation_1", {
+        description: "Reproduce and diagnose reported bugs.",
+        instructions: "Reproduce, isolate, and explain the root cause.",
+        expectedBundleId: "bundle_1",
+      }),
     );
     expect(routerMock.refresh).toHaveBeenCalled();
+  });
+  it("keeps a failed save editable, validates empty instructions, and discards a draft", async () => {
+    render(<SkillBundleRoute installation={workspaceSkillFixture} canEdit />);
+    const instructions = screen.getByRole("textbox", { name: "Skill instructions" });
+    await userEvent.clear(instructions);
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Add a description and instructions");
+    expect(skillActionsMock.updateHeadlessWorkspaceSkill).not.toHaveBeenCalled();
+    await userEvent.type(instructions, "Revised instructions.");
+    skillActionsMock.updateHeadlessWorkspaceSkill.mockRejectedValueOnce(
+      new Error("This skill changed since you opened it."),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("This skill changed");
+    expect(instructions).toHaveValue("Revised instructions.");
+    await userEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+    expect(instructions).toHaveValue("Reproduce the issue first.");
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  });
+
+  it("respects an explicitly read-only skill view", () => {
+    render(<SkillBundleRoute installation={workspaceSkillFixture} canEdit={false} />);
+    expect(screen.queryByRole("combobox", { name: "Visibility" })).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Skill instructions" })).toHaveAttribute("readonly");
+    expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Archive" })).not.toBeInTheDocument();
   });
 });
 
@@ -577,10 +693,16 @@ describe("SkillsSettingsRoute", () => {
     routerMock.push.mockReset();
   });
 
-  it("previews then imports a skill from a pasted URL", async () => {
+  it.each([
+    ["All", "personal"],
+    ["Company", "company"],
+    ["Personal", "personal"],
+  ])("imports a skill from %s with %s visibility", async (filter, scope) => {
     render(<SkillsSettingsRoute skills={[]} canEdit />);
 
+    await userEvent.click(screen.getByRole("button", { name: filter }));
     await userEvent.click(screen.getByRole("button", { name: "Import skill" }));
+    expect(screen.getByRole("combobox", { name: "Visibility" })).toHaveValue(scope);
     await userEvent.type(screen.getByPlaceholderText("github.com/owner/repo"), "github.com/o/r");
     await userEvent.click(screen.getByRole("button", { name: "Preview" }));
 
@@ -595,13 +717,14 @@ describe("SkillsSettingsRoute", () => {
 
     await waitFor(() =>
       expect(skillActionsMock.importHeadlessSkill).toHaveBeenCalledWith({
+        scope,
         url: "github.com/o/r",
         expectedResolvedCommit: "a".repeat(40),
         expectedIntegrity: `sha256:${"b".repeat(64)}`,
       }),
     );
     await waitFor(() =>
-      expect(routerMock.push).toHaveBeenCalledWith("/settings/skills/imported-skill"),
+      expect(routerMock.push).toHaveBeenCalledWith("/settings/skills/imported_id"),
     );
   });
 
@@ -639,33 +762,106 @@ describe("SkillsSettingsRoute", () => {
     await userEvent.click(screen.getByRole("button", { name: "Preview" }));
 
     expect(await screen.findByText(/will be installed as/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Install skill" })).toBeEnabled();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Install skill" })).toBeEnabled(),
+    );
   });
 
-  it("creates a standard workspace-authored Skill with a derived slash command", async () => {
-    render(<SkillsSettingsRoute skills={[]} canEdit />);
+  it.each([
+    ["All", "personal"],
+    ["Company", "company"],
+    ["Personal", "personal"],
+  ])(
+    "creates a skill from %s with %s visibility and a derived slash command",
+    async (filter, scope) => {
+      render(<SkillsSettingsRoute skills={[]} canEdit />);
 
-    await userEvent.click(screen.getByRole("button", { name: "New skill" }));
-    await userEvent.type(screen.getByPlaceholderText("investigate-bug"), "incident-review");
-    expect(screen.getByText("/incident-review")).toBeInTheDocument();
-    await userEvent.type(
-      screen.getByPlaceholderText(/What this skill does/),
-      "Review incidents and identify root causes.",
+      await userEvent.click(screen.getByRole("button", { name: filter }));
+      await userEvent.click(screen.getByRole("button", { name: `New ${scope} skill` }));
+      expect(screen.getByRole("combobox", { name: "Visibility" })).toHaveValue(scope);
+      await userEvent.type(screen.getByPlaceholderText("investigate-bug"), "incident-review");
+      expect(screen.getByText("/incident-review")).toBeInTheDocument();
+      await userEvent.type(
+        screen.getByPlaceholderText(/What this skill does/),
+        "Review incidents and identify root causes.",
+      );
+      await userEvent.type(
+        screen.getByPlaceholderText(/Write the operating instructions/),
+        "Reproduce the incident before proposing changes.",
+      );
+      await userEvent.click(screen.getByRole("button", { name: "Create skill" }));
+
+      await waitFor(() =>
+        expect(skillActionsMock.createHeadlessWorkspaceSkill).toHaveBeenCalledWith({
+          scope,
+          name: "incident-review",
+          description: "Review incidents and identify root causes.",
+          instructions: "Reproduce the incident before proposing changes.",
+        }),
+      );
+      expect(routerMock.push).toHaveBeenCalledWith("/settings/skills/created_id");
+    },
+  );
+
+  it("filters skills by scope, preserves stable links, and returns to All", async () => {
+    const personal = {
+      ...workspaceSkillFixture,
+      id: "personal_skill",
+      scope: "personal" as const,
+    };
+    render(<SkillsSettingsRoute skills={[workspaceSkillFixture, personal]} canEdit />);
+    const filters = within(screen.getByRole("group", { name: "Skill scope" }));
+    expect(filters.getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getAllByRole("link")).toHaveLength(2);
+
+    await userEvent.click(filters.getByRole("button", { name: "Company" }));
+    expect(filters.getByRole("button", { name: "Company" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
     );
+    expect(screen.getByRole("link")).toHaveAttribute("href", "/settings/skills/installation_1");
+
+    await userEvent.click(filters.getByRole("button", { name: "Personal" }));
+    expect(filters.getByRole("button", { name: "Company" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    expect(screen.getByRole("link")).toHaveAttribute("href", "/settings/skills/personal_skill");
+
+    await userEvent.click(filters.getByRole("button", { name: "All" }));
+    expect(screen.getAllByRole("link")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "New personal skill" })).toBeInTheDocument();
+  });
+
+  it("keeps the selected scope actionable when there are no matching skills", async () => {
+    render(<SkillsSettingsRoute skills={[workspaceSkillFixture]} canEdit />);
+    await userEvent.click(screen.getByRole("button", { name: "Personal" }));
+    expect(screen.getByText("No personal skills yet")).toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "New personal skill" }));
+    expect(screen.getByRole("combobox", { name: "Visibility" })).toHaveValue("personal");
+  });
+
+  it("allows overriding the creation scope without changing the list filter", async () => {
+    render(<SkillsSettingsRoute skills={[]} canEdit />);
+    await userEvent.click(screen.getByRole("button", { name: "Company" }));
+    await userEvent.click(screen.getByRole("button", { name: "New company skill" }));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Visibility" }), "personal");
+    await userEvent.type(screen.getByPlaceholderText("investigate-bug"), "my-notes");
+    await userEvent.type(screen.getByPlaceholderText(/What this skill does/), "Personal notes.");
     await userEvent.type(
       screen.getByPlaceholderText(/Write the operating instructions/),
-      "Reproduce the incident before proposing changes.",
+      "Take notes.",
     );
     await userEvent.click(screen.getByRole("button", { name: "Create skill" }));
-
     await waitFor(() =>
-      expect(skillActionsMock.createHeadlessWorkspaceSkill).toHaveBeenCalledWith({
-        name: "incident-review",
-        description: "Review incidents and identify root causes.",
-        instructions: "Reproduce the incident before proposing changes.",
-      }),
+      expect(skillActionsMock.createHeadlessWorkspaceSkill).toHaveBeenCalledWith(
+        expect.objectContaining({ scope: "personal" }),
+      ),
     );
-    expect(routerMock.push).toHaveBeenCalledWith("/settings/skills/incident-review");
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await userEvent.click(screen.getByRole("button", { name: "New company skill" }));
+    expect(screen.getByRole("combobox", { name: "Visibility" })).toHaveValue("company");
   });
 });
 

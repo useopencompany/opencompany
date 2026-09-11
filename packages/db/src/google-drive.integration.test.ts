@@ -2,6 +2,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { claimNextGoogleDriveFile } from "./google-drive";
+import { createTestPGlite } from "./test-pglite";
 
 const RAW_TIMESTAMP_FAILURE =
   "observedAt.getTime is not a function. (In 'observedAt.getTime()', 'observedAt.getTime' is undefined)";
@@ -10,7 +11,7 @@ describe("Google Drive file claims", () => {
   let database: PGlite;
 
   beforeEach(async () => {
-    database = new PGlite();
+    database = await createTestPGlite();
     await database.exec(`
       CREATE SCHEMA goat;
       CREATE TABLE goat.google_drive_file_states (

@@ -20,7 +20,7 @@ import {
 } from "@opencompany/db/product-schema";
 import { and, desc, eq, isNull, ne, sql } from "drizzle-orm";
 import { getAppUrl } from "../app-url";
-import { captureIntegrationAddedAnalytics } from "./analytics";
+import { captureConnectionAddedAnalytics } from "./analytics";
 
 const STATE_TTL_MS = 10 * 60 * 1000;
 const CREDENTIAL_KIND = "oauth_token" as const;
@@ -169,22 +169,7 @@ export function createRemoteMcpIntegration<const TProvider extends IntegrationPr
       )
       .orderBy(desc(integrations.updatedAt))
       .limit(1);
-    if (personal || !input.workspaceId) return personal;
-
-    const [workspace] = await getDb()
-      .select(selection)
-      .from(integrations)
-      .where(
-        and(
-          eq(integrations.workspaceId, input.workspaceId),
-          eq(integrations.provider, config.provider),
-          eq(integrations.externalId, config.externalId),
-          ne(integrations.status, "disconnected"),
-        ),
-      )
-      .orderBy(desc(integrations.updatedAt))
-      .limit(1);
-    return workspace;
+    return personal;
   }
 
   // The web settings surface and runner workers keep resolving the shared
@@ -347,7 +332,7 @@ export function createRemoteMcpIntegration<const TProvider extends IntegrationPr
   }
 
   async function markConnected(integrationId: string, userWorkosId: string, db?: DbLike) {
-    await (db ?? getDb())
+    const [connection] = await (db ?? getDb())
       .update(integrations)
       .set({
         status: "connected",
@@ -365,8 +350,13 @@ export function createRemoteMcpIntegration<const TProvider extends IntegrationPr
           eq(integrations.userWorkosId, userWorkosId),
           eq(integrations.provider, config.provider),
         ),
-      );
-    await captureIntegrationAddedAnalytics({
+      )
+      .returning({ id: integrations.id });
+    if (!connection) {
+      throw new Error(`${config.displayName} connection no longer exists.`);
+    }
+    await captureConnectionAddedAnalytics({
+      connectionId: integrationId,
       userWorkosId,
       provider: config.provider,
     });

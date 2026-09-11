@@ -15,8 +15,10 @@ import {
   type CreateTaskCommentCommand,
   type CreateTaskCommentResult,
   type CreateTaskResult,
+  isSettledTaskStatus,
   type LegacyTask,
   type LegacyTaskHistory,
+  SETTLED_TASK_STATUSES,
   type Task,
   type TaskPage,
   type TaskRepository,
@@ -26,6 +28,7 @@ import {
   type UpdateTaskCommand,
   type UpdateTaskResult,
 } from "@opencompany/core";
+import { newResourceId } from "@opencompany/core/resource-ids";
 import { type SQL, sql } from "drizzle-orm";
 import {
   type ChatAttachmentResolver,
@@ -49,7 +52,7 @@ export type TaskRepositoryIdFactory = {
 const defaultIds: TaskRepositoryIdFactory = {
   command: () => `task_command_${randomUUID()}`,
   task: () => `task_${randomUUID()}`,
-  conversation: () => `conversation_${randomUUID()}`,
+  conversation: () => newResourceId("conversation"),
   message: () => `message_${randomUUID()}`,
   runtime: () => `runtime_${randomUUID()}`,
   run: () => `run_${randomUUID()}`,
@@ -494,6 +497,7 @@ export class PostgresTaskRepository implements TaskRepository {
           FROM goat.plugins AS plugin
           WHERE plugin.workspace_id = ${input.actor.workspaceId}
             AND plugin.status = 'enabled'
+            AND plugin.owner_user_id = ${input.actor.userId}
         ),
         prior AS MATERIALIZED (
           SELECT *
@@ -1204,15 +1208,32 @@ export class PostgresTaskRepository implements TaskRepository {
     const now = this.options.now?.() ?? new Date();
     const archived = "archived" in input.command ? input.command.archived : null;
     const name = "name" in input.command ? input.command.name : null;
+    const markSeen = "markSeen" in input.command ? input.command.markSeen : null;
     const [row] = await this.rows<TaskUpdateRow>(sql`
       WITH authorized AS MATERIALIZED (
-        SELECT task.id
+        SELECT task.id, task.session_id
         FROM goat.tasks AS task
         JOIN goat.chat_sessions AS conversation
           ON conversation.id = task.session_id
          AND conversation.kind = 'task'
         WHERE (task.id = ${input.taskId} OR upper(task.display_id) = upper(${input.taskId}))
           AND ${taskAccessPredicate(input.actor)}
+      ),
+      -- Acknowledgment lives on the Task's conversation, which is where settlement raises the
+      -- unread flag. It deliberately leaves updated_at alone on both rows so reading a result
+      -- never resequences a queue the reader is working through.
+      acknowledged_conversation AS (
+        UPDATE goat.chat_sessions AS conversation
+        SET has_unseen = false,
+            last_seen_at = GREATEST(
+              COALESCE(conversation.last_seen_at, '-infinity'::timestamptz),
+              ${now}::timestamptz
+            )
+        FROM authorized
+        WHERE ${markSeen}::boolean IS TRUE
+          AND conversation.id = authorized.session_id
+          AND conversation.kind = 'task'
+        RETURNING conversation.id
       ),
       updated AS MATERIALIZED (
         UPDATE goat.tasks AS task
@@ -1229,7 +1250,10 @@ export class PostgresTaskRepository implements TaskRepository {
             (${name}::text IS NOT NULL AND task.name IS DISTINCT FROM ${name}::text)
             OR (
               ${archived}::boolean IS NOT NULL
-              AND task.status IN ('succeeded', 'failed', 'canceled')
+              AND task.status IN (${sql.join(
+                SETTLED_TASK_STATUSES.map((status) => sql`${status}`),
+                sql`, `,
+              )})
               AND (
                 (${archived}::boolean AND task.archived_at IS NULL)
                 OR (NOT ${archived}::boolean AND task.archived_at IS NOT NULL)
@@ -1291,9 +1315,9 @@ export class PostgresTaskRepository implements TaskRepository {
       input.command.archived &&
       !row.changed &&
       row.archivedAt === null &&
-      !["succeeded", "failed", "canceled"].includes(row.status)
+      !isSettledTaskStatus(row.status)
     ) {
-      throw new CoreError("invalid_argument", "Only a terminal Task can be archived.");
+      throw new CoreError("invalid_argument", "Only a settled Task can be archived.");
     }
     const transactionId = validTransactionId(row.transactionId);
     return { task: mapTask(row), transactionId };

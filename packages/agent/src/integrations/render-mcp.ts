@@ -6,7 +6,7 @@ import {
 } from "@opencompany/db/integrations";
 import { integrations } from "@opencompany/db/product-schema";
 import { and, desc, eq, isNull, ne, sql } from "drizzle-orm";
-import { captureIntegrationAddedAnalytics } from "./analytics";
+import { captureConnectionAddedAnalytics } from "./analytics";
 import type { RemoteMcpProviderState } from "./remote-mcp-oauth";
 import { createRemoteMcpStaticBearerAuthProvider } from "./remote-mcp-static-bearer";
 
@@ -130,7 +130,11 @@ export async function connectRenderMcpIntegration(input: {
     throw error;
   }
 
-  await captureIntegrationAddedAnalytics({ userWorkosId: input.userWorkosId, provider: "render" });
+  await captureConnectionAddedAnalytics({
+    connectionId: integration.id,
+    userWorkosId: input.userWorkosId,
+    provider: "render",
+  });
   return { integrationId: integration.id };
 }
 

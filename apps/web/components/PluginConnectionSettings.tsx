@@ -69,7 +69,8 @@ export function PluginAccountRow({
         account.integrationId
       : account.provider === "linear" ||
           account.provider === "hubspot" ||
-          account.provider === "attio"
+          account.provider === "attio" ||
+          account.provider === "notion"
         ? account.connectionLabel ||
           account.accountName ||
           account.accountEmail ||
@@ -110,7 +111,7 @@ export function PluginAccountRow({
   };
 
   return (
-    <div className="flex flex-col gap-1.5 rounded-lg border border-border/70 px-3 py-2">
+    <div className="flex flex-col gap-1.5 rounded-lg border border-border bg-surface px-3 py-2">
       <div className="flex min-w-0 items-center gap-2">
         <span className="min-w-0 flex-1 truncate text-[12px] leading-4 text-ink-subtle">
           {identity}

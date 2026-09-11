@@ -1,0 +1,107 @@
+---
+title: Plugins
+description: Add tools, reusable Skills, and supported events to your workspace.
+---
+
+Plugins extend opencompany with reusable Skills, connections to external services, or events that
+can start Workflows. Some contain only Skills and need no account connection.
+
+## Find and install a Plugin
+
+Open **Plugins** in the sidebar. Search by name or browse categories; use **Installed** to return
+to your installed packages.
+
+Every workspace member installs and manages their own Plugins. After installation, open the Plugin page to see its
+Skills, tool connection, permissions, and any supported events. For a tool Plugin, connect the
+account you want it to use. Installation and account authorization are separate steps.
+
+When a newer reviewed version of an official Plugin ships, its catalog entry and Plugin page show
+**Update available**. Updating keeps your connection, enabled or disabled state, event choices, and
+persistent Plugin data. Exact-package MCP approvals must be reviewed again when package integrity
+changes.
+
+Start with the [connection guide](/docs/getting-started/connecting-sources) or the
+[provider index](/docs/integrations).
+
+## Skills, tools, and events
+
+| Part | How you use it |
+| --- | --- |
+| **Skills** | Select the Plugin's instructions from the `/` menu or a Workflow step. |
+| **Tools** | Ask the agent to work with the connected provider; the account and permission settings determine what's available. |
+| **Events** | Enable an event for your personal installation, then select it in a Workflow's event trigger. |
+
+Enabling a Plugin doesn't activate every Skill in every conversation. The agent applies relevant
+instructions, or you can select a Skill explicitly.
+
+If two installed Skills have the same name, a standalone Skill takes precedence over a Plugin
+Skill. Between Plugins, the alphabetically earlier Plugin name takes precedence. Settings reports
+these collisions so you can identify why a Skill is hidden.
+
+## Permissions and account ownership
+
+Plugins and connected accounts are personal. Each teammate installs their own plugins and connects
+their own identity, including Infisical. Installing, configuring, or removing a plugin affects only
+your use. A shared Skill or Workflow can require a plugin, but does not share its installation or credentials.
+
+Tool groups use **On**, **Ask**, and **Off**. Read
+[Permissions](/docs/core-concepts/integrations) for their effect in interactive, background, and
+coding work. Event enablement is separate from tool permissions.
+
+## Import a custom Plugin
+
+Members can preview and import a supported Plugin package from Settings. Review its manifest,
+Skills, bundled files, and install report. A manifest error prevents installation; invalid child
+Skills can be skipped and reported, so check the report before relying on the package.
+
+Installed packages are pinned to an exact version. Replacing a package creates a new version;
+Chats and Tasks retain the versions they captured, but current ownership, enabled state, and
+workspace membership still determine access.
+
+## MCP servers
+
+Model Context Protocol (MCP) is the interface many Plugins use to expose tools. You don't need to
+configure an MCP client for an official tool Plugin; its page handles the connection.
+
+Remote HTTP and SSE servers run through opencompany's server-side tool gateway. Provider
+credentials stay at that connection boundary.
+
+Custom Plugins can also declare **stdio** MCP servers, which start a process inside a coding
+sandbox. You must approve the exact installed package version before these servers
+can run. Review the command, arguments, and declared environment variable names in the approval
+screen. This process support is available in Codex and Claude Code sandboxes. Replacing the
+package requires approval again.
+
+## Disable or archive
+
+Disabling or archiving your Plugin removes its availability for your later work. Teammates keep
+their own installations. It doesn't undo actions
+already completed in an external service.
+
+Plugins that use a writable `PLUGIN_DATA` directory can retain your personal data across sandbox and
+Plugin replacement. Archiving a Plugin doesn't implicitly erase this data. Manage the provider
+connection separately when you want to revoke account access.
+
+## Convex
+
+Install Convex from **Settings → Plugins**, then connect it using a deployment-scoped deploy key
+from your Convex deployment settings. Use a key beginning with `dev:` or `prod:` and grant
+function inspection so the connection can be validated. Project-wide tokens and self-hosted
+endpoints are not supported. You can replace or disconnect the key from the same plugin page.
+
+Convex uses the same On, Ask, and Off controls as other plugins:
+
+- **Inspect Convex deployment** starts On: deployment metadata, schemas, and function specifications.
+- **Read documents and logs** starts Ask: documents, read-only queries, and function logs.
+- **Run Convex functions** starts Ask: deployed queries, mutations, and actions, which may change data or call other services.
+- **Manage environment variables** starts Off: reading, setting, and removing variables, including secrets.
+
+A production connection supports only deployment metadata, schemas, and function specifications.
+Changing permissions does not enable production data access or writes. The insights tool is
+unavailable with deployment-key authentication. Tools always target the connected deployment;
+there is no project directory or deployment selector to configure in chat.
+
+opencompany encrypts the key and keeps it server-side. Its hosted bridge runs the pinned official
+Convex CLI MCP server. Requests have a 30-second execution limit and a bounded response size;
+use smaller pages or narrower queries for large datasets. Uninstalling the plugin disables tools;
+disconnect the account separately to revoke opencompany's saved connection.

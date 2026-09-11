@@ -25,6 +25,7 @@
   --color-spend-chat: #3b6ea5;
   --color-spend-ingestion: #b07a2e;
   --color-spend-capabilities: #2e8968;
+  --color-spend-sandbox: #8665ac;
   --color-spend-other: #b6b6b0;
 }
 
@@ -51,6 +52,7 @@
   --color-spend-chat: #5b93d6;
   --color-spend-ingestion: #c1863a;
   --color-spend-capabilities: #3fa07f;
+  --color-spend-sandbox: #b294d6;
   --color-spend-other: #5f635a;
 }
 
@@ -78,6 +80,7 @@
     --color-spend-chat: #5b93d6;
     --color-spend-ingestion: #c1863a;
     --color-spend-capabilities: #3fa07f;
+    --color-spend-sandbox: #b294d6;
     --color-spend-other: #5f635a;
   }
 }
@@ -88,6 +91,15 @@ body {
   background: var(--color-canvas);
   color: var(--color-ink);
   overscroll-behavior: none;
+}
+
+/* Keeps a container scrollable while hiding its scrollbar, for quiet list surfaces
+   where a visible track on platforms that draw one reads as noise. */
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 .desktop-drag-region {

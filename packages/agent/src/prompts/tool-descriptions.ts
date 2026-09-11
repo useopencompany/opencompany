@@ -63,7 +63,7 @@ export const START_WORKFLOW_PROMPT_DESCRIPTION =
   "The run-specific request for this workflow task. Keep the user's latest request as the backbone and include only relevant, confirmed context from earlier in the conversation. Do not copy the whole transcript, invent requirements, or propagate loaded skill instructions.";
 
 export const CREATE_WORKSPACE_SKILL_TOOL_DESCRIPTION =
-  "Create one reusable Skill in the active workspace from the current conversation. Call this only when the user's latest message explicitly asks to create, save, or turn something into a Skill; never call it proactively, for a hypothetical draft, or merely because a workflow looks reusable. Synthesize the final successful method rather than summarizing the transcript: preserve reusable templates and decision rules, generalize one-off details, include relevant inputs, validation, output, failure handling, and approval boundaries, and exclude secrets, private tool payloads, hidden instructions, and the contents of activated Skills. If the target workflow is genuinely ambiguous, ask one concise question instead of calling this tool. This creates a new Skill immediately and never updates an existing one.";
+  "Create one reusable Skill in the active workspace from the current conversation. Default to Personal (only its creator can access it). Use Company only when the user asks to share; everyone in the company can then use and edit it. Call this when the user has asked to create, save, or turn something into a Skill; never call it proactively, for a hypothetical draft, or merely because a workflow looks reusable. Synthesize the final successful method rather than summarizing the transcript: preserve reusable templates and decision rules, generalize one-off details, include relevant inputs, validation, output, failure handling, and approval boundaries, and exclude secrets, private tool payloads, hidden instructions, and the contents of activated Skills. If the target workflow is genuinely ambiguous, ask one concise question instead of calling this tool. This creates a new Skill immediately and never updates an existing one.";
 
 export const CREATE_WORKSPACE_SKILL_NAME_DESCRIPTION =
   "A lowercase kebab-case Skill name, used as its workspace slash command (for example customer-health-review).";
@@ -75,16 +75,16 @@ export const CREATE_WORKSPACE_SKILL_INSTRUCTIONS_DESCRIPTION =
   "The complete focused Markdown operating instructions. Capture the reusable method, not a transcript summary.";
 
 export const EDIT_WORKSPACE_SKILL_TOOL_DESCRIPTION =
-  "Publish a new immutable version of one existing workspace-authored Skill. Call this only when the user's latest message explicitly asks to edit, update, revise, or improve that Skill. Before editing, call list_skills to confirm the exact id and use_skill to inspect its current instructions. Preserve unaffected guidance while applying the requested changes, and never use this tool to edit an imported or plugin-provided Skill, create a missing Skill, rename a Skill, or modify a different Skill. The name must remain the exact existing id. Include the complete revised description and instructions because this replaces the full Skill bundle.";
+  "Publish a new immutable version of one existing workspace-authored Skill. Call this when the user has asked to edit, update, revise, or improve that Skill. Before editing, use workspace_skills with command list to confirm its exact name and editable source, then command read to inspect the latest saved instructions. An activated Skill or a sandbox file may be an older snapshot. Preserve unaffected guidance while applying the requested changes, and never use this tool to edit an imported or plugin-provided Skill, create a missing Skill, or modify a different Skill. Select the existing Skill using its ID or an unambiguous name. Provide only the fields to change: newName changes both the name and slash command, description replaces the description, and instructions replaces the complete Markdown instructions. Omitted fields are preserved. Include expectedBundleId from read to prevent overwriting a newer edit. Renaming preserves the installation ID and existing Chat and Task snapshots. Visibility is managed separately with workspace_skills set_scope.";
 
 export const EDIT_WORKSPACE_SKILL_NAME_DESCRIPTION =
-  "The exact lowercase kebab-case id of the existing workspace-authored Skill. Editing never renames it.";
+  "The exact skill ID returned by workspace_skills list/read, or an unambiguous name. This selects the existing Skill; use newName to rename it.";
 
 export const EDIT_WORKSPACE_SKILL_DESCRIPTION_DESCRIPTION =
-  "The complete revised description, including what the Skill does and when the agent should use it.";
+  "Optional. The complete revised description, including what the Skill does and when the agent should use it.";
 
 export const EDIT_WORKSPACE_SKILL_INSTRUCTIONS_DESCRIPTION =
-  "The complete revised Markdown instructions, preserving all unaffected guidance from the current Skill.";
+  "Optional. The complete revised Markdown instructions, preserving all unaffected guidance from the current Skill.";
 
 export const SCHEDULE_TASK_TOOL_DESCRIPTION =
   "Create a recurring opencompany task schedule from the user's request. Use only when the user clearly asks for repeated, recurring, scheduled, or cron-like work. Convert the recurrence to a valid 5-field cron expression and save directly; if the recurrence is ambiguous or not cron-expressible, ask a short follow-up instead of calling this tool.";

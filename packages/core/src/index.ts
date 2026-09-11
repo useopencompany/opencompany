@@ -1,6 +1,7 @@
 export * from "./actor";
 export * from "./attachments";
 export * from "./chat";
+export * from "./custom-mcp";
 export * from "./knowledge";
 export * from "./plugin-import";
 export * from "./skill-import";

@@ -86,32 +86,35 @@ describe("resolveWorkflowStepSelection", () => {
     });
   });
 
-  it("uses configured coding model and effort for cloud coding steps", () => {
-    expect(
-      resolveWorkflowStepSelection({
-        model: "codex",
-        runtimeModel: "openai/gpt-5.6-luna",
+  it.each(["anthropic/claude-opus-4.8", "anthropic/claude-opus-5"])(
+    "uses configured coding model %s and effort for cloud coding steps",
+    (model) => {
+      expect(
+        resolveWorkflowStepSelection({
+          model: "codex",
+          runtimeModel: "openai/gpt-5.6-luna",
+          reasoningEffort: "medium",
+          instructions: "Fix the bug.",
+        }),
+      ).toEqual({
+        engine: "codex",
+        model: "openai/gpt-5.6-luna",
         reasoningEffort: "medium",
-        instructions: "Fix the bug.",
-      }),
-    ).toEqual({
-      engine: "codex",
-      model: "openai/gpt-5.6-luna",
-      reasoningEffort: "medium",
-    });
-    expect(
-      resolveWorkflowStepSelection({
-        model: "claude-code",
-        runtimeModel: "anthropic/claude-opus-4.8",
+      });
+      expect(
+        resolveWorkflowStepSelection({
+          model: "claude-code",
+          runtimeModel: model,
+          reasoningEffort: "xhigh",
+          instructions: "Fix the bug.",
+        }),
+      ).toEqual({
+        engine: "claude_code",
+        model,
         reasoningEffort: "xhigh",
-        instructions: "Fix the bug.",
-      }),
-    ).toEqual({
-      engine: "claude_code",
-      model: "anthropic/claude-opus-4.8",
-      reasoningEffort: "xhigh",
-    });
-  });
+      });
+    },
+  );
 
   it("rejects unavailable and ambiguous step models", () => {
     expect(() =>
@@ -127,6 +130,14 @@ describe("resolveWorkflowStepSelection", () => {
 });
 
 describe("extractWorkflowSkillMentionRefs", () => {
+  it("resolves installation IDs escaped by the Markdown editor", () => {
+    expect(
+      extractWorkflowSkillMentionRefs(
+        String.raw`@skill/skill\_installation\_0123456789abcdef0123456789abcdef`,
+      ),
+    ).toEqual([{ id: "skill_installation_0123456789abcdef0123456789abcdef" }]);
+  });
+
   it("collects deduped skill mentions from one step", () => {
     expect(
       extractWorkflowSkillMentionRefs(
@@ -208,6 +219,7 @@ describe("compileWorkflowHarnessSpec", () => {
           description: "How to research",
           instructions: "Search broadly.",
           sourceKind: "standalone",
+          scope: "company",
         },
         {
           id: "coding-work",
@@ -216,6 +228,7 @@ describe("compileWorkflowHarnessSpec", () => {
           description: "How to implement",
           instructions: "Inspect, implement, and verify.",
           sourceKind: "plugin",
+          scope: null,
         },
       ],
       tools: ["exa_search"],
@@ -296,6 +309,7 @@ describe("compileWorkflowHarnessSpec", () => {
           description: "Ship product changes",
           instructions: "Implement and verify the feature.",
           sourceKind: "standalone",
+          scope: "company",
         },
         {
           id: "smooth-shadow-ring",
@@ -304,6 +318,7 @@ describe("compileWorkflowHarnessSpec", () => {
           description: "Polish elevation styles",
           instructions: "Use layered shadows and a crisp ring.",
           sourceKind: "standalone",
+          scope: "company",
         },
       ],
       invokedSkillIds: ["smooth-shadow-ring"],
@@ -402,19 +417,19 @@ describe("createTaskFromWorkflow", () => {
           id: "step-1",
           title: "Research",
           model: "kimi-k2.6",
-          instructions: "Use @skill/research.",
+          instructions: String.raw`Use @skill/skill\_installation\_research.`,
         },
         {
           id: "step-2",
           title: "Write",
           model: "sonnet-5",
-          instructions: "Use @skill/writing and @skill/research.",
+          instructions: "Use @skill/writing and @skill/skill_installation_research.",
         },
       ],
     });
     mocks.resolveSkillMentions.mockResolvedValue([
       {
-        id: "research",
+        id: "skill_installation_research",
         bundleId: "skill_bundle_research_v1",
         name: "Research",
         description: "",
@@ -449,7 +464,11 @@ describe("createTaskFromWorkflow", () => {
 
     expect(mocks.resolveSkillMentions).toHaveBeenCalledWith({
       workspaceId: "ws_1",
-      mentions: [{ id: "research" }, { id: "writing" }, { id: "smooth-shadow-ring" }],
+      mentions: [
+        { id: "skill_installation_research" },
+        { id: "writing" },
+        { id: "smooth-shadow-ring" },
+      ],
     });
     expect(mocks.createTaskForUser).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -457,7 +476,7 @@ describe("createTaskFromWorkflow", () => {
         workflowId: "mixed-workflow",
         harnessSpec: expect.objectContaining({
           workflow: expect.objectContaining({
-            skillIds: ["research", "writing", "smooth-shadow-ring"],
+            skillIds: ["skill_installation_research", "writing", "smooth-shadow-ring"],
             skillBundleIds: [
               "skill_bundle_research_v1",
               "skill_bundle_writing_v1",
@@ -465,11 +484,11 @@ describe("createTaskFromWorkflow", () => {
             ],
             steps: [
               expect.objectContaining({
-                skillIds: ["research", "smooth-shadow-ring"],
+                skillIds: ["skill_installation_research", "smooth-shadow-ring"],
                 skillBundleIds: ["skill_bundle_research_v1", "skill_bundle_shadow_v1"],
               }),
               expect.objectContaining({
-                skillIds: ["writing", "research"],
+                skillIds: ["writing", "skill_installation_research"],
                 skillBundleIds: ["skill_bundle_writing_v1", "skill_bundle_research_v1"],
               }),
             ],

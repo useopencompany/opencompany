@@ -1,0 +1,83 @@
+---
+title: Cloud coding
+description: Connect an engine and GitHub, prepare a repository, and take a change through review.
+---
+
+Codex and Claude Code run in persistent cloud sandboxes. They can read and edit files, run terminal
+commands, install dependencies, and work with GitHub. Later messages in the same Chat continue with
+its files and session when available.
+
+You'll need a connected coding subscription and access to the repository you want to work on.
+
+## 1. Connect an engine
+
+Open **Settings → Inference → Coding subscriptions** and connect **Codex** or **Claude Code**.
+These are personal connections; each teammate connects their own subscription.
+
+Follow the [Codex](/docs/integrations/codex) or [Claude Code](/docs/integrations/claude-code) guide,
+then check the connection status before starting a session.
+
+## 2. Grant GitHub access
+
+Install the **GitHub as you** Plugin and authorize your GitHub identity. The repository must be
+accessible to your account and included in an accessible GitHub App installation.
+
+Start with [GitHub setup](/docs/integrations/github) if the repository is missing. Connecting a
+coding subscription doesn't grant GitHub access.
+
+## 3. Prepare repository setup
+
+For repeatable setup, a workspace admin can open **Settings → Repositories**, select the repository,
+and save:
+
+- An environment file for the repository's tools.
+- Setup instructions describing where that file belongs and which install, setup, and check
+  commands the project uses.
+
+Keep the commands specific to your project. The agent also follows repository instructions such as
+`AGENTS.md` and `CLAUDE.md`. Put secret values in the environment settings, not in a prompt or
+setup instructions. If your workspace uses Infisical, see its
+[Plugin guide](/docs/integrations/infisical).
+
+This setup is optional for a repository that doesn't need additional configuration.
+
+## 4. Start with a bounded change
+
+Create a Chat and choose the connected coding engine. Specify the repository, expected behavior,
+and verification:
+
+```text
+Work on OWNER/REPO. Read the repository instructions and set up the project.
+Fix the issue where submitting the search form twice creates duplicate requests.
+Reproduce the bug, make the smallest complete fix, and run the relevant checks.
+Open a pull request with the behavior change and verification results.
+```
+
+Replace the repository and bug description with your own. For a larger change, first ask for an
+implementation plan and resolve the open questions. Codex also exposes plan and reasoning controls
+when available.
+
+## 5. Review the result
+
+Inspect the changed files, test results, and PR. Ask the agent to explain any tradeoff or missing
+verification. For UI changes, ask it to exercise the affected route and report what it observed.
+
+When the coding session offers **Terminal** and **Preview**, use them to inspect the sandbox and a
+running app. A preview needs a server running inside the sandbox; creating files alone doesn't
+start one.
+
+Continue in the same Chat to revise the change. The sandbox is useful working state; commit and
+push repository changes, or publish finished files, when you need a durable handoff outside the
+session.
+
+## Delegate coding work
+
+With Tasks & Workflows enabled, configure a Workflow step to use the coding engine and invoke
+the Workflow from Chat. Give background work enough context to proceed and specify any
+decision that should return to you.
+
+Coding sessions receive Plugin tools set to **On**. Check
+[Permissions](/docs/core-concepts/integrations#background-and-coding-work) if a tool available in
+interactive Chat is missing in a coding session.
+
+For authentication, setup, or runtime issues, see [Troubleshooting](/docs/guides/troubleshooting).

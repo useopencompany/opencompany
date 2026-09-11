@@ -21,6 +21,13 @@ export type WorkflowStep = {
   instructions: string;
 };
 
+export function workflowActivationDisabledReason(steps: Pick<WorkflowStep, "instructions">[]) {
+  if (steps.length === 0) return "Add a step with instructions before activating this workflow.";
+  const emptySteps = steps.flatMap((step, index) => (step.instructions.trim() ? [] : [index + 1]));
+  if (emptySteps.length === 0) return null;
+  return `Add instructions to ${emptySteps.length === 1 ? "step" : "steps"} ${emptySteps.join(", ")} before activating this workflow.`;
+}
+
 export type WorkflowEventFilterValue = {
   id: string;
   name: string;
@@ -375,7 +382,7 @@ export class WorkflowApplicationService {
       instructions: "",
     };
     validateWorkflowDefinition(
-      { name, description, steps: [initialStep], status: "active", trigger: { type: "manual" } },
+      { name, description, steps: [initialStep], status: "draft", trigger: { type: "manual" } },
       this.options.validateDefinition,
     );
     return this.repository.createWorkflow({
@@ -406,6 +413,10 @@ export class WorkflowApplicationService {
     if (!current) throw new CoreError("not_found", "Workflow not found.");
     if (current.version !== expectedVersion) throw versionConflict("Workflow");
     const normalized = normalizeWorkflowDefinition(input, this.options.validateDefinition);
+    const activationError = workflowActivationDisabledReason(normalized.steps);
+    if (normalized.status === "active" && activationError) {
+      throw new CoreError("invalid_argument", activationError);
+    }
     const now = this.options.now?.() ?? new Date();
     let schedule:
       | { definition: ScheduleDefinition; execution?: AutomationExecutionPlan }
@@ -422,12 +433,6 @@ export class WorkflowApplicationService {
       if (!definition) throw invalidSchedule("Workflow");
       schedule = { definition };
       if (normalized.trigger.enabled !== false && normalized.status === "active") {
-        if (normalized.steps.some((step) => !step.instructions.trim())) {
-          throw new CoreError(
-            "invalid_argument",
-            "Scheduled Workflows need instructions in every step.",
-          );
-        }
         const pending: Workflow = {
           ...current,
           ...normalized,
@@ -458,12 +463,6 @@ export class WorkflowApplicationService {
       if (subscriptionError) throw new CoreError("invalid_argument", subscriptionError);
       event = {};
       if (normalized.status === "active") {
-        if (normalized.steps.some((step) => !step.instructions.trim())) {
-          throw new CoreError(
-            "invalid_argument",
-            "Event-triggered Workflows need instructions in every step.",
-          );
-        }
         const pending: Workflow = { ...current, ...normalized, trigger: normalized.trigger };
         event.execution = validatedExecution(
           await this.options.planner.prepareWorkflow({
@@ -513,6 +512,10 @@ export class WorkflowApplicationService {
       description: string;
       attachmentIds?: readonly string[];
       skillIds?: readonly string[];
+      stepModelOverrides?: readonly Pick<
+        WorkflowStep,
+        "id" | "model" | "runtimeModel" | "reasoningEffort"
+      >[];
     },
   ): Promise<CreateTaskResult> {
     requirePermission(actor, WORKFLOW_WRITE_PERMISSION, "Workflows");
@@ -521,7 +524,7 @@ export class WorkflowApplicationService {
     const execution = validatedExecution(
       await this.options.planner.prepareWorkflow({
         actor,
-        workflow,
+        workflow: workflowWithModelOverrides(workflow, input.stepModelOverrides),
         prompt: goal,
         ...(input.skillIds?.length ? { skillIds: workflowSkillIds(input.skillIds) } : {}),
       }),
@@ -1067,4 +1070,39 @@ function requirePermission(actor: Actor, permission: string, resource: string) {
   if (!actor.userId.trim() || !actor.workspaceId.trim() || !actorHasPermission(actor, permission)) {
     throw new CoreError("forbidden", `The actor is not allowed to access ${resource}.`);
   }
+}
+
+function workflowWithModelOverrides(
+  workflow: Workflow,
+  overrides: readonly Pick<
+    WorkflowStep,
+    "id" | "model" | "runtimeModel" | "reasoningEffort"
+  >[] = [],
+): Workflow {
+  if (overrides.length > 20)
+    throw new CoreError("invalid_argument", "Too many workflow model overrides.");
+  const byId = new Map<string, WorkflowStep>();
+  for (const override of overrides) {
+    const step = workflow.steps.find((step) => step.id === override.id);
+    if (!step || byId.has(override.id)) {
+      throw new CoreError(
+        "invalid_argument",
+        "Workflow model overrides must reference distinct existing steps.",
+      );
+    }
+    const [normalized] = workflowSteps([
+      {
+        id: step.id,
+        title: step.title,
+        instructions: step.instructions,
+        model: override.model,
+        ...(override.runtimeModel ? { runtimeModel: override.runtimeModel } : {}),
+        ...(override.reasoningEffort ? { reasoningEffort: override.reasoningEffort } : {}),
+      },
+    ]);
+    if (normalized) {
+      byId.set(step.id, { ...normalized, title: step.title, instructions: step.instructions });
+    }
+  }
+  return { ...workflow, steps: workflow.steps.map((step) => byId.get(step.id) ?? step) };
 }

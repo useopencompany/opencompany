@@ -68,7 +68,12 @@ export function createServer(
   app.get("/healthz", async () => ({
     ok: true,
     service: "opencompany-runner",
-    capabilities: { acpToolsMcp: "v3", brainWorkerAdmission: "postgres-v1" },
+    capabilities: {
+      acpToolsMcp: "v3",
+      brainWorkerAdmission: "postgres-v1",
+      personalSkillsAuthorization: "v1",
+      personalPluginsAuthorization: "v1",
+    },
     environment: process.env.OBSERVABILITY_ENV ?? process.env.NODE_ENV ?? "development",
     release:
       process.env.RENDER_GIT_COMMIT ??

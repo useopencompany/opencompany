@@ -9,6 +9,7 @@ import {
   claudeCodeModelSupportsReasoningEffort,
   codexCliModelNameForModelId,
   getAgentModelRuntimeOptions,
+  isClaudeCodeModelId,
   isCodexModelId,
   resolveAvailableAgentModelId,
 } from "./models";
@@ -65,6 +66,13 @@ describe("Codex model catalog", () => {
 });
 
 describe("Claude Code model catalog", () => {
+  it("accepts Opus 5 for sandbox execution with adaptive reasoning", () => {
+    expect(isClaudeCodeModelId("anthropic/claude-opus-5")).toBe(true);
+    expect(claudeCodeCliModelNameForModelId("anthropic/claude-opus-5")).toBe("claude-opus-5");
+    expect(claudeCodeModelSupportsReasoningEffort("anthropic/claude-opus-5")).toBe(true);
+    expect(claudeCodeModelSupportsReasoningEffort("claude-opus-5")).toBe(true);
+  });
+
   it("maps Fable 5 to the Claude CLI and exposes adaptive reasoning", () => {
     expect(CLAUDE_CODE_AGENT_MODEL_IDS).toContain("anthropic/claude-fable-5");
     expect(claudeCodeCliModelNameForModelId("anthropic/claude-fable-5")).toBe("claude-fable-5");
@@ -81,6 +89,18 @@ describe("Claude Code model catalog", () => {
 describe("DeepSeek model catalog", () => {
   it("exposes V4 Pro reasoning while retaining automatic Gateway caching", () => {
     expect(getAgentModelRuntimeOptions("deepseek/deepseek-v4-pro")).toEqual({
+      supportsReasoning: true,
+      providerOptions: {
+        gateway: {
+          caching: "auto",
+        },
+      },
+      reasoningExposure: "raw",
+    });
+  });
+
+  it("exposes V4 Flash reasoning while retaining automatic Gateway caching", () => {
+    expect(getAgentModelRuntimeOptions("deepseek/deepseek-v4-flash")).toEqual({
       supportsReasoning: true,
       providerOptions: {
         gateway: {

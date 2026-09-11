@@ -22,9 +22,11 @@ export type IdentityUser = {
   lastName: string | null;
   avatarUrl: string | null;
   timezone: string;
+  botsEnabled?: boolean;
   taskSpawningEnabled: boolean;
   autoModelRoutingEnabled: boolean;
   chatCapabilitiesBetaEnabled: boolean;
+  reviewInboxEnabled: boolean;
   /** @deprecated Wiki is always enabled. */
   wikiEnabled: true;
   taskViewMode: "board" | "list";
@@ -224,9 +226,11 @@ function identityUser(user: IdentityDto["user"]): IdentityUser {
     lastName: user.lastName,
     avatarUrl: user.avatarUrl,
     timezone: user.timezone,
+    botsEnabled: user.botsEnabled === true,
     taskSpawningEnabled: user.taskSpawningEnabled,
     autoModelRoutingEnabled: user.autoModelRoutingEnabled,
     chatCapabilitiesBetaEnabled: user.chatCapabilitiesBetaEnabled,
+    reviewInboxEnabled: user.reviewInboxEnabled,
     wikiEnabled: true,
     taskViewMode: user.taskViewMode,
     taskTimeRange: user.taskTimeRange,

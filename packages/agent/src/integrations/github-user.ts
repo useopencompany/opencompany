@@ -11,7 +11,7 @@ import type {
   GitHubRepositoryAccessDto,
   GitHubRepositoryAccessItemDto,
   GitHubRepositoryAccessTargetDto,
-} from "@opencompany/protocol";
+} from "@opencompany/protocol/schemas";
 import { and, desc, eq, isNull, ne } from "drizzle-orm";
 import { getAppUrl } from "../app-url";
 import {
@@ -33,6 +33,7 @@ const GITHUB_USER_REQUIRED_REPOSITORY_PERMISSIONS = {
   issues: "write",
   metadata: "read",
   pull_requests: "write",
+  statuses: "read",
 } as const;
 const STATE_TTL_MS = 10 * 60 * 1_000;
 
@@ -400,6 +401,7 @@ export async function getGitHubUserAccessToken(
   options: {
     signal?: AbortSignal;
     forceRefresh?: boolean;
+    refreshIfAccessToken?: string;
     minimumValidityMs?: number;
     db?: DbLike;
     now?: Date;

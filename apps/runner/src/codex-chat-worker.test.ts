@@ -4,6 +4,7 @@ import {
   CodexChatHandoffError,
   CodexChatLeaseLostError,
   CodexChatRetryableInfrastructureError,
+  TaskActionApprovalPauseError,
 } from "./codex-chat-errors";
 import {
   CODEX_CHAT_MAX_INFRASTRUCTURE_ATTEMPTS,
@@ -18,6 +19,16 @@ import {
   sweepTerminalCodexChatSandboxes,
 } from "./codex-chat-worker";
 import type { RunnerEnv } from "./env";
+
+const taskApprovalMocks = vi.hoisted(() => ({
+  resumeTaskActionApprovals: vi.fn(async () => ""),
+  pauseTaskActionApprovals: vi.fn(async () => undefined),
+}));
+vi.mock("./task-action-approval", () => taskApprovalMocks);
+const engineFenceMocks = vi.hoisted(() => ({
+  fenceCodingSessionEngine: vi.fn(async () => undefined),
+}));
+vi.mock("./coding-engine-fence", () => engineFenceMocks);
 
 const sessionRows = vi.hoisted(() => [] as CodexChatSession[]);
 const claimedTaskContext = vi.hoisted(() => ({
@@ -139,6 +150,7 @@ describe("claimNextCodexChatTurn", () => {
         "goat-chat-host-tools.v4",
         "goat-codex-host-tools.v2",
         "goat-codex-host-tools.v3",
+        "goat-codex-host-tools.v4",
       ]),
     );
   });
@@ -278,7 +290,7 @@ describe("opencompany Codex chat worker shutdown", () => {
         interruptHeartbeatObserved = true;
         return { rows: [] };
       }
-      return { rows: [{ id: "updated" }] };
+      return { rows: [{ id: "updated", previous_infrastructure_failures: 0 }] };
     });
     sessionRows.length = 0;
     sessionRows.push(session());
@@ -331,7 +343,7 @@ describe("opencompany Codex chat worker shutdown", () => {
         claimed = true;
         return { rows: [claimedTurnRow()] };
       }
-      return { rows: [{ id: "updated" }] };
+      return { rows: [{ id: "updated", previous_infrastructure_failures: 0 }] };
     });
     sessionRows.length = 0;
     sessionRows.push(session());
@@ -371,7 +383,7 @@ describe("opencompany Codex chat worker shutdown", () => {
         claimed = true;
         return { rows: [claimedTurnRow()] };
       }
-      return { rows: [{ id: "updated" }] };
+      return { rows: [{ id: "updated", previous_infrastructure_failures: 0 }] };
     });
     sessionRows.length = 0;
     sessionRows.push(session());
@@ -403,7 +415,7 @@ describe("opencompany Codex chat worker shutdown", () => {
         claimed = true;
         return { rows: [claimedTurnRow()] };
       }
-      return { rows: [{ id: "updated" }] };
+      return { rows: [{ id: "updated", previous_infrastructure_failures: 0 }] };
     });
     sessionRows.length = 0;
     sessionRows.push(session());
@@ -509,7 +521,19 @@ describe("runClaimedTurn", () => {
     sessionRows.push(session());
     chatMocks.runCodexChatTurn.mockResolvedValue(undefined);
     chatMocks.runProductChatTurn.mockResolvedValue(undefined);
-    dbMock.execute.mockResolvedValue({ rows: [{ id: "updated" }] });
+    dbMock.execute.mockResolvedValue({
+      rows: [{ id: "updated", previous_infrastructure_failures: 0 }],
+    });
+  });
+
+  it("parks an engine stopped for approval without settling or failing the task", async () => {
+    chatMocks.runCodexChatTurn.mockRejectedValueOnce(new TaskActionApprovalPauseError());
+    await runClaimedTurn(turn(), env());
+    expect(taskApprovalMocks.pauseTaskActionApprovals).toHaveBeenCalledExactlyOnceWith(
+      turn(),
+      "updated",
+    );
+    expect(eventMocks.fail).not.toHaveBeenCalled();
   });
 
   it("runs first attempts normally", async () => {
@@ -572,6 +596,34 @@ describe("runClaimedTurn", () => {
     );
   });
 
+  it("fences an interrupted coding session before terminal settlement without resuming approvals", async () => {
+    const interruptRequestedAt = new Date("2026-07-10T09:00:05.000Z");
+    await runClaimedTurn(turn({ attempts: 2, interruptRequestedAt }), env());
+    expect(engineFenceMocks.fenceCodingSessionEngine).toHaveBeenCalledWith(
+      sessionRows[0],
+      expect.any(Number),
+    );
+    expect(engineFenceMocks.fenceCodingSessionEngine.mock.invocationCallOrder[0]).toBeLessThan(
+      chatMocks.runCodexChatTurn.mock.invocationCallOrder[0]!,
+    );
+    expect(taskApprovalMocks.resumeTaskActionApprovals).not.toHaveBeenCalled();
+    expect(chatMocks.runCodexChatTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ turn: expect.objectContaining({ interruptRequestedAt }) }),
+    );
+  });
+
+  it("defers cancellation recovery when the sandbox process cannot be fenced", async () => {
+    engineFenceMocks.fenceCodingSessionEngine.mockRejectedValueOnce(
+      new CodexChatRetryableInfrastructureError("fence failed", new Error("unavailable")),
+    );
+    await runClaimedTurn(turn({ attempts: 2, interruptRequestedAt: new Date() }), env());
+    expect(chatMocks.runCodexChatTurn).not.toHaveBeenCalled();
+    expect(taskApprovalMocks.resumeTaskActionApprovals).not.toHaveBeenCalled();
+    expect(
+      dbMock.execute.mock.calls.some(([query]) => sqlText(query).includes("WITH deferred AS")),
+    ).toBe(true);
+  });
+
   it("dispatches opencompany turns without coding-engine recovery state", async () => {
     sessionRows.length = 0;
     sessionRows.push(session({ engine: "opencompany", model: "anthropic/claude-sonnet-5" }));
@@ -600,7 +652,9 @@ describe("runClaimedTurn", () => {
     sessionRows.length = 0;
     sessionRows.push(session({ engine: "opencompany", model: "anthropic/claude-sonnet-5" }));
     dbMock.execute.mockImplementation(async (query) =>
-      sqlText(query).includes("WITH heartbeat AS") ? { rows: [] } : { rows: [{ id: "updated" }] },
+      sqlText(query).includes("WITH heartbeat AS")
+        ? { rows: [] }
+        : { rows: [{ id: "updated", previous_infrastructure_failures: 0 }] },
     );
     chatMocks.runProductChatTurn.mockImplementationOnce(
       (input) =>
@@ -756,10 +810,14 @@ describe("runClaimedTurn", () => {
   });
 
   it("terminally settles retryable infrastructure failures after the retry budget", async () => {
+    dbMock.execute.mockResolvedValue({
+      rows: [{ id: "updated", previous_infrastructure_failures: 3 }],
+    });
     chatMocks.runCodexChatTurn.mockRejectedValueOnce(
       new CodexChatRetryableInfrastructureError(
         "Temporary infrastructure failure.",
         new Error("provider unavailable"),
+        "[fence_previous_turn] Error: provider unavailable",
       ),
     );
 
@@ -768,12 +826,36 @@ describe("runClaimedTurn", () => {
     ).resolves.toBeUndefined();
 
     expect(eventMocks.fail).toHaveBeenCalledWith(
-      "This chat run could not start after several infrastructure retries. Send your message again to retry.",
-      { sessionStatus: "failed" },
+      "This chat run could not continue after repeated infrastructure failures. Send your message again to retry.",
+      {
+        sessionStatus: "failed",
+        failureDiagnostic: "[fence_previous_turn] Error: provider unavailable",
+      },
     );
     expect(
       dbMock.execute.mock.calls.some(([query]) => sqlText(query).includes("WITH deferred AS")),
     ).toBe(false);
+  });
+
+  it("does not charge deploy handoffs and lease reclaims to the infrastructure retry budget", async () => {
+    // The reported Run had two abandoned claims and one infrastructure failure before claim four.
+    dbMock.execute.mockResolvedValue({
+      rows: [{ id: "updated", previous_infrastructure_failures: 1 }],
+    });
+    chatMocks.runCodexChatTurn.mockRejectedValueOnce(
+      new CodexChatRetryableInfrastructureError(
+        "Codex could not fence the previous sandbox process before recovery.",
+        new Error("command timed out"),
+        "[fence_previous_turn] Error: command timed out",
+      ),
+    );
+
+    await runClaimedTurn(turn({ attempts: 4 }), env());
+
+    expect(eventMocks.fail).not.toHaveBeenCalled();
+    expect(
+      dbMock.execute.mock.calls.some(([query]) => sqlText(query).includes("WITH deferred AS")),
+    ).toBe(true);
   });
 
   it("settles turns past the total attempt budget without executing them", async () => {
@@ -794,6 +876,22 @@ describe("runClaimedTurn", () => {
       runClaimedTurn(turn({ attempts: CODEX_CHAT_MAX_TOTAL_ATTEMPTS }), env()),
     ).resolves.toBeUndefined();
 
+    expect(chatMocks.runCodexChatTurn).toHaveBeenCalledOnce();
+    expect(eventMocks.fail).not.toHaveBeenCalled();
+  });
+
+  it("still fences and settles cancellation recovery past the total attempt budget", async () => {
+    await expect(
+      runClaimedTurn(
+        turn({
+          attempts: CODEX_CHAT_MAX_TOTAL_ATTEMPTS + 1,
+          interruptRequestedAt: new Date("2026-07-10T09:00:05.000Z"),
+        }),
+        env(),
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(engineFenceMocks.fenceCodingSessionEngine).toHaveBeenCalledOnce();
     expect(chatMocks.runCodexChatTurn).toHaveBeenCalledOnce();
     expect(eventMocks.fail).not.toHaveBeenCalled();
   });
@@ -887,7 +985,7 @@ function sqlText(query: unknown): string {
       ) {
         return ((chunk as { value: unknown[] }).value ?? []).join("");
       }
-      return "";
+      return chunk && typeof chunk === "object" && "queryChunks" in chunk ? sqlText(chunk) : "";
     })
     .join("");
 }

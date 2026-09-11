@@ -12,7 +12,7 @@ import type {
 } from "./skill-import";
 
 export type PluginSource = {
-  type: "github" | "skills.sh";
+  type: "github" | "skills.sh" | "custom_mcp";
   url: string;
   ref: string;
   path: string;
@@ -325,11 +325,13 @@ export class PluginImportApplicationService {
       idempotencyKey: idempotencyKey(input.idempotencyKey),
       plugin,
     });
-    await this.gatewayLifecycle?.refresh({
-      actor,
-      pluginName: result.plugin.name,
-      reason: "install",
-    });
+    if (result.plugin.status === "enabled") {
+      await this.gatewayLifecycle?.refresh({
+        actor,
+        pluginName: result.plugin.name,
+        reason: "install",
+      });
+    }
     return result;
   }
 

@@ -1,21 +1,38 @@
 ---
 title: Codex
-description: Connect a Codex subscription for persistent cloud coding Chats.
+description: Connect your personal subscription and start a persistent cloud coding session.
 ---
 
-## What connecting does
+Connect Codex to use your ChatGPT subscription for Codex coding sandboxes in opencompany. This is
+a personal engine connection; each teammate connects their own account.
 
-The Codex connection authorizes the Codex engine used by cloud coding Chats. A successful connection
-is validated and stored for the signed-in person; it is not shared as a workspace API key.
-Connect or manage it under **Settings → Inference → Coding subscriptions**.
+## Connect
 
-## Scopes and permissions
+1. Open **Settings → Inference → Coding subscriptions**.
+2. Select **Connect** on the Codex card.
+3. Open the displayed Codex sign-in link and enter the displayed code.
+4. Complete sign-in, return to opencompany, and wait for the connection to validate.
+5. Start a new Chat and choose Codex and an available model.
 
-Codex uses its own subscription authentication flow. Detailed login, expiration, and reauthorization
-troubleshooting is coming soon. Repository and secret access still comes from the separate tools and
-connections available to the coding workspace.
+If the sign-in code expires, start the connection flow again. If an existing credential needs
+reauthorization, use the connection control on the same card and check its status after returning.
 
-## Brain ingestion
+## Give it a repository
 
-Codex is not a Brain source. A Codex Conversation can receive scoped Brain read and capture tools
-when a Brain is pinned, but its transcript is not ingested automatically.
+Engine authentication and repository access are separate. Connect
+[GitHub](/docs/integrations/github), then tell Codex which repository to work on. Use
+**Settings → Repositories** for shared environment files and setup instructions.
+
+See [Cloud coding](/docs/guides/cloud-coding) for a first change, verification, and PR handoff.
+
+## Continue and customize
+
+Later messages in the same Chat continue the persistent cloud session when available. The composer
+shows Codex-specific model, reasoning, plan, and goal controls where applicable. Workspace Skills
+and supported Plugin tools can be available to the session; Plugin tools must be set to **On**.
+
+Codex can use workspace Wiki tools. Its transcript isn't automatically saved as Wiki knowledge;
+ask it to save the useful result explicitly.
+
+For the separate option to share supported model access through an admin's subscription, see
+[Models and usage](/docs/core-concepts/models-and-usage).

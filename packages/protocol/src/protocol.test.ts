@@ -160,11 +160,14 @@ describe("headless protocol", () => {
       "/v1/skills/imports",
       "/v1/skills/catalog",
       "/v1/skills/{slug}",
+      "/v1/skills/{slug}/scope",
       "/v1/skills/{slug}/archive",
       "/v1/skills/{slug}/enable",
       "/v1/skills/{slug}/disable",
       "/v1/skills/{slug}/replace",
       "/v1/skills/{slug}/files/read",
+      "/v1/bots",
+      "/v1/bots/{botId}",
       "/v1/conversations",
       "/v1/conversations/{conversationId}",
       "/v1/conversations/{conversationId}/share",
@@ -200,6 +203,7 @@ describe("headless protocol", () => {
       "/v1/integration-accounts/attio/{integrationId}",
       "/v1/integration-accounts/fathom",
       "/v1/integration-accounts/granola",
+      "/v1/integration-accounts/convex",
       "/v1/integration-accounts/render",
       "/v1/integration-accounts/stripe",
       "/v1/integration-accounts",
@@ -212,6 +216,7 @@ describe("headless protocol", () => {
       "/v1/integration-accounts/{integrationId}",
       "/v1/engine-auth/claude-code",
       "/v1/engine-auth/codex",
+      "/v1/engine-auth/codex/usage",
       "/v1/engine-auth/codex/workspace",
       "/v1/engine-auth/codex/device",
       "/v1/engine-auth/codex/device/{flowId}/poll",
@@ -226,6 +231,13 @@ describe("headless protocol", () => {
       "/v1/billing/portal-sessions",
       "/v1/billing/auto-refill",
       "/v1/plugins",
+      "/v1/plugins/custom/preview",
+      "/v1/plugins/custom",
+      "/v1/plugins/{name}/custom-mcp",
+      "/v1/plugins/{name}/custom-mcp/connect",
+      "/v1/plugins/{name}/custom-mcp/refresh",
+      "/v1/plugins/{name}/custom-mcp/disconnect",
+      "/v1/plugins/{name}/custom-mcp/permissions",
       "/v1/plugins/imports/preview",
       "/v1/plugins/imports",
       "/v1/plugins/{name}",
@@ -368,6 +380,35 @@ describe("headless protocol", () => {
       InvokeWorkflowBodySchema.safeParse({
         description: "Focus on competitors.",
         skillIds: Array.from({ length: 17 }, (_, index) => `skill-${index + 1}`),
+      }).success,
+    ).toBe(false);
+  });
+
+  it("limits invocation overrides to model settings on existing step references", () => {
+    const command = {
+      description: "Ship it.",
+      stepModelOverrides: [
+        {
+          id: "step_1",
+          model: "codex",
+          runtimeModel: "openai/gpt-5.6-sol",
+          reasoningEffort: "high",
+        },
+      ],
+    };
+    expect(InvokeWorkflowBodySchema.safeParse(command).success).toBe(true);
+    expect(
+      InvokeWorkflowBodySchema.safeParse({
+        ...command,
+        stepModelOverrides: [
+          { ...command.stepModelOverrides[0], instructions: "Replace the saved instructions." },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      InvokeWorkflowBodySchema.safeParse({
+        ...command,
+        stepModelOverrides: Array.from({ length: 21 }, () => command.stepModelOverrides[0]),
       }).success,
     ).toBe(false);
   });

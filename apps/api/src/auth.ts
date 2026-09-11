@@ -322,7 +322,7 @@ function actorPermissions(row: {
     WIKI_READ_PERMISSION,
     WIKI_WRITE_PERMISSION,
     ...(row.legacyBrainEnabled ? [BRAIN_READ_PERMISSION] : []),
-    ...(row.role === "admin" ? [SKILL_WRITE_PERMISSION] : []),
+    SKILL_WRITE_PERMISSION,
     ...(row.role === "admin" && row.legacyBrainEnabled ? [BRAIN_WRITE_PERMISSION] : []),
     ...(row.taskSpawningEnabled
       ? [

@@ -2,13 +2,12 @@
 
 import {
   type AgentSchedulePreset,
-  CLOUD_CODING_ENGINE_CONFIG,
   cronForSchedulePreset,
   SUPPORTED_HOUR_INTERVALS,
   schedulePresetFromCron,
   scheduleSummary,
 } from "@opencompany/agent-runtime";
-import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import { workflowActivationDisabledReason } from "@opencompany/core/workflows";
 import type { PluginEventDefinitionDto } from "@opencompany/protocol";
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import {
@@ -21,7 +20,6 @@ import {
   MoreHorizontal,
   Play,
   Plus,
-  Sparkles,
   Trash2,
   Webhook,
 } from "lucide-react";
@@ -30,6 +28,11 @@ import { useRouter } from "next/navigation";
 import { type ReactNode, useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { Markdown } from "@/components/Markdown";
 import { MarkdownBrainEditor } from "@/components/MarkdownBrainEditor";
+import {
+  StepCloudRuntimeControls,
+  StepRuntimePicker,
+  type WorkflowStepPatch,
+} from "@/components/WorkflowModelControls";
 import { type LinearTeamListResult, listLinearTeamsAction } from "@/lib/brain-source-actions";
 import {
   archiveHeadlessWorkflow,
@@ -40,16 +43,10 @@ import type { WorkflowDetail } from "@/lib/headless-automation-types";
 import type { SkillCatalogItem } from "@/lib/skills";
 import { supportedTimezones, timezoneLabel } from "@/lib/timezones";
 import {
-  DEFAULT_WORKFLOW_MODEL_TOKEN,
-  DEFAULT_WORKFLOW_REASONING_EFFORT,
   isWorkflowCloudRuntime,
   normalizeWorkflowReasoningEffort,
   normalizeWorkflowRuntimeModel,
   WORKFLOW_MODEL_OPTIONS,
-  WORKFLOW_REASONING_EFFORT_OPTIONS,
-  type WorkflowCloudRuntime,
-  workflowCloudModelOptions,
-  workflowRuntimeModelSupportsReasoningEffort,
 } from "@/lib/workflow-model-options";
 import {
   DEFAULT_WORKFLOW_SCHEDULE_CRON,
@@ -59,7 +56,6 @@ import {
 
 const AUTOSAVE_DELAY_MS = 1200;
 const MAX_WORKFLOW_STEPS = 20;
-const DEFAULT_LINEAR_EVENT_PROMPT = "Review and triage this Linear issue.";
 
 type WorkflowStatus = WorkflowDetail["status"];
 type WorkflowStep = WorkflowDetail["steps"][number];
@@ -79,18 +75,10 @@ type WorkflowTriggerDraft =
   | { type: "schedule"; cron: string; timezone: string; prompt: string };
 type LinearWorkflowAccount = { integrationId: string; label: string };
 type WorkflowEventOption = PluginEventDefinitionDto & { provider: string };
-type WorkflowStepPatch = Partial<Omit<WorkflowStep, "runtimeModel" | "reasoningEffort">> & {
-  runtimeModel?: WorkflowStep["runtimeModel"] | undefined;
-  reasoningEffort?: WorkflowStep["reasoningEffort"] | undefined;
-};
 type WorkflowDraft = Pick<WorkflowDetail, "name" | "description" | "status" | "steps"> & {
   trigger: WorkflowTriggerDraft;
 };
 type SaveState = "saved" | "saving" | "error";
-
-const DEFAULT_MODEL_LABEL =
-  WORKFLOW_MODEL_OPTIONS.find((option) => option.token === DEFAULT_WORKFLOW_MODEL_TOKEN)?.label ??
-  "Default";
 
 export function WorkflowEditor({
   workflow,
@@ -220,30 +208,32 @@ export function WorkflowEditor({
 
   const patch = (partial: Partial<WorkflowDraft>) => {
     if (!canEdit) return;
-    setDraft((current) => ({ ...current, ...partial }));
+    setDraft((current) => workflowDraftWithStatus({ ...current, ...partial }));
   };
 
   const updateStep = (id: string, partial: WorkflowStepPatch) => {
     if (!canEdit) return;
-    setDraft((current) => ({
-      ...current,
-      steps: current.steps.map((step) =>
-        step.id === id ? workflowStepWithPatch(step, partial) : step,
-      ),
-    }));
+    setDraft((current) =>
+      workflowDraftWithStatus({
+        ...current,
+        steps: current.steps.map((step) =>
+          step.id === id ? workflowStepWithPatch(step, partial) : step,
+        ),
+      }),
+    );
   };
 
   const addStep = () => {
     if (!canEdit) return;
     setDraft((current) => {
       if (current.steps.length >= MAX_WORKFLOW_STEPS) return current;
-      return {
+      return workflowDraftWithStatus({
         ...current,
         steps: [
           ...current.steps,
           { id: newWorkflowStepId(), title: "", model: "", instructions: "" },
         ],
-      };
+      });
     });
   };
 
@@ -251,7 +241,10 @@ export function WorkflowEditor({
     if (!canEdit) return;
     setDraft((current) =>
       current.steps.length > 1
-        ? { ...current, steps: current.steps.filter((step) => step.id !== id) }
+        ? workflowDraftWithStatus({
+            ...current,
+            steps: current.steps.filter((step) => step.id !== id),
+          })
         : current,
     );
   };
@@ -282,6 +275,7 @@ export function WorkflowEditor({
     });
   };
 
+  const activationDisabledReason = workflowActivationDisabledReason(draft.steps);
   const runDisabledReason = workflowRunDisabledReason({
     canEdit,
     draft,
@@ -298,11 +292,6 @@ export function WorkflowEditor({
           <div className="flex items-center justify-between gap-4">
             <BackLink />
             <div className="flex min-w-0 items-center gap-2">
-              {saveError ? (
-                <span className="max-w-[320px] truncate text-[12px] text-warning" role="alert">
-                  {saveError}
-                </span>
-              ) : null}
               <SaveIndicator state={saveState} canEdit={canEdit} onRetry={saveLatest} />
               {draft.trigger.type === "schedule" && canEdit ? (
                 <button
@@ -330,6 +319,12 @@ export function WorkflowEditor({
             </div>
           </div>
 
+          {saveError ? (
+            <p className="text-[12px] text-warning" role="alert">
+              {saveError}
+            </p>
+          ) : null}
+
           <header className="flex items-start justify-between gap-4">
             <div className="flex min-w-0 flex-1 flex-col gap-1">
               <InlineTitle
@@ -346,11 +341,19 @@ export function WorkflowEditor({
             <div className="shrink-0 pt-1">
               <StatusPicker
                 value={draft.status}
+                activationDisabledReason={activationDisabledReason}
                 onChange={(status) => patch({ status })}
                 disabled={!canEdit}
               />
             </div>
           </header>
+
+          {draft.status === "draft" ? (
+            <p className="text-[12.5px] leading-5 text-ink-subtle" role="status">
+              This workflow is a draft and won’t run until you activate it.
+              {activationDisabledReason ? ` ${activationDisabledReason}` : ""}
+            </p>
+          ) : null}
 
           <TriggerSection
             trigger={draft.trigger}
@@ -483,10 +486,12 @@ function InlineSummary({
 
 function StatusPicker({
   value,
+  activationDisabledReason,
   onChange,
   disabled,
 }: {
   value: WorkflowStatus;
+  activationDisabledReason: string | null;
   onChange: (value: WorkflowStatus) => void;
   disabled: boolean;
 }) {
@@ -508,11 +513,13 @@ function StatusPicker({
           <button
             key={option}
             type="button"
+            disabled={option === "active" && activationDisabledReason !== null}
+            title={option === "active" ? (activationDisabledReason ?? undefined) : undefined}
             onClick={() => {
               onChange(option);
               setOpen(false);
             }}
-            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-ink transition-colors duration-150 hover:bg-surface-hover"
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-ink transition-colors duration-150 hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
           >
             <StatusDot status={option} />
             <span className="flex-1">{option === "active" ? "Active" : "Draft"}</span>
@@ -572,7 +579,7 @@ function TriggerSection({
       event: event.id,
       integrationId: account.integrationId,
       filters: {},
-      prompt: DEFAULT_LINEAR_EVENT_PROMPT,
+      prompt: DEFAULT_WORKFLOW_SCHEDULE_PROMPT,
     });
   };
   const updateSchedule = (
@@ -640,17 +647,11 @@ function TriggerSection({
               onCronChange={(cron) => updateSchedule({ cron })}
               onTimezoneChange={(timezone) => updateSchedule({ timezone })}
             />
-            <label className="flex min-w-0 flex-col gap-1.5">
-              <span className="text-[12px] font-medium text-ink-subtle">Task request</span>
-              <textarea
-                value={trigger.prompt}
-                readOnly={!canEdit}
-                onChange={(event) => updateSchedule({ prompt: event.target.value })}
-                rows={3}
-                placeholder={DEFAULT_WORKFLOW_SCHEDULE_PROMPT}
-                className="min-h-20 resize-y rounded-lg border border-border bg-canvas px-2.5 py-2 text-[13px] leading-5 text-ink outline-none transition-colors placeholder:text-ink-faint focus-visible:ring-1 focus-visible:ring-ink/20 read-only:opacity-70"
-              />
-            </label>
+            <WorkflowRunContext
+              prompt={trigger.prompt}
+              canEdit={canEdit}
+              onChange={(prompt) => updateSchedule({ prompt })}
+            />
           </div>
         ) : null}
         {trigger.type === "event" ? (
@@ -838,17 +839,53 @@ function LinearEventTriggerEditor({
           ) : null}
         </label>
       </div>
-      <label className="flex min-w-0 flex-col gap-1.5">
-        <span className="text-[12px] font-medium text-ink-subtle">Task request</span>
-        <textarea
-          value={trigger.prompt}
-          readOnly={!canEdit}
-          onChange={(event) => onChange({ ...trigger, prompt: event.target.value })}
-          rows={3}
-          placeholder={DEFAULT_LINEAR_EVENT_PROMPT}
-          className="min-h-20 resize-y rounded-lg border border-border bg-canvas px-2.5 py-2 text-[13px] leading-5 text-ink outline-none placeholder:text-ink-faint focus-visible:ring-1 focus-visible:ring-ink/20 read-only:opacity-70"
-        />
-      </label>
+      <WorkflowRunContext
+        prompt={trigger.prompt}
+        canEdit={canEdit}
+        onChange={(prompt) => onChange({ ...trigger, prompt })}
+      />
+    </div>
+  );
+}
+
+function WorkflowRunContext({
+  prompt,
+  canEdit,
+  onChange,
+}: {
+  prompt: string;
+  canEdit: boolean;
+  onChange: (prompt: string) => void;
+}) {
+  const value = prompt === DEFAULT_WORKFLOW_SCHEDULE_PROMPT ? "" : prompt;
+  const [open, setOpen] = useState(() => Boolean(value.trim()));
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-[12px] leading-5 text-ink-subtle">
+        Each run follows the instructions in your steps.
+      </p>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        className="flex w-fit items-center gap-1.5 rounded-md text-[12px] text-ink-subtle hover:text-ink focus-visible:ring-1 focus-visible:ring-ink/20"
+      >
+        <ChevronDown size={12} className={open ? "rotate-180" : ""} />
+        Additional run context (optional)
+      </button>
+      {open ? (
+        <label className="flex min-w-0 flex-col gap-1.5">
+          <span className="text-[12px] font-medium text-ink-subtle">Run context</span>
+          <textarea
+            value={value}
+            readOnly={!canEdit}
+            onChange={(event) => onChange(event.target.value)}
+            rows={3}
+            placeholder="Extra context shared across steps, such as a region or reporting period."
+            className="min-h-20 resize-y rounded-lg border border-border bg-canvas px-2.5 py-2 text-[13px] leading-5 text-ink outline-none transition-colors placeholder:text-ink-faint focus-visible:ring-1 focus-visible:ring-ink/20 read-only:opacity-70"
+          />
+        </label>
+      ) : null}
     </div>
   );
 }
@@ -1193,6 +1230,11 @@ function StepCard({
         />
       ) : null}
       <div className="px-3.5 py-3">
+        {!step.instructions.trim() ? (
+          <p className="mb-2 text-[12px] leading-5 text-ink-subtle">
+            Add instructions to this step before activating the workflow.
+          </p>
+        ) : null}
         {canEdit ? (
           <MarkdownBrainEditor
             content={step.instructions}
@@ -1208,245 +1250,6 @@ function StepCard({
         )}
       </div>
     </section>
-  );
-}
-
-function StepRuntimePicker({
-  value,
-  onChange,
-  disabled,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-  disabled: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const selectedOption = WORKFLOW_MODEL_OPTIONS.find((option) => option.token === value);
-  const selectedLabel = selectedOption?.label ?? DEFAULT_MODEL_LABEL;
-
-  return (
-    <Popover open={open} onOpenChange={disabled ? undefined : setOpen}>
-      <PopoverTrigger
-        type="button"
-        disabled={disabled}
-        aria-label={`Runtime: ${selectedLabel}`}
-        className="flex h-7 max-w-[150px] shrink-0 items-center gap-1.5 rounded-lg px-2 text-[12px] font-medium text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-default disabled:hover:bg-transparent data-[popup-open]:bg-surface-hover data-[popup-open]:text-ink"
-      >
-        <Sparkles size={12} strokeWidth={1.9} className="shrink-0" />
-        <span className="truncate">{selectedLabel}</span>
-        {disabled ? null : <ChevronDown size={11} strokeWidth={2} className="shrink-0" />}
-      </PopoverTrigger>
-      <PopoverContent
-        align="end"
-        sideOffset={8}
-        className="w-[288px] max-w-[calc(100vw-1.5rem)] bg-surface p-1 text-ink"
-      >
-        <ModelOption
-          label="Default"
-          hint={`Uses ${DEFAULT_MODEL_LABEL}`}
-          selected={value === ""}
-          onSelect={() => {
-            onChange("");
-            setOpen(false);
-          }}
-        />
-        {WORKFLOW_MODEL_OPTIONS.map((option) => (
-          <ModelOption
-            key={option.token}
-            label={option.label}
-            hint={option.hint}
-            selected={value === option.token}
-            onSelect={() => {
-              onChange(option.token);
-              setOpen(false);
-            }}
-          />
-        ))}
-      </PopoverContent>
-    </Popover>
-  );
-}
-
-function StepCloudRuntimeControls({
-  engine,
-  step,
-  disabled,
-  onChange,
-}: {
-  engine: WorkflowCloudRuntime;
-  step: WorkflowStep;
-  disabled: boolean;
-  onChange: (partial: WorkflowStepPatch) => void;
-}) {
-  const runtimeModel = normalizeWorkflowRuntimeModel(engine, step.runtimeModel);
-  const reasoningEffort = normalizeWorkflowReasoningEffort(
-    engine,
-    runtimeModel,
-    step.reasoningEffort,
-  );
-  const supportsEffort = workflowRuntimeModelSupportsReasoningEffort(engine, runtimeModel);
-
-  return (
-    <div className="flex flex-wrap items-center gap-2 border-b border-border bg-surface-muted/35 px-3.5 py-2">
-      <StepCloudModelPicker
-        engine={engine}
-        value={runtimeModel}
-        onChange={(nextModel) => {
-          onChange({
-            runtimeModel: nextModel,
-            reasoningEffort: normalizeWorkflowReasoningEffort(
-              engine,
-              nextModel,
-              step.reasoningEffort,
-            ),
-          });
-        }}
-        disabled={disabled}
-      />
-      {supportsEffort ? (
-        <StepEffortPicker
-          value={reasoningEffort ?? DEFAULT_WORKFLOW_REASONING_EFFORT}
-          onChange={(nextEffort) => onChange({ reasoningEffort: nextEffort })}
-          disabled={disabled}
-        />
-      ) : null}
-    </div>
-  );
-}
-
-function StepCloudModelPicker({
-  engine,
-  value,
-  onChange,
-  disabled,
-}: {
-  engine: WorkflowCloudRuntime;
-  value: AgentModelId;
-  onChange: (value: AgentModelId) => void;
-  disabled: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const options = workflowCloudModelOptions(engine);
-  const selectedOption = options.find((option) => option.id === value);
-  const selectedLabel = selectedOption?.label ?? value;
-  const runtimeLabel = CLOUD_CODING_ENGINE_CONFIG[engine].label;
-
-  return (
-    <Popover open={open} onOpenChange={disabled ? undefined : setOpen}>
-      <PopoverTrigger
-        type="button"
-        disabled={disabled}
-        aria-label={`${runtimeLabel} model: ${selectedLabel}`}
-        className="flex h-7 max-w-[210px] shrink-0 items-center gap-1.5 rounded-lg px-2 text-[12px] font-medium text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-default disabled:hover:bg-transparent data-[popup-open]:bg-surface-hover data-[popup-open]:text-ink"
-      >
-        <span className="truncate">{selectedLabel}</span>
-        {disabled ? null : <ChevronDown size={11} strokeWidth={2} className="shrink-0" />}
-      </PopoverTrigger>
-      <PopoverContent
-        align="start"
-        sideOffset={8}
-        className="w-[312px] max-w-[calc(100vw-1.5rem)] bg-surface p-1 text-ink"
-      >
-        {options.map((option) => (
-          <ModelOption
-            key={option.id}
-            label={option.label}
-            hint={option.description}
-            selected={value === option.id}
-            onSelect={() => {
-              onChange(option.id);
-              setOpen(false);
-            }}
-          />
-        ))}
-      </PopoverContent>
-    </Popover>
-  );
-}
-
-const WORKFLOW_EFFORT_LABELS = {
-  low: { label: "Low effort", hint: "Fastest" },
-  medium: { label: "Medium effort", hint: "Balanced" },
-  high: { label: "High effort", hint: "Deeper" },
-  xhigh: { label: "X-high effort", hint: "Maximum" },
-} as const;
-
-const WORKFLOW_EFFORT_OPTIONS = WORKFLOW_REASONING_EFFORT_OPTIONS.map((value) => ({
-  value,
-  ...WORKFLOW_EFFORT_LABELS[value],
-}));
-
-type WorkflowEffort = (typeof WORKFLOW_EFFORT_OPTIONS)[number]["value"];
-
-function StepEffortPicker({
-  value,
-  onChange,
-  disabled,
-}: {
-  value: WorkflowEffort;
-  onChange: (value: WorkflowEffort) => void;
-  disabled: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const selectedOption = WORKFLOW_EFFORT_OPTIONS.find((option) => option.value === value);
-  const selectedLabel = selectedOption?.label ?? "High effort";
-
-  return (
-    <Popover open={open} onOpenChange={disabled ? undefined : setOpen}>
-      <PopoverTrigger
-        type="button"
-        disabled={disabled}
-        aria-label={`Effort: ${selectedLabel}`}
-        className="flex h-7 max-w-[160px] shrink-0 items-center gap-1.5 rounded-lg px-2 text-[12px] font-medium text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-default disabled:hover:bg-transparent data-[popup-open]:bg-surface-hover data-[popup-open]:text-ink"
-      >
-        <span className="truncate">{selectedLabel}</span>
-        {disabled ? null : <ChevronDown size={11} strokeWidth={2} className="shrink-0" />}
-      </PopoverTrigger>
-      <PopoverContent align="start" sideOffset={8} className="w-[220px] bg-surface p-1 text-ink">
-        {WORKFLOW_EFFORT_OPTIONS.map((option) => (
-          <ModelOption
-            key={option.value}
-            label={option.label}
-            hint={option.hint}
-            selected={value === option.value}
-            onSelect={() => {
-              onChange(option.value);
-              setOpen(false);
-            }}
-          />
-        ))}
-      </PopoverContent>
-    </Popover>
-  );
-}
-
-function ModelOption({
-  label,
-  hint,
-  selected,
-  onSelect,
-}: {
-  label: string;
-  hint: string;
-  selected: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors duration-150 hover:bg-surface-hover"
-    >
-      <Check
-        size={13}
-        strokeWidth={2}
-        className={`shrink-0 text-ink ${selected ? "opacity-100" : "opacity-0"}`}
-      />
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-[13px] font-medium leading-4 text-ink">{label}</span>
-        <span className="block truncate text-[11.5px] leading-4 text-ink-subtle">{hint}</span>
-      </span>
-    </button>
   );
 }
 
@@ -1556,6 +1359,12 @@ function workflowDraft(workflow: WorkflowDetail): WorkflowDraft {
           ? { ...workflow.trigger }
           : { type: "manual" },
   };
+}
+
+function workflowDraftWithStatus(draft: WorkflowDraft): WorkflowDraft {
+  return draft.status === "active" && workflowActivationDisabledReason(draft.steps)
+    ? { ...draft, status: "draft" }
+    : draft;
 }
 
 function workflowStepWithPatch(step: WorkflowStep, patch: WorkflowStepPatch): WorkflowStep {

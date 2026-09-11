@@ -1,6 +1,8 @@
 export type AuthenticationMethod = "session" | "oauth" | "api_key" | "service";
 
 export type Actor = {
+  /** Shared task sessions must not discover personal skill definitions. */
+  skillAccess?: "company";
   userId: string;
   workspaceId: string;
   sessionId?: string;

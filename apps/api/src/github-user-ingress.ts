@@ -1,5 +1,5 @@
 import { getAppUrl } from "@opencompany/agent/app-url";
-import { captureIntegrationAddedAnalytics } from "@opencompany/agent/integrations/analytics";
+import { captureConnectionAddedAnalytics } from "@opencompany/agent/integrations/analytics";
 import { ExpiringOAuthReauthRequired } from "@opencompany/agent/integrations/expiring-oauth-access-token";
 import {
   appendGitHubUserIntegrationStatus,
@@ -199,7 +199,7 @@ async function handleCallback(input: GitHubUserIngressInput, request: Request): 
       return statusRedirect(session, state.returnTo, "error", "installation_not_authorized");
     }
     const identity = await fetchGitHubUserIdentity(tokens.accessToken);
-    await connectGitHubUserIntegration({
+    const connection = await connectGitHubUserIntegration({
       userWorkosId: session.userId,
       githubUserId: identity.id,
       login: identity.login,
@@ -213,7 +213,8 @@ async function handleCallback(input: GitHubUserIngressInput, request: Request): 
       tokenType: tokens.tokenType,
       db: input.db,
     });
-    await captureIntegrationAddedAnalytics({
+    await captureConnectionAddedAnalytics({
+      connectionId: connection.integrationId,
       userWorkosId: session.userId,
       workspaceId: session.workspaceId,
       provider: "github_user",

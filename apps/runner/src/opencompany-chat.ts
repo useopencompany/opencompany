@@ -13,6 +13,7 @@ import type {
   WebSearchToolOutput,
 } from "@opencompany/agent/chat-ui";
 import {
+  compareChatMessageOrder,
   listedActionSourceIdsFromMessages,
   replaceChatUiMessageText,
   textFromChatUiMessage,
@@ -20,6 +21,7 @@ import {
 } from "@opencompany/agent/chat-ui";
 import { executeChatExaFetch } from "@opencompany/agent/chat-web-fetch";
 import { executeChatExaSearch } from "@opencompany/agent/chat-web-search";
+import { guardKimiOutput } from "@opencompany/agent/kimi-output-guard";
 import { resolveProductLanguageModel } from "@opencompany/agent/language-model";
 import { createProductChatSystemPrompt } from "@opencompany/agent/prompts";
 import {
@@ -61,6 +63,7 @@ import * as ai from "ai";
 import { convertToModelMessages, type LanguageModelUsage, parsePartialJson, stepCountIs } from "ai";
 import { asc, eq, sql } from "drizzle-orm";
 import { downloadBlobBytes } from "./attachment-hydration";
+import { loadBotIdentityPrompt } from "./bot-context";
 import { runTaskBrainRead } from "./codex-brain-tool";
 import {
   CodexChatHandoffError,
@@ -327,7 +330,7 @@ export async function runProductChatTurn(input: {
     }
     const messages = context.messages;
     const stream = streamText({
-      model: modelResolution.model,
+      model: guardKimiOutput(modelResolution.model, runtime.model),
       system: runtime.system,
       messages,
       tools: runtime.toolContext.tools,
@@ -336,6 +339,9 @@ export async function runProductChatTurn(input: {
         prepareProductChatStep({
           stepNumber,
           maxSteps: runtime.maxSteps,
+          system: runtime.system,
+          actionCallsExhausted: runtime.toolContext.areActionCallsExhausted(),
+          toolNames: Object.keys(runtime.toolContext.tools),
         }),
       ...(runtime.toolContext.repairToolCall
         ? { experimental_repairToolCall: runtime.toolContext.repairToolCall }
@@ -854,14 +860,15 @@ function replayMessagesThroughCurrent(
   currentUserMessageId: string,
   includeCurrentAssistantMessage: boolean,
 ) {
-  const currentIndex = storedMessages.findIndex(
+  const orderedMessages = storedMessages.toSorted(compareChatMessageOrder);
+  const currentIndex = orderedMessages.findIndex(
     (message) => message.id === currentUserMessageId && message.role === "user",
   );
   if (currentIndex < 0) {
     throw new Error(`opencompany chat user message ${currentUserMessageId} was not found.`);
   }
-  const nextMessage = storedMessages[currentIndex + 1];
-  return storedMessages.slice(
+  const nextMessage = orderedMessages[currentIndex + 1];
+  return orderedMessages.slice(
     0,
     currentIndex + (includeCurrentAssistantMessage && nextMessage?.role === "assistant" ? 2 : 1),
   );
@@ -1181,6 +1188,9 @@ async function resolveProductChatRuntime(input: {
   }
 
   const actionDispatcher = await createActionDispatcher({
+    ...(session.hostToolContractVersion
+      ? { hostToolContractVersion: session.hostToolContractVersion }
+      : {}),
     sessionId: session.id,
     turnId: turn.id,
     signal,
@@ -1229,6 +1239,7 @@ async function resolveProductChatRuntime(input: {
     ...(hostTools?.scheduleTask ? { scheduleTask: hostTools.scheduleTask } : {}),
     ...(hostTools?.editTaskSchedule ? { editTaskSchedule: hostTools.editTaskSchedule } : {}),
     ...(hostTools?.deleteTaskSchedule ? { deleteTaskSchedule: hostTools.deleteTaskSchedule } : {}),
+    ...(hostTools?.workspaceSkills ? { workspaceSkills: hostTools.workspaceSkills } : {}),
     ...(hostTools?.createWorkspaceSkill
       ? { createWorkspaceSkill: hostTools.createWorkspaceSkill }
       : {}),
@@ -1278,7 +1289,6 @@ async function resolveProductChatRuntime(input: {
           limits: {
             webSearchCallsPerTurn: 20,
             webFetchCallsPerTurn: 20,
-            actionCallsPerTurn: 20,
           },
         }
       : {}),
@@ -1310,12 +1320,13 @@ async function resolveProductChatRuntime(input: {
     ...(actionDispatcher?.catalog.sources.length
       ? {
           actionSources: actionDispatcher.catalog.sources,
+          legacyActionDiscovery: actionDispatcher.legacyDiscovery ?? false,
           connectedIntegrations: actionDispatcher.catalog.sources,
         }
       : {}),
   });
   const taskSkillBundles = taskContext
-    ? await loadWorkflowTaskSkillBundles(taskContext.harnessSpec)
+    ? await loadWorkflowTaskSkillBundles(taskContext.harnessSpec, turn.userWorkosId)
     : [];
   const taskSystemBlocks = taskContext
     ? [
@@ -1337,7 +1348,13 @@ async function resolveProductChatRuntime(input: {
     brain,
     activeSkills: hostTools?.activeSkills ?? [],
     toolContext,
-    system: [baseSystem, ...taskSystemBlocks].join("\n\n"),
+    system: [
+      baseSystem,
+      await loadBotIdentityPrompt(session.chatSessionId, turn.userWorkosId),
+      ...taskSystemBlocks,
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
     maxSteps: taskContext
       ? Math.max(1, taskContext.harnessSpec.maxModelSteps || CHAT_MAX_STEPS)
       : hostTools?.browserTools

@@ -1,22 +1,11 @@
 import { resolvePluginGatewayRegistrations } from "../plugin-gateway";
-import { resolveAttioActions } from "./attio";
-import { resolveGmailActions } from "./gmail";
-import { resolveGoogleCalendarActions } from "./google-calendar";
-import { resolveGoogleDriveActions } from "./google-drive";
-import { resolveLatitudeActions } from "./latitude";
-import { resolveLinearActions } from "./linear";
-import { resolveNeonActions } from "./neon";
-import { resolvePostHogActions } from "./posthog";
 import { type RemoteMcpGatewayRegistration, resolveRemoteMcpActions } from "./remote-mcp";
-import { resolveRevolutActions } from "./revolut";
-import { resolveStripeActions } from "./stripe";
 import type {
   ActionProviderCatalog,
   ActionSourceDescriptor,
   ResolvedAction,
   ResolvedActionCatalog,
 } from "./types";
-import { resolveXAccountActions } from "./x-account";
 
 // Managed (Monid) capabilities are injected so each composition root can bind
 // the same shared resolver only for surfaces whose persisted policy permits them.
@@ -44,7 +33,7 @@ export function isChatActionsKilled(): boolean {
 }
 
 // Resolves the user's connected providers into a flat action catalog. A
-// provider that is disconnected — or whose resolver throws — is simply absent;
+// provider that is not personally installed, disconnected — or whose resolver throws — is simply absent;
 // one broken provider never takes down the others. Managed (Monid) capabilities
 // are merged in only when the composition root injects their shared resolver.
 export async function resolveActionCatalog(
@@ -59,56 +48,14 @@ export async function resolveActionCatalog(
     (await (deps.resolveRemoteMcpRegistrations ?? resolvePluginGatewayRegistrations)(input).catch(
       () => [],
     ));
-  const linearPluginInstalled = remoteMcpRegistrations.some((registration) =>
-    registration.source.startsWith("plugin:linear:"),
-  );
-  const attioPluginInstalled = remoteMcpRegistrations.some((registration) =>
-    registration.source.startsWith("plugin:attio:"),
-  );
-  const gmailPluginInstalled = remoteMcpRegistrations.some((registration) =>
-    registration.source.startsWith("plugin:gmail:"),
-  );
-  const googleDrivePluginInstalled = remoteMcpRegistrations.some((registration) =>
-    registration.source.startsWith("plugin:google-drive:"),
-  );
-  const googleCalendarPluginInstalled = remoteMcpRegistrations.some((registration) =>
-    registration.source.startsWith("plugin:google-calendar:"),
-  );
-  const neonPluginInstalled = remoteMcpRegistrations.some((registration) =>
-    registration.source.startsWith("plugin:neon:"),
-  );
-  const posthogPluginInstalled = remoteMcpRegistrations.some((registration) =>
-    registration.source.startsWith("plugin:posthog:"),
-  );
-  const latitudePluginInstalled = remoteMcpRegistrations.some((registration) =>
-    registration.source.startsWith("plugin:latitude:"),
-  );
-  const stripePluginInstalled = remoteMcpRegistrations.some((registration) =>
-    registration.source.startsWith("plugin:stripe:"),
-  );
   const xPluginInstalled = remoteMcpRegistrations.some((registration) =>
     registration.source.startsWith("plugin:x:"),
   );
-  const resolved = await Promise.all([
-    gmailPluginInstalled ? null : resolveGmailActions(input.userWorkosId).catch(() => null),
-    googleCalendarPluginInstalled
-      ? null
-      : resolveGoogleCalendarActions(input.userWorkosId).catch(() => null),
-    googleDrivePluginInstalled
-      ? null
-      : resolveGoogleDriveActions(input.userWorkosId).catch(() => null),
-    linearPluginInstalled ? null : resolveLinearActions(input.userWorkosId).catch(() => null),
-    posthogPluginInstalled ? null : resolvePostHogActions(input.userWorkosId).catch(() => null),
-    latitudePluginInstalled ? null : resolveLatitudeActions(input.userWorkosId).catch(() => null),
-    neonPluginInstalled ? null : resolveNeonActions(input.userWorkosId).catch(() => null),
-    attioPluginInstalled ? null : resolveAttioActions(input.userWorkosId).catch(() => null),
-    stripePluginInstalled ? null : resolveStripeActions(input.workspaceId).catch(() => null),
-    resolveRevolutActions(input.workspaceId).catch(() => null),
-    xPluginInstalled ? null : resolveXAccountActions(input.userWorkosId).catch(() => null),
-    ...remoteMcpRegistrations.map((registration) =>
+  const resolved = await Promise.all(
+    remoteMcpRegistrations.map((registration) =>
       resolveRemoteMcpActions(input, registration).catch(() => null),
     ),
-  ]);
+  );
   const providers = resolved.filter(
     (entry): entry is ActionProviderCatalog => entry !== null && entry.actions.length > 0,
   );
@@ -134,6 +81,21 @@ export async function resolveActionCatalog(
         }),
       ),
       ...reconciledManaged.sources,
+      ...remoteMcpRegistrations
+        .filter(
+          (registration) =>
+            registration.connectionProvider === "custom_mcp" &&
+            !providers.some((provider) => provider.id === registration.source),
+        )
+        .map(
+          (registration): ActionSourceDescriptor => ({
+            id: registration.source,
+            kind: "integration",
+            unavailable: true,
+            label: registration.label,
+            description: registration.description,
+          }),
+        ),
     ],
     actions: [...providers.flatMap((provider) => provider.actions), ...reconciledManaged.actions],
   };

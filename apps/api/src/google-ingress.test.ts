@@ -41,7 +41,7 @@ function ingress(
     noWorkspaces?: boolean;
     authError?: ApiError;
     refreshPluginRegistrations?: (input: {
-      provider: "gmail" | "google_calendar" | "google_drive";
+      provider: "gmail" | "google_calendar" | "google_drive" | "google_admin";
       userWorkosId: string;
       workspaceIds: string[];
     }) => Promise<void>;
@@ -209,7 +209,7 @@ describe("Google ingress", () => {
       email: "ada@example.com",
       name: "Ada",
     } as never);
-    vi.mocked(connectGoogleIntegration).mockResolvedValue(undefined as never);
+    vi.mocked(connectGoogleIntegration).mockResolvedValue({ integrationId: "gint_google" });
 
     const state = createGoogleIntegrationState({
       provider: "gmail",
@@ -251,6 +251,47 @@ describe("Google ingress", () => {
     });
   });
 
+  it("refreshes installed plugin discovery after Google Admin connects", async () => {
+    vi.mocked(exchangeGoogleCode).mockResolvedValue({
+      tokens: {
+        access_token: "at",
+        refresh_token: "rt",
+        scope: [
+          "openid",
+          "email",
+          "https://www.googleapis.com/auth/admin.directory.user",
+          "https://www.googleapis.com/auth/admin.directory.group",
+        ].join(" "),
+      },
+      expiresAt: new Date(Date.now() + 3_600_000),
+    } as never);
+    vi.mocked(fetchGoogleUserInfo).mockResolvedValue({
+      sub: "google-sub-1",
+      email: "ada@example.com",
+      name: "Ada",
+    } as never);
+    vi.mocked(connectGoogleIntegration).mockResolvedValue({ integrationId: "gint_google" });
+    const state = createGoogleIntegrationState({
+      provider: "google_admin",
+      userWorkosId: "user_1",
+      returnTo: "/settings/plugins/google-admin",
+    });
+
+    const response = await ingress().callback(
+      "google_admin",
+      new Request(
+        `https://api.example.com/integrations/google-admin/callback?state=${encodeURIComponent(state)}&code=abc`,
+      ),
+    );
+
+    expect(response.status).toBe(302);
+    expect(refreshPluginRegistrations).toHaveBeenCalledWith({
+      provider: "google_admin",
+      userWorkosId: "user_1",
+      workspaceIds: ["workspace_1"],
+    });
+  });
+
   it("refreshes installed plugin discovery after Google Calendar connects", async () => {
     vi.mocked(exchangeGoogleCode).mockResolvedValue({
       tokens: {
@@ -270,7 +311,7 @@ describe("Google ingress", () => {
       email: "ada@example.com",
       name: "Ada",
     } as never);
-    vi.mocked(connectGoogleIntegration).mockResolvedValue(undefined as never);
+    vi.mocked(connectGoogleIntegration).mockResolvedValue({ integrationId: "gint_google" });
     const state = createGoogleIntegrationState({
       provider: "google_calendar",
       userWorkosId: "user_1",
@@ -308,7 +349,7 @@ describe("Google ingress", () => {
       email: "ada@example.com",
       name: "Ada",
     } as never);
-    vi.mocked(connectGoogleIntegration).mockResolvedValue(undefined as never);
+    vi.mocked(connectGoogleIntegration).mockResolvedValue({ integrationId: "gint_google" });
 
     const state = createGoogleIntegrationState({
       provider: "google_drive",

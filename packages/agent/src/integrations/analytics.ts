@@ -1,15 +1,16 @@
 import { captureProductServerEvent } from "@opencompany/analytics/product/server";
 
-// Shared choke point for the `integration_added` event so every provider's connect
-// path reports it the same way. Fire-and-forget from callers via `void` / `after(...)`;
-// `captureProductServerEvent` swallows its own errors and never throws.
-export async function captureIntegrationAddedAnalytics(input: {
+// Capture only after credentials are persisted. Reauthorization keeps the same connection ID,
+// so reports can separate authorization activity from distinct connected accounts.
+export async function captureConnectionAddedAnalytics(input: {
   userWorkosId: string;
   provider: string;
+  connectionId: string;
   workspaceId?: string;
 }) {
-  await captureProductServerEvent("integration_added", input.userWorkosId, {
+  await captureProductServerEvent("connection_added", input.userWorkosId, {
     provider: input.provider,
+    connection_id: input.connectionId,
     ...(input.workspaceId ? { workspace_id: input.workspaceId } : {}),
   });
 }

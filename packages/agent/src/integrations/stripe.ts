@@ -8,14 +8,15 @@ import {
 import { integrations } from "@opencompany/db/product-schema";
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { StripeProviderState } from "../integration-state";
-import { captureIntegrationAddedAnalytics } from "./analytics";
+import { captureConnectionAddedAnalytics } from "./analytics";
 import { createRemoteMcpStaticBearerAuthProvider } from "./remote-mcp-static-bearer";
+import { getStripeOAuthIntegrationState, loadStripeOAuthWorkerConnection } from "./stripe-mcp";
 
 export const STRIPE_PROVIDER = "stripe" as const;
 export const STRIPE_CREDENTIAL_KIND = "api_key" as const;
 export const STRIPE_API_BASE_URL = "https://api.stripe.com/v1";
 export const STRIPE_API_VERSION = "2026-04-22.dahlia";
-export const STRIPE_MCP_ENDPOINT_URL = "https://mcp.stripe.com";
+export { STRIPE_MCP_ENDPOINT_URL } from "./stripe-mcp";
 
 // Follows the repo-wide injectable-db convention so the canonical API can pass
 // its pooled handle while web/runner callers keep the getDb() default.
@@ -241,7 +242,8 @@ export async function connectStripeIntegration(input: {
     throw error;
   }
 
-  await captureIntegrationAddedAnalytics({
+  await captureConnectionAddedAnalytics({
+    connectionId: integration.id,
     userWorkosId: input.userWorkosId,
     workspaceId: input.workspaceId,
     provider: STRIPE_PROVIDER,
@@ -286,8 +288,11 @@ export async function getStripeIntegrationState(
   };
 }
 
-export function getStripeMcpIntegrationState(input: { userWorkosId: string; workspaceId: string }) {
-  return getStripeIntegrationState(input.workspaceId);
+export async function getStripeMcpIntegrationState(input: {
+  userWorkosId: string;
+  workspaceId: string;
+}) {
+  return getStripeOAuthIntegrationState(input);
 }
 
 export async function loadStripeMcpWorkerConnection(input: {
@@ -295,26 +300,7 @@ export async function loadStripeMcpWorkerConnection(input: {
   workspaceId: string;
   onAuthorizationRequired: () => never;
 }) {
-  const state = await getStripeIntegrationState(input.workspaceId);
-  if (state.status === "not_connected" || state.status === "disconnected") {
-    return { ok: false as const, reason: "not_connected" as const };
-  }
-  if (!state.connected) return { ok: false as const, reason: "needs_reauth" as const };
-
-  const connection = await loadStripeConnection(input.workspaceId);
-  if (!connection) return { ok: false as const, reason: "needs_reauth" as const };
-
-  return {
-    ok: true as const,
-    integrationId: connection.integrationId,
-    authProvider: createRemoteMcpStaticBearerAuthProvider({
-      accessToken: connection.apiKey,
-      onAuthorizationRequired: async () => {
-        await markStripeConnectionNeedsReauth(connection);
-        return input.onAuthorizationRequired();
-      },
-    }),
-  };
+  return loadStripeOAuthWorkerConnection(input);
 }
 
 export async function loadStripeConnection(workspaceId: string): Promise<StripeConnection | null> {

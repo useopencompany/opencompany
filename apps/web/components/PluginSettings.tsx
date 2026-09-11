@@ -12,30 +12,38 @@ import { toast } from "@opencompany/ui/components/sonner";
 import {
   AttioIcon,
   BetterStackIcon,
+  ConvexIcon,
   FathomIcon,
   GitHubIcon,
   GmailIcon,
+  GoogleAdminIcon,
   GoogleCalendarIcon,
   GoogleDriveIcon,
   GranolaIcon,
   HubSpotIcon,
+  InfisicalIcon,
+  JamieIcon,
+  LatitudeIcon,
   LinearIcon,
   NeonIcon,
+  NotionIcon,
   PostHogIcon,
+  RenderIcon,
+  ResendIcon,
+  SigNozIcon,
   SlackIcon,
   StripeIcon,
+  SupabaseIcon,
+  VercelIcon,
   XIcon,
 } from "@opencompany/ui/icons";
 import { cn } from "@opencompany/ui/lib/utils";
 import {
-  Activity,
   Archive,
-  AudioLines,
   ChevronDown,
   ChevronRight,
   ExternalLink,
   FileArchive,
-  KeyRound,
   Link2,
   Loader2,
   PackageOpen,
@@ -45,11 +53,11 @@ import {
   ShieldCheck,
   Sparkles,
   Trash2,
-  Triangle,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type ReactNode, useEffect, useRef, useState, useTransition } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useAppData } from "@/components/AppDataProvider";
 import { PluginConnectionFeedback } from "@/components/PluginConnectionSettings";
 import { SettingsContent } from "@/components/SettingsChrome";
 import {
@@ -73,7 +81,9 @@ import {
   type OfficialPluginName,
   type OfficialSkillPluginMetadata,
   type OfficialSkillPluginName,
+  officialPluginUpdateAvailable,
 } from "@/lib/official-plugins";
+import { pluginAccountsFromState, pluginConnectionSatisfied } from "@/lib/plugin-connection-state";
 
 type PluginSkillView = {
   name: string;
@@ -147,7 +157,7 @@ export const OFFICIAL_MCP_PLUGINS = {
   fathom: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.fathom,
     Icon: FathomIcon,
-    iconClassName: "bg-[#1355FF] text-white",
+    iconClassName: "bg-[#101820] text-white",
   },
   github: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.github,
@@ -163,6 +173,11 @@ export const OFFICIAL_MCP_PLUGINS = {
     ...OFFICIAL_MCP_PLUGIN_METADATA.granola,
     Icon: GranolaIcon,
     iconClassName: "bg-[#F0EBE1] text-[#1A1714]",
+  },
+  "google-admin": {
+    ...OFFICIAL_MCP_PLUGIN_METADATA["google-admin"],
+    Icon: GoogleAdminIcon,
+    iconClassName: "bg-white",
   },
   "google-calendar": {
     ...OFFICIAL_MCP_PLUGIN_METADATA["google-calendar"],
@@ -181,17 +196,17 @@ export const OFFICIAL_MCP_PLUGINS = {
   },
   infisical: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.infisical,
-    Icon: KeyRound,
+    Icon: InfisicalIcon,
     iconClassName: "bg-[#6C47FF] text-white",
   },
   jamie: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.jamie,
-    Icon: AudioLines,
+    Icon: JamieIcon,
     iconClassName: "bg-[#5B5BD6] text-white",
   },
   latitude: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.latitude,
-    Icon: Activity,
+    Icon: LatitudeIcon,
     iconClassName: "bg-[#171717] text-white",
   },
   linear: {
@@ -204,25 +219,45 @@ export const OFFICIAL_MCP_PLUGINS = {
     Icon: NeonIcon,
     iconClassName: "bg-[#00E599] text-[#0B0F14]",
   },
+  notion: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.notion,
+    Icon: NotionIcon,
+    iconClassName: "bg-white text-black",
+  },
   posthog: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.posthog,
     Icon: PostHogIcon,
     iconClassName: "bg-[#F54E00] text-white",
   },
+  convex: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.convex,
+    Icon: ConvexIcon,
+    iconClassName: "bg-surface-muted",
+  },
   render: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.render,
-    Icon: ServerCog,
+    Icon: RenderIcon,
     iconClassName: "bg-[#0B0D0E] text-white",
   },
   vercel: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.vercel,
-    Icon: Triangle,
+    Icon: VercelIcon,
+    iconClassName: "bg-black text-white",
+  },
+  supabase: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.supabase,
+    Icon: SupabaseIcon,
+    iconClassName: "bg-[#003D2B] text-[#3ECF8E]",
+  },
+  resend: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.resend,
+    Icon: ResendIcon,
     iconClassName: "bg-black text-white",
   },
   signoz: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.signoz,
-    Icon: Activity,
-    iconClassName: "bg-[#FF6B35] text-white",
+    Icon: SigNozIcon,
+    iconClassName: "bg-[#0B0D0E] text-white",
   },
   slack: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.slack,
@@ -278,6 +313,8 @@ export const LINEAR_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.linear.name;
 export const LINEAR_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.linear.source;
 export const NEON_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.neon.name;
 export const NEON_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.neon.source;
+export const NOTION_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.notion.name;
+export const NOTION_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.notion.source;
 export const POSTHOG_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.posthog.name;
 export const POSTHOG_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.posthog.source;
 export const RENDER_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.render.name;
@@ -407,6 +444,7 @@ export function PluginsSettings({
   workspaceId: string;
 }) {
   const router = useRouter();
+  const { integrations } = useAppData();
   const catalogViewCaptured = useRef(false);
   const [query, setQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState<PluginCatalogFilter>("all");
@@ -414,10 +452,42 @@ export function PluginsSettings({
   const [isInstalling, startInstall] = useTransition();
   const configs: OfficialPluginConfig[] = Object.values(OFFICIAL_PLUGINS);
   const normalizedQuery = query.trim().toLocaleLowerCase();
-  const installedPlugins = new Map(
-    plugins.map((plugin) => [plugin.name.toLocaleLowerCase(), plugin] as const),
+  const installedPlugins = useMemo(
+    () => new Map(plugins.map((plugin) => [plugin.name.toLocaleLowerCase(), plugin] as const)),
+    [plugins],
   );
+  // An enabled MCP plugin without its account connection cannot run, so the catalog must not
+  // claim it is "Enabled". Skills-only plugins never need a connection.
+  const pluginsMissingConnection = useMemo(() => {
+    const names = new Set<string>();
+    for (const config of Object.values(OFFICIAL_MCP_PLUGINS)) {
+      if (installedPlugins.get(config.name)?.status !== "enabled") continue;
+      if (!pluginConnectionSatisfied(config, pluginAccountsFromState(integrations, config))) {
+        names.add(config.name);
+      }
+    }
+    return names;
+  }, [installedPlugins, integrations]);
   const installedConfigs = configs.filter((config) => installedPlugins.has(config.name));
+  const pluginsWithUpdates = new Set<OfficialPluginName>();
+  for (const config of configs) {
+    const installed = installedPlugins.get(config.name);
+    if (
+      installed &&
+      officialPluginUpdateAvailable(installed.source.resolvedCommit, config.source)
+    ) {
+      pluginsWithUpdates.add(config.name);
+    }
+  }
+  const customPlugins = plugins.filter((plugin) => plugin.source.type === "custom_mcp");
+  const installedCount = installedConfigs.length + customPlugins.length;
+  const visibleCustomPlugins = customPlugins.filter(
+    (plugin) =>
+      (activeFilter === "all" || activeFilter === "installed") &&
+      `${plugin.manifest.description ?? plugin.name} ${plugin.source.url}`
+        .toLocaleLowerCase()
+        .includes(normalizedQuery),
+  );
 
   useEffect(() => {
     if (catalogViewCaptured.current) return;
@@ -428,15 +498,20 @@ export function PluginsSettings({
 
   const install = (config: OfficialPluginConfig) => {
     if (isInstalling) return;
+    const updating = pluginsWithUpdates.has(config.name);
     setInstallingPluginName(config.name);
     startInstall(async () => {
       try {
         await installOfficialPlugin(config);
-        toast.success(`${config.label} installed.`);
+        toast.success(`${config.label} ${updating ? "updated" : "installed"}.`);
         router.push(`/settings/plugins/${config.name}`);
+        // API mutations do not invalidate the catalog cached for back navigation.
+        router.refresh();
       } catch (cause) {
         setInstallingPluginName(null);
-        toast.error(`Couldn't install ${config.label}. ${errorMessage(cause)}`);
+        toast.error(
+          `Couldn't ${updating ? "update" : "install"} ${config.label}. ${errorMessage(cause)}`,
+        );
       }
     });
   };
@@ -469,6 +544,8 @@ export function PluginsSettings({
         title={title}
         configs={options?.preview ? sectionConfigs.slice(0, CATALOG_PREVIEW_SIZE) : sectionConfigs}
         installedPlugins={installedPlugins}
+        pluginsMissingConnection={pluginsMissingConnection}
+        pluginsWithUpdates={pluginsWithUpdates}
         canEdit={canEdit}
         isInstalling={isInstalling}
         installingPluginName={installingPluginName}
@@ -488,16 +565,27 @@ export function PluginsSettings({
   return (
     <SettingsContent
       title="Plugins"
-      description="Add trusted tools and expertise to your workspace."
+      description="Your plugins, accounts, and permissions are personal. Older workspace installations no longer appear here. If a plugin you used before is missing, reinstall it for yourself and review its permissions."
       contentClassName="max-w-[960px]"
     >
       <PluginConnectionFeedback />
+      {canEdit ? (
+        <div className="mb-5 flex justify-end">
+          <Link
+            href="/settings/plugins/add-mcp"
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+          >
+            <ServerCog className="mr-2 size-4" />
+            Add custom MCP
+          </Link>
+        </div>
+      ) : null}
       <div className="flex flex-col gap-7">
-        {installedConfigs.length > 0 ? (
+        {installedCount > 0 ? (
           <Button
             variant={activeFilter === "installed" ? "secondary" : "ghost"}
             size="sm"
-            aria-label={`Show ${installedConfigs.length} installed ${installedConfigs.length === 1 ? "plugin" : "plugins"}`}
+            aria-label={`Show ${installedCount} installed ${installedCount === 1 ? "plugin" : "plugins"}`}
             aria-pressed={activeFilter === "installed"}
             onClick={() => {
               setQuery("");
@@ -518,7 +606,7 @@ export function PluginsSettings({
                 </span>
               ))}
             </span>
-            <span>{installedConfigs.length} installed</span>
+            <span>{installedCount} installed</span>
             <ChevronRight size={14} strokeWidth={1.8} aria-hidden="true" />
           </Button>
         ) : null}
@@ -557,10 +645,36 @@ export function PluginsSettings({
         </div>
 
         <div className="flex flex-col gap-8">
+          {visibleCustomPlugins.length ? (
+            <section className="space-y-3" aria-label="Custom MCP plugins">
+              <h2 className="text-sm font-semibold text-ink">Custom MCP</h2>
+              <div className="divide-y divide-border rounded-lg border border-border">
+                {visibleCustomPlugins.map((plugin) => (
+                  <Link
+                    key={plugin.id}
+                    href={`/settings/plugins/${plugin.name}`}
+                    className="flex items-center gap-3 p-4 hover:bg-surface-hover"
+                  >
+                    <ServerCog className="size-5 shrink-0 text-ink-subtle" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-ink">
+                        {plugin.manifest.description ?? plugin.name}
+                      </p>
+                      <p className="truncate text-xs text-ink-subtle">{plugin.source.url}</p>
+                    </div>
+                    <span className="text-xs text-ink-subtle">
+                      {plugin.status === "disabled" ? "Disabled" : "Installed"}
+                    </span>
+                    <ChevronRight className="size-4 text-ink-subtle" />
+                  </Link>
+                ))}
+              </div>
+            </section>
+          ) : null}
           {normalizedQuery ? (
             filteredConfigs.length > 0 ? (
               renderSection("Search results", filteredConfigs)
-            ) : (
+            ) : visibleCustomPlugins.length ? null : (
               <PluginCatalogEmptyState onReset={() => setQuery("")} />
             )
           ) : activeFilter === "all" ? (
@@ -582,7 +696,7 @@ export function PluginsSettings({
             </>
           ) : filteredConfigs.length > 0 ? (
             renderSection(pluginCatalogFilterLabel(activeFilter), filteredConfigs)
-          ) : (
+          ) : visibleCustomPlugins.length ? null : (
             <PluginCatalogEmptyState onReset={() => setActiveFilter("all")} />
           )}
         </div>
@@ -595,6 +709,8 @@ function PluginCatalogSection({
   title,
   configs,
   installedPlugins,
+  pluginsMissingConnection,
+  pluginsWithUpdates,
   canEdit,
   isInstalling,
   installingPluginName,
@@ -604,6 +720,8 @@ function PluginCatalogSection({
   title: string;
   configs: OfficialPluginConfig[];
   installedPlugins: ReadonlyMap<string, PluginListItemDto>;
+  pluginsMissingConnection: ReadonlySet<string>;
+  pluginsWithUpdates: ReadonlySet<OfficialPluginName>;
   canEdit: boolean;
   isInstalling: boolean;
   installingPluginName: OfficialPluginName | null;
@@ -633,6 +751,8 @@ function PluginCatalogSection({
       <ul className="grid grid-cols-1 gap-x-3 gap-y-1 sm:grid-cols-2">
         {configs.map((config) => {
           const plugin = installedPlugins.get(config.name);
+          const missingConnection = pluginsMissingConnection.has(config.name);
+          const updateAvailable = pluginsWithUpdates.has(config.name);
           const installingThisPlugin = isInstalling && installingPluginName === config.name;
 
           return (
@@ -658,14 +778,31 @@ function PluginCatalogSection({
                     <span className="truncate text-[13.5px] font-medium leading-5 text-ink">
                       {config.label}
                     </span>
-                    {plugin ? <PluginStatus status={plugin.status} /> : null}
+                    {plugin ? (
+                      <PluginStatus
+                        status={plugin.status}
+                        missingConnection={missingConnection}
+                        updateAvailable={updateAvailable}
+                      />
+                    ) : null}
                   </span>
                   <span className="block truncate text-[12px] leading-5 text-ink-subtle">
                     {plugin?.manifest.description || config.description}
                   </span>
                 </span>
               </Link>
-              {plugin ? (
+              {plugin && updateAvailable && canEdit ? (
+                <Button
+                  size="sm"
+                  disabled={isInstalling}
+                  aria-busy={installingThisPlugin}
+                  onClick={() => onInstall(config)}
+                  className="h-8 rounded-full px-3 text-[12px] shadow-none"
+                >
+                  {installingThisPlugin ? <Loader2 className="animate-spin" /> : null}
+                  {installingThisPlugin ? "Updating…" : "Update"}
+                </Button>
+              ) : plugin ? (
                 <Link
                   href={`/settings/plugins/${config.name}`}
                   className={cn(
@@ -673,7 +810,7 @@ function PluginCatalogSection({
                     "h-8 rounded-full px-3 text-[12px] text-ink shadow-none",
                   )}
                 >
-                  Manage
+                  {missingConnection ? "Connect" : "Manage"}
                 </Link>
               ) : canEdit ? (
                 <Button
@@ -808,7 +945,7 @@ export function OfficialSkillPluginDetail({
 
       {!canEdit ? (
         <p className="text-[13px] leading-5 text-ink-subtle">
-          Only workspace admins can install plugins.
+          You need plugin write permission to install plugins.
         </p>
       ) : null}
 
@@ -855,16 +992,23 @@ export function PluginDetail({
   canEdit,
   title,
   description,
+  officialPluginName,
 }: {
   plugin: PluginInstallationDto;
   canEdit: boolean;
   title?: string;
   description?: string;
+  officialPluginName?: OfficialPluginName;
 }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [confirmDataDelete, setConfirmDataDelete] = useState(false);
   const [isMutating, startMutation] = useTransition();
+  const officialConfig = officialPluginName ? OFFICIAL_PLUGINS[officialPluginName] : undefined;
+  const updateAvailable = Boolean(
+    officialConfig &&
+      officialPluginUpdateAvailable(plugin.source.resolvedCommit, officialConfig.source),
+  );
 
   const mutate = (operation: () => Promise<unknown>, done?: () => void) => {
     setError(null);
@@ -892,10 +1036,38 @@ export function PluginDetail({
     >
       {!canEdit ? (
         <p className="text-[13px] leading-5 text-ink-subtle">
-          Only workspace admins can manage plugin installations.
+          You need plugin write permission to manage your plugins.
         </p>
       ) : null}
 
+      <p className="text-[13px] leading-5 text-ink-subtle">
+        Installed for you. Disabling or removing this plugin affects only your use.
+      </p>
+      {officialConfig && updateAvailable ? (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-warning/30 bg-warning/5 px-3 py-2.5">
+          <div className="min-w-0 flex-1">
+            <p className="text-[12.5px] font-medium text-ink">Update available</p>
+            <p className="mt-0.5 text-[12px] leading-4 text-ink-subtle">
+              A newer reviewed package is ready. Your plugin settings stay in place.
+            </p>
+          </div>
+          {canEdit ? (
+            <Button
+              size="sm"
+              disabled={isMutating}
+              onClick={() =>
+                mutate(
+                  () => installOfficialPlugin(officialConfig),
+                  () => toast.success(`${officialConfig.label} updated.`),
+                )
+              }
+            >
+              {isMutating ? <Loader2 className="animate-spin" /> : null}
+              {isMutating ? "Updating…" : "Update"}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
       <section className="flex flex-col gap-2">
         <SectionLabel>Status</SectionLabel>
         <PluginStatus status={plugin.status} />
@@ -936,8 +1108,8 @@ export function PluginDetail({
       <section className="flex flex-col gap-2">
         <SectionLabel>Passive skills ({plugin.skills.length})</SectionLabel>
         <p className="text-[12.5px] leading-5 text-ink-subtle">
-          These standard Agent Skills join the workspace catalog while this plugin is enabled. They
-          do not execute a process.
+          These Agent Skills are available to you while your plugin is enabled. They do not execute
+          a process.
         </p>
         {plugin.skills.length === 0 ? (
           <EmptyRow label="No valid skills were discovered." />
@@ -1480,7 +1652,29 @@ function CollisionReport({ collisions }: { collisions: PluginCollisionView[] }) 
   );
 }
 
-function PluginStatus({ status }: { status: PluginListItemDto["status"] }) {
+function PluginStatus({
+  status,
+  missingConnection = false,
+  updateAvailable = false,
+}: {
+  status: PluginListItemDto["status"];
+  missingConnection?: boolean;
+  updateAvailable?: boolean;
+}) {
+  if (updateAvailable) {
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-warning-bg px-1.5 py-px text-[10.5px] font-medium leading-4 text-warning">
+        <span className="h-1.5 w-1.5 rounded-full bg-warning" /> Update available
+      </span>
+    );
+  }
+  if (status === "enabled" && missingConnection) {
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-warning-bg px-1.5 py-px text-[10.5px] font-medium leading-4 text-warning">
+        <span className="h-1.5 w-1.5 rounded-full bg-warning" /> Requires connection
+      </span>
+    );
+  }
   return status === "enabled" ? (
     <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-success/10 px-1.5 py-px text-[10.5px] font-medium leading-4 text-success">
       <span className="h-1.5 w-1.5 rounded-full bg-success" /> Enabled

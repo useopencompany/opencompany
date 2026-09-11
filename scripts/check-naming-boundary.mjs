@@ -30,7 +30,7 @@ const allowedStandaloneFiles = new Set([
 // merge. Comparing with origin/main plus a PR-specific delta makes the check
 // self-invalidating once origin/main advances to that merged tree.
 const protectedCompatibilityTokens = [
-  ["physical and stored quoted goat_* identifiers", /["'`]goat_[a-z0-9_]*["'`]/gu, 1103],
+  ["physical and stored quoted goat_* identifiers", /["'`]goat_[a-z0-9_]*["'`]/gu, 1096],
   ["quoted sandbox runtime roots", /["'`]opencompany-goat[a-z0-9_./${}:*-]*["'`]/gu, 26],
   ["chat source-provider values", /["']goat-chat["']/gu, 30],
   ["import source-provider values", /["']goat-import["']/gu, 13],
@@ -188,7 +188,11 @@ const baseEnvKeys = envKeys(
 // variables are declared here so the check accepts them.
 const addedEnvKeys = [
   "API_INTERNAL_TOKEN",
+  "BUN_CONFIG_MAX_HTTP_REQUESTS",
   "DOCS_VERCEL_PROJECT_ID",
+  "ELECTRIC_AUTH_MODE",
+  "ELECTRIC_REPLICATION_STREAM_ID",
+  "ELECTRIC_STORAGE_DIR",
   "EXPO_PUBLIC_OPENCOMPANY_API_ORIGIN",
   "EXPO_PUBLIC_WORKOS_CLIENT_ID",
   "GITHUB_USER_APP_CLIENT_ID",

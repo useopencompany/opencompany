@@ -8,6 +8,7 @@ import {
   importHeadlessPlugin,
   previewHeadlessPluginImport,
 } from "@/lib/headless-knowledge-commands";
+import { type IntegrationState, integrationStateFromRows } from "@/lib/integration-state";
 import {
   ATTIO_PLUGIN_SOURCE,
   BETTERSTACK_PLUGIN_SOURCE,
@@ -22,6 +23,8 @@ import {
   LATITUDE_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
+  NOTION_PLUGIN_SOURCE,
+  OFFICIAL_PLUGINS,
   OfficialSkillPluginDetail,
   PluginDetail,
   PluginsSettings,
@@ -37,8 +40,13 @@ import {
 
 const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
 const toasts = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
+const appData = vi.hoisted(() => ({ integrations: null as unknown as IntegrationState }));
 
 vi.mock("next/navigation", () => ({ useRouter: () => router }));
+vi.mock("@/components/AppDataProvider", () => ({
+  useAppData: () => appData,
+  useAppDataOptional: () => appData,
+}));
 vi.mock("@opencompany/analytics/product/client", () => ({ captureProductEvent: vi.fn() }));
 vi.mock("@opencompany/ui/components/sonner", () => ({ toast: toasts }));
 vi.mock("@/lib/headless-knowledge-commands", () => ({
@@ -183,8 +191,50 @@ const ycAdvisePreview = {
     ],
   },
 } as const satisfies PluginImportPreviewDto;
+function integrationsWithConnectedLinear(): IntegrationState {
+  const base = integrationStateFromRows([]);
+  return {
+    ...base,
+    linear: {
+      ...base.linear,
+      connected: true,
+      status: "connected",
+      integrationId: "gint_linear_tools",
+      accountName: "Linear tool access",
+    },
+  };
+}
+
+function installedOfficialPlugin(name: string) {
+  const config = OFFICIAL_PLUGINS[name as keyof typeof OFFICIAL_PLUGINS];
+  const currentCommit = config.source.match(/\/tree\/([0-9a-f]{40})\//u)?.[1];
+  if (!currentCommit) throw new Error(`Official plugin ${name} is not commit-pinned.`);
+  return {
+    id: `plugin_${name}`,
+    name,
+    status: "enabled" as const,
+    manifest: { name, description: `${name} workflows.` },
+    source: {
+      ...plugin.source,
+      path: name,
+      ref: currentCommit,
+      resolvedCommit: currentCommit,
+    },
+    integrity: plugin.integrity,
+    installReport: plugin.installReport,
+    mcpApprovedIntegrity: plugin.mcpApprovedIntegrity,
+    createdAt: plugin.createdAt,
+    updatedAt: plugin.updatedAt,
+    archivedAt: plugin.archivedAt,
+    fileCount: 1,
+    skillCount: 1,
+    stdioServerCount: 1,
+  };
+}
+
 describe("Plugin settings", () => {
   beforeEach(() => {
+    appData.integrations = integrationsWithConnectedLinear();
     router.push.mockReset();
     router.refresh.mockReset();
     toasts.error.mockReset();
@@ -206,20 +256,8 @@ describe("Plugin settings", () => {
       <PluginsSettings
         plugins={[
           {
-            id: plugin.id,
-            name: "linear",
-            status: plugin.status,
+            ...installedOfficialPlugin("linear"),
             manifest: { name: "Linear", description: "Linear workflows." },
-            source: plugin.source,
-            integrity: plugin.integrity,
-            installReport: plugin.installReport,
-            mcpApprovedIntegrity: plugin.mcpApprovedIntegrity,
-            createdAt: plugin.createdAt,
-            updatedAt: plugin.updatedAt,
-            archivedAt: plugin.archivedAt,
-            fileCount: 1,
-            skillCount: 1,
-            stdioServerCount: 1,
           },
         ]}
         canEdit
@@ -251,6 +289,50 @@ describe("Plugin settings", () => {
     expect(screen.queryByRole("region", { name: "Featured" })).not.toBeInTheDocument();
   });
 
+  it("warns that an enabled plugin still needs its account connection", () => {
+    appData.integrations = integrationStateFromRows([]);
+    render(
+      <PluginsSettings plugins={[installedOfficialPlugin("linear")]} canEdit workspaceId="w1" />,
+    );
+
+    expect(screen.getByText("Requires connection")).toBeInTheDocument();
+    expect(screen.queryByText("Enabled")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Connect" })).toHaveAttribute(
+      "href",
+      "/settings/plugins/linear",
+    );
+    expect(screen.queryByRole("link", { name: "Manage" })).toBeNull();
+  });
+
+  it("keeps a disabled plugin disabled rather than warning about its connection", () => {
+    appData.integrations = integrationStateFromRows([]);
+    render(
+      <PluginsSettings
+        plugins={[{ ...installedOfficialPlugin("linear"), status: "disabled" as const }]}
+        canEdit
+        workspaceId="w1"
+      />,
+    );
+
+    expect(screen.getByText("Disabled")).toBeInTheDocument();
+    expect(screen.queryByText("Requires connection")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Manage" })).toBeInTheDocument();
+  });
+
+  it("stays green for a plugin that has no connection to make", async () => {
+    const user = userEvent.setup();
+    appData.integrations = integrationStateFromRows([]);
+    render(
+      <PluginsSettings plugins={[installedOfficialPlugin("vercel")]} canEdit workspaceId="w1" />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Show 1 installed plugin" }));
+
+    const installed = screen.getByRole("region", { name: "Installed" });
+    expect(within(installed).getByText("Enabled")).toBeInTheDocument();
+    expect(within(installed).queryByText("Requires connection")).not.toBeInTheDocument();
+  });
+
   it("offers one-click installation for every uninstalled official package", async () => {
     const user = userEvent.setup();
     render(<PluginsSettings plugins={[]} canEdit workspaceId="workspace_1" />);
@@ -272,6 +354,10 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/neon",
     );
+    expect(screen.getByRole("link", { name: /notion/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/notion",
+    );
     expect(screen.getByRole("link", { name: /better stack/i })).toHaveAttribute(
       "href",
       "/settings/plugins/betterstack",
@@ -292,14 +378,17 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/granola",
     );
-    expect(screen.getByRole("link", { name: /google drive/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /google admin/i })).toHaveAttribute(
       "href",
-      "/settings/plugins/google-drive",
+      "/settings/plugins/google-admin",
     );
+    await user.click(screen.getByRole("button", { name: "View all featured plugins" }));
     expect(screen.getByRole("link", { name: /slack/i })).toHaveAttribute(
       "href",
       "/settings/plugins/slack",
     );
+    await user.click(screen.getByRole("button", { name: "All" }));
+
     expect(screen.getByRole("link", { name: /google calendar/i })).toHaveAttribute(
       "href",
       "/settings/plugins/google-calendar",
@@ -324,8 +413,12 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/latitude",
     );
-    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(17);
+    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(18);
     await user.click(screen.getByRole("button", { name: "View all productivity plugins" }));
+    expect(screen.getByRole("link", { name: /google drive/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/google-drive",
+    );
     expect(screen.getByRole("link", { name: /jamie/i })).toHaveAttribute(
       "href",
       "/settings/plugins/jamie",
@@ -361,6 +454,9 @@ describe("Plugin settings", () => {
     );
     expect(NEON_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/neon$/u,
+    );
+    expect(NOTION_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/fb207086016a74e2e5724386c524d275771e5db6/notion",
     );
     expect(BETTERSTACK_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/betterstack$/u,
@@ -441,6 +537,12 @@ describe("Plugin settings", () => {
     expect(within(business).getByRole("link", { name: /stripe/i })).toBeInTheDocument();
     expect(within(business).getByRole("link", { name: /yc advise/i })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /gmail/i })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Communication" }));
+    expect(screen.getByRole("link", { name: /resend/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/resend",
+    );
   });
 
   it("opens a full category from its overview section", async () => {
@@ -450,7 +552,16 @@ describe("Plugin settings", () => {
     await user.click(screen.getByRole("button", { name: "View all engineering plugins" }));
 
     const engineering = screen.getByRole("region", { name: "Engineering" });
-    expect(within(engineering).getAllByRole("link")).toHaveLength(8);
+    expect(within(engineering).getByRole("link", { name: /convex/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/convex",
+    );
+    expect(within(engineering).getAllByRole("link")).toHaveLength(10);
+    expect(within(engineering).getByRole("link", { name: /supabase/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/supabase",
+    );
+
     expect(within(engineering).getByRole("link", { name: /github/i })).toBeInTheDocument();
     expect(within(engineering).getByRole("link", { name: /signoz/i })).toHaveAttribute(
       "href",
@@ -481,7 +592,7 @@ describe("Plugin settings", () => {
     expect(screen.getByRole("region", { name: "Featured" })).toBeInTheDocument();
   });
 
-  it("installs from the overview and opens the installed plugin page", async () => {
+  it("installs from the overview and refreshes the router cache after opening the plugin", async () => {
     const user = userEvent.setup();
     let finishPreview: ((preview: PluginImportPreviewDto) => void) | undefined;
     vi.mocked(previewHeadlessPluginImport).mockImplementation(
@@ -499,6 +610,8 @@ describe("Plugin settings", () => {
 
     expect(screen.getByRole("button", { name: "Installing…" })).toBeDisabled();
     expect(screen.getAllByRole("button", { name: "Install" })[0]).toBeDisabled();
+    expect(router.push).not.toHaveBeenCalled();
+    expect(router.refresh).not.toHaveBeenCalled();
 
     finishPreview?.(officialPreview);
 
@@ -512,33 +625,72 @@ describe("Plugin settings", () => {
       expectedIntegrity: officialPreview.integrity,
     });
     expect(toasts.success).toHaveBeenCalledWith("Linear installed.");
+    expect(router.refresh).toHaveBeenCalledOnce();
+    expect(router.push).toHaveBeenCalledBefore(router.refresh);
   });
 
-  it("keeps the user on the overview and allows a retry when installation fails", async () => {
+  it("updates a stale official plugin from the overview", async () => {
     const user = userEvent.setup();
-    vi.mocked(previewHeadlessPluginImport).mockRejectedValue(
-      new Error("Package source unavailable."),
+    const current = installedOfficialPlugin("linear");
+    render(
+      <PluginsSettings
+        plugins={[
+          {
+            ...current,
+            source: {
+              ...current.source,
+              ref: "a".repeat(40),
+              resolvedCommit: "a".repeat(40),
+            },
+          },
+        ]}
+        canEdit
+        workspaceId="workspace_1"
+      />,
     );
 
-    render(<PluginsSettings plugins={[]} canEdit workspaceId="workspace_1" />);
+    expect(screen.getByText("Update available")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Update" }));
 
-    const linearCard = screen.getByRole("link", { name: /linear/i }).closest("li");
-    expect(linearCard).not.toBeNull();
-    const installButton = within(linearCard as HTMLElement).getByRole("button", {
-      name: "Install",
+    await waitFor(() => expect(router.refresh).toHaveBeenCalledOnce());
+    expect(previewHeadlessPluginImport).toHaveBeenCalledWith({ url: LINEAR_PLUGIN_SOURCE });
+    expect(importHeadlessPlugin).toHaveBeenCalledWith({
+      url: LINEAR_PLUGIN_SOURCE,
+      expectedResolvedCommit: officialPreview.source.resolvedCommit,
+      expectedIntegrity: officialPreview.integrity,
     });
-    await user.click(installButton);
-
-    await waitFor(() => {
-      expect(toasts.error).toHaveBeenCalledWith(
-        "Couldn't install Linear. Package source unavailable.",
-      );
-    });
-    expect(router.push).not.toHaveBeenCalled();
-    await waitFor(() => {
-      expect(installButton).toBeEnabled();
-    });
+    expect(toasts.success).toHaveBeenCalledWith("Linear updated.");
   });
+
+  it.each(["preview", "import"] as const)(
+    "keeps the catalog cache and allows a retry when %s fails",
+    async (stage) => {
+      const user = userEvent.setup();
+      vi.mocked(
+        stage === "preview" ? previewHeadlessPluginImport : importHeadlessPlugin,
+      ).mockRejectedValue(new Error("Package source unavailable."));
+
+      render(<PluginsSettings plugins={[]} canEdit workspaceId="workspace_1" />);
+
+      const linearCard = screen.getByRole("link", { name: /linear/i }).closest("li");
+      expect(linearCard).not.toBeNull();
+      const installButton = within(linearCard as HTMLElement).getByRole("button", {
+        name: "Install",
+      });
+      await user.click(installButton);
+
+      await waitFor(() => {
+        expect(toasts.error).toHaveBeenCalledWith(
+          "Couldn't install Linear. Package source unavailable.",
+        );
+      });
+      expect(router.push).not.toHaveBeenCalled();
+      expect(router.refresh).not.toHaveBeenCalled();
+      await waitFor(() => {
+        expect(installButton).toBeEnabled();
+      });
+    },
+  );
 
   it("previews and installs an official skills-only package from its detail page", async () => {
     vi.mocked(previewHeadlessPluginImport).mockResolvedValue(ycAdvisePreview);
@@ -568,6 +720,34 @@ describe("Plugin settings", () => {
       expectedIntegrity: ycAdvisePreview.integrity,
     });
     expect(toasts.success).toHaveBeenCalledWith("YC Advise installed.");
+  });
+
+  it("updates an installed official skills-only package", async () => {
+    vi.mocked(previewHeadlessPluginImport).mockResolvedValue(ycAdvisePreview);
+    render(
+      <PluginDetail
+        plugin={{
+          ...plugin,
+          name: "yc-advise",
+          manifest: ycAdvisePreview.manifest,
+          source: { ...plugin.source, path: "yc-advise" },
+          stdioServers: [],
+        }}
+        canEdit
+        officialPluginName="yc-advise"
+      />,
+    );
+
+    expect(screen.getByText("Update available")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Update" }));
+
+    await waitFor(() => expect(router.refresh).toHaveBeenCalledOnce());
+    expect(importHeadlessPlugin).toHaveBeenCalledWith({
+      url: YC_ADVISE_PLUGIN_SOURCE,
+      expectedResolvedCommit: ycAdvisePreview.source.resolvedCommit,
+      expectedIntegrity: ycAdvisePreview.integrity,
+    });
+    expect(toasts.success).toHaveBeenCalledWith("YC Advise updated.");
   });
 
   it("shows the exact MCP approval boundary without exposing environment values", () => {

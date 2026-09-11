@@ -8,6 +8,7 @@ export function GET() {
     service: "opencompany-goat",
     environment: process.env.VERCEL_ENV ?? process.env.NODE_ENV ?? "development",
     protocolVersion: PROTOCOL_VERSION,
+    capabilities: { personalSkillsAuthorization: "v1", personalPluginsAuthorization: "v1" },
     release:
       process.env.RELEASE_SHA ??
       process.env.GITHUB_SHA ??

@@ -2,8 +2,8 @@
 
 This shared Codex and Claude Code chat template extends E2B's `codex` template and bakes in the
 runner's repo workflow toolbox:
-`rg`, `fd`, `jq`, `curl`, `git`, `gh`, `tmux`, `ss`, Node/npm 22+, Bun `1.3.2`,
-`@agentclientprotocol/codex-acp@1.6.0`, `@openai/codex@0.148.0`,
+`rg`, `fd`, `jq`, `curl`, `git`, `gh`, `tmux`, `ss`, `ffmpeg`, `ffprobe`, Node/npm 22+, Bun `1.4.2`,
+`@agentclientprotocol/codex-acp@1.10.0`, `@openai/codex@0.153.4`,
 `@anthropic-ai/claude-code@2.1.220`, Playwright `1.60.0`,
 Infisical CLI `0.43.118`, Playwright-managed Chromium, and Docker Engine (with the Compose
 plugin) for containers inside the sandbox — the sandbox itself is a Linux microVM, so this is a
@@ -19,8 +19,10 @@ Run the build with an E2B API key:
 E2B_API_KEY=e2b_... bun apps/runner/e2b/codex/build.prod.ts
 ```
 
-The production alias is `opencompany-codex-toolbox`. The build must use 8 vCPU and 8192 MB RAM to
-match the runner's Codex sandbox billing allocation.
+The production alias is `opencompany-codex-toolbox`. The build must use 8 vCPU and 16384 MB RAM to
+match the runner's Codex sandbox billing allocation. The 16 GB allocation is deliberate headroom:
+sandboxes paused near their memory ceiling can produce snapshots that wedge on resume
+(prod incident 2026-09-08/09).
 
 ## Smoke Test
 
@@ -32,6 +34,8 @@ rg --version
 fd --version
 jq --version
 gh --version
+ffmpeg -version
+ffprobe -version
 tmux -V
 ss --version
 bun --version
@@ -53,3 +57,7 @@ docker run --rm hello-world
 Set `OPENCOMPANY_CODEX_E2B_TEMPLATE=opencompany-codex-toolbox` in Infisical for the runner
 environment, then redeploy the runner. The variable configures both persistent Codex and Claude Code
 Chat sandboxes. Leave it unset to fall back to E2B's `codex` template.
+
+When the runner already uses this alias, rebuilding it updates newly created sandboxes without a
+runner redeploy. Existing persistent sandboxes retain their filesystem and installed tools when
+resumed; template updates do not retrofit them.

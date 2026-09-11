@@ -1,14 +1,19 @@
 import { createMCPClient, type OAuthClientProvider } from "@ai-sdk/mcp";
 import type { RemoteMcpServer } from "@opencompany/agent-runtime";
+import { captureProductServerEvent } from "@opencompany/analytics/product/server";
 import type { PluginGatewayDiscoveredTool } from "@opencompany/core";
 import { createLogger } from "@opencompany/observability";
 import type { JSONSchema7 } from "ai";
+import Ajv, { type AnySchema } from "ajv";
+import Ajv2019 from "ajv/dist/2019";
+import Ajv2020 from "ajv/dist/2020";
 import { type CapabilityId, type CapabilityMode, isCapabilityMode } from "./capabilities";
 import {
   ACTION_EFFECTS_READ,
   ACTION_EFFECTS_WRITE,
   ActionAuthError,
   type ActionExecuteContext,
+  ActionInvalidParamsError,
   ActionPermissionError,
   type ActionProviderCatalog,
   type ActionProviderId,
@@ -39,13 +44,21 @@ export type RemoteMcpConnectionState = {
 
 export type RemoteMcpWorkerConnection =
   | { ok: false; reason: "not_connected" | "needs_reauth" }
-  | { ok: true; integrationId: string; authProvider: OAuthClientProvider };
+  | {
+      ok: true;
+      integrationId: string;
+      authProvider?: OAuthClientProvider;
+      createClient?: RemoteMcpGatewayDependencies["createClient"];
+      sanitizeResult?: (value: unknown) => unknown;
+    };
 
 export type RemoteMcpOperation =
   | { type: "tools/list" }
   | { type: "tools/call"; tool: string; capability: CapabilityId };
 
 export type RemoteMcpGatewayRegistration = {
+  approvalContext?: string;
+  pluginName: string;
   source: ActionSourceId;
   connectionProvider: ActionProviderId;
   label: string;
@@ -119,7 +132,7 @@ export type RemoteMcpGatewayDependencies = {
       type: "http" | "sse";
       url: string;
       headers?: Record<string, string>;
-      authProvider: OAuthClientProvider;
+      authProvider?: OAuthClientProvider;
     };
   }) => Promise<RemoteMcpClient>;
   recordDispatch: (audit: RemoteMcpDispatchAudit) => Promise<void>;
@@ -182,8 +195,12 @@ export async function resolveRemoteMcpActions(
         id: `${registration.source}.${definition.name}`,
         provider: registration.source,
         capability: classification.capability.id,
-        effects: classification.bucket === "read" ? ACTION_EFFECTS_READ : ACTION_EFFECTS_WRITE,
+        effects:
+          registration.connectionProvider !== "custom_mcp" && classification.bucket === "read"
+            ? ACTION_EFFECTS_READ
+            : ACTION_EFFECTS_WRITE,
         permissionMode,
+        ...(registration.approvalContext ? { approvalContext: registration.approvalContext } : {}),
         ...(permission ? { permission } : {}),
         description:
           definition.description?.trim() || `Call ${definition.name} on ${registration.label}.`,
@@ -232,7 +249,7 @@ export async function discoverRemoteMcpSnapshot(
   });
   if (!connection.ok || connection.integrationId !== state.integrationId) return null;
 
-  const client = await deps.createClient(
+  const client = await (connection.createClient ?? deps.createClient)(
     clientConfig(registration.server, connection.authProvider),
   );
   try {
@@ -387,6 +404,15 @@ async function executeRemoteMcpTool(input: {
     userWorkosId: input.context.userWorkosId,
     workspaceId: input.context.workspaceId ?? input.identity.workspaceId,
   };
+  if (
+    identity.userWorkosId !== input.identity.userWorkosId ||
+    identity.workspaceId !== input.identity.workspaceId
+  ) {
+    throw new ActionPermissionError(
+      input.registration.connectionProvider,
+      "This action belongs to another personal plugin context. Refresh your available actions.",
+    );
+  }
   const current = await input.registration.getState(identity);
   if (!current.connected || !current.integrationId) {
     throw remoteAuthError(input.registration, "not_connected");
@@ -409,6 +435,8 @@ async function executeRemoteMcpTool(input: {
       `${input.classification.capability.label} permission changed before this action could run. Retry to use the current permission.`,
     );
   }
+
+  validateRemoteMcpInput(input.definition, input.params);
 
   const connection = await input.registration.loadConnection({
     ...identity,
@@ -434,13 +462,14 @@ async function executeRemoteMcpTool(input: {
     );
   }
 
-  const client = await input.dependencies.createClient(
+  const client = await (connection.createClient ?? input.dependencies.createClient)(
     clientConfig(input.registration.server, connection.authProvider),
   );
   try {
-    // Execution clients do not call tools/list because the gateway serves its persisted discovery
-    // snapshot. Preload the selected definition so @ai-sdk/mcp can honor transport metadata such
-    // as x-mcp-header and mirror structured arguments into request-specific Mcp-Param-* headers.
+    // Preload the selected definition from the persisted discovery snapshot. Custom servers
+    // additionally verify live definitions before dispatch. This lets @ai-sdk/mcp honor transport
+    // metadata such as x-mcp-header and mirror structured arguments into request-specific
+    // Mcp-Param-* headers.
     client.toolsFromDefinitions({ tools: [input.definition] });
     await input.dependencies.recordDispatch({
       operation: "tools/call",
@@ -454,12 +483,39 @@ async function executeRemoteMcpTool(input: {
       ...(input.context.sourceTurnId ? { turnId: input.context.sourceTurnId } : {}),
       ...(input.context.toolCallId ? { toolCallId: input.context.toolCallId } : {}),
     });
-    const result = await client.callTool({
-      name: input.definition.name,
-      arguments: input.params,
-      options: { signal: input.context.signal },
-    });
-    return unwrapRemoteMcpResult(result, input.registration);
+    const startedAt = Date.now();
+    let outcome: "success" | "error" = "error";
+    try {
+      const result = await client.callTool({
+        name: input.definition.name,
+        arguments: input.params,
+        options: { signal: input.context.signal },
+      });
+      const output = unwrapRemoteMcpResult(
+        connection.sanitizeResult ? connection.sanitizeResult(result) : result,
+        input.registration,
+      );
+      outcome = "success";
+      return output;
+    } catch (error) {
+      // JSON-RPC invalid params are model-correctable input failures. Counting them as
+      // provider outages can exhaust the turn's retry budget before corrected input runs.
+      if (error instanceof Error && "code" in error && error.code === -32602) {
+        throw new ActionInvalidParamsError(error.message);
+      }
+      throw error;
+    } finally {
+      await captureProductServerEvent("plugin_tool_call_completed", identity.userWorkosId, {
+        workspace_id: identity.workspaceId,
+        plugin_name: input.registration.pluginName,
+        connection_id: connection.integrationId,
+        provider: input.registration.connectionProvider,
+        capability: input.classification.capability.id,
+        outcome,
+        duration_ms: Math.max(0, Date.now() - startedAt),
+        engine: input.context.sourceEngine ?? "opencompany",
+      });
+    }
   } finally {
     await client.close().catch(() => {});
   }
@@ -480,7 +536,7 @@ function storedClassification(
   };
 }
 
-function clientConfig(server: RemoteMcpServer, authProvider: OAuthClientProvider) {
+function clientConfig(server: RemoteMcpServer, authProvider?: OAuthClientProvider) {
   return {
     clientName: "opencompany-action-gateway",
     version: "0.1.0",
@@ -492,7 +548,7 @@ function clientConfig(server: RemoteMcpServer, authProvider: OAuthClientProvider
       type: server.type === "streamable-http" ? ("http" as const) : ("sse" as const),
       url: server.url,
       ...(Object.keys(server.headers).length > 0 ? { headers: server.headers } : {}),
-      authProvider,
+      ...(authProvider ? { authProvider } : {}),
     },
   };
 }
@@ -505,6 +561,28 @@ function normalizeInputSchema(value: RemoteToolDefinition["inputSchema"]): JSONS
     ...value,
     properties: value.properties ?? {},
   } as JSONSchema7;
+}
+
+function validateRemoteMcpInput(definition: RemoteToolDefinition, params: Record<string, unknown>) {
+  const schema = normalizeInputSchema(definition.inputSchema);
+  // MCP defaults schemas without an explicit dialect to JSON Schema 2020-12.
+  const Validator =
+    !schema.$schema || schema.$schema.includes("2020-12")
+      ? Ajv2020
+      : schema.$schema.includes("2019-09")
+        ? Ajv2019
+        : Ajv;
+  // Provider formats and extension keywords are not necessarily registered locally.
+  // Validate structure without coercing, removing, or defaulting model arguments.
+  const validator = new Validator({ strict: false, validateFormats: false });
+  const validate = validator.compile(schema as AnySchema);
+  if (!validate(params)) {
+    throw new ActionInvalidParamsError(
+      `Invalid arguments for "${definition.name}": ${validator.errorsText(validate.errors, {
+        dataVar: "arguments",
+      })}. Correct the arguments and retry this action in the current turn.`,
+    );
+  }
 }
 
 function unwrapRemoteMcpResult(
@@ -520,7 +598,11 @@ function unwrapRemoteMcpResult(
     .map((entry) => entry.text);
   const joined = texts.join("\n");
   if (result.isError === true) {
-    if (registration.connectionProvider === "google_calendar" && isAuthExpiredMcpError(joined)) {
+    if (
+      (registration.connectionProvider === "google_calendar" ||
+        registration.connectionProvider === "google_admin") &&
+      isAuthExpiredMcpError(joined)
+    ) {
       throw remoteAuthError(registration, "auth_expired");
     }
     throw new Error(joined || `${registration.label} returned an MCP tool error.`);

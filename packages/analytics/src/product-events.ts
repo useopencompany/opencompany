@@ -118,16 +118,41 @@ export type ProductAnalyticsEventPropertiesByName = {
   plugin_catalog_viewed: {
     workspace_id: string;
   };
+  plugin_import_previewed: {
+    workspace_id: string;
+    plugin_name: string;
+  };
+  plugin_removed: {
+    workspace_id: string;
+    plugin_name: string;
+  };
+  plugin_tool_call_completed: {
+    workspace_id: string;
+    plugin_name: string;
+    connection_id: string;
+    provider: string;
+    capability: "read" | "query" | "draft" | "write";
+    outcome: "success" | "error";
+    duration_ms: number;
+    engine: ProductAnalyticsEngine;
+  };
   plugin_installed: {
     workspace_id: string;
+    plugin_id: string;
     plugin_name: string;
     plugin_kind: ProductPluginKind;
     skill_count: number;
     mcp_server_count: number;
   };
-  integration_added: {
+  connection_added: {
     workspace_id?: string;
     provider: string;
+    connection_id: string;
+  };
+  connection_removed: {
+    workspace_id: string;
+    provider: string;
+    connection_id?: string;
   };
   brain_source_added: {
     workspace_id: string;
@@ -304,21 +329,52 @@ export const productAnalyticsEvents = {
     description: "A user opened the plugin catalog.",
     safeProperties: ["workspace_id"],
   },
+  plugin_import_previewed: {
+    name: "plugin_import_previewed",
+    description: "A plugin import preview resolved successfully, before installation confirmation.",
+    safeProperties: ["workspace_id", "plugin_name"],
+  },
+  plugin_removed: {
+    name: "plugin_removed",
+    description: "A user successfully removed an installed plugin from a workspace.",
+    safeProperties: ["workspace_id", "plugin_name"],
+  },
+  plugin_tool_call_completed: {
+    name: "plugin_tool_call_completed",
+    description: "A dispatched plugin remote MCP tool call finished successfully or with an error.",
+    safeProperties: [
+      "workspace_id",
+      "plugin_name",
+      "connection_id",
+      "provider",
+      "capability",
+      "outcome",
+      "duration_ms",
+      "engine",
+    ],
+  },
   plugin_installed: {
     name: "plugin_installed",
     description: "A user successfully installed a plugin into a workspace.",
     safeProperties: [
       "workspace_id",
       "plugin_name",
+      "plugin_id",
       "plugin_kind",
       "skill_count",
       "mcp_server_count",
     ],
   },
-  integration_added: {
-    name: "integration_added",
-    description: "A user connected an integration account, including an account used by a plugin.",
-    safeProperties: ["workspace_id", "provider"],
+  connection_added: {
+    name: "connection_added",
+    description:
+      "An account connection was authorized successfully, including reauthorization. Count distinct connection_id for unique connections.",
+    safeProperties: ["workspace_id", "provider", "connection_id"],
+  },
+  connection_removed: {
+    name: "connection_removed",
+    description: "A user successfully disconnected an account.",
+    safeProperties: ["workspace_id", "provider", "connection_id"],
   },
   brain_source_added: {
     name: "brain_source_added",

@@ -22,10 +22,6 @@ const mocks = vi.hoisted(() => ({
   switchWorkspace: vi.fn(),
 }));
 
-vi.mock("node:crypto", () => ({
-  randomUUID: vi.fn(() => "00000000-0000-4000-8000-000000000123"),
-}));
-
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 vi.mock("next/navigation", () => ({
@@ -100,7 +96,7 @@ describe("createWorkspaceAction", () => {
     });
     expect(mocks.createWorkspace).toHaveBeenCalledWith({
       json: {
-        workspaceId: "goat_ws_00000000-0000-4000-8000-000000000123",
+        workspaceId: expect.stringMatching(/^workspace_[0-9a-f-]{36}$/u),
         name: "Analytical Co",
       },
     });

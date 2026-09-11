@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   CHAT_MAX_STEPS,
   createProductChatToolContext,
+  PRODUCT_CHAT_FINAL_RESPONSE_INSTRUCTION,
   prepareProductChatStep,
   UPDATE_TASK_STATUS_TOOL_NAME,
 } from "./chat-agent";
@@ -132,7 +133,7 @@ describe("create_workspace_skill tool", () => {
       ),
     ).resolves.toMatchObject({ created: true, command: "/customer-health-review" });
 
-    expect(skillTool.description).toContain("latest message explicitly asks");
+    expect(skillTool.description).toContain("the user has asked");
     expect(createWorkspaceSkill).toHaveBeenCalledWith(
       {
         name: "customer-health-review",
@@ -153,6 +154,22 @@ describe("edit_workspace_skill tool", () => {
       EDIT_WORKSPACE_SKILL_TOOL_NAME in
         createProductChatToolContext({ model, editWorkspaceSkill: vi.fn() }).tools,
     ).toBe(true);
+  });
+
+  it("passes a rename without requiring replacement instructions", async () => {
+    const editWorkspaceSkill = vi.fn();
+    const context = createProductChatToolContext({ model, editWorkspaceSkill });
+    const skillTool = context.tools[EDIT_WORKSPACE_SKILL_TOOL_NAME] as {
+      execute: (args: unknown, context: { toolCallId: string }) => Promise<unknown>;
+    };
+    await skillTool.execute(
+      { name: " installation_1 ", newName: " renamed-skill ", expectedBundleId: "bundle_1" },
+      { toolCallId: "rename_1" },
+    );
+    expect(editWorkspaceSkill).toHaveBeenCalledWith(
+      { name: "installation_1", newName: "renamed-skill", expectedBundleId: "bundle_1" },
+      { toolCallId: "rename_1" },
+    );
   });
 
   it("passes the complete revised Skill and stable SDK tool-call id to the host", async () => {
@@ -180,7 +197,7 @@ describe("edit_workspace_skill tool", () => {
     ).resolves.toMatchObject({ updated: true, command: "/add-mcp-provider-plugin" });
 
     expect(skillTool.description).toContain("existing workspace-authored Skill");
-    expect(skillTool.description).toContain("use_skill");
+    expect(skillTool.description).toContain("workspace_skills");
     expect(editWorkspaceSkill).toHaveBeenCalledWith(
       {
         name: "add-mcp-provider-plugin",
@@ -663,19 +680,31 @@ describe("start_workflow tool", () => {
 });
 
 describe("prepareProductChatStep maxSteps", () => {
+  it("preserves the system prompt while explaining the final response transition", () => {
+    const system = "Follow the workspace instructions.";
+    expect(prepareProductChatStep({ stepNumber: 15, maxSteps: 16, system })).toEqual({
+      toolChoice: "none",
+      system: `${system}\n\n${PRODUCT_CHAT_FINAL_RESPONSE_INSTRUCTION}`,
+    });
+    expect(prepareProductChatStep({ stepNumber: 0, finalizeAfterApproval: true, system })).toEqual({
+      toolChoice: "none",
+      system: `${system}\n\n${PRODUCT_CHAT_FINAL_RESPONSE_INSTRUCTION}`,
+    });
+  });
+
   it("reserves the final step with the default chat budget", () => {
     expect(prepareProductChatStep({ stepNumber: CHAT_MAX_STEPS - 2 })).toEqual({});
     expect(prepareProductChatStep({ stepNumber: CHAT_MAX_STEPS - 1 })).toEqual({
-      activeTools: [],
       toolChoice: "none",
+      system: PRODUCT_CHAT_FINAL_RESPONSE_INSTRUCTION,
     });
   });
 
   it("reserves the final step at a task's larger budget", () => {
     expect(prepareProductChatStep({ stepNumber: 14, maxSteps: 16 })).toEqual({});
     expect(prepareProductChatStep({ stepNumber: 15, maxSteps: 16 })).toEqual({
-      activeTools: [],
       toolChoice: "none",
+      system: PRODUCT_CHAT_FINAL_RESPONSE_INSTRUCTION,
     });
   });
 
@@ -688,5 +717,172 @@ describe("prepareProductChatStep maxSteps", () => {
         forceApprovedAction: boolean;
       }),
     ).toEqual({});
+  });
+});
+
+describe("workspace_skills tool", () => {
+  it("exposes management only with an authorized runner and dispatches inspection and archive", async () => {
+    expect(createProductChatToolContext({ model }).tools).not.toHaveProperty("workspace_skills");
+    const workspaceSkills = vi.fn(async () => ({ skills: [] }));
+    const tool = createProductChatToolContext({ model, workspaceSkills }).tools
+      .workspace_skills as {
+      execute: (args: unknown) => Promise<unknown>;
+    };
+    for (const command of ["list", "read", "archive"]) {
+      await tool.execute({ command, name: "my-skill" });
+      expect(workspaceSkills).toHaveBeenLastCalledWith({ command, name: "my-skill" });
+    }
+  });
+});
+
+describe("action discovery tools", () => {
+  const action = {
+    id: "gmail.search",
+    source: "gmail" as const,
+    description: "Search email ".repeat(30),
+    params: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+    permissionMode: "on" as const,
+  };
+  const catalog = {
+    sources: [{ id: "gmail" as const, label: "Gmail", description: "Email" }],
+    actions: [action],
+  };
+  type ActionTool = {
+    execute: (args: unknown, context?: { toolCallId: string }) => Promise<unknown>;
+  };
+
+  it("shares compact listing, full descriptions, admission, and invalid batch handling", async () => {
+    const execute = vi.fn(async () => ({ ok: true as const, action: action.id, result: [] }));
+    const tools = createProductChatToolContext({ model, actions: { catalog, execute } }).tools;
+    const list = tools.list_actions as ActionTool;
+    const describe = tools.describe_actions as ActionTool;
+    const use = tools.use_action as ActionTool;
+    await expect(describe.execute({ actions: [] })).resolves.toMatchObject({
+      ok: false,
+      error: { code: "invalid_params" },
+    });
+    await expect(describe.execute({ actions: [action.id, "missing", action.id] })).resolves.toEqual(
+      { ok: true, actions: [action], not_found: ["missing"] },
+    );
+    expect(execute).not.toHaveBeenCalled();
+    await expect(
+      use.execute({ action: action.id, params: { query: "launch" } }, { toolCallId: "call1" }),
+    ).resolves.toMatchObject({ ok: true });
+    expect(execute).toHaveBeenCalledTimes(1);
+    const inventory = (await list.execute({ source: "gmail" })) as {
+      actions: Record<string, unknown>[];
+    };
+    expect(inventory.actions).toHaveLength(1);
+    expect(inventory.actions[0]).not.toHaveProperty("params");
+  });
+
+  it("removes only use_action from subsequent steps at exhaustion", async () => {
+    const execute = vi.fn(async () => ({ ok: true as const, action: action.id, result: [] }));
+    const context = createProductChatToolContext({
+      model,
+      runWiki: vi.fn(),
+      actions: { catalog, execute, prelistedSourceIds: ["gmail"] },
+    });
+    const use = context.tools.use_action as ActionTool;
+    for (let i = 0; i < 15; i++)
+      await use.execute(
+        { action: action.id, params: { query: "launch" } },
+        { toolCallId: `call-${i}` },
+      );
+    expect(context.areActionCallsExhausted()).toBe(false);
+    await use.execute(
+      { action: action.id, params: { query: "launch" } },
+      { toolCallId: "call-15" },
+    );
+    expect(context.areActionCallsExhausted()).toBe(true);
+    const step = prepareProductChatStep({
+      stepNumber: 2,
+      actionCallsExhausted: context.areActionCallsExhausted(),
+      toolNames: Object.keys(context.tools),
+      system: "Workspace instructions",
+    });
+    expect(step.activeTools).not.toContain("use_action");
+    expect(step.activeTools).toContain(WIKI_TOOL_NAME);
+    expect(step.system).toContain("Workspace instructions");
+    expect(step.system).toContain("incomplete coverage");
+  });
+
+  it("keeps exhaustion sticky when a prior concurrent call resolves later", async () => {
+    let finishEarlier!: (value: {
+      ok: true;
+      action: string;
+      result: never[];
+      budget: { limit: number; used: number; remaining: number };
+    }) => void;
+    const execute = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishEarlier = resolve;
+          }),
+      )
+      .mockResolvedValueOnce({
+        ok: true,
+        action: action.id,
+        result: [],
+        budget: { limit: 16, used: 16, remaining: 0 },
+      });
+    const context = createProductChatToolContext({
+      model,
+      actions: { catalog, execute, prelistedSourceIds: ["gmail"] },
+    });
+    const use = context.tools.use_action as ActionTool;
+    const earlier = use.execute(
+      { action: action.id, params: { query: "first" } },
+      { toolCallId: "first" },
+    );
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+    await use.execute({ action: action.id, params: { query: "last" } }, { toolCallId: "last" });
+    expect(context.areActionCallsExhausted()).toBe(true);
+    finishEarlier({
+      ok: true,
+      action: action.id,
+      result: [],
+      budget: { limit: 16, used: 15, remaining: 1 },
+    });
+    await earlier;
+    expect(context.areActionCallsExhausted()).toBe(true);
+  });
+
+  it("recognizes an exhausted legacy gateway after approval resume", async () => {
+    const execute = vi.fn(async () => ({
+      ok: false as const,
+      action: action.id,
+      error: { code: "call_budget" as const, message: "Limit reached" },
+    }));
+    const context = createProductChatToolContext({
+      model,
+      actions: { catalog, execute, prelistedSourceIds: ["gmail"] },
+    });
+    const result = await (context.tools.use_action as ActionTool).execute(
+      { action: action.id, params: { query: "launch" } },
+      { toolCallId: "resumed" },
+    );
+    expect(result).toMatchObject({ budget: { limit: 16, used: 16, remaining: 0 } });
+    expect(context.areActionCallsExhausted()).toBe(true);
+  });
+
+  it("retains the legacy surface and reuses previously discovered sources", async () => {
+    const execute = vi.fn(async () => ({ ok: true as const, action: action.id, result: [] }));
+    const tools = createProductChatToolContext({
+      model,
+      actions: { catalog, execute, legacyDiscovery: true, prelistedSourceIds: ["gmail"] },
+    }).tools;
+    expect(tools).not.toHaveProperty("describe_actions");
+    await expect(
+      (tools.list_actions as ActionTool).execute({ source: "gmail" }),
+    ).resolves.toMatchObject({ actions: [action] });
+    await expect(
+      (tools.use_action as ActionTool).execute(
+        { action: action.id, params: { query: "launch" } },
+        { toolCallId: "reused" },
+      ),
+    ).resolves.toMatchObject({ ok: true });
   });
 });

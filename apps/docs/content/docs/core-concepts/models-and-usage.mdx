@@ -1,0 +1,48 @@
+---
+title: Models and usage
+description: Choose an engine and model, connect subscriptions, and inspect recorded usage.
+---
+
+Choose the engine and model in the Chat composer. Use the built-in opencompany engine for connected
+workspace work, or Codex and Claude Code for persistent cloud coding sessions. Available models and
+controls depend on the engine.
+
+## Connect a coding subscription
+
+Open **Settings → Inference → Coding subscriptions**.
+
+- **Codex:** connect your own ChatGPT subscription through the displayed sign-in flow.
+- **Claude Code:** connect your own Claude subscription using the setup-token flow shown in Settings.
+
+Each teammate manages their own coding subscriptions. These credentials authorize the engine;
+GitHub access and repository environments are configured separately. See
+[Cloud coding](/docs/guides/cloud-coding) for an end-to-end setup.
+
+## Shared model access
+
+The same Inference page has **Workspace model access**. A workspace admin can choose whether
+supported shared models use workspace credits or the admin's connected subscription. This setting
+is separate from each person's coding-sandbox login.
+
+Read the account identity and status shown there before changing the setting. If the shared account
+needs reauthorization, its owner must reconnect it.
+
+## Automatic model routing
+
+Enable **Automatic model routing** in **Settings → Preferences → Beta features** if you want
+opencompany to choose a model from the first message. The choice stays with the Chat. Use the
+composer's model picker when you want an explicit selection.
+
+Workflow steps have their own model configuration. Check those selections when adapting an
+interactive process into a Workflow.
+
+## Inspect usage
+
+Open **Settings → Usage** to review daily spend and its breakdown. A Task's details show its
+recorded cost when available. **Settings → Billing** contains workspace billing controls.
+
+A connected model subscription covers the model use supported by that connection; it doesn't
+imply that every managed capability or external service is free. Check the current settings and
+recorded usage for the work you're running.
+
+If a model or account is unavailable, see [Troubleshooting](/docs/guides/troubleshooting).

@@ -1,0 +1,71 @@
+---
+title: "Launching the public beta of opencompany"
+description: "opencompany is a model-independent, open-source AI workspace for small teams. Use any model, keep your agents running in the cloud, ship code with Claude Code and Codex in isolated sandboxes, and build shared context in a built-in wiki."
+date: "2026-09-07"
+author: "Louis Morgner"
+keywords:
+  - open source ai workspace
+  - model independent ai
+  - ai agents for small teams
+  - claude cowork alternative
+  - chatgpt work alternative
+  - agent native company
+---
+
+Today we're launching the public beta of opencompany: a model-independent, open-source AI workspace built for small teams that want to move real work to agents.
+
+## Why we're building a new AI workspace
+
+The model alone is not what makes AI useful. What unlocks real-world work is the model combined with the right setup, tools, and integrations — you can think of AI capability as model × harness. The frontier labs have scaled models to a level where this works for serious use cases, and they've shipped their own harnesses around them: ChatGPT Work, Claude Cowork, Claude Code, Codex.
+
+Here's the problem: as companies start rebuilding themselves in an agent-native way, they're wiring their entire operations into a single model vendor. We believe that's a mistake. There needs to be a model-neutral way to run your company on agents — one where you control your data and can switch models for any given task without losing your context, your setup, or your ways of operating. When a better model drops next week, switching should take minutes, not a migration.
+
+That's why we started building opencompany. Our mission is to build the best AI workspace in the world for small teams — a place where work gets done across your tools, your files, and your codebase. The philosophy from day one has been to build for ourselves and close the gaps we kept hitting with other tools in the market. This release is the first step.
+
+## What opencompany can do for your team
+
+You can think of opencompany today as an open-source alternative to products like Claude Cowork or ChatGPT Work, with four important differences:
+
+1. **Use any model — frontier or open weights.** If a new best-in-class model ships next week, you can use it immediately without changing your setup.
+2. **Your work lives in the cloud and keeps running.** Close your laptop and your agents continue to execute, and your whole team collaborates in one shared workspace. And because the codebase is open source, you're not locked into us either.
+3. **Coding agents run in isolated cloud sandboxes, with Claude Code and Codex supported out of the box.** Build multi-harness workflows and ship code faster.
+4. **A built-in wiki accumulates context across all your work.** Context is shared across the team, so every agent and every person gets better answers.
+
+Some of the use cases we've been loving internally:
+
+- A **#ship-feature** workflow that spins up a cloud sandbox with Codex and ships real features to production from a single prompt — behind our normal review gates.
+- An **#investigate-bug** workflow that picks up user reports with Claude Code, uses scoped read access to our database to reproduce the bug, then proposes the best fix and opens the PR.
+- Deep research on leads and guests for our YouTube show, combining data from X, LinkedIn, YouTube, and the public web — with zero manual setup.
+- Automatically adding new signups to Attio (our CRM) and drafting personalized outreach for each one.
+
+These are a few examples of what's possible today. We started by building the foundational blocks needed to get specific jobs done well, and they generalize across very different use cases. There's more experimental work shipping over the coming weeks as we push further into agentic workflows.
+
+For the start, we're shipping a fast web app. Native iOS and macOS clients are coming soon.
+
+## The building blocks of the platform
+
+We went through many iterations to find the most intuitive, safe, and useful shape for the core of the product. The most important decisions:
+
+**Everything is a session.** A session can be triggered by a user typing into the chatbox, by an event in a tool you use, or on a schedule. One canonical model for all work, whether a human kicked it off or not.
+
+**Plugins bring capabilities.** We're aligning with the official plugin and skills standard: a plugin holds the MCP connector, skills, and tools that get exposed to the model. On top of that, we layered our own permission model, so you define which actions an agent takes autonomously, which are disallowed, and which need your consent. Every action runs through a gateway, and credentials never pass through the model.
+
+**Built-in support for coding harnesses.** Claude Code and Codex are supported natively. Coding workloads spin up a cloud sandbox that's hooked up to all the plugins and configuration you've set for your product.
+
+**Wiki as a shared context layer.** Inspired by Andrej Karpathy's agent-wiki idea, every agent session can navigate a shared wiki for your company — query it, read it, edit it, manage it. You can also configure officially supported plugins to ingest events directly into the wiki, so your company's context compounds over time.
+
+There are more decisions worth breaking down in detail, and we'll write about them as we build this out. Follow along on [X](https://x.com/useopencompany).
+
+## What's next
+
+Launching is the first step of a long journey, and we plan to iterate aggressively. We're deliberately not writing long roadmaps — the field moves too fast for that to be honest.
+
+The beta is open, and we're onboarding the first batch of users personally to find the real friction points in their agent-native companies, so we can close the gaps and build something people truly love.
+
+The entire codebase is open source under the MIT license. Today the local setup is still maintainer-oriented; improving the contributor experience so developers everywhere can run opencompany and help shape it is one of the first things we're fixing.
+
+The future shouldn't be everyone on your team running their own AI setup. It should be one unified way for your team to get work done — without wasting time on setup ever again.
+
+---
+
+*Try opencompany at [opencompany.cloud](https://opencompany.cloud), star the repo on [GitHub](https://github.com/useopencompany/opencompany), and tell us what you think on [X](https://x.com/useopencompany).*

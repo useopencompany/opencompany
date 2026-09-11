@@ -4,6 +4,7 @@ export type ChatHostToolOperation =
   | "read_skill_file"
   | "create_workspace_skill"
   | "edit_workspace_skill"
+  | "workspace_skills"
   | "start_task"
   | "schedule_task"
   | "edit_task_schedule"

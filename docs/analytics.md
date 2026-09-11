@@ -11,7 +11,7 @@ without maintaining a second analytics sink.
 
 `packages/analytics/src/product-events.ts` is the current product registry. It defines every event
 name, allowed property shape, description, and safe property keys. Events cover app and onboarding
-activity, Chat and Task use, integrations and Brain ingestion, model usage and spend, and billing
+activity, Chat and Task use, plugins, connections and Brain ingestion, model usage and spend, and billing
 top-ups.
 
 `packages/analytics/src/events.ts` is a separate billing-compatibility registry. It exists for the
@@ -26,6 +26,43 @@ feature flags, browser performance, dead/rage clicks, and exception capture are 
 There is no separate `chat_started` event: the first Message is represented by
 `chat_message_sent.is_first_message`. Before adding a new event, check the registry for an existing
 signal that already answers the question.
+
+## Plugin and connection reporting
+
+Plugins are workspace-installed packages. Connections are authorized provider accounts; installing a
+plugin does not create a connection, and removing a plugin does not disconnect its accounts.
+
+| Question | Signal | Counting guidance |
+| --- | --- | --- |
+| Do users discover plugins? | `plugin_catalog_viewed` | Unique users/workspaces opening the catalog. |
+| Do they evaluate a plugin? | `plugin_import_previewed` | Successful server previews, including custom imports; group by `plugin_name`. Repeated previews are expected. |
+| Do they install it? | `plugin_installed` | Successful installs, excluding idempotent replays. `plugin_id` identifies the installation; `plugin_kind`, `skill_count`, and `mcp_server_count` describe its contents. |
+| Do they connect accounts? | `connection_added` | Successful authorization, including reconnects. Count distinct `connection_id` for unique accounts, split by `provider`. |
+| Do connected plugins deliver value? | `plugin_tool_call_completed` | Remote MCP calls actually dispatched by the shared plugin gateway. Filter `outcome = success` for usage; compare error share and `duration_ms` by plugin, capability, and engine. |
+| Do they stop using them? | `plugin_removed`, `connection_removed` | Successful explicit removals, recorded after persistence. These measure different actions. |
+
+Use catalog → preview → install as an exploration funnel. Measure adoption as workspaces with a
+successful plugin tool call, and retention as those workspaces using plugins again in later weeks.
+Connections may predate installation and may be shared by multiple plugins, so do not require
+install → connection → use to happen in that order. Personal authorization paths without workspace
+context emit user-level connections; do not infer workspace membership from those events.
+
+Tool-call events exclude catalog discovery, blocked permissions, missing credentials, and failures
+before dispatch. They contain no tool names, arguments, outputs, or error text. They cover remote MCP
+plugins through the shared gateway across engines, not local stdio MCP or skill execution. A skill-only
+installation is adoption intent, not evidence that the skill was used. Existing chat/task events remain
+the broader activity signals. Removal events do not cover provider-side revocation or token expiry.
+Workspace Stripe removals have no `connection_id`; other removals identify the deleted connection.
+
+### Event-name migration
+
+`connection_added` replaces `integration_added` at this release. New code emits only the new event;
+there is no dual emission or historical rewrite. Existing dashboards/insights that filter on
+`integration_added` need to include both names for a continuous historical authorization series.
+The old event lacks `connection_id`, so unique-account reporting is available only after this change.
+Keep `provider` values stable (for example `github_user`, `google_drive`, and `x_account`); these are
+provider identifiers, while `plugin_name` identifies the installed package. Plugin names should not be
+joined to provider IDs without the mapping in `packages/agent/src/plugin-gateway.ts`.
 
 ## Privacy rules
 

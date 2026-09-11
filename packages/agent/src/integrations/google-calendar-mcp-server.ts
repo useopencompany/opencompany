@@ -25,6 +25,7 @@ const TOOL_CAPABILITIES = {
   list_events: "query",
   get_event: "query",
   create_event: "write",
+  reschedule_event: "write",
 } as const satisfies Record<string, CapabilityId>;
 
 type GoogleCalendarMcpToolName = keyof typeof TOOL_CAPABILITIES;
@@ -104,6 +105,14 @@ const createEventSchema = {
     .optional(),
 };
 
+const rescheduleEventSchema = {
+  ...getEventSchema,
+  startTime: createEventSchema.startTime,
+  endTime: createEventSchema.endTime,
+  timeZone: createEventSchema.timeZone,
+  notificationLevel: createEventSchema.notificationLevel,
+};
+
 const READ_ANNOTATIONS = {
   readOnlyHint: true,
   destructiveHint: false,
@@ -177,18 +186,30 @@ export function createGoogleCalendarMcpService(input: {
             {
               title: "Create event",
               description:
-                "Create an event in Google Calendar. Attendee notifications default to all recipients.",
+                "Create a new event in Google Calendar. Never use this to move or reschedule an existing event; use reschedule_event with its original eventId. Attendee notifications default to all recipients.",
               inputSchema: createEventSchema,
               annotations: CREATE_ANNOTATIONS,
             },
             async (args) =>
               runTool(() => createEvent(calendarApiCall, payload, args, request.signal)),
           );
+          server.registerTool(
+            "reschedule_event",
+            {
+              title: "Reschedule event",
+              description:
+                "Change the time of an existing event, preserving its id, attendees, conference link, and other details. First resolve the original calendarId and eventId with list_events or get_event. For recurring meetings, use the specific occurrence id from list_events; this tool does not move an entire series. Keep timed events timed and all-day events all-day. Attendee notifications default to all recipients. Never create a replacement if rescheduling fails.",
+              inputSchema: rescheduleEventSchema,
+              annotations: { ...CREATE_ANNOTATIONS, idempotentHint: true },
+            },
+            async (args) =>
+              runTool(() => rescheduleEvent(calendarApiCall, payload, args, request.signal)),
+          );
         },
         {
           serverInfo: { name: "opencompany-google-calendar", version: "0.1.0" },
           instructions:
-            "Use list_calendars to resolve calendar ids, list_events or get_event to inspect events, and create_event only after the user requested a calendar write.",
+            "Use list_calendars to resolve calendar ids and list_events or get_event to inspect events. Use reschedule_event to move an existing meeting and create_event only to add a new meeting. If the requested operation is unavailable, explain the limitation before making any substitute calendar write.",
         },
         {
           streamableHttpEndpoint: "/mcp/plugins/google-calendar",
@@ -213,6 +234,7 @@ async function authorizeTicket(db: DbLike, payload: GoogleCalendarMcpTicketPaylo
   const [active, row] = await Promise.all([
     isPluginGatewayRegistrationActive(db, {
       workspaceId: payload.workspaceId,
+      userId: payload.userWorkosId,
       registrationId: payload.registrationId,
     }),
     loadGoogleCalendarIntegration({ userWorkosId: payload.userWorkosId }),
@@ -412,10 +434,60 @@ async function createEvent(
   return { calendarId, event: compactEvent(response) };
 }
 
+async function rescheduleEvent(
+  apiCall: CalendarApiCall,
+  payload: GoogleCalendarMcpTicketPayload,
+  args: z.infer<z.ZodObject<typeof rescheduleEventSchema>>,
+  signal: AbortSignal,
+) {
+  const calendarId = args.calendarId ?? "primary";
+  const times = eventTimes(args);
+  const url = new URL(
+    `${CALENDAR_BASE}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(args.eventId)}`,
+  );
+  const original = asRecord(await callGoogle(apiCall, payload, "GET", url, signal));
+  if (original.id !== args.eventId || original.status === "cancelled") {
+    throw new Error("The original event is unavailable or cancelled; no replacement was created.");
+  }
+  if (asArray(original.recurrence).length > 0) {
+    throw new Error("Select a specific recurring occurrence from list_events, not the series id.");
+  }
+  const originalStart = asRecord(original.start);
+  const originalEnd = asRecord(original.end);
+  const allDay = "date" in times.start;
+  if (allDay !== Boolean(originalStart.date)) {
+    throw new Error("Rescheduling must preserve whether the original event is timed or all-day.");
+  }
+  // A time-only patch must preserve each endpoint's timezone when none was requested.
+  if (!args.timeZone) {
+    if ("dateTime" in times.start && typeof originalStart.timeZone === "string")
+      times.start.timeZone = originalStart.timeZone;
+    if ("dateTime" in times.end && typeof originalEnd.timeZone === "string")
+      times.end.timeZone = originalEnd.timeZone;
+  }
+  const sameTime = (before: Record<string, unknown>, after: Record<string, unknown>) =>
+    allDay
+      ? before.date === after.date
+      : typeof before.dateTime === "string" &&
+        Date.parse(before.dateTime) === Date.parse(String(after.dateTime)) &&
+        before.timeZone === after.timeZone;
+  if (sameTime(originalStart, times.start) && sameTime(originalEnd, times.end)) {
+    return { calendarId, event: compactEvent(original) };
+  }
+  url.searchParams.set("sendUpdates", sendUpdates(args.notificationLevel));
+  const updated = asRecord(await callGoogle(apiCall, payload, "PATCH", url, signal, times));
+  if (updated.id !== args.eventId) {
+    throw new Error(
+      "Google Calendar did not return the rescheduled event. Read it before retrying.",
+    );
+  }
+  return { calendarId, event: compactEvent(updated) };
+}
+
 async function callGoogle(
   apiCall: CalendarApiCall,
   payload: GoogleCalendarMcpTicketPayload,
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "PATCH",
   url: URL,
   signal: AbortSignal,
   body?: unknown,
@@ -432,7 +504,12 @@ async function callGoogle(
   );
 }
 
-function eventTimes(args: z.infer<z.ZodObject<typeof createEventSchema>>) {
+function eventTimes(args: {
+  startTime: string;
+  endTime: string;
+  allDay?: boolean | undefined;
+  timeZone?: string | undefined;
+}) {
   const startDate = plainDate(args.startTime);
   const endDate = plainDate(args.endTime);
   const allDay = args.allDay ?? Boolean(startDate && endDate);

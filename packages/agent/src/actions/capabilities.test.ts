@@ -24,3 +24,16 @@ describe("Infisical capabilities", () => {
     expect(effectiveCapabilityMode("infisical", "write", {})).toBe("off");
   });
 });
+
+describe("Notion capabilities", () => {
+  it("requires approval for reads, agent sessions, and workspace changes", () => {
+    expect(providerCapabilities("notion")).toEqual([
+      expect.objectContaining({ id: "query", defaultMode: "ask" }),
+      expect.objectContaining({ id: "draft", defaultMode: "ask" }),
+      expect.objectContaining({ id: "write", defaultMode: "ask" }),
+    ]);
+    expect(effectiveCapabilityMode("notion", "query", {})).toBe("ask");
+    expect(effectiveCapabilityMode("notion", "draft", {})).toBe("ask");
+    expect(effectiveCapabilityMode("notion", "write", {})).toBe("ask");
+  });
+});

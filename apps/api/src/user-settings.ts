@@ -15,11 +15,13 @@ type DbLike = any;
 
 export type UserPreferenceSet = {
   timezone: string;
+  botsEnabled: boolean;
   taskSpawningEnabled: boolean;
   wikiEnabled: true;
   taskViewMode: TaskViewMode;
   taskTimeRange: TaskTimeRange;
   autoModelRoutingEnabled: boolean;
+  reviewInboxEnabled: boolean;
 };
 
 export type UpdateUserPreferencesCommand = Partial<Omit<UserPreferenceSet, "wikiEnabled">> & {
@@ -43,10 +45,12 @@ export type UserSettingsService = {
 
 const PREFERENCE_COLUMNS = {
   timezone: users.timezone,
+  botsEnabled: users.botsEnabled,
   taskSpawningEnabled: users.taskSpawningEnabled,
   taskViewMode: users.taskViewMode,
   taskTimeRange: users.taskTimeRange,
   autoModelRoutingEnabled: users.autoModelRoutingEnabled,
+  reviewInboxEnabled: users.reviewInboxEnabled,
 };
 
 export function createUserSettingsService(input: {
@@ -63,7 +67,12 @@ export function createUserSettingsService(input: {
         const timezone = normalizeScheduleTimezone(command.timezone);
         if (timezone !== current.timezone) changes.timezone = timezone;
       }
-      for (const field of ["taskSpawningEnabled", "autoModelRoutingEnabled"] as const) {
+      for (const field of [
+        "botsEnabled",
+        "taskSpawningEnabled",
+        "autoModelRoutingEnabled",
+        "reviewInboxEnabled",
+      ] as const) {
         const value = command[field];
         if (value !== undefined && value !== current[field]) changes[field] = value;
       }

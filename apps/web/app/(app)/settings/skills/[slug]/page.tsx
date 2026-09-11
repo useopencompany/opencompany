@@ -1,6 +1,5 @@
 import { SkillBundleRoute } from "@/components/Routes";
 import { SettingsContent } from "@/components/SettingsChrome";
-import { currentUser } from "@/lib/auth";
 import { getHeadlessSkill } from "@/lib/headless-knowledge-server";
 
 type SkillBundlePageProps = {
@@ -9,7 +8,6 @@ type SkillBundlePageProps = {
 
 export default async function SkillBundlePage({ params }: SkillBundlePageProps) {
   const { slug } = await params;
-  const context = await currentUser();
   const skill = await getHeadlessSkill(slug);
 
   if (!skill) {
@@ -24,5 +22,5 @@ export default async function SkillBundlePage({ params }: SkillBundlePageProps) 
     );
   }
 
-  return <SkillBundleRoute installation={skill} canEdit={context.role === "admin"} />;
+  return <SkillBundleRoute installation={skill} canEdit={skill.canEdit} />;
 }

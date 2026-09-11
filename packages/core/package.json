@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./resource-ids": {
+      "types": "./src/resource-ids.ts",
+      "default": "./src/resource-ids.ts"
+    },
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"

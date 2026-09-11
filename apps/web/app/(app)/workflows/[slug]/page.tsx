@@ -1,4 +1,8 @@
-import type { PluginEventDefinitionDto, PluginListItemDto } from "@opencompany/protocol";
+import type {
+  PluginEventDefinitionDto,
+  PluginListItemDto,
+  SkillCatalogItemDto,
+} from "@opencompany/protocol";
 import Link from "next/link";
 import { TasksWorkflowsDisabledRoute } from "@/components/Routes";
 import { WorkflowEditor } from "@/components/WorkflowEditor";
@@ -66,7 +70,7 @@ export default async function WorkflowEditorPage({ params }: WorkflowEditorPageP
       workflow={workflow}
       workspaceId={context.workspace.id}
       canEdit
-      skillCatalog={skillCatalog}
+      skillCatalog={skillCatalog.filter((skill: SkillCatalogItemDto) => skill.scope !== "personal")}
       linearAccounts={linearAccounts}
       workflowEvents={workflowEvents}
     />

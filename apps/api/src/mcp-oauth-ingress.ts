@@ -54,17 +54,41 @@ import {
   verifyNeonMcpState,
 } from "@opencompany/agent/integrations/neon-mcp";
 import {
+  appendNotionMcpStatus,
+  completeNotionMcpOAuth,
+  startNotionMcpOAuth,
+  verifyNotionMcpState,
+} from "@opencompany/agent/integrations/notion-mcp";
+import {
   appendPostHogMcpStatus,
   completePostHogMcpOAuth,
   startPostHogMcpOAuth,
   verifyPostHogMcpState,
 } from "@opencompany/agent/integrations/posthog-mcp";
 import {
+  appendResendMcpStatus,
+  completeResendMcpOAuth,
+  startResendMcpOAuth,
+  verifyResendMcpState,
+} from "@opencompany/agent/integrations/resend-mcp";
+import {
   appendSigNozMcpStatus,
   completeSigNozMcpOAuth,
   startSigNozMcpOAuth,
   verifySigNozMcpState,
 } from "@opencompany/agent/integrations/signoz-mcp";
+import {
+  appendStripeMcpStatus,
+  completeStripeMcpOAuth,
+  startStripeMcpOAuth,
+  verifyStripeMcpState,
+} from "@opencompany/agent/integrations/stripe-mcp";
+import {
+  appendSupabaseMcpStatus,
+  completeSupabaseMcpOAuth,
+  startSupabaseMcpOAuth,
+  verifySupabaseMcpState,
+} from "@opencompany/agent/integrations/supabase-mcp";
 import {
   appendVercelMcpStatus,
   completeVercelMcpOAuth,
@@ -86,6 +110,10 @@ export type McpOAuthProvider =
   | "granola"
   | "posthog"
   | "neon"
+  | "notion"
+  | "stripe"
+  | "supabase"
+  | "resend"
   | "latitude"
   | "jamie"
   | "betterstack"
@@ -182,6 +210,34 @@ const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
     verifyState: verifyNeonMcpState,
     appendStatus: appendNeonMcpStatus,
     deniedReason: "neon_denied",
+  },
+  stripe: {
+    start: startStripeMcpOAuth,
+    complete: completeStripeMcpOAuth,
+    verifyState: verifyStripeMcpState,
+    appendStatus: appendStripeMcpStatus,
+    deniedReason: "stripe_denied",
+  },
+  notion: {
+    start: startNotionMcpOAuth,
+    complete: completeNotionMcpOAuth,
+    verifyState: verifyNotionMcpState,
+    appendStatus: appendNotionMcpStatus,
+    deniedReason: "notion_denied",
+  },
+  supabase: {
+    start: startSupabaseMcpOAuth,
+    complete: completeSupabaseMcpOAuth,
+    verifyState: verifySupabaseMcpState,
+    appendStatus: appendSupabaseMcpStatus,
+    deniedReason: "supabase_denied",
+  },
+  resend: {
+    start: startResendMcpOAuth,
+    complete: completeResendMcpOAuth,
+    verifyState: verifyResendMcpState,
+    appendStatus: appendResendMcpStatus,
+    deniedReason: "resend_denied",
   },
   latitude: {
     start: startLatitudeMcpOAuth,

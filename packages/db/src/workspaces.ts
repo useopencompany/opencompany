@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { newResourceId } from "@opencompany/core/resource-ids";
 import { and, asc, eq, isNull, or, sql } from "drizzle-orm";
 import { normalizeBrainId } from "../../brain/src/index";
 import { calendarMonthWindow, PRO_STRIPE_PRODUCT_KEY } from "./billing-constants";
@@ -45,7 +46,7 @@ export type WorkspaceMemberWithUser = {
 };
 
 export function newWorkspaceId() {
-  return `goat_ws_${randomUUID()}`;
+  return newResourceId("workspace");
 }
 
 export function newBrainId(name = "brain") {

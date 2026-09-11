@@ -1,9 +1,12 @@
+import { CustomMcpPluginDetail } from "@/components/CustomMcpPluginSettings";
 import {
   AttioPluginDetail,
   BetterStackPluginDetail,
+  ConvexPluginDetail,
   FathomPluginDetail,
   GitHubPluginDetail,
   GmailPluginDetail,
+  GoogleAdminPluginDetail,
   GoogleCalendarPluginDetail,
   GoogleDrivePluginDetail,
   GranolaPluginDetail,
@@ -13,19 +16,22 @@ import {
   LatitudePluginDetail,
   LinearPluginDetail,
   NeonPluginDetail,
+  NotionPluginDetail,
   type PluginLoadState,
   PostHogPluginDetail,
   RenderPluginDetail,
+  ResendPluginDetail,
   SigNozPluginDetail,
   SlackPluginDetail,
   StripePluginDetail,
+  SupabasePluginDetail,
   VercelPluginDetail,
   XPluginDetail,
 } from "@/components/OfficialMcpPluginSettings";
 import { OfficialSkillPluginDetail, PluginDetail } from "@/components/PluginSettings";
 import { SettingsContent } from "@/components/SettingsChrome";
 import { currentUser } from "@/lib/auth";
-import { getHeadlessPlugin } from "@/lib/headless-knowledge-server";
+import { getHeadlessCustomMcp, getHeadlessPlugin } from "@/lib/headless-knowledge-server";
 import {
   isOfficialMcpPluginName,
   isOfficialSkillPluginName,
@@ -37,10 +43,7 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
   const { name } = await params;
   const normalizedName = name.toLocaleLowerCase();
   if (isOfficialMcpPluginName(normalizedName)) {
-    const [context, pluginState] = await Promise.all([
-      currentUser(),
-      loadOfficialPlugin(normalizedName),
-    ]);
+    const [, pluginState] = await Promise.all([currentUser(), loadOfficialPlugin(normalizedName)]);
     const Detail = {
       attio: AttioPluginDetail,
       betterstack: BetterStackPluginDetail,
@@ -49,6 +52,7 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
       gmail: GmailPluginDetail,
       granola: GranolaPluginDetail,
       "google-drive": GoogleDrivePluginDetail,
+      "google-admin": GoogleAdminPluginDetail,
       "google-calendar": GoogleCalendarPluginDetail,
       hubspot: HubSpotPluginDetail,
       infisical: InfisicalPluginDetail,
@@ -56,7 +60,11 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
       latitude: LatitudePluginDetail,
       linear: LinearPluginDetail,
       neon: NeonPluginDetail,
+      notion: NotionPluginDetail,
+      supabase: SupabasePluginDetail,
+      resend: ResendPluginDetail,
       posthog: PostHogPluginDetail,
+      convex: ConvexPluginDetail,
       render: RenderPluginDetail,
       signoz: SigNozPluginDetail,
       slack: SlackPluginDetail,
@@ -64,23 +72,24 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
       vercel: VercelPluginDetail,
       x: XPluginDetail,
     }[normalizedName];
-    return <Detail pluginState={pluginState} canEdit={context.role === "admin"} />;
+    return <Detail pluginState={pluginState} canEdit={true} />;
   }
   if (isOfficialSkillPluginName(normalizedName)) {
-    const [context, plugin] = await Promise.all([currentUser(), getHeadlessPlugin(normalizedName)]);
+    const [, plugin] = await Promise.all([currentUser(), getHeadlessPlugin(normalizedName)]);
     const metadata = OFFICIAL_SKILL_PLUGIN_METADATA[normalizedName];
     return plugin ? (
       <PluginDetail
         plugin={plugin}
-        canEdit={context.role === "admin"}
+        canEdit={true}
         title={metadata.label}
         description={metadata.description}
+        officialPluginName={normalizedName}
       />
     ) : (
-      <OfficialSkillPluginDetail name={normalizedName} canEdit={context.role === "admin"} />
+      <OfficialSkillPluginDetail name={normalizedName} canEdit={true} />
     );
   }
-  const [context, plugin] = await Promise.all([currentUser(), getHeadlessPlugin(name)]);
+  const [, plugin] = await Promise.all([currentUser(), getHeadlessPlugin(name)]);
   if (!plugin) {
     return (
       <SettingsContent
@@ -92,7 +101,16 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
       </SettingsContent>
     );
   }
-  return <PluginDetail plugin={plugin} canEdit={context.role === "admin"} />;
+  if (plugin.source.type === "custom_mcp") {
+    return (
+      <CustomMcpPluginDetail
+        plugin={plugin}
+        initialStatus={await getHeadlessCustomMcp(name)}
+        canEdit={true}
+      />
+    );
+  }
+  return <PluginDetail plugin={plugin} canEdit={true} />;
 }
 
 async function loadOfficialPlugin(

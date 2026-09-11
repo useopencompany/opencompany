@@ -7,6 +7,27 @@ const connectedAuth = {
 };
 
 describe("engine message model admission", () => {
+  it("admits Opus 5 and passes its CLI model name and effort to Claude Code", async () => {
+    await expect(
+      admitEngineMessage({
+        actor: {} as never,
+        engine: {
+          type: "claude_code",
+          schemaVersion: 1,
+          settings: { reasoningEffort: "high" },
+        },
+        model: "anthropic/claude-opus-5",
+        defaultProductModel: "moonshotai/kimi-k3",
+        auth: connectedAuth as never,
+      }),
+    ).resolves.toEqual({
+      engine: "claude_code",
+      model: "anthropic/claude-opus-5",
+      runtimeModel: "claude-opus-5",
+      settings: { reasoningEffort: "high" },
+    });
+  });
+
   it("normalizes rollout-gated opencompany sessions to the safe replacement", async () => {
     await expect(
       admitEngineMessage({
@@ -20,6 +41,22 @@ describe("engine message model admission", () => {
       engine: "opencompany",
       model: "openai/gpt-5.6-sol",
       runtimeModel: "openai/gpt-5.6-sol",
+    });
+  });
+
+  it("admits DeepSeek V4 Flash without changing the requested model", async () => {
+    await expect(
+      admitEngineMessage({
+        actor: {} as never,
+        engine: { type: "opencompany", schemaVersion: 1 },
+        model: "deepseek/deepseek-v4-flash",
+        defaultProductModel: "moonshotai/kimi-k3",
+        auth: connectedAuth as never,
+      }),
+    ).resolves.toEqual({
+      engine: "opencompany",
+      model: "deepseek/deepseek-v4-flash",
+      runtimeModel: "deepseek/deepseek-v4-flash",
     });
   });
 

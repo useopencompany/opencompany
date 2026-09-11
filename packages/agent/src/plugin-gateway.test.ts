@@ -17,10 +17,14 @@ const mocks = vi.hoisted(() => ({
   loadGmailConnection: vi.fn(),
   getGranolaState: vi.fn(),
   loadGranolaConnection: vi.fn(),
+  getGoogleAdminState: vi.fn(),
+  loadGoogleAdminConnection: vi.fn(),
   getGoogleCalendarState: vi.fn(),
   loadConnection: vi.fn(),
   loadGitHubConnection: vi.fn(),
   loadFathomConnection: vi.fn(),
+  getConvexState: vi.fn(),
+  loadConvexConnection: vi.fn(),
   getGoogleDriveState: vi.fn(),
   loadGoogleDriveConnection: vi.fn(),
   loadGoogleCalendarConnection: vi.fn(),
@@ -34,6 +38,12 @@ const mocks = vi.hoisted(() => ({
   loadLatitudeConnection: vi.fn(),
   getNeonState: vi.fn(),
   loadNeonConnection: vi.fn(),
+  getNotionState: vi.fn(),
+  getSupabaseState: vi.fn(),
+  getResendState: vi.fn(),
+  loadNotionConnection: vi.fn(),
+  loadSupabaseConnection: vi.fn(),
+  loadResendConnection: vi.fn(),
   getBetterStackState: vi.fn(),
   loadBetterStackConnection: vi.fn(),
   getRenderState: vi.fn(),
@@ -105,12 +115,24 @@ vi.mock("./integrations/granola-mcp", () => ({
   getGranolaMcpIntegrationState: mocks.getGranolaState,
   loadGranolaMcpWorkerConnection: mocks.loadGranolaConnection,
 }));
+vi.mock("./integrations/google-admin-mcp", () => ({
+  GOOGLE_ADMIN_MCP_ENDPOINT_URL: "https://api.opencompany.chat/mcp/plugins/google-admin",
+  googleAdminMcpRuntimeEndpointUrl: () => "https://api.opencompany.chat/mcp/plugins/google-admin",
+  getGoogleAdminMcpIntegrationState: mocks.getGoogleAdminState,
+  loadGoogleAdminMcpWorkerConnection: mocks.loadGoogleAdminConnection,
+}));
 vi.mock("./integrations/google-calendar-mcp", () => ({
   GOOGLE_CALENDAR_MCP_ENDPOINT_URL: "https://api.opencompany.chat/mcp/plugins/google-calendar",
   googleCalendarMcpRuntimeEndpointUrl: () =>
     "https://api.opencompany.chat/mcp/plugins/google-calendar",
   getGoogleCalendarMcpIntegrationState: mocks.getGoogleCalendarState,
   loadGoogleCalendarMcpWorkerConnection: mocks.loadGoogleCalendarConnection,
+}));
+vi.mock("./integrations/convex-mcp", () => ({
+  CONVEX_MCP_ENDPOINT_URL: "https://api.opencompany.chat/mcp/plugins/convex",
+  convexMcpRuntimeEndpointUrl: () => "https://api.opencompany.chat/mcp/plugins/convex",
+  getConvexIntegrationState: mocks.getConvexState,
+  loadConvexMcpWorkerConnection: mocks.loadConvexConnection,
 }));
 vi.mock("./integrations/google-drive-mcp", () => ({
   GOOGLE_DRIVE_MCP_ENDPOINT_URL: "https://api.opencompany.chat/mcp/plugins/google-drive",
@@ -149,6 +171,21 @@ vi.mock("./integrations/neon-mcp", () => ({
     "https://mcp.neon.tech/mcp?readonly=true&category=projects&category=branches&category=schema&category=querying",
   getNeonIntegrationState: mocks.getNeonState,
   loadNeonMcpWorkerConnection: mocks.loadNeonConnection,
+}));
+vi.mock("./integrations/notion-mcp", () => ({
+  NOTION_MCP_ENDPOINT_URL: "https://mcp.notion.com/mcp",
+  getNotionMcpIntegrationState: mocks.getNotionState,
+  loadNotionMcpWorkerConnection: mocks.loadNotionConnection,
+}));
+vi.mock("./integrations/supabase-mcp", () => ({
+  SUPABASE_MCP_ENDPOINT_URL: "https://mcp.supabase.com/mcp",
+  getSupabaseMcpIntegrationState: mocks.getSupabaseState,
+  loadSupabaseMcpWorkerConnection: mocks.loadSupabaseConnection,
+}));
+vi.mock("./integrations/resend-mcp", () => ({
+  RESEND_MCP_ENDPOINT_URL: "https://mcp.resend.com/mcp",
+  getResendMcpIntegrationState: mocks.getResendState,
+  loadResendMcpWorkerConnection: mocks.loadResendConnection,
 }));
 vi.mock("./integrations/latitude-mcp", () => ({
   LATITUDE_MCP_ENDPOINT_URL: "https://api.latitude.so/v1/mcp",
@@ -233,6 +270,7 @@ describe("plugin gateway registration cache", () => {
     const registrations = await resolvePluginGatewayRegistrations(identity, { db, now });
 
     expect(mocks.claimRefresh).toHaveBeenCalledWith(db, {
+      userId: "user_1",
       workspaceId: "workspace_1",
       registrationId: "plugin_gateway_1",
       staleAt: now,
@@ -401,6 +439,19 @@ describe("plugin gateway registration cache", () => {
     });
     expect(registration?.getState).toBe(mocks.getXState);
     expect(registration?.loadConnection).toBe(mocks.loadXConnection);
+    expect(registration?.discoverySnapshot).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "create_posts",
+          classification: expect.objectContaining({ capabilityId: "write", defaultMode: "ask" }),
+        }),
+        expect.objectContaining({
+          name: "get_posts_analytics",
+          classification: expect.objectContaining({ capabilityId: "query", defaultMode: "ask" }),
+        }),
+      ]),
+    );
+    expect(mocks.discoverSnapshot).not.toHaveBeenCalled();
 
     mocks.listRegistrations.mockResolvedValueOnce([
       {
@@ -512,6 +563,57 @@ describe("plugin gateway registration cache", () => {
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
   });
 
+  it("binds Google credentials only to opencompany's exact Admin MCP endpoint", async () => {
+    const calendarRecord = record({
+      pluginName: "google-admin",
+      pluginLabel: "google-admin",
+      pluginDescription: "Google Admin plugin tools.",
+      connectionProvider: "google-admin",
+      server: {
+        name: "google-admin",
+        type: "streamable-http",
+        url: "https://api.opencompany.chat/mcp/plugins/google-admin",
+        headers: {},
+      },
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([calendarRecord]);
+
+    const registrations = await resolvePluginGatewayRegistrations(identity, { db, now });
+    expect(registrations).toEqual([
+      expect.objectContaining({
+        source: "plugin:google-admin:google-admin",
+        connectionProvider: "google_admin",
+        getState: mocks.getGoogleAdminState,
+      }),
+    ]);
+    await registrations[0]!.loadConnection({
+      ...identity,
+      operation: { type: "tools/list" },
+      onAuthorizationRequired: () => {
+        throw new Error("authorization required");
+      },
+    });
+    expect(mocks.loadGoogleAdminConnection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ...identity,
+        registrationId: "plugin_gateway_1",
+        operation: { type: "tools/list" },
+      }),
+    );
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...calendarRecord,
+        server: {
+          ...calendarRecord.server,
+          url: "https://api.opencompany.chat.evil.example/mcp/plugins/google-admin",
+        },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
   it("binds Google credentials only to opencompany's exact Calendar MCP endpoint", async () => {
     const calendarRecord = record({
       pluginName: "google-calendar",
@@ -597,6 +699,56 @@ describe("plugin gateway registration cache", () => {
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
   });
 
+  it("binds Convex credentials only to opencompany's exact Convex MCP endpoint", async () => {
+    const convexRecord = record({
+      pluginName: "convex",
+      pluginLabel: "convex",
+      pluginDescription: "Convex plugin tools.",
+      connectionProvider: "convex",
+      server: {
+        name: "convex",
+        type: "streamable-http",
+        url: "https://api.opencompany.chat/mcp/plugins/convex",
+        headers: {},
+      },
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([convexRecord]);
+
+    const registrations = await resolvePluginGatewayRegistrations(identity, { db, now });
+    expect(registrations).toEqual([
+      expect.objectContaining({
+        source: "plugin:convex:convex",
+        connectionProvider: "convex",
+        getState: mocks.getConvexState,
+      }),
+    ]);
+    await registrations[0]!.loadConnection({
+      ...identity,
+      operation: { type: "tools/list" },
+      onAuthorizationRequired: () => {
+        throw new Error("authorization required");
+      },
+    });
+    expect(mocks.loadConvexConnection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ...identity,
+        registrationId: "plugin_gateway_1",
+        operation: { type: "tools/list" },
+      }),
+    );
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...convexRecord,
+        server: {
+          ...convexRecord.server,
+          url: "https://api.opencompany.chat.evil.example/mcp/plugins/convex",
+        },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
   it("binds Google credentials only to opencompany's exact Drive MCP endpoint", async () => {
     const googleDriveRecord = record({
       pluginName: "google-drive",
@@ -908,6 +1060,40 @@ describe("plugin gateway registration cache", () => {
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
   });
 
+  it("binds Notion credentials only to Notion's exact hosted MCP endpoint", async () => {
+    const notionRecord = record({
+      pluginName: "notion",
+      pluginLabel: "Notion",
+      pluginDescription: "Notion workspace tools.",
+      connectionProvider: "notion",
+      server: {
+        name: "notion",
+        type: "streamable-http",
+        url: "https://mcp.notion.com/mcp",
+        headers: {},
+      },
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([notionRecord]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:notion:notion",
+        connectionProvider: "notion",
+        getState: mocks.getNotionState,
+        loadConnection: mocks.loadNotionConnection,
+      }),
+    ]);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...notionRecord,
+        server: { ...notionRecord.server, url: "https://mcp.notion.com.evil.example/mcp" },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
   it("binds Stripe credentials only to the reviewed hosted endpoint", async () => {
     const stripeRecord = record({
       pluginName: "stripe",
@@ -1010,6 +1196,85 @@ describe("plugin gateway registration cache", () => {
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
   });
 
+  it("binds Supabase OAuth credentials only to Supabase's exact hosted MCP endpoint", async () => {
+    const supabaseRecord = record({
+      pluginName: "supabase",
+      pluginLabel: "supabase",
+      pluginDescription: "Supabase plugin tools.",
+      connectionProvider: "supabase",
+      server: {
+        name: "supabase",
+        type: "streamable-http",
+        url: "https://mcp.supabase.com/mcp",
+        headers: {},
+      },
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([supabaseRecord]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:supabase:supabase",
+        connectionProvider: "supabase",
+        getState: mocks.getSupabaseState,
+        loadConnection: mocks.loadSupabaseConnection,
+      }),
+    ]);
+
+    for (const url of [
+      "https://mcp.supabase.com.evil.example/mcp",
+      "https://evil.example/mcp",
+      "http://mcp.supabase.com/mcp",
+      "https://mcp.supabase.com/other",
+      "https://mcp.supabase.com/mcp?project_ref=unreviewed",
+      "https://attacker@mcp.supabase.com/mcp",
+    ]) {
+      mocks.listRegistrations.mockResolvedValueOnce([
+        { ...supabaseRecord, server: { ...supabaseRecord.server, url } },
+      ]);
+      await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+    }
+  });
+  it("binds Resend OAuth credentials only to Resend's exact hosted MCP endpoint", async () => {
+    const resendRecord = record({
+      pluginName: "resend",
+      pluginLabel: "resend",
+      pluginDescription: "Resend plugin tools.",
+      connectionProvider: "resend",
+      server: {
+        name: "resend",
+        type: "streamable-http",
+        url: "https://mcp.resend.com/mcp",
+        headers: {},
+      },
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([resendRecord]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:resend:resend",
+        connectionProvider: "resend",
+        getState: mocks.getResendState,
+        loadConnection: mocks.loadResendConnection,
+      }),
+    ]);
+
+    for (const url of [
+      "https://mcp.resend.com.evil.example/mcp",
+      "https://evil.example/mcp",
+      "http://mcp.resend.com/mcp",
+      "https://mcp.resend.com/other",
+      "https://mcp.resend.com/mcp?redirect=unreviewed",
+      "https://attacker@mcp.resend.com/mcp",
+    ]) {
+      mocks.listRegistrations.mockResolvedValueOnce([
+        { ...resendRecord, server: { ...resendRecord.server, url } },
+      ]);
+      await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+    }
+  });
+
   it("binds Vercel credentials only to Vercel's exact MCP root endpoint", async () => {
     const vercelRecord = record({
       pluginName: "vercel",
@@ -1109,6 +1374,7 @@ describe("plugin gateway registration cache", () => {
     });
 
     expect(mocks.listRegistrations).toHaveBeenCalledWith(db, {
+      userId: "user_1",
       workspaceId: "workspace_1",
       pluginName: "linear",
     });

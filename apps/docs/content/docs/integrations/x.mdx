@@ -1,21 +1,50 @@
 ---
 title: X
-description: Research conversations and manage an X account through the official MCP plugin.
+description: Research conversations, publish posts with images, and measure results from your X account.
 ---
 
 ## Install and connect
 
-X is an official Agent Plugin backed by [X's hosted MCP server](https://docs.x.com/tools/mcp).
+X is an official Agent Plugin combining [X's hosted MCP server](https://docs.x.com/tools/mcp)
+with opencompany tools for X's official API.
 A workspace admin installs the immutable package from **Settings → Plugins → X**. Each person who
 wants to use X tools then connects their own X account from that plugin page.
 
-The most recently connected account powers plugin tools. Older X connections remain stored as a
-legacy fallback and become available again if the plugin is uninstalled.
+The most recently connected account powers plugin tools. Check the connected account before
+publishing. Uninstalling the plugin removes its tools from the agent.
+
+## Publish and measure
+
+- **Publish a post:** create a text post, attach uploaded images, quote a post, or add a poll.
+  Replies use the same action. X determines whether your account is eligible to reply.
+- **Upload an image:** upload a PNG or JPEG up to 5 MiB, then set its alt text before publishing.
+  Uploading an image does not publish a post. Media IDs expire; use the expiry returned by X.
+- **Delete a post:** delete a specific post owned by the connected account.
+- **Search recent posts:** search the last seven days using X query operators and pagination.
+- **Read analytics:** request metrics for specific posts over an explicit time range.
+  Available metrics depend on your X access; missing values do not mean zero.
+
+For example, ask: “Prepare a launch post with this screenshot, add alt text, and show me before
+publishing,” or “Compare the performance of these posts over the last week.” Publishing is a
+separate action from preparing copy or uploading media. Writes require approval by default.
+
+The plugin cannot save ordinary tweet drafts in X. Keep draft copy in chat or Wiki until you are
+ready to publish. X Articles and Ads API drafts are separate products.
+
+X applies its own account limits, API access rules, and rate limits. For self-serve API customers,
+replies require the original author to have mentioned the replying account or quoted one of its
+posts. See [X's publishing restrictions](https://docs.x.com/x-api/posts/manage-tweets/integrate).
+After an interrupted publish request, check the account's recent posts before retrying to avoid
+creating a duplicate.
 
 ## Scopes and permissions
 
-The connection requests `tweet.read`, `tweet.write`, `users.read`, and `offline.access`. The plugin
-groups X's current non-streaming MCP tools into three controls:
+The connection requests `tweet.read`, `tweet.write`, `users.read`, `offline.access`, `media.write`,
+`bookmark.read`, and `bookmark.write`. Existing connections must reconnect to grant image-upload
+and bookmark permissions. Existing text publishing and research continue to work; a missing
+permission produces a reconnect message when you try the affected action.
+
+The plugin groups tools into three controls:
 
 - **Research public X data — On:** public posts, profiles, lists, communities, trends, news, and
   Spaces can be inspected automatically.
@@ -29,11 +58,29 @@ opencompany connection does not request. X can reject those calls until the acco
 required access. X API usage may consume the connected developer app's paid credits. New or
 unclassified tools always start at **Ask**, even when X marks them read-only.
 
-OAuth credentials remain encrypted and server-side. The plugin gateway sends them only to the
-fixed `https://api.x.com/mcp` endpoint. Reconnect the account if X revokes the grant or the saved
+OAuth credentials remain encrypted and server-side. The plugin gateway sends them only to X's
+fixed hosted MCP endpoint or the supported `https://api.x.com/2/` API endpoints. Reconnect the account if X revokes the grant or the saved
 refresh token expires. X's own automation, duplicate-content, display, and developer policies still
 apply to every call; review proposed posts and destructive actions before approving them.
 
-## Brain ingestion
+## API tool details
 
-Connected X accounts are not configurable Brain sources in the current UI.
+The additional tools are `create_posts`, `delete_posts`, `upload_image`, `set_media_alt_text`,
+`search_posts_recent`, and `get_posts_analytics`. They run through the same personal plugin gateway,
+including permission checks, account-change checks, and audit events. New tools are available to
+existing installations without reinstalling; the saved tool list in settings updates on discovery
+refresh (normally within an hour).
+
+`upload_image` accepts base64 file content, without a data URL prefix. It accepts neither sandbox
+paths nor arbitrary download URLs. It returns the X media ID used by `set_media_alt_text` and
+`create_posts`. Video and GIF uploads are not included in this release.
+
+Recent search preserves `meta.next_token`; pass it as `next_token` for the next page. Analytics
+accepts up to 100 IDs and preserves any per-post errors returned alongside successful results.
+Public research and account analytics have separate permission categories. Unknown upstream tools
+still default to Ask; camelCase and snake_case spellings of reviewed X tools share their category.
+
+## Knowledge ingestion
+
+X isn't offered by the current Wiki source picker. Ask the agent to save a reviewed result
+in Wiki when it should inform future work.

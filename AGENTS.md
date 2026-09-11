@@ -13,7 +13,7 @@ Use judgment. The goal is not to follow rules mechanically; the goal is to ship 
 
 ## Stack
 
-- Package manager: `bun@1.3.2`
+- Package manager: `bun@1.4.2`
 - Runtime: Node `>=20.20.0`
 - Stack: Turborepo, Bun, Next.js App Router, Drizzle, Neon Postgres, WorkOS AuthKit, Vercel AI Gateway, GitHub App integration.
 - Product app: `apps/web`

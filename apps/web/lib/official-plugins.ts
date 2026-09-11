@@ -1,3 +1,5 @@
+import { OFFICIAL_PLUGIN_SOURCES } from "@opencompany/agent-runtime/official-plugin-catalog";
+
 export type OfficialMcpPluginName =
   | "attio"
   | "betterstack"
@@ -5,6 +7,7 @@ export type OfficialMcpPluginName =
   | "github"
   | "gmail"
   | "granola"
+  | "google-admin"
   | "google-calendar"
   | "google-drive"
   | "hubspot"
@@ -13,7 +16,11 @@ export type OfficialMcpPluginName =
   | "latitude"
   | "linear"
   | "neon"
+  | "notion"
+  | "supabase"
+  | "resend"
   | "posthog"
+  | "convex"
   | "render"
   | "vercel"
   | "signoz"
@@ -50,6 +57,7 @@ export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
     | "github_user"
     | "gmail"
     | "granola"
+    | "google_admin"
     | "google_calendar"
     | "google_drive"
     | "hubspot"
@@ -58,7 +66,11 @@ export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
     | "latitude"
     | "linear"
     | "neon"
+    | "notion"
+    | "supabase"
+    | "resend"
     | "posthog"
+    | "convex"
     | "render"
     | "vercel"
     | "signoz"
@@ -80,6 +92,17 @@ export type OfficialSkillPluginMetadata = OfficialPluginMetadataBase & {
 
 export type OfficialPluginMetadata = OfficialMcpPluginMetadata | OfficialSkillPluginMetadata;
 
+const OFFICIAL_PLUGIN_SOURCE_PATTERN =
+  /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/([0-9a-f]{40})(?:\/|$)/u;
+
+export function officialPluginUpdateAvailable(
+  installedCommit: string,
+  officialSource: string,
+): boolean {
+  const expectedCommit = OFFICIAL_PLUGIN_SOURCE_PATTERN.exec(officialSource)?.[1];
+  return expectedCommit !== undefined && installedCommit !== expectedCommit;
+}
+
 // The public repository is the reviewed trust boundary. Keep every source pinned to a full commit.
 export const OFFICIAL_MCP_PLUGIN_METADATA = {
   attio: {
@@ -88,8 +111,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     label: "Attio",
     description: "Inspect CRM structure, query workspace data, and make approved changes.",
     category: "business",
-    source:
-      "https://github.com/useopencompany/plugins/tree/0daeec4cff5d5f9925af2901410e1aa6c8baf0d8/attio",
+    source: OFFICIAL_PLUGIN_SOURCES["attio"],
     connectionProvider: "attio",
     connectHref: "/api/integrations/attio-mcp/start?returnTo=/settings/plugins/attio",
     accountDescription: "The Attio account opencompany uses when you run CRM tools.",
@@ -103,8 +125,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     description:
       "Investigate observability data and manage monitoring, incidents, dashboards, and team access.",
     category: "engineering",
-    source:
-      "https://github.com/useopencompany/plugins/tree/cd2ab3510ce35031bb564fbd2d4d55b825a4a83b/betterstack",
+    source: OFFICIAL_PLUGIN_SOURCES["betterstack"],
     connectionProvider: "betterstack",
     connectHref: "/api/integrations/betterstack/start?returnTo=/settings/plugins/betterstack",
     accountDescription: "The account opencompany uses when you run Better Stack tools.",
@@ -115,8 +136,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     label: "Fathom",
     description: "Search meetings and read summaries, transcripts, and action items with approval.",
     category: "productivity",
-    source:
-      "https://github.com/useopencompany/plugins/tree/444dd4dbfaaed6abd2c7c8000024c5be0ff4fa48/fathom",
+    source: OFFICIAL_PLUGIN_SOURCES["fathom"],
     connectionProvider: "fathom",
     connectHref: "/api/integrations/fathom-mcp/start?returnTo=/settings/plugins/fathom",
     accountDescription: "The Fathom account opencompany uses when you search meeting content.",
@@ -130,8 +150,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     description: "Work with repositories, issues, pull requests, and Actions as yourself.",
     category: "engineering",
     featured: true,
-    source:
-      "https://github.com/useopencompany/plugins/tree/232e380e8850c440c28e4588ef79143d41c000db/github",
+    source: OFFICIAL_PLUGIN_SOURCES["github"],
     connectionProvider: "github_user",
     connectHref: "/api/integrations/github-user/start?returnTo=/settings/plugins/github",
     accountLabel: "GitHub",
@@ -145,8 +164,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
       "Search and read Gmail, download attachments, create drafts, and organize messages with approval.",
     category: "communication",
     featured: true,
-    source:
-      "https://github.com/useopencompany/plugins/tree/ff6f34b42796129c2a125a32b3a78e8cae353df6/gmail",
+    source: OFFICIAL_PLUGIN_SOURCES["gmail"],
     connectionProvider: "gmail",
     connectHref: "/api/integrations/gmail/start?access=mcp&returnTo=/settings/plugins/gmail",
     accountDescription: "The most recently connected Gmail account powers Gmail tools.",
@@ -159,13 +177,24 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     label: "Granola",
     description: "Search and read meeting notes, summaries, folders, and transcripts.",
     category: "productivity",
-    source:
-      "https://github.com/useopencompany/plugins/tree/cf036c82fc5186f5187e4da59b040ce92e492df3/granola",
+    source: OFFICIAL_PLUGIN_SOURCES["granola"],
     connectionProvider: "granola",
     connectHref: "/api/integrations/granola-mcp/start?returnTo=/settings/plugins/granola",
     accountDescription: "The Granola account opencompany uses when you search meeting history.",
     ingestionHref: "/wiki/sources",
     ingestionLabel: "Configure legacy Granola API ingestion in Wiki sources",
+  },
+  "google-admin": {
+    name: "google-admin",
+    kind: "mcp",
+    label: "Google Admin",
+    description: "Create Workspace user accounts, set up groups, and add group members.",
+    category: "productivity",
+    source: OFFICIAL_PLUGIN_SOURCES["google-admin"],
+    connectionProvider: "google_admin",
+    connectHref: "/api/integrations/google-admin/start?returnTo=/settings/plugins/google-admin",
+    accountDescription:
+      "Connect a Google Workspace administrator with user and group management privileges. The most recently connected account powers these tools. New users need a password reset and sign-in details from Google Admin.",
   },
   "google-calendar": {
     name: "google-calendar",
@@ -173,8 +202,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     label: "Google Calendar",
     description: "List calendars, read your schedule, and create calendar events.",
     category: "productivity",
-    source:
-      "https://github.com/useopencompany/plugins/tree/de04f0c11eeb4e4eb4ed1140818205e14b08401f/google-calendar",
+    source: OFFICIAL_PLUGIN_SOURCES["google-calendar"],
     connectionProvider: "google_calendar",
     connectHref:
       "/api/integrations/google-calendar/start?returnTo=/settings/plugins/google-calendar",
@@ -187,8 +215,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     description:
       "Browse, read, create, copy, and edit files through opencompany's Google Drive MCP.",
     category: "productivity",
-    source:
-      "https://github.com/useopencompany/plugins/tree/bae88070e498725de008e358a74bd18bc46ed27c/google-drive",
+    source: OFFICIAL_PLUGIN_SOURCES["google-drive"],
     connectionProvider: "google_drive",
     connectHref: "/api/integrations/google-drive/start?returnTo=/settings/plugins/google-drive",
     accountDescription:
@@ -202,8 +229,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     label: "HubSpot",
     description: "Inspect CRM structure, query customer data, and make approved changes.",
     category: "business",
-    source:
-      "https://github.com/useopencompany/plugins/tree/6b4e00b71f7d1b388fe5aa225aa86c8d35ba2578/hubspot",
+    source: OFFICIAL_PLUGIN_SOURCES["hubspot"],
     connectionProvider: "hubspot",
     connectHref: "/api/integrations/hubspot-mcp/start?returnTo=/settings/plugins/hubspot",
     accountDescription: "The HubSpot account opencompany uses when you run CRM tools.",
@@ -217,12 +243,11 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     description:
       "Search current Infisical documentation and safely use workspace secrets in coding sandboxes.",
     category: "engineering",
-    source:
-      "https://github.com/useopencompany/plugins/tree/f283f509c195464f90f5f78f7e30a9a472b6393b/infisical",
+    source: OFFICIAL_PLUGIN_SOURCES["infisical"],
     connectionProvider: "infisical",
     connectHref: "/settings/plugins/infisical",
     accountDescription:
-      "The workspace CLI connection restored into coding sandboxes. Its credentials are never sent to the documentation MCP.",
+      "Your personal Infisical login, restored into your coding sandboxes. Its credentials are never sent to the documentation MCP.",
   },
   jamie: {
     name: "jamie",
@@ -231,8 +256,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     description:
       "Search meeting notes and transcripts, review action items, and organize meetings with approval.",
     category: "productivity",
-    source:
-      "https://github.com/useopencompany/plugins/tree/ad062203fcbb628ad27572d564cd536025f2d6ed/jamie",
+    source: OFFICIAL_PLUGIN_SOURCES["jamie"],
     connectionProvider: "jamie",
     connectHref: "/api/integrations/jamie-mcp/start?returnTo=/settings/plugins/jamie",
     accountDescription: "The Jamie account opencompany uses when you run meeting tools.",
@@ -244,8 +268,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     description:
       "Inspect agent observability data and manage Latitude workspace resources with approval.",
     category: "engineering",
-    source:
-      "https://github.com/useopencompany/plugins/tree/56855e7d53ee3544520ec1fdef84d9e2f5ae6896/latitude",
+    source: OFFICIAL_PLUGIN_SOURCES["latitude"],
     connectionProvider: "latitude",
     connectHref: "/api/integrations/latitude/start?returnTo=/settings/plugins/latitude",
     accountDescription: "The Latitude account opencompany uses when you run observability tools.",
@@ -257,8 +280,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     description: "Work with Linear issues, projects, comments, and team workflows.",
     category: "productivity",
     featured: true,
-    source:
-      "https://github.com/useopencompany/plugins/tree/9addd067ff8311fb3dcbc51285e4a3e671577838/linear",
+    source: OFFICIAL_PLUGIN_SOURCES["linear"],
     connectionProvider: "linear",
     connectHref: "/api/integrations/linear/start?returnTo=/settings/plugins/linear",
     accountDescription: "The account opencompany uses when you run Linear tools.",
@@ -272,11 +294,49 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     description:
       "Inspect Neon projects and database structure, and run permission-gated read-only SQL.",
     category: "engineering",
-    source:
-      "https://github.com/useopencompany/plugins/tree/bbec4c01a46b6d7bf1ffffda87af898060dd7916/neon",
+    source: OFFICIAL_PLUGIN_SOURCES["neon"],
     connectionProvider: "neon",
     connectHref: "/api/integrations/neon/start?returnTo=/settings/plugins/neon",
     accountDescription: "The account opencompany uses when you run Neon tools.",
+  },
+  notion: {
+    name: "notion",
+    kind: "mcp",
+    label: "Notion",
+    description:
+      "Search workspace knowledge, work with Custom Agents, and make approved content changes.",
+    category: "productivity",
+    featured: true,
+    source: OFFICIAL_PLUGIN_SOURCES["notion"],
+    connectionProvider: "notion",
+    connectHref: "/api/integrations/notion/start?returnTo=/settings/plugins/notion",
+    accountDescription: "The Notion account opencompany uses when you work with workspace content.",
+  },
+  supabase: {
+    name: "supabase",
+    kind: "mcp",
+    label: "Supabase",
+    description:
+      "Inspect projects, query databases, and manage migrations and Edge Functions with permission controls.",
+    category: "engineering",
+    source: OFFICIAL_PLUGIN_SOURCES["supabase"],
+    connectionProvider: "supabase",
+    connectHref: "/api/integrations/supabase/start?returnTo=/settings/plugins/supabase",
+    accountDescription:
+      "Choose the Supabase organization to authorize. SQL can read or change data; review permissions before use.",
+  },
+  resend: {
+    name: "resend",
+    kind: "mcp",
+    label: "Resend",
+    description:
+      "Send emails, read inbound messages, and manage contacts and broadcasts with permission controls.",
+    category: "communication",
+    source: OFFICIAL_PLUGIN_SOURCES["resend"],
+    connectionProvider: "resend",
+    connectHref: "/api/integrations/resend/start?returnTo=/settings/plugins/resend",
+    accountDescription:
+      "Connect your Resend account. Sending and sensitive reads require approval; access administration and destructive actions start off.",
   },
   posthog: {
     name: "posthog",
@@ -285,11 +345,23 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     description:
       "Explore dashboards, insights, schemas, and product analytics, with permission-gated insight creation.",
     category: "business",
-    source:
-      "https://github.com/useopencompany/plugins/tree/4ba32cd5a7618d9be3714ec0efd3c8784209046c/posthog",
+    source: OFFICIAL_PLUGIN_SOURCES["posthog"],
     connectionProvider: "posthog",
     connectHref: "/api/integrations/posthog/start?returnTo=/settings/plugins/posthog",
     accountDescription: "The PostHog account opencompany uses when you run analytics tools.",
+  },
+  convex: {
+    name: "convex",
+    kind: "mcp",
+    label: "Convex",
+    category: "engineering",
+    description:
+      "Inspect deployments, query data, and run Convex functions with permission controls.",
+    source: OFFICIAL_PLUGIN_SOURCES.convex,
+    connectionProvider: "convex",
+    connectHref: "/settings/plugins/convex#convex-deploy-key",
+    accountDescription:
+      "A deployment-scoped key connects one Convex deployment. Production supports schema and function inspection only.",
   },
   render: {
     name: "render",
@@ -298,8 +370,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     description:
       "Inspect Render infrastructure, troubleshoot services, and deploy permission-gated applications and datastores.",
     category: "engineering",
-    source:
-      "https://github.com/useopencompany/plugins/tree/569241125c96a07b9072d42aee404822a6950b26/render",
+    source: OFFICIAL_PLUGIN_SOURCES["render"],
     connectionProvider: "render",
     connectHref: "/settings/plugins/render#render-api-key",
     accountDescription: "The Render account opencompany uses when you run Render tools.",
@@ -311,8 +382,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     description:
       "Inspect Vercel projects and deployments, investigate operational data, and perform permission-gated deployment and account actions.",
     category: "engineering",
-    source:
-      "https://github.com/useopencompany/plugins/tree/14e7f6d3e978103c5427c725229ae93bc3e47f8c/vercel",
+    source: OFFICIAL_PLUGIN_SOURCES["vercel"],
     connectionProvider: "vercel",
     connectHref: "/api/integrations/vercel/start?returnTo=/settings/plugins/vercel",
     connectionUnavailableReason:
@@ -325,8 +395,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     label: "SigNoz",
     description: "Investigate logs, metrics, traces, alerts, and dashboards in SigNoz US Cloud.",
     category: "engineering",
-    source:
-      "https://github.com/useopencompany/plugins/tree/053e9e9207f320651f1cb9b4e8feb84ab2af6bba/signoz",
+    source: OFFICIAL_PLUGIN_SOURCES["signoz"],
     connectionProvider: "signoz",
     connectHref: "/api/integrations/signoz/start?returnTo=/settings/plugins/signoz",
     accountDescription: "The SigNoz US Cloud account opencompany uses when you run SigNoz tools.",
@@ -338,8 +407,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     description: "Search Slack and, with approval, read private content or make changes.",
     category: "communication",
     featured: true,
-    source:
-      "https://github.com/useopencompany/plugins/tree/1b912fe6c4f4497147887b2383f0181f763aa19b/slack",
+    source: OFFICIAL_PLUGIN_SOURCES["slack"],
     connectionProvider: "slack",
     connectHref: "/api/integrations/slack/start?returnTo=/settings/plugins/slack",
     accountDescription: "The most recently connected Slack account powers Slack tools.",
@@ -351,12 +419,10 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     description:
       "Learn about Stripe, inspect account and financial data, and manage Stripe resources with approval.",
     category: "business",
-    source:
-      "https://github.com/useopencompany/plugins/tree/68c22e8a1ffe5eb8a83fb91c68f76f3f45705d3a/stripe",
+    source: OFFICIAL_PLUGIN_SOURCES["stripe"],
     connectionProvider: "stripe",
-    connectHref: "/settings/plugins/stripe#stripe-restricted-key",
-    accountDescription:
-      "A workspace-owned restricted API key controls which Stripe resources plugin tools can access.",
+    connectHref: "/api/integrations/stripe/start?returnTo=/settings/plugins/stripe",
+    accountDescription: "Connect your Stripe account securely through Stripe. No API key required.",
   },
   x: {
     name: "x",
@@ -364,8 +430,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     label: "X",
     description: "Research public conversations and manage your X account with approval.",
     category: "communication",
-    source:
-      "https://github.com/useopencompany/plugins/tree/21060c09d1bbe70df85519cc3ad74cd5d097fbb6/x",
+    source: OFFICIAL_PLUGIN_SOURCES["x"],
     connectionProvider: "x_account",
     connectHref: "/api/integrations/x-account/start?returnTo=/settings/plugins/x",
     accountLabel: "X",
@@ -382,8 +447,7 @@ export const OFFICIAL_SKILL_PLUGIN_METADATA = {
     description:
       "Independent YC-style startup advice and structured founder office hours, based on public principles and not affiliated with Y Combinator.",
     category: "business",
-    source:
-      "https://github.com/useopencompany/plugins/tree/2e092c3bc518622f1dc4ac1a6777d87ae3695ec6/yc-advise",
+    source: OFFICIAL_PLUGIN_SOURCES["yc-advise"],
   },
 } as const satisfies Record<OfficialSkillPluginName, OfficialSkillPluginMetadata>;
 
