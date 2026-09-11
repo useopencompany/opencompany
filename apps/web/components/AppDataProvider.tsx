@@ -40,15 +40,12 @@ import {
 import { listLegacyTaskCompatibility } from "@/lib/headless-task-commands";
 import { type IntegrationState, integrationStateFromRows } from "@/lib/integration-state";
 import type { McpClient } from "@/lib/mcp-setup";
+import { reconcileOptimisticArchives, useOptimisticArchives } from "@/lib/optimistic-archives";
 import {
   mergeOptimisticChatSummaries,
   reconcileOptimisticChatSummaries,
   useOptimisticChatSummaries,
 } from "@/lib/optimistic-chat-summaries";
-import {
-  reconcileOptimisticReviewArchives,
-  useOptimisticReviewArchives,
-} from "@/lib/optimistic-review-archive";
 import { countAwaitingReview, type ReviewItem, selectReviewItems } from "@/lib/review-inbox";
 import { selectSidebarChats } from "@/lib/sidebar-chats";
 import type { TaskRow } from "@/lib/task-collections";
@@ -294,6 +291,16 @@ function AppLiveDataSubscriptions({
     schedulesLoading,
   ]);
 
+  // An archive the user just clicked applies to every list built from the conversation projection,
+  // so the row leaves the sidebar and the review queue on the click rather than a beat later when
+  // the write and its projection land.
+  const optimisticallyArchived = useOptimisticArchives();
+  const openConversationRows = useMemo(() => {
+    const rows = (chatRows ?? []) as HeadlessChatConversationReadModel[];
+    if (optimisticallyArchived.size === 0) return rows;
+    return rows.filter((row) => !optimisticallyArchived.has(row.id));
+  }, [chatRows, optimisticallyArchived]);
+
   const recentChats = useMemo(() => {
     if (chatsLoading && !chatRows?.length) return selectSidebarChats(initialData.recentChats);
     const initialById = new Map(initialData.recentChats.map((chat) => [chat.id, chat]));
@@ -314,10 +321,8 @@ function AppLiveDataSubscriptions({
         pinnedAt: row.pinnedAt,
       };
     };
-    return selectSidebarChats((chatRows ?? []) as HeadlessChatConversationReadModel[]).map(
-      toSummary,
-    );
-  }, [chatRows, chatsLoading, initialData.recentChats]);
+    return selectSidebarChats(openConversationRows).map(toSummary);
+  }, [chatRows, chatsLoading, initialData.recentChats, openConversationRows]);
   const chatMessageShapeRows = useMemo(
     () =>
       ((chatRows ?? []) as HeadlessChatConversationReadModel[]).map((row) => ({
@@ -370,14 +375,6 @@ function AppLiveDataSubscriptions({
       }));
   }, [chatRows]);
 
-  // An archive the reader just clicked is applied to the queue's own inputs, so the list and the
-  // sidebar count both drop the item on the click instead of on the projection that follows it.
-  const optimisticallyArchived = useOptimisticReviewArchives();
-  const reviewConversations = useMemo(() => {
-    const rows = (chatRows ?? []) as HeadlessChatConversationReadModel[];
-    if (optimisticallyArchived.size === 0) return rows;
-    return rows.filter((row) => !optimisticallyArchived.has(row.id));
-  }, [chatRows, optimisticallyArchived]);
   // Task candidates come from the Task read model rather than the presentation rows: the unread
   // flag and the canonical status only exist there, and legacy compatibility rows own no
   // conversation to read a result from.
@@ -395,16 +392,16 @@ function AppLiveDataSubscriptions({
     for (const row of (taskRows ?? []) as HeadlessTaskReadModel[]) {
       if (row.archivedAt) archived.push(row.conversationId);
     }
-    reconcileOptimisticReviewArchives(archived);
+    reconcileOptimisticArchives(archived);
   }, [chatRows, optimisticallyArchived, taskRows]);
   const reviewItems = useMemo<ReviewItem[]>(() => {
     if (!initialData.featureFlags.reviewInbox) return [];
-    return selectReviewItems({ conversations: reviewConversations, tasks: reviewTasks });
-  }, [initialData.featureFlags.reviewInbox, reviewConversations, reviewTasks]);
+    return selectReviewItems({ conversations: openConversationRows, tasks: reviewTasks });
+  }, [initialData.featureFlags.reviewInbox, openConversationRows, reviewTasks]);
   const reviewCount = useMemo(() => {
     if (!initialData.featureFlags.reviewInbox) return 0;
-    return countAwaitingReview({ conversations: reviewConversations, tasks: reviewTasks });
-  }, [initialData.featureFlags.reviewInbox, reviewConversations, reviewTasks]);
+    return countAwaitingReview({ conversations: openConversationRows, tasks: reviewTasks });
+  }, [initialData.featureFlags.reviewInbox, openConversationRows, reviewTasks]);
 
   const integrations = useMemo(() => {
     if (integrationsLoading && !integrationRows?.length) return initialData.integrations;

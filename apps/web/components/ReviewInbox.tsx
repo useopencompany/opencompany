@@ -16,9 +16,9 @@ import { updateHeadlessChatConversation } from "@/lib/headless-chat-commands";
 import { archiveHeadlessTask, markHeadlessTaskSeen } from "@/lib/headless-task-commands";
 import { DEFAULT_MODEL, normalizeConversationModel } from "@/lib/model-options";
 import {
-  archiveReviewItemOptimistically,
-  restoreOptimisticReviewArchive,
-} from "@/lib/optimistic-review-archive";
+  archiveConversationOptimistically,
+  restoreOptimisticArchive,
+} from "@/lib/optimistic-archives";
 import type { ReviewItem } from "@/lib/review-inbox";
 
 export function ReviewInboxRoute() {
@@ -69,14 +69,14 @@ export function ReviewInboxRoute() {
   const archive = useCallback(
     (item: ReviewItem) => {
       const { conversationId, source } = item;
-      if (!archiveReviewItemOptimistically(conversationId)) return;
+      if (!archiveConversationOptimistically(conversationId)) return;
       setOpenItem((current) => (current?.conversationId === conversationId ? null : current));
       const archived =
         source.kind === "task"
           ? archiveHeadlessTask(source.taskId, { scopeKey: workspace.id })
           : updateHeadlessChatConversation(conversationId, { archived: true });
       void archived.catch(() => {
-        restoreOptimisticReviewArchive(conversationId);
+        restoreOptimisticArchive(conversationId);
         toast.error(`Could not archive "${item.title}".`);
       });
     },
