@@ -2,6 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { LinearTeamListResult } from "@/lib/brain-source-actions";
 import { WorkflowEditor as WorkflowEditorComponent } from "./WorkflowEditor";
 
 const routerMock = vi.hoisted(() => ({
@@ -16,11 +17,13 @@ const workflowActionsMock = vi.hoisted(() => ({
 }));
 
 const brainSourceActionsMock = vi.hoisted(() => ({
-  listLinearTeams: vi.fn(async () => ({
-    ok: true as const,
-    teams: [{ id: "team_1", name: "Core", key: "CORE", triageStateId: "state_triage" }],
-    partial: false,
-  })),
+  listLinearTeams: vi.fn(
+    async (): Promise<LinearTeamListResult> => ({
+      ok: true,
+      teams: [{ id: "team_1", name: "Core", key: "CORE", triageStateId: "state_triage" }],
+      partial: false,
+    }),
+  ),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -349,6 +352,30 @@ describe("WorkflowEditor", () => {
           prompt: "Run this workflow.",
         },
       }),
+    );
+  });
+
+  it("sends the author to the account when a filter's options cannot be read", async () => {
+    brainSourceActionsMock.listLinearTeams.mockResolvedValueOnce({
+      ok: false,
+      error: "Linear rejected the saved connection.",
+    });
+    render(
+      <WorkflowEditor
+        workflow={workflow}
+        canEdit
+        skillCatalog={[]}
+        eventProviders={[linearEventProvider()]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("radio", { name: "On an event" }));
+    await act(async () => Promise.resolve());
+
+    expect(screen.getByText(/Linear rejected the saved connection\./)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Linear settings" })).toHaveAttribute(
+      "href",
+      "/settings/plugins/linear",
     );
   });
 
