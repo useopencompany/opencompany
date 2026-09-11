@@ -89,6 +89,7 @@ import {
   emptyCodingChatHistory,
   loadCodingChatHistory,
 } from "./coding-chat-history";
+import { codingChatSkillPromptLines } from "./coding-chat-skills";
 import { settledCodingSandboxIdleTimeoutMs } from "./coding-sandbox-lifecycle";
 import { CODING_WORKSPACE_SANDBOX_NETWORK } from "./coding-workspace-runtime";
 import { getDb } from "./db";
@@ -1917,7 +1918,7 @@ function buildCodexChatTask(input: {
     "<user_message>",
     input.prompt || "Review the attached file(s).",
     "</user_message>",
-    ...codexChatSkillPromptLines(input.skillPaths),
+    ...codingChatSkillPromptLines(input.skillPaths),
     ...codexChatAttachmentPromptLines(input.attachmentPaths),
   ]
     .filter((line) => line !== null)
@@ -1974,7 +1975,7 @@ function buildCodexChatRecoveryTask(input: {
     "<original_user_message>",
     input.prompt || "Review the attached file(s).",
     "</original_user_message>",
-    ...codexChatSkillPromptLines(input.skillPaths),
+    ...codingChatSkillPromptLines(input.skillPaths),
     ...codexChatAttachmentPromptLines(input.attachmentPaths),
     "",
     "<last_persisted_progress>",
@@ -1983,17 +1984,6 @@ function buildCodexChatRecoveryTask(input: {
   ]
     .filter((line) => line !== null)
     .join("\n");
-}
-
-function codexChatSkillPromptLines(skillPaths: string[]) {
-  if (skillPaths.length === 0) return [];
-  return [
-    "",
-    "<invoked_skills>",
-    "The user invoked these skills with this message. Read each SKILL.md and follow its instructions:",
-    ...skillPaths.map((path) => `- ${path}`),
-    "</invoked_skills>",
-  ];
 }
 
 function codexBackgroundTaskPromptLines(context: TaskTurnContext | undefined) {

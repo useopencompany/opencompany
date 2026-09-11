@@ -685,6 +685,7 @@ describe("runCodexChatTurn over ACP", () => {
   });
 
   it("explicitly invokes the Skill bundle activated by the current Codex message", async () => {
+    const turn = codexTurn({ prompt: "/release-review Review v1.2.0." });
     const bundle = {
       id: "skill_bundle_release_review_v1",
       name: "release-review",
@@ -705,7 +706,7 @@ describe("runCodexChatTurn over ACP", () => {
         {
           bundleId: bundle.id,
           sourceKind: "standalone",
-          activatedMessageId: "goat_msg_user_1",
+          activatedMessageId: turn.userMessageId,
           workspaceId: "workspace_1",
           activatedAt: new Date("2026-07-10T12:00:00Z"),
         },
@@ -714,7 +715,7 @@ describe("runCodexChatTurn over ACP", () => {
     skillBundleMocks.loadImmutableSkillBundles.mockResolvedValueOnce([bundle]);
 
     await runCodexChatTurn({
-      turn: codexTurn({ prompt: "/release-review Review v1.2.0." }),
+      turn,
       session: codexSession(),
       env: env(),
     });
