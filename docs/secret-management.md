@@ -45,8 +45,8 @@ Edit secrets in the runtime's Infisical path and verify the integration sync on 
 - API: `prod` `/api` → Render product API.
 - Runner: `prod` `/runner` → Render runner.
 - Release automation: `prod` `/release` → GitHub Actions through `infisical run`.
-- Mobile build automation: `production` in the dedicated mobile project → GitHub Actions through
-  the Infisical secrets action and OIDC.
+- Mobile build automation: `prod` `/mobile` → GitHub Actions through the Infisical secrets action
+  and OIDC.
 
 After changing a required value, run the release preflight and deploy the affected runtime. A value
 existing in Infisical is not sufficient evidence until the destination reports it and the runtime

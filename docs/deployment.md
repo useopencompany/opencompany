@@ -77,6 +77,7 @@ deployment, and health checks. Do not bypass preflight or branch protection.
 - Electric: Infisical `prod` `/electric`, copied to the `opencompany-electric` Render service;
   `render.yaml` owns the image, disk, region, and non-secret configuration.
 - Runner: Infisical `prod` `/runner`, synced to the runner Render service.
+- Mobile: Infisical `prod` `/mobile`, loaded by GitHub Actions for EAS builds.
 - Release: Infisical `prod` `/release`, containing deployment credentials, service/project IDs,
   production URLs, and the migration database URL.
 
@@ -97,8 +98,8 @@ or web build jobs. It passes `--wait` so the GitHub job reports the final EAS bu
 Concurrency cancels an older GitHub run for the same branch. If that run already submitted its job
 to EAS, the remote build may continue in Expo after GitHub stops waiting for it.
 
-The protected `production` job reads these values from the `production` environment in the
-dedicated mobile Infisical project:
+The protected `production` job reads these values from Infisical `prod` `/mobile` in the shared
+project:
 
 - `APP_VARIANT`, set to `production`
 - `EXPO_TOKEN`
@@ -110,9 +111,9 @@ dedicated mobile Infisical project:
 - `EXPO_PUBLIC_OPENCOMPANY_API_ORIGIN`
 - `EXPO_PUBLIC_WORKOS_CLIENT_ID`
 
-Set the GitHub `production` environment variable `INFISICAL_MOBILE_PROJECT_SLUG` to that project's
-slug. The existing OIDC machine identity must have read access to the project. GitHub does not need
-copies of the build values.
+The workflow uses the GitHub `production` environment variable `INFISICAL_PROJECT_SLUG`, which is
+shared with the release workflow. The existing OIDC machine identity must have read access to
+`/mobile`. GitHub does not need copies of the build values.
 
 The Infisical action exports every value into the GitHub job environment. `EXPO_TOKEN` and the App
 Store Connect values configure the local EAS CLI invocation. EAS does not copy the caller's complete

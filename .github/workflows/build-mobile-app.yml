@@ -22,7 +22,7 @@ jobs:
       CI: true
       DO_NOT_TRACK: "1"
       INFISICAL_MACHINE_IDENTITY_ID: "251c74b2-32d5-490a-abfa-12d83f59ed7b"
-      INFISICAL_ENV_SLUG: production
+      INFISICAL_ENV_SLUG: ${{ vars.INFISICAL_ENV_SLUG || secrets.INFISICAL_ENV_SLUG || 'prod' }}
       INFISICAL_DOMAIN: ${{ vars.INFISICAL_DOMAIN || secrets.INFISICAL_DOMAIN || 'https://eu.infisical.com' }}
     steps:
       - name: Checkout build commit
@@ -55,9 +55,10 @@ jobs:
         with:
           method: oidc
           identity-id: ${{ env.INFISICAL_MACHINE_IDENTITY_ID }}
-          project-slug: ${{ vars.INFISICAL_MOBILE_PROJECT_SLUG || secrets.INFISICAL_MOBILE_PROJECT_SLUG }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG || secrets.INFISICAL_PROJECT_SLUG }}
           env-slug: ${{ env.INFISICAL_ENV_SLUG }}
           domain: ${{ env.INFISICAL_DOMAIN }}
+          secret-path: /mobile
 
       - name: Check mobile build env
         shell: bash
