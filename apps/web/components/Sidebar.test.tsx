@@ -8,6 +8,7 @@ import {
   HOME_NAVIGATION_EVENT,
 } from "@/lib/chat-navigation";
 import { clearAllLocalChatStates, setLocalChatState } from "@/lib/chat-session-state";
+import { clearOptimisticArchives } from "@/lib/optimistic-archives";
 import {
   addOptimisticChatSummary,
   clearAllOptimisticChatSummaries,
@@ -104,46 +105,78 @@ vi.mock("@/lib/headless-chat-commands", () => chatCommandsMock);
 
 vi.mock("@/lib/headless-chat-collections", () => chatCollectionMocks);
 
-vi.mock("@/components/AppDataProvider", () => ({
-  useAppData: () => ({
-    user: {
-      email: "ada@example.com",
-      firstName: "Ada",
-      lastName: "Lovelace",
-      avatarUrl: null,
+// The provider applies the user's pending archives to the chat list it publishes, so the mock does
+// the same: these tests are about what the sidebar shows between the click and the projection.
+vi.mock("@/components/AppDataProvider", async () => {
+  const { useMemo } = await import("react");
+  const { useOptimisticArchives } = await import("@/lib/optimistic-archives");
+  return {
+    useAppData: () => {
+      const pendingArchives = useOptimisticArchives();
+      // Memoized like the provider's own list: the sidebar syncs pin overrides against the chat
+      // list by identity, so a fresh array on every render would loop.
+      const chats = recentChatsMock.value;
+      const recentChats = useMemo(
+        () =>
+          pendingArchives.size === 0
+            ? chats
+            : chats.filter((chat) => !pendingArchives.has(chat.id)),
+        [chats, pendingArchives],
+      );
+      return {
+        user: {
+          email: "ada@example.com",
+          firstName: "Ada",
+          lastName: "Lovelace",
+          avatarUrl: null,
+        },
+        workspace: { id: "goat_ws_1", name: "Ada's Workspace", role: workspaceRoleMock.value },
+        plan: "hobby",
+        workspaces: workspacesMock.value,
+        workspaceMembers: [],
+        brains: [
+          {
+            id: "goat_brain_1",
+            name: "General",
+            slug: "general",
+            description: null,
+            visibility: "workspace",
+          },
+        ],
+        activeBrain: {
+          id: "goat_brain_1",
+          name: "General",
+          slug: "general",
+          description: null,
+          visibility: "workspace",
+        },
+        tasks: tasksMock.value,
+        recentChats,
+        featureFlags: {
+          taskSpawning: featureFlagsMock.taskSpawning,
+          autoModelRouting: featureFlagsMock.autoModelRouting,
+          legacyBrain: featureFlagsMock.legacyBrain,
+          reviewInbox: featureFlagsMock.reviewInbox,
+        },
+        reviewCount: reviewCountMock.value,
+        mcpSetup: { preferredClient: null, completedAt: mcpSetupMock.completedAt },
+      };
     },
-    workspace: { id: "goat_ws_1", name: "Ada's Workspace", role: workspaceRoleMock.value },
-    plan: "hobby",
-    workspaces: workspacesMock.value,
-    workspaceMembers: [],
-    brains: [
-      {
-        id: "goat_brain_1",
-        name: "General",
-        slug: "general",
-        description: null,
-        visibility: "workspace",
-      },
-    ],
-    activeBrain: {
-      id: "goat_brain_1",
-      name: "General",
-      slug: "general",
-      description: null,
-      visibility: "workspace",
-    },
-    tasks: tasksMock.value,
-    recentChats: recentChatsMock.value,
-    featureFlags: {
-      taskSpawning: featureFlagsMock.taskSpawning,
-      autoModelRouting: featureFlagsMock.autoModelRouting,
-      legacyBrain: featureFlagsMock.legacyBrain,
-      reviewInbox: featureFlagsMock.reviewInbox,
-    },
-    reviewCount: reviewCountMock.value,
-    mcpSetup: { preferredClient: null, completedAt: mcpSetupMock.completedAt },
-  }),
-}));
+  };
+});
+
+function archivableChat(id: string, title: string) {
+  return {
+    id,
+    title,
+    model: "claude-sonnet-5",
+    engine: "opencompany" as const,
+    codexComposerSettings: null,
+    preview: "Ready",
+    updatedAt: "2026-07-14T09:00:00.000Z",
+    pinnedAt: null,
+  };
+}
 
 describe("Sidebar", () => {
   afterEach(() => {
@@ -160,6 +193,7 @@ describe("Sidebar", () => {
     tasksMock.value = [];
     clearAllLocalChatStates();
     clearAllOptimisticChatSummaries();
+    clearOptimisticArchives();
     consumePendingChatComposerFocus("goat_chat_focus");
   });
 
@@ -830,6 +864,11 @@ describe("Sidebar", () => {
     expect(chatCommandsMock.updateHeadlessChatConversation).toHaveBeenCalledTimes(2);
     expect(screen.getByRole("button", { name: "Unpin Recent chat" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Pin Pinned chat" })).toBeDisabled();
+    // The rows have already moved between sections, so the toggles show the state the user asked
+    // for rather than a spinner over the one they just left.
+    expect(
+      screen.getByRole("button", { name: "Unpin Recent chat" }).querySelector(".animate-spin"),
+    ).toBeNull();
 
     await act(async () => resolvePin({ transactionId: "1" }));
     await waitFor(() =>
@@ -842,33 +881,60 @@ describe("Sidebar", () => {
     );
   });
 
-  it("keeps the sidebar usable when archiving a chat rejects", async () => {
+  // The write and the projection behind it take about a second. The user has already dismissed the
+  // chat, so the row leaves on the click rather than sitting there under a spinner.
+  it("drops an archived chat row before the write settles", async () => {
+    const user = userEvent.setup();
+    let settleArchive!: (value: { transactionId: string }) => void;
+    chatCommandsMock.updateHeadlessChatConversation.mockImplementationOnce(
+      () => new Promise((resolve) => (settleArchive = resolve)),
+    );
+    recentChatsMock.value = [
+      archivableChat("conversation_archive", "Archive me"),
+      archivableChat("conversation_keep", "Keep me"),
+    ];
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "Archive Archive me" }));
+
+    expect(screen.queryByRole("link", { name: /Archive me/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Keep me/ })).toBeInTheDocument();
+    await act(async () => settleArchive({ transactionId: "1" }));
+  });
+
+  // Leaving the archived chat open would keep a conversation on screen that is no longer listed
+  // anywhere, so the route moves with the row rather than after the write.
+  it("leaves the archived chat's route on the click", async () => {
+    const user = userEvent.setup();
+    pathnameMock.value = "/chat/conversation_archive";
+    chatCommandsMock.updateHeadlessChatConversation.mockImplementationOnce(
+      () => new Promise(() => {}),
+    );
+    recentChatsMock.value = [archivableChat("conversation_archive", "Archive me")];
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "Archive Archive me" }));
+
+    expect(routerMock.push).toHaveBeenCalledWith("/");
+  });
+
+  it("restores the row and reports the failure when archiving rejects", async () => {
     const user = userEvent.setup();
     chatCommandsMock.updateHeadlessChatConversation.mockRejectedValueOnce(
       new Error("network unavailable"),
     );
-    recentChatsMock.value = [
-      {
-        id: "goat_chat_archive",
-        title: "Archive me",
-        model: "claude-sonnet-5",
-        engine: "opencompany",
-        codexComposerSettings: null,
-        preview: "Ready",
-        updatedAt: "2026-07-14T09:00:00.000Z",
-        pinnedAt: null,
-      },
-    ];
+    recentChatsMock.value = [archivableChat("goat_chat_archive", "Archive me")];
     render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
-    const archiveButton = screen.getByRole("button", { name: "Archive Archive me" });
-    await user.click(archiveButton);
+    await user.click(screen.getByRole("button", { name: "Archive Archive me" }));
 
     expect(chatCommandsMock.updateHeadlessChatConversation).toHaveBeenCalledWith(
       "goat_chat_archive",
       { archived: true },
     );
-    await waitFor(() => expect(archiveButton).toBeEnabled());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Archive Archive me" })).toBeInTheDocument(),
+    );
     expect(routerMock.push).not.toHaveBeenCalled();
   });
 

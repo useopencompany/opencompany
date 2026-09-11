@@ -42,6 +42,10 @@ import { clearLocalChatState, useLocalChatStates } from "@/lib/chat-session-stat
 import { type ChatSummaryView, chatSummaryState } from "@/lib/chat-ui";
 import { preloadHeadlessChatMessages } from "@/lib/headless-chat-collections";
 import { updateHeadlessChatConversation } from "@/lib/headless-chat-commands";
+import {
+  archiveConversationOptimistically,
+  restoreOptimisticArchive,
+} from "@/lib/optimistic-archives";
 import { useOptimisticChatSummaries } from "@/lib/optimistic-chat-summaries";
 import { createWorkspaceAction, switchWorkspaceAction } from "@/lib/workspace-actions";
 
@@ -397,7 +401,6 @@ function SidebarRecentChats() {
       ),
     [optimisticChats, workspace.id],
   );
-  const [archivingIds, setArchivingIds] = useState<Set<string>>(() => new Set());
   const [pinningIds, setPinningIds] = useState<Set<string>>(() => new Set());
   const [pinOverrides, setPinOverrides] = useState<Map<string, boolean>>(() => new Map());
   const [previousRecentChats, setPreviousRecentChats] = useState(recentChats);
@@ -424,24 +427,21 @@ function SidebarRecentChats() {
   const pinnedChats = recentChats.filter(isPinned);
   const unpinnedChats = recentChats.filter((chat) => !isPinned(chat));
 
+  // The row goes on the click. The write and the projection behind it take about a second, and
+  // holding a chat the user has already dismissed for that long reads as lag; a failed write puts
+  // the row back and says so.
   const archiveChat = (chatId: string, chatTitle: string, href: string) => {
-    if (archivingIds.has(chatId)) return;
-    setArchivingIds((current) => new Set(current).add(chatId));
+    if (!archiveConversationOptimistically(chatId)) return;
+    // If we archived the chat we're currently viewing, drop back to home.
+    if (pathname === href) {
+      router.push("/");
+    }
     startTransition(async () => {
       try {
         await updateHeadlessChatConversation(chatId, { archived: true });
-        // If we archived the chat we're currently viewing, drop back to home.
-        if (pathname === href) {
-          router.push("/");
-        }
       } catch {
+        restoreOptimisticArchive(chatId);
         toast.error(`Could not archive "${chatTitle}".`);
-      } finally {
-        setArchivingIds((current) => {
-          const next = new Set(current);
-          next.delete(chatId);
-          return next;
-        });
       }
     });
   };
@@ -495,7 +495,6 @@ function SidebarRecentChats() {
         optimistic={optimistic}
         localState={localChatStates.get(chat.id) ?? null}
         pinned={pinned}
-        archiving={archivingIds.has(chat.id)}
         pinning={pinningIds.has(chat.id)}
         onPrefetch={prefetchChat}
         onRequestComposerFocus={() => requestChatComposerFocus(chat.id)}
@@ -553,7 +552,6 @@ function SidebarChatRow({
   optimistic,
   localState,
   pinned,
-  archiving,
   pinning,
   onPrefetch,
   onRequestComposerFocus,
@@ -566,7 +564,6 @@ function SidebarChatRow({
   optimistic: boolean;
   localState: ReturnType<typeof chatSummaryState> | null;
   pinned: boolean;
-  archiving: boolean;
   pinning: boolean;
   onPrefetch: () => void;
   onRequestComposerFocus: () => void;
@@ -634,29 +631,18 @@ function SidebarChatRow({
                 : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
             }`}
           >
-            {pinning ? (
-              <Loader2 size={12} strokeWidth={1.75} className="animate-spin" />
-            ) : (
-              <Pin size={11.5} strokeWidth={1.8} fill={pinned ? "currentColor" : "none"} />
-            )}
+            {/* The row has already moved to its new section, so the icon shows the state the user
+                asked for rather than a spinner over the one they just left. */}
+            <Pin size={11.5} strokeWidth={1.8} fill={pinned ? "currentColor" : "none"} />
           </button>
           <button
             type="button"
             title="Archive chat"
             aria-label={`Archive ${chat.title}`}
-            disabled={archiving}
             onClick={onArchive}
-            className={`mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink/50 transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed ${
-              archiving
-                ? "opacity-100"
-                : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
-            }`}
+            className="mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink/50 opacity-0 transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover:opacity-100 group-focus-within:opacity-100"
           >
-            {archiving ? (
-              <Loader2 size={13} strokeWidth={1.75} className="animate-spin" />
-            ) : (
-              <Archive size={13} strokeWidth={1.75} />
-            )}
+            <Archive size={13} strokeWidth={1.75} />
           </button>
         </>
       )}
