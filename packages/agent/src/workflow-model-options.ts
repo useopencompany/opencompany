@@ -232,3 +232,48 @@ function requireAgentModelDefinition(modelId: AgentModelId) {
   }
   return model;
 }
+
+const DEFAULT_WORKFLOW_SELECTION: ReturnType<typeof workflowModelSelection> =
+  workflowModelSelection({
+    model: DEFAULT_WORKFLOW_MODEL_TOKEN,
+  });
+
+// The token must end alphanumeric so trailing punctuation ("run @sonnet-5.")
+// stays out of the capture while inner dots ("@kimi-k2.6") still match.
+const WORKFLOW_MENTION_TOKEN_PATTERN = /(^|\s)@([a-z0-9](?:[a-z0-9./-]*[a-z0-9])?)/gi;
+
+export function resolveWorkflowStepModelSelection(step: {
+  model: string;
+  runtimeModel?: unknown;
+  reasoningEffort?: unknown;
+  instructions: string;
+}): ReturnType<typeof workflowModelSelection> {
+  const selectedToken = step.model.trim().toLowerCase();
+  if (selectedToken) {
+    if (!isWorkflowModelToken(selectedToken)) {
+      throw new Error(
+        `This workflow step's model "${selectedToken}" is not available. Pick a model in the workflow editor.`,
+      );
+    }
+    return workflowModelSelection({
+      model: selectedToken,
+      runtimeModel: step.runtimeModel,
+      reasoningEffort: step.reasoningEffort,
+    });
+  }
+
+  const selected = new Map<string, ReturnType<typeof workflowModelSelection>>();
+  for (const match of step.instructions.matchAll(WORKFLOW_MENTION_TOKEN_PATTERN)) {
+    const token = (match[2] ?? "").toLowerCase();
+    if (!isWorkflowModelToken(token)) continue;
+    selected.set(token, workflowModelSelection({ model: token }));
+  }
+  if (selected.size > 1) {
+    throw new Error(
+      `This workflow step mentions more than one model (${[...selected.keys()]
+        .map((token) => `@${token}`)
+        .join(", ")}). Pick one model for the step.`,
+    );
+  }
+  return [...selected.values()][0] ?? DEFAULT_WORKFLOW_SELECTION;
+}

@@ -16,7 +16,7 @@ it("adds Outlook providers without removing existing integration providers", asy
     for (const migration of [
       "0262_opencompany_convex_integration.sql",
       "0266_google_admin_integration.sql",
-      "0267_outlook_integrations.sql",
+      "0269_outlook_integrations.sql",
     ]) {
       const sql = await readFile(new URL(`../../../drizzle/${migration}`, import.meta.url), "utf8");
       await db.exec(sql);

@@ -585,6 +585,21 @@
               "name"
             ],
             "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "markSeen": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              }
+            },
+            "required": [
+              "markSeen"
+            ],
+            "additionalProperties": false
           }
         ]
       },
@@ -1550,10 +1565,47 @@
               "example": "run_019fed53"
             },
             "maxItems": 16
+          },
+          "stepModelOverrides": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkflowStepModelOverride"
+            },
+            "maxItems": 20
           }
         },
         "required": [
           "description"
+        ],
+        "additionalProperties": false
+      },
+      "WorkflowStepModelOverride": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "model": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "runtimeModel": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "reasoningEffort": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "id",
+          "model"
         ],
         "additionalProperties": false
       },
@@ -4344,6 +4396,9 @@
           "chatCapabilitiesBetaEnabled": {
             "type": "boolean"
           },
+          "reviewInboxEnabled": {
+            "type": "boolean"
+          },
           "wikiEnabled": {
             "type": "boolean",
             "enum": [
@@ -4407,6 +4462,7 @@
           "taskSpawningEnabled",
           "autoModelRoutingEnabled",
           "chatCapabilitiesBetaEnabled",
+          "reviewInboxEnabled",
           "wikiEnabled",
           "taskViewMode",
           "taskTimeRange",
@@ -9968,6 +10024,9 @@
           },
           "autoModelRoutingEnabled": {
             "type": "boolean"
+          },
+          "reviewInboxEnabled": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -9977,7 +10036,8 @@
           "wikiEnabled",
           "taskViewMode",
           "taskTimeRange",
-          "autoModelRoutingEnabled"
+          "autoModelRoutingEnabled",
+          "reviewInboxEnabled"
         ],
         "additionalProperties": false
       },
@@ -10017,6 +10077,9 @@
             ]
           },
           "autoModelRoutingEnabled": {
+            "type": "boolean"
+          },
+          "reviewInboxEnabled": {
             "type": "boolean"
           }
         },

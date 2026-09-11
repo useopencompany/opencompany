@@ -241,6 +241,7 @@ export const UPDATE_TASK_STATUS_TOOL_INPUT_JSON_SCHEMA: JSONSchema7 = {
 export const TASK_SYSTEM_BLOCK = [
   "<background_task_run>",
   "You are running as a background task, so the user cannot respond during this turn.",
+  "Execute the assigned work in this task. Tasks cannot create other tasks, start workflows, or manage task schedules; delegation is available only from main chats. If a needed capability is unavailable or a limit is reached, report the unfinished work and the blocker instead of handing it to another task or claiming completion.",
   "Follow the task and workflow instructions. If they call for a plan, question, decision, or approval before further work, end the turn with that request; the runner will pause the task for review. Otherwise complete the requested work with the tools available.",
   "When you have finished, write your final result as your last message. The task runner will decide the user-facing task status and card comment after your run finishes.",
   "</background_task_run>",
@@ -523,7 +524,13 @@ export async function runProductChatAgent(input: {
     })),
     stopWhen: stepCountIs(maxSteps),
     prepareStep: ({ stepNumber }: { stepNumber: number }) =>
-      prepareProductChatStep({ stepNumber, maxSteps, system }),
+      prepareProductChatStep({
+        stepNumber,
+        maxSteps,
+        system,
+        actionCallsExhausted: toolContext.areActionCallsExhausted(),
+        toolNames: Object.keys(toolContext.tools),
+      }),
     tools: toolContext.tools,
     ...(toolContext.repairToolCall
       ? { experimental_repairToolCall: toolContext.repairToolCall }
@@ -616,7 +623,6 @@ export function createProductChatToolContext(input: {
   limits?: {
     webSearchCallsPerTurn?: number;
     webFetchCallsPerTurn?: number;
-    actionCallsPerTurn?: number;
   };
   // When several brains are in scope (e.g. a Slack channel routed to more than
   // one brain), the brain schema grows a required `brain` enum and raw
@@ -625,7 +631,8 @@ export function createProductChatToolContext(input: {
 }) {
   const webSearchCap = input.limits?.webSearchCallsPerTurn ?? MAX_WEB_SEARCH_CALLS_PER_TURN;
   const webFetchCap = input.limits?.webFetchCallsPerTurn ?? MAX_WEB_FETCH_CALLS_PER_TURN;
-  const actionCap = input.limits?.actionCallsPerTurn ?? MAX_ACTION_CALLS_PER_TURN;
+  const actionCap = MAX_ACTION_CALLS_PER_TURN;
+  let actionCallsExhausted = false;
   let startedTask: StartedTask | null = null;
   let startedTaskInFlight: Promise<StartedTask> | null = null;
   let startTaskCallCount = 0;
@@ -1636,7 +1643,7 @@ export function createProductChatToolContext(input: {
           typeof executionContext.toolCallId === "string"
             ? executionContext.toolCallId
             : `ai-sdk:${++internalActionInvocationSequence}`;
-        return serveActionRequest({
+        const response = (await serveActionRequest({
           request: {
             operation: "execute",
             sessionId: "foreground",
@@ -1657,7 +1664,15 @@ export function createProductChatToolContext(input: {
               toolCallId: invocationId,
             });
           },
-        }) as Promise<UseActionToolOutput>;
+        })) as UseActionToolOutput;
+        // Parallel calls can resolve out of admission order. Exhaustion is monotonic.
+        if (
+          response.budget?.remaining === 0 ||
+          (!response.ok && response.error.code === "call_budget")
+        ) {
+          actionCallsExhausted = true;
+        }
+        return response;
       },
     });
   }
@@ -1683,6 +1698,7 @@ export function createProductChatToolContext(input: {
   }
 
   return {
+    areActionCallsExhausted: () => actionCallsExhausted,
     getStartedTask: () => startedTask,
     hasVisibleToolActivity: () => visibleToolActivity,
     repairToolCall,
@@ -1696,10 +1712,10 @@ export const PRODUCT_CHAT_FINAL_RESPONSE_INSTRUCTION =
 export function prepareProductChatStep(input: {
   system?: string;
   stepNumber: number;
-  // Background task runs use a larger budget than an interactive chat turn; the
-  // final step is always reserved with toolChoice "none" so the model produces
-  // a text answer instead of a dangling tool call.
+  actionCallsExhausted?: boolean;
+  toolNames?: string[];
   finalizeAfterApproval?: boolean;
+  // Reserve the final model step for an answer, including tasks with larger step limits.
   maxSteps?: number;
 }) {
   const maxSteps = input.maxSteps ?? CHAT_MAX_STEPS;
@@ -1712,6 +1728,17 @@ export function prepareProductChatStep(input: {
     return {
       toolChoice: "none" as const,
       system: [input.system, PRODUCT_CHAT_FINAL_RESPONSE_INSTRUCTION].filter(Boolean).join("\n\n"),
+    };
+  }
+  if (input.actionCallsExhausted) {
+    return {
+      activeTools: (input.toolNames ?? []).filter((name) => name !== USE_ACTION_TOOL_NAME),
+      system: [
+        input.system,
+        "The action-call budget for this turn is exhausted. use_action is unavailable. Continue only with other available tools and information already gathered; clearly state any incomplete coverage.",
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
     };
   }
   return {};

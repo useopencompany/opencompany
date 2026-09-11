@@ -7,6 +7,7 @@ import {
 } from "./host-tools";
 
 const context: ChatHostContext = {
+  taskConversation: false,
   actorId: "user_1",
   workspaceId: "workspace_1",
   workspaceName: "Analytical Engines",
@@ -23,6 +24,65 @@ const context: ChatHostContext = {
 };
 
 describe("opencompany Chat Task host tools", () => {
+  it("does not advertise task delegation or schedules in a task conversation", async () => {
+    const dependencies = testDependencies({
+      loadContext: vi.fn(async () => ({ ...context, taskConversation: true })),
+    });
+
+    await expect(
+      executeChatHostToolService({
+        command: { operation: "bootstrap", sessionId: "runtime_1", runId: "run_1" },
+        dependencies,
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      result: { taskToolsEnabled: false, workflows: [], recurringSchedules: [] },
+    });
+    expect(dependencies.listWorkflowCatalog).not.toHaveBeenCalled();
+    expect(dependencies.listSchedules).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "start_task",
+    "start_workflow",
+    "schedule_task",
+    "edit_task_schedule",
+    "delete_task_schedule",
+  ] as const)("rejects direct %s calls from tasks before any side effect", async (operation) => {
+    const dependencies = testDependencies({
+      loadContext: vi.fn(async () => ({ ...context, taskConversation: true })),
+    });
+
+    await expect(
+      executeChatHostToolService({
+        command: {
+          operation,
+          sessionId: "runtime_1",
+          runId: "run_1",
+          input: {
+            taskConversation: false,
+            name: "Research",
+            prompt: "Research the requested topic.",
+            model: "moonshotai/kimi-k2.6",
+            engine: "opencompany",
+            workflowId: "research",
+            cron: "0 9 * * *",
+          },
+        },
+        dependencies,
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      error: "Tasks cannot create other tasks or manage task schedules. Use a main chat instead.",
+    });
+    expect(dependencies.createTask).not.toHaveBeenCalled();
+    expect(dependencies.createWorkflowTask).not.toHaveBeenCalled();
+    expect(dependencies.createSchedule).not.toHaveBeenCalled();
+    expect(dependencies.listSchedules).not.toHaveBeenCalled();
+    expect(dependencies.updateSchedule).not.toHaveBeenCalled();
+    expect(dependencies.deleteSchedule).not.toHaveBeenCalled();
+  });
+
   it("keeps the acting member when a task resolves plugin Skills and restricts standalone Skills to company scope", async () => {
     const dependencies = testDependencies({
       loadContext: vi.fn(async () => ({ ...context, taskConversation: true })),

@@ -26,6 +26,7 @@ export type IdentityUser = {
   taskSpawningEnabled: boolean;
   autoModelRoutingEnabled: boolean;
   chatCapabilitiesBetaEnabled: boolean;
+  reviewInboxEnabled: boolean;
   /** @deprecated Wiki is always enabled. */
   wikiEnabled: true;
   taskViewMode: "board" | "list";
@@ -229,6 +230,7 @@ function identityUser(user: IdentityDto["user"]): IdentityUser {
     taskSpawningEnabled: user.taskSpawningEnabled,
     autoModelRoutingEnabled: user.autoModelRoutingEnabled,
     chatCapabilitiesBetaEnabled: user.chatCapabilitiesBetaEnabled,
+    reviewInboxEnabled: user.reviewInboxEnabled,
     wikiEnabled: true,
     taskViewMode: user.taskViewMode,
     taskTimeRange: user.taskTimeRange,

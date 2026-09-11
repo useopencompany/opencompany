@@ -83,7 +83,17 @@ export function ToolCallItem({
 }) {
   // Keep the user's choice when historical detail switches the row renderer.
   const [expanded, setExpanded] = useState(false);
-  useHistoricalPresentationDetail(expanded, detail);
+  const pendingApproval = Boolean(
+    !readOnly &&
+      (tool.name === USE_ACTION_TOOL_NAME || tool.name === CODEX_APPROVAL_TOOL_NAME) &&
+      tool.state === "approval-requested" &&
+      tool.approvalId &&
+      allowActionApproval &&
+      onActionApproval,
+  );
+  // Summary params can omit recipients or truncate message bodies. Fetch the complete request
+  // automatically, keeping the decision card visible while approval waits for that detail.
+  useHistoricalPresentationDetail(expanded || pendingApproval, detail);
   const disclosure: ToolCallDisclosure = {
     expanded,
     onToggle: () => {
@@ -93,22 +103,26 @@ export function ToolCallItem({
     },
   };
 
-  // Summary-backed messages retain the approval id, action, and bounded params. The latest
-  // authorized approval must use those fields before the historical-detail guard collapses it.
-  if (
-    !readOnly &&
-    tool.name === USE_ACTION_TOOL_NAME &&
-    tool.state === "approval-requested" &&
-    tool.approvalId &&
-    allowActionApproval &&
-    onActionApproval
-  ) {
-    if (managedCapabilityActionFromTool(tool)) {
+  if (pendingApproval && onActionApproval) {
+    if (tool.name === USE_ACTION_TOOL_NAME && managedCapabilityActionFromTool(tool)) {
       return (
-        <CapabilityApprovalCard tool={tool} onDecision={onActionApproval} disclosure={disclosure} />
+        <CapabilityApprovalCard
+          tool={tool}
+          onDecision={onActionApproval}
+          disclosure={disclosure}
+          detail={detail}
+        />
       );
     }
-    return <ActionApprovalCard tool={tool} onDecision={onActionApproval} disclosure={disclosure} />;
+    return (
+      <ActionApprovalCard
+        tool={tool}
+        onDecision={onActionApproval}
+        allowAlways={tool.name === USE_ACTION_TOOL_NAME}
+        disclosure={disclosure}
+        detail={detail}
+      />
+    );
   }
   if (detail && detail.state !== "loaded")
     return <ToolCallRow tool={tool} detail={detail} {...disclosure} />;
@@ -139,22 +153,6 @@ export function ToolCallItem({
   }
   if (tool.name === CODEX_QUESTION_TOOL_NAME && codexQuestionInput(tool.input)) {
     return <CodexQuestionRow tool={tool} onAction={onCodexAction} disclosure={disclosure} />;
-  }
-  if (
-    tool.name === CODEX_APPROVAL_TOOL_NAME &&
-    tool.state === "approval-requested" &&
-    tool.approvalId &&
-    allowActionApproval &&
-    onActionApproval
-  ) {
-    return (
-      <ActionApprovalCard
-        tool={tool}
-        onDecision={onActionApproval}
-        allowAlways={false}
-        disclosure={disclosure}
-      />
-    );
   }
   if (tool.name === USE_ACTION_TOOL_NAME && capabilityApprovalFromTool(tool)) {
     return <LegacyCapabilityApprovalRow tool={tool} />;
@@ -216,10 +214,12 @@ function CapabilityApprovalCard({
   tool,
   disclosure,
   onDecision,
+  detail,
 }: {
   tool: ToolCallView;
   disclosure: ToolCallDisclosure;
   onDecision: (request: ActionApprovalRequest) => Promise<void>;
+  detail: HistoricalPresentationDetailController | undefined;
 }) {
   const approvalId = tool.approvalId;
   const action = managedCapabilityActionFromTool(tool);
@@ -271,7 +271,8 @@ function CapabilityApprovalCard({
   }, [tool.toolCallId]);
 
   if (!approvalId || !action) return <ToolCallRow tool={tool} {...disclosure} />;
-  const approvalAvailable = quote?.status === "awaiting_approval";
+  const approvalAvailable =
+    quote?.status === "awaiting_approval" && (!detail || detail.state === "loaded");
 
   const decide = (decision: "accept" | "decline") => {
     if (submitting || (decision === "accept" && !approvalAvailable)) return;
@@ -327,6 +328,7 @@ function CapabilityApprovalCard({
           </p>
         </>
       ) : null}
+      {detail ? <HistoricalPresentationDetailStatus detail={detail} /> : null}
       <div className="mt-3 flex flex-wrap gap-2">
         <button
           type="button"
@@ -336,7 +338,7 @@ function CapabilityApprovalCard({
         >
           {submitting === "accept"
             ? "Running..."
-            : approvalAvailable && quote
+            : quote?.status === "awaiting_approval"
               ? `Approve for ${formatUsdMicros(quote.maxCostUsdMicros)}`
               : quote
                 ? capabilityApprovalStatusLabel(quote.status)
@@ -365,11 +367,13 @@ function ActionApprovalCard({
   disclosure,
   onDecision,
   allowAlways = true,
+  detail,
 }: {
   tool: ToolCallView;
   disclosure: ToolCallDisclosure;
   onDecision: (request: ActionApprovalRequest) => Promise<void>;
   allowAlways?: boolean;
+  detail: HistoricalPresentationDetailController | undefined;
 }) {
   const [submitting, setSubmitting] = useState<ActionApprovalDecision | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -377,12 +381,13 @@ function ActionApprovalCard({
   const taskApproval = tool.toolCallId.startsWith("task_action_");
   const summary = actionApprovalSummary(tool.input);
   const approvalId = tool.approvalId;
+  const approvalAvailable = !detail || detail.state === "loaded";
   const action =
     isRecord(tool.input) && typeof tool.input.action === "string" ? tool.input.action : "";
   if (!approvalId) return <ToolCallRow tool={tool} {...disclosure} />;
 
   const decide = (decision: ActionApprovalDecision) => {
-    if (submitting) return;
+    if (submitting || (decision !== "decline" && !approvalAvailable)) return;
     setError(null);
     setSubmitting(decision);
     void onDecision({ approvalId, action, decision }).catch((cause) => {
@@ -414,10 +419,11 @@ function ActionApprovalCard({
           ))}
         </dl>
       ) : null}
+      {detail ? <HistoricalPresentationDetailStatus detail={detail} /> : null}
       <div className="mt-3 flex flex-wrap gap-2">
         <button
           type="button"
-          disabled={submitting !== null}
+          disabled={!approvalAvailable || submitting !== null}
           onClick={() => decide("accept")}
           className="rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-canvas transition-opacity hover:opacity-90 disabled:opacity-50"
         >
@@ -426,7 +432,7 @@ function ActionApprovalCard({
         {allowAlways && !taskApproval && !/^plugin:custom-[a-f0-9]{24}:/.test(action) ? (
           <button
             type="button"
-            disabled={submitting !== null}
+            disabled={!approvalAvailable || submitting !== null}
             onClick={() => decide("accept_always")}
             className="rounded-lg border border-border px-3 py-1.5 text-[12px] font-medium text-ink-muted hover:bg-surface-hover disabled:opacity-50"
           >

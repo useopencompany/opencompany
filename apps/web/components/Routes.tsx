@@ -1,9 +1,6 @@
 "use client";
 
 import type {
-  LegacyTaskHistoryDto,
-  LegacyTaskHistoryEventDto,
-  LegacyTaskHistoryMessageDto,
   SkillBundleFileMetadataDto,
   SkillImportCandidateDto,
   SkillImportFileMetadataDto,
@@ -24,6 +21,7 @@ import {
   CalendarClock,
   CircleUserRound,
   ExternalLink,
+  Inbox,
   Link2,
   ListTodo,
   Loader2,
@@ -60,6 +58,7 @@ import { Surface } from "@/components/Surface";
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
 import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
 import { useHydrated } from "@/components/useHydrated";
+import { useTaskRun } from "@/components/useTaskRun";
 import type { ChatSessionView } from "@/lib/chat-ui";
 import { getHeadlessWorkflows } from "@/lib/headless-automation-collections";
 import { createHeadlessWorkflow } from "@/lib/headless-automation-commands";
@@ -76,14 +75,12 @@ import {
   updateHeadlessWorkspaceSkill,
 } from "@/lib/headless-knowledge-commands";
 import type { BrainOverviewStats, BrainSnapshot } from "@/lib/headless-knowledge-types";
-import { legacyTaskDtoToRow, taskReadModelToRow } from "@/lib/headless-task-collections";
-import { getHeadlessTask, getLegacyTaskCompatibilityHistory } from "@/lib/headless-task-commands";
 import { DEFAULT_MODEL } from "@/lib/model-options";
 import type { RepoConfigView, WorkspaceRepository } from "@/lib/repo-config-actions";
-import { buildHarnessRun, type HarnessRunViewModel } from "@/lib/task-harness-run";
 import {
   updateAutoModelRoutingAction,
   updateBotsAction,
+  updateReviewInboxAction,
   updateTaskSpawningAction,
 } from "@/lib/user-preferences";
 
@@ -270,6 +267,13 @@ export function PreferencesSettingsRoute() {
           description="Let opencompany choose a model from your first message and keep it for the chat."
           checked={featureFlags.autoModelRouting}
           update={updateAutoModelRoutingAction}
+        />
+        <BetaFeatureSwitch
+          icon={Inbox}
+          label="For review"
+          description="Collect finished chats and tasks you haven't read yet in one place, and read them side by side."
+          checked={featureFlags.reviewInbox}
+          update={updateReviewInboxAction}
         />
       </section>
     </SettingsContent>
@@ -469,91 +473,6 @@ export function TaskDetailRoute({ taskId }: { taskId: string }) {
   );
 }
 
-function useTaskRun(taskId: string) {
-  const { featureFlags, tasks, taskRows } = useAppData();
-  const [serverState, setServerState] = useState<{
-    taskId: string;
-    run: HarnessRunViewModel | null;
-    notFound: boolean;
-  } | null>(null);
-  const normalizedTaskId = taskId.trim().toUpperCase();
-  const liveTask = useMemo(
-    () =>
-      taskRows.find((task) => task.id === taskId || task.display_id === normalizedTaskId) ??
-      tasks.find((task) => task.id === taskId || task.displayId === normalizedTaskId) ??
-      null,
-    [normalizedTaskId, taskId, taskRows, tasks],
-  );
-  const placeholderRun = useMemo(
-    () => (liveTask ? buildHarnessRun({ task: liveTask, messages: [], events: [] }) : null),
-    [liveTask],
-  );
-
-  useEffect(() => {
-    if (!featureFlags.taskSpawning) return;
-    const controller = new AbortController();
-    void getHeadlessTask(taskId, {
-      fetch: (input, init) => fetch(input, { ...init, signal: controller.signal }),
-    })
-      .then((task) => {
-        if (task) {
-          return buildHarnessRun({
-            task: taskReadModelToRow(task),
-            messages: [],
-            events: [],
-          });
-        }
-        return getLegacyTaskCompatibilityHistory(taskId, {
-          fetch: (input, init) => fetch(input, { ...init, signal: controller.signal }),
-        }).then((history: LegacyTaskHistoryDto | null) => {
-          if (!history) {
-            setServerState({ taskId, run: null, notFound: true });
-            return null;
-          }
-          return buildHarnessRun({
-            task: legacyTaskDtoToRow(history.task),
-            messages: history.messages.map((message: LegacyTaskHistoryMessageDto) => ({
-              id: message.id,
-              task_id: history.task.id,
-              user_workos_id: "",
-              role: message.role,
-              status: message.status,
-              content: message.content,
-              model_message: null,
-              tool_name: message.toolName,
-              tool_call_id: message.toolCallId,
-              response_to_message_id: null,
-              created_at: message.createdAt,
-              updated_at: message.updatedAt,
-              completed_at: message.completedAt,
-            })),
-            events: history.events.map((event: LegacyTaskHistoryEventDto) => ({
-              id: event.id,
-              task_id: history.task.id,
-              user_workos_id: "",
-              message_id: event.messageId,
-              type: event.type,
-              payload: event.payload,
-              created_at: event.createdAt,
-            })),
-          });
-        });
-      })
-      .then((run) => {
-        if (run) setServerState({ taskId, run, notFound: false });
-      })
-      .catch((error) => {
-        if (error instanceof DOMException && error.name === "AbortError") return;
-      });
-    return () => controller.abort();
-  }, [featureFlags.taskSpawning, taskId]);
-
-  const currentServerState = serverState?.taskId === taskId ? serverState : null;
-  if (currentServerState?.run) return currentServerState.run;
-  if (currentServerState?.notFound && !placeholderRun) return null;
-  return placeholderRun;
-}
-
 export function TasksWorkflowsDisabledRoute() {
   return (
     <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
@@ -566,6 +485,31 @@ export function TasksWorkflowsDisabledRoute() {
           <p className="text-[13px] leading-5 text-ink-subtle">
             Enable Tasks &amp; Workflows in Preferences to fire workflows, run background tasks, and
             set up recurring routines.
+          </p>
+          <Link
+            href="/settings/preferences"
+            className="inline-flex w-fit rounded-md border border-border bg-surface px-3 py-2 text-[13px] font-medium text-ink hover:bg-surface-hover"
+          >
+            Open Preferences
+          </Link>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+export function ReviewInboxDisabledRoute() {
+  return (
+    <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
+      <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
+        <div className="flex w-full max-w-[720px] flex-col gap-4 pb-24 pt-16 sm:pt-24">
+          <BackLink href="/" label="Chat" />
+          <h1 className="text-[24px] font-semibold leading-tight text-ink">
+            For review is a beta feature
+          </h1>
+          <p className="text-[13px] leading-5 text-ink-subtle">
+            Enable For review in Preferences to collect finished chats and tasks you haven&apos;t
+            read yet in one place.
           </p>
           <Link
             href="/settings/preferences"

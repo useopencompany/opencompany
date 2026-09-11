@@ -36,6 +36,7 @@ const migrationPaths = [
   "0246_goat_task_waiting_status.sql",
   "0248_goat_chat_attachment_upload_idempotency.sql",
   "0255_goat_task_waiting_projection.sql",
+  "0268_goat_task_review_unseen.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -1370,6 +1371,107 @@ describe("Postgres Task repository", () => {
       ),
     ).resolves.toMatchObject({
       rows: [{ task_name: "Launch brief", conversation_title: "Launch brief" }],
+    });
+  });
+
+  // The review queue reads Task results from the Task projection because the conversation
+  // projection deliberately drops conversations of kind 'task'. These cover that contract end to
+  // end: settlement raises the flag on the projection, acknowledgment clears it through an
+  // authorized command, and a stranger cannot clear it at all.
+  describe("Task result unread state", () => {
+    async function settledTask(idempotencyKey: string) {
+      const created = await service.createTask(actor(), {
+        idempotencyKey,
+        goal: "Scan the competitors",
+        engine: "opencompany",
+        model: "moonshotai/kimi-k3",
+        source: "manual",
+      });
+      // How apps/runner/src/task-turn.ts settles a completed Task run.
+      await database.query(`UPDATE goat.chat_sessions SET has_unseen = true WHERE id = $1`, [
+        created.task.conversationId,
+      ]);
+      return created.task;
+    }
+
+    it("projects a settled Task as unread, where the conversation projection cannot", async () => {
+      const task = await settledTask("task-unseen-projection");
+
+      await expect(
+        database.query<{ has_unseen: boolean }>(
+          `SELECT has_unseen FROM goat.task_read_model_v1 WHERE id = $1`,
+          [task.id],
+        ),
+      ).resolves.toMatchObject({ rows: [{ has_unseen: true }] });
+      await expect(
+        database.query(`SELECT 1 FROM goat.conversation_read_model_v1 WHERE id = $1`, [
+          task.conversationId,
+        ]),
+      ).resolves.toMatchObject({ rows: [] });
+    });
+
+    it("clears the flag on acknowledgment without resequencing the queue", async () => {
+      const task = await settledTask("task-unseen-ack");
+      const before = await database.query<{ task_updated_at: Date; conversation_updated_at: Date }>(
+        `SELECT task.updated_at AS task_updated_at,
+                conversation.updated_at AS conversation_updated_at
+         FROM goat.tasks AS task
+         JOIN goat.chat_sessions AS conversation ON conversation.id = task.session_id
+         WHERE task.id = $1`,
+        [task.id],
+      );
+
+      await expect(service.updateTask(actor(), task.id, { markSeen: true })).resolves.toMatchObject(
+        { task: { id: task.id } },
+      );
+
+      await expect(
+        database.query<{ has_unseen: boolean; last_seen_at: Date | null }>(
+          `SELECT projection.has_unseen, conversation.last_seen_at
+           FROM goat.task_read_model_v1 AS projection
+           JOIN goat.chat_sessions AS conversation ON conversation.id = projection.conversation_id
+           WHERE projection.id = $1`,
+          [task.id],
+        ),
+      ).resolves.toMatchObject({ rows: [{ has_unseen: false }] });
+      const [seen] = (
+        await database.query<{ last_seen_at: Date | null }>(
+          `SELECT conversation.last_seen_at
+           FROM goat.tasks AS task
+           JOIN goat.chat_sessions AS conversation ON conversation.id = task.session_id
+           WHERE task.id = $1`,
+          [task.id],
+        )
+      ).rows;
+      expect(seen?.last_seen_at).not.toBeNull();
+
+      // Reading a result must not move the row the reader is working through.
+      await expect(
+        database.query<{ task_updated_at: Date; conversation_updated_at: Date }>(
+          `SELECT task.updated_at AS task_updated_at,
+                  conversation.updated_at AS conversation_updated_at
+           FROM goat.tasks AS task
+           JOIN goat.chat_sessions AS conversation ON conversation.id = task.session_id
+           WHERE task.id = $1`,
+          [task.id],
+        ),
+      ).resolves.toMatchObject({ rows: [before.rows[0]] });
+    });
+
+    it("refuses to acknowledge a Task the actor does not own", async () => {
+      const task = await settledTask("task-unseen-foreign");
+
+      await expect(
+        service.updateTask(actor({ userId: "user_2", workspaceId: "workspace_2" }), task.id, {
+          markSeen: true,
+        }),
+      ).rejects.toThrow(/not found/i);
+      await expect(
+        database.query<{ has_unseen: boolean }>(
+          `SELECT has_unseen FROM goat.task_read_model_v1 WHERE id = $1`,
+          [task.id],
+        ),
+      ).resolves.toMatchObject({ rows: [{ has_unseen: true }] });
     });
   });
 });

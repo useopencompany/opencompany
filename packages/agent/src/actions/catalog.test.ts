@@ -11,7 +11,6 @@ const mocks = vi.hoisted(() => ({
   remote: vi.fn(),
   registrations: vi.fn(),
   stripe: vi.fn(),
-  x: vi.fn(),
 }));
 
 vi.mock("../plugin-gateway", () => ({
@@ -28,7 +27,6 @@ vi.mock("./posthog", () => ({ resolvePostHogActions: mocks.posthog }));
 vi.mock("./remote-mcp", () => ({ resolveRemoteMcpActions: mocks.remote }));
 vi.mock("./revolut", () => ({ resolveRevolutActions: mocks.noop }));
 vi.mock("./stripe", () => ({ resolveStripeActions: mocks.stripe }));
-vi.mock("./x-account", () => ({ resolveXAccountActions: mocks.x }));
 
 import { resolveActionCatalog } from "./catalog";
 import type { RemoteMcpGatewayRegistration } from "./remote-mcp";
@@ -37,7 +35,6 @@ describe("resolveActionCatalog plugin reconciliation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.noop.mockResolvedValue(null);
-    mocks.x.mockResolvedValue(null);
     mocks.calendar.mockResolvedValue({
       id: "google_calendar",
       label: "Google Calendar",
@@ -295,12 +292,6 @@ describe("resolveActionCatalog plugin reconciliation", () => {
   });
 
   it("requires the personal X plugin for account posting", async () => {
-    mocks.x.mockResolvedValueOnce({
-      id: "x_account",
-      label: "X",
-      description: "Legacy X posting.",
-      actions: [{ id: "x_account.post_tweet" }],
-    });
     const withoutPlugin = await resolveActionCatalog(
       { userWorkosId: "user_1", workspaceId: "workspace_1" },
       { remoteMcpRegistrations: [] },
@@ -309,7 +300,6 @@ describe("resolveActionCatalog plugin reconciliation", () => {
       expect.objectContaining({ id: "x_account.post_tweet" }),
     );
 
-    mocks.x.mockClear();
     const xPluginRegistration = {
       source: "plugin:x:x",
     } as unknown as RemoteMcpGatewayRegistration;
@@ -317,7 +307,7 @@ describe("resolveActionCatalog plugin reconciliation", () => {
       id: "plugin:x:x",
       label: "X",
       description: "Official X plugin tools.",
-      actions: [{ id: "plugin:x:x.createPosts" }],
+      actions: [{ id: "plugin:x:x.create_posts" }],
     });
     const withPlugin = await resolveActionCatalog(
       { userWorkosId: "user_1", workspaceId: "workspace_1" },
@@ -340,13 +330,12 @@ describe("resolveActionCatalog plugin reconciliation", () => {
       expect.objectContaining({ id: "x_account.post_tweet" }),
     );
     expect(withPlugin.actions).toContainEqual(
-      expect.objectContaining({ id: "plugin:x:x.createPosts" }),
+      expect.objectContaining({ id: "plugin:x:x.create_posts" }),
     );
     expect(withPlugin.actions).not.toContainEqual(
       expect.objectContaining({ id: "x.search_posts" }),
     );
     expect(withPlugin.providers).not.toContainEqual(expect.objectContaining({ id: "x" }));
-    expect(mocks.x).not.toHaveBeenCalled();
   });
 
   it("requires the personal plugin and never restores legacy actions", async () => {

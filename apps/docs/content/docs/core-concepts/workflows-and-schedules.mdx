@@ -36,6 +36,12 @@ Type `#` in Chat, select an active Workflow, and add the request for this invoca
 Use the linked test report and list anything that still needs verification.
 ```
 
+Selecting a Workflow shows its saved model settings in the composer. For workflows with multiple
+steps, each step has its own controls. Change a model or reasoning effort to override it for
+**this run only**, or select **Reset** to return to the Workflow defaults. These changes do not
+update the saved Workflow or your usual Chat model. Image and PDF uploads are checked against
+the models selected for the Workflow. Removing the hashtag restores the normal Chat controls.
+
 The work appears in **Tasks**. Inspect one complete run and refine the instructions before
 scheduling it. Editing a Workflow doesn't rewrite the definition captured by an existing Task.
 

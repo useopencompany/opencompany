@@ -512,6 +512,14 @@ describe("canonical Hono API", () => {
       body: JSON.stringify({
         description: "Focus on competitors.",
         skillIds: ["market-research"],
+        stepModelOverrides: [
+          {
+            id: "step_1",
+            model: "codex",
+            runtimeModel: "openai/gpt-5.6-sol",
+            reasoningEffort: "xhigh",
+          },
+        ],
       }),
     });
     expect(invoked.status).toBe(202);
@@ -519,7 +527,19 @@ describe("canonical Hono API", () => {
       data: { task: { id: "task_automation", source: "workflow" }, runId: "run_automation" },
     });
     expect(automations.prepareWorkflow).toHaveBeenCalledWith(
-      expect.objectContaining({ skillIds: ["market-research"] }),
+      expect.objectContaining({
+        skillIds: ["market-research"],
+        workflow: expect.objectContaining({
+          steps: [
+            expect.objectContaining({
+              id: "step_1",
+              model: "codex",
+              runtimeModel: "openai/gpt-5.6-sol",
+              reasoningEffort: "xhigh",
+            }),
+          ],
+        }),
+      }),
     );
 
     const createdSchedule = await app.request("/v1/schedules", {
@@ -3574,6 +3594,7 @@ describe("canonical Hono API", () => {
             taskViewMode: "list",
             taskTimeRange: "24h",
             autoModelRoutingEnabled: true,
+            reviewInboxEnabled: false,
           }),
         },
       });
@@ -3637,6 +3658,7 @@ describe("canonical Hono API", () => {
         taskViewMode: "board" as const,
         taskTimeRange: "7d" as const,
         autoModelRoutingEnabled: false,
+        reviewInboxEnabled: false,
       }));
       const app = testApp(fakeRepository(), {
         userSettings: { ...fakeUserSettings(), updatePreferences },
@@ -3663,6 +3685,7 @@ describe("canonical Hono API", () => {
       taskViewMode: "list" as const,
       taskTimeRange: "24h" as const,
       autoModelRoutingEnabled: true,
+      reviewInboxEnabled: false,
     }));
     const app = testApp(fakeRepository(), {
       userSettings: { ...fakeUserSettings(), updatePreferences },

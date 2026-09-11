@@ -37,6 +37,7 @@ const appDataMock = vi.hoisted(() => ({
       taskSpawning: false,
       autoModelRouting: false,
       legacyBrain: true,
+      reviewInbox: false,
     },
     integrations: {},
     mcpSetup: { preferredClient: null, completedAt: null },
@@ -47,6 +48,7 @@ const userPreferencesMock = vi.hoisted(() => ({
   updateBotsAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateTaskSpawningAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateAutoModelRoutingAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
+  updateReviewInboxAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
 }));
 
 const workflowActionsMock = vi.hoisted(() => ({
@@ -169,6 +171,7 @@ vi.mock("@/lib/user-preferences", () => ({
   updateBotsAction: userPreferencesMock.updateBotsAction,
   updateTaskSpawningAction: userPreferencesMock.updateTaskSpawningAction,
   updateAutoModelRoutingAction: userPreferencesMock.updateAutoModelRoutingAction,
+  updateReviewInboxAction: userPreferencesMock.updateReviewInboxAction,
 }));
 
 vi.mock("@/lib/headless-automation-commands", () => ({
@@ -351,6 +354,19 @@ describe("SettingsRoute", () => {
     await user.click(toggle);
 
     expect(userPreferencesMock.updateTaskSpawningAction).toHaveBeenCalledWith(true);
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+  });
+
+  it("shows the For review switch off by default and persists opt-in", async () => {
+    const user = userEvent.setup();
+    render(<PreferencesSettingsRoute />);
+
+    const toggle = screen.getByRole("switch", { name: "For review" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+
+    await user.click(toggle);
+
+    expect(userPreferencesMock.updateReviewInboxAction).toHaveBeenCalledWith(true);
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
   });
 
