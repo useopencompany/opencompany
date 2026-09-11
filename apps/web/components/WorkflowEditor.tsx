@@ -843,7 +843,13 @@ function LinearEventTriggerEditor({
               ))}
           </select>
           {teams && !teams.ok ? (
-            <span className="text-[11.5px] text-warning">{teams.error}</span>
+            <span className="text-[11.5px] text-warning">
+              {teams.error}{" "}
+              <Link href="/settings/plugins/linear" className="underline underline-offset-2">
+                Open Linear settings
+              </Link>
+              .
+            </span>
           ) : null}
           {teams?.ok && teams.partial ? (
             <span className="text-[11.5px] text-warning">

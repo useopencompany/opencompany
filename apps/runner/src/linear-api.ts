@@ -1,3 +1,4 @@
+import { linearGraphqlRequest } from "@opencompany/agent/integrations/linear-api";
 import { createLogger } from "@opencompany/observability";
 
 // Read-only Linear GraphQL helpers for the flush worker's prompt enrichment
@@ -6,7 +7,6 @@ import { createLogger } from "@opencompany/observability";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-linear-api" });
 
-const LINEAR_API_TIMEOUT_MS = 10_000;
 export const LINEAR_SNAPSHOT_COMMENT_LIMIT = 50;
 
 export type LinearIssueSnapshot = {
@@ -99,40 +99,6 @@ export async function fetchLinearIssueSnapshot(input: {
     });
     return null;
   }
-}
-
-export async function linearGraphqlRequest<T>(input: {
-  token: string;
-  query: string;
-  variables?: Record<string, unknown>;
-}): Promise<T> {
-  const response = await fetch("https://api.linear.app/graphql", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${input.token}`,
-    },
-    body: JSON.stringify({
-      query: input.query,
-      ...(input.variables ? { variables: input.variables } : {}),
-    }),
-    signal: AbortSignal.timeout(LINEAR_API_TIMEOUT_MS),
-  });
-  if (!response.ok) {
-    throw new Error(`Linear GraphQL request failed with ${response.status}.`);
-  }
-
-  const result = (await response.json()) as {
-    data?: T;
-    errors?: Array<{ message?: string }>;
-  };
-  if (result.errors && result.errors.length > 0) {
-    throw new Error(`Linear GraphQL returned ${result.errors[0]?.message ?? "an unknown error"}.`);
-  }
-  if (!result.data) {
-    throw new Error("Linear GraphQL returned no data.");
-  }
-  return result.data;
 }
 
 function toIssueSnapshot(issue: Record<string, unknown>): LinearIssueSnapshot | null {
