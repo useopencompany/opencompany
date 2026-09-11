@@ -1,0 +1,132 @@
+name: Build mobile app
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: build-mobile-app-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  build:
+    name: Build iOS (production)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      CI: true
+      DO_NOT_TRACK: "1"
+      INFISICAL_MACHINE_IDENTITY_ID: "251c74b2-32d5-490a-abfa-12d83f59ed7b"
+      INFISICAL_ENV_SLUG: production
+      INFISICAL_DOMAIN: ${{ vars.INFISICAL_DOMAIN || secrets.INFISICAL_DOMAIN || 'https://eu.infisical.com' }}
+    steps:
+      - name: Checkout build commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24.x
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+
+      - name: Install dependencies from the lockfile
+        run: bun install --frozen-lockfile
+
+      - name: Setup EAS
+        uses: expo/expo-github-action@eab7a230208c952974db8c3245cfd78402c7b385 # v9
+        with:
+          eas-version: 21.x.x
+          packager: bun
+
+      - name: Fetch mobile build secrets from Infisical
+        uses: Infisical/secrets-action@6cd3f7c0e4cc0d2395ee4ef414eb6eeb5d3e73db # v1.0.17
+        with:
+          method: oidc
+          identity-id: ${{ env.INFISICAL_MACHINE_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_MOBILE_PROJECT_SLUG || secrets.INFISICAL_MOBILE_PROJECT_SLUG }}
+          env-slug: ${{ env.INFISICAL_ENV_SLUG }}
+          domain: ${{ env.INFISICAL_DOMAIN }}
+
+      - name: Check mobile build env
+        shell: bash
+        run: |
+          required=(
+            APP_VARIANT
+            EXPO_TOKEN
+            ASC_P8_KEY
+            EXPO_ASC_KEY_ID
+            EXPO_ASC_ISSUER_ID
+            EXPO_APPLE_TEAM_ID
+            EXPO_APPLE_TEAM_TYPE
+            EXPO_PUBLIC_OPENCOMPANY_API_ORIGIN
+            EXPO_PUBLIC_WORKOS_CLIENT_ID
+          )
+          missing=()
+          for variable_name in "${required[@]}"; do
+            if [[ -z "${!variable_name:-}" ]]; then missing+=("$variable_name"); fi
+          done
+          if (( ${#missing[@]} > 0 )); then
+            printf '::error::Missing required mobile build environment variables: %s\n' "${missing[*]}"
+            exit 1
+          fi
+          if [[ "$APP_VARIANT" != "production" ]]; then
+            echo "::error::APP_VARIANT must be production."
+            exit 1
+          fi
+          case "$EXPO_APPLE_TEAM_TYPE" in
+            IN_HOUSE|COMPANY_OR_ORGANIZATION|INDIVIDUAL) ;;
+            *)
+              echo "::error::EXPO_APPLE_TEAM_TYPE must be IN_HOUSE, COMPANY_OR_ORGANIZATION, or INDIVIDUAL."
+              exit 1
+              ;;
+          esac
+
+      - name: Write Expo build environment
+        shell: bash
+        run: |
+          umask 077
+          {
+            printf 'APP_VARIANT=%s\n' "$APP_VARIANT"
+            printf 'EXPO_PUBLIC_OPENCOMPANY_API_ORIGIN=%s\n' "$EXPO_PUBLIC_OPENCOMPANY_API_ORIGIN"
+            printf 'EXPO_PUBLIC_WORKOS_CLIENT_ID=%s\n' "$EXPO_PUBLIC_WORKOS_CLIENT_ID"
+          } > "$GITHUB_WORKSPACE/apps/mobile/.env"
+
+          cp "$GITHUB_WORKSPACE/apps/mobile/.gitignore" "$GITHUB_WORKSPACE/apps/mobile/.easignore"
+          printf '\n!.env\n' >> "$GITHUB_WORKSPACE/apps/mobile/.easignore"
+
+      - name: Write ASC API key
+        shell: bash
+        run: |
+          key_path="$RUNNER_TEMP/asc-api-key.p8"
+          umask 077
+          printf '%s\n' "$ASC_P8_KEY" > "$key_path"
+          {
+            echo "EXPO_ASC_API_KEY_PATH=$key_path"
+            echo "ASC_P8_KEY="
+          } >> "$GITHUB_ENV"
+
+      - name: Build iOS app
+        working-directory: apps/mobile
+        env:
+          EAS_BUILD_NO_EXPO_GO_WARNING: "true"
+        run: eas build --platform ios --profile production --non-interactive --wait
+
+      - name: Remove temporary build files
+        if: ${{ always() }}
+        run: >-
+          rm -f
+          "$RUNNER_TEMP/asc-api-key.p8"
+          "$GITHUB_WORKSPACE/apps/mobile/.easignore"
+          "$GITHUB_WORKSPACE/apps/mobile/.env"
