@@ -107,15 +107,17 @@ services:
         sync: false
       # Google-family OAuth ingress moved to the API in the #1203 4a2 cutover
       # (Gmail, Calendar, Drive; Drive webhook verification is row-based).
-      - key: MICROSOFT_OAUTH_CLIENT_ID
-        sync: false
-      - key: MICROSOFT_OAUTH_CLIENT_SECRET
-        sync: false
       - key: GOOGLE_OAUTH_CLIENT_ID
         sync: false
       - key: GOOGLE_OAUTH_CLIENT_SECRET
         sync: false
       - key: GOOGLE_INTEGRATION_STATE_SECRET
+        sync: false
+      # Microsoft OAuth ingress for the Outlook mail and calendar plugins. The
+      # state secret also derives the PKCE verifier, so only the API needs it.
+      - key: MICROSOFT_OAUTH_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_OAUTH_CLIENT_SECRET
         sync: false
       - key: MICROSOFT_INTEGRATION_STATE_SECRET
         sync: false
@@ -401,13 +403,14 @@ services:
       - key: GITHUB_USER_APP_CLIENT_SECRET
         sync: false
       # Google OAuth client, used by the runner to refresh Gmail/Calendar access tokens.
-      - key: MICROSOFT_OAUTH_CLIENT_ID
-        sync: false
-      - key: MICROSOFT_OAUTH_CLIENT_SECRET
-        sync: false
       - key: GOOGLE_OAUTH_CLIENT_ID
         sync: false
       - key: GOOGLE_OAUTH_CLIENT_SECRET
+        sync: false
+      # Microsoft OAuth client, used by the runner to refresh Outlook access tokens.
+      - key: MICROSOFT_OAUTH_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_OAUTH_CLIENT_SECRET
         sync: false
       # X OAuth client, used by the runner to refresh access tokens before posting.
       - key: OPENCOMPANY_X_CLIENT_ID

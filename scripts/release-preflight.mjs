@@ -88,11 +88,12 @@ const groups = {
       "GITHUB_USER_APP_CLIENT_SECRET",
       "GITHUB_USER_APP_STATE_SECRET",
       // Google-family OAuth ingress (#1203 4a2).
-      "MICROSOFT_OAUTH_CLIENT_ID",
-      "MICROSOFT_OAUTH_CLIENT_SECRET",
       "GOOGLE_OAUTH_CLIENT_ID",
       "GOOGLE_OAUTH_CLIENT_SECRET",
       "GOOGLE_INTEGRATION_STATE_SECRET",
+      // Microsoft OAuth ingress for the Outlook mail and calendar plugins.
+      "MICROSOFT_OAUTH_CLIENT_ID",
+      "MICROSOFT_OAUTH_CLIENT_SECRET",
       "MICROSOFT_INTEGRATION_STATE_SECRET",
       // Official Slack MCP plugin OAuth + Linear ingest OAuth/webhook ingress.
       "OPENCOMPANY_SLACK_CLIENT_ID",
@@ -218,10 +219,11 @@ const groups = {
       "BLOB_READ_WRITE_TOKEN",
       "GITHUB_USER_APP_CLIENT_ID",
       "GITHUB_USER_APP_CLIENT_SECRET",
-      "MICROSOFT_OAUTH_CLIENT_ID",
-      "MICROSOFT_OAUTH_CLIENT_SECRET",
       "GOOGLE_OAUTH_CLIENT_ID",
       "GOOGLE_OAUTH_CLIENT_SECRET",
+      // Refreshes Outlook mail and calendar access tokens during tool execution.
+      "MICROSOFT_OAUTH_CLIENT_ID",
+      "MICROSOFT_OAUTH_CLIENT_SECRET",
       "OPENCOMPANY_HUBSPOT_MCP_CLIENT_ID",
       "OPENCOMPANY_HUBSPOT_MCP_CLIENT_SECRET",
       "OPENCOMPANY_X_CLIENT_ID",

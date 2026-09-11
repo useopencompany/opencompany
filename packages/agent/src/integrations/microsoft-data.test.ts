@@ -23,8 +23,12 @@ describe("Microsoft account selection", () => {
     // last_synced_at moves on connect and reconnect but not on a permission edit.
     // Ordering by created_at would leave a reconnected older account inactive,
     // and ordering by updated_at would let a mode change take over the plugin.
+    // `nulls last` matches activePluginAccount on the settings side, which ranks
+    // an account without a timestamp as the oldest; plain `desc` would rank it
+    // first in Postgres and split the two selections again.
     expect(query?.sql).toContain(
-      'order by "goat"."integrations"."last_synced_at" desc, "goat"."integrations"."id" desc',
+      'order by "goat"."integrations"."last_synced_at" desc nulls last, ' +
+        '"goat"."integrations"."id" desc',
     );
     expect(query?.sql).not.toContain("created_at");
     expect(query?.sql).not.toContain("updated_at");
