@@ -13,7 +13,7 @@ import {
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/pglite";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { actionApprovalInputHash } from "./action-governance";
 import {
   type ChatRepositoryIdFactory,
@@ -27,6 +27,7 @@ import {
   PostgresTaskActionApprovalRepository,
   taskActionInvocationId,
 } from "./task-action-approvals";
+import { snapshotPGliteSchema } from "./test-schema-snapshot";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const migrationPaths = [
@@ -61,11 +62,12 @@ describe("Postgres Chat repositories", () => {
   let legacySurvivedMigration: boolean;
   let legacyRuntimeSurvivedMigration: boolean;
   let legacyAttachmentSurvivedMigration: boolean;
+  let restoreDatabase: () => Promise<PGlite>;
 
-  beforeEach(async () => {
-    database = new PGlite();
-    await database.exec(BASE_SCHEMA);
-    await database.exec(`
+  beforeAll(async () => {
+    restoreDatabase = await snapshotPGliteSchema(async (database) => {
+      await database.exec(BASE_SCHEMA);
+      await database.exec(`
       INSERT INTO goat.users (workos_user_id) VALUES ('migration_user');
       INSERT INTO goat.workspaces (id) VALUES ('migration_workspace');
       INSERT INTO goat.chat_sessions (id, user_workos_id, model)
@@ -88,9 +90,9 @@ describe("Postgres Chat repositories", () => {
         'migration_message', 'migration_assistant', 'Preserve me'
       );
     `);
-    for (const migrationPath of migrationPaths) {
-      if (migrationPath.endsWith("0248_goat_chat_attachment_upload_idempotency.sql")) {
-        await database.exec(`
+      for (const migrationPath of migrationPaths) {
+        if (migrationPath.endsWith("0248_goat_chat_attachment_upload_idempotency.sql")) {
+          await database.exec(`
           INSERT INTO goat.chat_attachment_uploads (
             id, user_workos_id, workspace_id, format, media_type, filename, size_bytes,
             blob_pathname, blob_url, expires_at
@@ -100,42 +102,42 @@ describe("Postgres Chat repositories", () => {
             'https://blob.invalid/preserve', now() + interval '1 day'
           )
         `);
+        }
+        const migration = await readFile(migrationPath, "utf8");
+        for (const statement of migration.split("--> statement-breakpoint")) {
+          if (statement.trim()) await database.exec(statement);
+        }
       }
-      const migration = await readFile(migrationPath, "utf8");
-      for (const statement of migration.split("--> statement-breakpoint")) {
-        if (statement.trim()) await database.exec(statement);
-      }
-    }
-    const migrated = await database.query<{ id: string; event_sequence: number }>(`
+      const migrated = await database.query<{ id: string; event_sequence: number }>(`
       SELECT id, event_sequence FROM goat.codex_chat_turns WHERE id = 'migration_run'
     `);
-    const migratedProjection = await database.query<{ id: string; content: string }>(`
+      const migratedProjection = await database.query<{ id: string; content: string }>(`
       SELECT id, content FROM goat.message_read_model_v1 WHERE id = 'migration_message'
     `);
-    const migratedConversationProjection = await database.query<{
-      runtime_status: string | null;
-      active_run_id: string | null;
-      runtime_has_error: boolean | null;
-    }>(`
+      const migratedConversationProjection = await database.query<{
+        runtime_status: string | null;
+        active_run_id: string | null;
+        runtime_has_error: boolean | null;
+      }>(`
       SELECT runtime_status, active_run_id, runtime_has_error
       FROM goat.conversation_read_model_v1
       WHERE id = 'migration_conversation'
     `);
-    legacySurvivedMigration =
-      migrated.rows[0]?.id === "migration_run" &&
-      migrated.rows[0].event_sequence === 0 &&
-      migratedProjection.rows[0]?.content === "Preserve me";
-    legacyRuntimeSurvivedMigration =
-      migratedConversationProjection.rows[0]?.runtime_status === "queued" &&
-      migratedConversationProjection.rows[0]?.active_run_id === null &&
-      migratedConversationProjection.rows[0]?.runtime_has_error === false;
-    legacyAttachmentSurvivedMigration =
-      (
-        await database.query<{ count: number }>(
-          "SELECT count(*)::int AS count FROM goat.chat_attachment_uploads WHERE id = 'migration_attachment'",
-        )
-      ).rows[0]?.count === 1;
-    await database.exec(`
+      legacySurvivedMigration =
+        migrated.rows[0]?.id === "migration_run" &&
+        migrated.rows[0].event_sequence === 0 &&
+        migratedProjection.rows[0]?.content === "Preserve me";
+      legacyRuntimeSurvivedMigration =
+        migratedConversationProjection.rows[0]?.runtime_status === "queued" &&
+        migratedConversationProjection.rows[0]?.active_run_id === null &&
+        migratedConversationProjection.rows[0]?.runtime_has_error === false;
+      legacyAttachmentSurvivedMigration =
+        (
+          await database.query<{ count: number }>(
+            "SELECT count(*)::int AS count FROM goat.chat_attachment_uploads WHERE id = 'migration_attachment'",
+          )
+        ).rows[0]?.count === 1;
+      await database.exec(`
       DELETE FROM goat.codex_chat_turns;
       DELETE FROM goat.codex_chat_sessions;
       DELETE FROM goat.chat_messages;
@@ -143,7 +145,7 @@ describe("Postgres Chat repositories", () => {
       DELETE FROM goat.users;
       DELETE FROM goat.workspaces;
     `);
-    await database.exec(`
+      await database.exec(`
       INSERT INTO goat.users (workos_user_id) VALUES ('user_1'), ('user_2'), ('user_3');
       INSERT INTO goat.workspaces (id) VALUES ('workspace_1'), ('workspace_2');
       INSERT INTO goat.workspace_members (id, workspace_id, user_workos_id, role)
@@ -152,7 +154,14 @@ describe("Postgres Chat repositories", () => {
         ('member_2', 'workspace_2', 'user_2', 'admin'),
         ('member_3', 'workspace_1', 'user_3', 'member');
     `);
-    await database.exec(`ALTER TABLE goat.plugins ADD COLUMN owner_user_id text DEFAULT 'user_1';`);
+      await database.exec(
+        `ALTER TABLE goat.plugins ADD COLUMN owner_user_id text DEFAULT 'user_1';`,
+      );
+    });
+  });
+
+  beforeEach(async () => {
+    database = await restoreDatabase();
     execute = async (query) => {
       const compiled = dialect.sqlToQuery(query);
       return database.query(compiled.sql, compiled.params as never[]);

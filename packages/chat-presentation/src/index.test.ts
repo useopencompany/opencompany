@@ -1,4 +1,4 @@
-import type { PresentationDeltaFrameDto } from "@opencompany/protocol";
+import type { PresentationDeltaFrameDto } from "@opencompany/protocol/events";
 import { describe, expect, it, vi } from "vitest";
 import {
   CHAT_PRESENTATION_STREAM_MAX_LENGTH,

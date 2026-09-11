@@ -116,6 +116,10 @@
       "types": "./src/wiki.ts",
       "default": "./src/wiki.ts"
     },
+    "./test-schema-snapshot": {
+      "types": "./src/test-schema-snapshot.ts",
+      "default": "./src/test-schema-snapshot.ts"
+    },
     "./wiki-migrate": {
       "types": "./src/wiki-migrate.ts",
       "default": "./src/wiki-migrate.ts"
