@@ -533,7 +533,20 @@ export async function runCodexChatTurn(input: {
     checkExternalAbort();
     if (serializedAuthJson) {
       executionStage = "write_auth";
-      await sandbox.files.write(`${CODEX_CHAT_HOME}/auth.json`, serializedAuthJson);
+      try {
+        await sandbox.files.write(`${CODEX_CHAT_HOME}/auth.json`, serializedAuthJson);
+      } catch (error) {
+        // Auth staging is idempotent and happens before the engine starts, so a provider timeout
+        // is safe to replay through the durable infrastructure retry path.
+        if (isCommandTimeoutError(error)) {
+          throw new CodexChatRetryableInfrastructureError(
+            "Codex authentication could not be staged in the sandbox.",
+            error,
+            failureDiagnostic(executionStage, error, redact),
+          );
+        }
+        throw error;
+      }
       authCacheStaged = true;
       checkExternalAbort();
     }

@@ -822,6 +822,39 @@ describe("runCodexChatTurn over ACP", () => {
     });
   });
 
+  it("retries an auth file write timeout before starting Codex", async () => {
+    const timeout = new Error("502: Server Error: This error is likely due to sandbox timeout.");
+    timeout.name = "TimeoutError";
+    authMocks.loadCodexCliAuth.mockResolvedValueOnce({
+      kind: "chatgpt",
+      authJson: { tokens: { access_token: "chatgpt-secret" } },
+    });
+    const sandbox = fakeSandbox("sbx_existing");
+    sandbox.files.write.mockRejectedValueOnce(timeout);
+    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
+    sandboxMocks.isCommandTimeoutError.mockImplementationOnce(
+      (error: unknown) => error === timeout,
+    );
+
+    await expect(
+      runCodexChatTurn({
+        turn: codexTurn(),
+        session: codexSession(),
+        canonicalAttemptId: "attempt_1",
+        env: env(),
+      }),
+    ).rejects.toMatchObject({
+      name: CodexChatRetryableInfrastructureError.name,
+      cause: timeout,
+      diagnosticMessage:
+        "[write_auth] TimeoutError: 502: Server Error: This error is likely due to sandbox timeout.",
+    });
+    expect(acpMocks.runTurn).not.toHaveBeenCalled();
+    for (const result of eventMocks.createExternalEngineProjector.mock.results) {
+      expect(result.value.fail).not.toHaveBeenCalled();
+    }
+  });
+
   it.each([
     "504: Failed to place sandbox: placement timed out after 2 attempt(s), please retry",
     "502: Server Error",
