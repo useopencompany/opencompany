@@ -2,7 +2,7 @@
 
 import type { ChatEngine } from "@opencompany/core";
 import { toast } from "@opencompany/ui/components/sonner";
-import { Archive, ArrowLeft, Inbox, Loader2 } from "lucide-react";
+import { Archive, ArrowLeft, Inbox } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppData } from "@/components/AppDataProvider";
 import { EmptyState, formatRelativeTime } from "@/components/Routes";
@@ -14,6 +14,10 @@ import type { ChatSessionView } from "@/lib/chat-ui";
 import { updateHeadlessChatConversation } from "@/lib/headless-chat-commands";
 import { archiveHeadlessTask, markHeadlessTaskSeen } from "@/lib/headless-task-commands";
 import { DEFAULT_MODEL, normalizeConversationModel } from "@/lib/model-options";
+import {
+  archiveReviewItemOptimistically,
+  restoreOptimisticReviewArchive,
+} from "@/lib/optimistic-review-archive";
 import type { ReviewItem } from "@/lib/review-inbox";
 
 export function ReviewInboxRoute() {
@@ -25,7 +29,6 @@ export function ReviewInboxRoute() {
   // Rows the reader has just opened. The projection lands a moment later and reports the same
   // thing; this only keeps the row from looking unread in the meantime.
   const [readItems, setReadItems] = useState<ReadonlySet<string>>(new Set());
-  const [archivingIds, setArchivingIds] = useState<ReadonlySet<string>>(new Set());
   // Acknowledgment is fire-and-forget and the detail pane can report readability more than once
   // (Electric redelivers rows). This keeps one command in flight per conversation.
   const acknowledging = useRef(new Set<string>());
@@ -59,31 +62,24 @@ export function ReviewInboxRoute() {
 
   // Archiving is how an item leaves the queue. It reuses the same commands the sidebar and the
   // Tasks board archive with, so a review item disappears everywhere it was listed, not just here.
+  // The row and the pane go on the click: the write and the projection behind it take about a
+  // second, and holding a decision the reader has already made for that long reads as lag. A
+  // failed write puts the item back and says so.
   const archive = useCallback(
     (item: ReviewItem) => {
       const { conversationId, source } = item;
-      if (archivingIds.has(conversationId)) return;
-      setArchivingIds((current) => new Set(current).add(conversationId));
+      if (!archiveReviewItemOptimistically(conversationId)) return;
+      setOpenItem((current) => (current?.conversationId === conversationId ? null : current));
       const archived =
         source.kind === "task"
           ? archiveHeadlessTask(source.taskId, { scopeKey: workspace.id })
           : updateHeadlessChatConversation(conversationId, { archived: true });
-      void archived
-        .then(() => {
-          setOpenItem((current) => (current?.conversationId === conversationId ? null : current));
-        })
-        .catch(() => {
-          toast.error(`Could not archive "${item.title}".`);
-        })
-        .finally(() => {
-          setArchivingIds((current) => {
-            const next = new Set(current);
-            next.delete(conversationId);
-            return next;
-          });
-        });
+      void archived.catch(() => {
+        restoreOptimisticReviewArchive(conversationId);
+        toast.error(`Could not archive "${item.title}".`);
+      });
     },
-    [archivingIds, workspace.id],
+    [workspace.id],
   );
 
   // Selecting an item is not the same as having read it. The detail pane calls this once the
@@ -143,7 +139,6 @@ export function ReviewInboxRoute() {
                 item={item}
                 selected={item.conversationId === selectedId}
                 unread={isUnread(item)}
-                archiving={archivingIds.has(item.conversationId)}
                 onSelect={() => select(item)}
                 onArchive={() => archive(item)}
               />
@@ -184,14 +179,12 @@ function ReviewListRow({
   item,
   selected,
   unread,
-  archiving,
   onSelect,
   onArchive,
 }: {
   item: ReviewItem;
   selected: boolean;
   unread: boolean;
-  archiving: boolean;
   onSelect: () => void;
   onArchive: () => void;
 }) {
@@ -234,19 +227,10 @@ function ReviewListRow({
         type="button"
         title="Archive"
         aria-label={`Archive ${item.title}`}
-        disabled={archiving}
         onClick={onArchive}
-        className={`mx-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink/50 transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed ${
-          archiving
-            ? "opacity-100"
-            : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
-        }`}
+        className="mx-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink/50 opacity-0 transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover:opacity-100 group-focus-within:opacity-100"
       >
-        {archiving ? (
-          <Loader2 size={13} strokeWidth={1.75} className="animate-spin" />
-        ) : (
-          <Archive size={13} strokeWidth={1.75} />
-        )}
+        <Archive size={13} strokeWidth={1.75} />
       </button>
     </div>
   );
