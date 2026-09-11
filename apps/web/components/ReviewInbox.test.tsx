@@ -14,7 +14,9 @@ const transcriptMock = vi.hoisted(() => ({
   syncFailed: false,
 }));
 const updateConversationMock = vi.hoisted(() => vi.fn(async () => ({ transactionId: "1" })));
+const toastErrorMock = vi.hoisted(() => vi.fn());
 const markTaskSeenMock = vi.hoisted(() => vi.fn(async () => ({ id: "task_c1" })));
+const archiveTaskMock = vi.hoisted(() => vi.fn(async () => ({ id: "task_c1" })));
 
 vi.mock("@/components/AppDataProvider", () => ({
   useAppData: () => ({
@@ -77,29 +79,44 @@ vi.mock("@/lib/headless-chat-commands", () => ({
 
 vi.mock("@/lib/headless-task-commands", () => ({
   markHeadlessTaskSeen: markTaskSeenMock,
+  archiveHeadlessTask: archiveTaskMock,
 }));
+
+vi.mock("@opencompany/ui/components/sonner", () => ({ toast: { error: toastErrorMock } }));
 
 function chatItem(
   id: string,
   title: string,
   updatedAt: string,
   source: Partial<Extract<ReviewItem["source"], { kind: "chat" }>> = {},
+  unread = true,
 ): ReviewItem {
   return {
     conversationId: id,
     title,
     updatedAt,
+    unread,
     source: { kind: "chat", model: "claude-opus-5", engine: "opencompany", ...source },
   };
 }
 
-function taskItem(id: string, title: string, updatedAt: string): ReviewItem {
+function taskItem(id: string, title: string, updatedAt: string, unread = true): ReviewItem {
   return {
     conversationId: id,
     title,
     updatedAt,
+    unread,
     source: { kind: "task", taskId: `task_${id}`, displayId: "TASK-7" },
   };
+}
+
+// The archive control adds a second button per row, so the reader's own rows are the ones named
+// after the item they open.
+function rowTitles() {
+  return screen
+    .getAllByRole("button")
+    .filter((node) => !node.getAttribute("aria-label")?.startsWith("Archive "))
+    .map((node) => node.textContent);
 }
 
 function assistantReply(text: string) {
@@ -121,18 +138,19 @@ describe("ReviewInboxRoute", () => {
     expect(screen.getByText("You're all caught up")).toBeInTheDocument();
   });
 
-  // Tasks and chats are one queue, newest first: to the reader they are the same thing, a
-  // finished turn waiting on them.
-  it("lists tasks and chats together in one recency-ordered list", () => {
+  // Tasks and chats are one queue: to the reader they are the same thing, a finished turn waiting
+  // on them. The queue's order is the selector's (see lib/review-inbox.test.ts); the list renders
+  // it as given.
+  it("lists tasks and chats together in one list, in queue order", () => {
     reviewItemsMock.value = [
+      chatItem("c3", "Newest reply", "2026-09-10T13:00:00.000Z"),
       taskItem("c1", "Weekly competitor scan", "2026-09-10T12:00:00.000Z"),
       chatItem("c2", "Draft the investor update", "2026-09-10T11:00:00.000Z"),
-      chatItem("c3", "Newest reply", "2026-09-10T13:00:00.000Z"),
     ];
 
     render(<ReviewInboxRoute />);
 
-    const titles = screen.getAllByRole("button").map((node) => node.textContent);
+    const titles = rowTitles();
     expect(titles[0]).toContain("Newest reply");
     expect(titles[1]).toContain("Weekly competitor scan");
     expect(titles[2]).toContain("Draft the investor update");
@@ -148,7 +166,7 @@ describe("ReviewInboxRoute", () => {
     transcriptMock.messages = [assistantReply("Here is the draft.")];
 
     render(<ReviewInboxRoute />);
-    await userEvent.click(screen.getByRole("button", { name: /Draft the investor update/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^Draft the investor update/ }));
 
     expect(screen.getByTestId("chat-conversation")).toHaveAttribute("data-conversation-id", "c1");
   });
@@ -164,7 +182,7 @@ describe("ReviewInboxRoute", () => {
     ];
 
     render(<ReviewInboxRoute />);
-    await userEvent.click(screen.getByRole("button", { name: /Ship the migration/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^Ship the migration/ }));
 
     expect(screen.getByTestId("chat-conversation")).toHaveAttribute(
       "data-model",
@@ -177,7 +195,7 @@ describe("ReviewInboxRoute", () => {
     transcriptMock.messages = [assistantReply("Scan complete.")];
 
     render(<ReviewInboxRoute />);
-    await userEvent.click(screen.getByRole("button", { name: /Weekly competitor scan/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^Weekly competitor scan/ }));
 
     expect(screen.getByTestId("task-conversation")).toHaveAttribute("data-task-id", "task_c1");
   });
@@ -192,7 +210,7 @@ describe("ReviewInboxRoute", () => {
     ];
 
     render(<ReviewInboxRoute />);
-    await userEvent.click(screen.getByRole("button", { name: /Draft the investor update/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^Draft the investor update/ }));
 
     expect(updateConversationMock).toHaveBeenCalledWith("c1", { markSeen: true });
   });
@@ -204,7 +222,7 @@ describe("ReviewInboxRoute", () => {
     transcriptMock.messages = [assistantReply("Scan complete.")];
 
     render(<ReviewInboxRoute />);
-    await userEvent.click(screen.getByRole("button", { name: /Weekly competitor scan/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^Weekly competitor scan/ }));
 
     expect(markTaskSeenMock).toHaveBeenCalledWith("task_c1", { scopeKey: "workspace_1" });
     expect(updateConversationMock).not.toHaveBeenCalled();
@@ -217,7 +235,7 @@ describe("ReviewInboxRoute", () => {
     transcriptMock.syncFailed = true;
 
     render(<ReviewInboxRoute />);
-    await userEvent.click(screen.getByRole("button", { name: /Draft the investor update/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^Draft the investor update/ }));
 
     expect(updateConversationMock).not.toHaveBeenCalled();
     expect(screen.getByTestId("review-item-unread")).toBeInTheDocument();
@@ -230,26 +248,100 @@ describe("ReviewInboxRoute", () => {
     transcriptMock.isLoading = true;
 
     render(<ReviewInboxRoute />);
-    await userEvent.click(screen.getByRole("button", { name: /Draft the investor update/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^Draft the investor update/ }));
 
     expect(updateConversationMock).not.toHaveBeenCalled();
   });
 
-  it("keeps an opened item in the list after it leaves the unread queue", async () => {
+  // Reading is not the same as being done with it: the queue keeps the item so the reader can come
+  // back to it, and archiving is what removes it.
+  it("keeps an item in the list after reading it", async () => {
     reviewItemsMock.value = [
       chatItem("c1", "Draft the investor update", "2026-09-10T11:00:00.000Z"),
     ];
     transcriptMock.messages = [assistantReply("Here is the draft.")];
 
-    const view = render(<ReviewInboxRoute />);
-    await userEvent.click(screen.getByRole("button", { name: /Draft the investor update/ }));
+    render(<ReviewInboxRoute />);
+    await userEvent.click(screen.getByRole("button", { name: /^Draft the investor update/ }));
     await waitFor(() => expect(screen.getByTestId("review-item-read")).toBeInTheDocument());
 
-    // The live query drops the row once the acknowledgment lands; the reader keeps their place.
-    reviewItemsMock.value = [];
-    view.rerender(<ReviewInboxRoute />);
+    expect(screen.getByRole("button", { name: /^Draft the investor update/ })).toBeInTheDocument();
+  });
 
-    expect(screen.getByRole("button", { name: /Draft the investor update/ })).toBeInTheDocument();
+  // A read item recedes instead of disappearing, so unread work still reads as the top of the list.
+  it("dims a read item and leaves an unread one at full weight", () => {
+    reviewItemsMock.value = [
+      chatItem("c1", "Already read", "2026-09-10T12:00:00.000Z", {}, false),
+      chatItem("c2", "Still unread", "2026-09-10T11:00:00.000Z"),
+    ];
+
+    render(<ReviewInboxRoute />);
+
+    const read = screen.getByRole("button", { name: /^Already read/ });
+    const unread = screen.getByRole("button", { name: /^Still unread/ });
+    expect(read.querySelector('[class*="opacity-"]')).not.toBeNull();
+    expect(unread.querySelector('[class*="opacity-"]')).toBeNull();
+  });
+
+  it("archives a chat from its row", async () => {
+    reviewItemsMock.value = [
+      chatItem("c1", "Draft the investor update", "2026-09-10T11:00:00.000Z"),
+    ];
+
+    render(<ReviewInboxRoute />);
+    await userEvent.click(
+      screen.getByRole("button", { name: "Archive Draft the investor update" }),
+    );
+
+    expect(updateConversationMock).toHaveBeenCalledWith("c1", { archived: true });
+  });
+
+  // A Task is archived through the Task command; the conversation command would leave the Task
+  // itself listed on the Tasks board.
+  it("archives a task through the task command", async () => {
+    reviewItemsMock.value = [taskItem("c1", "Weekly competitor scan", "2026-09-10T12:00:00.000Z")];
+
+    render(<ReviewInboxRoute />);
+    await userEvent.click(screen.getByRole("button", { name: "Archive Weekly competitor scan" }));
+
+    expect(archiveTaskMock).toHaveBeenCalledWith("task_c1", { scopeKey: "workspace_1" });
+    expect(updateConversationMock).not.toHaveBeenCalled();
+  });
+
+  // Archiving the item being read has to close the pane: the conversation it showed is no longer
+  // in the queue behind it.
+  it("closes the detail pane when the open item is archived", async () => {
+    reviewItemsMock.value = [
+      chatItem("c1", "Draft the investor update", "2026-09-10T11:00:00.000Z"),
+    ];
+    transcriptMock.messages = [assistantReply("Here is the draft.")];
+
+    render(<ReviewInboxRoute />);
+    await userEvent.click(screen.getByRole("button", { name: /^Draft the investor update/ }));
+    expect(screen.getByTestId("chat-conversation")).toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Archive Draft the investor update" }),
+    );
+
+    await waitFor(() => expect(screen.getByText("Pick something to read")).toBeInTheDocument());
+  });
+
+  it("keeps the item and reports the failure when archiving does not land", async () => {
+    reviewItemsMock.value = [
+      chatItem("c1", "Draft the investor update", "2026-09-10T11:00:00.000Z"),
+    ];
+    updateConversationMock.mockRejectedValueOnce(new Error("offline"));
+
+    render(<ReviewInboxRoute />);
+    await userEvent.click(
+      screen.getByRole("button", { name: "Archive Draft the investor update" }),
+    );
+
+    await waitFor(() =>
+      expect(toastErrorMock).toHaveBeenCalledWith('Could not archive "Draft the investor update".'),
+    );
+    expect(screen.getByRole("button", { name: /^Draft the investor update/ })).toBeInTheDocument();
   });
 
   it("marks unopened items unread", () => {
@@ -273,11 +365,11 @@ describe("ReviewInboxRoute", () => {
     transcriptMock.messages = [assistantReply("Scan complete.")];
 
     render(<ReviewInboxRoute />);
-    await userEvent.click(screen.getByRole("button", { name: /Weekly competitor scan/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^Weekly competitor scan/ }));
     expect(screen.getByTestId("task-conversation")).toBeInTheDocument();
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: /Draft the investor update/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^Draft the investor update/ }));
     expect(screen.getByTestId("chat-conversation")).toBeInTheDocument();
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });
@@ -288,7 +380,7 @@ describe("ReviewInboxRoute", () => {
     ];
 
     render(<ReviewInboxRoute />);
-    await userEvent.click(screen.getByRole("button", { name: /Draft the investor update/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^Draft the investor update/ }));
     await userEvent.click(screen.getByRole("button", { name: "Back to the review list" }));
 
     expect(screen.getByText("Pick something to read")).toBeInTheDocument();
