@@ -1,10 +1,10 @@
-import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { expect, it } from "vitest";
 import { claimActionInvocation, recordActionSourceDiscovery } from "./action-governance";
+import { createTestPGlite } from "./test-pglite";
 
 it("atomically claims both the invocation id and write key while counting one action", async () => {
-  const database = new PGlite();
+  const database = await createTestPGlite();
   try {
     await database.exec(`
       CREATE SCHEMA goat;

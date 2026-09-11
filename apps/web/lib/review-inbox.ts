@@ -45,6 +45,17 @@ export type TaskCandidate = Pick<
 // that is a request for input rather than a result to read. `canceled` had no result to produce.
 const TASK_RESULT_STATUSES = new Set<TaskReadModel["status"]>(["succeeded", "failed"]);
 
+/**
+ * Whether a Task's unread flag stands for a result someone can read.
+ *
+ * Shared with the sidebar, which acknowledges the flag when a reader opens the Task. Only a Task
+ * that finished with something to read can be satisfied by having been read: an approval request
+ * is answered by approving it, so opening its page must not clear the signal.
+ */
+export function taskHasReadableResult(status: TaskReadModel["status"]): boolean {
+  return TASK_RESULT_STATUSES.has(status);
+}
+
 // Read items stay until they are archived, so the queue needs its own tail: every unread item is
 // kept, and read ones beyond this many fall off the bottom. Without it the list would grow into
 // the workspace's entire finished history, which is a log, not a queue.
@@ -118,7 +129,7 @@ function isChatUnread(conversation: ConversationCandidate) {
 }
 
 function isTaskInReview(task: TaskCandidate) {
-  return !task.archivedAt && TASK_RESULT_STATUSES.has(task.status);
+  return !task.archivedAt && taskHasReadableResult(task.status);
 }
 
 // The sidebar badge counts genuinely unread work only: read items keep their place in the queue
