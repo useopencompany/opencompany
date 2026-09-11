@@ -755,9 +755,9 @@ function SidebarTaskRow({
         className="flex min-w-0 flex-1 items-center gap-2 rounded-l-md py-[5px] pl-2 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
       >
         <ChatStateIndicator state={state} surface="sidebar" />
-        <span className="truncate tracking-[-0.005em]">{task.name}</span>
-        <span className="ml-auto shrink-0 pl-1.5 text-[11px] leading-none text-ink-faint">
-          {task.displayId}
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate tracking-[-0.005em]">{task.name}</span>
+          <span className="truncate text-[11px] leading-none text-ink-faint">{task.displayId}</span>
         </span>
       </Link>
       {/* Empty stand-in for the chat row's pin control, so the archive icon lands in the same
