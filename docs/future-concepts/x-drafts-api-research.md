@@ -1,7 +1,9 @@
 # Saving Draft Posts to a Connected X Account
 
-Status: researched answer, no build recommended
+Status: researched recommendation, do not build
 Date: 2026-09-11
+
+This is a constraint on future proposals rather than a proposal to build something.
 
 ## Question
 
@@ -32,9 +34,10 @@ separate long-form surface, not a post draft. Source:
 [Articles endpoints](https://docs.x.com/x-api/articles/introduction).
 
 This is also what X's own hosted MCP server means when its tool table lists "Create draft Articles
-and publish them", and the X plugin's `write` capability lists `articleCreateDraft` and
-`articlePublish` alongside no draft-post tool of any kind. If someone saw an agent tool that drafts
-on X, this is most likely it. Source: [X MCP Server](https://docs.x.com/tools/mcp).
+and publish them". The vendored X plugin snapshot in
+`packages/agent-runtime/src/test-fixtures/plugins/x/` agrees: across its whole tool list,
+`articleCreateDraft` is the only tool with "draft" in its name. If someone saw an agent tool that
+drafts on X, this is most likely it. Source: [X MCP Server](https://docs.x.com/tools/mcp).
 
 **3. Draft posts do exist in the Ads API, and they are not the user's drafts.** X Ads API v12 has
 full CRUD on `https://ads-api.x.com/12/accounts/:account_id/draft_tweets`, plus a device-preview
@@ -46,15 +49,19 @@ our job:
   access through ads.x.com. A founder connecting X in Settings has granted us none of that.
 - `nullcast` defaults to `true`, so the created draft is a Promoted-only creative.
 - Media must already be in the ads account's Media Library, not our normal media upload path.
-- The draft lives in the ads creative composer. It does not appear in the X app's Drafts.
+- The draft lives in the ads creative composer, not the X app's Drafts. The docs make this
+  concrete: to see one on a phone you have to call
+  `POST accounts/:account_id/draft_tweets/preview/:draft_tweet_id`, which pushes a notification to
+  the authenticated user's devices that opens a one-off preview timeline.
 
 Source: [Ads API creatives reference](https://docs.x.com/x-ads-api/creatives/reference).
 
-**4. Third-party "X drafts" are the vendor's own drafts.** Typefully, Buffer, and similar tools keep
-drafts in their own database and later publish through the normal post endpoint. Typefully's public
-API exposes its own drafts, not X's. Their own marketing makes this explicit: they sell reliable
-draft sync as the fix for X's native drafts being unreliable for threads with media, which only makes
-sense if they are not writing into X's drafts at all. Sources:
+**4. Third-party "X drafts" are the vendor's own drafts.** Typefully, Buffer, and similar schedulers
+keep drafts in their own product and later publish through the normal post endpoint. None of them
+documents writing into X's drafts, because none of them can. Typefully's public API exposes its own
+drafts, not X's, and its marketing makes the boundary explicit: it sells reliable draft sync as the
+fix for X's native drafts being unreliable for threads with media, which only makes sense if it is
+not writing into X's drafts at all. Sources:
 [Typefully API](https://typefully.com/docs/api),
 [Typefully on X draft sync](https://typefully.com/blog/sync-x-twitter-drafts-web-mobile).
 
@@ -62,7 +69,9 @@ sense if they are not writing into X's drafts at all. Sources:
 mobile now appear on web. That sync runs over the undocumented GraphQL API that X's own clients use.
 It is not documented, not authorized for third parties, and would require driving a logged-in session
 rather than our OAuth connection. Building on it would be brittle and a terms violation, so it is not
-an option.
+an option. The sync itself is reported by third parties rather than by X's developer docs, which say
+nothing about drafts at all. Source:
+[Typefully on X draft sync](https://typefully.com/blog/sync-x-twitter-drafts-web-mobile).
 
 ## What this means for opencompany
 
