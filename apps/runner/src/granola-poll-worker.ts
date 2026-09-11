@@ -14,8 +14,11 @@ import {
   completeGranolaSyncPages,
   ensureGranolaSyncState,
   GRANOLA_CREDENTIAL_KIND,
+  GRANOLA_MEETING_NOTES_READY_EVENT,
   GRANOLA_PROVIDER,
   granolaEventClaimKey,
+  granolaWorkflowEventContext,
+  granolaWorkflowEventDeliveryId,
   listEnabledGranolaBrainSourceRoutes,
   updateGranolaSyncCursor,
   updateGranolaSyncPage,
@@ -28,6 +31,12 @@ import {
 } from "@opencompany/db/wiki-event-claims";
 import { upsertWikiSourceItemAndEnqueue } from "@opencompany/db/wiki-ingest";
 import { listEnabledWikiSourcesForIntegration } from "@opencompany/db/wiki-sources";
+import {
+  enqueueWorkflowEventRuns,
+  listWorkflowEventTriggerRoutes,
+  type WorkflowEventTriggerRoute,
+  workflowEventFiltersMatch,
+} from "@opencompany/db/workflow-event-routes";
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import { wakeBrainIngestWorker } from "./brain-ingest-worker";
@@ -75,6 +84,8 @@ export async function listGranolaPollCandidates(
     WHERE i.provider = 'granola'
       AND i.external_id <> 'granola_mcp'
       AND i.status = 'connected'
+      -- Event triggers bind to personal connections; Granola only ever creates those.
+      AND i.workspace_id IS NULL
       AND (
         EXISTS (
           SELECT 1
@@ -90,6 +101,16 @@ export async function listGranolaPollCandidates(
             AND ws.provider = 'granola'
             AND ws.enabled = true
         )
+        OR EXISTS (
+          SELECT 1
+          FROM goat.workflows w
+          WHERE w.trigger = 'event'
+            AND w.status = 'active'
+            AND w.archived_at IS NULL
+            AND w.event_user_workos_id = i.user_workos_id
+            AND w.event_config->>'provider' = 'granola'
+            AND w.event_config->>'integrationId' = i.id
+        )
       )
   `);
   return rowsFromExecute<GranolaPollCandidate>(result);
@@ -99,7 +120,7 @@ export async function pollGranolaIntegration(input: {
   candidate: GranolaPollCandidate;
   signal: AbortSignal;
   cooldownMs?: number;
-}): Promise<{ enqueued: number; seen: number } | null> {
+}): Promise<{ enqueued: number; seen: number; workflowRuns: number } | null> {
   const { candidate } = input;
   const db = getDb();
   await ensureGranolaSyncState(
@@ -124,7 +145,7 @@ export async function pollGranolaIntegration(input: {
       { integrationId: candidate.integrationId, updatedAfterCursor: new Date() },
       db,
     );
-    return { enqueued: 0, seen: 0 };
+    return { enqueued: 0, seen: 0, workflowRuns: 0 };
   }
 
   const credential = await loadIntegrationCredential({
@@ -167,8 +188,35 @@ export async function pollGranolaIntegration(input: {
         .map((source) => source.workspaceId),
     ),
   ];
+  // Event routing is authorized per pass, not per note: the plugin event toggle, the workflow
+  // status, and the connection can all change between polls. The declared event carries no
+  // filters, so a route that somehow stored one is dropped rather than fired unfiltered.
+  const workflowRoutes =
+    notes.length === 0
+      ? []
+      : (
+          await listWorkflowEventTriggerRoutes(
+            {
+              provider: GRANOLA_PROVIDER,
+              integrations: [
+                {
+                  id: candidate.integrationId,
+                  workspaceId: null,
+                  userWorkosId: candidate.userWorkosId,
+                  status: "connected",
+                },
+              ],
+            },
+            db,
+          )
+        ).filter(
+          (route) =>
+            route.event === GRANOLA_MEETING_NOTES_READY_EVENT &&
+            workflowEventFiltersMatch(route, {}),
+        );
 
   let enqueued = 0;
+  let workflowRuns = 0;
   for (const note of notes) {
     if (input.signal.aborted) throw new Error("Granola poll aborted.");
     const result = await ingestGranolaNote({
@@ -177,9 +225,11 @@ export async function pollGranolaIntegration(input: {
       note,
       routedBrainRefs,
       routedWikiWorkspaceIds,
+      workflowRoutes,
       signal: input.signal,
     });
     if (result.enqueued) enqueued += 1;
+    workflowRuns += result.workflowRuns;
   }
 
   // The timestamp watermark only advances after the final page. When a pass
@@ -215,7 +265,7 @@ export async function pollGranolaIntegration(input: {
       db,
     );
   }
-  return { enqueued, seen: notes.length };
+  return { enqueued, seen: notes.length, workflowRuns };
 }
 
 type GranolaNotesBatch = {
@@ -268,9 +318,10 @@ export async function ingestGranolaNote(input: {
   note: GranolaNoteSummary;
   routedBrainRefs: readonly string[];
   routedWikiWorkspaceIds: readonly string[];
+  workflowRoutes?: readonly WorkflowEventTriggerRoute[];
   signal: AbortSignal;
   fetchNote?: typeof fetchGranolaNote;
-}): Promise<{ enqueued: boolean }> {
+}): Promise<{ enqueued: boolean; workflowRuns: number }> {
   const { candidate, note } = input;
   const db = getDb();
   const eventKey = granolaEventClaimKey(note.id);
@@ -298,8 +349,13 @@ export async function ingestGranolaNote(input: {
   const pendingWikiWorkspaceIds = input.routedWikiWorkspaceIds.filter(
     (workspaceId) => !alreadyClaimedWikiWorkspaceIds.has(workspaceId),
   );
-  if (pendingBrainRefs.length === 0 && pendingWikiWorkspaceIds.length === 0) {
-    return { enqueued: false };
+  const workflowRoutes = input.workflowRoutes ?? [];
+  if (
+    pendingBrainRefs.length === 0 &&
+    pendingWikiWorkspaceIds.length === 0 &&
+    workflowRoutes.length === 0
+  ) {
+    return { enqueued: false, workflowRuns: 0 };
   }
 
   const payload = await (input.fetchNote ?? fetchGranolaNote)({
@@ -307,6 +363,17 @@ export async function ingestGranolaNote(input: {
     noteId: note.id,
     signal: input.signal,
   });
+
+  const workflowRuns = await enqueueGranolaWorkflowEventRuns({
+    routes: workflowRoutes,
+    note,
+    payload,
+    db,
+  });
+
+  if (pendingBrainRefs.length === 0 && pendingWikiWorkspaceIds.length === 0) {
+    return { enqueued: false, workflowRuns };
+  }
   const item = normalizeGranolaMeetingNote(payload, { capturedAt: new Date().toISOString() });
 
   let brainEnqueued = false;
@@ -387,7 +454,33 @@ export async function ingestGranolaNote(input: {
   }
   if (wikiEnqueued) wakeWikiIngestWorker();
 
-  return { enqueued: brainEnqueued || wikiEnqueued };
+  return { enqueued: brainEnqueued || wikiEnqueued, workflowRuns };
+}
+
+// The list endpoint only returns notes Granola has finished summarizing, but a note whose summary
+// is still missing is not "ready": skipping it keeps the note id free so a later poll — the
+// summary lands and bumps updated_at — is the delivery that starts the workflow.
+async function enqueueGranolaWorkflowEventRuns(input: {
+  routes: readonly WorkflowEventTriggerRoute[];
+  note: GranolaNoteSummary;
+  payload: Record<string, unknown>;
+  db: ReturnType<typeof getDb>;
+}): Promise<number> {
+  if (input.routes.length === 0) return 0;
+  const hasSummary =
+    typeof input.payload.summary_markdown === "string" ||
+    typeof input.payload.summary_text === "string";
+  if (!hasSummary) return 0;
+  const updatedAt = input.note.updatedAt ? new Date(input.note.updatedAt) : null;
+  return enqueueWorkflowEventRuns(
+    {
+      routes: input.routes,
+      deliveryId: granolaWorkflowEventDeliveryId(input.note.id),
+      eventAt: updatedAt && !Number.isNaN(updatedAt.getTime()) ? updatedAt : new Date(),
+      context: granolaWorkflowEventContext(input.payload),
+    },
+    input.db,
+  );
 }
 
 async function markGranolaNeedsReauth(candidate: GranolaPollCandidate, reason: string) {
@@ -427,11 +520,12 @@ export function startGranolaPollWorker(options: { pollIntervalMs?: number } = {}
           });
           return null;
         });
-        if (polled && polled.enqueued > 0) {
+        if (polled && (polled.enqueued > 0 || polled.workflowRuns > 0)) {
           logger.info("opencompany Granola notes enqueued", {
             event: "opencompany.goat_granola_notes_enqueued",
             integration_id: candidate.integrationId,
             enqueued_count: polled.enqueued,
+            workflow_run_count: polled.workflowRuns,
             seen_count: polled.seen,
           });
         }

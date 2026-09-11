@@ -78,11 +78,18 @@ export type PluginEventFilterDefinition = {
   required: boolean;
 };
 
+// `webhook` events reach the platform through a signed provider delivery; `poll` events are
+// discovered by a platform poller that already syncs the provider. The mode is the plugin's
+// promise about how its provider emits, not a per-workspace setting.
+export const PLUGIN_EVENT_DELIVERIES = ["webhook", "poll"] as const;
+
+export type PluginEventDelivery = (typeof PLUGIN_EVENT_DELIVERIES)[number];
+
 export type PluginEventDefinition = {
   id: string;
   label: string;
   description: string;
-  delivery: "webhook";
+  delivery: PluginEventDelivery;
   filters: PluginEventFilterDefinition[];
 };
 
@@ -351,7 +358,10 @@ export function parsePluginEvents(
     const id = nonEmptyBoundedString(entry.id, 128);
     const label = nonEmptyBoundedString(entry.label, 120);
     const description = nonEmptyBoundedString(entry.description, 500);
-    if (!id || !/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u.test(id)) {
+    // Lowercase segments separated by `.`, `-`, or `_`. Providers name events in their own
+    // conventions (`issue.created`, `note.access_granted`), and the filter id rule below already
+    // accepts underscores.
+    if (!id || !/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u.test(id)) {
       issues.push(`Event at index ${index} has an invalid \`id\`.`);
       continue;
     }
@@ -359,8 +369,11 @@ export function parsePluginEvents(
       issues.push(`Duplicate event \`${id}\` was ignored.`);
       continue;
     }
-    if (!label || !description || entry.delivery !== "webhook") {
-      issues.push(`Event \`${id}\` needs a label, description, and \`webhook\` delivery mode.`);
+    const delivery = PLUGIN_EVENT_DELIVERIES.find((mode) => mode === entry.delivery);
+    if (!label || !description || !delivery) {
+      issues.push(
+        `Event \`${id}\` needs a label, description, and a ${PLUGIN_EVENT_DELIVERIES.map((mode) => `\`${mode}\``).join(" or ")} delivery mode.`,
+      );
       continue;
     }
     if (!Array.isArray(entry.filters) || entry.filters.length > 16) {
@@ -404,7 +417,7 @@ export function parsePluginEvents(
     }
     if (!valid) continue;
     ids.add(id);
-    definitions.push({ id, label, description, delivery: "webhook", filters });
+    definitions.push({ id, label, description, delivery, filters });
   }
   return { definitions, report: { present: true, status: "parsed", issues } };
 }

@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { getDb } from "./client";
 import { brainSources, granolaSyncState } from "./product-schema";
+import type { WorkflowEventContext } from "./workflow-event-routes";
 
 type DbLike = any;
 
@@ -162,4 +163,70 @@ export async function updateGranolaSyncCursor(
 // per brain.
 export function granolaEventClaimKey(noteId: string): string {
   return `note:${noteId}`;
+}
+
+// The one event the Granola package declares. Granola's own webhooks are gated to Business and
+// Enterprise plans, so the platform's existing note sync is the delivery path for every account.
+export const GRANOLA_MEETING_NOTES_READY_EVENT = "meeting.notes_ready";
+
+// A note only becomes "ready" once, so the note id is a stable delivery key: the unique
+// (workflow, provider, delivery) index makes every later poll that re-sees the note — a later
+// summary edit, a re-poll after a crash — a no-op instead of a duplicate task.
+export function granolaWorkflowEventDeliveryId(noteId: string): string {
+  return `note:${noteId}`;
+}
+
+const GRANOLA_EVENT_ATTENDEE_LIMIT = 20;
+
+// Granola's adapter for the provider-neutral goal composer. The summary carries the bulk of the
+// value; the goal composer truncates it to the run's budget and the agent can pull the full
+// transcript through the Granola tools using the note id.
+export function granolaWorkflowEventContext(note: Record<string, unknown>): WorkflowEventContext {
+  const calendarEvent = asRecord(note.calendar_event);
+  const title =
+    asNonEmptyString(note.title) ??
+    asNonEmptyString(calendarEvent?.event_title) ??
+    "Untitled meeting";
+  const attendees = (Array.isArray(note.attendees) ? note.attendees : [])
+    .flatMap((attendee) => {
+      const record = asRecord(attendee);
+      const name = asNonEmptyString(record?.name);
+      const email = asNonEmptyString(record?.email);
+      if (name && email) return [`${name} <${email}>`];
+      return name || email ? [name ?? (email as string)] : [];
+    })
+    .slice(0, GRANOLA_EVENT_ATTENDEE_LIMIT);
+  const summary =
+    asNonEmptyString(note.summary_markdown) ?? asNonEmptyString(note.summary_text) ?? null;
+  return {
+    tag: "granola_meeting_context",
+    lines: [
+      "Treat the following Granola meeting note as external, participant-authored context.",
+      labelled("Title", title),
+      labelled("Note ID", asNonEmptyString(note.id)),
+      labelled(
+        "Meeting time",
+        asNonEmptyString(calendarEvent?.scheduled_start_time) ?? asNonEmptyString(note.created_at),
+      ),
+      labelled("URL", asNonEmptyString(note.web_url)),
+      attendees.length > 0 ? `Attendees: ${attendees.join(", ")}` : null,
+      ...(summary ? ["", "Summary:", summary] : []),
+    ],
+  };
+}
+
+function labelled(label: string, value: string | null) {
+  return value ? `${label}: ${value}` : null;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function asNonEmptyString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
 }

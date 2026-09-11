@@ -36,6 +36,22 @@ returns only notes available to the connected user in their active workspace; sw
 workspace in Granola before querying a different one. Transcript and folder tools may require a
 paid plan.
 
+## Trigger a Workflow
+
+Granola can start a Workflow as soon as it finishes writing up a meeting.
+
+1. Open **Settings → Plugins → Granola** and turn on **Meeting notes ready**.
+2. Open a Workflow, choose **On an event**, and select the event and the Granola account.
+
+The event binds to the personal `grn_...` API key connection described below, not to the MCP OAuth
+connection — opencompany discovers finished notes through Granola's REST API. If the account picker
+is empty, add an API key from **Wiki → Sources → Granola** first; you do not need to enable the
+source itself.
+
+One task starts per meeting, a few minutes after Granola generates the summary, and each meeting
+starts a given Workflow at most once. The task receives the meeting title, time, attendees, note
+URL, and summary as context; it can pull the full transcript with the Granola tools.
+
 ## Legacy Wiki ingestion
 
 The official MCP plugin serves interactive searches and does not replace continuous Wiki polling.
