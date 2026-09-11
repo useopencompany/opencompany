@@ -68,6 +68,13 @@ vi.mock("@/components/Surface", () => ({
       {initialChat.title}
     </div>
   ),
+  QuickChatComposer: ({ workspaceId }: { workspaceId: string }) => (
+    <div data-testid="review-composer" data-workspace-id={workspaceId} />
+  ),
+}));
+
+vi.mock("@/components/chat/useCreditBalance", () => ({
+  useCreditBalance: () => ({ balance: null, refetch: vi.fn() }),
 }));
 
 vi.mock("@/components/TaskDetailPanel", () => ({
@@ -442,6 +449,35 @@ describe("ReviewInboxRoute", () => {
     await userEvent.click(screen.getByRole("button", { name: /^Draft the investor update/ }));
     expect(screen.getByTestId("chat-conversation")).toBeInTheDocument();
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  });
+
+  // The queue is where the next piece of work often gets thought of, so the reading pane keeps a
+  // composer until it has a conversation to show instead.
+  it("offers the composer while nothing is open and hands it back to the conversation", async () => {
+    reviewItemsMock.value = [
+      chatItem("c1", "Draft the investor update", "2026-09-10T11:00:00.000Z"),
+    ];
+    transcriptMock.messages = [assistantReply("Here is the draft.")];
+
+    render(<ReviewInboxRoute />);
+    expect(screen.getByTestId("review-composer")).toHaveAttribute(
+      "data-workspace-id",
+      "workspace_1",
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /^Draft the investor update/ }));
+
+    expect(screen.getByTestId("chat-conversation")).toBeInTheDocument();
+    expect(screen.queryByTestId("review-composer")).not.toBeInTheDocument();
+  });
+
+  it("keeps the composer when the queue is empty", () => {
+    reviewItemsMock.value = [];
+
+    render(<ReviewInboxRoute />);
+
+    expect(screen.getByText("You're all caught up")).toBeInTheDocument();
+    expect(screen.getByTestId("review-composer")).toBeInTheDocument();
   });
 
   it("returns to the list from the detail pane", async () => {
