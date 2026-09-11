@@ -6,6 +6,7 @@ import {
   chatSummaryState,
   PINNED_CHAT_LIMIT,
 } from "@/lib/chat-ui";
+import { taskHasReadableResult } from "@/lib/review-inbox";
 
 export const RECENT_SIDEBAR_CHAT_LIMIT = 8;
 export const RECENT_SIDEBAR_TASK_LIMIT = 8;
@@ -101,12 +102,17 @@ export function isTaskUnfinished(status: TaskStatus) {
  * A Task's row state, in the same vocabulary chat rows use.
  *
  * Chats and Tasks raise the same unread flag on the same column, so the dot has one meaning and
- * one implementation across both: something finished here that you have not read. A `waiting` Task
- * has paused for an approval and carries that flag too, which is exactly when it needs the dot.
+ * one implementation across both: something happened here that you have not dealt with.
+ *
+ * It only claims what the reader can still act on, though. A settled run has a result to read and
+ * a `waiting` one has an approval to answer, and both clear as soon as that is done. A canceled
+ * run raises the same flag on its way out with neither, so a dot for it would be one nothing in
+ * the product could ever turn off.
  */
 export function sidebarTaskState(task: Pick<SidebarTaskView, "status" | "hasUnseen">): ChatState {
   if (isTaskRunning(task.status)) return "working";
-  return task.hasUnseen ? "done_unseen" : "done_seen";
+  const resolvable = taskHasReadableResult(task.status) || task.status === "waiting";
+  return task.hasUnseen && resolvable ? "done_unseen" : "done_seen";
 }
 
 // One list of the work in view, whatever shape it took. Chats and Tasks are two ways to run the

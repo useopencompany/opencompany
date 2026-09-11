@@ -143,12 +143,18 @@ export function Sidebar({
   onToggleCollapsed: () => void;
   showCollapseButton?: boolean;
 }) {
-  const { featureFlags, mcpSetup, reviewCount } = useAppData();
+  const { featureFlags, mcpSetup, reviewCount, sidebarTasks } = useAppData();
   const pathname = usePathname();
   const mcpSetupActive = !mcpSetup.completedAt && pathname === "/settings/mcp";
   const homeActive = pathname === "/";
   const reviewActive = pathname === "/review";
   const tasksActive = pathname === "/tasks" || pathname.startsWith("/tasks/");
+  // The Tasks row hands the current-page claim to the Task's own row, but only when the list
+  // actually holds one: an older or archived Task has no row, and the page still has to say where
+  // the reader is.
+  const openTaskHasRow =
+    featureFlags.taskSpawning &&
+    sidebarTasks.some((task) => isTaskRouteActive(pathname, taskHref(task.displayId)));
   const workflowsActive = pathname === "/workflows" || pathname.startsWith("/workflows/");
   const wikiActive = pathname === "/wiki" || pathname.startsWith("/wiki/");
   const pluginsActive =
@@ -216,7 +222,7 @@ export function Sidebar({
                 icon={ListTodo}
                 label="Tasks"
                 active={tasksActive}
-                current={pathname === "/tasks"}
+                current={tasksActive && !openTaskHasRow}
               />
               <SidebarNavRow
                 href="/workflows"

@@ -489,10 +489,8 @@ describe("Sidebar", () => {
     const tasks = within(primaryNav).getByRole("link", { name: "Tasks" });
     const workflows = within(primaryNav).getByRole("link", { name: "Workflows" });
     expect(tasks).toHaveAttribute("href", "/tasks");
-    // The nav row still highlights for its subtree, but the task the reader opened owns the
-    // current-page claim, so only one element on the page can carry it.
-    expect(tasks).toHaveClass("bg-surface-active");
-    expect(tasks).not.toHaveAttribute("aria-current");
+    // No row is listed for this Task, so the nav row keeps the current-page claim.
+    expect(tasks).toHaveAttribute("aria-current", "page");
     expect(home.nextElementSibling).toBe(tasks);
     expect(tasks.nextElementSibling).toBe(workflows);
     expect(screen.queryByRole("navigation", { name: "Workflow tasks" })).not.toBeInTheDocument();
@@ -674,6 +672,23 @@ describe("Sidebar", () => {
     );
   });
 
+  // An older or archived Task has no row in a list bounded by recency, so the nav row keeps the
+  // claim rather than leaving the page with nothing marked current.
+  it("keeps the Tasks nav row current on a task the list does not hold", () => {
+    pathnameMock.value = "/tasks/T-99";
+    featureFlagsMock.taskSpawning = true;
+    sidebarTasksMock.value = [taskRow("task_other", { displayId: "T-1", name: "Other task" })];
+
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    const nav = screen.getByRole("navigation", { name: "opencompany primary" });
+    expect(within(nav).getByRole("link", { name: "Tasks" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(screen.getAllByText("Other task")).toHaveLength(1);
+  });
+
   it("marks a task row current on its run subroute and a lowercased display id", () => {
     featureFlagsMock.taskSpawning = true;
     pathnameMock.value = "/tasks/t-12/run";
@@ -684,6 +699,12 @@ describe("Sidebar", () => {
     render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
     expect(screen.getByRole("link", { name: /Open task/ })).toHaveAttribute("aria-current", "page");
+    // Exactly one element claims the page: the nav row still highlights for its subtree but
+    // defers to the row for the Task actually open.
+    const nav = screen.getByRole("navigation", { name: "opencompany primary" });
+    const tasksNavRow = within(nav).getByRole("link", { name: "Tasks" });
+    expect(tasksNavRow).toHaveClass("bg-surface-active");
+    expect(tasksNavRow).not.toHaveAttribute("aria-current");
   });
 
   it("restores the task row and reports the failure when archiving rejects", async () => {

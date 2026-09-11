@@ -142,6 +142,10 @@ describe("sidebarTaskState", () => {
   it("reports a read task as seen", () => {
     expect(sidebarTaskState({ status: "succeeded", hasUnseen: false })).toBe("done_seen");
   });
+
+  it("withholds the dot from a canceled run, which has nothing that would clear it", () => {
+    expect(sidebarTaskState({ status: "canceled", hasUnseen: true })).toBe("done_seen");
+  });
 });
 
 describe("orderSidebarWorkItems", () => {
