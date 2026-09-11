@@ -8,6 +8,7 @@ import {
   createExternalEngineGatewayTicket,
 } from "@opencompany/agent-runtime";
 import type { PooledDb } from "@opencompany/db/pool";
+import { createTestPGlite } from "@opencompany/db/test-pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import Fastify from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -49,7 +50,7 @@ describe("external engine Skill persistence through the MCP route", () => {
   let pg: PGlite;
 
   beforeAll(async () => {
-    pg = new PGlite();
+    pg = await createTestPGlite();
     await pg.exec(`
       CREATE SCHEMA goat;
       CREATE TABLE goat.workspaces (id text PRIMARY KEY);

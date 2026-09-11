@@ -60,6 +60,7 @@ import { TaskDetailPanel } from "@/components/TaskDetailPanel";
 import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
 import { useHydrated } from "@/components/useHydrated";
 import { useTaskRun } from "@/components/useTaskRun";
+import { useTaskSeenAcknowledgement } from "@/components/useTaskSeenAcknowledgement";
 import type { ChatSessionView } from "@/lib/chat-ui";
 import { getHeadlessWorkflows } from "@/lib/headless-automation-collections";
 import { createHeadlessWorkflow } from "@/lib/headless-automation-commands";
@@ -464,6 +465,10 @@ function BrainSettingsRoute({ brain }: { brain: BrainSummaryView }) {
 export function TaskDetailRoute({ taskId }: { taskId: string }) {
   const run = useTaskRun(taskId);
   const { featureFlags } = useAppData();
+  // The route resolves a display id as well as a canonical id, so the acknowledgment keys off the
+  // run's own identifier rather than the one in the URL. A disabled workspace renders the beta
+  // notice instead of a result, so there is nothing there to acknowledge.
+  useTaskSeenAcknowledgement(featureFlags.taskSpawning ? (run?.task.id ?? null) : null);
 
   if (!featureFlags.taskSpawning) return <TasksWorkflowsDisabledRoute />;
 

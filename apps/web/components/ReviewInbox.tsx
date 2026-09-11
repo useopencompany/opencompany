@@ -2,11 +2,12 @@
 
 import type { ChatEngine } from "@opencompany/core";
 import { toast } from "@opencompany/ui/components/sonner";
-import { Archive, ArrowLeft, Inbox, Loader2 } from "lucide-react";
+import { Archive, ArrowLeft, Inbox } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppData } from "@/components/AppDataProvider";
+import { useCreditBalance } from "@/components/chat/useCreditBalance";
 import { EmptyState, formatRelativeTime } from "@/components/Routes";
-import { Surface } from "@/components/Surface";
+import { QuickChatComposer, Surface } from "@/components/Surface";
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
 import { useHeadlessChatTranscript } from "@/components/useHeadlessChatTranscript";
 import { useTaskRun } from "@/components/useTaskRun";
@@ -14,6 +15,10 @@ import type { ChatSessionView } from "@/lib/chat-ui";
 import { updateHeadlessChatConversation } from "@/lib/headless-chat-commands";
 import { archiveHeadlessTask, markHeadlessTaskSeen } from "@/lib/headless-task-commands";
 import { DEFAULT_MODEL, normalizeConversationModel } from "@/lib/model-options";
+import {
+  archiveConversationOptimistically,
+  restoreOptimisticArchive,
+} from "@/lib/optimistic-archives";
 import type { ReviewItem } from "@/lib/review-inbox";
 
 export function ReviewInboxRoute() {
@@ -25,7 +30,6 @@ export function ReviewInboxRoute() {
   // Rows the reader has just opened. The projection lands a moment later and reports the same
   // thing; this only keeps the row from looking unread in the meantime.
   const [readItems, setReadItems] = useState<ReadonlySet<string>>(new Set());
-  const [archivingIds, setArchivingIds] = useState<ReadonlySet<string>>(new Set());
   // Acknowledgment is fire-and-forget and the detail pane can report readability more than once
   // (Electric redelivers rows). This keeps one command in flight per conversation.
   const acknowledging = useRef(new Set<string>());
@@ -59,31 +63,24 @@ export function ReviewInboxRoute() {
 
   // Archiving is how an item leaves the queue. It reuses the same commands the sidebar and the
   // Tasks board archive with, so a review item disappears everywhere it was listed, not just here.
+  // The row and the pane go on the click: the write and the projection behind it take about a
+  // second, and holding a decision the reader has already made for that long reads as lag. A
+  // failed write puts the item back and says so.
   const archive = useCallback(
     (item: ReviewItem) => {
       const { conversationId, source } = item;
-      if (archivingIds.has(conversationId)) return;
-      setArchivingIds((current) => new Set(current).add(conversationId));
+      if (!archiveConversationOptimistically(conversationId)) return;
+      setOpenItem((current) => (current?.conversationId === conversationId ? null : current));
       const archived =
         source.kind === "task"
           ? archiveHeadlessTask(source.taskId, { scopeKey: workspace.id })
           : updateHeadlessChatConversation(conversationId, { archived: true });
-      void archived
-        .then(() => {
-          setOpenItem((current) => (current?.conversationId === conversationId ? null : current));
-        })
-        .catch(() => {
-          toast.error(`Could not archive "${item.title}".`);
-        })
-        .finally(() => {
-          setArchivingIds((current) => {
-            const next = new Set(current);
-            next.delete(conversationId);
-            return next;
-          });
-        });
+      void archived.catch(() => {
+        restoreOptimisticArchive(conversationId);
+        toast.error(`Could not archive "${item.title}".`);
+      });
     },
-    [archivingIds, workspace.id],
+    [workspace.id],
   );
 
   // Selecting an item is not the same as having read it. The detail pane calls this once the
@@ -131,7 +128,7 @@ export function ReviewInboxRoute() {
             </span>
           ) : null}
         </header>
-        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-6 pt-1">
+        <div className="min-h-0 flex-1 overflow-y-auto scrollbar-none px-2 pb-6 pt-1">
           {items.length === 0 ? (
             <p className="px-2 py-8 text-center text-[12.5px] leading-5 text-ink-subtle">
               Nothing to review. Finished chats and tasks land here until you archive them.
@@ -143,7 +140,6 @@ export function ReviewInboxRoute() {
                 item={item}
                 selected={item.conversationId === selectedId}
                 unread={isUnread(item)}
-                archiving={archivingIds.has(item.conversationId)}
                 onSelect={() => select(item)}
                 onArchive={() => archive(item)}
               />
@@ -161,18 +157,21 @@ export function ReviewInboxRoute() {
             onRead={acknowledge}
           />
         ) : (
-          <div className="flex min-h-0 w-full items-center justify-center overflow-y-auto px-6 py-10">
-            <div className="w-full max-w-[520px]">
-              <EmptyState
-                icon={Inbox}
-                title={items.length > 0 ? "Pick something to read" : "You're all caught up"}
-                description={
-                  items.length > 0
-                    ? "Select an item on the left to pick the conversation up where it stopped."
-                    : "When a chat or task finishes, it shows up here until you archive it."
-                }
-              />
+          <div className="flex min-h-0 w-full flex-1 flex-col">
+            <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-6 py-10">
+              <div className="w-full max-w-[520px]">
+                <EmptyState
+                  icon={Inbox}
+                  title={items.length > 0 ? "Pick something to read" : "You're all caught up"}
+                  description={
+                    items.length > 0
+                      ? "Select an item on the left to pick the conversation up where it stopped."
+                      : "When a chat or task finishes, it shows up here until you archive it."
+                  }
+                />
+              </div>
             </div>
+            <ReviewStartComposer />
           </div>
         )}
       </div>
@@ -180,18 +179,45 @@ export function ReviewInboxRoute() {
   );
 }
 
+/**
+ * Reading the queue is also where the next piece of work gets thought of, so the empty pane keeps
+ * the composer the command palette starts chats with. It runs the prompt in the background: the
+ * queue stays where it was, and the finished conversation comes back to it.
+ */
+function ReviewStartComposer() {
+  const { claudeCodeConnected, codexConnected, featureFlags, user, workspace } = useAppData();
+  const { balance: creditBalance } = useCreditBalance();
+
+  return (
+    <div className="shrink-0 px-6 pb-6">
+      <div className="mx-auto w-full max-w-[720px]">
+        <QuickChatComposer
+          open
+          initialPrompt=""
+          userWorkosId={user.workosUserId}
+          defaultModel={DEFAULT_MODEL}
+          codexConnected={codexConnected}
+          claudeCodeConnected={claudeCodeConnected}
+          taskSpawningEnabled={featureFlags.taskSpawning}
+          autoModelRoutingEnabled={featureFlags.autoModelRouting}
+          creditBalance={creditBalance}
+          workspaceId={workspace.id}
+        />
+      </div>
+    </div>
+  );
+}
+
 function ReviewListRow({
   item,
   selected,
   unread,
-  archiving,
   onSelect,
   onArchive,
 }: {
   item: ReviewItem;
   selected: boolean;
   unread: boolean;
-  archiving: boolean;
   onSelect: () => void;
   onArchive: () => void;
 }) {
@@ -234,19 +260,10 @@ function ReviewListRow({
         type="button"
         title="Archive"
         aria-label={`Archive ${item.title}`}
-        disabled={archiving}
         onClick={onArchive}
-        className={`mx-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink/50 transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed ${
-          archiving
-            ? "opacity-100"
-            : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
-        }`}
+        className="mx-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink/50 opacity-0 transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover:opacity-100 group-focus-within:opacity-100"
       >
-        {archiving ? (
-          <Loader2 size={13} strokeWidth={1.75} className="animate-spin" />
-        ) : (
-          <Archive size={13} strokeWidth={1.75} />
-        )}
+        <Archive size={13} strokeWidth={1.75} />
       </button>
     </div>
   );

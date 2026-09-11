@@ -3,6 +3,7 @@ import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
 import { describe, expect, it } from "vitest";
+import { createTestPGlite } from "./test-pglite";
 
 const migrationsRoot = path.join(__dirname, "..", "..", "..", "drizzle");
 
@@ -15,7 +16,7 @@ async function applyMigration(db: PGlite, name: string) {
 
 describe("0220_goat_wiki_folders", () => {
   it("converts stub parents and splits parent pages with bodies", async () => {
-    const db = new PGlite({ extensions: { pg_trgm } });
+    const db = await createTestPGlite({ extensions: { pg_trgm } });
     await db.exec("CREATE EXTENSION IF NOT EXISTS pg_trgm;");
     await db.exec("CREATE SCHEMA goat;");
     await db.exec("CREATE TABLE goat.workspaces (id text PRIMARY KEY);");

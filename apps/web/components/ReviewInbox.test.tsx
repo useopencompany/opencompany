@@ -2,6 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { clearOptimisticArchives } from "@/lib/optimistic-archives";
 import type { ReviewItem } from "@/lib/review-inbox";
 import { ReviewInboxRoute } from "./ReviewInbox";
 
@@ -18,22 +19,32 @@ const toastErrorMock = vi.hoisted(() => vi.fn());
 const markTaskSeenMock = vi.hoisted(() => vi.fn(async () => ({ id: "task_c1" })));
 const archiveTaskMock = vi.hoisted(() => vi.fn(async () => ({ id: "task_c1" })));
 
-vi.mock("@/components/AppDataProvider", () => ({
-  useAppData: () => ({
-    reviewItems: reviewItemsMock.value,
-    workspace: { id: "workspace_1" },
-    user: { firstName: "Ada", email: "ada@example.com", workosUserId: "user_1" },
-    recentChats: [],
-    archivedChats: [],
-    tasks: [],
-    allTasks: [],
-    schedules: [],
-    featureFlags: { taskSpawning: true, autoModelRouting: false },
-    activeBrain: null,
-    codexConnected: false,
-    claudeCodeConnected: false,
-  }),
-}));
+// The provider applies the reader's pending archives to the queue it publishes, so the mock does
+// the same: these tests are about what the list shows between the click and the projection.
+vi.mock("@/components/AppDataProvider", async () => {
+  const { useOptimisticArchives } = await import("@/lib/optimistic-archives");
+  return {
+    useAppData: () => {
+      const pendingArchives = useOptimisticArchives();
+      return {
+        reviewItems: reviewItemsMock.value.filter(
+          (item) => !pendingArchives.has(item.conversationId),
+        ),
+        workspace: { id: "workspace_1" },
+        user: { firstName: "Ada", email: "ada@example.com", workosUserId: "user_1" },
+        recentChats: [],
+        archivedChats: [],
+        tasks: [],
+        allTasks: [],
+        schedules: [],
+        featureFlags: { taskSpawning: true, autoModelRouting: false },
+        activeBrain: null,
+        codexConnected: false,
+        claudeCodeConnected: false,
+      };
+    },
+  };
+});
 
 vi.mock("@/components/Routes", () => ({
   formatRelativeTime: () => "2m ago",
@@ -57,6 +68,13 @@ vi.mock("@/components/Surface", () => ({
       {initialChat.title}
     </div>
   ),
+  QuickChatComposer: ({ workspaceId }: { workspaceId: string }) => (
+    <div data-testid="review-composer" data-workspace-id={workspaceId} />
+  ),
+}));
+
+vi.mock("@/components/chat/useCreditBalance", () => ({
+  useCreditBalance: () => ({ balance: null, refetch: vi.fn() }),
 }));
 
 vi.mock("@/components/TaskDetailPanel", () => ({
@@ -126,6 +144,7 @@ function assistantReply(text: string) {
 describe("ReviewInboxRoute", () => {
   afterEach(() => {
     vi.clearAllMocks();
+    clearOptimisticArchives();
     reviewItemsMock.value = [];
     transcriptMock.messages = [];
     transcriptMock.isLoading = false;
@@ -314,6 +333,45 @@ describe("ReviewInboxRoute", () => {
     expect(updateConversationMock).toHaveBeenCalledWith("c1", { archived: true });
   });
 
+  // The write and the projection behind it take about a second. The reader has already decided,
+  // so the row leaves on the click rather than sitting there under a spinner.
+  it("drops the row before the archive settles", async () => {
+    reviewItemsMock.value = [
+      chatItem("c1", "Draft the investor update", "2026-09-10T11:00:00.000Z"),
+      chatItem("c2", "Review the pricing page", "2026-09-10T10:00:00.000Z"),
+    ];
+    let settleArchive = () => {};
+    updateConversationMock.mockReturnValueOnce(
+      new Promise((resolve) => {
+        settleArchive = () => resolve({ transactionId: "1" });
+      }),
+    );
+
+    render(<ReviewInboxRoute />);
+    await userEvent.click(
+      screen.getByRole("button", { name: "Archive Draft the investor update" }),
+    );
+
+    expect(screen.queryByRole("button", { name: /^Draft the investor update/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /^Review the pricing page/ })).toBeInTheDocument();
+    settleArchive();
+  });
+
+  // A double click that beats the re-render must not send the command twice.
+  it("sends one archive command per item", async () => {
+    reviewItemsMock.value = [
+      chatItem("c1", "Draft the investor update", "2026-09-10T11:00:00.000Z"),
+    ];
+
+    render(<ReviewInboxRoute />);
+    const archiveButton = screen.getByRole("button", {
+      name: "Archive Draft the investor update",
+    });
+    await userEvent.dblClick(archiveButton);
+
+    expect(updateConversationMock).toHaveBeenCalledTimes(1);
+  });
+
   // A Task is archived through the Task command; the conversation command would leave the Task
   // itself listed on the Tasks board.
   it("archives a task through the task command", async () => {
@@ -342,7 +400,7 @@ describe("ReviewInboxRoute", () => {
       screen.getByRole("button", { name: "Archive Draft the investor update" }),
     );
 
-    await waitFor(() => expect(screen.getByText("Pick something to read")).toBeInTheDocument());
+    expect(screen.getByText("You're all caught up")).toBeInTheDocument();
   });
 
   it("keeps the item and reports the failure when archiving does not land", async () => {
@@ -359,6 +417,7 @@ describe("ReviewInboxRoute", () => {
     await waitFor(() =>
       expect(toastErrorMock).toHaveBeenCalledWith('Could not archive "Draft the investor update".'),
     );
+    // The row comes back: the queue still owes the reader an item the write never removed.
     expect(screen.getByRole("button", { name: /^Draft the investor update/ })).toBeInTheDocument();
   });
 
@@ -390,6 +449,35 @@ describe("ReviewInboxRoute", () => {
     await userEvent.click(screen.getByRole("button", { name: /^Draft the investor update/ }));
     expect(screen.getByTestId("chat-conversation")).toBeInTheDocument();
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  });
+
+  // The queue is where the next piece of work often gets thought of, so the reading pane keeps a
+  // composer until it has a conversation to show instead.
+  it("offers the composer while nothing is open and hands it back to the conversation", async () => {
+    reviewItemsMock.value = [
+      chatItem("c1", "Draft the investor update", "2026-09-10T11:00:00.000Z"),
+    ];
+    transcriptMock.messages = [assistantReply("Here is the draft.")];
+
+    render(<ReviewInboxRoute />);
+    expect(screen.getByTestId("review-composer")).toHaveAttribute(
+      "data-workspace-id",
+      "workspace_1",
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /^Draft the investor update/ }));
+
+    expect(screen.getByTestId("chat-conversation")).toBeInTheDocument();
+    expect(screen.queryByTestId("review-composer")).not.toBeInTheDocument();
+  });
+
+  it("keeps the composer when the queue is empty", () => {
+    reviewItemsMock.value = [];
+
+    render(<ReviewInboxRoute />);
+
+    expect(screen.getByText("You're all caught up")).toBeInTheDocument();
+    expect(screen.getByTestId("review-composer")).toBeInTheDocument();
   });
 
   it("returns to the list from the detail pane", async () => {
