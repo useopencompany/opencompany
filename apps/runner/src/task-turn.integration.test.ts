@@ -1,8 +1,9 @@
 import { PGlite } from "@electric-sql/pglite";
 import type { CodexChatTurn, HarnessSpec, Task } from "@opencompany/db/product-schema";
+import { snapshotPGliteSchema } from "@opencompany/db/test-schema-snapshot";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildTaskFailureCompletion,
   buildTaskTerminalProjection,
@@ -281,11 +282,15 @@ function turnFixture(overrides?: Partial<CodexChatTurn>): CodexChatTurn {
 
 describe("task-turn SQL against real Postgres", () => {
   let pg: PGlite;
+  let restoreDatabase: () => Promise<PGlite>;
+
+  beforeAll(async () => {
+    restoreDatabase = await snapshotPGliteSchema((database) => database.exec(SCHEMA));
+  });
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    pg = await PGlite.create();
-    await pg.exec(SCHEMA);
+    pg = await restoreDatabase();
     dbHolder.execute = async (query: SQL) => {
       const compiled = dialect.sqlToQuery(query);
       return pg.query(compiled.sql, compiled.params as never[]);

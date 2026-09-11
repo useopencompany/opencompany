@@ -23,7 +23,7 @@ import type {
   BrainImportStatus,
 } from "@opencompany/db/product-schema";
 import { getBrainAccess, isLegacyBrainEnabledForWorkspace } from "@opencompany/db/workspaces";
-import type { WikiSourceDto } from "@opencompany/protocol";
+import type { WikiSourceDto } from "@opencompany/protocol/schemas";
 import type { BrainSourceApplicationService } from "./brain-sources";
 
 type DbLike = any;

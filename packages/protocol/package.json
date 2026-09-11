@@ -16,6 +16,10 @@
       "types": "./src/events.ts",
       "default": "./src/events.ts"
     },
+    "./schemas": {
+      "types": "./src/schemas.ts",
+      "default": "./src/schemas.ts"
+    },
     "./openapi": "./openapi/openapi.v1.json"
   },
   "scripts": {
