@@ -89,6 +89,7 @@ import {
   emptyCodingChatHistory,
   loadCodingChatHistory,
 } from "./coding-chat-history";
+import { codingChatSkillPromptLines } from "./coding-chat-skills";
 import { settledCodingSandboxIdleTimeoutMs } from "./coding-sandbox-lifecycle";
 import { CODING_WORKSPACE_SANDBOX_NETWORK } from "./coding-workspace-runtime";
 import { getDb } from "./db";
@@ -614,6 +615,9 @@ export async function runCodexChatTurn(input: {
       })),
     });
     checkExternalAbort();
+    const invokedSkillPaths = turnSkills.invokedSkillIds.map(
+      (skillId) => `${CODEX_CHAT_WORKDIR}/.agents/skills/${skillId}/SKILL.md`,
+    );
     if (pluginRuntime.mcpPlugins.length > 0) {
       if (!skillWorkspaceId) throw new Error("Approved Plugin MCP requires a workspace ID.");
       executionStage = "restore_plugin_data";
@@ -674,6 +678,7 @@ export async function runCodexChatTurn(input: {
             ),
             previousProgress: summarizeCodexChatRecoveryProgress(initialParts),
             attachmentPaths: materializedAttachments.paths,
+            skillPaths: invokedSkillPaths,
             conversationHistory: history,
             ...(historyAttachmentMaterialization ? { historyAttachmentMaterialization } : {}),
             taskContext,
@@ -695,6 +700,7 @@ export async function runCodexChatTurn(input: {
               infisicalAuth.promptFragment,
             ),
             attachmentPaths: materializedAttachments.paths,
+            skillPaths: invokedSkillPaths,
             conversationHistory: history,
             ...(historyAttachmentMaterialization ? { historyAttachmentMaterialization } : {}),
             taskContext,
@@ -1875,6 +1881,7 @@ function buildCodexChatTask(input: {
   wikiSupported: boolean;
   repositoryBootstrapPrompt: string;
   attachmentPaths: string[];
+  skillPaths: string[];
   conversationHistory: CodingChatHistory;
   historyAttachmentMaterialization?: CodingChatHistoryAttachmentMaterialization;
   taskContext?: TaskTurnContext | undefined;
@@ -1911,6 +1918,7 @@ function buildCodexChatTask(input: {
     "<user_message>",
     input.prompt || "Review the attached file(s).",
     "</user_message>",
+    ...codingChatSkillPromptLines(input.skillPaths),
     ...codexChatAttachmentPromptLines(input.attachmentPaths),
   ]
     .filter((line) => line !== null)
@@ -1929,6 +1937,7 @@ function buildCodexChatRecoveryTask(input: {
   repositoryBootstrapPrompt: string;
   previousProgress: string;
   attachmentPaths: string[];
+  skillPaths: string[];
   conversationHistory: CodingChatHistory;
   historyAttachmentMaterialization?: CodingChatHistoryAttachmentMaterialization;
   taskContext?: TaskTurnContext | undefined;
@@ -1966,6 +1975,7 @@ function buildCodexChatRecoveryTask(input: {
     "<original_user_message>",
     input.prompt || "Review the attached file(s).",
     "</original_user_message>",
+    ...codingChatSkillPromptLines(input.skillPaths),
     ...codexChatAttachmentPromptLines(input.attachmentPaths),
     "",
     "<last_persisted_progress>",
