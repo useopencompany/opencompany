@@ -17,7 +17,7 @@ import {
 import { getBrainSourcesAction } from "@/lib/brain-source-actions";
 import {
   getHeadlessBrainCollections,
-  getHeadlessWikiCollections,
+  getHeadlessWikiImportRuns,
   type HeadlessBrainImportRunReadModel,
 } from "@/lib/headless-knowledge-collections";
 import { listWikiSources } from "@/lib/wiki-source-api";
@@ -66,14 +66,16 @@ function CompanyImport({
   initialWebsite?: string;
 }) {
   const wiki = Boolean(workspaceId);
-  const collections = useMemo(
+  // Company import runs are workspace-level either way; only the Electric shape
+  // they arrive on differs between the Brain and Wiki surfaces.
+  const importRuns = useMemo(
     () =>
       workspaceId
-        ? getHeadlessWikiCollections(workspaceId)
-        : getHeadlessBrainCollections(brainRef!),
+        ? getHeadlessWikiImportRuns(workspaceId)
+        : getHeadlessBrainCollections(brainRef!).importRuns,
     [brainRef, workspaceId],
   );
-  const { data } = useLiveQuery((q) => q.from({ run: collections.importRuns }), [collections]);
+  const { data } = useLiveQuery((q) => q.from({ run: importRuns }), [importRuns]);
   const run =
     ((data ?? []) as HeadlessBrainImportRunReadModel[]).toSorted((a, b) =>
       b.createdAt.localeCompare(a.createdAt),

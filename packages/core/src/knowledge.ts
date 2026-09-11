@@ -114,6 +114,18 @@ export type WikiTimelineEntry = {
   createdAt: Date;
 };
 
+/** A wiki as the client sees it. `access` has two stored states; see @opencompany/db/wikis. */
+export type WikiSummary = {
+  id: string;
+  name: string;
+  slug: string;
+  instructions: string;
+  access: "workspace" | "restricted";
+  isDefault: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 export interface KnowledgeRepository {
   assertBrainAccess(input: { actor: Actor; brainId: string }): Promise<void>;
   getBrainSnapshot(input: { actor: Actor; brainId: string }): Promise<BrainSnapshot>;
@@ -152,9 +164,22 @@ export interface KnowledgeRepository {
     toPath: string;
   }): Promise<{ path: string }>;
   deleteBrainFolder(input: { actor: Actor; brainId: string; path: string }): Promise<void>;
-  listWikiPages(input: { actor: Actor }): Promise<WikiPage[]>;
+  /**
+   * The wiki the actor means — an explicit id, otherwise the workspace's default
+   * wiki — or null when it does not exist *or* the actor cannot reach it. The two
+   * are deliberately indistinguishable so a restricted wiki's existence cannot be
+   * probed by a non-member.
+   */
+  resolveWiki(input: {
+    actor: Actor;
+    wikiId?: string | undefined;
+  }): Promise<{ wikiId: string; name: string; slug: string; instructions: string } | null>;
+  /** Every wiki in the actor's workspace they may read, default first. */
+  listWikis(input: { actor: Actor }): Promise<WikiSummary[]>;
+  listWikiPages(input: { actor: Actor; wikiId: string }): Promise<WikiPage[]>;
   createWikiPage(input: {
     actor: Actor;
+    wikiId: string;
     idempotencyKey: string;
     clientPageId?: string;
     nodeType: WikiPage["nodeType"];
@@ -164,6 +189,7 @@ export interface KnowledgeRepository {
   }): Promise<{ page: WikiPage; transactionIds: number[] }>;
   updateWikiPage(input: {
     actor: Actor;
+    wikiId: string;
     id: string;
     body?: string;
     kind?: WikiPage["kind"];
@@ -172,11 +198,13 @@ export interface KnowledgeRepository {
   }): Promise<{ page: WikiPage; transactionIds: number[] }>;
   deleteWikiPage(input: {
     actor: Actor;
+    wikiId: string;
     id: string;
     recursive: boolean;
   }): Promise<{ deletedPaths: string[]; transactionIds: number[] }>;
   addWikiTimelineEntry(input: {
     actor: Actor;
+    wikiId: string;
     idempotencyKey: string;
     clientEntryId?: string;
     id: string;
@@ -319,18 +347,29 @@ export class KnowledgeApplicationService {
     });
   }
 
-  listWikiPages(actor: Actor) {
+  async listWikis(actor: Actor) {
     requirePermission(actor, WIKI_READ_PERMISSION, "Wiki");
-    return this.repository.listWikiPages({ actor });
+    return this.repository.listWikis({ actor });
   }
 
-  authorizeWikiRead(actor: Actor) {
-    requirePermission(actor, WIKI_READ_PERMISSION, "Wiki");
+  async listWikiPages(actor: Actor, wikiId?: string) {
+    const resolved = await this.requireWikiAccess(actor, WIKI_READ_PERMISSION, wikiId);
+    return this.repository.listWikiPages({ actor, wikiId: resolved });
   }
 
-  createWikiPage(
+  /**
+   * Gate for the Electric wiki shapes. Returns the resolved wiki id so the read
+   * model filters on exactly the wiki that was authorized, never on the actor's
+   * workspace.
+   */
+  async authorizeWikiRead(actor: Actor, wikiId?: string) {
+    return this.requireWikiAccess(actor, WIKI_READ_PERMISSION, wikiId);
+  }
+
+  async createWikiPage(
     actor: Actor,
     input: {
+      wikiId?: string;
       idempotencyKey: string;
       clientPageId?: string;
       nodeType: WikiPage["nodeType"];
@@ -339,9 +378,10 @@ export class KnowledgeApplicationService {
       slug?: string;
     },
   ) {
-    requirePermission(actor, WIKI_WRITE_PERMISSION, "Wiki");
+    const wikiId = await this.requireWikiAccess(actor, WIKI_WRITE_PERMISSION, input.wikiId);
     return this.repository.createWikiPage({
       actor,
+      wikiId,
       idempotencyKey: idempotencyKey(input.idempotencyKey),
       ...(input.clientPageId
         ? { clientPageId: resourceId(input.clientPageId, "clientPageId") }
@@ -353,19 +393,21 @@ export class KnowledgeApplicationService {
     });
   }
 
-  updateWikiPage(
+  async updateWikiPage(
     actor: Actor,
     id: string,
     input: {
+      wikiId?: string;
       body?: string;
       kind?: WikiPage["kind"];
       slug?: string;
       title?: string;
     },
   ) {
-    requirePermission(actor, WIKI_WRITE_PERMISSION, "Wiki");
+    const wikiId = await this.requireWikiAccess(actor, WIKI_WRITE_PERMISSION, input.wikiId);
     return this.repository.updateWikiPage({
       actor,
+      wikiId,
       id: resourceId(id, "id"),
       ...(input.body !== undefined ? { body: boundedRaw(input.body, 1_000_000, "body") } : {}),
       ...(input.kind ? { kind: input.kind } : {}),
@@ -374,18 +416,20 @@ export class KnowledgeApplicationService {
     });
   }
 
-  deleteWikiPage(actor: Actor, input: { id: string; recursive?: boolean }) {
-    requirePermission(actor, WIKI_WRITE_PERMISSION, "Wiki");
+  async deleteWikiPage(actor: Actor, input: { wikiId?: string; id: string; recursive?: boolean }) {
+    const wikiId = await this.requireWikiAccess(actor, WIKI_WRITE_PERMISSION, input.wikiId);
     return this.repository.deleteWikiPage({
       actor,
+      wikiId,
       id: resourceId(input.id, "id"),
       recursive: input.recursive ?? false,
     });
   }
 
-  addWikiTimelineEntry(
+  async addWikiTimelineEntry(
     actor: Actor,
     input: {
+      wikiId?: string;
       idempotencyKey: string;
       clientEntryId?: string;
       id: string;
@@ -393,13 +437,14 @@ export class KnowledgeApplicationService {
       at?: string;
     },
   ) {
-    requirePermission(actor, WIKI_WRITE_PERMISSION, "Wiki");
+    const wikiId = await this.requireWikiAccess(actor, WIKI_WRITE_PERMISSION, input.wikiId);
     const at = input.at ? new Date(input.at) : undefined;
     if (at && Number.isNaN(at.getTime())) {
       throw new CoreError("invalid_argument", "Timeline date is invalid.");
     }
     return this.repository.addWikiTimelineEntry({
       actor,
+      wikiId,
       idempotencyKey: idempotencyKey(input.idempotencyKey),
       ...(input.clientEntryId
         ? { clientEntryId: resourceId(input.clientEntryId, "clientEntryId") }
@@ -408,6 +453,21 @@ export class KnowledgeApplicationService {
       text: bounded(input.text, 20_000, "text"),
       ...(at ? { at } : {}),
     });
+  }
+
+  /**
+   * The workspace-level Wiki permission plus per-wiki membership. Both gates run
+   * for every wiki entry point in this service; a missing or unreachable wiki is
+   * reported as not_found so membership cannot be probed.
+   */
+  private async requireWikiAccess(actor: Actor, permission: string, wikiIdValue?: string) {
+    requirePermission(actor, permission, "Wiki");
+    const wiki = await this.repository.resolveWiki({
+      actor,
+      ...(wikiIdValue ? { wikiId: resourceId(wikiIdValue, "wikiId") } : {}),
+    });
+    if (!wiki) throw new CoreError("not_found", "Wiki not found.");
+    return wiki.wikiId;
   }
 
   private async requireBrainWrite(actor: Actor, brainIdValue: string) {

@@ -298,6 +298,7 @@ describe("canonical Hono API", () => {
       pluginImports: fakePluginImportService(),
       brainAssets: fakeBrainAssets(),
       brainControl: fakeBrainControl(),
+      wikiControl: fakeWikiControl(),
       attachments: fakeAttachments(),
       userSettings: fakeUserSettings(),
       feedback: fakeFeedback(),
@@ -5291,6 +5292,7 @@ function testApp(
     pluginImports: fakePluginImportService(),
     brainAssets: fakeBrainAssets(),
     brainControl: fakeBrainControl(),
+    wikiControl: fakeWikiControl(),
     attachments: fakeAttachments(),
     userSettings: fakeUserSettings(),
     feedback: fakeFeedback(),
@@ -5395,6 +5397,35 @@ function fakeBrainControl(): Parameters<typeof createApiApp>[0]["brainControl"] 
     },
     setIntelligence: async () => {
       throw new Error("Unexpected Brain intelligence mutation.");
+    },
+  };
+}
+
+function fakeWikiControl(): Parameters<typeof createApiApp>[0]["wikiControl"] {
+  return {
+    listWikis: async () => [
+      {
+        id: "goat_wiki_1",
+        name: "Wiki",
+        slug: "wiki",
+        instructions: "",
+        access: "workspace",
+        isDefault: true,
+        createdAt,
+        updatedAt: createdAt,
+      },
+    ],
+    createWiki: async () => {
+      throw new Error("Unexpected Wiki creation.");
+    },
+    updateWiki: async () => {
+      throw new Error("Unexpected Wiki update.");
+    },
+    getAccess: async () => {
+      throw new Error("Unexpected Wiki access read.");
+    },
+    setAccess: async () => {
+      throw new Error("Unexpected Wiki access mutation.");
     },
   };
 }
@@ -6013,6 +6044,7 @@ function fakeWikiCommandRepository(
     throw new Error("Unexpected wiki command repository call.");
   };
   return {
+    resolveWiki: async () => fakeResolvedWiki,
     getTree: async () => [],
     resolvePages: async () => ({ pages: [], missing: [] }),
     getBacklinks: async () => [],
@@ -6097,15 +6129,27 @@ function fakePluginImportService(
   return new PluginImportApplicationService(repository, resolver, gatewayLifecycle);
 }
 
+const fakeResolvedWiki = {
+  wikiId: "goat_wiki_1",
+  name: "Wiki",
+  slug: "wiki",
+  instructions: "",
+};
+
 function knowledgeService(overrides: Partial<KnowledgeRepository>) {
-  const repository = new Proxy(overrides, {
-    get(target, operation) {
-      if (operation in target) return target[operation as keyof typeof target];
-      return async () => {
-        throw new Error(`Unexpected knowledge operation: ${String(operation)}.`);
-      };
+  // Every wiki entry point resolves and authorizes its wiki first, so the fake
+  // repository answers that by default.
+  const repository = new Proxy(
+    { resolveWiki: async () => fakeResolvedWiki, ...overrides },
+    {
+      get(target, operation) {
+        if (operation in target) return target[operation as keyof typeof target];
+        return async () => {
+          throw new Error(`Unexpected knowledge operation: ${String(operation)}.`);
+        };
+      },
     },
-  }) as KnowledgeRepository;
+  ) as KnowledgeRepository;
   return new KnowledgeApplicationService(repository);
 }
 

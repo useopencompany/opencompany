@@ -1,7 +1,7 @@
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it, vi } from "vitest";
-import { brains, workspaceMembers, workspaces } from "./product-schema";
+import { brains, wikis, workspaceMembers, workspaces } from "./product-schema";
 import {
   createWorkspaceForUser,
   getBrainEnrichmentEnabled,
@@ -73,9 +73,17 @@ describe("opencompany workspace creation", () => {
     expect(result.brain).toBeNull();
     expect(batch).toHaveBeenCalledOnce();
     const batchedQueries = batch.mock.calls[0]?.[0] ?? [];
-    expect(batchedQueries).toHaveLength(2);
+    expect(batchedQueries).toHaveLength(3);
     expect(batchedQueries.some((query) => query.table === workspaceMembers)).toBe(true);
     expect(batchedQueries.some((query) => query.table === brains)).toBe(false);
+    // The workspace's one default wiki is created in the same batch, so no entry
+    // point can ever resolve a workspace with no wiki to write to.
+    expect(batchedQueries.find((query) => query.table === wikis)?.values).toMatchObject({
+      workspaceId: "goat_ws_new",
+      slug: "wiki",
+      access: "workspace",
+      isDefault: true,
+    });
     expect(execute).toHaveBeenCalledTimes(2);
   });
 

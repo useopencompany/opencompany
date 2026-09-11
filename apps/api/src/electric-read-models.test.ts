@@ -1142,7 +1142,7 @@ describe("Electric read models", () => {
     );
   });
 
-  it("scopes Wiki page and import shapes to the authenticated Workspace", async () => {
+  it("scopes the Wiki page shape to the authorized wiki, not the Workspace", async () => {
     const upstreamUrls: string[] = [];
     const proxy = new ElectricReadModelProxy({
       electricUrl: "https://electric.example.test",
@@ -1155,6 +1155,7 @@ describe("Electric read models", () => {
     await proxy.stream({
       actor,
       readModel: "wiki-pages-v2",
+      wikiId: "goat_wiki_clevel",
       requestUrl: new URL(
         "https://api.example.test/v1/read-models/wiki-pages-v2?table=goat.users&where=true&params[1]=workspace_other",
       ),
@@ -1167,10 +1168,12 @@ describe("Electric read models", () => {
       ),
     });
 
+    // A workspace can hold a restricted wiki, so a workspace-scoped page stream
+    // would put its rows in every member's browser.
     const pagesUrl = new URL(upstreamUrls[0]!);
     expect(pagesUrl.searchParams.get("table")).toBe("goat.wiki_pages");
-    expect(pagesUrl.searchParams.get("where")).toBe('"workspace_id" = $1');
-    expect(pagesUrl.searchParams.get("params[1]")).toBe("workspace_1");
+    expect(pagesUrl.searchParams.get("where")).toBe('"wiki_id" = $1');
+    expect(pagesUrl.searchParams.get("params[1]")).toBe("goat_wiki_clevel");
     expect(pagesUrl.searchParams.get("columns")).not.toContain("created_by_workos_id");
 
     const importsUrl = new URL(upstreamUrls[1]!);
@@ -1178,6 +1181,23 @@ describe("Electric read models", () => {
     expect(importsUrl.searchParams.get("where")).toBe('"workspace_id" = $1');
     expect(importsUrl.searchParams.get("params[1]")).toBe("workspace_1");
     expect(importsUrl.searchParams.get("columns")).not.toMatch(/brain_ref|user_workos|lease/iu);
+  });
+
+  it("refuses a Wiki page or timeline stream with no wiki resolved", async () => {
+    const proxy = new ElectricReadModelProxy({
+      electricUrl: "https://electric.example.test",
+      fetch: vi.fn(async () => Response.json([])) as typeof fetch,
+    });
+
+    for (const readModel of ["wiki-pages-v2", "wiki-timeline-v1"] as const) {
+      await expect(
+        proxy.stream({
+          actor,
+          readModel,
+          requestUrl: new URL(`https://api.example.test/v1/read-models/${readModel}`),
+        }),
+      ).rejects.toMatchObject({ status: 400 });
+    }
   });
 
   it("scopes the Task shape to the server-owned Workspace and nests canonical outcome fields", async () => {

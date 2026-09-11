@@ -88,6 +88,7 @@ export interface ReadModelService {
     readModel: ReadModel;
     conversationId?: string;
     brainId?: string;
+    wikiId?: string;
     taskId?: string;
     messageShapeEpoch?: number;
     requestUrl: URL;
@@ -132,6 +133,7 @@ export class ElectricReadModelProxy implements ReadModelService {
     readModel: ReadModel;
     conversationId?: string;
     brainId?: string;
+    wikiId?: string;
     taskId?: string;
     messageShapeEpoch?: number;
     requestUrl: URL;
@@ -217,6 +219,7 @@ function readModelShape(input: {
   readModel: ReadModel;
   conversationId?: string;
   brainId?: string;
+  wikiId?: string;
   taskId?: string;
   messageShapeEpoch?: number;
 }) {
@@ -576,38 +579,44 @@ function readModelShape(input: {
         params: [input.actor.workspaceId],
       };
     case "wiki-pages-v2":
-      return {
-        table: "goat.wiki_pages",
-        columns: [
-          "id",
-          "slug",
-          "path",
-          "node_type",
-          "title",
-          "kind",
-          "content",
-          "content_hash",
-          "size_bytes",
-          "format",
-          "mime_type",
-          "original_file_name",
-          "asset_size_bytes",
-          "created_at",
-          "updated_at",
-        ],
-        where: `"workspace_id" = $1`,
-        params: [input.actor.workspaceId],
-      };
+      return wikiShape(input, "goat.wiki_pages", [
+        "id",
+        "slug",
+        "path",
+        "node_type",
+        "title",
+        "kind",
+        "content",
+        "content_hash",
+        "size_bytes",
+        "format",
+        "mime_type",
+        "original_file_name",
+        "asset_size_bytes",
+        "created_at",
+        "updated_at",
+      ]);
     case "wiki-timeline-v1":
-      return {
-        table: "goat.wiki_timeline_entries",
-        columns: ["id", "page_id", "at", "text", "created_at"],
-        where: `"workspace_id" = $1`,
-        params: [input.actor.workspaceId],
-      };
+      return wikiShape(input, "goat.wiki_timeline_entries", [
+        "id",
+        "page_id",
+        "at",
+        "text",
+        "created_at",
+      ]);
     default:
       throw new ApiError(400, "invalid_request", "Unknown read model.");
   }
+}
+
+// Per-wiki shapes filter on wiki_id, not workspace_id: a workspace can hold a
+// restricted wiki, so a workspace-scoped stream would put its rows in the
+// browser of every member. The caller has already authorized this exact id.
+function wikiShape(input: { wikiId?: string }, table: string, columns: string[]) {
+  if (!input.wikiId) {
+    throw new ApiError(400, "invalid_request", "wikiId is required for this read model.");
+  }
+  return { table, columns, where: `"wiki_id" = $1`, params: [input.wikiId] };
 }
 
 function brainShape(input: { brainId?: string }, table: string, columns: string[]) {

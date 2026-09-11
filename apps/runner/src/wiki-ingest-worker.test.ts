@@ -63,6 +63,7 @@ function job(overrides: Partial<ClaimedWikiIngestJob> = {}): ClaimedWikiIngestJo
   return {
     id: "gwjob_123",
     workspaceId: "workspace_123",
+    wikiId: "goat_wiki_123",
     sourceItemId: "gwsrc_123",
     sourceProvider: "jamie",
     sourceConnectionId: "connection_123",

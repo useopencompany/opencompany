@@ -507,7 +507,7 @@ describe("Plugin settings", () => {
       "https://github.com/useopencompany/plugins/tree/ff6f34b42796129c2a125a32b3a78e8cae353df6/gmail",
     );
     expect(GRANOLA_PLUGIN_SOURCE).toBe(
-      "https://github.com/useopencompany/plugins/tree/cf036c82fc5186f5187e4da59b040ce92e492df3/granola",
+      "https://github.com/useopencompany/plugins/tree/8e79573ef91e122f9e0c15c810e7607d1be1d094/granola",
     );
     expect(GOOGLE_CALENDAR_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/de04f0c11eeb4e4eb4ed1140818205e14b08401f/google-calendar",

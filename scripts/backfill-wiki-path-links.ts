@@ -11,24 +11,27 @@ import { canonicalizeWikiPageLinks } from "@opencompany/db/wiki-backfill";
 import { asc, eq } from "drizzle-orm";
 
 const db = getDb();
-const nodes = await db
-  .select()
-  .from(wikiPages)
-  .orderBy(asc(wikiPages.workspaceId), asc(wikiPages.path));
-const workspaceIds = [...new Set(nodes.map((node) => node.workspaceId))];
+const nodes = await db.select().from(wikiPages).orderBy(asc(wikiPages.wikiId), asc(wikiPages.path));
+// Canonicalization resolves a bare basename against its siblings, so it has to
+// run per wiki: a basename that is unique inside one wiki may well exist in
+// another, and resolving across that boundary is exactly what the wiki_id
+// scoping prevents at read time.
+const scopes = new Map(
+  nodes.map((node) => [node.wikiId, { workspaceId: node.workspaceId, wikiId: node.wikiId }]),
+);
 const counts = { pages: 0, timelineEntries: 0, rebuilt: 0 };
 
-for (const workspaceId of workspaceIds) {
-  const workspaceNodes = nodes.filter((node) => node.workspaceId === workspaceId);
-  for (const node of workspaceNodes) {
+for (const scope of scopes.values()) {
+  const wikiNodes = nodes.filter((node) => node.wikiId === scope.wikiId);
+  for (const node of wikiNodes) {
     if (node.nodeType === "folder") {
       await rebuildWikiLinksForPage(node);
       counts.rebuilt += 1;
       continue;
     }
-    const body = canonicalizeWikiPageLinks(node.content, workspaceNodes);
+    const body = canonicalizeWikiPageLinks(node.content, wikiNodes);
     const result = await writeWikiPage({
-      workspaceId,
+      scope,
       path: node.path,
       body,
       kind: node.kind,
@@ -43,9 +46,9 @@ for (const workspaceId of workspaceIds) {
   const timeline = await db
     .select()
     .from(wikiTimelineEntries)
-    .where(eq(wikiTimelineEntries.workspaceId, workspaceId));
+    .where(eq(wikiTimelineEntries.wikiId, scope.wikiId));
   for (const entry of timeline) {
-    const text = canonicalizeWikiPageLinks(entry.text, workspaceNodes);
+    const text = canonicalizeWikiPageLinks(entry.text, wikiNodes);
     if (text === entry.text) continue;
     await db.update(wikiTimelineEntries).set({ text }).where(eq(wikiTimelineEntries.id, entry.id));
     counts.timelineEntries += 1;

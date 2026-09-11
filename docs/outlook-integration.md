@@ -4,7 +4,7 @@ The official `outlook` and `outlook-calendar` packages use our Microsoft Graph M
 The shared Microsoft OAuth layer lives in `packages/agent/src/integrations/microsoft-*`;
 `apps/api/src/microsoft-ingress.ts` owns connection flow. Web relays the public callback URLs.
 Account storage uses the existing encrypted personal OAuth vault and leased token refresh.
-Migration `0269_outlook_integrations.sql` adds the two providers to the three vault constraints.
+Migration `0270_outlook_integrations.sql` adds the two providers to the three vault constraints.
 It does not rewrite account data. Reverting the constraint expansion requires disconnecting and
 removing Outlook rows first; retaining the expanded constraints while reverting application code
 is safe. The `outlook-calendar` provider id deliberately matches the hyphenated plugin name so the

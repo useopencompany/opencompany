@@ -1876,7 +1876,7 @@ describe("Linear plugin settings", () => {
     expect(html).toContain("Read meeting content");
     expect(html).toContain("Configure legacy Granola API ingestion in Wiki sources");
     expect(GRANOLA_PLUGIN_SOURCE).toBe(
-      "https://github.com/useopencompany/plugins/tree/cf036c82fc5186f5187e4da59b040ce92e492df3/granola",
+      "https://github.com/useopencompany/plugins/tree/8e79573ef91e122f9e0c15c810e7607d1be1d094/granola",
     );
     expect(useLiveQuery).not.toHaveBeenCalled();
   });

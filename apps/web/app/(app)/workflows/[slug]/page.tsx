@@ -1,16 +1,12 @@
-import type {
-  PluginEventDefinitionDto,
-  PluginListItemDto,
-  SkillCatalogItemDto,
-} from "@opencompany/protocol";
+import type { SkillCatalogItemDto } from "@opencompany/protocol";
 import Link from "next/link";
 import { TasksWorkflowsDisabledRoute } from "@/components/Routes";
 import { WorkflowEditor } from "@/components/WorkflowEditor";
 import { currentUser } from "@/lib/auth";
 import { getHeadlessWorkflow } from "@/lib/headless-automation-server";
 import { listHeadlessPlugins, listHeadlessSkillCatalog } from "@/lib/headless-knowledge-server";
-import type { IntegrationAccountView } from "@/lib/integration-state";
 import { getPersonalAccounts } from "@/lib/integrations/personal-accounts";
+import { workflowEventProviderOptions } from "@/lib/workflow-event-triggers";
 
 type WorkflowEditorPageProps = {
   params: Promise<{ slug: string }>;
@@ -52,27 +48,14 @@ export default async function WorkflowEditorPage({ params }: WorkflowEditorPageP
     );
   }
 
-  const linearAccounts = personalAccounts.linear
-    .filter((account: IntegrationAccountView) => account.connected)
-    .map((account: IntegrationAccountView) => ({
-      integrationId: account.integrationId,
-      label: account.connectionLabel ?? account.accountName ?? account.accountEmail ?? "Linear",
-    }));
-  const workflowEvents = plugins.flatMap((plugin: PluginListItemDto) =>
-    plugin.name === "linear" && plugin.status === "enabled"
-      ? plugin.events
-          .filter((event: PluginEventDefinitionDto) => plugin.eventModes[event.id] === true)
-          .map((event: PluginEventDefinitionDto) => ({ provider: plugin.name, ...event }))
-      : [],
-  );
+  const eventProviders = workflowEventProviderOptions({ plugins, personalAccounts });
   return (
     <WorkflowEditor
       workflow={workflow}
       workspaceId={context.workspace.id}
       canEdit
       skillCatalog={skillCatalog.filter((skill: SkillCatalogItemDto) => skill.scope !== "personal")}
-      linearAccounts={linearAccounts}
-      workflowEvents={workflowEvents}
+      eventProviders={eventProviders}
     />
   );
 }

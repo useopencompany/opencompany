@@ -544,9 +544,15 @@ export type BrainTimelineEntryRow = {
 };
 export type BrainDocumentVersionOperation = "overwrite" | "delete";
 
-// Wiki (brain v2): one wiki per workspace, pages in a tree. A page's `slug` is
-// its stable identity ([[wiki-links]] target slugs); `path` is its position as
-// the slug chain of its ancestors plus itself. Mirrors @opencompany/wiki.
+// Wiki (brain v2): a workspace holds many named wikis, each a tree of pages. A
+// page's `slug` is its stable identity ([[wiki-links]] target slugs); `path` is
+// its position as the slug chain of its ancestors plus itself, unique per wiki.
+// Mirrors @opencompany/wiki.
+//
+// Access has two stored states and three displayed ones: "private" is simply
+// `restricted` with no invited members besides the creator, so there is no
+// invalid combination to guard against.
+export type WikiAccessLevel = "workspace" | "restricted";
 export type WikiKind = "project" | "person" | "company" | "research" | "meeting" | "other";
 export type WikiNodeType = "page" | "folder";
 export type WikiPageFormat = BrainDocumentFormat;
@@ -2164,10 +2170,75 @@ export const brainImportCandidates = productSchema.table(
 );
 
 // ---------------------------------------------------------------------------
-// Wiki (brain v2). One wiki per workspace. Folder and page nodes share this
-// table; paths are their workspace-unique identities. See packages/wiki for
+// Wiki (brain v2). A workspace holds many wikis; each is an independent tree of
+// folder and page nodes whose paths are unique per wiki. See packages/wiki for
 // the domain rules these tables store.
 // ---------------------------------------------------------------------------
+
+// A named wiki. `instructions` is the markdown brief describing how this wiki
+// should be structured (desired folder layout, what belongs where); it is a
+// stored setting here and is wired into agent prompts separately.
+export const wikis = productSchema.table(
+  "wikis",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    slug: text("slug").notNull(),
+    instructions: text("instructions").notNull().default(""),
+    access: text("access").$type<WikiAccessLevel>().notNull().default("workspace"),
+    // Exactly one wiki per workspace is the default: the wiki every entry point
+    // that carries no explicit selector resolves to. Enforced by a unique
+    // partial index rather than "oldest row wins", which would silently shift
+    // if the first wiki were deleted.
+    isDefault: boolean("is_default").notNull().default(false),
+    createdByWorkosId: text("created_by_workos_id").references(() => users.workosUserId, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceSlugIdx: uniqueIndex("goat_wikis_workspace_slug_idx").on(
+      table.workspaceId,
+      table.slug,
+    ),
+    workspaceDefaultIdx: uniqueIndex("goat_wikis_workspace_default_idx")
+      .on(table.workspaceId)
+      .where(sql`${table.isDefault}`),
+    workspaceIdx: index("goat_wikis_workspace_idx").on(table.workspaceId),
+    accessCheck: check(
+      "goat_wikis_access_check",
+      sql`${table.access} IN ('workspace', 'restricted')`,
+    ),
+  }),
+);
+
+// Invited readers/writers of a `restricted` wiki. A restricted wiki with no rows
+// here beyond its creator is what the UI displays as "private".
+export const wikiMembers = productSchema.table(
+  "wiki_members",
+  {
+    id: text("id").primaryKey(),
+    wikiId: text("wiki_id")
+      .notNull()
+      .references(() => wikis.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => users.workosUserId, { onDelete: "cascade" }),
+    addedByWorkosId: text("added_by_workos_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    wikiUserIdx: uniqueIndex("goat_wiki_members_wiki_user_idx").on(
+      table.wikiId,
+      table.userWorkosId,
+    ),
+    userIdx: index("goat_wiki_members_user_idx").on(table.userWorkosId),
+  }),
+);
 
 // Workspace-level source configuration for the wiki ingestion pipeline.
 export const wikiSources = productSchema.table(
@@ -2177,6 +2248,9 @@ export const wikiSources = productSchema.table(
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
+    wikiId: text("wiki_id")
+      .notNull()
+      .references(() => wikis.id, { onDelete: "cascade" }),
     provider: text("provider").$type<WikiSourceProvider>().notNull(),
     integrationId: text("integration_id").notNull(),
     // The owner of the referenced integration row. Keeping this alongside the
@@ -2198,6 +2272,7 @@ export const wikiSources = productSchema.table(
     ),
     integrationIdx: index("opencompany_wiki_sources_integration_idx").on(table.integrationId),
     workspaceIdx: index("opencompany_wiki_sources_workspace_idx").on(table.workspaceId),
+    wikiIdx: index("opencompany_wiki_sources_wiki_idx").on(table.wikiId),
     integrationUserProviderFk: foreignKey({
       name: "opencompany_wiki_sources_integration_user_provider_fk",
       columns: [table.integrationId, table.userWorkosId, table.provider],
@@ -2212,7 +2287,9 @@ export const wikiSources = productSchema.table(
 
 // Normalized provider windows. The workspace replaces brain/user targeting in
 // the v1 ingestion key, so overlapping member connections deduplicate before
-// the single workspace wiki is mutated.
+// the target wiki is mutated. `wiki_id` names that target; the dedup key stays
+// workspace-global deliberately, because sources are configured per workspace
+// and a shared connection must not be normalized twice per wiki.
 export const wikiSourceItems = productSchema.table(
   "wiki_source_items",
   {
@@ -2220,6 +2297,9 @@ export const wikiSourceItems = productSchema.table(
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
+    wikiId: text("wiki_id")
+      .notNull()
+      .references(() => wikis.id, { onDelete: "cascade" }),
     sourceProvider: text("source_provider").$type<WikiIngestSourceProvider>().notNull(),
     sourceConnectionId: text("source_connection_id").notNull(),
     integrationId: text("integration_id").references(() => integrations.id, {
@@ -2264,6 +2344,7 @@ export const wikiSourceItems = productSchema.table(
       table.lastIngestStatus,
       table.updatedAt,
     ),
+    wikiIdx: index("opencompany_wiki_source_items_wiki_idx").on(table.wikiId),
     sourceProviderCheck: check(
       "opencompany_wiki_source_items_source_provider_check",
       sql`${table.sourceProvider} IN ('gmail', 'slack', 'jamie', 'granola', 'linear', 'github', 'opencompany-import')`,
@@ -2294,6 +2375,9 @@ export const wikiIngestJobs = productSchema.table(
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
+    wikiId: text("wiki_id")
+      .notNull()
+      .references(() => wikis.id, { onDelete: "cascade" }),
     sourceItemId: text("source_item_id")
       .notNull()
       .references(() => wikiSourceItems.id, { onDelete: "cascade" }),
@@ -2342,6 +2426,7 @@ export const wikiIngestJobs = productSchema.table(
       "opencompany_wiki_ingest_jobs_workspace_integration_status_idx",
     ).on(table.workspaceId, table.integrationId, table.status),
     importRunIdx: index("opencompany_wiki_ingest_jobs_import_run_idx").on(table.importRunId),
+    wikiIdx: index("opencompany_wiki_ingest_jobs_wiki_idx").on(table.wikiId),
     sourceProviderCheck: check(
       "opencompany_wiki_ingest_jobs_source_provider_check",
       sql`${table.sourceProvider} IN ('gmail', 'slack', 'jamie', 'granola', 'linear', 'github', 'opencompany-import')`,
@@ -2358,6 +2443,7 @@ export const wikiIngestJobs = productSchema.table(
 );
 
 // Cross-member event claims make provider-native identities workspace-global.
+// `wiki_id` records which wiki the claimed event was routed to.
 export const wikiSourceEventClaims = productSchema.table(
   "wiki_source_event_claims",
   {
@@ -2365,6 +2451,9 @@ export const wikiSourceEventClaims = productSchema.table(
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
+    wikiId: text("wiki_id")
+      .notNull()
+      .references(() => wikis.id, { onDelete: "cascade" }),
     sourceProvider: text("source_provider").$type<WikiSourceProvider>().notNull(),
     eventKey: text("event_key").notNull(),
     sourceItemId: text("source_item_id").references(() => wikiSourceItems.id, {
@@ -2376,6 +2465,7 @@ export const wikiSourceEventClaims = productSchema.table(
     workspaceProviderKeyIdx: uniqueIndex(
       "opencompany_wiki_source_event_claims_workspace_provider_key_idx",
     ).on(table.workspaceId, table.sourceProvider, table.eventKey),
+    wikiIdx: index("opencompany_wiki_source_event_claims_wiki_idx").on(table.wikiId),
     sourceProviderCheck: check(
       "opencompany_wiki_source_event_claims_source_provider_check",
       sql`${table.sourceProvider} IN ('gmail', 'slack', 'jamie', 'granola', 'linear', 'github')`,
@@ -2390,6 +2480,9 @@ export const wikiPages = productSchema.table(
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
+    wikiId: text("wiki_id")
+      .notNull()
+      .references(() => wikis.id, { onDelete: "cascade" }),
     // Basename (the final path segment), unique only among siblings.
     slug: text("slug").notNull(),
     // Workspace-unique identity. Leading segments are folder slugs and the
@@ -2428,14 +2521,8 @@ export const wikiPages = productSchema.table(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
-    workspacePathIdx: uniqueIndex("goat_wiki_pages_workspace_path_idx").on(
-      table.workspaceId,
-      table.path,
-    ),
-    workspaceUpdatedIdx: index("goat_wiki_pages_workspace_updated_idx").on(
-      table.workspaceId,
-      table.updatedAt,
-    ),
+    wikiPathIdx: uniqueIndex("goat_wiki_pages_wiki_path_idx").on(table.wikiId, table.path),
+    wikiUpdatedIdx: index("goat_wiki_pages_wiki_updated_idx").on(table.wikiId, table.updatedAt),
     searchTsvIdx: index("goat_wiki_pages_search_tsv_idx").using("gin", table.searchTsv),
     titleTrgmIdx: index("goat_wiki_pages_title_trgm_idx").using(
       "gin",
@@ -2466,6 +2553,9 @@ export const wikiPageVersions = productSchema.table(
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
+    wikiId: text("wiki_id")
+      .notNull()
+      .references(() => wikis.id, { onDelete: "cascade" }),
     pageId: text("page_id").references(() => wikiPages.id, { onDelete: "set null" }),
     slug: text("slug").notNull(),
     path: text("path").notNull(),
@@ -2482,8 +2572,8 @@ export const wikiPageVersions = productSchema.table(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
-    workspaceCreatedIdx: index("goat_wiki_page_versions_workspace_created_idx").on(
-      table.workspaceId,
+    wikiCreatedIdx: index("goat_wiki_page_versions_wiki_created_idx").on(
+      table.wikiId,
       table.createdAt,
     ),
     pageCreatedIdx: index("goat_wiki_page_versions_page_created_idx").on(
@@ -2507,6 +2597,9 @@ export const wikiTimelineEntries = productSchema.table(
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
+    wikiId: text("wiki_id")
+      .notNull()
+      .references(() => wikis.id, { onDelete: "cascade" }),
     pageId: text("page_id")
       .notNull()
       .references(() => wikiPages.id, { onDelete: "cascade" }),
@@ -2519,10 +2612,7 @@ export const wikiTimelineEntries = productSchema.table(
   },
   (table) => ({
     pageAtIdx: index("goat_wiki_timeline_entries_page_at_idx").on(table.pageId, table.at),
-    workspaceAtIdx: index("goat_wiki_timeline_entries_workspace_at_idx").on(
-      table.workspaceId,
-      table.at,
-    ),
+    wikiAtIdx: index("goat_wiki_timeline_entries_wiki_at_idx").on(table.wikiId, table.at),
   }),
 );
 
@@ -2537,6 +2627,9 @@ export const wikiLinks = productSchema.table(
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
+    wikiId: text("wiki_id")
+      .notNull()
+      .references(() => wikis.id, { onDelete: "cascade" }),
     fromPageId: text("from_page_id")
       .notNull()
       .references(() => wikiPages.id, { onDelete: "cascade" }),
@@ -2550,8 +2643,8 @@ export const wikiLinks = productSchema.table(
       table.kind,
       table.target,
     ),
-    workspaceKindTargetIdx: index("goat_wiki_links_workspace_kind_target_idx").on(
-      table.workspaceId,
+    wikiKindTargetIdx: index("goat_wiki_links_wiki_kind_target_idx").on(
+      table.wikiId,
       table.kind,
       table.target,
     ),
@@ -6263,10 +6356,38 @@ export const brainDocumentVersionsRelations = relations(brainDocumentVersions, (
   }),
 }));
 
+export const wikisRelations = relations(wikis, ({ one, many }) => ({
+  workspace: one(workspaces, {
+    fields: [wikis.workspaceId],
+    references: [workspaces.id],
+  }),
+  createdBy: one(users, {
+    fields: [wikis.createdByWorkosId],
+    references: [users.workosUserId],
+  }),
+  members: many(wikiMembers),
+  pages: many(wikiPages),
+}));
+
+export const wikiMembersRelations = relations(wikiMembers, ({ one }) => ({
+  wiki: one(wikis, {
+    fields: [wikiMembers.wikiId],
+    references: [wikis.id],
+  }),
+  user: one(users, {
+    fields: [wikiMembers.userWorkosId],
+    references: [users.workosUserId],
+  }),
+}));
+
 export const wikiPagesRelations = relations(wikiPages, ({ one, many }) => ({
   workspace: one(workspaces, {
     fields: [wikiPages.workspaceId],
     references: [workspaces.id],
+  }),
+  wiki: one(wikis, {
+    fields: [wikiPages.wikiId],
+    references: [wikis.id],
   }),
   versions: many(wikiPageVersions),
   timelineEntries: many(wikiTimelineEntries),
@@ -6989,6 +7110,8 @@ export type WorkspaceMember = typeof workspaceMembers.$inferSelect;
 export type WorkspaceCapability = typeof workspaceCapabilities.$inferSelect;
 export type WorkspaceBilling = typeof workspaceBilling.$inferSelect;
 export type WorkspaceIngestionReservation = typeof workspaceIngestionReservations.$inferSelect;
+export type Wiki = typeof wikis.$inferSelect;
+export type WikiMember = typeof wikiMembers.$inferSelect;
 export type WikiSource = typeof wikiSources.$inferSelect;
 export type WikiSourceItem = typeof wikiSourceItems.$inferSelect;
 export type WikiIngestJob = typeof wikiIngestJobs.$inferSelect;

@@ -19,6 +19,7 @@ import {
   CoreError,
   type KnowledgeRepository,
   type WikiPage,
+  type WikiSummary,
   type WikiTimelineEntry,
 } from "@opencompany/core";
 import { isValidWikiKind, isValidWikiSlug, wikiSlugFromTitle } from "@opencompany/wiki";
@@ -63,6 +64,7 @@ import {
   WikiError,
   writeWikiPage,
 } from "./wiki";
+import { listWikisForUser, resolveWikiForUser, type WikiScope } from "./wikis";
 import { getBrainAccess } from "./workspaces";
 
 type DbClient = any;
@@ -379,13 +381,49 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
     }
   }
 
-  async listWikiPages(input: { actor: Actor }) {
-    const pages = await listWikiPagesWithBodies(input.actor.workspaceId, this.db);
+  async resolveWiki(input: { actor: Actor; wikiId?: string | undefined }) {
+    const wiki = await resolveWikiForUser(
+      {
+        userWorkosId: input.actor.userId,
+        workspaceId: input.actor.workspaceId,
+        ...(input.wikiId ? { wikiId: input.wikiId } : {}),
+      },
+      { db: this.db },
+    );
+    if (!wiki) return null;
+    return {
+      wikiId: wiki.id,
+      name: wiki.name,
+      slug: wiki.slug,
+      instructions: wiki.instructions,
+    };
+  }
+
+  async listWikis(input: { actor: Actor }): Promise<WikiSummary[]> {
+    const rows = await listWikisForUser(
+      { userWorkosId: input.actor.userId, workspaceId: input.actor.workspaceId },
+      { db: this.db },
+    );
+    return rows.map((wiki) => ({
+      id: wiki.id,
+      name: wiki.name,
+      slug: wiki.slug,
+      instructions: wiki.instructions,
+      access: wiki.access,
+      isDefault: wiki.isDefault,
+      createdAt: wiki.createdAt,
+      updatedAt: wiki.updatedAt,
+    }));
+  }
+
+  async listWikiPages(input: { actor: Actor; wikiId: string }) {
+    const pages = await listWikiPagesWithBodies(this.wikiScope(input), this.db);
     return pages.map(wikiPage);
   }
 
   async createWikiPage(input: {
     actor: Actor;
+    wikiId: string;
     idempotencyKey: string;
     clientPageId?: string;
     nodeType: WikiPage["nodeType"];
@@ -398,18 +436,19 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
         input,
         "wiki_page.create",
         {
+          wikiId: input.wikiId,
           clientPageId: input.clientPageId ?? null,
           nodeType: input.nodeType,
           parentPath: input.parentPath,
           title: input.title,
           slug: input.slug ?? null,
         },
-        input.clientPageId ?? deterministicUuid("wiki-page", input, input.idempotencyKey),
+        input.clientPageId ?? deterministicWikiUuid("wiki-page", input, input.idempotencyKey),
       );
       const [replay] = await this.db
         .select()
         .from(wikiPages)
-        .where(and(eq(wikiPages.workspaceId, input.actor.workspaceId), eq(wikiPages.id, id)))
+        .where(and(eq(wikiPages.wikiId, input.wikiId), eq(wikiPages.id, id)))
         .limit(1);
       if (replay) return { page: wikiPage(replay), transactionIds: [] };
       let slug = input.slug?.trim();
@@ -424,12 +463,7 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
           const [taken] = await this.db
             .select({ id: wikiPages.id })
             .from(wikiPages)
-            .where(
-              and(
-                eq(wikiPages.workspaceId, input.actor.workspaceId),
-                eq(wikiPages.path, candidatePath),
-              ),
-            )
+            .where(and(eq(wikiPages.wikiId, input.wikiId), eq(wikiPages.path, candidatePath)))
             .limit(1);
           if (!taken) break;
           slug = `${baseSlug.slice(0, 76)}-${suffix}`;
@@ -442,7 +476,7 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
       const [existingPath] = await this.db
         .select({ id: wikiPages.id })
         .from(wikiPages)
-        .where(and(eq(wikiPages.workspaceId, input.actor.workspaceId), eq(wikiPages.path, path)))
+        .where(and(eq(wikiPages.wikiId, input.wikiId), eq(wikiPages.path, path)))
         .limit(1);
       if (existingPath) {
         throw new WikiError(`A Wiki node already exists at "${path}".`);
@@ -451,7 +485,7 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
         const result = await createWikiFolder(
           {
             id,
-            workspaceId: input.actor.workspaceId,
+            scope: this.wikiScope(input),
             path,
             title: input.title.trim() || slug,
             actorWorkosId: input.actor.userId,
@@ -463,7 +497,7 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
       const result = await writeWikiPage(
         {
           id,
-          workspaceId: input.actor.workspaceId,
+          scope: this.wikiScope(input),
           path,
           body: "",
           title: input.title.trim(),
@@ -475,11 +509,11 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
     } catch (error) {
       if (isUniqueViolation(error)) {
         const id =
-          input.clientPageId ?? deterministicUuid("wiki-page", input, input.idempotencyKey);
+          input.clientPageId ?? deterministicWikiUuid("wiki-page", input, input.idempotencyKey);
         const [replay] = await this.db
           .select()
           .from(wikiPages)
-          .where(and(eq(wikiPages.workspaceId, input.actor.workspaceId), eq(wikiPages.id, id)))
+          .where(and(eq(wikiPages.wikiId, input.wikiId), eq(wikiPages.id, id)))
           .limit(1);
         if (replay) return { page: wikiPage(replay), transactionIds: [] };
         throw new CoreError("conflict", "A Wiki page with that identity already exists.");
@@ -490,6 +524,7 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
 
   async updateWikiPage(input: {
     actor: Actor;
+    wikiId: string;
     id: string;
     body?: string;
     kind?: WikiPage["kind"];
@@ -500,7 +535,7 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
       const [page] = await this.db
         .select()
         .from(wikiPages)
-        .where(and(eq(wikiPages.workspaceId, input.actor.workspaceId), eq(wikiPages.id, input.id)))
+        .where(and(eq(wikiPages.wikiId, input.wikiId), eq(wikiPages.id, input.id)))
         .limit(1);
       if (!page) {
         throw new CoreError("not_found", "Wiki page not found.");
@@ -520,7 +555,7 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
         input.slug !== undefined
           ? await renameWikiNode(
               {
-                workspaceId: input.actor.workspaceId,
+                scope: this.wikiScope(input),
                 id: page.id,
                 title: input.title ?? page.title,
                 slug: input.slug,
@@ -540,7 +575,7 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
         if (renamed) return { page: wikiPage(renamed.node), transactionIds: renamed.txids };
         const result = await updateWikiNodeTitle(
           {
-            workspaceId: input.actor.workspaceId,
+            scope: this.wikiScope(input),
             id: page.id,
             title: input.title,
             actorWorkosId: input.actor.userId,
@@ -557,7 +592,7 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
       }
       const result = await writeWikiPage(
         {
-          workspaceId: input.actor.workspaceId,
+          scope: this.wikiScope(input),
           path: currentPage.path,
           body: input.body ?? currentPage.content,
           ...(isValidWikiKind(input.kind) ? { kind: input.kind } : {}),
@@ -578,17 +613,17 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
     }
   }
 
-  async deleteWikiPage(input: { actor: Actor; id: string; recursive: boolean }) {
+  async deleteWikiPage(input: { actor: Actor; wikiId: string; id: string; recursive: boolean }) {
     try {
       const [node] = await this.db
         .select({ path: wikiPages.path })
         .from(wikiPages)
-        .where(and(eq(wikiPages.workspaceId, input.actor.workspaceId), eq(wikiPages.id, input.id)))
+        .where(and(eq(wikiPages.wikiId, input.wikiId), eq(wikiPages.id, input.id)))
         .limit(1);
       if (!node) throw new CoreError("not_found", "Wiki page not found.");
       const result = await deleteWikiPage(
         {
-          workspaceId: input.actor.workspaceId,
+          scope: this.wikiScope(input),
           path: node.path,
           recursive: input.recursive,
           actorWorkosId: input.actor.userId,
@@ -603,6 +638,7 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
 
   async addWikiTimelineEntry(input: {
     actor: Actor;
+    wikiId: string;
     idempotencyKey: string;
     clientEntryId?: string;
     id: string;
@@ -614,28 +650,24 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
         input,
         "wiki_timeline.create",
         {
+          wikiId: input.wikiId,
           clientEntryId: input.clientEntryId ?? null,
           id: input.id,
           text: input.text,
           at: input.at?.toISOString() ?? null,
         },
-        input.clientEntryId ?? deterministicUuid("wiki-timeline", input, input.idempotencyKey),
+        input.clientEntryId ?? deterministicWikiUuid("wiki-timeline", input, input.idempotencyKey),
       );
       const [replay] = await this.db
         .select()
         .from(wikiTimelineEntries)
-        .where(
-          and(
-            eq(wikiTimelineEntries.workspaceId, input.actor.workspaceId),
-            eq(wikiTimelineEntries.id, id),
-          ),
-        )
+        .where(and(eq(wikiTimelineEntries.wikiId, input.wikiId), eq(wikiTimelineEntries.id, id)))
         .limit(1);
       if (replay) return { entry: wikiTimelineEntry(replay), transactionId: 0 };
       const [page] = await this.db
         .select({ path: wikiPages.path, nodeType: wikiPages.nodeType })
         .from(wikiPages)
-        .where(and(eq(wikiPages.workspaceId, input.actor.workspaceId), eq(wikiPages.id, input.id)))
+        .where(and(eq(wikiPages.wikiId, input.wikiId), eq(wikiPages.id, input.id)))
         .limit(1);
       if (!page || page.nodeType !== "page") {
         throw new CoreError("not_found", "Wiki page not found.");
@@ -643,7 +675,7 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
       const result = await addWikiTimelineEntry(
         {
           id,
-          workspaceId: input.actor.workspaceId,
+          scope: this.wikiScope(input),
           path: page.path,
           text: input.text,
           at: input.at ?? new Date(),
@@ -655,22 +687,22 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
     } catch (error) {
       if (isUniqueViolation(error)) {
         const id =
-          input.clientEntryId ?? deterministicUuid("wiki-timeline", input, input.idempotencyKey);
+          input.clientEntryId ??
+          deterministicWikiUuid("wiki-timeline", input, input.idempotencyKey);
         const [replay] = await this.db
           .select()
           .from(wikiTimelineEntries)
-          .where(
-            and(
-              eq(wikiTimelineEntries.workspaceId, input.actor.workspaceId),
-              eq(wikiTimelineEntries.id, id),
-            ),
-          )
+          .where(and(eq(wikiTimelineEntries.wikiId, input.wikiId), eq(wikiTimelineEntries.id, id)))
           .limit(1);
         if (replay) return { entry: wikiTimelineEntry(replay), transactionId: 0 };
         throw new CoreError("conflict", "A Wiki timeline entry with that identity already exists.");
       }
       throw knowledgeError(error);
     }
+  }
+
+  private wikiScope(input: { actor: Actor; wikiId: string }): WikiScope {
+    return { workspaceId: input.actor.workspaceId, wikiId: input.wikiId };
   }
 
   private async requireBrainDocument(brainId: string, documentId: string) {
@@ -807,9 +839,24 @@ function deterministicResourceId(prefix: string, input: { actor: Actor }, key: s
 }
 
 function deterministicUuid(prefix: string, input: { actor: Actor }, key: string) {
-  const digest = createHash("sha256")
-    .update([prefix, input.actor.userId, input.actor.workspaceId, key].join("\n"))
-    .digest("hex");
+  return uuidFromParts([prefix, input.actor.userId, input.actor.workspaceId, key]);
+}
+
+/**
+ * Wiki resources fold the target wiki into their derived id. Without it, the
+ * same actor reusing one Idempotency-Key across two wikis would derive the same
+ * row id in both and collide on the primary key.
+ */
+function deterministicWikiUuid(
+  prefix: string,
+  input: { actor: Actor; wikiId: string },
+  key: string,
+) {
+  return uuidFromParts([prefix, input.actor.userId, input.actor.workspaceId, input.wikiId, key]);
+}
+
+function uuidFromParts(parts: string[]) {
+  const digest = createHash("sha256").update(parts.join("\n")).digest("hex");
   return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-5${digest.slice(13, 16)}-a${digest.slice(17, 20)}-${digest.slice(20, 32)}`;
 }
 

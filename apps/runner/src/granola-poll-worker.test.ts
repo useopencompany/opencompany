@@ -1,3 +1,4 @@
+import type { WorkflowEventTriggerRoute } from "@opencompany/db/workflow-event-routes";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -22,6 +23,7 @@ const workerMocks = vi.hoisted(() => ({
   captureQuotaAnalytics: vi.fn(),
   wakeBrain: vi.fn(),
   wakeWiki: vi.fn(),
+  enqueueWorkflowEventRuns: vi.fn(),
 }));
 
 vi.mock("./db", () => ({ getDb: workerMocks.getDb }));
@@ -52,6 +54,10 @@ vi.mock("@opencompany/db/wiki-event-claims", async (importOriginal) => ({
 vi.mock("@opencompany/db/wiki-ingest", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   upsertWikiSourceItemAndEnqueue: workerMocks.upsertWikiItem,
+}));
+vi.mock("@opencompany/db/workflow-event-routes", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  enqueueWorkflowEventRuns: workerMocks.enqueueWorkflowEventRuns,
 }));
 vi.mock("./brain-ingest-worker", () => ({ wakeBrainIngestWorker: workerMocks.wakeBrain }));
 vi.mock("./wiki-ingest-worker", () => ({ wakeWikiIngestWorker: workerMocks.wakeWiki }));
@@ -160,6 +166,7 @@ describe("Granola wiki meeting routing", () => {
     });
     workerMocks.attributeBrainClaims.mockResolvedValue(undefined);
     workerMocks.attributeWikiClaims.mockResolvedValue(undefined);
+    workerMocks.enqueueWorkflowEventRuns.mockResolvedValue(1);
   });
 
   it("unions enabled wiki sources into poll candidate selection", async () => {
@@ -181,12 +188,14 @@ describe("Granola wiki meeting routing", () => {
     expect(compiled.sql).toContain("OR EXISTS");
     expect(compiled.sql).toContain("FROM goat.wiki_sources ws");
     expect(compiled.sql).toContain("ws.enabled = true");
+    expect(compiled.sql).toContain("FROM goat.workflows w");
+    expect(compiled.sql).toContain("w.event_config->>'provider' = 'granola'");
   });
 
   it("does not fetch or enqueue when neither brain nor wiki has an enabled route", async () => {
     await expect(
       ingestMeeting({ routedBrainRefs: [], routedWikiWorkspaceIds: [] }),
-    ).resolves.toEqual({ enqueued: false });
+    ).resolves.toEqual({ enqueued: false, workflowRuns: 0 });
 
     expect(workerMocks.fetchGranolaNote).not.toHaveBeenCalled();
     expect(workerMocks.upsertBrainItem).not.toHaveBeenCalled();
@@ -201,7 +210,7 @@ describe("Granola wiki meeting routing", () => {
         routedBrainRefs: [],
         routedWikiWorkspaceIds: ["workspace_1"],
       }),
-    ).resolves.toEqual({ enqueued: false });
+    ).resolves.toEqual({ enqueued: false, workflowRuns: 0 });
 
     expect(workerMocks.fetchGranolaNote).not.toHaveBeenCalled();
     expect(workerMocks.claimWikiEvents).not.toHaveBeenCalled();
@@ -213,7 +222,7 @@ describe("Granola wiki meeting routing", () => {
         routedBrainRefs: ["brain_1"],
         routedWikiWorkspaceIds: [],
       }),
-    ).resolves.toEqual({ enqueued: true });
+    ).resolves.toEqual({ enqueued: true, workflowRuns: 0 });
 
     expect(workerMocks.claimBrainEvents).toHaveBeenCalledWith(
       expect.objectContaining({ brainRef: "brain_1", eventKeys: ["note:note_1"] }),
@@ -241,7 +250,7 @@ describe("Granola wiki meeting routing", () => {
         routedBrainRefs: [],
         routedWikiWorkspaceIds: ["workspace_1"],
       }),
-    ).resolves.toEqual({ enqueued: true });
+    ).resolves.toEqual({ enqueued: true, workflowRuns: 0 });
 
     expect(workerMocks.claimWikiEvents).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -275,19 +284,129 @@ describe("Granola wiki meeting routing", () => {
   });
 });
 
-function ingestMeeting(routes: { routedBrainRefs: string[]; routedWikiWorkspaceIds: string[] }) {
+describe("Granola meeting.notes_ready workflow routing", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    workerMocks.getDb.mockReturnValue({ transaction: vi.fn() });
+    workerMocks.fetchGranolaNote.mockResolvedValue(granolaPayload());
+    workerMocks.listClaimedBrainRefs.mockResolvedValue(new Set<string>());
+    workerMocks.listClaimedWikiWorkspaceIds.mockResolvedValue(new Set<string>());
+    workerMocks.enqueueWorkflowEventRuns.mockResolvedValue(1);
+  });
+
+  it("enqueues one run keyed on the note id with the meeting as context", async () => {
+    await expect(
+      ingestMeeting({
+        routedBrainRefs: [],
+        routedWikiWorkspaceIds: [],
+        workflowRoutes: [meetingRoute()],
+      }),
+    ).resolves.toEqual({ enqueued: false, workflowRuns: 1 });
+
+    expect(workerMocks.enqueueWorkflowEventRuns).toHaveBeenCalledWith(
+      {
+        routes: [expect.objectContaining({ workflowId: "workflow_1" })],
+        deliveryId: "note:note_1",
+        eventAt: new Date("2026-08-24T11:00:00.000Z"),
+        context: {
+          tag: "granola_meeting_context",
+          lines: expect.arrayContaining([
+            "Title: Roadmap review",
+            "Attendees: Ada <ada@example.com>, Grace <grace@example.com>",
+            "The team selected option A and committed to ship it in September.",
+          ]),
+        },
+      },
+      expect.anything(),
+    );
+  });
+
+  it("fetches the note for a workflow route even when every ingestion route already claimed it", async () => {
+    workerMocks.listClaimedWikiWorkspaceIds.mockResolvedValue(new Set(["workspace_1"]));
+
+    await expect(
+      ingestMeeting({
+        routedBrainRefs: [],
+        routedWikiWorkspaceIds: ["workspace_1"],
+        workflowRoutes: [meetingRoute()],
+      }),
+    ).resolves.toEqual({ enqueued: false, workflowRuns: 1 });
+
+    expect(workerMocks.fetchGranolaNote).toHaveBeenCalledOnce();
+    expect(workerMocks.claimWikiEvents).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["empty", "   "],
+  ])("leaves a note whose summary is %s for a later poll", async (_label, summary) => {
+    workerMocks.fetchGranolaNote.mockResolvedValue({
+      ...granolaPayload(),
+      summary_markdown: summary,
+    });
+
+    await expect(
+      ingestMeeting({
+        routedBrainRefs: [],
+        routedWikiWorkspaceIds: [],
+        workflowRoutes: [meetingRoute()],
+      }),
+    ).resolves.toEqual({ enqueued: false, workflowRuns: 0 });
+
+    expect(workerMocks.enqueueWorkflowEventRuns).not.toHaveBeenCalled();
+  });
+
+  it("does not replay a stale backlog as one task per historical meeting", async () => {
+    await expect(
+      ingestMeeting({
+        routedBrainRefs: [],
+        routedWikiWorkspaceIds: [],
+        workflowRoutes: [meetingRoute()],
+        now: new Date("2026-08-26T11:05:00.000Z"),
+      }),
+    ).resolves.toEqual({ enqueued: false, workflowRuns: 0 });
+
+    expect(workerMocks.fetchGranolaNote).toHaveBeenCalledOnce();
+    expect(workerMocks.enqueueWorkflowEventRuns).not.toHaveBeenCalled();
+  });
+});
+
+const NOTE_UPDATED_AT = "2026-08-24T11:00:00.000Z";
+
+function ingestMeeting(routes: {
+  routedBrainRefs: string[];
+  routedWikiWorkspaceIds: string[];
+  workflowRoutes?: WorkflowEventTriggerRoute[];
+  now?: Date;
+}) {
   return ingestGranolaNote({
     candidate: { integrationId: "gint_granola_1", userWorkosId: "user_1" },
     apiKey: "grn_test",
     note: {
       id: "note_1",
       title: "Roadmap review",
-      updatedAt: "2026-08-24T11:00:00.000Z",
+      updatedAt: NOTE_UPDATED_AT,
       raw: {},
     },
+    now: new Date("2026-08-24T11:05:00.000Z"),
     ...routes,
     signal: new AbortController().signal,
   });
+}
+
+function meetingRoute() {
+  return {
+    workflowId: "workflow_1",
+    workspaceId: "workspace_1",
+    userWorkosId: "user_1",
+    workflowSlug: "meeting-follow-ups",
+    workflowName: "Meeting follow-ups",
+    prompt: "Turn the decisions into Linear issues.",
+    harnessSpec: {},
+    provider: "granola",
+    event: "meeting.notes_ready",
+    filters: {},
+  } as unknown as WorkflowEventTriggerRoute;
 }
 
 function granolaPayload() {

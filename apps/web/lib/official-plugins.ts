@@ -87,6 +87,10 @@ export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
   accountDescription: string;
   ingestionHref?: string;
   ingestionLabel?: string;
+  // Where to send someone who enabled a plugin event but has no account it can bind to. Defaults
+  // to the plugin page; set it when the event's connection is not the one that page connects.
+  eventAccountHref?: string;
+  eventAccountLabel?: string;
 };
 
 export type OfficialSkillPluginMetadata = OfficialPluginMetadataBase & {
@@ -187,6 +191,10 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     accountDescription: "The Granola account opencompany uses when you search meeting history.",
     ingestionHref: "/wiki/sources",
     ingestionLabel: "Configure legacy Granola API ingestion in Wiki sources",
+    // Granola's note events are discovered by polling its REST API, which the MCP OAuth connection
+    // cannot call. They bind to the personal `grn_` API key connected from Wiki sources.
+    eventAccountHref: "/wiki/sources",
+    eventAccountLabel: "Add a Granola API key",
   },
   outlook: {
     name: "outlook",

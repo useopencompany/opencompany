@@ -571,11 +571,7 @@ export function PluginsSettings({
   };
 
   return (
-    <SettingsContent
-      title="Plugins"
-      description="Your plugins, accounts, and permissions are personal. Older workspace installations no longer appear here. If a plugin you used before is missing, reinstall it for yourself and review its permissions."
-      contentClassName="max-w-[960px]"
-    >
+    <SettingsContent title="Plugins" contentClassName="max-w-[960px]">
       <PluginConnectionFeedback />
       {canEdit ? (
         <div className="mb-5 flex justify-end">
@@ -1047,9 +1043,6 @@ export function PluginDetail({
         </p>
       ) : null}
 
-      <p className="text-[13px] leading-5 text-ink-subtle">
-        Installed for you. Disabling or removing this plugin affects only your use.
-      </p>
       {officialConfig && updateAvailable ? (
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-warning/30 bg-warning/5 px-3 py-2.5">
           <div className="min-w-0 flex-1">
