@@ -20,7 +20,6 @@ test-results
 .source
 *.profraw
 apps/docs/content/docs/api-reference/endpoints
-.firecrawl
 
 # Local workspace and provider state.
 /conductor.json
