@@ -614,6 +614,9 @@ export async function runCodexChatTurn(input: {
       })),
     });
     checkExternalAbort();
+    const invokedSkillPaths = turnSkills.invokedSkillIds.map(
+      (skillId) => `${CODEX_CHAT_WORKDIR}/.agents/skills/${skillId}/SKILL.md`,
+    );
     if (pluginRuntime.mcpPlugins.length > 0) {
       if (!skillWorkspaceId) throw new Error("Approved Plugin MCP requires a workspace ID.");
       executionStage = "restore_plugin_data";
@@ -674,6 +677,7 @@ export async function runCodexChatTurn(input: {
             ),
             previousProgress: summarizeCodexChatRecoveryProgress(initialParts),
             attachmentPaths: materializedAttachments.paths,
+            skillPaths: invokedSkillPaths,
             conversationHistory: history,
             ...(historyAttachmentMaterialization ? { historyAttachmentMaterialization } : {}),
             taskContext,
@@ -695,6 +699,7 @@ export async function runCodexChatTurn(input: {
               infisicalAuth.promptFragment,
             ),
             attachmentPaths: materializedAttachments.paths,
+            skillPaths: invokedSkillPaths,
             conversationHistory: history,
             ...(historyAttachmentMaterialization ? { historyAttachmentMaterialization } : {}),
             taskContext,
@@ -1875,6 +1880,7 @@ function buildCodexChatTask(input: {
   wikiSupported: boolean;
   repositoryBootstrapPrompt: string;
   attachmentPaths: string[];
+  skillPaths: string[];
   conversationHistory: CodingChatHistory;
   historyAttachmentMaterialization?: CodingChatHistoryAttachmentMaterialization;
   taskContext?: TaskTurnContext | undefined;
@@ -1911,6 +1917,7 @@ function buildCodexChatTask(input: {
     "<user_message>",
     input.prompt || "Review the attached file(s).",
     "</user_message>",
+    ...codexChatSkillPromptLines(input.skillPaths),
     ...codexChatAttachmentPromptLines(input.attachmentPaths),
   ]
     .filter((line) => line !== null)
@@ -1929,6 +1936,7 @@ function buildCodexChatRecoveryTask(input: {
   repositoryBootstrapPrompt: string;
   previousProgress: string;
   attachmentPaths: string[];
+  skillPaths: string[];
   conversationHistory: CodingChatHistory;
   historyAttachmentMaterialization?: CodingChatHistoryAttachmentMaterialization;
   taskContext?: TaskTurnContext | undefined;
@@ -1966,6 +1974,7 @@ function buildCodexChatRecoveryTask(input: {
     "<original_user_message>",
     input.prompt || "Review the attached file(s).",
     "</original_user_message>",
+    ...codexChatSkillPromptLines(input.skillPaths),
     ...codexChatAttachmentPromptLines(input.attachmentPaths),
     "",
     "<last_persisted_progress>",
@@ -1974,6 +1983,17 @@ function buildCodexChatRecoveryTask(input: {
   ]
     .filter((line) => line !== null)
     .join("\n");
+}
+
+function codexChatSkillPromptLines(skillPaths: string[]) {
+  if (skillPaths.length === 0) return [];
+  return [
+    "",
+    "<invoked_skills>",
+    "The user invoked these skills with this message. Read each SKILL.md and follow its instructions:",
+    ...skillPaths.map((path) => `- ${path}`),
+    "</invoked_skills>",
+  ];
 }
 
 function codexBackgroundTaskPromptLines(context: TaskTurnContext | undefined) {
