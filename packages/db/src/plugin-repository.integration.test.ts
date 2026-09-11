@@ -708,6 +708,72 @@ describe("Postgres immutable Plugin repository", () => {
     ).resolves.toMatchObject({ rows: [{ plugins: 2 }] });
   });
 
+  it("atomically replaces a live package while preserving its status and event settings", async () => {
+    const installed = await repository.install({
+      actor: actor(),
+      idempotencyKey: "update-first",
+      plugin: await resolvedPlugin("quality-tools", "review", "First.", {
+        events: true,
+        mcp: true,
+        remoteMcp: true,
+      }),
+    });
+    await repository.setEventEnabled({
+      actor: actor(),
+      name: "quality-tools",
+      eventId: "issue.created",
+      enabled: true,
+    });
+    await repository.setStatus({ actor: actor(), name: "quality-tools", status: "disabled" });
+
+    const nextPackage = await resolvedPlugin("quality-tools", "review", "Second.", {
+      events: true,
+      mcp: true,
+      remoteMcp: true,
+    });
+    nextPackage.source = {
+      ...nextPackage.source,
+      ref: "b".repeat(40),
+      resolvedCommit: "b".repeat(40),
+    };
+    const replacement = await repository.install({
+      actor: actor(),
+      idempotencyKey: "update-second",
+      plugin: nextPackage,
+    });
+
+    expect(replacement).toMatchObject({
+      idempotentReplay: false,
+      plugin: {
+        status: "disabled",
+        eventModes: { "issue.created": true },
+        mcpApprovedIntegrity: null,
+      },
+    });
+    expect(replacement.plugin.id).not.toBe(installed.plugin.id);
+    await expect(
+      database.query<{ status: string; archived: boolean }>(
+        "SELECT status, archived_at IS NOT NULL AS archived FROM goat.plugins WHERE id = $1",
+        [installed.plugin.id],
+      ),
+    ).resolves.toMatchObject({
+      rows: [{ status: "archived", archived: true }],
+    });
+    await expect(
+      database.query<{ status: string; archived: boolean }>(
+        "SELECT status, archived_at IS NOT NULL AS archived FROM goat.plugins WHERE id = $1",
+        [replacement.plugin.id],
+      ),
+    ).resolves.toMatchObject({
+      rows: [{ status: "disabled", archived: false }],
+    });
+    await expect(
+      database.query<{ plugin_id: string }>(
+        "SELECT plugin_id FROM goat.plugin_gateway_registrations",
+      ),
+    ).resolves.toMatchObject({ rows: [{ plugin_id: replacement.plugin.id }] });
+  });
+
   it("deletes archived plugin data rows before their private blobs", async () => {
     await repository.install({
       actor: actor(),

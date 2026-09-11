@@ -83,6 +83,7 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
         canEdit={true}
         title={metadata.label}
         description={metadata.description}
+        officialPluginName={normalizedName}
       />
     ) : (
       <OfficialSkillPluginDetail name={normalizedName} canEdit={true} />

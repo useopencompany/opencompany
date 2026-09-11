@@ -81,6 +81,7 @@ import {
   type OfficialPluginName,
   type OfficialSkillPluginMetadata,
   type OfficialSkillPluginName,
+  officialPluginUpdateAvailable,
 } from "@/lib/official-plugins";
 import { pluginAccountsFromState, pluginConnectionSatisfied } from "@/lib/plugin-connection-state";
 
@@ -468,6 +469,16 @@ export function PluginsSettings({
     return names;
   }, [installedPlugins, integrations]);
   const installedConfigs = configs.filter((config) => installedPlugins.has(config.name));
+  const pluginsWithUpdates = new Set<OfficialPluginName>();
+  for (const config of configs) {
+    const installed = installedPlugins.get(config.name);
+    if (
+      installed &&
+      officialPluginUpdateAvailable(installed.source.resolvedCommit, config.source)
+    ) {
+      pluginsWithUpdates.add(config.name);
+    }
+  }
   const customPlugins = plugins.filter((plugin) => plugin.source.type === "custom_mcp");
   const installedCount = installedConfigs.length + customPlugins.length;
   const visibleCustomPlugins = customPlugins.filter(
@@ -487,17 +498,20 @@ export function PluginsSettings({
 
   const install = (config: OfficialPluginConfig) => {
     if (isInstalling) return;
+    const updating = pluginsWithUpdates.has(config.name);
     setInstallingPluginName(config.name);
     startInstall(async () => {
       try {
         await installOfficialPlugin(config);
-        toast.success(`${config.label} installed.`);
+        toast.success(`${config.label} ${updating ? "updated" : "installed"}.`);
         router.push(`/settings/plugins/${config.name}`);
         // API mutations do not invalidate the catalog cached for back navigation.
         router.refresh();
       } catch (cause) {
         setInstallingPluginName(null);
-        toast.error(`Couldn't install ${config.label}. ${errorMessage(cause)}`);
+        toast.error(
+          `Couldn't ${updating ? "update" : "install"} ${config.label}. ${errorMessage(cause)}`,
+        );
       }
     });
   };
@@ -531,6 +545,7 @@ export function PluginsSettings({
         configs={options?.preview ? sectionConfigs.slice(0, CATALOG_PREVIEW_SIZE) : sectionConfigs}
         installedPlugins={installedPlugins}
         pluginsMissingConnection={pluginsMissingConnection}
+        pluginsWithUpdates={pluginsWithUpdates}
         canEdit={canEdit}
         isInstalling={isInstalling}
         installingPluginName={installingPluginName}
@@ -695,6 +710,7 @@ function PluginCatalogSection({
   configs,
   installedPlugins,
   pluginsMissingConnection,
+  pluginsWithUpdates,
   canEdit,
   isInstalling,
   installingPluginName,
@@ -705,6 +721,7 @@ function PluginCatalogSection({
   configs: OfficialPluginConfig[];
   installedPlugins: ReadonlyMap<string, PluginListItemDto>;
   pluginsMissingConnection: ReadonlySet<string>;
+  pluginsWithUpdates: ReadonlySet<OfficialPluginName>;
   canEdit: boolean;
   isInstalling: boolean;
   installingPluginName: OfficialPluginName | null;
@@ -735,6 +752,7 @@ function PluginCatalogSection({
         {configs.map((config) => {
           const plugin = installedPlugins.get(config.name);
           const missingConnection = pluginsMissingConnection.has(config.name);
+          const updateAvailable = pluginsWithUpdates.has(config.name);
           const installingThisPlugin = isInstalling && installingPluginName === config.name;
 
           return (
@@ -761,7 +779,11 @@ function PluginCatalogSection({
                       {config.label}
                     </span>
                     {plugin ? (
-                      <PluginStatus status={plugin.status} missingConnection={missingConnection} />
+                      <PluginStatus
+                        status={plugin.status}
+                        missingConnection={missingConnection}
+                        updateAvailable={updateAvailable}
+                      />
                     ) : null}
                   </span>
                   <span className="block truncate text-[12px] leading-5 text-ink-subtle">
@@ -769,7 +791,18 @@ function PluginCatalogSection({
                   </span>
                 </span>
               </Link>
-              {plugin ? (
+              {plugin && updateAvailable && canEdit ? (
+                <Button
+                  size="sm"
+                  disabled={isInstalling}
+                  aria-busy={installingThisPlugin}
+                  onClick={() => onInstall(config)}
+                  className="h-8 rounded-full px-3 text-[12px] shadow-none"
+                >
+                  {installingThisPlugin ? <Loader2 className="animate-spin" /> : null}
+                  {installingThisPlugin ? "Updating…" : "Update"}
+                </Button>
+              ) : plugin ? (
                 <Link
                   href={`/settings/plugins/${config.name}`}
                   className={cn(
@@ -959,16 +992,23 @@ export function PluginDetail({
   canEdit,
   title,
   description,
+  officialPluginName,
 }: {
   plugin: PluginInstallationDto;
   canEdit: boolean;
   title?: string;
   description?: string;
+  officialPluginName?: OfficialPluginName;
 }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [confirmDataDelete, setConfirmDataDelete] = useState(false);
   const [isMutating, startMutation] = useTransition();
+  const officialConfig = officialPluginName ? OFFICIAL_PLUGINS[officialPluginName] : undefined;
+  const updateAvailable = Boolean(
+    officialConfig &&
+      officialPluginUpdateAvailable(plugin.source.resolvedCommit, officialConfig.source),
+  );
 
   const mutate = (operation: () => Promise<unknown>, done?: () => void) => {
     setError(null);
@@ -1003,6 +1043,31 @@ export function PluginDetail({
       <p className="text-[13px] leading-5 text-ink-subtle">
         Installed for you. Disabling or removing this plugin affects only your use.
       </p>
+      {officialConfig && updateAvailable ? (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-warning/30 bg-warning/5 px-3 py-2.5">
+          <div className="min-w-0 flex-1">
+            <p className="text-[12.5px] font-medium text-ink">Update available</p>
+            <p className="mt-0.5 text-[12px] leading-4 text-ink-subtle">
+              A newer reviewed package is ready. Your plugin settings stay in place.
+            </p>
+          </div>
+          {canEdit ? (
+            <Button
+              size="sm"
+              disabled={isMutating}
+              onClick={() =>
+                mutate(
+                  () => installOfficialPlugin(officialConfig),
+                  () => toast.success(`${officialConfig.label} updated.`),
+                )
+              }
+            >
+              {isMutating ? <Loader2 className="animate-spin" /> : null}
+              {isMutating ? "Updating…" : "Update"}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
       <section className="flex flex-col gap-2">
         <SectionLabel>Status</SectionLabel>
         <PluginStatus status={plugin.status} />
@@ -1590,10 +1655,19 @@ function CollisionReport({ collisions }: { collisions: PluginCollisionView[] }) 
 function PluginStatus({
   status,
   missingConnection = false,
+  updateAvailable = false,
 }: {
   status: PluginListItemDto["status"];
   missingConnection?: boolean;
+  updateAvailable?: boolean;
 }) {
+  if (updateAvailable) {
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-warning-bg px-1.5 py-px text-[10.5px] font-medium leading-4 text-warning">
+        <span className="h-1.5 w-1.5 rounded-full bg-warning" /> Update available
+      </span>
+    );
+  }
   if (status === "enabled" && missingConnection) {
     return (
       <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-warning-bg px-1.5 py-px text-[10.5px] font-medium leading-4 text-warning">
