@@ -5,8 +5,9 @@ import { toast } from "@opencompany/ui/components/sonner";
 import { Archive, ArrowLeft, Inbox } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppData } from "@/components/AppDataProvider";
+import { useCreditBalance } from "@/components/chat/useCreditBalance";
 import { EmptyState, formatRelativeTime } from "@/components/Routes";
-import { Surface } from "@/components/Surface";
+import { QuickChatComposer, Surface } from "@/components/Surface";
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
 import { useHeadlessChatTranscript } from "@/components/useHeadlessChatTranscript";
 import { useTaskRun } from "@/components/useTaskRun";
@@ -156,22 +157,54 @@ export function ReviewInboxRoute() {
             onRead={acknowledge}
           />
         ) : (
-          <div className="flex min-h-0 w-full items-center justify-center overflow-y-auto px-6 py-10">
-            <div className="w-full max-w-[520px]">
-              <EmptyState
-                icon={Inbox}
-                title={items.length > 0 ? "Pick something to read" : "You're all caught up"}
-                description={
-                  items.length > 0
-                    ? "Select an item on the left to pick the conversation up where it stopped."
-                    : "When a chat or task finishes, it shows up here until you archive it."
-                }
-              />
+          <div className="flex min-h-0 w-full flex-1 flex-col">
+            <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-6 py-10">
+              <div className="w-full max-w-[520px]">
+                <EmptyState
+                  icon={Inbox}
+                  title={items.length > 0 ? "Pick something to read" : "You're all caught up"}
+                  description={
+                    items.length > 0
+                      ? "Select an item on the left to pick the conversation up where it stopped."
+                      : "When a chat or task finishes, it shows up here until you archive it."
+                  }
+                />
+              </div>
             </div>
+            <ReviewStartComposer />
           </div>
         )}
       </div>
     </main>
+  );
+}
+
+/**
+ * Reading the queue is also where the next piece of work gets thought of, so the empty pane keeps
+ * the composer the command palette starts chats with. It runs the prompt in the background: the
+ * queue stays where it was, and the finished conversation comes back to it.
+ */
+function ReviewStartComposer() {
+  const { claudeCodeConnected, codexConnected, featureFlags, user, workspace } = useAppData();
+  const { balance: creditBalance } = useCreditBalance();
+
+  return (
+    <div className="shrink-0 px-6 pb-6">
+      <div className="mx-auto w-full max-w-[720px]">
+        <QuickChatComposer
+          open
+          initialPrompt=""
+          userWorkosId={user.workosUserId}
+          defaultModel={DEFAULT_MODEL}
+          codexConnected={codexConnected}
+          claudeCodeConnected={claudeCodeConnected}
+          taskSpawningEnabled={featureFlags.taskSpawning}
+          autoModelRoutingEnabled={featureFlags.autoModelRouting}
+          creditBalance={creditBalance}
+          workspaceId={workspace.id}
+        />
+      </div>
+    </div>
   );
 }
 
