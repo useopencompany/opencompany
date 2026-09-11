@@ -4,6 +4,7 @@ import {
   actorHasPermission,
   BRAIN_READ_PERMISSION,
   CoreError,
+  WORKFLOW_READ_PERMISSION,
 } from "@opencompany/core";
 import {
   ATTIO_EVENT_TYPES,
@@ -334,7 +335,7 @@ export class BrainSourceApplicationService {
     integrationId: string,
     command: BrainSourceOptionsCommand,
   ): Promise<BrainSourceOptions> {
-    requireBrainRead(actor);
+    requireSourceOptionsRead(actor, command.provider);
     const integration = resourceId(integrationId, "integrationId");
     switch (command.provider) {
       case "linear":
@@ -1081,6 +1082,16 @@ function requireBrainRead(actor: Actor) {
   if (!actorHasPermission(actor, BRAIN_READ_PERMISSION)) {
     throw new CoreError("forbidden", "Brain permission is required.");
   }
+}
+
+function requireSourceOptionsRead(actor: Actor, provider: BrainSourceOptionsCommand["provider"]) {
+  if (
+    actorHasPermission(actor, BRAIN_READ_PERMISSION) ||
+    (provider === "linear" && actorHasPermission(actor, WORKFLOW_READ_PERMISSION))
+  ) {
+    return;
+  }
+  throw new CoreError("forbidden", "Brain permission is required.");
 }
 
 function resourceId(value: string, field: string) {

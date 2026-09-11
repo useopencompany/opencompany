@@ -1,4 +1,4 @@
-import { PGlite } from "@electric-sql/pglite";
+import type { PGlite } from "@electric-sql/pglite";
 import { ACTION_EFFECTS_WRITE } from "@opencompany/agent/actions/types";
 import type {
   ActionGatewayServiceDependencies,
@@ -20,12 +20,19 @@ import {
 } from "@opencompany/db/chat-repository";
 import type { CodexChatTurn } from "@opencompany/db/product-schema";
 import { PostgresTaskActionApprovalRepository } from "@opencompany/db/task-action-approvals";
+import { snapshotPGliteSchema } from "@opencompany/db/test-schema-snapshot";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/pglite";
-import { expect, it, vi } from "vitest";
+import { beforeAll, expect, it, vi } from "vitest";
 import { executeExternalActionWithApproval } from "./acp-tools-mcp";
 import { resumeTaskActionApprovals } from "./task-action-approval";
+
+let restoreDatabase: () => Promise<PGlite>;
+
+beforeAll(async () => {
+  restoreDatabase = await snapshotPGliteSchema((database) => database.exec(SCHEMA));
+});
 
 // The provider is a fixture; gateway governance, persistence, approval resolution,
 // and restart/resume all execute their production code against Postgres.
@@ -42,9 +49,8 @@ it.each([
     const action = `${source}.${custom ? "send" : "create_draft"}`;
     let approvalContext = "custom-account-revision";
     const succeeds = resolution === "approved" && !changed;
-    const pg = new PGlite();
+    const pg = await restoreDatabase();
     try {
-      await pg.exec(SCHEMA);
       const dialect = new PgDialect();
       const execute = (query: SQL) => {
         const compiled = dialect.sqlToQuery(query);

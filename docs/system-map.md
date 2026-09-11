@@ -113,7 +113,10 @@ re-check may refresh the expiring user token once per install attempt.
 
 ## Ownership rules
 
-- Public contracts and the typed client: `packages/protocol`.
+- Public contracts and the typed client: `packages/protocol`. The barrel and `/client` both pull
+  in `src/routes.ts`, so only `apps/api` and `apps/web`, which consume the router contract itself,
+  should import them. Code that just needs a DTO imports `@opencompany/protocol/schemas` or
+  `/events`, which are router-free. `bun run boundary:check` enforces this.
 - Application services and ports: `packages/core`.
 - Database adapters and schema: `packages/db`.
 - Provider-neutral agent behavior: shared packages such as `packages/agent`.

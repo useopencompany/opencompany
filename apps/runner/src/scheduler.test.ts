@@ -1,5 +1,5 @@
-import { PGlite } from "@electric-sql/pglite";
 import type { HarnessSpec } from "@opencompany/db/product-schema";
+import { createTestPGlite } from "@opencompany/db/test-pglite";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -52,7 +52,7 @@ describe("sweepDueTaskSchedules", () => {
   });
 
   it("claims a due schedule through the users join without ambiguous timezone columns", async () => {
-    const pg = await PGlite.create();
+    const pg = await createTestPGlite();
     try {
       await pg.exec(`
         CREATE SCHEMA goat;

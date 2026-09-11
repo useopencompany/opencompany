@@ -684,6 +684,65 @@ describe("runCodexChatTurn over ACP", () => {
     );
   });
 
+  it("explicitly invokes the Skill bundle activated by the current Codex message", async () => {
+    const turn = codexTurn({ prompt: "/release-review Review v1.2.0." });
+    const bundle = {
+      id: "skill_bundle_release_review_v1",
+      name: "release-review",
+      description: "Review a release.",
+      body: "Verify every release claim.",
+      files: [
+        {
+          path: "SKILL.md",
+          content: new TextEncoder().encode("exact Skill document"),
+          executable: false,
+          sizeBytes: 20,
+        },
+      ],
+    };
+    dbMocks.selectRows.push(
+      [],
+      [
+        {
+          bundleId: bundle.id,
+          sourceKind: "standalone",
+          activatedMessageId: turn.userMessageId,
+          workspaceId: "workspace_1",
+          activatedAt: new Date("2026-07-10T12:00:00Z"),
+        },
+      ],
+    );
+    skillBundleMocks.loadImmutableSkillBundles.mockResolvedValueOnce([bundle]);
+
+    await runCodexChatTurn({
+      turn,
+      session: codexSession(),
+      env: env(),
+    });
+
+    expect(skillMocks.materializeCodexSkillSnapshotsForSession).toHaveBeenCalledWith({
+      sandbox: expect.anything(),
+      codexWorkRoot: "/home/user/opencompany-goat/codex-chat",
+      skills: [
+        {
+          name: "release-review",
+          files: [
+            {
+              path: "SKILL.md",
+              content: new TextEncoder().encode("exact Skill document"),
+              executable: false,
+            },
+          ],
+        },
+      ],
+    });
+    const harnessInput = acpMocks.runTurn.mock.calls[0]?.[0] as AcpHarnessTurnInput;
+    expect(harnessInput.task).toContain(
+      "/home/user/opencompany-goat/codex-chat/.agents/skills/release-review/SKILL.md",
+    );
+    expect(harnessInput.task).toContain("Read each SKILL.md and follow its instructions");
+  });
+
   it.each(["goat-codex-host-tools.v4", ACTION_HOST_TOOL_CONTRACT_VERSION])(
     "keeps action discovery guidance aligned with %s",
     async (hostToolContractVersion) => {
@@ -761,6 +820,39 @@ describe("runCodexChatTurn over ACP", () => {
       attemptId: "attempt_1",
       leaseId: "lease_1",
     });
+  });
+
+  it("retries an auth file write timeout before starting Codex", async () => {
+    const timeout = new Error("502: Server Error: This error is likely due to sandbox timeout.");
+    timeout.name = "TimeoutError";
+    authMocks.loadCodexCliAuth.mockResolvedValueOnce({
+      kind: "chatgpt",
+      authJson: { tokens: { access_token: "chatgpt-secret" } },
+    });
+    const sandbox = fakeSandbox("sbx_existing");
+    sandbox.files.write.mockRejectedValueOnce(timeout);
+    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
+    sandboxMocks.isCommandTimeoutError.mockImplementationOnce(
+      (error: unknown) => error === timeout,
+    );
+
+    await expect(
+      runCodexChatTurn({
+        turn: codexTurn(),
+        session: codexSession(),
+        canonicalAttemptId: "attempt_1",
+        env: env(),
+      }),
+    ).rejects.toMatchObject({
+      name: CodexChatRetryableInfrastructureError.name,
+      cause: timeout,
+      diagnosticMessage:
+        "[write_auth] TimeoutError: 502: Server Error: This error is likely due to sandbox timeout.",
+    });
+    expect(acpMocks.runTurn).not.toHaveBeenCalled();
+    for (const result of eventMocks.createExternalEngineProjector.mock.results) {
+      expect(result.value.fail).not.toHaveBeenCalled();
+    }
   });
 
   it.each([

@@ -7,6 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { actionApprovalInputHash } from "./action-governance";
 import { customMcpToolsFingerprint, PostgresCustomMcpRepository } from "./custom-mcp-repository";
 import { integrationCredentials, integrations } from "./product-schema";
+import { createTestPGlite } from "./test-pglite";
 
 const actor: Actor = {
   userId: "user_1",
@@ -38,7 +39,7 @@ describe("personal custom MCP account persistence", () => {
   let repository: PostgresCustomMcpRepository;
   beforeAll(async () => {
     vi.stubEnv("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 7).toString("base64"));
-    database = new PGlite();
+    database = await createTestPGlite();
     await database.exec(`
       CREATE SCHEMA goat;
       CREATE TABLE goat.users (workos_user_id text PRIMARY KEY);
