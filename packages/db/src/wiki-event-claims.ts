@@ -3,6 +3,7 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { getDb } from "./client";
 import { wikiSourceEventClaims } from "./product-schema";
 import type { ActiveWikiSourceProvider } from "./wiki-ingest";
+import { requireIngestionWikiId } from "./wikis";
 
 type DbLike = any;
 
@@ -18,6 +19,7 @@ export async function claimWikiSourceEvents(input: {
   const keys = [...new Set(input.eventKeys.map((key) => key.trim()).filter(Boolean))];
   if (keys.length === 0) return { claimedCount: 0, claimedEventKeys: [] };
   const db = input.db ?? getDb();
+  const wikiId = await requireIngestionWikiId(input.workspaceId, db);
 
   const inserted = await db
     .insert(wikiSourceEventClaims)
@@ -25,6 +27,7 @@ export async function claimWikiSourceEvents(input: {
       keys.map((key) => ({
         id: newWikiSourceEventClaimId(),
         workspaceId: input.workspaceId,
+        wikiId,
         sourceProvider: input.sourceProvider,
         eventKey: key,
         sourceItemId: input.sourceItemId ?? null,

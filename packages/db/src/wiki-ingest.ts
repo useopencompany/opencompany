@@ -13,6 +13,7 @@ import {
   wikiIngestJobs,
   wikiSourceItems,
 } from "./product-schema";
+import { requireIngestionWikiId } from "./wikis";
 
 export type ActiveWikiSourceProvider = Exclude<WikiSourceProvider, "slack" | "github">;
 export type ActiveWikiIngestSourceProvider = ActiveWikiSourceProvider | "opencompany-import";
@@ -144,6 +145,7 @@ export async function upsertWikiSourceItemAndEnqueue(input: {
   }
 
   const db = input.db;
+  const wikiId = await requireIngestionWikiId(input.workspaceId, db);
   const now = input.now ?? new Date();
   const occurredAt = new Date(input.item.occurredAt);
   const capturedAt = new Date(input.item.capturedAt);
@@ -158,6 +160,7 @@ export async function upsertWikiSourceItemAndEnqueue(input: {
     .values({
       id: newWikiSourceItemId(),
       workspaceId: input.workspaceId,
+      wikiId,
       sourceProvider: input.item.sourceProvider,
       sourceConnectionId: input.sourceConnectionId,
       integrationId: input.integrationId,
@@ -203,6 +206,7 @@ export async function upsertWikiSourceItemAndEnqueue(input: {
     .values({
       id: newWikiIngestJobId(),
       workspaceId: input.workspaceId,
+      wikiId,
       sourceItemId: sourceItem.id,
       sourceProvider: input.item.sourceProvider,
       sourceConnectionId: input.sourceConnectionId,

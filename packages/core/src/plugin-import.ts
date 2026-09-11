@@ -121,11 +121,13 @@ export type PluginEventFilterDefinition = {
   required: boolean;
 };
 
+export type PluginEventDelivery = "webhook" | "poll";
+
 export type PluginEventDefinition = {
   id: string;
   label: string;
   description: string;
-  delivery: "webhook";
+  delivery: PluginEventDelivery;
   filters: PluginEventFilterDefinition[];
 };
 

@@ -88,6 +88,7 @@ import { createSlackBotSettingsService } from "./slack-bot-settings";
 import { createSlackIngress } from "./slack-ingress";
 import { createStripeIngress } from "./stripe-ingress";
 import { createUserSettingsService } from "./user-settings";
+import { createWikiControlService } from "./wiki-control";
 import { createWikiSourceService } from "./wiki-sources";
 import { createWorkspaceCapabilityService } from "./workspace-capabilities";
 import { createWorkspaceControlService } from "./workspace-control";
@@ -134,6 +135,7 @@ const wikiCommands = new WikiCommandApplicationService(
   new PostgresWikiCommandRepository(database.db),
 );
 const wikiSources = createWikiSourceService({ db: database.db });
+const wikiControl = createWikiControlService({ db: database.db });
 const brainSources = new BrainSourceApplicationService(database.db);
 const brainImports = new BrainImportApplicationService(database.db, brainSources);
 const wikiImports = new WikiImportApplicationService(database.db, wikiSources);
@@ -167,6 +169,7 @@ const app = createApiApp({
   ...(process.env.API_INTERNAL_TOKEN?.trim()
     ? { wikiCommandsInternalSecret: process.env.API_INTERNAL_TOKEN.trim() }
     : {}),
+  wikiControl,
   wikiSources,
   brainSources,
   brainImports,

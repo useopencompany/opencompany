@@ -117,6 +117,8 @@ const getServerHydrationSnapshot = () => false;
 // server payload paints a read-only frame for the first client render.
 export function WikiView(props: {
   userWorkosId: string;
+  /** The wiki whose pages this view edits. Scopes the Electric collections. */
+  wikiId: string;
   workspaceId: string;
   pages: WikiPageData[];
   initialPath: string | null;
@@ -178,18 +180,20 @@ function WikiStaticFrame({
 
 function WikiLiveView({
   userWorkosId,
+  wikiId,
   workspaceId,
   pages: initialPages,
   initialPath,
 }: {
   userWorkosId: string;
+  wikiId: string;
   workspaceId: string;
   pages: WikiPageData[];
   initialPath: string | null;
 }) {
   const pathname = usePathname();
   const [error, setError] = useState<string | null>(null);
-  const collections = useMemo(() => getHeadlessWikiCollections(workspaceId), [workspaceId]);
+  const collections = useMemo(() => getHeadlessWikiCollections(wikiId), [wikiId]);
 
   const { data: pageRows, isLoading: pagesLoading } = useLiveQuery(
     (q) => q.from({ page: collections.pages }),
@@ -427,6 +431,7 @@ function WikiLiveView({
             key={page.id}
             page={page}
             pages={pages}
+            wikiId={wikiId}
             collections={collections}
             editable={syncReady}
             wikiLinks={wikiLinks}
@@ -827,6 +832,7 @@ function WikiTreeRow({
 function WikiPageEditor({
   page,
   pages,
+  wikiId,
   collections,
   editable,
   wikiLinks,
@@ -842,6 +848,7 @@ function WikiPageEditor({
 }: {
   page: WikiPageData;
   pages: WikiPageData[];
+  wikiId: string;
   collections: HeadlessWikiCollections;
   editable: boolean;
   wikiLinks: Record<string, string>;
@@ -885,7 +892,7 @@ function WikiPageEditor({
       const mutations = asHeadlessWikiPageWriteMutations(transaction.mutations).filter(
         (mutation) => collections.pages.get(mutation.original.id) !== undefined,
       );
-      const txids = await persistHeadlessWikiPageWrites(mutations);
+      const txids = await persistHeadlessWikiPageWrites(mutations, wikiId);
       // The write is durable once the action returns; waiting for the txids to
       // stream back only holds optimistic state so nothing flickers. A missed
       // txid (e.g. Electric briefly unreachable) must not fail the save.

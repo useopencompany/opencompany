@@ -15,7 +15,9 @@ import {
   type WikiCommandPage,
   type WikiCommandRecentChange,
   type WikiCommandRepository,
+  type WikiCommandScope,
   type WikiCommandSearchHit,
+  type WikiCommandTarget,
   type WikiCommandTimelineAddResult,
   type WikiCommandTimelineItem,
   type WikiCommandTreeNode,
@@ -39,22 +41,37 @@ import {
   WikiError,
   writeWikiPage,
 } from "./wiki";
+import { resolveWikiForUser } from "./wikis";
 
 type DbClient = any;
 
 export class PostgresWikiCommandRepository implements WikiCommandRepository {
   constructor(private readonly db: DbClient) {}
 
-  getTree(input: { workspaceId: string }): Promise<WikiCommandTreeNode[]> {
-    return this.run(async () => getWikiTree(input.workspaceId, this.db));
+  async resolveWiki(input: {
+    workspaceId: string;
+    userWorkosId: string;
+    wikiId?: string | undefined;
+  }): Promise<WikiCommandTarget | null> {
+    const wiki = await resolveWikiForUser(input, { db: this.db });
+    if (!wiki) return null;
+    return {
+      wikiId: wiki.id,
+      name: wiki.name,
+      slug: wiki.slug,
+      instructions: wiki.instructions,
+    };
   }
 
-  resolvePages(input: {
-    workspaceId: string;
-    refs: string[];
-  }): Promise<{ pages: WikiCommandPage[]; missing: string[] }> {
+  getTree(input: WikiCommandScope): Promise<WikiCommandTreeNode[]> {
+    return this.run(async () => getWikiTree(input, this.db));
+  }
+
+  resolvePages(
+    input: WikiCommandScope & { refs: string[] },
+  ): Promise<{ pages: WikiCommandPage[]; missing: string[] }> {
     return this.run(async () => {
-      const { pages, missing } = await resolveWikiPages(input.workspaceId, input.refs, this.db);
+      const { pages, missing } = await resolveWikiPages(input, input.refs, this.db);
       return {
         pages: pages.map((page) => ({
           slug: page.slug,
@@ -69,22 +86,19 @@ export class PostgresWikiCommandRepository implements WikiCommandRepository {
     });
   }
 
-  getBacklinks(input: { workspaceId: string; path: string }): Promise<string[]> {
+  getBacklinks(input: WikiCommandScope & { path: string }): Promise<string[]> {
     return this.run(async () => {
-      const links = await getWikiBacklinks(input.workspaceId, input.path, this.db);
+      const links = await getWikiBacklinks(input, input.path, this.db);
       return links.map((link) => link.path);
     });
   }
 
-  grep(input: {
-    workspaceId: string;
-    pattern: string;
-    ignoreCase: boolean;
-    limit?: number;
-  }): Promise<WikiCommandGrepMatch[]> {
+  grep(
+    input: WikiCommandScope & { pattern: string; ignoreCase: boolean; limit?: number },
+  ): Promise<WikiCommandGrepMatch[]> {
     return this.run(async () =>
       grepWiki(
-        input.workspaceId,
+        input,
         {
           pattern: input.pattern,
           ignoreCase: input.ignoreCase,
@@ -95,15 +109,12 @@ export class PostgresWikiCommandRepository implements WikiCommandRepository {
     );
   }
 
-  search(input: {
-    workspaceId: string;
-    text: string;
-    limit?: number;
-    offset?: number;
-  }): Promise<WikiCommandSearchHit[]> {
+  search(
+    input: WikiCommandScope & { text: string; limit?: number; offset?: number },
+  ): Promise<WikiCommandSearchHit[]> {
     return this.run(async () =>
       searchWiki(
-        input.workspaceId,
+        input,
         {
           text: input.text,
           ...(input.limit !== undefined ? { limit: input.limit } : {}),
@@ -114,29 +125,25 @@ export class PostgresWikiCommandRepository implements WikiCommandRepository {
     );
   }
 
-  recentChanges(input: {
-    workspaceId: string;
-    since: Date;
-    limit?: number;
-  }): Promise<WikiCommandRecentChange[]> {
+  recentChanges(
+    input: WikiCommandScope & { since: Date; limit?: number },
+  ): Promise<WikiCommandRecentChange[]> {
     return this.run(async () =>
       recentWikiChanges(
-        input.workspaceId,
+        input,
         { since: input.since, ...(input.limit !== undefined ? { limit: input.limit } : {}) },
         this.db,
       ),
     );
   }
 
-  listTimeline(input: {
-    workspaceId: string;
-    path: string;
-    since?: Date;
-  }): Promise<WikiCommandTimelineItem[]> {
+  listTimeline(
+    input: WikiCommandScope & { path: string; since?: Date },
+  ): Promise<WikiCommandTimelineItem[]> {
     return this.run(async () => {
       const entries = await listWikiTimeline(
         {
-          workspaceId: input.workspaceId,
+          scope: input,
           path: input.path,
           ...(input.since ? { since: input.since } : {}),
         },
@@ -146,17 +153,18 @@ export class PostgresWikiCommandRepository implements WikiCommandRepository {
     });
   }
 
-  createFolder(input: {
-    workspaceId: string;
-    actorWorkosId: string;
-    idempotencyKey: string;
-    path: string;
-    title?: string;
-  }): Promise<WikiCommandFolderResult> {
+  createFolder(
+    input: WikiCommandScope & {
+      actorWorkosId: string;
+      idempotencyKey: string;
+      path: string;
+      title?: string;
+    },
+  ): Promise<WikiCommandFolderResult> {
     return this.run(async () => {
       const result = await createWikiFolder(
         {
-          workspaceId: input.workspaceId,
+          scope: input,
           path: input.path,
           id: deterministicWikiId("wiki-command-folder", input),
           ...(input.title ? { title: input.title } : {}),
@@ -173,19 +181,20 @@ export class PostgresWikiCommandRepository implements WikiCommandRepository {
     });
   }
 
-  writePage(input: {
-    workspaceId: string;
-    actorWorkosId: string;
-    idempotencyKey: string;
-    path: string;
-    body: string;
-    kind?: WikiKind;
-    title?: string;
-  }): Promise<WikiCommandWriteResult> {
+  writePage(
+    input: WikiCommandScope & {
+      actorWorkosId: string;
+      idempotencyKey: string;
+      path: string;
+      body: string;
+      kind?: WikiKind;
+      title?: string;
+    },
+  ): Promise<WikiCommandWriteResult> {
     return this.run(async () => {
       const result = await writeWikiPage(
         {
-          workspaceId: input.workspaceId,
+          scope: input,
           path: input.path,
           body: input.body,
           id: deterministicWikiId("wiki-command-page", input),
@@ -205,16 +214,17 @@ export class PostgresWikiCommandRepository implements WikiCommandRepository {
     });
   }
 
-  moveNode(input: {
-    workspaceId: string;
-    actorWorkosId: string;
-    path: string;
-    newParentPath: string | null;
-  }): Promise<WikiCommandMoveResult> {
+  moveNode(
+    input: WikiCommandScope & {
+      actorWorkosId: string;
+      path: string;
+      newParentPath: string | null;
+    },
+  ): Promise<WikiCommandMoveResult> {
     return this.run(async () => {
       const result = await moveWikiNode(
         {
-          workspaceId: input.workspaceId,
+          scope: input,
           path: input.path,
           newParentPath: input.newParentPath,
           actorWorkosId: input.actorWorkosId,
@@ -230,16 +240,17 @@ export class PostgresWikiCommandRepository implements WikiCommandRepository {
     });
   }
 
-  deletePage(input: {
-    workspaceId: string;
-    actorWorkosId: string;
-    path: string;
-    recursive?: boolean;
-  }): Promise<WikiCommandDeleteResult> {
+  deletePage(
+    input: WikiCommandScope & {
+      actorWorkosId: string;
+      path: string;
+      recursive?: boolean;
+    },
+  ): Promise<WikiCommandDeleteResult> {
     return this.run(async () => {
       const result = await deleteWikiPage(
         {
-          workspaceId: input.workspaceId,
+          scope: input,
           path: input.path,
           ...(input.recursive !== undefined ? { recursive: input.recursive } : {}),
           actorWorkosId: input.actorWorkosId,
@@ -250,25 +261,26 @@ export class PostgresWikiCommandRepository implements WikiCommandRepository {
     });
   }
 
-  addTimelineEntry(input: {
-    workspaceId: string;
-    actorWorkosId: string;
-    idempotencyKey: string;
-    path: string;
-    at: Date;
-    text: string;
-  }): Promise<WikiCommandTimelineAddResult> {
+  addTimelineEntry(
+    input: WikiCommandScope & {
+      actorWorkosId: string;
+      idempotencyKey: string;
+      path: string;
+      at: Date;
+      text: string;
+    },
+  ): Promise<WikiCommandTimelineAddResult> {
     return this.run(async () => {
       // Timeline entries are append-only, so a naive retry would insert a second
       // row. Derive a stable id from the idempotency key and replay it instead.
       const id = deterministicWikiId("wiki-command-timeline", input);
-      const existing = await this.timelineEntryById(input.workspaceId, id);
+      const existing = await this.timelineEntryById(input.wikiId, id);
       if (existing) return existing;
       try {
         const entry = await addWikiTimelineEntry(
           {
             id,
-            workspaceId: input.workspaceId,
+            scope: input,
             path: input.path,
             at: input.at,
             text: input.text,
@@ -279,7 +291,7 @@ export class PostgresWikiCommandRepository implements WikiCommandRepository {
         return { at: entry.at, text: entry.text };
       } catch (error) {
         if (isUniqueViolation(error)) {
-          const replay = await this.timelineEntryById(input.workspaceId, id);
+          const replay = await this.timelineEntryById(input.wikiId, id);
           if (replay) return replay;
         }
         throw error;
@@ -288,13 +300,13 @@ export class PostgresWikiCommandRepository implements WikiCommandRepository {
   }
 
   private async timelineEntryById(
-    workspaceId: string,
+    wikiId: string,
     id: string,
   ): Promise<WikiCommandTimelineAddResult | null> {
     const [row]: Array<{ at: Date; text: string }> = await this.db
       .select({ at: wikiTimelineEntries.at, text: wikiTimelineEntries.text })
       .from(wikiTimelineEntries)
-      .where(and(eq(wikiTimelineEntries.workspaceId, workspaceId), eq(wikiTimelineEntries.id, id)))
+      .where(and(eq(wikiTimelineEntries.wikiId, wikiId), eq(wikiTimelineEntries.id, id)))
       .limit(1);
     return row ? { at: row.at, text: row.text } : null;
   }
@@ -309,18 +321,30 @@ export class PostgresWikiCommandRepository implements WikiCommandRepository {
   }
 }
 
-// A v5-shaped UUID derived from the workspace, actor, idempotency key, and target
-// path so a transport retry lands on the same row identity. The path is folded in
-// so two distinct writes never collide on a row id even if a caller reuses a key.
+// A v5-shaped UUID derived from the wiki, actor, idempotency key, and target
+// path so a transport retry lands on the same row identity. The wiki and path are
+// folded in so two distinct writes never collide on a row id even if a caller
+// reuses a key across wikis.
 function deterministicWikiId(
   namespace: string,
-  input: { workspaceId: string; actorWorkosId: string; idempotencyKey: string; path: string },
+  input: {
+    workspaceId: string;
+    wikiId: string;
+    actorWorkosId: string;
+    idempotencyKey: string;
+    path: string;
+  },
 ): string {
   const digest = createHash("sha256")
     .update(
-      [namespace, input.workspaceId, input.actorWorkosId, input.idempotencyKey, input.path].join(
-        "\n",
-      ),
+      [
+        namespace,
+        input.workspaceId,
+        input.wikiId,
+        input.actorWorkosId,
+        input.idempotencyKey,
+        input.path,
+      ].join("\n"),
     )
     .digest("hex");
   return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-5${digest.slice(13, 16)}-a${digest.slice(17, 20)}-${digest.slice(20, 32)}`;

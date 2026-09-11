@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { WikiView } from "@/components/WikiView";
 import { currentUser } from "@/lib/auth";
-import { listHeadlessWikiPages } from "@/lib/headless-knowledge-server";
+import { listHeadlessWikiPages, listHeadlessWikis } from "@/lib/headless-knowledge-server";
 
 type PageProps = {
   params: Promise<{ path?: string[] }>;
@@ -15,12 +15,18 @@ export default async function WikiPage({ params }: PageProps) {
   const { user, workspace } = await currentUser();
 
   const pagePath = (path ?? []).map((segment) => decodeURIComponent(segment)).join("/");
-  const pages = await listHeadlessWikiPages();
+  // This route always renders the workspace's default wiki; a per-wiki route
+  // (/wiki/[wikiSlug]/...) is a follow-up.
+  const wikis = await listHeadlessWikis();
+  const wiki = wikis.find((entry) => entry.isDefault) ?? wikis[0];
+  if (!wiki) notFound();
+  const pages = await listHeadlessWikiPages(wiki.id);
   if (pagePath && !pages.some((page) => page.path === pagePath)) notFound();
 
   return (
     <WikiView
       userWorkosId={user.workosUserId}
+      wikiId={wiki.id}
       workspaceId={workspace.id}
       pages={pages.map((page) => ({
         id: page.id,

@@ -73,6 +73,7 @@ import {
   CreateTaskCommentEnvelopeSchema,
   CreateTaskEnvelopeSchema,
   CreateTaskScheduleBodySchema,
+  CreateWikiBodySchema,
   CreateWikiPageBodySchema,
   CreateWorkflowBodySchema,
   CreateWorkspaceBodySchema,
@@ -157,6 +158,7 @@ import {
   SetRepoConfigSetupBodySchema,
   SetSkillScopeBodySchema,
   SetSlackBotDestinationBodySchema,
+  SetWikiAccessBodySchema,
   SetWikiSourceEnabledBodySchema,
   SetWorkspaceCapabilityBodySchema,
   SkillArchiveEnvelopeSchema,
@@ -194,12 +196,16 @@ import {
   UpdateTaskEnvelopeSchema,
   UpdateTaskScheduleCommandSchema,
   UpdateUserPreferencesBodySchema,
+  UpdateWikiBodySchema,
   UpdateWikiPageBodySchema,
   UpdateWorkflowBodySchema,
   UpdateWorkspaceSkillBodySchema,
   UpsertWikiSourceBodySchema,
   UserPreferencesEnvelopeSchema,
+  WikiAccessEnvelopeSchema,
   WikiIngestActivityListEnvelopeSchema,
+  WikiListEnvelopeSchema,
+  WikiMutationEnvelopeSchema,
   WikiPageDeleteEnvelopeSchema,
   WikiPageListEnvelopeSchema,
   WikiPageMutationEnvelopeSchema,
@@ -1096,14 +1102,97 @@ export const deleteBrainFolderRoute = createRoute({
   },
 });
 
+export const listWikisRoute = createRoute({
+  method: "get",
+  path: "/v1/wikis",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Every wiki in the workspace the actor may read, default first.",
+      content: { "application/json": { schema: WikiListEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const createWikiRoute = createRoute({
+  method: "post",
+  path: "/v1/wikis",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  request: {
+    body: { required: true, content: { "application/json": { schema: CreateWikiBodySchema } } },
+  },
+  responses: {
+    201: {
+      description: "Wiki created.",
+      content: { "application/json": { schema: WikiMutationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const updateWikiRoute = createRoute({
+  method: "patch",
+  path: "/v1/wikis/{wikiId}",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ wikiId: ResourceIdSchema }),
+    body: { required: true, content: { "application/json": { schema: UpdateWikiBodySchema } } },
+  },
+  responses: {
+    200: {
+      description: "Wiki name or instructions updated.",
+      content: { "application/json": { schema: WikiMutationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getWikiAccessRoute = createRoute({
+  method: "get",
+  path: "/v1/wikis/{wikiId}/access",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  request: { params: z.object({ wikiId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Wiki access level, invited members, and the workspace roster.",
+      content: { "application/json": { schema: WikiAccessEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const setWikiAccessRoute = createRoute({
+  method: "put",
+  path: "/v1/wikis/{wikiId}/access",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ wikiId: ResourceIdSchema }),
+    body: { required: true, content: { "application/json": { schema: SetWikiAccessBodySchema } } },
+  },
+  responses: {
+    200: {
+      description: "Wiki access level and member list replaced.",
+      content: { "application/json": { schema: WikiAccessEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const listWikiPagesRoute = createRoute({
   method: "get",
   path: "/v1/wiki/pages",
   tags: ["Wiki"],
   security: actorSecurity,
+  request: { query: z.object({ wikiId: ResourceIdSchema.optional() }) },
   responses: {
     200: {
-      description: "All pages in the active workspace Wiki.",
+      description: "All pages in the selected Wiki, or the workspace's default Wiki.",
       content: { "application/json": { schema: WikiPageListEnvelopeSchema } },
     },
     default: errorResponse,
@@ -2358,6 +2447,7 @@ export const streamReadModelRoute = createRoute({
     query: z.object({
       conversationId: ResourceIdSchema.optional(),
       brainId: ResourceIdSchema.optional(),
+      wikiId: ResourceIdSchema.optional(),
       taskId: ResourceIdSchema.optional(),
       messageShapeEpoch: z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
       offset: z.string().optional(),
@@ -3827,6 +3917,11 @@ export type V1RouteHandlers = {
   createBrainFolder: RouteHandler<typeof createBrainFolderRoute>;
   renameBrainFolder: RouteHandler<typeof renameBrainFolderRoute>;
   deleteBrainFolder: RouteHandler<typeof deleteBrainFolderRoute>;
+  listWikis: RouteHandler<typeof listWikisRoute>;
+  createWiki: RouteHandler<typeof createWikiRoute>;
+  updateWiki: RouteHandler<typeof updateWikiRoute>;
+  getWikiAccess: RouteHandler<typeof getWikiAccessRoute>;
+  setWikiAccess: RouteHandler<typeof setWikiAccessRoute>;
   listWikiPages: RouteHandler<typeof listWikiPagesRoute>;
   createWikiPage: RouteHandler<typeof createWikiPageRoute>;
   updateWikiPage: RouteHandler<typeof updateWikiPageRoute>;
@@ -4040,6 +4135,11 @@ export function createV1Router(
       .openapi(createBrainFolderRoute, handlers.createBrainFolder)
       .openapi(renameBrainFolderRoute, handlers.renameBrainFolder)
       .openapi(deleteBrainFolderRoute, handlers.deleteBrainFolder)
+      .openapi(listWikisRoute, handlers.listWikis)
+      .openapi(createWikiRoute, handlers.createWiki)
+      .openapi(updateWikiRoute, handlers.updateWiki)
+      .openapi(getWikiAccessRoute, handlers.getWikiAccess)
+      .openapi(setWikiAccessRoute, handlers.setWikiAccess)
       .openapi(listWikiPagesRoute, handlers.listWikiPages)
       .openapi(createWikiPageRoute, handlers.createWikiPage)
       .openapi(updateWikiPageRoute, handlers.updateWikiPage)
@@ -4317,6 +4417,21 @@ const placeholderBrainDocument = {
   createdByActorId: "actor_contract",
   createdAt: placeholderTime,
   updatedAt: placeholderTime,
+};
+const placeholderWiki = {
+  id: "wiki_contract",
+  name: "Wiki",
+  slug: "wiki",
+  instructions: "",
+  access: "workspace" as const,
+  isDefault: true,
+  createdAt: placeholderTime,
+  updatedAt: placeholderTime,
+};
+const placeholderWikiAccess = {
+  access: "workspace" as const,
+  memberIds: [],
+  workspaceMembers: [],
 };
 const placeholderWikiPage = {
   id: "wiki_page_contract",
@@ -4967,6 +5082,11 @@ const contractDocumentHandlers: V1RouteHandlers = {
   createBrainFolder: (c) => c.json({ data: placeholderBrainFolder, meta }, 201),
   renameBrainFolder: (c) => c.json({ data: { path: placeholderBrainFolder.path }, meta }, 200),
   deleteBrainFolder: (c) => c.json({ data: { path: placeholderBrainFolder.path }, meta }, 200),
+  listWikis: (c) => c.json({ data: [placeholderWiki], meta }, 200),
+  createWiki: (c) => c.json({ data: placeholderWiki, meta }, 201),
+  updateWiki: (c) => c.json({ data: placeholderWiki, meta }, 200),
+  getWikiAccess: (c) => c.json({ data: placeholderWikiAccess, meta }, 200),
+  setWikiAccess: (c) => c.json({ data: placeholderWikiAccess, meta }, 200),
   listWikiPages: (c) => c.json({ data: [placeholderWikiPage], meta }, 200),
   createWikiPage: (c) =>
     c.json({ data: { page: placeholderWikiPage, transactionIds: [1] }, meta }, 201),
