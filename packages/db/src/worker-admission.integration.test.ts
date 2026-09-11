@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { createTestPGlite } from "./test-pglite";
 import { BRAIN_WORKER_ADMISSION_CHANNEL } from "./worker-admission";
 
 const migrationPath = path.resolve(
@@ -16,7 +17,7 @@ describe("opencompany Brain worker admission migration", () => {
   const hints: string[] = [];
 
   beforeAll(async () => {
-    database = new PGlite();
+    database = await createTestPGlite();
     await database.exec(BASE_SCHEMA);
     const migration = await readFile(migrationPath, "utf8");
     for (const statement of migration.split("--> statement-breakpoint")) {
