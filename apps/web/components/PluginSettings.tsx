@@ -58,6 +58,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useAppData } from "@/components/AppDataProvider";
+import { IntentPrefetchLink } from "@/components/IntentPrefetchLink";
 import { PluginConnectionFeedback } from "@/components/PluginConnectionSettings";
 import { SettingsContent } from "@/components/SettingsChrome";
 import {
@@ -650,7 +651,7 @@ export function PluginsSettings({
               <h2 className="text-sm font-semibold text-ink">Custom MCP</h2>
               <div className="divide-y divide-border rounded-lg border border-border">
                 {visibleCustomPlugins.map((plugin) => (
-                  <Link
+                  <IntentPrefetchLink
                     key={plugin.id}
                     href={`/settings/plugins/${plugin.name}`}
                     className="flex items-center gap-3 p-4 hover:bg-surface-hover"
@@ -666,7 +667,7 @@ export function PluginsSettings({
                       {plugin.status === "disabled" ? "Disabled" : "Installed"}
                     </span>
                     <ChevronRight className="size-4 text-ink-subtle" />
-                  </Link>
+                  </IntentPrefetchLink>
                 ))}
               </div>
             </section>
@@ -760,9 +761,8 @@ function PluginCatalogSection({
               key={config.name}
               className="group flex min-w-0 items-center gap-2.5 rounded-lg px-2 py-2.5 transition-colors duration-150 hover:bg-surface-hover"
             >
-              <Link
+              <IntentPrefetchLink
                 href={`/settings/plugins/${config.name}`}
-                prefetch={Boolean(plugin)}
                 className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
               >
                 <span
@@ -790,7 +790,7 @@ function PluginCatalogSection({
                     {plugin?.manifest.description || config.description}
                   </span>
                 </span>
-              </Link>
+              </IntentPrefetchLink>
               {plugin && updateAvailable && canEdit ? (
                 <Button
                   size="sm"
@@ -803,7 +803,7 @@ function PluginCatalogSection({
                   {installingThisPlugin ? "Updating…" : "Update"}
                 </Button>
               ) : plugin ? (
-                <Link
+                <IntentPrefetchLink
                   href={`/settings/plugins/${config.name}`}
                   className={cn(
                     buttonVariants({ variant: "outline", size: "sm" }),
@@ -811,7 +811,7 @@ function PluginCatalogSection({
                   )}
                 >
                   {missingConnection ? "Connect" : "Manage"}
-                </Link>
+                </IntentPrefetchLink>
               ) : canEdit ? (
                 <Button
                   size="sm"

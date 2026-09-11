@@ -3557,6 +3557,39 @@ describe("canonical Hono API", () => {
     expect(response.headers.get("retry-after")).toBe("7");
   });
 
+  it("keeps lower-limit provider reads independent of ordinary API reads", async () => {
+    const listOptions = vi.fn(async () => ({
+      provider: "linear" as const,
+      teams: [{ id: "team_1", name: "Engineering", key: "ENG" }],
+      partial: false,
+    }));
+    const resolveLiveViewUrl = vi.fn(async () => "https://live.example.com/session_1");
+    const app = testApp(fakeRepository(), {
+      rateLimiter: new InMemoryApiRateLimiter(() => 0),
+      brainSources: brainSourceService({ listOptions }),
+      browserProfiles: browserProfileService({ resolveLiveViewUrl }),
+    });
+
+    for (let index = 0; index < 120; index += 1) {
+      expect((await app.request("/v1/conversations")).status).toBe(200);
+    }
+
+    const response = await app.request("/v1/integrations/integration_1/brain-source-options", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: "linear" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(listOptions).toHaveBeenCalledWith(actor, "integration_1", { provider: "linear" });
+
+    const liveView = await app.request(
+      "/v1/browser-profiles/profile_1/live-view?sessionId=session_1",
+    );
+    expect(liveView.status).toBe(200);
+    expect(resolveLiveViewUrl).toHaveBeenCalledWith(actor, "profile_1", "session_1");
+  });
+
   it.each(["plugins", "skills"] as const)(
     "keeps %s previews and imports independent of workspace writes and each other",
     async (kind) => {

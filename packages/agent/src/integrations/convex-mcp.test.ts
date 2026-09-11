@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getDb: vi.fn(),
   loadCredential: vi.fn(),
+  runCli: vi.fn(),
   saveCredential: vi.fn(),
 }));
 vi.mock("@opencompany/db/client", () => ({ getDb: mocks.getDb }));
@@ -12,8 +13,13 @@ vi.mock("@opencompany/db/integrations", () => ({
   markIntegrationStatus: vi.fn(),
 }));
 vi.mock("./analytics", () => ({ captureConnectionAddedAnalytics: vi.fn() }));
+vi.mock("./convex-cli", () => ({ runConvexCli: mocks.runCli }));
 
-import { connectConvexMcpIntegration, loadConvexMcpWorkerConnection } from "./convex-mcp";
+import {
+  connectConvexMcpIntegration,
+  loadConvexMcpWorkerConnection,
+  validateConvexApiKey,
+} from "./convex-mcp";
 import { verifyConvexMcpTicket } from "./convex-mcp-ticket";
 
 const apiKey = "dev:happy-animal-123|fakekey123";
@@ -99,4 +105,54 @@ describe("Convex credential versions", () => {
       });
     },
   );
+});
+
+describe("Convex credential validation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.runCli.mockResolvedValue({ content: [{ type: "text", text: "ok" }] });
+  });
+
+  it("preflights function and schema access before accepting a key", async () => {
+    await expect(validateConvexApiKey(apiKey)).resolves.toEqual({
+      ok: true,
+      deployment: "happy-animal-123",
+    });
+    expect(mocks.runCli).toHaveBeenNthCalledWith(1, {
+      apiKey,
+      tool: "functionSpec",
+      args: {},
+    });
+    expect(mocks.runCli).toHaveBeenNthCalledWith(2, { apiKey, tool: "tables", args: {} });
+  });
+
+  it("surfaces the exact missing Convex permission without exposing arbitrary provider errors", async () => {
+    mocks.runCli.mockResolvedValueOnce({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            error:
+              "You do not have permission to perform this operation (deployment:functions:runInternalQueries).",
+          }),
+        },
+      ],
+      isError: true,
+    });
+    await expect(validateConvexApiKey(apiKey)).resolves.toEqual({
+      ok: false,
+      error:
+        "Convex denied deployment:functions:runInternalQueries. Grant that permission to the deploy key and try again.",
+    });
+
+    mocks.runCli.mockResolvedValueOnce({
+      content: [{ type: "text", text: JSON.stringify({ error: "upstream details" }) }],
+      isError: true,
+    });
+    await expect(validateConvexApiKey(apiKey)).resolves.toEqual({
+      ok: false,
+      error:
+        "Convex could not inspect this deployment. Grant deployment:functions:runInternalQueries to the deploy key and try again.",
+    });
+  });
 });

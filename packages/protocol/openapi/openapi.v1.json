@@ -17264,6 +17264,9 @@
                         "enum": [
                           "linear"
                         ]
+                      },
+                      "includeTriageStateIds": {
+                        "type": "boolean"
                       }
                     },
                     "required": [

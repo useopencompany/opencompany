@@ -5,6 +5,8 @@ import {
   WRITE_ARTIFACT_TOOL_NAME,
 } from "@opencompany/agent-runtime";
 import { WIKI_TOOL_NAME } from "@opencompany/wiki/tool";
+import { generateText } from "ai";
+import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 import {
   CHAT_MAX_STEPS,
@@ -146,6 +148,44 @@ describe("create_workspace_skill tool", () => {
 });
 
 describe("edit_workspace_skill tool", () => {
+  it("allows generation with the skill tools under Anthropic's root schema restrictions", async () => {
+    const editWorkspaceSkill = vi.fn();
+    const { tools } = createProductChatToolContext({
+      model: "anthropic/claude-sonnet-5",
+      runWiki: vi.fn(),
+      writeArtifact: vi.fn(),
+      workspaceSkills: vi.fn(),
+      createWorkspaceSkill: vi.fn(),
+      editWorkspaceSkill,
+    });
+    const provider = new MockLanguageModelV4({
+      doGenerate: async ({ tools: providerTools }) => {
+        expect(providerTools?.[4]).toMatchObject({ name: EDIT_WORKSPACE_SKILL_TOOL_NAME });
+        for (const providerTool of providerTools ?? []) {
+          if (providerTool.type !== "function") continue;
+          for (const keyword of ["oneOf", "allOf", "anyOf"]) {
+            if (keyword in providerTool.inputSchema) {
+              throw new Error(`input_schema does not support ${keyword} at the top level`);
+            }
+          }
+        }
+        return {
+          content: [{ type: "text", text: "Ready." }],
+          finishReason: { unified: "stop", raw: "stop" },
+          usage: {
+            inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+            outputTokens: { total: 1, text: 1, reasoning: 0 },
+          },
+          warnings: [],
+        };
+      },
+    });
+
+    const result = await generateText({ model: provider, tools, prompt: "Hello.", maxRetries: 0 });
+    expect(result.text).toBe("Ready.");
+    expect(editWorkspaceSkill).not.toHaveBeenCalled();
+  });
+
   it("is available only when the authenticated host injects its runner", () => {
     expect(EDIT_WORKSPACE_SKILL_TOOL_NAME in createProductChatToolContext({ model }).tools).toBe(
       false,
