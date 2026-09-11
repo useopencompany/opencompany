@@ -30,8 +30,10 @@ an unpublished long-form Article from a DraftJS content state, and
 `POST https://api.x.com/2/articles/{article_id}/publish` publishes it. This is real, it uses ordinary
 user auth with `tweet.read`, `tweet.write`, and `users.read`, and it is the only place X lets an API
 client park unpublished content on an account. It does not help with regular posts: Articles are a
-separate long-form surface, not a post draft. Source:
-[Articles endpoints](https://docs.x.com/x-api/articles/introduction).
+separate long-form surface, not a post draft. This is exhaustive, not a spot check: across all 382
+reference pages in X's own v2 documentation index, "draft" appears only on the two Articles pages.
+Sources: [Articles endpoints](https://docs.x.com/x-api/articles/introduction),
+[X API v2 index](https://docs.x.com/x-api/llms.txt).
 
 This is also what X's own hosted MCP server means when its tool table lists "Create draft Articles
 and publish them". The vendored X plugin snapshot in
