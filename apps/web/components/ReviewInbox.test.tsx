@@ -2,7 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { clearOptimisticReviewArchives } from "@/lib/optimistic-review-archive";
+import { clearOptimisticArchives } from "@/lib/optimistic-archives";
 import type { ReviewItem } from "@/lib/review-inbox";
 import { ReviewInboxRoute } from "./ReviewInbox";
 
@@ -22,10 +22,10 @@ const archiveTaskMock = vi.hoisted(() => vi.fn(async () => ({ id: "task_c1" })))
 // The provider applies the reader's pending archives to the queue it publishes, so the mock does
 // the same: these tests are about what the list shows between the click and the projection.
 vi.mock("@/components/AppDataProvider", async () => {
-  const { useOptimisticReviewArchives } = await import("@/lib/optimistic-review-archive");
+  const { useOptimisticArchives } = await import("@/lib/optimistic-archives");
   return {
     useAppData: () => {
-      const pendingArchives = useOptimisticReviewArchives();
+      const pendingArchives = useOptimisticArchives();
       return {
         reviewItems: reviewItemsMock.value.filter(
           (item) => !pendingArchives.has(item.conversationId),
@@ -144,7 +144,7 @@ function assistantReply(text: string) {
 describe("ReviewInboxRoute", () => {
   afterEach(() => {
     vi.clearAllMocks();
-    clearOptimisticReviewArchives();
+    clearOptimisticArchives();
     reviewItemsMock.value = [];
     transcriptMock.messages = [];
     transcriptMock.isLoading = false;
