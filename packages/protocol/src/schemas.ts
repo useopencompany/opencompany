@@ -1085,7 +1085,12 @@ export const BrainSourceDeleteEnvelopeSchema = z
   .openapi("BrainSourceDeleteEnvelope");
 
 export const BrainSourceOptionsBodySchema = z.discriminatedUnion("provider", [
-  z.object({ provider: z.literal("linear") }).strict(),
+  z
+    .object({
+      provider: z.literal("linear"),
+      includeTriageStateIds: z.boolean().optional(),
+    })
+    .strict(),
   z
     .object({
       provider: z.literal("google_drive"),

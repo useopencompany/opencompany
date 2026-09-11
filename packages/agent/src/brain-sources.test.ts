@@ -94,42 +94,89 @@ describe("BrainSourceApplicationService", () => {
   it("lets workflow readers list teams from their connected Linear account", async () => {
     const workflowMember = { ...member, permissions: ["workflow:read"] };
     const service = new BrainSourceApplicationService(
-      queuedDb([
-        {
-          id: "integration_1",
-          provider: "linear",
-          userWorkosId: workflowMember.userId,
-          workspaceId: null,
-          externalId: "linear_workspace_1",
-          status: "connected",
-          accountName: "Acta",
-          accountEmail: null,
-          connectionLabel: null,
-          statusReason: null,
-        },
-      ]),
+      queuedDb([linearIntegrationRow(workflowMember.userId)]),
     );
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        Response.json({
-          data: {
-            teams: {
-              nodes: [{ id: "team_1", key: "PRO", name: "Product", states: { nodes: [] } }],
-              pageInfo: { hasNextPage: false, endCursor: null },
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          Response.json({
+            data: {
+              teams: {
+                nodes: [{ id: "team_1", key: "PRO", name: "Product" }],
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
             },
-          },
-        }),
-      ),
+          }),
+        )
+        .mockResolvedValueOnce(
+          Response.json({
+            data: {
+              workflowStates: {
+                nodes: [{ id: "state_triage", team: { id: "team_1" } }],
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          }),
+        ),
     );
 
     await expect(
-      service.listOptions(workflowMember, "integration_1", { provider: "linear" }),
+      service.listOptions(workflowMember, "integration_1", {
+        provider: "linear",
+        includeTriageStateIds: true,
+      }),
+    ).resolves.toEqual({
+      provider: "linear",
+      teams: [{ id: "team_1", key: "PRO", name: "Product", triageStateId: "state_triage" }],
+      partial: false,
+    });
+  });
+
+  it("keeps Linear teams available when optional triage-state enrichment fails", async () => {
+    const service = new BrainSourceApplicationService(queuedDb([linearIntegrationRow()]));
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          Response.json({
+            data: {
+              teams: {
+                nodes: [{ id: "team_1", key: "PRO", name: "Product" }],
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          }),
+        )
+        .mockResolvedValueOnce(
+          Response.json({ errors: [{ message: "Could not load workflow states." }] }),
+        ),
+    );
+
+    await expect(
+      service.listOptions(member, "integration_1", {
+        provider: "linear",
+        includeTriageStateIds: true,
+      }),
     ).resolves.toEqual({
       provider: "linear",
       teams: [{ id: "team_1", key: "PRO", name: "Product" }],
-      partial: false,
+      partial: true,
     });
+  });
+
+  it("does not disguise a failed Linear team lookup as an empty workspace", async () => {
+    const service = new BrainSourceApplicationService(queuedDb([linearIntegrationRow()]));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ errors: [{ message: "Linear is unavailable." }] })),
+    );
+
+    await expect(
+      service.listOptions(member, "integration_1", { provider: "linear" }),
+    ).rejects.toThrow("Linear GraphQL returned Linear is unavailable.");
   });
 
   it("does not grant workflow readers access to Google Drive Brain options", async () => {
@@ -402,6 +449,21 @@ function integrationRow(
     connectionLabel: null,
     statusReason: null,
     ...overrides,
+  };
+}
+
+function linearIntegrationRow(userWorkosId = member.userId) {
+  return {
+    id: "integration_1",
+    provider: "linear" as const,
+    userWorkosId,
+    workspaceId: null,
+    externalId: "linear_workspace_1",
+    status: "connected" as const,
+    accountName: "Acta",
+    accountEmail: null,
+    connectionLabel: null,
+    statusReason: null,
   };
 }
 
