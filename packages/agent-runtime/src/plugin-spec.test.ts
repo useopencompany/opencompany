@@ -274,6 +274,31 @@ describe("parsePluginEvents", () => {
     expect(result.report.status).toBe("parsed");
     if (result.report.status === "parsed") expect(result.report.issues).toHaveLength(2);
   });
+
+  test("parses a filter-free poll-delivered event with an underscored id", () => {
+    const poll = {
+      id: "meeting.notes_ready",
+      label: "Meeting notes ready",
+      description: "Starts a workflow once the meeting summary is generated.",
+      delivery: "poll",
+      filters: [],
+    };
+    const result = parsePluginEvents({ "so.opencompany.events": [poll] }, { trusted: true });
+    expect(result.definitions).toEqual([poll]);
+    expect(result.report).toEqual({ present: true, status: "parsed", issues: [] });
+  });
+
+  test("rejects an id that is not lowercase separated segments", () => {
+    const result = parsePluginEvents(
+      { "so.opencompany.events": [{ ...declaration, id: "Meeting Notes" }] },
+      { trusted: true },
+    );
+    expect(result.definitions).toEqual([]);
+    expect(result.report).toMatchObject({
+      status: "parsed",
+      issues: ["Event at index 0 has an invalid `id`."],
+    });
+  });
 });
 
 describe("parseMcpConfig", () => {

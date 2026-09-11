@@ -25,7 +25,6 @@ import {
   ChevronDown,
   ExternalLink,
   Loader2,
-  PackageCheck,
   PlugZap,
   RefreshCw,
   Sparkles,
@@ -1123,16 +1122,6 @@ function PluginHeaderSection({
 
   return (
     <section aria-label={`${config.label} package`} className="flex flex-col gap-3">
-      <p className="text-[12px] leading-4 text-ink-subtle">
-        Your personal plugin. Installing, disabling, or removing it affects only your use.
-      </p>
-      {!plugin ? (
-        <p className="text-[12px] leading-5 text-ink-subtle">
-          Used this plugin before? Older workspace installations were retired when plugins became
-          personal. Install it for yourself, review its permissions, and connect your account if
-          prompted.
-        </p>
-      ) : null}
       {updateAvailable ? (
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-warning/30 bg-warning/5 px-3 py-2.5">
           <div className="min-w-0 flex-1">
@@ -1208,11 +1197,7 @@ function PluginHeaderSection({
             <dd className="break-all font-mono text-ink">{plugin.integrity}</dd>
           </dl>
         </details>
-      ) : (
-        <SectionEmpty icon={PackageCheck}>
-          Review the package tools and skills below, then install when you are ready.
-        </SectionEmpty>
-      )}
+      ) : null}
 
       {canEdit && plugin ? (
         <div className="flex">

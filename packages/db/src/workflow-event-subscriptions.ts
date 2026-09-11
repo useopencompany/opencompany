@@ -66,7 +66,7 @@ function pluginEvents(value: unknown): PluginEventDefinition[] {
       typeof event.id === "string" &&
       typeof event.label === "string" &&
       typeof event.description === "string" &&
-      event.delivery === "webhook" &&
+      (event.delivery === "webhook" || event.delivery === "poll") &&
       Array.isArray(event.filters),
   );
 }

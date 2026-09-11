@@ -77,6 +77,58 @@ describe("workflow event subscription validation", () => {
     ).resolves.toMatch(/required/i);
   });
 
+  it("accepts a poll-delivered event that declares no filters", async () => {
+    const execute = vi.fn(async () => ({
+      rows: [
+        {
+          integrationId: "gint_granola_1",
+          events: [
+            {
+              id: "meeting.notes_ready",
+              label: "Meeting notes ready",
+              description: "Starts once the summary is generated.",
+              delivery: "poll",
+              filters: [],
+            },
+          ],
+          eventModes: { "meeting.notes_ready": true },
+        },
+      ],
+    }));
+
+    await expect(
+      validateWorkflowEventSubscription(execute, {
+        actor,
+        trigger: {
+          ...trigger,
+          provider: "granola",
+          event: "meeting.notes_ready",
+          integrationId: "gint_granola_1",
+          filters: {},
+        },
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it("rejects a filter the declaration does not declare", async () => {
+    const execute = vi.fn(async () => ({
+      rows: [
+        {
+          integrationId: trigger.integrationId,
+          events: [declaration],
+          eventModes: { "issue.created": true },
+        },
+      ],
+    }));
+
+    await expect(
+      validateWorkflowEventSubscription(execute, {
+        actor,
+        trigger: { ...trigger, filters: { project: { id: "project_1", name: "Roadmap" } } },
+      }),
+    ).resolves.toMatch(/does not declare/i);
+  });
+
   it("requires legacy triage subscriptions to use a declared personal plugin event", async () => {
     const execute = vi.fn(async () => ({
       rows: [{ integrationId: trigger.integrationId, events: [], eventModes: {} }],

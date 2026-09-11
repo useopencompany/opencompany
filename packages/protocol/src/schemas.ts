@@ -1700,7 +1700,7 @@ export const PluginEventDefinitionSchema = z
     id: z.string().min(1).max(128),
     label: z.string().min(1).max(120),
     description: z.string().min(1).max(500),
-    delivery: z.literal("webhook"),
+    delivery: z.enum(["webhook", "poll"]),
     filters: z.array(PluginEventFilterDefinitionSchema).max(16),
   })
   .strict()
@@ -4543,6 +4543,7 @@ export type PluginRemoteMcpServerDto = z.infer<typeof PluginRemoteMcpServerSchem
 export type PluginListItemDto = z.infer<typeof PluginListItemSchema>;
 export type PluginInstallationDto = z.infer<typeof PluginInstallationSchema>;
 export type PluginEventDefinitionDto = z.infer<typeof PluginEventDefinitionSchema>;
+export type PluginEventFilterDefinitionDto = z.infer<typeof PluginEventFilterDefinitionSchema>;
 export type PluginImportPreviewDto = z.infer<typeof PluginImportPreviewSchema>;
 export type PluginImportPreviewBody = z.infer<typeof PluginImportPreviewBodySchema>;
 export type InstallPluginBody = z.infer<typeof InstallPluginBodySchema>;

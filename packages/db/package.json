@@ -24,6 +24,10 @@
       "types": "./src/workflow-repository.ts",
       "default": "./src/workflow-repository.ts"
     },
+    "./workflow-event-routes": {
+      "types": "./src/workflow-event-routes.ts",
+      "default": "./src/workflow-event-routes.ts"
+    },
     "./workflow-event-subscriptions": {
       "types": "./src/workflow-event-subscriptions.ts",
       "default": "./src/workflow-event-subscriptions.ts"

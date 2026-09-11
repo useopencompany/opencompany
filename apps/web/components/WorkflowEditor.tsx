@@ -8,7 +8,7 @@ import {
   scheduleSummary,
 } from "@opencompany/agent-runtime";
 import { workflowActivationDisabledReason } from "@opencompany/core/workflows";
-import type { PluginEventDefinitionDto } from "@opencompany/protocol";
+import type { PluginEventFilterDefinitionDto } from "@opencompany/protocol";
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import {
   ArrowLeft,
@@ -33,7 +33,6 @@ import {
   StepRuntimePicker,
   type WorkflowStepPatch,
 } from "@/components/WorkflowModelControls";
-import { type LinearTeamListResult, listLinearTeamsAction } from "@/lib/brain-source-actions";
 import {
   archiveHeadlessWorkflow,
   runHeadlessWorkflowNow,
@@ -42,6 +41,12 @@ import {
 import type { WorkflowDetail } from "@/lib/headless-automation-types";
 import type { SkillCatalogItem } from "@/lib/skills";
 import { supportedTimezones, timezoneLabel } from "@/lib/timezones";
+import {
+  loadWorkflowEventFilterOptions,
+  type WorkflowEventFilterOptionsResult,
+} from "@/lib/workflow-event-filters";
+import type { WorkflowEventProviderOption } from "@/lib/workflow-event-triggers";
+import { workflowEventProvidersReady } from "@/lib/workflow-event-triggers";
 import {
   isWorkflowCloudRuntime,
   normalizeWorkflowReasoningEffort,
@@ -55,6 +60,9 @@ import {
 } from "@/lib/workflow-schedule-defaults";
 
 const AUTOSAVE_DELAY_MS = 1200;
+// Stable identity so the autosave effect is not re-run — and its error banner cleared — on every
+// render of a workflow whose providers were never passed.
+const NO_EVENT_PROVIDERS: WorkflowEventProviderOption[] = [];
 const MAX_WORKFLOW_STEPS = 20;
 
 type WorkflowStatus = WorkflowDetail["status"];
@@ -73,8 +81,7 @@ type WorkflowTriggerDraft =
       prompt: string;
     }
   | { type: "schedule"; cron: string; timezone: string; prompt: string };
-type LinearWorkflowAccount = { integrationId: string; label: string };
-type WorkflowEventOption = PluginEventDefinitionDto & { provider: string };
+type WorkflowEventTriggerDraft = Extract<WorkflowTriggerDraft, { type: "event" }>;
 type WorkflowDraft = Pick<WorkflowDetail, "name" | "description" | "status" | "steps"> & {
   trigger: WorkflowTriggerDraft;
 };
@@ -85,15 +92,13 @@ export function WorkflowEditor({
   workspaceId,
   canEdit,
   skillCatalog,
-  linearAccounts = [],
-  workflowEvents = [],
+  eventProviders = NO_EVENT_PROVIDERS,
 }: {
   workflow: WorkflowDetail;
   workspaceId: string;
   canEdit: boolean;
   skillCatalog: SkillCatalogItem[];
-  linearAccounts?: LinearWorkflowAccount[];
-  workflowEvents?: WorkflowEventOption[];
+  eventProviders?: WorkflowEventProviderOption[];
 }) {
   const router = useRouter();
   const [draft, setDraft] = useState<WorkflowDraft>(() => workflowDraft(workflow));
@@ -111,9 +116,11 @@ export function WorkflowEditor({
     sequence: 0,
   });
 
+  const eventProvidersRef = useRef(eventProviders);
   useEffect(() => {
     draftRef.current = draft;
-  }, [draft]);
+    eventProvidersRef.current = eventProviders;
+  }, [draft, eventProviders]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -126,7 +133,7 @@ export function WorkflowEditor({
     async function saveLatestDraft() {
       const autosave = autosaveRef.current;
       const snapshot = draftRef.current;
-      if (!workflowDraftReadyToSave(snapshot)) return;
+      if (!workflowDraftReadyToSave(snapshot, eventProvidersRef.current)) return;
       const value = serializeWorkflowDraft(snapshot);
       if (value === autosave.savedValue) return;
       if (autosave.inFlight) return;
@@ -184,7 +191,7 @@ export function WorkflowEditor({
 
   useEffect(() => {
     if (!canEdit) return;
-    if (!workflowDraftReadyToSave(draft)) {
+    if (!workflowDraftReadyToSave(draft, eventProvidersRef.current)) {
       setSaveState("saved");
       setSaveError(null);
       return;
@@ -358,8 +365,7 @@ export function WorkflowEditor({
           <TriggerSection
             trigger={draft.trigger}
             canEdit={canEdit}
-            linearAccounts={linearAccounts}
-            workflowEvents={workflowEvents}
+            eventProviders={eventProviders}
             onChange={(trigger) => patch({ trigger })}
           />
 
@@ -543,14 +549,12 @@ function StatusDot({ status }: { status: WorkflowStatus }) {
 function TriggerSection({
   trigger,
   canEdit,
-  linearAccounts,
-  workflowEvents,
+  eventProviders,
   onChange,
 }: {
   trigger: WorkflowTriggerDraft;
   canEdit: boolean;
-  linearAccounts: LinearWorkflowAccount[];
-  workflowEvents: WorkflowEventOption[];
+  eventProviders: WorkflowEventProviderOption[];
   onChange: (trigger: WorkflowTriggerDraft) => void;
 }) {
   const setManual = () => onChange({ type: "manual" });
@@ -565,17 +569,21 @@ function TriggerSection({
             prompt: DEFAULT_WORKFLOW_SCHEDULE_PROMPT,
           },
     );
+  const eventsReady = workflowEventProvidersReady(eventProviders);
   const setEvent = () => {
     if (trigger.type === "event") {
       onChange(trigger);
       return;
     }
-    const account = linearAccounts[0];
-    const event = workflowEvents[0];
-    if (!account || !event) return;
+    const provider = eventProviders.find(
+      (candidate) => candidate.accounts.length > 0 && candidate.events.length > 0,
+    );
+    const account = provider?.accounts[0];
+    const event = provider?.events[0];
+    if (!provider || !account || !event) return;
     onChange({
       type: "event",
-      provider: event.provider,
+      provider: provider.provider,
       event: event.id,
       integrationId: account.integrationId,
       filters: {},
@@ -616,26 +624,13 @@ function TriggerSection({
             icon={Webhook}
             label="On an event"
             selected={trigger.type === "event"}
-            disabled={
-              !canEdit ||
-              ((linearAccounts.length === 0 || workflowEvents.length === 0) &&
-                trigger.type !== "event")
-            }
+            disabled={!canEdit || (!eventsReady && trigger.type !== "event")}
             onSelect={setEvent}
           />
         </div>
 
-        {(linearAccounts.length === 0 || workflowEvents.length === 0) &&
-        trigger.type !== "event" ? (
-          <p className="mt-3 text-[12px] text-ink-subtle">
-            <Link
-              href="/settings/plugins/linear"
-              className="underline underline-offset-2 hover:text-ink"
-            >
-              {linearAccounts.length === 0 ? "Connect Linear" : "Enable a Linear event"}
-            </Link>{" "}
-            to trigger workflows from Linear activity.
-          </p>
+        {!eventsReady && trigger.type !== "event" ? (
+          <EventTriggerZeroState providers={eventProviders} />
         ) : null}
 
         {trigger.type === "schedule" ? (
@@ -655,10 +650,9 @@ function TriggerSection({
           </div>
         ) : null}
         {trigger.type === "event" ? (
-          <LinearEventTriggerEditor
+          <EventTriggerEditor
             trigger={trigger}
-            accounts={linearAccounts}
-            events={workflowEvents}
+            providers={eventProviders}
             canEdit={canEdit}
             onChange={onChange}
           />
@@ -668,96 +662,81 @@ function TriggerSection({
   );
 }
 
-function LinearEventTriggerEditor({
+// Nothing to trigger on yet. Point at the nearest missing step rather than a generic "connect an
+// integration": a provider with events switched on but no account needs a different link than one
+// that is connected with every event still off.
+function EventTriggerZeroState({ providers }: { providers: WorkflowEventProviderOption[] }) {
+  const connectable = providers.find((provider) => provider.accounts.length === 0);
+  return (
+    <p className="mt-3 text-[12px] text-ink-subtle">
+      {connectable ? (
+        <>
+          <Link
+            href={connectable.accountHref}
+            className="underline underline-offset-2 hover:text-ink"
+          >
+            {connectable.accountLabel}
+          </Link>{" "}
+          to trigger workflows from {connectable.label} activity.
+        </>
+      ) : (
+        <>
+          Turn on an event in{" "}
+          <Link href="/settings/plugins" className="underline underline-offset-2 hover:text-ink">
+            plugin settings
+          </Link>{" "}
+          to trigger workflows from your connected tools.
+        </>
+      )}
+    </p>
+  );
+}
+
+function EventTriggerEditor({
   trigger,
-  accounts,
-  events,
+  providers,
   canEdit,
   onChange,
 }: {
-  trigger: Extract<WorkflowTriggerDraft, { type: "event" }>;
-  accounts: LinearWorkflowAccount[];
-  events: WorkflowEventOption[];
+  trigger: WorkflowEventTriggerDraft;
+  providers: WorkflowEventProviderOption[];
   canEdit: boolean;
   onChange: (trigger: WorkflowTriggerDraft) => void;
 }) {
-  const needsTriageState = trigger.event === "issue_enters_triage";
-  const [teamsState, setTeamsState] = useState<{
-    integrationId: string;
-    includeTriageStateIds: boolean;
-    result: LinearTeamListResult;
-  } | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    void listLinearTeamsAction(trigger.integrationId, {
-      includeTriageStateIds: needsTriageState,
-    }).then((result) => {
-      if (!cancelled) {
-        setTeamsState({
-          integrationId: trigger.integrationId,
-          includeTriageStateIds: needsTriageState,
-          result,
-        });
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [needsTriageState, trigger.integrationId]);
-
-  const teams =
-    teamsState?.integrationId === trigger.integrationId &&
-    teamsState.includeTriageStateIds === needsTriageState
-      ? teamsState.result
-      : null;
-
+  const provider = providers.find((candidate) => candidate.provider === trigger.provider);
+  const selectedEvent = provider?.events.find((event) => event.id === trigger.event);
+  // A workflow can outlive the event it subscribed to: the plugin can be updated, the event
+  // switched back off, or its account disconnected. Keep the selection visible and editable
+  // instead of silently retargeting it, but never offer a choice that cannot be bound.
+  const eventChoices = providers
+    .filter((candidate) => candidate.accounts.length > 0)
+    .flatMap((candidate) => candidate.events.map((event) => ({ provider: candidate, event })));
+  const selectedChoiceValue = `${trigger.provider}:${trigger.event}`;
+  const accounts = provider?.accounts ?? [];
   const accountOptions = accounts.some((account) => account.integrationId === trigger.integrationId)
     ? accounts
-    : [{ integrationId: trigger.integrationId, label: "Disconnected Linear account" }, ...accounts];
-  const selectedTeam = trigger.filters.team;
-  const selectedTeamOption = selectedTeam
-    ? { ...selectedTeam, triageStateId: selectedTeam.metadata?.triageStateId }
-    : null;
-  const teamOptions =
-    teams?.ok &&
-    selectedTeamOption &&
-    !teams.teams.some((team) => team.id === selectedTeamOption.id)
-      ? [selectedTeamOption, ...teams.teams]
-      : teams?.ok
-        ? teams.teams
-        : selectedTeamOption
-          ? [selectedTeamOption]
-          : [];
-  const selectedEvent = events.find(
-    (event) => event.provider === trigger.provider && event.id === trigger.event,
-  );
-  const eventOptions = selectedEvent
-    ? events
     : [
         {
-          provider: trigger.provider,
-          id: trigger.event,
-          label:
-            trigger.event === "issue_enters_triage"
-              ? "Issue enters triage (legacy)"
-              : trigger.event,
-          description: "This workflow uses a legacy or currently disabled event.",
-          delivery: "webhook" as const,
-          filters: [],
+          integrationId: trigger.integrationId,
+          label: `Disconnected ${provider?.label ?? trigger.provider} account`,
         },
-        ...events,
+        ...accounts,
       ];
+
   return (
     <div className="mt-3 flex flex-col gap-3">
       <p className="text-[12px] leading-5 text-ink-subtle">
-        {selectedEvent?.description ?? "Starts one task when an issue enters Linear triage."}
+        {selectedEvent?.description ??
+          "This workflow uses an event that is no longer available. Pick another one to keep it running."}
       </p>
       {accounts.length === 0 ? (
         <p className="text-[12px] text-warning">
-          This Linear account is disconnected.{" "}
-          <Link href="/settings/plugins/linear" className="underline underline-offset-2">
-            Reconnect Linear
+          This {provider?.label ?? trigger.provider} account is disconnected.{" "}
+          <Link
+            href={provider?.accountHref ?? "/settings/plugins"}
+            className="underline underline-offset-2"
+          >
+            {provider?.accountLabel ?? "Connect an account"}
           </Link>
           .
         </p>
@@ -766,35 +745,50 @@ function LinearEventTriggerEditor({
         <label className="flex min-w-0 flex-col gap-1.5 sm:col-span-2">
           <span className="text-[12px] font-medium text-ink-subtle">Event</span>
           <select
-            value={`${trigger.provider}:${trigger.event}`}
+            value={selectedChoiceValue}
             disabled={!canEdit}
-            onChange={(event) => {
-              const option = events.find(
-                (candidate) => `${candidate.provider}:${candidate.id}` === event.target.value,
+            onChange={(changed) => {
+              const choice = eventChoices.find(
+                ({ provider: candidate, event }) =>
+                  `${candidate.provider}:${event.id}` === changed.target.value,
               );
-              if (option)
-                onChange({ ...trigger, provider: option.provider, event: option.id, filters: {} });
+              if (!choice?.provider.accounts[0]) return;
+              const account =
+                choice.provider.provider === trigger.provider
+                  ? trigger.integrationId
+                  : choice.provider.accounts[0].integrationId;
+              onChange({
+                ...trigger,
+                provider: choice.provider.provider,
+                event: choice.event.id,
+                integrationId: account,
+                filters: {},
+              });
             }}
             className="h-8 rounded-lg border border-border bg-canvas px-2.5 text-[12.5px] text-ink outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-70"
           >
-            {eventOptions.map((event) => (
-              <option key={`${event.provider}:${event.id}`} value={`${event.provider}:${event.id}`}>
-                {event.label}
+            {selectedEvent ? null : (
+              <option value={selectedChoiceValue}>{unavailableEventLabel(trigger.event)}</option>
+            )}
+            {eventChoices.map(({ provider: candidate, event }) => (
+              <option
+                key={`${candidate.provider}:${event.id}`}
+                value={`${candidate.provider}:${event.id}`}
+              >
+                {candidate.label} · {event.label}
               </option>
             ))}
           </select>
         </label>
         <label className="flex min-w-0 flex-col gap-1.5">
-          <span className="text-[12px] font-medium text-ink-subtle">Linear account</span>
+          <span className="text-[12px] font-medium text-ink-subtle">
+            {provider?.label ?? "Provider"} account
+          </span>
           <select
             value={trigger.integrationId}
             disabled={!canEdit}
-            onChange={(event) =>
-              onChange({
-                ...trigger,
-                integrationId: event.target.value,
-                filters: {},
-              })
+            onChange={(changed) =>
+              onChange({ ...trigger, integrationId: changed.target.value, filters: {} })
             }
             className="h-8 rounded-lg border border-border bg-canvas px-2.5 text-[12.5px] text-ink outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-70"
           >
@@ -805,57 +799,16 @@ function LinearEventTriggerEditor({
             ))}
           </select>
         </label>
-        <label className="flex min-w-0 flex-col gap-1.5">
-          <span className="text-[12px] font-medium text-ink-subtle">Team</span>
-          <select
-            aria-label="Team"
-            value={selectedTeam?.id ?? ""}
-            disabled={!canEdit || !teams?.ok}
-            onChange={(event) => {
-              const team = teamOptions.find((candidate) => candidate.id === event.target.value);
-              if (team && (!needsTriageState || team.triageStateId)) {
-                onChange({
-                  ...trigger,
-                  filters: {
-                    ...trigger.filters,
-                    team: {
-                      id: team.id,
-                      name: team.name,
-                      ...(team.key ? { key: team.key } : {}),
-                      ...(needsTriageState && team.triageStateId
-                        ? { metadata: { triageStateId: team.triageStateId } }
-                        : {}),
-                    },
-                  },
-                });
-              }
-            }}
-            className="h-8 rounded-lg border border-border bg-canvas px-2.5 text-[12.5px] text-ink outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-70"
-          >
-            {!selectedTeam?.id ? <option value="">Select a team…</option> : null}
-            {teamOptions
-              .filter((team) => team.id && (!needsTriageState || team.triageStateId))
-              .map((team) => (
-                <option key={team.id} value={team.id}>
-                  {team.key ? `${team.key} · ` : ""}
-                  {team.name}
-                </option>
-              ))}
-          </select>
-          {teams && !teams.ok ? (
-            <span className="text-[11.5px] text-warning">{teams.error}</span>
-          ) : null}
-          {teams?.ok && teams.partial ? (
-            <span className="text-[11.5px] text-warning">
-              Some Linear team details could not be loaded. Refresh to try again.
-            </span>
-          ) : null}
-          {needsTriageState && teams?.ok && teams.teams.every((team) => !team.triageStateId) ? (
-            <span className="text-[11.5px] text-warning">
-              No teams with Triage enabled were found in this Linear workspace.
-            </span>
-          ) : null}
-        </label>
+        {(selectedEvent?.filters ?? []).map((filter: PluginEventFilterDefinitionDto) => (
+          <EventFilterPicker
+            key={filter.id}
+            filter={filter}
+            trigger={trigger}
+            provider={provider ?? null}
+            canEdit={canEdit}
+            onChange={onChange}
+          />
+        ))}
       </div>
       <WorkflowRunContext
         prompt={trigger.prompt}
@@ -864,6 +817,130 @@ function LinearEventTriggerEditor({
       />
     </div>
   );
+}
+
+function EventFilterPicker({
+  filter,
+  trigger,
+  provider: providerOption,
+  canEdit,
+  onChange,
+}: {
+  filter: PluginEventFilterDefinitionDto;
+  trigger: WorkflowEventTriggerDraft;
+  provider: WorkflowEventProviderOption | null;
+  canEdit: boolean;
+  onChange: (trigger: WorkflowTriggerDraft) => void;
+}) {
+  const { provider, event, integrationId } = trigger;
+  const [state, setState] = useState<{
+    key: string;
+    result: WorkflowEventFilterOptionsResult;
+  } | null>(null);
+  const key = `${provider}:${event}:${integrationId}:${filter.resourceType}`;
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadWorkflowEventFilterOptions({
+      provider,
+      resourceType: filter.resourceType,
+      integrationId,
+      event,
+    }).then((result) => {
+      if (!cancelled) setState({ key, result });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [event, filter.resourceType, integrationId, key, provider]);
+
+  const result = state?.key === key ? state.result : null;
+  const selected = trigger.filters[filter.id] ?? null;
+  // Keep a saved value selectable while options load, and after it disappears from the provider.
+  const options =
+    result?.ok && (!selected || result.options.some((option) => option.id === selected.id))
+      ? result.options
+      : result?.ok
+        ? [selected as NonNullable<typeof selected>, ...result.options]
+        : selected
+          ? [selected]
+          : [];
+
+  return (
+    <label className="flex min-w-0 flex-col gap-1.5">
+      <span className="text-[12px] font-medium text-ink-subtle">{filter.label}</span>
+      <select
+        aria-label={filter.label}
+        value={selected?.id ?? ""}
+        disabled={!canEdit || !result?.ok}
+        onChange={(changed) => {
+          const next = options.find((option) => option.id === changed.target.value);
+          if (!next) {
+            onChange({
+              ...trigger,
+              filters: Object.fromEntries(
+                Object.entries(trigger.filters).filter(([id]) => id !== filter.id),
+              ),
+            });
+            return;
+          }
+          onChange({
+            ...trigger,
+            filters: {
+              ...trigger.filters,
+              [filter.id]: {
+                id: next.id,
+                name: next.name,
+                ...(next.key ? { key: next.key } : {}),
+                ...(next.metadata ? { metadata: next.metadata } : {}),
+              },
+            },
+          });
+        }}
+        className="h-8 rounded-lg border border-border bg-canvas px-2.5 text-[12.5px] text-ink outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-70"
+      >
+        <option value="">
+          {filter.required ? `Select a ${filter.label.toLowerCase()}…` : "Any"}
+        </option>
+        {options.map((option) => (
+          <option key={option.id} value={option.id}>
+            {option.key ? `${option.key} · ` : ""}
+            {option.name}
+          </option>
+        ))}
+      </select>
+      {result && !result.ok ? (
+        // The provider rejected the read — most often a revoked token — so send the author to the
+        // account rather than leaving them with an error they cannot act on.
+        <span className="text-[11.5px] text-warning">
+          {result.error}{" "}
+          <Link
+            href={providerOption?.accountHref ?? "/settings/plugins"}
+            className="underline underline-offset-2"
+          >
+            {providerOption ? `Open ${providerOption.label} settings` : "Open plugin settings"}
+          </Link>
+          .
+        </span>
+      ) : null}
+      {result?.ok && result.partial ? (
+        <span className="text-[11.5px] text-warning">
+          Some {filter.label.toLowerCase()} details could not be loaded. Refresh to try again.
+        </span>
+      ) : null}
+      {result?.ok && result.options.length === 0 ? (
+        <span className="text-[11.5px] text-warning">
+          No {filter.label.toLowerCase()} options are available for this account.
+        </span>
+      ) : null}
+    </label>
+  );
+}
+
+function unavailableEventLabel(event: string) {
+  return event === "issue_enters_triage"
+    ? "Issue enters triage (legacy)"
+    : `${event} (unavailable)`;
 }
 
 function WorkflowRunContext({
@@ -1401,12 +1478,25 @@ function serializeWorkflowDraft(draft: WorkflowDraft) {
   return JSON.stringify(draft);
 }
 
-function workflowDraftReadyToSave(draft: WorkflowDraft) {
-  return (
-    draft.trigger.type !== "event" ||
-    (Boolean(draft.trigger.integrationId) &&
-      Object.keys(draft.trigger.filters).length > 0 &&
-      Object.values(draft.trigger.filters).every((filter) => filter.id && filter.name))
+// An event trigger is only worth saving once it can pass server-side validation: an account, and
+// a value for every filter the declaration marks required. An event that declares no filters — or
+// one the plugin no longer declares — is ready as soon as an account is picked.
+function workflowDraftReadyToSave(
+  draft: WorkflowDraft,
+  eventProviders: readonly WorkflowEventProviderOption[],
+) {
+  if (draft.trigger.type !== "event") return true;
+  const { provider, event, integrationId, filters } = draft.trigger;
+  if (!integrationId) return false;
+  if (Object.values(filters).some((filter) => !filter.id || !filter.name)) return false;
+  const declaration = eventProviders
+    .find((candidate) => candidate.provider === provider)
+    ?.events.find((candidate) => candidate.id === event);
+  // The plugin no longer declares this event, so there is nothing to check the filters against.
+  // Let the save through: a server-side rejection is a visible error, silence is not.
+  if (!declaration) return true;
+  return declaration.filters.every(
+    (filter: PluginEventFilterDefinitionDto) => !filter.required || Boolean(filters[filter.id]?.id),
   );
 }
 
