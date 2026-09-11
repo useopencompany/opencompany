@@ -3,10 +3,10 @@ import { getTableConfig, PgDialect } from "drizzle-orm/pg-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   wikiIngestJobs,
-  wikis,
   wikiSourceEventClaims,
   wikiSourceItems,
   wikiSources,
+  wikis,
 } from "./product-schema";
 import { defaultWikiSelectStub, TEST_DEFAULT_WIKI_ID } from "./test-default-wiki";
 
@@ -212,8 +212,7 @@ describe("upsertWikiSourceItemAndEnqueue", () => {
       select: () => ({
         from: (table: unknown) => ({
           where: () => ({
-            limit: async () =>
-              table === wikis ? [{ id: TEST_DEFAULT_WIKI_ID }] : [skippedJob],
+            limit: async () => (table === wikis ? [{ id: TEST_DEFAULT_WIKI_ID }] : [skippedJob]),
           }),
         }),
       }),

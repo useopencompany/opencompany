@@ -436,13 +436,14 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
         input,
         "wiki_page.create",
         {
+          wikiId: input.wikiId,
           clientPageId: input.clientPageId ?? null,
           nodeType: input.nodeType,
           parentPath: input.parentPath,
           title: input.title,
           slug: input.slug ?? null,
         },
-        input.clientPageId ?? deterministicUuid("wiki-page", input, input.idempotencyKey),
+        input.clientPageId ?? deterministicWikiUuid("wiki-page", input, input.idempotencyKey),
       );
       const [replay] = await this.db
         .select()
@@ -508,7 +509,7 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
     } catch (error) {
       if (isUniqueViolation(error)) {
         const id =
-          input.clientPageId ?? deterministicUuid("wiki-page", input, input.idempotencyKey);
+          input.clientPageId ?? deterministicWikiUuid("wiki-page", input, input.idempotencyKey);
         const [replay] = await this.db
           .select()
           .from(wikiPages)
@@ -649,12 +650,13 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
         input,
         "wiki_timeline.create",
         {
+          wikiId: input.wikiId,
           clientEntryId: input.clientEntryId ?? null,
           id: input.id,
           text: input.text,
           at: input.at?.toISOString() ?? null,
         },
-        input.clientEntryId ?? deterministicUuid("wiki-timeline", input, input.idempotencyKey),
+        input.clientEntryId ?? deterministicWikiUuid("wiki-timeline", input, input.idempotencyKey),
       );
       const [replay] = await this.db
         .select()
@@ -685,7 +687,8 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
     } catch (error) {
       if (isUniqueViolation(error)) {
         const id =
-          input.clientEntryId ?? deterministicUuid("wiki-timeline", input, input.idempotencyKey);
+          input.clientEntryId ??
+          deterministicWikiUuid("wiki-timeline", input, input.idempotencyKey);
         const [replay] = await this.db
           .select()
           .from(wikiTimelineEntries)
@@ -836,9 +839,24 @@ function deterministicResourceId(prefix: string, input: { actor: Actor }, key: s
 }
 
 function deterministicUuid(prefix: string, input: { actor: Actor }, key: string) {
-  const digest = createHash("sha256")
-    .update([prefix, input.actor.userId, input.actor.workspaceId, key].join("\n"))
-    .digest("hex");
+  return uuidFromParts([prefix, input.actor.userId, input.actor.workspaceId, key]);
+}
+
+/**
+ * Wiki resources fold the target wiki into their derived id. Without it, the
+ * same actor reusing one Idempotency-Key across two wikis would derive the same
+ * row id in both and collide on the primary key.
+ */
+function deterministicWikiUuid(
+  prefix: string,
+  input: { actor: Actor; wikiId: string },
+  key: string,
+) {
+  return uuidFromParts([prefix, input.actor.userId, input.actor.workspaceId, input.wikiId, key]);
+}
+
+function uuidFromParts(parts: string[]) {
+  const digest = createHash("sha256").update(parts.join("\n")).digest("hex");
   return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-5${digest.slice(13, 16)}-a${digest.slice(17, 20)}-${digest.slice(20, 32)}`;
 }
 

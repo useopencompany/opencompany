@@ -56,9 +56,6 @@ beforeAll(async () => {
   await pglite.exec(
     "CREATE TABLE goat.workspace_members (workspace_id text, user_workos_id text, role text);",
   );
-  await pglite.exec(
-    "CREATE TABLE goat.workspace_billing (workspace_id text, plan text, stripe_product_key text);",
-  );
   // 0269 threads wiki_id through the ingestion tables too. They are not under
   // test here, so stub them with just the columns that migration touches.
   await pglite.exec(`

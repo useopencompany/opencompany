@@ -13,7 +13,6 @@
 
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, sql } from "drizzle-orm";
-import { PRO_STRIPE_PRODUCT_KEY } from "./billing-constants";
 import { getDb } from "./client";
 import { type Wiki, type WikiAccessLevel, wikiMembers, wikis } from "./product-schema";
 
@@ -55,39 +54,32 @@ export function newWikiId() {
 }
 
 /**
- * A user can reach a wiki when the workspace itself is reachable (the same
- * billing gate brains use) and either the wiki is workspace-access and they are
- * a workspace member, or they were invited to the restricted wiki. Mirrors
- * `brainAccessCondition` in ./workspaces so the two entities cannot drift.
+ * A user can reach a wiki when they are a member of its workspace and either the
+ * wiki is workspace-access, or they were invited to the restricted wiki.
+ *
+ * This deliberately does NOT carry the paid-plan clause that
+ * `brainAccessCondition` has. Brain was a gated feature; the wiki is the default
+ * knowledge surface, and `wiki:read`/`wiki:write` are granted to every
+ * authenticated workspace member (see `actorPermissions` in apps/api/src/auth.ts).
+ * Adding a plan clause here would silently lock every non-creator member of a
+ * hobby workspace out of their own wiki. Whether the wiki is plan-gated is a
+ * product decision that belongs where those permissions are granted, not in the
+ * per-wiki visibility check.
  */
 function wikiAccessCondition(userWorkosId: string) {
   return sql`(
     EXISTS (
-      SELECT 1
-      FROM "goat"."workspaces" access_workspace
-      LEFT JOIN "goat"."workspace_billing" access_billing
-        ON access_billing."workspace_id" = access_workspace."id"
-      WHERE access_workspace."id" = ${wikis.workspaceId}
-        AND (
-          access_workspace."created_by_workos_id" = ${userWorkosId}
-          OR (
-            access_billing."plan" = 'pro'
-            AND access_billing."stripe_product_key" = ${PRO_STRIPE_PRODUCT_KEY}
-          )
-        )
+      SELECT 1 FROM "goat"."workspace_members" access_member
+      WHERE access_member."workspace_id" = ${wikis.workspaceId}
+        AND access_member."user_workos_id" = ${userWorkosId}
     )
     AND (
-      (${wikis.access} = 'workspace' AND EXISTS (
-        SELECT 1 FROM "goat"."workspace_members" wm
-        WHERE wm."workspace_id" = ${wikis.workspaceId}
-          AND wm."user_workos_id" = ${userWorkosId}
-      ))
-      OR
-      (${wikis.access} = 'restricted' AND EXISTS (
+      ${wikis.access} = 'workspace'
+      OR EXISTS (
         SELECT 1 FROM "goat"."wiki_members" wmem
         WHERE wmem."wiki_id" = ${wikis.id}
           AND wmem."user_workos_id" = ${userWorkosId}
-      ))
+      )
     )
   )`;
 }
