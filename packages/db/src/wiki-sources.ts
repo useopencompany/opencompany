@@ -10,6 +10,7 @@ import {
   wikiSources,
 } from "./product-schema";
 import type { ActiveWikiSourceProvider } from "./wiki-ingest";
+import { requireIngestionWikiId } from "./wikis";
 
 type DbLike = any;
 
@@ -77,6 +78,7 @@ export async function upsertWikiSource(input: {
   const values = {
     id: newWikiSourceId(),
     workspaceId: input.workspaceId,
+    wikiId: await requireIngestionWikiId(input.workspaceId, db),
     provider: input.provider,
     integrationId: input.integrationId,
     userWorkosId: input.userWorkosId,
@@ -142,6 +144,7 @@ export async function ensureWikiSourceEnabledOnConnect(input: {
     .values({
       id: newWikiSourceId(),
       workspaceId: input.workspaceId,
+      wikiId: await requireIngestionWikiId(input.workspaceId, db),
       provider: input.provider,
       integrationId: input.integrationId,
       userWorkosId: input.userWorkosId,

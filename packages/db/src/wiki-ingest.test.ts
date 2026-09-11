@@ -3,10 +3,12 @@ import { getTableConfig, PgDialect } from "drizzle-orm/pg-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   wikiIngestJobs,
+  wikis,
   wikiSourceEventClaims,
   wikiSourceItems,
   wikiSources,
 } from "./product-schema";
+import { defaultWikiSelectStub, TEST_DEFAULT_WIKI_ID } from "./test-default-wiki";
 
 const { getDbMock, reserveWorkspaceIngestionMock } = vi.hoisted(() => ({
   getDbMock: vi.fn(),
@@ -95,6 +97,7 @@ describe("upsertWikiSourceItemAndEnqueue", () => {
     let jobValues: Record<string, unknown> | undefined;
     let jobConflict: { target?: unknown[] } | undefined;
     const db = {
+      select: defaultWikiSelectStub(),
       insert: (table: unknown) => ({
         values: (values: Record<string, unknown>) => {
           if (table === wikiSourceItems) {
@@ -155,6 +158,8 @@ describe("upsertWikiSourceItemAndEnqueue", () => {
 
     expect(jobValues).toMatchObject({
       workspaceId: "workspace_1",
+      // Sources stay workspace-level; the job records the wiki it writes into.
+      wikiId: TEST_DEFAULT_WIKI_ID,
       sourceItemId: "gwsrc_1",
       status: "queued",
     });
@@ -202,10 +207,13 @@ describe("upsertWikiSourceItemAndEnqueue", () => {
           },
         }),
       }),
+      // Two different lookups come through `select` here: the ingestion target
+      // wiki, and the replayed job row.
       select: () => ({
-        from: () => ({
+        from: (table: unknown) => ({
           where: () => ({
-            limit: async () => [skippedJob],
+            limit: async () =>
+              table === wikis ? [{ id: TEST_DEFAULT_WIKI_ID }] : [skippedJob],
           }),
         }),
       }),
@@ -230,6 +238,7 @@ describe("upsertWikiSourceItemAndEnqueue", () => {
     });
 
     expect(insertedJobValues).toMatchObject({
+      wikiId: TEST_DEFAULT_WIKI_ID,
       status: "skipped",
       skipReason: "routine_status_change",
       result: {

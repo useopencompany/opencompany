@@ -82,7 +82,7 @@ describe("headless knowledge commands", () => {
       {
         baseUrl: "https://api.example.test",
         fetch: fetchMock as typeof fetch,
-        scopeKey: "workspace_1",
+        wikiId: "goat_wiki_1",
       },
     );
 
@@ -90,7 +90,7 @@ describe("headless knowledge commands", () => {
     expect(new URL(sent.url).pathname).toBe("/v1/wiki/pages/launch-plan/timeline");
     expect(sent.headers.get("idempotency-key")).toMatch(/^web-wiki-timeline:/u);
     expect(awaitHeadlessWikiTransactions).toHaveBeenCalledWith([72], {
-      scopeKey: "workspace_1",
+      wikiId: "goat_wiki_1",
       target: "timeline",
     });
   });

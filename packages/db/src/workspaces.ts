@@ -18,10 +18,12 @@ import {
   users,
   type Workspace,
   type WorkspaceRole,
+  wikis,
   workspaceBilling,
   workspaceMembers,
   workspaces,
 } from "./product-schema";
+import { DEFAULT_WIKI_NAME, DEFAULT_WIKI_SLUG, newWikiId } from "./wikis";
 
 type DbClient = any;
 
@@ -368,6 +370,17 @@ export async function createWorkspaceForUser(
     userWorkosId: input.userWorkosId,
     role: "admin" as const,
   };
+  // Every workspace has exactly one default wiki, created atomically with it so
+  // no entry point can ever resolve a workspace that has no wiki to write to.
+  const defaultWikiValues = {
+    id: newWikiId(),
+    workspaceId: input.workspaceId,
+    name: DEFAULT_WIKI_NAME,
+    slug: DEFAULT_WIKI_SLUG,
+    access: "workspace" as const,
+    isDefault: true,
+    createdByWorkosId: input.userWorkosId,
+  };
   let workspace: Workspace | undefined;
 
   // neon-http exposes transactional batches but no interactive transactions;
@@ -376,12 +389,14 @@ export async function createWorkspaceForUser(
     const [workspaceRows] = await db.batch([
       db.insert(workspaces).values(workspaceValues).returning(),
       db.insert(workspaceMembers).values(membershipValues),
+      db.insert(wikis).values(defaultWikiValues),
     ]);
     workspace = workspaceRows[0];
   } else {
     workspace = await db.transaction(async (tx: DbClient) => {
       const [workspace] = await tx.insert(workspaces).values(workspaceValues).returning();
       await tx.insert(workspaceMembers).values(membershipValues);
+      await tx.insert(wikis).values(defaultWikiValues);
       if (!workspace) {
         throw new Error("Could not persist the opencompany workspace.");
       }

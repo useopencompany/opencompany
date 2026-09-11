@@ -21,7 +21,11 @@ import { createTestPGlite } from "./test-pglite";
 import { PostgresWikiCommandRepository } from "./wiki-command-repository";
 
 const WS = "ws-wiki-command";
-const MIGRATIONS = ["0195_goat_wiki.sql", "0220_goat_wiki_folders.sql"];
+const MIGRATIONS = [
+  "0195_goat_wiki.sql",
+  "0220_goat_wiki_folders.sql",
+  "0269_wiki_first_class_entity.sql",
+];
 
 const actor: Actor = {
   userId: "user_1",
@@ -43,8 +47,32 @@ beforeAll(async () => {
   const pglite = await createTestPGlite({ extensions: { pg_trgm } });
   await pglite.exec("CREATE EXTENSION IF NOT EXISTS pg_trgm;");
   await pglite.exec("CREATE SCHEMA goat;");
-  await pglite.exec("CREATE TABLE goat.workspaces (id text PRIMARY KEY);");
   await pglite.exec("CREATE TABLE goat.users (workos_user_id text PRIMARY KEY);");
+  // Wiki access resolution reads the workspace roster and billing gate, so both
+  // stubs have to exist before the wiki migration's backfill runs.
+  await pglite.exec(
+    "CREATE TABLE goat.workspaces (id text PRIMARY KEY, created_by_workos_id text);",
+  );
+  await pglite.exec(
+    "CREATE TABLE goat.workspace_members (workspace_id text, user_workos_id text, role text);",
+  );
+  await pglite.exec(
+    "CREATE TABLE goat.workspace_billing (workspace_id text, plan text, stripe_product_key text);",
+  );
+  // 0269 threads wiki_id through the ingestion tables too. They are not under
+  // test here, so stub them with just the columns that migration touches.
+  await pglite.exec(`
+    CREATE TABLE goat.wiki_sources (id text PRIMARY KEY, workspace_id text NOT NULL);
+    CREATE TABLE goat.wiki_source_items (id text PRIMARY KEY, workspace_id text NOT NULL);
+    CREATE TABLE goat.wiki_ingest_jobs (id text PRIMARY KEY, workspace_id text NOT NULL);
+    CREATE TABLE goat.wiki_source_event_claims (id text PRIMARY KEY, workspace_id text NOT NULL);
+  `);
+  await pglite.exec(
+    `INSERT INTO goat.users (workos_user_id) VALUES ('user_1');
+     INSERT INTO goat.workspaces (id, created_by_workos_id) VALUES ('${WS}', 'user_1');
+     INSERT INTO goat.workspace_members (workspace_id, user_workos_id, role)
+     VALUES ('${WS}', 'user_1', 'admin');`,
+  );
   for (const migration of MIGRATIONS) {
     const sql = await readFile(
       path.join(__dirname, "..", "..", "..", "drizzle", migration),
@@ -54,9 +82,6 @@ beforeAll(async () => {
       await pglite.exec(statement);
     }
   }
-  await pglite.exec(
-    `INSERT INTO goat.workspaces (id) VALUES ('${WS}'); INSERT INTO goat.users (workos_user_id) VALUES ('user_1');`,
-  );
   service = new WikiCommandApplicationService(new PostgresWikiCommandRepository(drizzle(pglite)));
 });
 
