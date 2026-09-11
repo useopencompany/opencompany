@@ -39,7 +39,7 @@ export class WikiAccessError extends Error {
   }
 }
 
-export function wikiSlugFromName(name: string): string {
+function wikiSlugFromName(name: string): string {
   return name
     .toLowerCase()
     .normalize("NFKD")
@@ -97,19 +97,6 @@ export async function listWikisForUser(
     .orderBy(sql`${wikis.isDefault} DESC`, asc(wikis.createdAt));
 }
 
-/** Every wiki in the workspace, ignoring access. Admin surfaces only. */
-export async function listWorkspaceWikis(
-  workspaceId: string,
-  options: { db?: DbClient } = {},
-): Promise<Wiki[]> {
-  const db = options.db ?? getDb();
-  return db
-    .select()
-    .from(wikis)
-    .where(eq(wikis.workspaceId, workspaceId))
-    .orderBy(sql`${wikis.isDefault} DESC`, asc(wikis.createdAt));
-}
-
 /**
  * Resolves the wiki a caller means and authorizes it in one query: an explicit
  * id or slug, otherwise the workspace's default wiki. Returns null when the wiki
@@ -146,20 +133,6 @@ export async function resolveWikiForUser(
   return rows[0] ?? null;
 }
 
-export async function requireWikiForUser(
-  input: {
-    userWorkosId: string;
-    workspaceId: string;
-    wikiId?: string | undefined;
-    wikiSlug?: string | undefined;
-  },
-  options: { db?: DbClient } = {},
-): Promise<Wiki> {
-  const wiki = await resolveWikiForUser(input, options);
-  if (!wiki) throw new WikiAccessError("Wiki not found.");
-  return wiki;
-}
-
 /**
  * The workspace's default wiki id — the ingestion target.
  *
@@ -185,15 +158,6 @@ export async function requireIngestionWikiId(
   const id = rows[0]?.id;
   if (!id) throw new WikiAccessError(`Workspace "${workspaceId}" has no default wiki.`);
   return id;
-}
-
-export async function getWikiById(
-  wikiId: string,
-  options: { db?: DbClient } = {},
-): Promise<Wiki | null> {
-  const db = options.db ?? getDb();
-  const rows: Wiki[] = await db.select().from(wikis).where(eq(wikis.id, wikiId)).limit(1);
-  return rows[0] ?? null;
 }
 
 export async function createWiki(
@@ -230,47 +194,6 @@ export async function createWiki(
     // The creator is always a member, so a restricted wiki is never orphaned.
     await addWikiMember({ wikiId: wiki.id, userWorkosId: input.createdByWorkosId }, { db });
   }
-  return wiki;
-}
-
-/**
- * The workspace's default wiki, created on demand. Workspaces provisioned before
- * wikis became entities are backfilled by migration 0269; this covers workspaces
- * created afterwards and makes the resolution path idempotent.
- */
-export async function ensureDefaultWiki(
-  input: { workspaceId: string; createdByWorkosId: string },
-  options: { db?: DbClient } = {},
-): Promise<Wiki> {
-  const db = options.db ?? getDb();
-  const existing: Wiki[] = await db
-    .select()
-    .from(wikis)
-    .where(and(eq(wikis.workspaceId, input.workspaceId), eq(wikis.isDefault, true)))
-    .limit(1);
-  if (existing[0]) return existing[0];
-  const rows: Wiki[] = await db
-    .insert(wikis)
-    .values({
-      id: newWikiId(),
-      workspaceId: input.workspaceId,
-      name: DEFAULT_WIKI_NAME,
-      slug: DEFAULT_WIKI_SLUG,
-      access: "workspace",
-      isDefault: true,
-      createdByWorkosId: input.createdByWorkosId,
-    })
-    .onConflictDoNothing()
-    .returning();
-  if (rows[0]) return rows[0];
-  // A concurrent caller won the unique partial index; read theirs.
-  const settled: Wiki[] = await db
-    .select()
-    .from(wikis)
-    .where(and(eq(wikis.workspaceId, input.workspaceId), eq(wikis.isDefault, true)))
-    .limit(1);
-  const wiki = settled[0];
-  if (!wiki) throw new WikiAccessError("Failed to resolve the default wiki.");
   return wiki;
 }
 
@@ -328,7 +251,7 @@ export async function listWikiMemberIds(
   return rows.map((row: { userWorkosId: string }) => row.userWorkosId);
 }
 
-export async function addWikiMember(
+async function addWikiMember(
   input: { wikiId: string; userWorkosId: string; addedByWorkosId?: string },
   options: { db?: DbClient } = {},
 ): Promise<void> {

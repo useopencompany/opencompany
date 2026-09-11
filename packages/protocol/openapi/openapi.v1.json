@@ -5639,6 +5639,235 @@
         ],
         "additionalProperties": false
       },
+      "WikiListEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Wiki"
+            },
+            "maxItems": 200
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "Wiki": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "instructions": {
+            "type": "string",
+            "maxLength": 20000
+          },
+          "access": {
+            "$ref": "#/components/schemas/WikiAccess"
+          },
+          "isDefault": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "instructions",
+          "access",
+          "isDefault",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "WikiAccess": {
+        "type": "string",
+        "enum": [
+          "workspace",
+          "restricted"
+        ]
+      },
+      "WikiMutationEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Wiki"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "CreateWikiBody": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "access": {
+            "$ref": "#/components/schemas/WikiAccess"
+          },
+          "instructions": {
+            "type": "string",
+            "maxLength": 20000
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "UpdateWikiBody": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "instructions": {
+            "type": "string",
+            "maxLength": 20000
+          }
+        },
+        "additionalProperties": false
+      },
+      "WikiAccessEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "access": {
+                "$ref": "#/components/schemas/WikiAccess"
+              },
+              "memberIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "maxItems": 500
+              },
+              "workspaceMembers": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "email": {
+                      "type": "string",
+                      "maxLength": 320
+                    },
+                    "name": {
+                      "type": "string",
+                      "maxLength": 320
+                    },
+                    "avatarUrl": {
+                      "type": "string",
+                      "nullable": true,
+                      "maxLength": 2048
+                    },
+                    "role": {
+                      "type": "string",
+                      "enum": [
+                        "admin",
+                        "member"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "email",
+                    "name",
+                    "avatarUrl",
+                    "role"
+                  ],
+                  "additionalProperties": false
+                },
+                "maxItems": 500
+              }
+            },
+            "required": [
+              "access",
+              "memberIds",
+              "workspaceMembers"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SetWikiAccessBody": {
+        "type": "object",
+        "properties": {
+          "access": {
+            "$ref": "#/components/schemas/WikiAccess"
+          },
+          "memberIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "maxItems": 500,
+            "default": []
+          }
+        },
+        "required": [
+          "access"
+        ],
+        "additionalProperties": false
+      },
       "WikiPageListEnvelope": {
         "type": "object",
         "properties": {
@@ -5794,6 +6023,12 @@
       "CreateWikiPageBody": {
         "type": "object",
         "properties": {
+          "wikiId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
           "clientPageId": {
             "type": "string",
             "minLength": 1,
@@ -5833,6 +6068,12 @@
       "UpdateWikiPageBody": {
         "type": "object",
         "properties": {
+          "wikiId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
           "body": {
             "type": "string",
             "maxLength": 1000000
@@ -5901,6 +6142,12 @@
       "DeleteWikiPageBody": {
         "type": "object",
         "properties": {
+          "wikiId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
           "recursive": {
             "type": "boolean"
           }
@@ -5976,6 +6223,12 @@
       "AddWikiTimelineEntryBody": {
         "type": "object",
         "properties": {
+          "wikiId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
           "clientEntryId": {
             "type": "string",
             "minLength": 1,
@@ -18470,7 +18723,7 @@
         }
       }
     },
-    "/v1/wiki/pages": {
+    "/v1/wikis": {
       "get": {
         "tags": [
           "Wiki"
@@ -18485,7 +18738,270 @@
         ],
         "responses": {
           "200": {
-            "description": "All pages in the active workspace Wiki.",
+            "description": "Every wiki in the workspace the actor may read, default first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WikiListEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Wiki"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWikiBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Wiki created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WikiMutationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/wikis/{wikiId}": {
+      "patch": {
+        "tags": [
+          "Wiki"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "wikiId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateWikiBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Wiki name or instructions updated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WikiMutationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/wikis/{wikiId}/access": {
+      "get": {
+        "tags": [
+          "Wiki"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "wikiId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Wiki access level, invited members, and the workspace roster.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WikiAccessEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Wiki"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "wikiId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetWikiAccessBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Wiki access level and member list replaced.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WikiAccessEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/wiki/pages": {
+      "get": {
+        "tags": [
+          "Wiki"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": false,
+            "name": "wikiId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "All pages in the selected Wiki, or the workspace's default Wiki.",
             "content": {
               "application/json": {
                 "schema": {
@@ -21695,6 +22211,17 @@
             },
             "required": false,
             "name": "brainId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": false,
+            "name": "wikiId",
             "in": "query"
           },
           {

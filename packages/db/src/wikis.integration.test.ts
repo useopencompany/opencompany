@@ -12,7 +12,6 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createTestPGlite } from "./test-pglite";
 import {
   createWiki,
-  ensureDefaultWiki,
   listWikiMemberIds,
   listWikisForUser,
   replaceWikiMembers,
@@ -350,12 +349,10 @@ describe("updateWikiSettings", () => {
 });
 
 describe("default wiki", () => {
-  it("resolves the migrated default wiki and is idempotent", async () => {
-    const first = await ensureDefaultWiki({ workspaceId: WS, createdByWorkosId: FOUNDER }, { db });
-    const second = await ensureDefaultWiki({ workspaceId: WS, createdByWorkosId: FOUNDER }, { db });
-    expect(first.id).toBe(second.id);
-    expect(first.isDefault).toBe(true);
-    expect(await requireIngestionWikiId(WS, db)).toBe(first.id);
+  it("resolves the one default wiki the migration seeded", async () => {
+    const resolved = await forUser(FOUNDER);
+    expect(resolved?.isDefault).toBe(true);
+    expect(await requireIngestionWikiId(WS, db)).toBe(resolved?.id);
   });
 
   it("fails closed when a workspace has no default wiki", async () => {
