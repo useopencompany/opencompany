@@ -51,6 +51,7 @@ import { BrainView } from "@/components/BrainView";
 import { BrowserProfilesSettings } from "@/components/BrowserProfilesSettings";
 import { FathomIntegrationSetup } from "@/components/FathomIntegrationSetup";
 import { InferenceSettingsPanel } from "@/components/InferenceSettingsPanel";
+import { IntentPrefetchLink } from "@/components/IntentPrefetchLink";
 import { McpSetupGuide } from "@/components/McpSetupGuide";
 import { RepositorySettings } from "@/components/RepositorySettings";
 import { SettingsContent } from "@/components/SettingsChrome";
@@ -59,6 +60,7 @@ import { TaskDetailPanel } from "@/components/TaskDetailPanel";
 import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
 import { useHydrated } from "@/components/useHydrated";
 import { useTaskRun } from "@/components/useTaskRun";
+import { useTaskSeenAcknowledgement } from "@/components/useTaskSeenAcknowledgement";
 import type { ChatSessionView } from "@/lib/chat-ui";
 import { getHeadlessWorkflows } from "@/lib/headless-automation-collections";
 import { createHeadlessWorkflow } from "@/lib/headless-automation-commands";
@@ -463,6 +465,10 @@ function BrainSettingsRoute({ brain }: { brain: BrainSummaryView }) {
 export function TaskDetailRoute({ taskId }: { taskId: string }) {
   const run = useTaskRun(taskId);
   const { featureFlags } = useAppData();
+  // The route resolves a display id as well as a canonical id, so the acknowledgment keys off the
+  // run's own identifier rather than the one in the URL. A disabled workspace renders the beta
+  // notice instead of a result, so there is nothing there to acknowledge.
+  useTaskSeenAcknowledgement(featureFlags.taskSpawning ? (run?.task.id ?? null) : null);
 
   if (!featureFlags.taskSpawning) return <TasksWorkflowsDisabledRoute />;
 
@@ -750,9 +756,8 @@ export function WorkflowsRoute({
 
 function WorkflowListRow({ workflow }: { workflow: WorkflowListItem }) {
   return (
-    <Link
+    <IntentPrefetchLink
       href={`/workflows/${encodeURIComponent(workflow.slug)}`}
-      prefetch
       className="group flex items-center gap-3 rounded-lg border border-border bg-surface px-3.5 py-3 transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
     >
       <span className="min-w-0 flex-1">
@@ -789,7 +794,7 @@ function WorkflowListRow({ workflow }: { workflow: WorkflowListItem }) {
       <span className="shrink-0 text-[11.5px] leading-4 text-ink-subtle">
         {formatRelativeTime(workflow.updatedAt)}
       </span>
-    </Link>
+    </IntentPrefetchLink>
   );
 }
 
@@ -896,9 +901,8 @@ export function SkillsSettingsRoute({
 
 function SkillListRow({ skill }: { skill: SkillListItemDto }) {
   return (
-    <Link
+    <IntentPrefetchLink
       href={`/settings/skills/${encodeURIComponent(skill.id)}`}
-      prefetch
       className="group flex items-center gap-3 rounded-lg border border-border bg-surface px-3.5 py-3 transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
     >
       <span className="min-w-0 flex-1">
@@ -919,7 +923,7 @@ function SkillListRow({ skill }: { skill: SkillListItemDto }) {
       <span className="shrink-0 text-[11.5px] leading-4 text-ink-subtle">
         {formatRelativeTime(skill.updatedAt)}
       </span>
-    </Link>
+    </IntentPrefetchLink>
   );
 }
 

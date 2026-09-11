@@ -4,14 +4,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppDataProvider, type AppInitialData, useAppData } from "@/components/AppDataProvider";
 import { integrationStateFromRows } from "@/lib/integration-state";
 import {
+  archiveConversationOptimistically,
+  clearOptimisticArchives,
+  getOptimisticArchives,
+} from "@/lib/optimistic-archives";
+import {
   addOptimisticChatSummary,
   clearAllOptimisticChatSummaries,
 } from "@/lib/optimistic-chat-summaries";
-import {
-  archiveReviewItemOptimistically,
-  clearOptimisticReviewArchives,
-  getOptimisticReviewArchives,
-} from "@/lib/optimistic-review-archive";
 
 const mocks = vi.hoisted(() => {
   const liveQueryResult: { data: unknown[]; isLoading: boolean } = {
@@ -75,7 +75,7 @@ describe("AppDataProvider", () => {
 
   afterEach(() => {
     clearAllOptimisticChatSummaries();
-    clearOptimisticReviewArchives();
+    clearOptimisticArchives();
   });
 
   it("server-renders from initial data without starting live queries", () => {
@@ -593,11 +593,41 @@ describe("AppDataProvider", () => {
     expect(screen.getByTestId("review-queue").dataset.count).toBe("2");
 
     act(() => {
-      archiveReviewItemOptimistically("chat_unread_1");
+      archiveConversationOptimistically("chat_unread_1");
     });
 
     expect(screen.getByTestId("review-queue").dataset.itemIds).toBe("chat_unread_2");
     expect(screen.getByTestId("review-queue").dataset.count).toBe("1");
+  });
+
+  // The sidebar and the review queue read the same conversation projection, so one archive has to
+  // empty the row from both rather than leaving it listed in the sidebar for the round trip.
+  it("drops an optimistically archived chat from the sidebar list", async () => {
+    const data = initialData();
+    // The sidebar keeps idle chats for seven days, so these have to be recent to be listed at all.
+    const updatedAt = new Date().toISOString();
+    mockLiveQueryRows({
+      chats: [
+        reviewChatRow("chat_open_1", { updatedAt }),
+        reviewChatRow("chat_open_2", { updatedAt: new Date(Date.now() - 1_000).toISOString() }),
+      ],
+    });
+
+    render(
+      <AppDataProvider initialData={data}>
+        <RecentChatStateProbe />
+      </AppDataProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("recent").dataset.chatIds).toBe("chat_open_1,chat_open_2"),
+    );
+
+    act(() => {
+      archiveConversationOptimistically("chat_open_1");
+    });
+
+    expect(screen.getByTestId("recent").dataset.chatIds).toBe("chat_open_2");
   });
 
   // The hint only covers the gap before the projection. Keeping it afterwards would hide the
@@ -610,7 +640,7 @@ describe("AppDataProvider", () => {
     });
 
     act(() => {
-      archiveReviewItemOptimistically("chat_unread_1");
+      archiveConversationOptimistically("chat_unread_1");
     });
     render(
       <AppDataProvider initialData={data}>
@@ -618,7 +648,7 @@ describe("AppDataProvider", () => {
       </AppDataProvider>,
     );
 
-    await waitFor(() => expect(getOptimisticReviewArchives().size).toBe(0));
+    await waitFor(() => expect(getOptimisticArchives().size).toBe(0));
   });
 });
 

@@ -5,6 +5,7 @@ import type { Actor } from "@opencompany/core";
 import { drizzle } from "drizzle-orm/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { startBrainImportRunIdempotent, startWikiImportRunIdempotent } from "./brain-import";
+import { createTestPGlite } from "./test-pglite";
 
 const migrationPaths = [
   "drizzle/0208_goat_headless_knowledge_idempotency.sql",
@@ -18,7 +19,7 @@ describe("startBrainImportRunIdempotent", () => {
   let db: ReturnType<typeof drizzle>;
 
   beforeAll(async () => {
-    database = new PGlite();
+    database = await createTestPGlite();
     await database.exec(BASE_SCHEMA);
     for (const migrationPath of migrationPaths) {
       const migration = await readFile(migrationPath, "utf8");
