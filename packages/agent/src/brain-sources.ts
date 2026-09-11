@@ -42,7 +42,7 @@ import {
   type HubspotObjectTypeRef,
   isHubspotObjectType,
 } from "@opencompany/db/hubspot";
-import { loadIntegrationCredential } from "@opencompany/db/integrations";
+import { loadIntegrationCredential, markIntegrationStatus } from "@opencompany/db/integrations";
 import {
   LINEAR_EVENT_TYPES,
   LINEAR_MCP_EXTERNAL_ID,
@@ -81,6 +81,7 @@ import {
   loadOwnGoogleDriveAccount,
 } from "./integrations/google-drive-source";
 import { GRANOLA_MCP_EXTERNAL_ID } from "./integrations/granola-mcp";
+import { isLinearAuthenticationError, linearGraphqlRequest } from "./integrations/linear-api";
 
 type DbLike = any;
 
@@ -602,19 +603,19 @@ export class BrainSourceApplicationService {
     let loadedTeamPage = false;
     do {
       try {
-        const page = await linearGraphqlRequest<{
+        const page = await this.linearOptionsRequest<{
           teams?: {
             nodes?: Array<{ id?: string; key?: string; name?: string }>;
             pageInfo?: { hasNextPage?: boolean; endCursor?: string };
           };
-        }>({
+        }>(actor, integrationId, {
           token,
           query: `query LinearTeams($after: String) {
-            teams(first: 100, after: $after) {
-              nodes { id key name }
-              pageInfo { hasNextPage endCursor }
-            }
-          }`,
+              teams(first: 100, after: $after) {
+                nodes { id key name }
+                pageInfo { hasNextPage endCursor }
+              }
+            }`,
           variables: cursor ? { after: cursor } : {},
         });
         if (!page.teams) throw new Error("Linear GraphQL returned no team data.");
@@ -631,7 +632,7 @@ export class BrainSourceApplicationService {
           ? (page.teams.pageInfo.endCursor ?? undefined)
           : undefined;
       } catch (error) {
-        if (!loadedTeamPage) throw error;
+        if (!loadedTeamPage || error instanceof CoreError) throw error;
         partial = true;
         cursor = undefined;
       }
@@ -647,7 +648,7 @@ export class BrainSourceApplicationService {
               nodes?: Array<{ id?: string; team?: { id?: string } }>;
               pageInfo?: { hasNextPage?: boolean; endCursor?: string };
             };
-          } = await linearGraphqlRequest({
+          } = await this.linearOptionsRequest(actor, integrationId, {
             token,
             query: `query LinearTriageStates($after: String) {
               workflowStates(first: 100, after: $after, filter: { type: { eq: "triage" } }) {
@@ -667,7 +668,8 @@ export class BrainSourceApplicationService {
             ? (page.workflowStates.pageInfo.endCursor ?? undefined)
             : undefined;
         } while (cursor);
-      } catch {
+      } catch (error) {
+        if (error instanceof CoreError) throw error;
         partial = true;
       }
       for (const team of teams) {
@@ -677,6 +679,27 @@ export class BrainSourceApplicationService {
     }
     teams.sort((a, b) => a.name.localeCompare(b.name));
     return { provider: "linear", teams, partial };
+  }
+
+  private async linearOptionsRequest<T>(
+    actor: Actor,
+    integrationId: string,
+    request: Parameters<typeof linearGraphqlRequest<T>>[0],
+  ) {
+    try {
+      return await linearGraphqlRequest<T>(request);
+    } catch (error) {
+      if (!isLinearAuthenticationError(error)) throw error;
+      await markIntegrationStatus({
+        userWorkosId: actor.userId,
+        integrationId,
+        provider: "linear",
+        status: "needs_reauth",
+        statusReason: "Linear rejected the saved connection. Reconnect Linear.",
+        db: this.db,
+      });
+      throw new CoreError("conflict", "Reconnect Linear in Settings first.");
+    }
   }
 
   private async listGoogleDriveOptions(
@@ -1241,26 +1264,4 @@ function sanitizeAttioObjectTypeRefs(refs: AttioObjectTypeRef[]) {
     seen.add(ref.id);
     return true;
   });
-}
-
-async function linearGraphqlRequest<T>(input: {
-  token: string;
-  query: string;
-  variables?: Record<string, unknown>;
-}): Promise<T> {
-  const response = await fetch("https://api.linear.app/graphql", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${input.token}` },
-    body: JSON.stringify({
-      query: input.query,
-      ...(input.variables ? { variables: input.variables } : {}),
-    }),
-  });
-  if (!response.ok) throw new Error(`Linear GraphQL request failed with ${response.status}.`);
-  const result = (await response.json()) as { data?: T; errors?: Array<{ message?: string }> };
-  if (result.errors?.length) {
-    throw new Error(`Linear GraphQL returned ${result.errors[0]?.message ?? "an unknown error"}.`);
-  }
-  if (!result.data) throw new Error("Linear GraphQL returned no data.");
-  return result.data;
 }
