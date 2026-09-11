@@ -2,6 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { LinearTeamListResult } from "@/lib/brain-source-actions";
 import { WorkflowEditor as WorkflowEditorComponent } from "./WorkflowEditor";
 
 const routerMock = vi.hoisted(() => ({
@@ -16,11 +17,13 @@ const workflowActionsMock = vi.hoisted(() => ({
 }));
 
 const brainSourceActionsMock = vi.hoisted(() => ({
-  listLinearTeams: vi.fn(async () => ({
-    ok: true as const,
-    teams: [{ id: "team_1", name: "Core", key: "CORE", triageStateId: "state_triage" }],
-    partial: false,
-  })),
+  listLinearTeams: vi.fn(
+    async (): Promise<LinearTeamListResult> => ({
+      ok: true,
+      teams: [{ id: "team_1", name: "Core", key: "CORE", triageStateId: "state_triage" }],
+      partial: false,
+    }),
+  ),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -275,37 +278,17 @@ describe("WorkflowEditor", () => {
         workflow={workflow}
         canEdit
         skillCatalog={[]}
-        linearAccounts={[{ integrationId: "gint_1", label: "Acme Linear" }]}
-        workflowEvents={[
-          {
-            provider: "linear",
-            id: "issue.created",
-            label: "Issue created",
-            description: "Starts when an issue is created.",
-            delivery: "webhook",
-            filters: [
-              {
-                id: "team",
-                label: "Team",
-                kind: "integration_resource",
-                resourceType: "team",
-                required: true,
-              },
-            ],
-          },
-        ]}
+        eventProviders={[linearEventProvider()]}
       />,
     );
 
     fireEvent.click(screen.getByRole("radio", { name: "On an event" }));
     await act(async () => Promise.resolve());
     expect(workflowActionsMock.update).not.toHaveBeenCalled();
-    expect(brainSourceActionsMock.listLinearTeams).toHaveBeenCalledWith("gint_1", {
-      includeTriageStateIds: false,
-    });
+    expect(brainSourceActionsMock.listLinearTeams).toHaveBeenCalledWith("gint_1", {});
     expect(screen.getByRole("option", { name: "CORE · Core" })).toBeInTheDocument();
     expect(
-      screen.getByText("Some Linear team details could not be loaded. Refresh to try again."),
+      screen.getByText("Some team details could not be loaded. Refresh to try again."),
     ).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Team"), { target: { value: "team_1" } });
@@ -333,6 +316,133 @@ describe("WorkflowEditor", () => {
           prompt: "Investigate the issue and propose the next step.",
         },
       }),
+    );
+  });
+
+  it("saves a filter-free poll-delivered event trigger as soon as an account is bound", async () => {
+    render(
+      <WorkflowEditor
+        workflow={workflow}
+        canEdit
+        skillCatalog={[]}
+        eventProviders={[granolaEventProvider()]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("radio", { name: "On an event" }));
+    await act(async () => Promise.resolve());
+
+    expect(
+      screen.getByText("Starts a workflow once Granola finishes the AI summary for a meeting."),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("Team")).not.toBeInTheDocument();
+    expect(brainSourceActionsMock.listLinearTeams).not.toHaveBeenCalled();
+
+    await advanceAutosave();
+
+    expect(workflowActionsMock.update).toHaveBeenCalledWith(
+      "workflow_1",
+      expect.objectContaining({
+        trigger: {
+          type: "event",
+          provider: "granola",
+          event: "meeting.notes_ready",
+          integrationId: "gint_granola_1",
+          filters: {},
+          prompt: "Run this workflow.",
+        },
+      }),
+    );
+  });
+
+  it("sends the author to the account when a filter's options cannot be read", async () => {
+    brainSourceActionsMock.listLinearTeams.mockResolvedValueOnce({
+      ok: false,
+      error: "Linear rejected the saved connection.",
+    });
+    render(
+      <WorkflowEditor
+        workflow={workflow}
+        canEdit
+        skillCatalog={[]}
+        eventProviders={[linearEventProvider()]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("radio", { name: "On an event" }));
+    await act(async () => Promise.resolve());
+
+    expect(screen.getByText(/Linear rejected the saved connection\./)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Linear settings" })).toHaveAttribute(
+      "href",
+      "/settings/plugins/linear",
+    );
+  });
+
+  it("keeps autosaving a trigger whose event the plugin no longer declares", async () => {
+    render(
+      <WorkflowEditor
+        workflow={{
+          ...workflow,
+          trigger: {
+            type: "event",
+            provider: "granola",
+            event: "meeting.notes_ready",
+            integrationId: "gint_granola_1",
+            filters: {},
+            prompt: "Draft the follow-ups.",
+          },
+        }}
+        canEdit
+        skillCatalog={[]}
+        eventProviders={[]}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Step 1 name"), { target: { value: "Edited" } });
+    await advanceAutosave();
+
+    expect(workflowActionsMock.update).toHaveBeenCalledWith(
+      "workflow_1",
+      expect.objectContaining({ steps: [expect.objectContaining({ title: "Edited" })] }),
+    );
+  });
+
+  it("does not offer an event whose provider has no account to bind it to", async () => {
+    render(
+      <WorkflowEditor
+        workflow={workflow}
+        canEdit
+        skillCatalog={[]}
+        eventProviders={[granolaEventProvider(), { ...linearEventProvider(), accounts: [] }]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("radio", { name: "On an event" }));
+    await act(async () => Promise.resolve());
+
+    expect(
+      screen.getByRole("option", { name: "Granola · Meeting notes ready" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: "Linear · Issue created" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("points at the connect step when a plugin has events on but no account", async () => {
+    render(
+      <WorkflowEditor
+        workflow={workflow}
+        canEdit
+        skillCatalog={[]}
+        eventProviders={[{ ...granolaEventProvider(), accounts: [] }]}
+      />,
+    );
+
+    expect(screen.getByRole("radio", { name: "On an event" })).toBeDisabled();
+    expect(screen.getByRole("link", { name: "Add a Granola API key" })).toHaveAttribute(
+      "href",
+      "/wiki/sources",
     );
   });
 
@@ -676,6 +786,52 @@ describe("WorkflowEditor", () => {
     expect(workflowActionsMock.archive).not.toHaveBeenCalled();
   });
 });
+
+function linearEventProvider() {
+  return {
+    provider: "linear",
+    label: "Linear",
+    accountHref: "/settings/plugins/linear",
+    accountLabel: "Connect Linear",
+    accounts: [{ integrationId: "gint_1", label: "Acme Linear" }],
+    events: [
+      {
+        id: "issue.created",
+        label: "Issue created",
+        description: "Starts when an issue is created.",
+        delivery: "webhook" as const,
+        filters: [
+          {
+            id: "team",
+            label: "Team",
+            kind: "integration_resource" as const,
+            resourceType: "team",
+            required: true,
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function granolaEventProvider() {
+  return {
+    provider: "granola",
+    label: "Granola",
+    accountHref: "/wiki/sources",
+    accountLabel: "Add a Granola API key",
+    accounts: [{ integrationId: "gint_granola_1", label: "ada@example.com" }],
+    events: [
+      {
+        id: "meeting.notes_ready",
+        label: "Meeting notes ready",
+        description: "Starts a workflow once Granola finishes the AI summary for a meeting.",
+        delivery: "poll" as const,
+        filters: [],
+      },
+    ],
+  };
+}
 
 async function advanceAutosave() {
   await act(async () => {

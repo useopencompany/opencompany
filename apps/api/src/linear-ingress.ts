@@ -12,19 +12,22 @@ import {
 import { verifyLinearWebhookSignature } from "@opencompany/agent/integrations/linear-signature";
 import { connectLinearIngestIntegration } from "@opencompany/db/integrations";
 import {
-  enqueueWorkflowEventRuns,
   insertLinearIssueEvents,
   type LinearIssueEventInsert,
   linearEventTypeFor,
   linearRouteMatchesEvent,
   linearSelectedTeamIds,
+  linearWorkflowEventContext,
   linearWorkflowRouteMatchesEvent,
   listEnabledLinearBrainSourceRoutes,
   listEnabledLinearWikiSourceRoutes,
   listLinearIntegrationsForOrganization,
-  listWorkflowEventTriggerRoutes,
 } from "@opencompany/db/linear";
 import type { LinearEventAction, LinearEventEntityType } from "@opencompany/db/product-schema";
+import {
+  enqueueWorkflowEventRuns,
+  listWorkflowEventTriggerRoutes,
+} from "@opencompany/db/workflow-event-routes";
 import { createLogger } from "@opencompany/observability";
 import type { ApiIdentityVerifier } from "./auth";
 import { type IngressSession, resolveIngressSession, sessionRedirect } from "./ingress-session";
@@ -266,8 +269,7 @@ async function handleLinearEvent(
         routes: matchedWorkflowRoutes,
         deliveryId,
         eventAt: normalizedEventTime,
-        issue: data,
-        ...(envelope.url ? { issueUrl: envelope.url } : {}),
+        context: linearWorkflowEventContext(data, envelope.url ?? null),
       },
       db,
     );

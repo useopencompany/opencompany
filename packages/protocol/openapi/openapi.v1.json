@@ -13108,7 +13108,8 @@
           "delivery": {
             "type": "string",
             "enum": [
-              "webhook"
+              "webhook",
+              "poll"
             ]
           },
           "filters": {
