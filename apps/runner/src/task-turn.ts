@@ -606,8 +606,9 @@ export function buildTaskFailureCompletion(input: {
   decision?: TaskRunDecision | null;
 }): TaskTurnCompletion {
   const error = input.error.trim().slice(0, CODING_ERROR_MAX_LENGTH);
+  // Detect on the full error: the stored copy is truncated and can drop the trailing limit notice.
   const automaticDecision = executionTurnLimitRetryDecision({
-    error,
+    error: input.error,
     attempts: input.context.task.attempts,
   });
   const decision = automaticDecision ?? input.decision;

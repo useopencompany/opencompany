@@ -326,6 +326,23 @@ describe("session-backed task turns", () => {
     ).toMatchObject({ disposition: "fail", nextTurn: null });
   });
 
+  it("resumes a task when the safety-limit notice trails a long engine error", () => {
+    expect(
+      buildTaskFailureCompletion({
+        context: context(workflowSpec()),
+        error: `${"stack frame\n".repeat(400)}Internal error: Reached maximum number of turns (250)`,
+        decision: { disposition: "fail", comment: "Start over from a clean state." },
+      }),
+    ).toMatchObject({
+      disposition: "retry",
+      outcomeComment: "Continuing from saved work after this run reached its execution limit.",
+      nextTurn: {
+        prompt:
+          "The previous run reached its execution limit. Continue from the existing sandbox and repository state. Inspect the current work first, then finish the task without repeating completed steps.",
+      },
+    });
+  });
+
   it("continues a successful workflow turn when no outcome was reported", () => {
     const completion = buildTaskTurnCompletion({
       context: context(workflowSpec()),
