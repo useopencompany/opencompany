@@ -58,6 +58,7 @@ type Context = {
   signal: AbortSignal;
   mentionedSkillIds: string[];
   approvalContinuation: boolean;
+  prelistedSkillIds?: readonly string[];
 };
 
 export type HostTools = {
@@ -108,6 +109,10 @@ export async function loadHostTools(
       mentionedSkillIds: context.mentionedSkillIds,
     }),
   );
+  const availableSkillIds = new Set(bootstrap.skills.map((skill) => skill.id));
+  const prelistedSkillIds = context.approvalContinuation
+    ? [...availableSkillIds]
+    : (context.prelistedSkillIds ?? []).filter((skillId) => availableSkillIds.has(skillId));
   const call = (
     operation: ChatHostToolGatewayRequest["operation"],
     input?: object,
@@ -179,9 +184,7 @@ export async function loadHostTools(
       ? {
           skills: {
             catalog: bootstrap.skills,
-            ...(context.approvalContinuation
-              ? { prelistedSkillIds: bootstrap.skills.map((skill) => skill.id) }
-              : {}),
+            ...(prelistedSkillIds.length > 0 ? { prelistedSkillIds } : {}),
             execute: async ({ skill }) => {
               try {
                 return (await call("use_skill", { skill })) as Awaited<

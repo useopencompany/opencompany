@@ -2,12 +2,13 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createTestPGlite } from "./test-pglite";
 
 describe("0246 Task waiting status", () => {
   let database: PGlite;
 
   beforeEach(async () => {
-    database = new PGlite();
+    database = await createTestPGlite();
     await database.exec(`
       CREATE SCHEMA goat;
       CREATE TABLE goat.tasks (

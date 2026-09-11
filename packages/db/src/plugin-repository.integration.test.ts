@@ -13,6 +13,7 @@ import {
 import { PostgresPluginRepository } from "./plugin-repository";
 import { loadChatSessionPluginRuntime } from "./plugin-runtime-repository";
 import { PostgresSkillBundleRepository } from "./skill-bundle-repository";
+import { createTestPGlite } from "./test-pglite";
 
 describe("Postgres immutable Plugin repository", () => {
   let database: PGlite;
@@ -22,7 +23,7 @@ describe("Postgres immutable Plugin repository", () => {
   const deletePluginDataBlob = vi.fn(async () => undefined);
 
   beforeAll(async () => {
-    database = new PGlite();
+    database = await createTestPGlite();
     await database.exec(`
       CREATE SCHEMA goat;
       CREATE TABLE goat.plugin_ownership_rollout (id text PRIMARY KEY, personal_enabled boolean NOT NULL);

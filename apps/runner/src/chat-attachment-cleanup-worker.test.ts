@@ -1,5 +1,5 @@
-import { PGlite } from "@electric-sql/pglite";
 import type { PooledDbClient, PooledDbHandle } from "@opencompany/db/pool";
+import { createTestPGlite } from "@opencompany/db/test-pglite";
 import { BlobNotFoundError } from "@vercel/blob";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -216,7 +216,7 @@ describe("chat attachment cleanup", () => {
   });
 
   it("reaches an eligible upload past a large prefix of expired claimed commands", async () => {
-    const database = await PGlite.create();
+    const database = await createTestPGlite();
     try {
       await database.exec(`
         CREATE SCHEMA goat;

@@ -101,6 +101,7 @@ import {
   emptyCodingChatHistory,
   loadCodingChatHistory,
 } from "./coding-chat-history";
+import { codingChatSkillPromptLines } from "./coding-chat-skills";
 import { settledCodingSandboxIdleTimeoutMs } from "./coding-sandbox-lifecycle";
 import { CODING_WORKSPACE_SANDBOX_NETWORK } from "./coding-workspace-runtime";
 import { getDb } from "./db";
@@ -1368,7 +1369,7 @@ function buildClaudeChatTask(input: {
     ...claudeBackgroundTaskPromptLines(input.taskContext),
     "Answer conversationally. Run commands or edit files only when the message calls for it, and keep replies concise unless the user asks for detail.",
     CLAUDE_CHAT_SCHEDULE_WAKEUP_CONTRACT,
-    ...claudeChatSkillPromptLines(input.skillPaths),
+    ...codingChatSkillPromptLines(input.skillPaths),
     ...codingChatHistoryPromptLines(
       input.conversationHistory,
       input.historyAttachmentMaterialization,
@@ -1418,7 +1419,7 @@ function buildClaudeChatRecoveryTask(input: {
     ...claudeBackgroundTaskPromptLines(input.taskContext),
     "If the interrupted work already finished, report the final result. If additional work is needed, finish it and then answer concisely.",
     CLAUDE_CHAT_SCHEDULE_WAKEUP_CONTRACT,
-    ...claudeChatSkillPromptLines(input.skillPaths),
+    ...codingChatSkillPromptLines(input.skillPaths),
     ...codingChatHistoryPromptLines(
       input.conversationHistory,
       input.historyAttachmentMaterialization,
@@ -1487,17 +1488,6 @@ function claudeBackgroundTaskPromptLines(context: TaskTurnContext | undefined) {
         : null,
     context.harnessSpec.systemPrompt.trim() || null,
   ].filter((line): line is string => line !== null);
-}
-
-function claudeChatSkillPromptLines(skillPaths: string[]) {
-  if (skillPaths.length === 0) return [];
-  return [
-    "",
-    "<invoked_skills>",
-    "The user invoked these skills with this message. Read each SKILL.md and follow its instructions:",
-    ...skillPaths.map((path) => `- ${path}`),
-    "</invoked_skills>",
-  ];
 }
 
 function lastLine(value: string) {

@@ -11,13 +11,14 @@ import {
   PostgresSkillBundleRepository,
   readChatSkillBundleFile,
 } from "./skill-bundle-repository";
+import { createTestPGlite } from "./test-pglite";
 
 describe("Postgres immutable Skill bundle repository", () => {
   let database: PGlite;
   let repository: PostgresSkillBundleRepository;
 
   beforeAll(async () => {
-    database = new PGlite();
+    database = await createTestPGlite();
     await database.exec(`
       CREATE SCHEMA goat;
       CREATE TABLE goat.workspaces (id text PRIMARY KEY);
@@ -1079,7 +1080,7 @@ function actor(overrides: Partial<Actor> = {}): Actor {
 
 describe("Personal and Company skill migration", () => {
   it("keeps legacy active and archived installations Company-scoped with shared revision history", async () => {
-    const legacy = new PGlite();
+    const legacy = await createTestPGlite();
     try {
       await legacy.exec(
         "CREATE SCHEMA goat; CREATE TABLE goat.workspaces (id text PRIMARY KEY); INSERT INTO goat.workspaces VALUES ('legacy_workspace');",

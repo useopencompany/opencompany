@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createTestPGlite } from "./test-pglite";
 
 const migrationPath = path.resolve(
   import.meta.dirname,
@@ -13,7 +14,7 @@ describe("legacy Brain ingestion cutover migration", () => {
   let database: PGlite;
 
   beforeAll(async () => {
-    database = new PGlite();
+    database = await createTestPGlite();
     await database.exec(BASE_SCHEMA);
     await database.exec(FIXTURE);
     const migration = await readFile(migrationPath, "utf8");

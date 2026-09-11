@@ -1,4 +1,5 @@
 import { PGlite } from "@electric-sql/pglite";
+import { createTestPGlite } from "./test-pglite";
 
 /**
  * Integration tests that assert against migrations need an untouched database per test, but
@@ -12,7 +13,7 @@ import { PGlite } from "@electric-sql/pglite";
 export async function snapshotPGliteSchema(
   build: (database: PGlite) => Promise<unknown>,
 ): Promise<() => Promise<PGlite>> {
-  const builder = new PGlite();
+  const builder = await createTestPGlite();
   try {
     await build(builder);
     // These snapshots live in memory for the duration of one test file, so compressing them would
