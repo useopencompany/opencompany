@@ -290,8 +290,7 @@ function CustomMcpForm({
           </div>
         ) : null}
         <p className="text-xs leading-5 text-ink-subtle">
-          Your credentials and permissions are personal. OAuth sign-in and local servers are not
-          supported yet.
+          OAuth sign-in and local servers are not supported yet.
         </p>
         {preview ? (
           <div className="rounded-lg border border-border p-4" role="status">
@@ -377,12 +376,7 @@ export function CustomMcpPluginDetail({
       backLink={{ href: "/settings/plugins", label: "Plugins" }}
     >
       <div className="max-w-2xl space-y-7">
-        <div className="space-y-2">
-          <p className="break-all text-sm text-ink-muted">{status.url}</p>
-          <p className="text-xs text-ink-subtle">
-            Installed for you. Your account and permissions are personal.
-          </p>
-        </div>
+        <p className="break-all text-sm text-ink-muted">{status.url}</p>
         {error ? (
           <p role="alert" className="text-sm text-red-600">
             {error}
