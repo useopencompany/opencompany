@@ -92,6 +92,7 @@ import {
   type GitHubCommandAuth,
   githubSandboxTokenMinimumValidityMs,
   loadGitHubAuthForUser,
+  logCodingSandboxAcquisition,
   shouldAppendGitHubAuthNotice,
 } from "./coding-agent-shared";
 import {
@@ -422,6 +423,11 @@ export async function runClaudeCodeChatTurn(input: {
       }),
       network: CODING_WORKSPACE_SANDBOX_NETWORK,
       idleTimeoutMs: env.codexChatIdleTimeoutMs,
+      onLatency: logCodingSandboxAcquisition({
+        engine: "claude_code",
+        codexChatSessionId: session.id,
+        turnId: turn.id,
+      }),
     });
   } catch (error) {
     const abort = shouldAbort?.();

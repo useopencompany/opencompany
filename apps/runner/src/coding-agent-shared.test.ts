@@ -34,6 +34,7 @@ vi.mock("./db", () => ({ getDb: () => dbMocks.db }));
 
 import {
   buildGitHubCommandEnv,
+  codingSandboxAcquisitionLogFields,
   GITHUB_RECONNECT_NOTICE,
   loadGitHubAuthForUser,
   loadGitHubUserAuthForUser,
@@ -212,6 +213,56 @@ describe("GitHub auth notices", () => {
         "GitHub access is temporarily unavailable. This turn continued without GitHub access.",
       ),
     ).toBe(true);
+  });
+});
+
+describe("codingSandboxAcquisitionLogFields", () => {
+  const context = {
+    engine: "claude_code" as const,
+    codexChatSessionId: "codex_chat_session_1",
+    turnId: "codex_chat_turn_1",
+  };
+
+  it("maps a successful resume with the requested and acquired sandbox ids", () => {
+    expect(
+      codingSandboxAcquisitionLogFields(context, {
+        operation: "connect",
+        outcome: "success",
+        latencyMs: 1_250,
+        sandboxId: "sbx_1",
+        requestedSandboxId: "sbx_1",
+      }),
+    ).toEqual({
+      event: "opencompany.runner_coding_sandbox_acquisition",
+      engine: "claude_code",
+      codex_chat_session_id: "codex_chat_session_1",
+      turn_id: "codex_chat_turn_1",
+      operation: "connect",
+      outcome: "success",
+      latency_ms: 1_250,
+      sandbox_id: "sbx_1",
+      requested_sandbox_id: "sbx_1",
+    });
+  });
+
+  it("omits absent identifiers and carries the failure name", () => {
+    expect(
+      codingSandboxAcquisitionLogFields(context, {
+        operation: "create",
+        outcome: "error",
+        latencyMs: 30_000,
+        errorName: "RateLimitError",
+      }),
+    ).toEqual({
+      event: "opencompany.runner_coding_sandbox_acquisition",
+      engine: "claude_code",
+      codex_chat_session_id: "codex_chat_session_1",
+      turn_id: "codex_chat_turn_1",
+      operation: "create",
+      outcome: "error",
+      latency_ms: 30_000,
+      error_name: "RateLimitError",
+    });
   });
 });
 
