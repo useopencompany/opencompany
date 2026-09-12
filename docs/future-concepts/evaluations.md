@@ -2,7 +2,11 @@
 
 - Status: Proposed
 - Original research: 2026-07-07
-- Last reviewed: 2026-08-26
+- Last reviewed: 2026-09-12
+
+The first concrete slice of this proposal is scoped in [Harness bench](./harness-bench.md)
+(PRO-271): main-Chat scenarios against the real harness with deterministic grading. This document
+remains the broader north star covering Workflow planning and durable Task execution.
 
 ## Goal
 
