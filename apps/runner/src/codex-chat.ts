@@ -110,9 +110,9 @@ import {
   armSandboxActiveTimeoutById,
   armSandboxIdleTimeout,
   createOrConnectSandbox,
-  isCommandTimeoutError,
   isRetryableCommandStreamError,
   isRetryableSandboxAcquisitionError,
+  isUnresponsiveGuestError,
   managedSandboxMetadata,
   type SandboxHandle,
   writeSandboxTextFiles,
@@ -362,6 +362,11 @@ export async function runCodexChatTurn(input: {
   let pluginMcpQuiesced = false;
   let pluginCheckpointStarted = false;
   let executionStage = "persist_sandbox_replacement";
+  // Every sandbox command before this flips is one the runner issues itself to prepare the turn.
+  // They are short, fixed shell calls, so a guest that stops answering them is wedged
+  // infrastructure, not a failed run. Set at `run_turn` rather than enumerated per stage so a new
+  // preflight step is covered without having to remember this boundary.
+  let engineStarted = false;
   let redact = (value: string) => value;
   let projector: ReturnType<typeof createExternalEngineProjector> | null = null;
   const activeProjector = async () => {
@@ -533,36 +538,12 @@ export async function runCodexChatTurn(input: {
     checkExternalAbort();
     if (serializedAuthJson) {
       executionStage = "write_auth";
-      try {
-        await sandbox.files.write(`${CODEX_CHAT_HOME}/auth.json`, serializedAuthJson);
-      } catch (error) {
-        // Auth staging is idempotent and happens before the engine starts, so a provider timeout
-        // is safe to replay through the durable infrastructure retry path.
-        if (isCommandTimeoutError(error)) {
-          throw new CodexChatRetryableInfrastructureError(
-            "Codex authentication could not be staged in the sandbox.",
-            error,
-            failureDiagnostic(executionStage, error, redact),
-          );
-        }
-        throw error;
-      }
+      await sandbox.files.write(`${CODEX_CHAT_HOME}/auth.json`, serializedAuthJson);
       authCacheStaged = true;
       checkExternalAbort();
     }
     executionStage = "ensure_codex_acp";
-    try {
-      await ensureCodexAcpAdapterInstalled(sandbox);
-    } catch (error) {
-      if (isCommandTimeoutError(error)) {
-        throw new CodexChatRetryableInfrastructureError(
-          "Codex runtime setup timed out before the turn started.",
-          error,
-          failureDiagnostic(executionStage, error, redact),
-        );
-      }
-      throw error;
-    }
+    await ensureCodexAcpAdapterInstalled(sandbox);
     checkExternalAbort();
     executionStage = "load_skills";
     const [sessionSkills, workflowSkills, pluginRuntime] = await Promise.all([
@@ -667,6 +648,7 @@ export async function runCodexChatTurn(input: {
       await checkAbort();
     };
     executionStage = "run_turn";
+    engineStarted = true;
     const botPrompt = await loadBotIdentityPrompt(turn.chatSessionId, turn.userWorkosId);
     const buildTask = (
       history: CodingChatHistory,
@@ -1044,6 +1026,15 @@ export async function runCodexChatTurn(input: {
       // A transient setup failure (e.g. the fence) preserves the durable turn: the worker defers
       // and retries from scratch instead of projecting a failed assistant message.
       throw effectiveError;
+    } else if (!engineStarted && isUnresponsiveGuestError(effectiveError)) {
+      // The retry reacquires the sandbox through `createOrConnectSandbox`, which probes the guest
+      // and reboots or replaces it. Failing the turn here instead would strand the session on the
+      // wedged sandbox and report an E2B SDK message as the user's result.
+      throw new CodexChatRetryableInfrastructureError(
+        "Codex's sandbox stopped responding while the turn was being prepared.",
+        effectiveError,
+        failureDiagnostic(executionStage, effectiveError, redact),
+      );
     } else if (isRetryableCommandStreamError(effectiveError)) {
       throw new CodexChatRetryableInfrastructureError(
         "Codex lost contact with its sandbox command stream before the turn completed.",
