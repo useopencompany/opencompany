@@ -1002,6 +1002,54 @@ describe("AcpHarness", () => {
     expect(JSON.stringify(runtimeEvents)).toContain("Current answer");
   });
 
+  it("conflates notifications that queue while the previous projection write is in flight", async () => {
+    const transport = fakeAcpSandbox(async (message, emit) => {
+      if (message.method === "initialize") {
+        await emit({ jsonrpc: "2.0", id: message.id, result: { agentCapabilities: {} } });
+      } else if (message.method === "session/new") {
+        await emit({ jsonrpc: "2.0", id: message.id, result: { sessionId: "session_batch" } });
+      } else if (message.method === "session/prompt") {
+        const chunk = (text: string) => ({
+          jsonrpc: "2.0",
+          method: "session/update",
+          params: {
+            sessionId: "session_batch",
+            update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } },
+          },
+        });
+        await emit(chunk("chunk-one"));
+        await emit(chunk("chunk-two"));
+        await emit(chunk("chunk-three"));
+        await emit({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
+      }
+    });
+    let releaseFirstBatch = () => {};
+    const firstBatchGate = new Promise<void>((resolve) => {
+      releaseFirstBatch = resolve;
+    });
+    const updateBatches: string[][] = [];
+    const onRuntimeEvents = vi.fn(async (events: Record<string, unknown>[]) => {
+      const updates = events
+        .filter((event) => event.method === "session/update")
+        .map((event) => JSON.stringify(event));
+      if (updates.length === 0) return;
+      updateBatches.push(updates);
+      // Hold the first projection write so the remaining chunks queue behind it.
+      if (updates[0]?.includes("chunk-one")) await firstBatchGate;
+    });
+
+    const running = new AcpHarness().runTurn(harnessInput(transport.sandbox, { onRuntimeEvents }));
+    await vi.waitFor(() => expect(updateBatches.length).toBeGreaterThanOrEqual(1));
+    releaseFirstBatch();
+    await running;
+
+    // Everything that queued during the in-flight write arrives as one ordered batch.
+    expect(updateBatches).toEqual([
+      [expect.stringContaining("chunk-one")],
+      [expect.stringContaining("chunk-two"), expect.stringContaining("chunk-three")],
+    ]);
+  });
+
   it("asks once for a final summary when a successful prompt produces no assistant text", async () => {
     let promptCount = 0;
     const transport = fakeAcpSandbox(async (message, emit) => {
