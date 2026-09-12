@@ -3,8 +3,6 @@
 import { type CreateWikiBody, createApiClient, type WikiDto } from "@opencompany/protocol";
 import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "@/lib/headless-chat-api";
 
-export const WIKIS_CHANGED_EVENT = "opencompany:wikis-changed";
-
 function client() {
   const baseUrl = headlessChatApiBaseUrl();
   return createApiClient(baseUrl, { fetch: createHeadlessChatApiFetch({ baseUrl }) });

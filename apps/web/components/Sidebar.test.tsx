@@ -372,6 +372,31 @@ describe("Sidebar", () => {
       expect(wikisApiMock.listWikis).toHaveBeenCalledTimes(1);
     });
 
+    it("keeps the wikis a still-pending first load was going to return", async () => {
+      // A create can land before the first load answers. The new wiki is spliced in at once, and
+      // the response that predates it must not drop it back out.
+      let resolveFirstLoad: (wikis: ReturnType<typeof wikiDto>[]) => void = () => {};
+      wikisApiMock.listWikis.mockImplementationOnce(
+        () =>
+          new Promise<ReturnType<typeof wikiDto>[]>((resolve) => {
+            resolveFirstLoad = resolve;
+          }),
+      );
+      wikisApiMock.createWiki.mockResolvedValue(wikiDto("goat_wiki_2", "Handbook", "handbook"));
+
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+      await screen.findByRole("region", { name: "Wiki" });
+
+      await userEvent.click(screen.getByRole("button", { name: "New wiki" }));
+      await userEvent.type(screen.getByLabelText("Wiki name"), "Handbook{Enter}");
+      expect(await screen.findByRole("link", { name: "Handbook" })).toBeInTheDocument();
+
+      resolveFirstLoad([wikiDto("goat_wiki_1", "Company", "company", true)]);
+
+      expect(await screen.findByRole("link", { name: "Company" })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Handbook" })).toBeInTheDocument();
+    });
+
     it("takes a new wiki name while collapsed and reopens the section once it saves", async () => {
       window.localStorage.setItem("opencompany-sidebar-wikis-collapsed", "true");
       wikisApiMock.listWikis.mockResolvedValue([]);

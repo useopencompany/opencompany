@@ -11,7 +11,7 @@ import {
   useCollapsedSidebarSection,
 } from "@/components/SidebarSection";
 import { wikiHref } from "@/lib/wiki-routes";
-import { createWiki, listWikis, WIKIS_CHANGED_EVENT } from "@/lib/wikis";
+import { createWiki, listWikis } from "@/lib/wikis";
 
 const WIKIS_LIST_ID = "sidebar-wikis";
 const SECTION_COLLAPSED_STORAGE_KEY = "opencompany-sidebar-wikis-collapsed";
@@ -31,13 +31,24 @@ export function useSidebarWikis() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const generation = useRef(0);
+  // Wikis created here that a given server response may predate. A create can land while a load
+  // is in flight, and that response would otherwise drop the wiki the reader just made. Each one
+  // is released as soon as a response carries it, so this is empty in the ordinary case.
+  const createdLocally = useRef<WikiDto[]>([]);
+
+  const withCreatedLocally = useCallback((next: WikiDto[]) => {
+    if (createdLocally.current.length === 0) return next;
+    const served = new Set(next.map((wiki) => wiki.id));
+    createdLocally.current = createdLocally.current.filter((wiki) => !served.has(wiki.id));
+    return createdLocally.current.length === 0 ? next : [...next, ...createdLocally.current];
+  }, []);
 
   const reload = useCallback(() => {
     const request = ++generation.current;
     void listWikis()
       .then((next) => {
         if (request !== generation.current) return;
-        setWikis(next);
+        setWikis(withCreatedLocally(next));
         setError(null);
       })
       .catch((cause: unknown) => {
@@ -47,17 +58,13 @@ export function useSidebarWikis() {
       .finally(() => {
         if (request === generation.current) setLoading(false);
       });
-  }, []);
+  }, [withCreatedLocally]);
 
   useEffect(reload, [reload]);
 
   useEffect(() => {
     window.addEventListener("focus", reload);
-    window.addEventListener(WIKIS_CHANGED_EVENT, reload);
-    return () => {
-      window.removeEventListener("focus", reload);
-      window.removeEventListener(WIKIS_CHANGED_EVENT, reload);
-    };
+    return () => window.removeEventListener("focus", reload);
   }, [reload]);
 
   // The created wiki is spliced in rather than waiting on a reload, so its row is navigable the
@@ -65,7 +72,7 @@ export function useSidebarWikis() {
   const create = useCallback(async (name: string) => {
     try {
       const created = await createWiki({ name, access: "workspace" });
-      generation.current += 1;
+      createdLocally.current = [...createdLocally.current, created];
       setWikis((current) =>
         current.some((wiki) => wiki.id === created.id) ? current : [...current, created],
       );
