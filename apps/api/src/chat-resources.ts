@@ -540,22 +540,29 @@ async function artifactDownload(
 ): Promise<ChatResourceDownload> {
   const stream = await storage.get(version.blobPathname);
   if (!stream) throw notFound("Chat artifact bytes not found.");
-  const inline = !download && INLINE_MEDIA_TYPES.has(version.mediaType);
-  const html = version.mediaType === HTML_MEDIA_TYPE;
+  // Stored media types come from the publication extension allowlists, so the parameterless base
+  // type is the invariant. Normalizing once keeps the inline, policy, and charset decisions from
+  // ever disagreeing about the same artifact.
+  const mediaType =
+    version.mediaType.split(";")[0]?.trim().toLowerCase() || "application/octet-stream";
+  const inline = !download && INLINE_MEDIA_TYPES.has(mediaType);
   return {
     stream,
     // Published text bytes are always UTF-8, and a text/* response without a charset is decoded
     // with the browser's legacy default, which renders non-ASCII artifact content as mojibake.
-    mediaType: version.mediaType
-      ? `${version.mediaType}${version.mediaType.startsWith("text/") ? "; charset=utf-8" : ""}`
-      : "application/octet-stream",
+    mediaType: mediaType.startsWith("text/") ? `${mediaType}; charset=utf-8` : mediaType,
     filename: version.filename,
     sizeBytes: version.sizeBytes,
     inline,
     cacheControl: "private, no-store",
     // Agent-authored HTML keeps its hardened policy even as a download, so a client that ignores
     // the attachment disposition still renders it without ambient authority.
-    contentSecurityPolicy: html ? HTML_ARTIFACT_CONTENT_SECURITY_POLICY : inline ? "sandbox" : null,
+    contentSecurityPolicy:
+      mediaType === HTML_MEDIA_TYPE
+        ? HTML_ARTIFACT_CONTENT_SECURITY_POLICY
+        : inline
+          ? "sandbox"
+          : null,
   };
 }
 

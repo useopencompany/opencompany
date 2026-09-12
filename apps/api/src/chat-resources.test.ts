@@ -1,3 +1,4 @@
+import { HTML_ARTIFACT_CONTENT_SECURITY_POLICY } from "@opencompany/agent-runtime";
 import { ChatShareIdSchema } from "@opencompany/protocol";
 import { describe, expect, it, vi } from "vitest";
 import { type ChatResourceStorage, createChatResourceService } from "./chat-resources";
@@ -179,6 +180,32 @@ describe("Chat resource service", () => {
     expect(download.contentSecurityPolicy).toContain("sandbox allow-scripts");
     expect(download.contentSecurityPolicy).toContain("default-src 'none'");
     expect(download.contentSecurityPolicy).not.toContain("allow-same-origin");
+  });
+
+  it("decides inline rendering and policy from the base type of a parameterized media type", async () => {
+    const db = fakeDb([
+      [
+        {
+          version: {
+            blobPathname: "private/pathname",
+            filename: "pricing-model.html",
+            mediaType: "TEXT/HTML; charset=utf-8",
+            sizeBytes: 24,
+          },
+        },
+      ],
+    ]);
+    const service = createChatResourceService({ db, storage: fakeStorage() });
+
+    const download = await service.downloadArtifact({
+      actor,
+      artifactId: "artifact_1",
+      versionId: "version_1",
+      download: false,
+    });
+
+    expect(download).toMatchObject({ mediaType: "text/html; charset=utf-8", inline: true });
+    expect(download.contentSecurityPolicy).toBe(HTML_ARTIFACT_CONTENT_SECURITY_POLICY);
   });
 
   it("keeps the HTML artifact policy on an explicit download", async () => {
