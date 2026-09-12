@@ -91,7 +91,7 @@ describe("Claude Code subscription usage", () => {
     expect(result.windows[0]).toMatchObject({ id: "claude-code:5h", usedPercent: 100 });
   });
 
-  it("identifies itself as Claude Code so a subscription token is accepted", async () => {
+  it("sends the same Claude Code identity the CLI uses for this credential", async () => {
     let body: string | undefined;
     const fetchImpl = vi.fn(async (_url: unknown, init?: RequestInit) => {
       body = String(init?.body);
