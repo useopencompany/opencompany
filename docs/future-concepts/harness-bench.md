@@ -1,9 +1,11 @@
 # Harness bench — agent evaluation v1
 
-- Status: Proposed (scoped, not yet implemented)
+- Status: v1 implemented in `packages/agent/evals` (PRO-273)
 - Tracking: Linear PRO-271 · broader north star in [Product and agent evaluations](./evaluations.md)
 - Research basis: wiki `engineering/agent-evaluation-and-regression-testing`; production-trace
   analysis and external-practice research summarized below (2026-09-12)
+
+Run it with `bun run bench --list`; see the [usage guide](../../packages/agent/evals/README.md) for commands, costs, baseline comparison and resume semantics.
 
 ## Intention
 
