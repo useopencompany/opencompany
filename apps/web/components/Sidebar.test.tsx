@@ -1361,7 +1361,9 @@ describe("Sidebar", () => {
       ]);
 
       render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
-      await screen.findByRole("region", { name: "Projects" });
+      // The drop reads which project holds the chat, so wait for the loaded row rather than the
+      // region the section renders before listProjects resolves.
+      await findProjects("Launch");
 
       await act(async () => {
         fireEvent.drop(screen.getByRole("button", { name: "Recents" }), {
