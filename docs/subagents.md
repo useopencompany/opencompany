@@ -5,8 +5,10 @@ runs in its own context window, works the task with a read-only slice of the par
 returns a single written summary. The intermediate tool results — the forty search hits, the raw
 integration payload, the wiki sweep — stay in the child's context and never enter the parent's.
 
-Gated by `RUNNER_OPENCOMPANY_SUBAGENTS_ENABLED` (default `false`). Codex and Claude Code sessions
-have their own engine-native subagents and are unaffected by this flag.
+Off by default, behind the **Subagents** switch in Preferences. It is a per-member preference
+(`users.subagents_enabled`), not a deployment gate: delegation needs no infrastructure beyond the
+model access the turn already has, and the member who pays the extra credits is the one who turns it
+on. Codex and Claude Code sessions have their own engine-native subagents and are unaffected.
 
 Interactive chat only. Background task turns do not get the tool: a task is already the product's
 "go do deeper work" primitive and runs with raised tool budgets, so nesting a second delegation
@@ -82,8 +84,9 @@ starting at `-1000`, so it bills correctly without colliding with a main step's
 subscription-covered idempotency key and without becoming the "latest step" that drives the chat
 header's context meter.
 
-A turn that delegates costs materially more than one that does not. That is the tradeoff the flag
-exists to control.
+A turn that delegates costs materially more than one that does not. That is the tradeoff the
+Preferences switch exists to put in the member's hands, and why its description says so plainly
+rather than burying it.
 
 ## Failure behavior
 

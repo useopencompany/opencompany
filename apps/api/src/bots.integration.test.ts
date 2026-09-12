@@ -32,6 +32,7 @@ describe("persistent bot storage", () => {
         auto_model_routing_enabled boolean NOT NULL DEFAULT false,
         review_inbox_enabled boolean NOT NULL DEFAULT false,
         sidebar_projects_enabled boolean NOT NULL DEFAULT false,
+        subagents_enabled boolean NOT NULL DEFAULT false,
         updated_at timestamptz NOT NULL DEFAULT now()
       );
       CREATE TABLE goat.workspace_members (workspace_id text, user_workos_id text);
