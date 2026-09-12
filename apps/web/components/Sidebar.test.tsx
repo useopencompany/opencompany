@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -38,7 +38,9 @@ const featureFlagsMock = vi.hoisted(() => ({
   autoModelRouting: false,
   legacyBrain: true,
   reviewInbox: false,
+  sidebarProjects: false,
 }));
+const searchParamsMock = vi.hoisted(() => ({ value: new URLSearchParams() }));
 const reviewCountMock = vi.hoisted(() => ({ value: 0 }));
 const recentChatsMock = vi.hoisted(() => ({
   value: [] as Array<{
@@ -89,6 +91,29 @@ const tasksMock = vi.hoisted(() => ({
 vi.mock("next/navigation", () => ({
   usePathname: () => pathnameMock.value,
   useRouter: () => routerMock,
+  useSearchParams: () => searchParamsMock.value,
+}));
+
+const projectsApiMock = vi.hoisted(() => ({
+  listProjects: vi.fn(
+    async () =>
+      [] as Array<{
+        id: string;
+        name: string;
+        conversationIds: string[];
+        createdAt: string;
+      }>,
+  ),
+  createProject: vi.fn(),
+  renameProject: vi.fn(),
+  deleteProject: vi.fn(),
+  fileConversationInProject: vi.fn(),
+  removeConversationFromProject: vi.fn(),
+}));
+
+vi.mock("@/lib/projects", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/projects")>()),
+  ...projectsApiMock,
 }));
 
 const workspaceActionsMock = vi.hoisted(() => ({
@@ -178,12 +203,15 @@ vi.mock("@/components/AppDataProvider", async () => {
         },
         tasks: tasksMock.value,
         sidebarTasks,
+        openSidebarTasks: sidebarTasks,
         recentChats,
+        openChats: recentChats,
         featureFlags: {
           taskSpawning: featureFlagsMock.taskSpawning,
           autoModelRouting: featureFlagsMock.autoModelRouting,
           legacyBrain: featureFlagsMock.legacyBrain,
           reviewInbox: featureFlagsMock.reviewInbox,
+          sidebarProjects: featureFlagsMock.sidebarProjects,
         },
         reviewCount: reviewCountMock.value,
         mcpSetup: { preferredClient: null, completedAt: mcpSetupMock.completedAt },
@@ -215,6 +243,9 @@ describe("Sidebar", () => {
     featureFlagsMock.taskSpawning = false;
     featureFlagsMock.legacyBrain = true;
     featureFlagsMock.reviewInbox = false;
+    featureFlagsMock.sidebarProjects = false;
+    searchParamsMock.value = new URLSearchParams();
+    projectsApiMock.listProjects.mockResolvedValue([]);
     reviewCountMock.value = 0;
     recentChatsMock.value = [];
     tasksMock.value = [];
@@ -1228,7 +1259,255 @@ describe("Sidebar", () => {
       "page",
     );
   });
+
+  describe("Projects", () => {
+    const project = (id: string, name: string, conversationIds: string[] = []) => ({
+      id,
+      name,
+      conversationIds,
+      createdAt: "2026-07-01T09:00:00.000Z",
+    });
+
+    it("stays hidden until the Projects preference is on", async () => {
+      recentChatsMock.value = [chatRow("chat_1")];
+      projectsApiMock.listProjects.mockResolvedValue([project("project_1", "Launch")]);
+
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+      expect(screen.queryByText("Projects")).not.toBeInTheDocument();
+      expect(projectsApiMock.listProjects).not.toHaveBeenCalled();
+    });
+
+    it("lists a project's chats and keeps them out of Recents", async () => {
+      featureFlagsMock.sidebarProjects = true;
+      featureFlagsMock.taskSpawning = true;
+      recentChatsMock.value = [chatRow("chat_filed"), chatRow("chat_loose")];
+      sidebarTasksMock.value = [taskRow("task_filed")];
+      projectsApiMock.listProjects.mockResolvedValue([
+        project("project_1", "Launch", ["chat_filed", "conversation_task_filed"]),
+        project("project_2", "Empty"),
+      ]);
+
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+      const projects = await screen.findByRole("region", { name: "Projects" });
+      expect(within(projects).getByText("Launch")).toBeInTheDocument();
+      expect(within(projects).getByRole("link", { name: "chat_filed title" })).toBeInTheDocument();
+      expect(within(projects).getByRole("link", { name: /task_filed name/ })).toBeInTheDocument();
+      expect(within(projects).getByText("No chats")).toBeInTheDocument();
+
+      const recents = screen.getByRole("navigation", { name: "Recents" });
+      expect(within(recents).getByRole("link", { name: "chat_loose title" })).toBeInTheDocument();
+      expect(within(recents).queryByRole("link", { name: "chat_filed title" })).toBeNull();
+      expect(within(recents).queryByRole("link", { name: /task_filed name/ })).toBeNull();
+    });
+
+    it("files a chat dropped on a project and keeps the row out of Recents", async () => {
+      featureFlagsMock.sidebarProjects = true;
+      recentChatsMock.value = [chatRow("chat_1")];
+      projectsApiMock.listProjects.mockResolvedValue([project("project_1", "Launch")]);
+      projectsApiMock.fileConversationInProject.mockResolvedValue([
+        project("project_1", "Launch", ["chat_1"]),
+      ]);
+
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+      const projects = await screen.findByRole("region", { name: "Projects" });
+      const folder = within(projects).getByRole("button", { name: "Launch" });
+
+      const target = folder.parentElement;
+      if (!target) throw new Error("The project row is missing its drop target.");
+      await act(async () => {
+        fireEvent.drop(target, { dataTransfer: conversationTransfer("chat_1") });
+      });
+
+      await waitFor(() =>
+        expect(projectsApiMock.fileConversationInProject).toHaveBeenCalledWith(
+          "project_1",
+          "chat_1",
+        ),
+      );
+      await waitFor(() =>
+        expect(
+          within(screen.getByRole("region", { name: "Projects" })).getByRole("link", {
+            name: "chat_1 title",
+          }),
+        ).toBeInTheDocument(),
+      );
+      // Recents keeps its header as the target for dragging the row back out, and says so now
+      // that it holds nothing.
+      const recents = screen.getByRole("navigation", { name: "Recents" });
+      expect(within(recents).queryByRole("link")).toBeNull();
+      expect(
+        within(recents).getByText("Drag a chat here to take it out of a project."),
+      ).toBeInTheDocument();
+    });
+
+    it("returns a dropped chat to Recents", async () => {
+      featureFlagsMock.sidebarProjects = true;
+      recentChatsMock.value = [chatRow("chat_filed"), chatRow("chat_loose")];
+      projectsApiMock.listProjects.mockResolvedValue([
+        project("project_1", "Launch", ["chat_filed"]),
+      ]);
+      projectsApiMock.removeConversationFromProject.mockResolvedValue([
+        project("project_1", "Launch"),
+      ]);
+
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+      await screen.findByRole("region", { name: "Projects" });
+
+      await act(async () => {
+        fireEvent.drop(screen.getByRole("button", { name: "Recents" }), {
+          dataTransfer: conversationTransfer("chat_filed"),
+        });
+      });
+
+      await waitFor(() =>
+        expect(projectsApiMock.removeConversationFromProject).toHaveBeenCalledWith(
+          "project_1",
+          "chat_filed",
+        ),
+      );
+      await waitFor(() =>
+        expect(
+          within(screen.getByRole("navigation", { name: "Recents" })).getByRole("link", {
+            name: "chat_filed title",
+          }),
+        ).toBeInTheDocument(),
+      );
+    });
+
+    it("collapses one project without hiding the others and remembers the choice", async () => {
+      featureFlagsMock.sidebarProjects = true;
+      recentChatsMock.value = [chatRow("chat_a"), chatRow("chat_b")];
+      projectsApiMock.listProjects.mockResolvedValue([
+        project("project_1", "Launch", ["chat_a"]),
+        project("project_2", "Research", ["chat_b"]),
+      ]);
+
+      const { unmount } = render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+      const projects = await screen.findByRole("region", { name: "Projects" });
+      const folder = within(projects).getByRole("button", { name: "Launch" });
+      expect(folder).toHaveAttribute("aria-expanded", "true");
+
+      await userEvent.click(folder);
+
+      expect(within(projects).getByRole("button", { name: "Launch" })).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      );
+      expect(within(projects).queryByRole("link", { name: "chat_a title" })).toBeNull();
+      expect(within(projects).getByRole("link", { name: "chat_b title" })).toBeInTheDocument();
+
+      unmount();
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+      const reopened = await screen.findByRole("region", { name: "Projects" });
+      expect(within(reopened).getByRole("button", { name: "Launch" })).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      );
+    });
+
+    it("starts a new chat in a project and marks that project as the target", async () => {
+      featureFlagsMock.sidebarProjects = true;
+      searchParamsMock.value = new URLSearchParams("project=project_1");
+      projectsApiMock.listProjects.mockResolvedValue([project("project_1", "Launch")]);
+
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+      const projects = await screen.findByRole("region", { name: "Projects" });
+
+      expect(within(projects).getByRole("link", { name: "New chat in Launch" })).toHaveAttribute(
+        "href",
+        "/?project=project_1",
+      );
+      expect(within(projects).getByRole("button", { name: "Launch" }).parentElement).toHaveClass(
+        "bg-surface-active",
+      );
+    });
+
+    it("renames a project when the reader clicks away from the field", async () => {
+      featureFlagsMock.sidebarProjects = true;
+      recentChatsMock.value = [chatRow("chat_a")];
+      projectsApiMock.listProjects.mockResolvedValue([project("project_1", "Launch", ["chat_a"])]);
+      projectsApiMock.renameProject.mockResolvedValue([
+        project("project_1", "Launch week", ["chat_a"]),
+      ]);
+
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+      const projects = await screen.findByRole("region", { name: "Projects" });
+
+      await userEvent.click(
+        within(projects).getByRole("button", { name: "Project options for Launch" }),
+      );
+      await userEvent.click(screen.getByRole("button", { name: "Rename" }));
+      const field = screen.getByLabelText("Project name");
+      await userEvent.clear(field);
+      await userEvent.type(field, "Launch week");
+      await act(async () => {
+        fireEvent.blur(field);
+      });
+
+      await waitFor(() =>
+        expect(projectsApiMock.renameProject).toHaveBeenCalledWith("project_1", "Launch week"),
+      );
+      expect(await screen.findByText("Launch week")).toBeInTheDocument();
+    });
+
+    it("deletes a project and returns its chats to Recents", async () => {
+      featureFlagsMock.sidebarProjects = true;
+      recentChatsMock.value = [chatRow("chat_a")];
+      projectsApiMock.listProjects.mockResolvedValue([project("project_1", "Launch", ["chat_a"])]);
+      projectsApiMock.deleteProject.mockResolvedValue([]);
+
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+      const projects = await screen.findByRole("region", { name: "Projects" });
+
+      await userEvent.click(
+        within(projects).getByRole("button", { name: "Project options for Launch" }),
+      );
+      await userEvent.click(screen.getByRole("button", { name: /Delete project/ }));
+
+      await waitFor(() => expect(projectsApiMock.deleteProject).toHaveBeenCalledWith("project_1"));
+      await waitFor(() =>
+        expect(
+          within(screen.getByRole("navigation", { name: "Recents" })).getByRole("link", {
+            name: "chat_a title",
+          }),
+        ).toBeInTheDocument(),
+      );
+    });
+
+    it("creates a project from the section header", async () => {
+      featureFlagsMock.sidebarProjects = true;
+      projectsApiMock.listProjects.mockResolvedValue([]);
+      projectsApiMock.createProject.mockResolvedValue([project("project_1", "Launch")]);
+
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+      await screen.findByRole("region", { name: "Projects" });
+
+      await userEvent.click(screen.getByRole("button", { name: "New project" }));
+      await userEvent.type(screen.getByLabelText("Project name"), "Launch{Enter}");
+
+      await waitFor(() =>
+        expect(projectsApiMock.createProject).toHaveBeenCalledWith({
+          id: expect.stringMatching(/^project_/),
+          name: "Launch",
+        }),
+      );
+      expect(await screen.findByText("Launch")).toBeInTheDocument();
+    });
+  });
 });
+
+// jsdom has no DataTransfer, so the drag payload is the minimal surface the sidebar reads.
+function conversationTransfer(conversationId: string) {
+  const type = "application/x-opencompany-conversation";
+  return {
+    types: [type],
+    getData: (requested: string) => (requested === type ? conversationId : ""),
+    dropEffect: "none",
+    effectAllowed: "all",
+  };
+}
 
 function chatRow(
   id: string,

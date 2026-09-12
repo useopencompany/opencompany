@@ -760,6 +760,7 @@ export const users = productSchema.table(
     autoModelRoutingEnabled: boolean("auto_model_routing_enabled").notNull().default(false),
     chatCapabilitiesBetaEnabled: boolean("chat_capabilities_beta_enabled").notNull().default(false),
     reviewInboxEnabled: boolean("review_inbox_enabled").notNull().default(false),
+    sidebarProjectsEnabled: boolean("sidebar_projects_enabled").notNull().default(false),
     // Retained for rollback compatibility after the wiki became the default.
     // Runtime code must not read this legacy per-user preview flag.
     wikiEnabled: boolean("wiki_enabled").notNull().default(false),
@@ -4336,6 +4337,36 @@ export const taskSandboxUsage = productSchema.table(
   }),
 );
 
+// A named folder in the sidebar that groups a member's chats and Tasks. Projects are personal to
+// the member who made them, like the chat list they reorganize, and scoped to one workspace so
+// switching workspaces switches the folders too.
+export const projects = productSchema.table(
+  "projects",
+  {
+    id: text("id").primaryKey(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => users.workosUserId, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    ownerIdx: index("opencompany_projects_owner_idx").on(
+      table.userWorkosId,
+      table.workspaceId,
+      table.createdAt,
+    ),
+    nameCheck: check(
+      "opencompany_projects_name_check",
+      sql`length(btrim(${table.name})) BETWEEN 1 AND 80`,
+    ),
+  }),
+);
+
 export const chatSessions = productSchema.table(
   "chat_sessions",
   {
@@ -4343,6 +4374,9 @@ export const chatSessions = productSchema.table(
     userWorkosId: text("user_workos_id")
       .notNull()
       .references(() => users.workosUserId, { onDelete: "cascade" }),
+    // The sidebar Project this chat or Task belongs to. Deleting a Project empties it rather than
+    // taking the conversations with it: the rows fall back to Recents.
+    projectId: text("project_id").references(() => projects.id, { onDelete: "set null" }),
     title: text("title").notNull().default("New chat"),
     botName: text("bot_name"),
     botDescription: text("bot_description"),
@@ -4362,6 +4396,7 @@ export const chatSessions = productSchema.table(
       table.closedAt,
       table.updatedAt,
     ),
+    projectIdx: index("opencompany_chat_sessions_project_idx").on(table.projectId),
     engineCheck: check(
       "goat_chat_sessions_engine_check",
       sql`${table.engine} IN ('opencompany', 'codex', 'claude_code')`,

@@ -236,6 +236,7 @@ import {
   addOptimisticChatSummary,
   removeOptimisticChatSummary,
 } from "@/lib/optimistic-chat-summaries";
+import { forgetLocalProjectAssignment, noteLocalProjectAssignment } from "@/lib/projects";
 import type { SkillCatalogItem } from "@/lib/skills";
 import type { TaskRow } from "@/lib/task-collections";
 import { STAGE_COPY, STATUS_COPY } from "@/lib/task-display";
@@ -419,6 +420,7 @@ export function Surface({
   schedules = [],
   defaultModel,
   initialChat,
+  newChatProjectId = null,
   recentChats = [],
   archivedChats = [],
   codexConnected = false,
@@ -441,6 +443,9 @@ export function Surface({
   schedules?: readonly TaskScheduleView[];
   defaultModel: string;
   initialChat: ChatSessionView | null;
+  // A sidebar Project the next new chat should be filed under, set when the reader started it from
+  // that project's row.
+  newChatProjectId?: string | null;
   recentChats?: readonly ChatSummaryView[];
   archivedChats?: readonly ChatSummaryView[];
   codexConnected?: boolean;
@@ -2363,16 +2368,24 @@ export function Surface({
     });
     // Clear without revoking previews: the optimistic bubble still shows them.
     composerAttachments.setAttachments([]);
+    // The API files the new Conversation under the project as it creates it; the local note keeps
+    // the sidebar row under that folder for the moment before the project list catches up.
+    const projectId = newSessionId ? newChatProjectId : null;
+    if (projectId && newSessionId) noteLocalProjectAssignment(projectId, newSessionId);
     void sendMessage(message, {
       body: {
         sessionId: requestSessionId,
         newSessionId,
         model,
         engine: messageEngine,
+        ...(projectId ? { projectId } : {}),
       },
     }).catch((error) => {
       setEngineSubmitting(false);
-      if (newSessionId) removeOptimisticChatSummary(newSessionId);
+      if (newSessionId) {
+        removeOptimisticChatSummary(newSessionId);
+        forgetLocalProjectAssignment(newSessionId);
+      }
       const requestChatSessionId = requestSessionId ?? newSessionId;
       clearLocalActiveTurnState(requestChatSessionId);
       cancelChatFirstOutputMeasurement();

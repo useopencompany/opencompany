@@ -25,8 +25,9 @@ import {
   Workflow,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
+  type DragEvent,
   type FormEvent,
   type MouseEventHandler,
   useEffect,
@@ -41,6 +42,14 @@ import { BrainSwitcher } from "@/components/BrainSwitcher";
 import { ChatStateIndicator } from "@/components/ChatStateIndicator";
 import { IntentPrefetchLink } from "@/components/IntentPrefetchLink";
 import { SidebarFeedback } from "@/components/SidebarFeedback";
+import {
+  conversationDragProps,
+  draggedConversationId,
+  isConversationDrag,
+  SidebarProjects,
+  type SidebarRowDragProps,
+  useSidebarProjects,
+} from "@/components/SidebarProjects";
 import { HOME_NAVIGATION_EVENT, requestChatComposerFocus } from "@/lib/chat-navigation";
 import { clearLocalChatState, useLocalChatStates } from "@/lib/chat-session-state";
 import { type ChatSummaryView, chatSummaryState } from "@/lib/chat-ui";
@@ -443,13 +452,16 @@ function persistRecentsCollapsed(next: boolean) {
 }
 
 function SidebarWorkList() {
-  const { featureFlags, recentChats, sidebarTasks, workspace } = useAppData();
+  const { featureFlags, openChats, openSidebarTasks, recentChats, sidebarTasks, workspace } =
+    useAppData();
   const recentsCollapsed = useSyncExternalStore(
     subscribeRecentsCollapsed,
     getRecentsCollapsedSnapshot,
     getRecentsCollapsedServerSnapshot,
   );
+  const projects = useSidebarProjects(featureFlags.sidebarProjects);
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const router = useRouter();
   const [, startTransition] = useTransition();
   const localChatStates = useLocalChatStates();
@@ -481,18 +493,17 @@ function SidebarWorkList() {
   }
 
   const isPinned = (chat: ChatSummaryView) => pinOverrides.get(chat.id) ?? Boolean(chat.pinnedAt);
-  const pinnedChats = recentChats.filter(isPinned);
+  // A conversation lives in exactly one place in the sidebar. Once it is filed under a Project,
+  // that folder is its home and it leaves Pinned and Recents, so the reader never has to work out
+  // which of two copies of a row is the real one.
+  const filedInProject = (conversationId: string) => projects.membership.has(conversationId);
+  const pinnedChats = recentChats.filter((chat) => isPinned(chat) && !filedInProject(chat.id));
   // Tasks follow the same flag as the Tasks nav row.
   const showTasks = featureFlags.taskSpawning;
   const workItems = orderSidebarWorkItems({
-    chats: recentChats.filter((chat) => !isPinned(chat)),
-    tasks: showTasks ? sidebarTasks : [],
+    chats: recentChats.filter((chat) => !isPinned(chat) && !filedInProject(chat.id)),
+    tasks: showTasks ? sidebarTasks.filter((task) => !filedInProject(task.conversationId)) : [],
   });
-
-  // Keep the footer pinned to the bottom when there is nothing to show.
-  if (pinnedChats.length === 0 && workItems.length === 0) {
-    return <div className="min-h-0 flex-1" />;
-  }
 
   // The row goes on the click. The write and the projection behind it take about a second, and
   // holding a chat the user has already dismissed for that long reads as lag; a failed write puts
@@ -558,6 +569,11 @@ function SidebarWorkList() {
     });
   };
 
+  // Nothing to drag a row into while Projects are off, and a draggable row changes native text
+  // selection, so the handlers only exist when the section does.
+  const rowDragProps = (conversationId: string): SidebarRowDragProps =>
+    projects.enabled ? conversationDragProps(conversationId) : {};
+
   const renderChatRow = (chat: ChatSummaryView) => {
     const href = chatHref(chat.id);
     const pinned = isPinned(chat);
@@ -580,6 +596,7 @@ function SidebarWorkList() {
         localState={localChatStates.get(chat.id) ?? null}
         pinned={pinned}
         pinning={pinningIds.has(chat.id)}
+        dragProps={optimistic ? {} : rowDragProps(chat.id)}
         onPrefetch={prefetchChat}
         onRequestComposerFocus={() => requestChatComposerFocus(chat.id)}
         onTogglePin={() => togglePin(chat.id, chat.title, pinned)}
@@ -598,13 +615,65 @@ function SidebarWorkList() {
         state={item.state}
         href={href}
         active={isTaskRouteActive(pathname, href)}
+        dragProps={rowDragProps(item.task.conversationId)}
         onArchive={() => archiveTask(item.task, href)}
       />
     );
   };
 
+  // A Project keeps what the reader filed there however old it is, so its rows resolve from the
+  // full open set rather than the recency-bounded Recents selections. Recents rows take
+  // precedence: they carry the optimistic summary of a chat whose first turn is still in flight.
+  const chatsById = projects.enabled
+    ? new Map([...openChats, ...recentChats].map((chat) => [chat.id, chat] as const))
+    : new Map<string, ChatSummaryView>();
+  const tasksByConversation = projects.enabled
+    ? new Map([...openSidebarTasks, ...sidebarTasks].map((task) => [task.conversationId, task]))
+    : new Map<string, SidebarTaskView>();
+  const projectItems = (project: { conversationIds: string[] }) => {
+    const chats: ChatSummaryView[] = [];
+    const tasks: SidebarTaskView[] = [];
+    for (const conversationId of project.conversationIds) {
+      const task = tasksByConversation.get(conversationId);
+      if (task) {
+        if (showTasks) tasks.push(task);
+        continue;
+      }
+      const chat = chatsById.get(conversationId);
+      if (chat) chats.push(chat);
+    }
+    return orderSidebarWorkItems({ chats, tasks });
+  };
+
+  const unfileDroppedConversation = (event: DragEvent<HTMLElement>) => {
+    const conversationId = draggedConversationId(event);
+    if (!conversationId) return;
+    event.preventDefault();
+    const projectId = projects.membership.get(conversationId);
+    if (projectId) void projects.unfile(projectId, conversationId);
+  };
+
+  const pendingProjectId = pathname === "/" ? searchParams.get("project") : null;
+  const hasRecents = pinnedChats.length > 0 || workItems.length > 0;
+  // The Recents header is the drop target that takes a row back out of a folder, so it has to
+  // stay on screen while any folder holds something -- otherwise filing the last loose chat
+  // leaves no way to unfile it.
+  const showRecents =
+    workItems.length > 0 || projects.projects.some((project) => project.conversationIds.length > 0);
+
+  // Keep the footer pinned to the bottom when there is nothing to show.
+  if (!projects.enabled && !hasRecents) {
+    return <div className="min-h-0 flex-1" />;
+  }
+
   return (
     <div className="mt-4 flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <SidebarProjects
+        state={projects}
+        itemsFor={projectItems}
+        renderItem={renderRow}
+        activeProjectId={pendingProjectId}
+      />
       {pinnedChats.length > 0 ? (
         <div className="pb-2">
           <div className="flex items-center gap-1 px-4 pb-1">
@@ -616,7 +685,7 @@ function SidebarWorkList() {
           </nav>
         </div>
       ) : null}
-      {workItems.length > 0 ? (
+      {showRecents ? (
         <div>
           <button
             type="button"
@@ -624,6 +693,14 @@ function SidebarWorkList() {
             aria-expanded={!recentsCollapsed}
             // Only points at the list while it exists; aria-expanded carries the state either way.
             aria-controls={recentsCollapsed ? undefined : RECENTS_LIST_ID}
+            // Dropping a project row here files it back out: Recents is where an unfiled
+            // conversation lives, so it is the drag target that means "take it out of the folder".
+            onDragOver={(event) => {
+              if (!isConversationDrag(event)) return;
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "move";
+            }}
+            onDrop={unfileDroppedConversation}
             className="group mx-2 flex items-center gap-1 rounded-md px-2 pb-1 pt-0.5 text-[11px] font-medium tracking-wide text-ink-subtle transition-colors duration-150 hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
           >
             Recents
@@ -640,7 +717,15 @@ function SidebarWorkList() {
           </button>
           {recentsCollapsed ? null : (
             <nav id={RECENTS_LIST_ID} aria-label="Recents" className="flex flex-col gap-px px-2">
-              {workItems.map(renderRow)}
+              {workItems.length === 0 ? (
+                // Everything loose has been filed. The header is still the target for dragging a
+                // row back out, so say what it is for rather than leaving it looking broken.
+                <p className="px-2 py-[5px] text-[12.5px] leading-4 text-ink-faint">
+                  Drag a chat here to take it out of a project.
+                </p>
+              ) : (
+                workItems.map(renderRow)
+              )}
             </nav>
           )}
         </div>
@@ -671,6 +756,7 @@ function SidebarChatRow({
   localState,
   pinned,
   pinning,
+  dragProps,
   onPrefetch,
   onRequestComposerFocus,
   onTogglePin,
@@ -683,6 +769,9 @@ function SidebarChatRow({
   localState: ReturnType<typeof chatSummaryState> | null;
   pinned: boolean;
   pinning: boolean;
+  // Lets the row be dragged into a sidebar Project. Empty when Projects are off, and for a chat
+  // whose first turn has not landed yet: there is no conversation to file.
+  dragProps: SidebarRowDragProps;
   onPrefetch: () => void;
   onRequestComposerFocus: () => void;
   onTogglePin: () => void;
@@ -697,6 +786,7 @@ function SidebarChatRow({
   );
   return (
     <div
+      {...dragProps}
       className={`group flex items-center rounded-md text-[13px] transition-colors duration-150 ${
         active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
       }`}
@@ -789,17 +879,21 @@ function SidebarTaskRow({
   state,
   href,
   active,
+  dragProps,
   onArchive,
 }: {
   task: SidebarTaskView;
   state: ReturnType<typeof chatSummaryState>;
   href: string;
   active: boolean;
+  // Keyed by the conversation behind the Task, the same key a Project stores for a chat.
+  dragProps: SidebarRowDragProps;
   onArchive: () => void;
 }) {
   const archivable = isSettledTaskStatus(task.status);
   return (
     <div
+      {...dragProps}
       className={`group flex items-center rounded-md text-[13px] transition-colors duration-150 ${
         active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
       }`}
