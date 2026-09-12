@@ -100,6 +100,7 @@ export const CLAUDE_CODE_AGENT_MODEL_IDS = [
   "anthropic/claude-sonnet-5",
   "anthropic/claude-opus-5",
   "anthropic/claude-opus-4.8",
+  "anthropic/claude-fable-5.1",
   "anthropic/claude-fable-5",
   "anthropic/claude-haiku-4.5",
 ] as const satisfies readonly AgentModelId[];
@@ -131,9 +132,9 @@ export function claudeCodeModelSupportsReasoningEffort(model: string): boolean {
 //   capability (AA index): <40 → 1 · 40–52 → 2 · ≥53 → 3 (flagships nudged up at borderlines)
 //   speed (output tok/sec): <60 → 1 · 60–150 → 2 · >150 → 3
 //   cost (output $/M tokens): ≤$2.50 → 1 · $2.51–$7.50 → 2 · >$7.50 → 3
-// minimax/minimax-m3, xai/grok-build-0.1, anthropic/claude-fable-5, and
-// anthropic/claude-sonnet-5 are estimates (no published benchmark yet) — revisit
-// when Artificial Analysis lists them. openrouter/fusion is a variable panel +
+// minimax/minimax-m3, xai/grok-build-0.1, anthropic/claude-fable-5.1,
+// anthropic/claude-fable-5, and anthropic/claude-sonnet-5 are estimates (no
+// published benchmark yet) — revisit when Artificial Analysis lists them. openrouter/fusion is a variable panel +
 // judge router and is rated qualitatively from OpenRouter's Fusion defaults
 // rather than a single model benchmark.
 export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
@@ -430,6 +431,26 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     supportsImages: true,
     supportsPdf: true,
     ratings: { capability: 3, speed: 2, cost: 3 },
+    reasoning: {
+      providerOptions: {
+        anthropic: {
+          thinkingBudget: 0.001,
+        },
+      },
+      exposure: "hidden",
+    },
+  },
+  {
+    id: "anthropic/claude-fable-5.1",
+    type: "model",
+    contextWindowTokens: 1_000_000,
+    label: "Claude Fable 5.1",
+    description: "Anthropic's most capable model for long-running, complex agent work.",
+    category: "Deep",
+    supportsReasoning: true,
+    supportsImages: true,
+    supportsPdf: true,
+    ratings: { capability: 3, speed: 1, cost: 3 },
     reasoning: {
       providerOptions: {
         anthropic: {
