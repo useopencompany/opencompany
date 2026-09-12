@@ -300,7 +300,10 @@ async function publishChatArtifactBytes(input: {
       );
     }
   } catch (error) {
+    // The rollback must still run after the turn was interrupted, so it gets the storage
+    // deadline without the turn signal; otherwise a hung delete replaces a hung upload.
     await del(stored.pathname, {
+      abortSignal: artifactBlobOperationSignal(),
       ...(input.context.env.blobReadWriteToken
         ? { token: input.context.env.blobReadWriteToken }
         : {}),

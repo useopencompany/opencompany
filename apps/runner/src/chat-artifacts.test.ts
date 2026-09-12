@@ -328,6 +328,27 @@ describe("publishChatArtifact", () => {
     expect(dbMocks.execute).toHaveBeenCalledTimes(1);
   });
 
+  it("bounds the rollback delete when the version cannot be recorded", async () => {
+    dbMocks.execute
+      .mockReset()
+      .mockResolvedValueOnce({ rows: [{ count: 0 }] })
+      .mockResolvedValueOnce({ rows: [] });
+
+    await expect(
+      publishChatArtifact({
+        context: context(),
+        input: { path: "report.md", title: "Quarterly report" },
+        toolCallId: "call_1",
+      }),
+    ).rejects.toThrow("The file publication could not be recorded.");
+    expect(blobMocks.del).toHaveBeenCalledWith(
+      "private/artifact/report.md",
+      expect.objectContaining({ abortSignal: expect.any(AbortSignal) }),
+    );
+    const [, delOptions] = blobMocks.del.mock.calls[0] as [string, { abortSignal: AbortSignal }];
+    expect(delOptions.abortSignal.aborted).toBe(false);
+  });
+
   it("rejects paths and non-Markdown extensions from the in-band tool", async () => {
     dbMocks.select.mockReset().mockReturnValueOnce(
       queryBuilder([
