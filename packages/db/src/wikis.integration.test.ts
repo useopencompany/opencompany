@@ -26,6 +26,7 @@ const MIGRATIONS = [
   "0195_goat_wiki.sql",
   "0220_goat_wiki_folders.sql",
   "0269_wiki_first_class_entity.sql",
+  "0272_default_wiki_company.sql",
 ];
 
 const WS = "ws-acl";
@@ -104,6 +105,22 @@ describe("createWiki", () => {
     expect(second.slug).toBe("c-level-2");
   });
 
+  it("suffixes a slug reserved by a static /wiki route", async () => {
+    // `/wiki/sources` and `/wiki/import` are pages of their own, so Next would resolve them before
+    // ever reaching a wiki holding that slug. Suffixing keeps the name the reader typed.
+    const sources = await createWiki(
+      { workspaceId: WS, name: "Sources", access: "workspace", createdByWorkosId: FOUNDER },
+      { db },
+    );
+    const importing = await createWiki(
+      { workspaceId: WS, name: "Import", access: "workspace", createdByWorkosId: FOUNDER },
+      { db },
+    );
+    expect(sources.name).toBe("Sources");
+    expect(sources.slug).toBe("sources-2");
+    expect(importing.slug).toBe("import-2");
+  });
+
   it("stores markdown instructions and makes the creator a member of a restricted wiki", async () => {
     const wiki = await createWiki(
       {
@@ -146,7 +163,7 @@ describe("resolveWikiForUser", () => {
   it("resolves the default wiki when no selector is given", async () => {
     const resolved = await forUser(EMPLOYEE);
     expect(resolved?.isDefault).toBe(true);
-    expect(resolved?.slug).toBe("wiki");
+    expect(resolved?.slug).toBe("company");
   });
 
   it("is reachable by an ordinary member of a workspace with no paid plan", async () => {

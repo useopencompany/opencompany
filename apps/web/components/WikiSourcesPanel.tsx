@@ -46,6 +46,7 @@ import {
   type HeadlessIntegrationAccountReadModel,
 } from "@/lib/headless-integration-collections";
 import type { IntegrationState } from "@/lib/integration-state";
+import { wikiHref } from "@/lib/wiki-routes";
 import { listWikiSources, setWikiSourceEnabled, upsertWikiSource } from "@/lib/wiki-source-api";
 import { WIKI_SOURCE_PROVIDERS, type WikiSourceProviderDef } from "@/lib/wiki-sources/registry";
 
@@ -65,11 +66,17 @@ export type WikiSourceScopeSlot = (entry: WikiSourceEntry) => ReactNode;
 
 export function WikiSourcesPanel({
   workspaceId,
+  defaultWikiSlug,
   mode = "page",
   integrationState,
 }: {
   workspaceId: string;
   isAdmin: boolean;
+  /**
+   * The wiki every source ingests into. Ingestion is still workspace-level and only ever targets
+   * the default wiki (`requireIngestionWikiId`), so the activity feed's page links are rooted here.
+   */
+  defaultWikiSlug: string;
   mode?: "page" | "onboarding";
   integrationState?: IntegrationState;
 }) {
@@ -77,7 +84,7 @@ export function WikiSourcesPanel({
   const initialIntegrations = useAppDataOptional()?.integrations;
   if (!hydrated) {
     return (
-      <WikiSourcesLayout mode={mode}>
+      <WikiSourcesLayout mode={mode} defaultWikiSlug={defaultWikiSlug}>
         <WikiSourceCardSkeletons />
         {mode === "page" ? <WikiIngestActivitySkeleton /> : null}
       </WikiSourcesLayout>
@@ -86,6 +93,7 @@ export function WikiSourcesPanel({
   return (
     <WikiSourcesLivePanel
       workspaceId={workspaceId}
+      defaultWikiSlug={defaultWikiSlug}
       mode={mode}
       initialIntegrations={integrationState ?? initialIntegrations}
     />
@@ -94,10 +102,12 @@ export function WikiSourcesPanel({
 
 function WikiSourcesLivePanel({
   workspaceId,
+  defaultWikiSlug,
   initialIntegrations,
   mode,
 }: {
   workspaceId: string;
+  defaultWikiSlug: string;
   initialIntegrations: IntegrationState | undefined;
   mode: "page" | "onboarding";
 }) {
@@ -301,7 +311,7 @@ function WikiSourcesLivePanel({
     .filter((entry) => entry.source?.enabled && entry.status === "connected").length;
 
   return (
-    <WikiSourcesLayout mode={mode}>
+    <WikiSourcesLayout mode={mode} defaultWikiSlug={defaultWikiSlug}>
       {loadError ? (
         <Alert variant="destructive">
           <CircleAlert />
@@ -358,7 +368,7 @@ function WikiSourcesLivePanel({
           ))}
         </section>
       )}
-      {mode === "page" ? <WikiIngestActivityFeed /> : null}
+      {mode === "page" ? <WikiIngestActivityFeed wikiSlug={defaultWikiSlug} /> : null}
       {setupProvider ? (
         <WikiSourceSetupDialog
           integrations={initialIntegrations}
@@ -372,9 +382,11 @@ function WikiSourcesLivePanel({
 function WikiSourcesLayout({
   children,
   mode,
+  defaultWikiSlug,
 }: {
   children: ReactNode;
   mode: "page" | "onboarding";
+  defaultWikiSlug: string;
 }) {
   return (
     <div className={cn(mode === "page" && "min-h-0 flex-1 overflow-y-auto")}>
@@ -387,7 +399,7 @@ function WikiSourcesLayout({
         <header className="flex flex-col gap-3">
           {mode === "page" ? (
             <Link
-              href="/wiki"
+              href={wikiHref(defaultWikiSlug)}
               className="inline-flex w-fit items-center gap-1.5 text-[12px] font-medium text-ink-subtle transition-colors hover:text-ink"
             >
               <ArrowLeft size={13} strokeWidth={1.9} />

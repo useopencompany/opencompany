@@ -49,6 +49,7 @@ import {
   useSidebarProjects,
 } from "@/components/SidebarProjects";
 import { SidebarSectionHeader, useCollapsedSidebarSection } from "@/components/SidebarSection";
+import { SidebarWikis, useSidebarWikis } from "@/components/SidebarWikis";
 import { HOME_NAVIGATION_EVENT, requestChatComposerFocus } from "@/lib/chat-navigation";
 import { clearLocalChatState, useLocalChatStates } from "@/lib/chat-session-state";
 import { type ChatSummaryView, chatSummaryState } from "@/lib/chat-ui";
@@ -65,6 +66,7 @@ import {
   type SidebarTaskView,
   type SidebarWorkItem,
 } from "@/lib/sidebar-items";
+import { activeWikiSlugFromPathname } from "@/lib/wiki-routes";
 import { createWorkspaceAction, switchWorkspaceAction } from "@/lib/workspace-actions";
 
 function Icon({ className }: { className?: string }) {
@@ -154,6 +156,7 @@ export function Sidebar({
   showCollapseButton?: boolean;
 }) {
   const { featureFlags, mcpSetup, reviewCount, sidebarTasks } = useAppData();
+  const wikis = useSidebarWikis();
   const pathname = usePathname();
   const mcpSetupActive = !mcpSetup.completedAt && pathname === "/settings/mcp";
   const homeActive = pathname === "/";
@@ -166,7 +169,9 @@ export function Sidebar({
     featureFlags.taskSpawning &&
     sidebarTasks.some((task) => isTaskRouteActive(pathname, taskHref(task.displayId)));
   const workflowsActive = pathname === "/workflows" || pathname.startsWith("/workflows/");
-  const wikiActive = pathname === "/wiki" || pathname.startsWith("/wiki/");
+  // `/wiki/sources` and `/wiki/import` are static routes under /wiki, not wikis, so neither marks
+  // a row as current. Bare `/wiki` redirects, so it is only ever in flight.
+  const activeWikiSlug = activeWikiSlugFromPathname(pathname);
   const pluginsActive =
     pathname === "/settings/plugins" || pathname.startsWith("/settings/plugins/");
 
@@ -242,7 +247,6 @@ export function Sidebar({
               />
             </>
           ) : null}
-          <SidebarNavRow href="/wiki" icon={BookOpen} label="Wiki" active={wikiActive} />
           {!mcpSetup.completedAt ? (
             <SidebarNavRow
               href="/settings/mcp"
@@ -260,6 +264,11 @@ export function Sidebar({
             <BrainSwitcher />
           </div>
         ) : null}
+
+        {/* Wiki: knowledge before agents */}
+        <div className="pt-4">
+          <SidebarWikis state={wikis} activeWikiSlug={activeWikiSlug} />
+        </div>
 
         <SidebarBots />
 
