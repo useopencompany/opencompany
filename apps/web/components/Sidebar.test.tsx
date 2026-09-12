@@ -1426,6 +1426,8 @@ describe("Sidebar", () => {
       const projects = await findLoadedProjects();
       const folder = within(projects).getByRole("button", { name: "Launch" });
 
+      // The icon is decorative, so aria-expanded (covered above) carries the state for assistive
+      // tech. Lucide's per-icon class is the only stable handle on which glyph actually rendered.
       expect(folder.querySelector(".lucide-folder-open")).not.toBeNull();
       expect(folder.querySelector(".lucide-chevron-down")).toBeNull();
 
