@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- choose claude fable 5.1 for a cloud claude code sandbox, in the composer or in a workflow step. sonnet 5 stays the default, and whether fable is included or needs usage credits depends on your claude plan (#1767) — @louis.
 - turn on the subagents beta in preferences to let opencompany hand wide research to helpers that work in their own context and report back, so one answer can cover several sources at once. expand a subagent row in the chat to watch what it is doing. uses more credits per message (#1749, #1756) — @louis.
 - turn on the projects beta in preferences to group chats and tasks into named folders above recents. drag a row onto a folder to file it, drag it back onto the recents header to take it out, collapse each folder on its own, and start a new chat straight into a project from the folder's new-chat button (#1755) — @louis.
 
