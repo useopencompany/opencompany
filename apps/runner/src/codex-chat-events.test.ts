@@ -7,7 +7,7 @@ import {
 } from "@opencompany/agent-runtime";
 import type { RunExecutionRepository } from "@opencompany/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { CodexChatLeaseLostError } from "./codex-chat-errors";
+import { CodexChatLeaseLostError, UNREADABLE_ENGINE_FAILURE_MESSAGE } from "./codex-chat-errors";
 import {
   createExternalEngineProjector,
   type ExternalEngineProjectorTarget,
@@ -538,6 +538,25 @@ describe("createExternalEngineProjector", () => {
     expect(sqlText(query)).toContain("UPDATE goat.chat_messages AS message");
     expect(queryValues(query)).toContainEqual(
       expect.stringContaining("Persist this before interrupt."),
+    );
+  });
+
+  it("persists a presentable failure when the engine error is a raw HTML page", async () => {
+    mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
+    const projector = createExternalEngineProjector({
+      target: projectorTarget(),
+      redact: (value) => value,
+      normalizeEvent: acpNormalizer(),
+    });
+
+    await projector.fail("\n<html><head><title>502 Server Error</title></head></html>");
+
+    const persistedValues = mocks.execute.mock.calls
+      .flatMap(([query]) => queryValues(query))
+      .filter((value): value is string => typeof value === "string");
+    expect(persistedValues.some((value) => value.includes("<html"))).toBe(false);
+    expect(persistedValues.some((value) => value.includes(UNREADABLE_ENGINE_FAILURE_MESSAGE))).toBe(
+      true,
     );
   });
 

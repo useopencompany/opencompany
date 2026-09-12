@@ -33,7 +33,7 @@ import {
 } from "@opencompany/db/product-schema";
 import { captureException } from "@opencompany/observability";
 import { and, eq, sql } from "drizzle-orm";
-import { CodexChatLeaseLostError } from "./codex-chat-errors";
+import { CodexChatLeaseLostError, presentableEngineFailureMessage } from "./codex-chat-errors";
 import { getDb } from "./db";
 import type { ExternalEngineRequest, ExternalEngineTurnSummary } from "./external-engine-contract";
 import { rowsFromExecute } from "./sql-exec";
@@ -773,8 +773,9 @@ export function createExternalEngineProjector(input: {
           });
           return;
         }
-        const error =
-          summary.error ?? turnError ?? `Codex finished with status: ${summary.status}.`;
+        const error = presentableEngineFailureMessage(
+          summary.error ?? turnError ?? `Codex finished with status: ${summary.status}.`,
+        );
         parts = finalizeCodexUiMessageParts(parts, "failed", error).parts;
         const content = await syncAssistantMessage({
           error,
@@ -824,19 +825,20 @@ export function createExternalEngineProjector(input: {
       } = {},
     ) {
       return serializeProjection(async () => {
+        const presentableError = presentableEngineFailureMessage(error);
         const completedAt = new Date();
         await cancelPendingInteractions();
         await reconcilePublishedArtifacts();
-        parts = finalizeCodexUiMessageParts(parts, "failed", error).parts;
+        parts = finalizeCodexUiMessageParts(parts, "failed", presentableError).parts;
         const content = await syncAssistantMessage({
-          error,
+          error: presentableError,
           durationMs: elapsedTurnDurationMs(target.turnCreatedAt, completedAt),
           force: true,
         });
         await settleTurn({
           turnStatus: "failed",
           sessionStatus: options.sessionStatus ?? "idle",
-          error,
+          error: presentableError,
           completedAt,
           taskCompletion: options.taskCompletion,
           content,
