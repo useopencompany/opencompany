@@ -44,6 +44,7 @@ import {
   type ReactNode,
   useEffect,
   useMemo,
+  useOptimistic,
   useState,
   useTransition,
 } from "react";
@@ -601,11 +602,13 @@ function BetaFeatureSwitch({
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [optimisticChecked, setOptimisticChecked] = useOptimistic(checked);
 
   const toggle = () => {
-    const nextEnabled = !checked;
+    const nextEnabled = !optimisticChecked;
     setError(null);
     startTransition(async () => {
+      setOptimisticChecked(nextEnabled);
       let result: { ok: boolean };
       try {
         result = await update(nextEnabled);
@@ -638,17 +641,17 @@ function BetaFeatureSwitch({
           <button
             type="button"
             role="switch"
-            aria-checked={checked}
+            aria-checked={optimisticChecked}
             aria-label={label}
             disabled={isPending}
             onClick={toggle}
             className={`ml-auto inline-flex h-6 w-10 shrink-0 items-center rounded-full border transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-60 ${
-              checked ? "border-ink bg-ink" : "border-border bg-surface-muted"
+              optimisticChecked ? "border-ink bg-ink" : "border-border bg-surface-muted"
             }`}
           >
             <span
               className={`block h-4 w-4 rounded-full bg-canvas shadow-sm transition-transform duration-150 ${
-                checked ? "translate-x-[18px]" : "translate-x-1"
+                optimisticChecked ? "translate-x-[18px]" : "translate-x-1"
               }`}
             />
           </button>

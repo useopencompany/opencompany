@@ -407,6 +407,27 @@ describe("SettingsRoute", () => {
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
   });
 
+  it("shows the Subagents opt-in while the preference save is pending", async () => {
+    let finishSave!: (result: { ok: true; enabled: boolean }) => void;
+    userPreferencesMock.updateSubagentsAction.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishSave = resolve;
+        }),
+    );
+    const user = userEvent.setup();
+    render(<PreferencesSettingsRoute />);
+
+    const toggle = screen.getByRole("switch", { name: "Subagents" });
+    await user.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    expect(toggle).toBeDisabled();
+
+    finishSave({ ok: true, enabled: true });
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+  });
+
   it("shows the Projects switch off by default and persists opt-in", async () => {
     const user = userEvent.setup();
     render(<PreferencesSettingsRoute />);
