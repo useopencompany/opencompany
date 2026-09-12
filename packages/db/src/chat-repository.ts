@@ -946,10 +946,12 @@ export class PostgresChatRepository implements ChatRepository {
       ),
       created_chat AS (
         INSERT INTO goat.chat_sessions (
-          id, user_workos_id, title, model, engine, kind, last_seen_at, created_at, updated_at
+          id, user_workos_id, project_id, title, model, engine, kind, last_seen_at,
+          created_at, updated_at
         )
         SELECT
-          reservation.conversation_id, ${input.actor.userId}, ${title},
+          reservation.conversation_id, ${input.actor.userId},
+          ${input.command.projectId ?? null}::text, ${title},
           ${input.command.model}, ${input.command.engine}, 'chat', ${now}, ${now}, ${now}
         FROM winner AS reservation
         WHERE ${input.command.conversationId ?? null}::text IS NULL
@@ -2877,6 +2879,7 @@ function hashCommand(command: CreateMessageCommand) {
         settings: command.settings ?? {},
         attachmentIds: command.attachmentIds ?? [],
         mentions: command.mentions ?? [],
+        projectId: command.projectId ?? null,
       }),
     )
     .digest("hex");

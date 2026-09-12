@@ -21,6 +21,7 @@ import {
   CalendarClock,
   CircleUserRound,
   ExternalLink,
+  FolderOpen,
   Inbox,
   Link2,
   ListTodo,
@@ -83,14 +84,19 @@ import {
   updateAutoModelRoutingAction,
   updateBotsAction,
   updateReviewInboxAction,
+  updateSidebarProjectsAction,
   updateTaskSpawningAction,
 } from "@/lib/user-preferences";
 
 export function HomeRoute({
   chatId,
+  projectId = null,
   initialChat: routeInitialChat = null,
 }: {
   chatId: string | null;
+  // Set when the reader started this chat from a sidebar Project row, so the Conversation the
+  // first message creates is filed there.
+  projectId?: string | null;
   initialChat?: ChatSessionView | null;
 }) {
   const data = useAppData();
@@ -125,6 +131,7 @@ export function HomeRoute({
         schedules={data.schedules}
         defaultModel={DEFAULT_MODEL}
         initialChat={initialChat}
+        newChatProjectId={projectId}
         recentChats={data.recentChats}
         archivedChats={data.archivedChats}
         codexConnected={data.codexConnected}
@@ -276,6 +283,13 @@ export function PreferencesSettingsRoute() {
           description="Collect finished chats and tasks in one place, read them side by side, and archive them when you're done."
           checked={featureFlags.reviewInbox}
           update={updateReviewInboxAction}
+        />
+        <BetaFeatureSwitch
+          icon={FolderOpen}
+          label="Projects"
+          description="Group chats and tasks into named folders in the sidebar, and start new chats inside one."
+          checked={featureFlags.sidebarProjects}
+          update={updateSidebarProjectsAction}
         />
       </section>
     </SettingsContent>

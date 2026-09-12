@@ -128,6 +128,11 @@ type AppData = AppInitialData & {
   // The Tasks the sidebar lists beside recent chats. Selected here and gated at the render site,
   // so the section label and the rows under it can never disagree about the flag.
   sidebarTasks: SidebarTaskView[];
+  // Every open chat and Task, unbounded by the Recents recency window and row limits. A sidebar
+  // Project lists whatever the reader filed there however old it is, so those rows resolve from
+  // these instead of from the bounded Recents selections.
+  openChats: ChatSummaryView[];
+  openSidebarTasks: SidebarTaskView[];
   // Every open Task whose unread flag stands for a result a reader can clear by reading it,
   // whatever its age. The sidebar list is bounded by recency; the acknowledgment must not be.
   unreadTaskIds: ReadonlySet<string>;
@@ -315,10 +320,9 @@ function AppLiveDataSubscriptions({
     return rows.filter((row) => !optimisticallyArchived.has(row.id));
   }, [chatRows, optimisticallyArchived]);
 
-  const recentChats = useMemo(() => {
-    if (chatsLoading && !chatRows?.length) return selectSidebarChats(initialData.recentChats);
+  const chatSummaryFrom = useMemo(() => {
     const initialById = new Map(initialData.recentChats.map((chat) => [chat.id, chat]));
-    const toSummary = (row: HeadlessChatConversationReadModel): ChatSummaryView => {
+    return (row: HeadlessChatConversationReadModel): ChatSummaryView => {
       const initial = initialById.get(row.id);
       return {
         id: row.id,
@@ -335,8 +339,20 @@ function AppLiveDataSubscriptions({
         pinnedAt: row.pinnedAt,
       };
     };
-    return selectSidebarChats(openConversationRows).map(toSummary);
-  }, [chatRows, chatsLoading, initialData.recentChats, openConversationRows]);
+  }, [initialData.recentChats]);
+
+  const recentChats = useMemo(() => {
+    if (chatsLoading && !chatRows?.length) return selectSidebarChats(initialData.recentChats);
+    return selectSidebarChats(openConversationRows).map(chatSummaryFrom);
+  }, [chatRows, chatSummaryFrom, chatsLoading, initialData.recentChats, openConversationRows]);
+  const openChats = useMemo(
+    () =>
+      openConversationRows
+        .filter((row) => !row.archivedAt)
+        .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+        .map(chatSummaryFrom),
+    [chatSummaryFrom, openConversationRows],
+  );
   const chatMessageShapeRows = useMemo(
     () =>
       ((chatRows ?? []) as HeadlessChatConversationReadModel[]).map((row) => ({
@@ -419,16 +435,11 @@ function AppLiveDataSubscriptions({
   }, [initialData.featureFlags.reviewInbox, openConversationRows, openTaskRows]);
 
   const sidebarTasks = useMemo<SidebarTaskView[]>(
-    () =>
-      selectSidebarTasks(openTaskRows).map((row) => ({
-        id: row.id,
-        conversationId: row.conversationId,
-        displayId: row.displayId,
-        name: row.name,
-        status: row.status,
-        hasUnseen: row.hasUnseen,
-        updatedAt: row.updatedAt,
-      })),
+    () => selectSidebarTasks(openTaskRows).map(sidebarTaskViewFrom),
+    [openTaskRows],
+  );
+  const openSidebarTasks = useMemo<SidebarTaskView[]>(
+    () => openTaskRows.filter((row) => !row.archivedAt).map(sidebarTaskViewFrom),
     [openTaskRows],
   );
 
@@ -477,6 +488,8 @@ function AppLiveDataSubscriptions({
       reviewItems,
       reviewCount,
       sidebarTasks,
+      openChats,
+      openSidebarTasks,
       unreadTaskIds,
       integrations,
       taskRows: currentTaskRows,
@@ -492,6 +505,8 @@ function AppLiveDataSubscriptions({
       reviewItems,
       schedules,
       sidebarTasks,
+      openChats,
+      openSidebarTasks,
       taskRows,
       unreadTaskIds,
       tasks,
@@ -537,7 +552,21 @@ function initialAppData(initialData: AppInitialData): AppData {
     // Task metadata only reaches the client through the Electric read model, so the sidebar's
     // Task rows and their unread state arrive with the first live push too.
     sidebarTasks: [],
+    openChats: selectSidebarChats(initialData.recentChats),
+    openSidebarTasks: [],
     unreadTaskIds: EMPTY_TASK_ID_SET,
+  };
+}
+
+function sidebarTaskViewFrom(row: HeadlessTaskReadModel): SidebarTaskView {
+  return {
+    id: row.id,
+    conversationId: row.conversationId,
+    displayId: row.displayId,
+    name: row.name,
+    status: row.status,
+    hasUnseen: row.hasUnseen,
+    updatedAt: row.updatedAt,
   };
 }
 

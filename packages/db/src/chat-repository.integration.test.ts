@@ -51,6 +51,7 @@ const migrationPaths = [
   "0248_goat_chat_attachment_upload_idempotency.sql",
   "0261_persistent_bots.sql",
   "0263_personal_company_skills.sql",
+  "0270_opencompany_sidebar_projects.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -220,6 +221,55 @@ describe("Postgres Chat repositories", () => {
         conversationId: "task_conversation_1",
       }),
     ).resolves.toMatchObject({ conversationId: "task_conversation_1" });
+  });
+
+  it("files a new conversation under the project the first message names", async () => {
+    await database.exec(`
+      INSERT INTO goat.projects (id, user_workos_id, workspace_id, name)
+      VALUES ('project_1', 'user_1', 'workspace_1', 'Launch');
+    `);
+
+    const created = await service.createMessage(actor(), {
+      idempotencyKey: "project-chat",
+      content: "Start the launch plan.",
+      engine: "opencompany",
+      model: "provider/model",
+      projectId: "project_1",
+    });
+
+    const filed = await database.query<{ project_id: string | null }>(
+      "SELECT project_id FROM goat.chat_sessions WHERE id = $1",
+      [created.conversationId],
+    );
+    expect(filed.rows).toEqual([{ project_id: "project_1" }]);
+
+    // An existing conversation is moved through the Project's own routes, never by a message. The
+    // service rejects that argument before it reaches the database, so this throws synchronously.
+    expect(() =>
+      service.createMessage(actor(), {
+        idempotencyKey: "project-on-existing-chat",
+        content: "Keep going.",
+        engine: "opencompany",
+        model: "provider/model",
+        conversationId: created.conversationId,
+        projectId: "project_1",
+      }),
+    ).toThrow("projectId applies only when a new Conversation is created.");
+  });
+
+  it("leaves a new conversation unfiled when no project is named", async () => {
+    const created = await service.createMessage(actor(), {
+      idempotencyKey: "unfiled-chat",
+      content: "Just a chat.",
+      engine: "opencompany",
+      model: "provider/model",
+    });
+
+    const filed = await database.query<{ project_id: string | null }>(
+      "SELECT project_id FROM goat.chat_sessions WHERE id = $1",
+      [created.conversationId],
+    );
+    expect(filed.rows).toEqual([{ project_id: null }]);
   });
 
   it("rejects competing same-name selections even when both preflight reads see an empty Chat", async () => {

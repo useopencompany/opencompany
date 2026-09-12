@@ -18,6 +18,13 @@ describe("featureFlagsFromUser", () => {
     expect(featureFlagsFromUser({ autoModelRoutingEnabled: false }).autoModelRouting).toBe(false);
   });
 
+  it("keeps sidebar Projects off unless explicitly enabled", () => {
+    expect(featureFlagsFromUser({}).sidebarProjects).toBe(false);
+    expect(featureFlagsFromUser({ sidebarProjectsEnabled: null }).sidebarProjects).toBe(false);
+    expect(featureFlagsFromUser({ sidebarProjectsEnabled: true }).sidebarProjects).toBe(true);
+    expect(featureFlagsFromUser({ sidebarProjectsEnabled: false }).sidebarProjects).toBe(false);
+  });
+
   it("keeps legacy Brain off unless the workspace explicitly enables it", () => {
     expect(featureFlagsFromUser({}).legacyBrain).toBe(false);
     expect(featureFlagsFromUser({ legacyBrainEnabled: null }).legacyBrain).toBe(false);

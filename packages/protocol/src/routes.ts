@@ -128,6 +128,10 @@ import {
   PluginInstallationEnvelopeSchema,
   PluginListEnvelopeSchema,
   PresentationCursorSchema,
+  ProjectBodySchema,
+  ProjectConversationBodySchema,
+  ProjectListEnvelopeSchema,
+  ProjectSchema,
   PublicChatShareEnvelopeSchema,
   PublicChatShareMetadataEnvelopeSchema,
   ReadModelSchema,
@@ -1976,6 +1980,109 @@ export const updateBotRoute = createRoute({
     200: {
       description: "Update bot identity for subsequent turns.",
       content: { "application/json": { schema: BotEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const listProjectsRoute = createRoute({
+  method: "get",
+  path: "/v1/projects",
+  tags: ["Projects"],
+  security: actorSecurity,
+  request: {},
+  responses: {
+    200: {
+      description: "Your sidebar projects and the conversations filed under them.",
+      content: { "application/json": { schema: ProjectListEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+export const createProjectRoute = createRoute({
+  method: "post",
+  path: "/v1/projects",
+  tags: ["Projects"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: {
+        "application/json": { schema: ProjectSchema.pick({ id: true, name: true }) },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Create a project. Repeating a creation id returns the unchanged list.",
+      content: { "application/json": { schema: ProjectListEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+export const renameProjectRoute = createRoute({
+  method: "patch",
+  path: "/v1/projects/{projectId}",
+  tags: ["Projects"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ projectId: ResourceIdSchema }),
+    body: { required: true, content: { "application/json": { schema: ProjectBodySchema } } },
+  },
+  responses: {
+    200: {
+      description: "Rename a project.",
+      content: { "application/json": { schema: ProjectListEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+export const deleteProjectRoute = createRoute({
+  method: "delete",
+  path: "/v1/projects/{projectId}",
+  tags: ["Projects"],
+  security: actorSecurity,
+  request: { params: z.object({ projectId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Delete a project. Conversations filed under it return to Recents.",
+      content: { "application/json": { schema: ProjectListEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+export const fileConversationInProjectRoute = createRoute({
+  method: "post",
+  path: "/v1/projects/{projectId}/conversations",
+  tags: ["Projects"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ projectId: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: ProjectConversationBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Move a chat or Task into this project.",
+      content: { "application/json": { schema: ProjectListEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+export const removeConversationFromProjectRoute = createRoute({
+  method: "delete",
+  path: "/v1/projects/{projectId}/conversations/{conversationId}",
+  tags: ["Projects"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ projectId: ResourceIdSchema, conversationId: ResourceIdSchema }),
+  },
+  responses: {
+    200: {
+      description: "Return a chat or Task to Recents.",
+      content: { "application/json": { schema: ProjectListEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -3983,6 +4090,12 @@ export type V1RouteHandlers = {
   createBot: RouteHandler<typeof createBotRoute>;
   getBot: RouteHandler<typeof getBotRoute>;
   updateBot: RouteHandler<typeof updateBotRoute>;
+  listProjects: RouteHandler<typeof listProjectsRoute>;
+  createProject: RouteHandler<typeof createProjectRoute>;
+  renameProject: RouteHandler<typeof renameProjectRoute>;
+  deleteProject: RouteHandler<typeof deleteProjectRoute>;
+  fileConversationInProject: RouteHandler<typeof fileConversationInProjectRoute>;
+  removeConversationFromProject: RouteHandler<typeof removeConversationFromProjectRoute>;
   listConversations: RouteHandler<typeof listConversationsRoute>;
   getConversation: RouteHandler<typeof getConversationRoute>;
   updateConversation: RouteHandler<typeof updateConversationRoute>;
@@ -4183,6 +4296,12 @@ export function createV1Router(
       .openapi(createBotRoute, handlers.createBot)
       .openapi(getBotRoute, handlers.getBot)
       .openapi(updateBotRoute, handlers.updateBot)
+      .openapi(listProjectsRoute, handlers.listProjects)
+      .openapi(createProjectRoute, handlers.createProject)
+      .openapi(renameProjectRoute, handlers.renameProject)
+      .openapi(deleteProjectRoute, handlers.deleteProject)
+      .openapi(fileConversationInProjectRoute, handlers.fileConversationInProject)
+      .openapi(removeConversationFromProjectRoute, handlers.removeConversationFromProject)
       .openapi(listConversationsRoute, handlers.listConversations)
       .openapi(getConversationRoute, handlers.getConversation)
       .openapi(updateConversationRoute, handlers.updateConversation)
@@ -4314,6 +4433,12 @@ const placeholderConversation = {
   model: "provider/model",
   createdAt: placeholderTime,
   updatedAt: placeholderTime,
+};
+const placeholderProject = {
+  id: "project_contract",
+  name: "Contract placeholder",
+  conversationIds: ["conversation_contract"],
+  createdAt: placeholderTime,
 };
 const placeholderTask = {
   id: "task_contract",
@@ -5332,6 +5457,12 @@ const contractDocumentHandlers: V1RouteHandlers = {
     c.json({ data: { id: "bot_example", name: "Assistant", description: "" }, meta }, 200),
   updateBot: (c) =>
     c.json({ data: { id: "bot_example", name: "Assistant", description: "" }, meta }, 200),
+  listProjects: (c) => c.json({ data: [placeholderProject], meta }, 200),
+  createProject: (c) => c.json({ data: [placeholderProject], meta }, 200),
+  renameProject: (c) => c.json({ data: [placeholderProject], meta }, 200),
+  deleteProject: (c) => c.json({ data: [], meta }, 200),
+  fileConversationInProject: (c) => c.json({ data: [placeholderProject], meta }, 200),
+  removeConversationFromProject: (c) => c.json({ data: [placeholderProject], meta }, 200),
   listConversations: (c) => c.json({ data: [], nextCursor: null, meta }, 200),
   getConversation: (c) => c.json({ data: placeholderConversation, meta }, 200),
   updateConversation: (c) =>

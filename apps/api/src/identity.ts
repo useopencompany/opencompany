@@ -167,6 +167,7 @@ export function createIdentityService(input: {
         autoModelRoutingEnabled: user.autoModelRoutingEnabled,
         chatCapabilitiesBetaEnabled: user.chatCapabilitiesBetaEnabled,
         reviewInboxEnabled: user.reviewInboxEnabled,
+        sidebarProjectsEnabled: user.sidebarProjectsEnabled,
         wikiEnabled: true as const,
         taskViewMode: user.taskViewMode,
         taskTimeRange: user.taskTimeRange,

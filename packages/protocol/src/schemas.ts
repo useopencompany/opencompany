@@ -3134,6 +3134,9 @@ export const CreateMessageBodySchema = z
     model: z.string().min(1).max(256).optional(),
     attachmentIds: z.array(ResourceIdSchema).max(5).optional(),
     mentions: z.array(MessageMentionSchema).max(16).optional(),
+    // Files the Conversation this message creates under a sidebar Project. Only meaningful for a
+    // new Conversation; an existing one is moved through the Project's own membership routes.
+    projectId: ResourceIdSchema.optional(),
   })
   .strict()
   .refine(
@@ -3142,6 +3145,11 @@ export const CreateMessageBodySchema = z
     {
       message: "conversationId and clientConversationId are mutually exclusive",
     },
+  )
+  .refine(
+    (body: { conversationId?: string; projectId?: string }) =>
+      !(body.conversationId && body.projectId),
+    { message: "projectId applies only to a new conversation" },
   )
   .refine(
     (body: { content: string; attachmentIds?: string[] }) =>
@@ -3723,6 +3731,7 @@ export const IdentityUserSchema = z
     autoModelRoutingEnabled: z.boolean(),
     chatCapabilitiesBetaEnabled: z.boolean(),
     reviewInboxEnabled: z.boolean(),
+    sidebarProjectsEnabled: z.boolean(),
     /** @deprecated Wiki is always enabled. */
     wikiEnabled: z.literal(true),
     taskViewMode: TaskViewModeSchema,
@@ -3788,6 +3797,7 @@ export const UserPreferencesSchema = z
     taskTimeRange: TaskTimeRangeSchema,
     autoModelRoutingEnabled: z.boolean(),
     reviewInboxEnabled: z.boolean(),
+    sidebarProjectsEnabled: z.boolean(),
   })
   .strict()
   .openapi("UserPreferences");
@@ -3803,6 +3813,7 @@ export const UpdateUserPreferencesBodySchema = z
     taskTimeRange: TaskTimeRangeSchema.optional(),
     autoModelRoutingEnabled: z.boolean().optional(),
     reviewInboxEnabled: z.boolean().optional(),
+    sidebarProjectsEnabled: z.boolean().optional(),
   })
   .strict()
   .refine((body: Record<string, unknown>) => Object.keys(body).length > 0, {
@@ -4717,3 +4728,28 @@ export const BotListEnvelopeSchema = z
   .strict();
 
 export type SetSkillScopeBody = z.infer<typeof SetSkillScopeBodySchema>;
+
+export const ProjectBodySchema = z.object({ name: z.string().trim().min(1).max(80) }).strict();
+export const ProjectSchema = z
+  .object({
+    id: ResourceIdSchema,
+    name: z.string(),
+    // The chats and Tasks filed under this project, newest first. Both kinds are Conversations,
+    // so one list covers the sidebar rows for either.
+    conversationIds: z.array(ResourceIdSchema),
+    createdAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("Project");
+export const ProjectEnvelopeSchema = z
+  .object({ data: ProjectSchema, meta: ProtocolMetadataSchema })
+  .strict();
+export const ProjectListEnvelopeSchema = z
+  .object({ data: z.array(ProjectSchema), meta: ProtocolMetadataSchema })
+  .strict();
+export const ProjectConversationBodySchema = z
+  .object({ conversationId: ResourceIdSchema })
+  .strict();
+export type ProjectDto = z.infer<typeof ProjectSchema>;
+export type ProjectBody = z.infer<typeof ProjectBodySchema>;
+export type ProjectConversationBody = z.infer<typeof ProjectConversationBodySchema>;

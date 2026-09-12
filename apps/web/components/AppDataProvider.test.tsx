@@ -804,6 +804,7 @@ function initialData(): AppInitialData {
       autoModelRouting: false,
       legacyBrain: false,
       reviewInbox: false,
+      sidebarProjects: false,
     },
     codexConnected: false,
     claudeCodeConnected: false,

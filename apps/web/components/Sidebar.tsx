@@ -25,8 +25,9 @@ import {
   Workflow,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
+  type DragEvent,
   type FormEvent,
   type MouseEventHandler,
   useEffect,
@@ -41,6 +42,13 @@ import { BrainSwitcher } from "@/components/BrainSwitcher";
 import { ChatStateIndicator } from "@/components/ChatStateIndicator";
 import { IntentPrefetchLink } from "@/components/IntentPrefetchLink";
 import { SidebarFeedback } from "@/components/SidebarFeedback";
+import {
+  conversationDragProps,
+  draggedConversationId,
+  isConversationDrag,
+  SidebarProjects,
+  useSidebarProjects,
+} from "@/components/SidebarProjects";
 import { HOME_NAVIGATION_EVENT, requestChatComposerFocus } from "@/lib/chat-navigation";
 import { clearLocalChatState, useLocalChatStates } from "@/lib/chat-session-state";
 import { type ChatSummaryView, chatSummaryState } from "@/lib/chat-ui";
@@ -443,13 +451,16 @@ function persistRecentsCollapsed(next: boolean) {
 }
 
 function SidebarWorkList() {
-  const { featureFlags, recentChats, sidebarTasks, workspace } = useAppData();
+  const { featureFlags, openChats, openSidebarTasks, recentChats, sidebarTasks, workspace } =
+    useAppData();
   const recentsCollapsed = useSyncExternalStore(
     subscribeRecentsCollapsed,
     getRecentsCollapsedSnapshot,
     getRecentsCollapsedServerSnapshot,
   );
+  const projects = useSidebarProjects(featureFlags.sidebarProjects);
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const router = useRouter();
   const [, startTransition] = useTransition();
   const localChatStates = useLocalChatStates();
@@ -481,18 +492,17 @@ function SidebarWorkList() {
   }
 
   const isPinned = (chat: ChatSummaryView) => pinOverrides.get(chat.id) ?? Boolean(chat.pinnedAt);
-  const pinnedChats = recentChats.filter(isPinned);
+  // A conversation lives in exactly one place in the sidebar. Once it is filed under a Project,
+  // that folder is its home and it leaves Pinned and Recents, so the reader never has to work out
+  // which of two copies of a row is the real one.
+  const filedInProject = (conversationId: string) => projects.membership.has(conversationId);
+  const pinnedChats = recentChats.filter((chat) => isPinned(chat) && !filedInProject(chat.id));
   // Tasks follow the same flag as the Tasks nav row.
   const showTasks = featureFlags.taskSpawning;
   const workItems = orderSidebarWorkItems({
-    chats: recentChats.filter((chat) => !isPinned(chat)),
-    tasks: showTasks ? sidebarTasks : [],
+    chats: recentChats.filter((chat) => !isPinned(chat) && !filedInProject(chat.id)),
+    tasks: showTasks ? sidebarTasks.filter((task) => !filedInProject(task.conversationId)) : [],
   });
-
-  // Keep the footer pinned to the bottom when there is nothing to show.
-  if (pinnedChats.length === 0 && workItems.length === 0) {
-    return <div className="min-h-0 flex-1" />;
-  }
 
   // The row goes on the click. The write and the projection behind it take about a second, and
   // holding a chat the user has already dismissed for that long reads as lag; a failed write puts
@@ -603,8 +613,52 @@ function SidebarWorkList() {
     );
   };
 
+  // A Project keeps what the reader filed there however old it is, so its rows resolve from the
+  // full open set rather than the recency-bounded Recents selections. Recents rows take
+  // precedence: they carry the optimistic summary of a chat whose first turn is still in flight.
+  const chatsById = new Map([...openChats, ...recentChats].map((chat) => [chat.id, chat] as const));
+  const tasksByConversation = new Map(
+    [...openSidebarTasks, ...sidebarTasks].map((task) => [task.conversationId, task] as const),
+  );
+  const projectItems = (project: { conversationIds: string[] }) => {
+    const chats: ChatSummaryView[] = [];
+    const tasks: SidebarTaskView[] = [];
+    for (const conversationId of project.conversationIds) {
+      const task = tasksByConversation.get(conversationId);
+      if (task) {
+        if (showTasks) tasks.push(task);
+        continue;
+      }
+      const chat = chatsById.get(conversationId);
+      if (chat) chats.push(chat);
+    }
+    return orderSidebarWorkItems({ chats, tasks });
+  };
+
+  const unfileDroppedConversation = (event: DragEvent<HTMLElement>) => {
+    const conversationId = draggedConversationId(event);
+    if (!conversationId) return;
+    event.preventDefault();
+    const projectId = projects.membership.get(conversationId);
+    if (projectId) void projects.unfile(projectId, conversationId);
+  };
+
+  const pendingProjectId = pathname === "/" ? searchParams.get("project") : null;
+  const hasRecents = pinnedChats.length > 0 || workItems.length > 0;
+
+  // Keep the footer pinned to the bottom when there is nothing to show.
+  if (!projects.enabled && !hasRecents) {
+    return <div className="min-h-0 flex-1" />;
+  }
+
   return (
     <div className="mt-4 flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <SidebarProjects
+        state={projects}
+        itemsFor={projectItems}
+        renderItem={renderRow}
+        activeProjectId={pendingProjectId}
+      />
       {pinnedChats.length > 0 ? (
         <div className="pb-2">
           <div className="flex items-center gap-1 px-4 pb-1">
@@ -624,6 +678,14 @@ function SidebarWorkList() {
             aria-expanded={!recentsCollapsed}
             // Only points at the list while it exists; aria-expanded carries the state either way.
             aria-controls={recentsCollapsed ? undefined : RECENTS_LIST_ID}
+            // Dropping a project row here files it back out: Recents is where an unfiled
+            // conversation lives, so it is the drag target that means "take it out of the folder".
+            onDragOver={(event) => {
+              if (!isConversationDrag(event)) return;
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "move";
+            }}
+            onDrop={unfileDroppedConversation}
             className="group mx-2 flex items-center gap-1 rounded-md px-2 pb-1 pt-0.5 text-[11px] font-medium tracking-wide text-ink-subtle transition-colors duration-150 hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
           >
             Recents
@@ -697,6 +759,9 @@ function SidebarChatRow({
   );
   return (
     <div
+      // Draggable so the row can be filed into a sidebar Project. A chat whose first turn has not
+      // landed yet has no row to move, so it stays put until it does.
+      {...(optimistic ? {} : conversationDragProps(chat.id))}
       className={`group flex items-center rounded-md text-[13px] transition-colors duration-150 ${
         active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
       }`}
@@ -800,6 +865,8 @@ function SidebarTaskRow({
   const archivable = isSettledTaskStatus(task.status);
   return (
     <div
+      // Filed by the conversation behind the Task, the same key a Project stores for a chat.
+      {...conversationDragProps(task.conversationId)}
       className={`group flex items-center rounded-md text-[13px] transition-colors duration-150 ${
         active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
       }`}

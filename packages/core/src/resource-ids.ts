@@ -3,6 +3,7 @@ export function newResourceId(
   resource:
     | "conversation"
     | "workspace"
+    | "project"
     | "workflow"
     | "task_schedule"
     | "workflow_schedule_run"

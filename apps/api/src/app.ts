@@ -112,6 +112,7 @@ import type { McpOAuthIngressService } from "./mcp-oauth-ingress";
 import { type MessagePresentationService, messagePresentationEtag } from "./message-presentations";
 import type { OnboardingService } from "./onboarding";
 import type { OnboardingEmailService } from "./onboarding-emails";
+import type { ProjectService } from "./projects";
 import { type ApiRateLimiter, InMemoryApiRateLimiter } from "./rate-limit";
 import type { RepoConfigService } from "./repo-configs";
 import { PollingRunEventNotifier, type RunEventNotifier } from "./run-event-notifier";
@@ -207,6 +208,7 @@ export type CreateApiAppInput = {
   wikiControl: WikiControlService;
   attachments: AttachmentUploadService;
   bots?: BotService;
+  projects: ProjectService;
   userSettings: UserSettingsService;
   feedback: FeedbackService;
   repoConfigs: RepoConfigService;
@@ -1665,6 +1667,70 @@ export function createApiApp(input: CreateApiAppInput) {
         200,
       );
     },
+    listProjects: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      return c.json({ data: await input.projects.list(actor), meta }, 200);
+    },
+    createProject: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 30);
+      return c.json({ data: await input.projects.create(actor, c.req.valid("json")), meta }, 200);
+    },
+    renameProject: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      return c.json(
+        {
+          data: await input.projects.rename(
+            actor,
+            c.req.valid("param").projectId,
+            c.req.valid("json").name,
+          ),
+          meta,
+        },
+        200,
+      );
+    },
+    deleteProject: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 30);
+      return c.json(
+        { data: await input.projects.remove(actor, c.req.valid("param").projectId), meta },
+        200,
+      );
+    },
+    fileConversationInProject: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 120);
+      return c.json(
+        {
+          data: await input.projects.fileConversation(
+            actor,
+            c.req.valid("param").projectId,
+            c.req.valid("json").conversationId,
+          ),
+          meta,
+        },
+        200,
+      );
+    },
+    removeConversationFromProject: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 120);
+      const params = c.req.valid("param");
+      return c.json(
+        {
+          data: await input.projects.removeConversation(
+            actor,
+            params.projectId,
+            params.conversationId,
+          ),
+          meta,
+        },
+        200,
+      );
+    },
     listConversations: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);
@@ -1760,6 +1826,9 @@ export function createApiApp(input: CreateApiAppInput) {
       });
       const idempotencyKey = c.req.valid("header")["idempotency-key"];
       if (body.conversationId) await input.bots?.authorizeConversation(actor, body.conversationId);
+      // Fail before the turn is admitted: filing a new chat under a project the actor does not own
+      // must be an error, not a chat that silently lands in Recents.
+      if (body.projectId) await input.projects.assertOwned(actor, body.projectId);
       const existingTarget = body.conversationId
         ? await getConversationOrTask(input, actor, body.conversationId)
         : null;
