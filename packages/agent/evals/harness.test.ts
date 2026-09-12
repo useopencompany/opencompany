@@ -198,6 +198,47 @@ describe("real harness benchmark", () => {
     expect(trial.executions.every((e) => !e.success)).toBe(true);
   });
 
+  it("grades prohibited attempts even when the SDK rejects the tool before execution", async () => {
+    const script = scripted([
+      [call("use_action", { action: `${ln}delete_issue`, params: { id: "DEMO-1" } })],
+      [text("That action is unavailable; no changes made.")],
+    ]);
+    const trial = await run(get("unavailable"), script.generate);
+    expect(trial.executions).toHaveLength(0);
+    expect(trial.failures).toContain("prohibited action");
+    expect(trial.status).toBe("failed");
+    expect(trial.costUsd).toBe(0.02);
+  });
+
+  it("does not credit a write whose fixture execution throws", async () => {
+    const script = scripted([
+      [call("describe_actions", { actions: [`${ln}save_issue`] })],
+      [
+        call("use_action", {
+          action: `${ln}save_issue`,
+          params: {
+            team: "Product",
+            title: "Sidebar collapse resets after refresh",
+            description: "Collapse the sidebar and refresh. It should stay collapsed.",
+          },
+        }),
+      ],
+      [text("Created DEMO-3.")],
+    ]);
+    const trial = await run(
+      {
+        ...get("linear-file-issue"),
+        fixture: () => {
+          throw new Error("Fixture failed");
+        },
+      },
+      script.generate,
+    );
+    expect(trial.executions[0]?.success).toBe(false);
+    expect(trial.failures).toContain("unsuccessful action");
+    expect(trial.status).toBe("failed");
+  });
+
   it("stops before the next model call and retains the cost of an interrupted trial", async () => {
     const script = scripted([
       [call("describe_actions", { actions: [`${ln}get_issue`] })],
