@@ -246,6 +246,7 @@ function context() {
     env: {
       vercelAiGatewayApiKey: "gateway-key",
       browserEnabled: true,
+      subagentsEnabled: false,
       apiOrigin: "http://localhost:3001",
       apiInternalToken: "api-internal-secret",
     },

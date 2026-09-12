@@ -1131,10 +1131,8 @@ export function SubagentRow({
   const [expanded, setExpanded] = useState(tool.status === "running" || tool.status === "waiting");
   useHistoricalPresentationDetail(expanded, detail);
   const meta = getToolCallMeta(tool);
-  const result =
-    isRecord(tool.output) && typeof tool.output.result === "string"
-      ? tool.output.result.trim()
-      : "";
+  // The coding engines return `result`; the opencompany engine's run_subagent returns `summary`.
+  const result = subagentResultText(tool.output);
   const stepLabel = childCount === 1 ? "1 step" : `${childCount} steps`;
   return (
     <div
@@ -1217,6 +1215,12 @@ export function SubagentRow({
       ) : null}
     </div>
   );
+}
+
+function subagentResultText(output: unknown) {
+  if (!isRecord(output)) return "";
+  const value = typeof output.result === "string" ? output.result : output.summary;
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function browserScreenshotUrl(value: unknown) {

@@ -16,6 +16,7 @@ const env = {
   openaiCodexApiKey: "openai-upstream-key",
   exaApiKey: undefined,
   browserEnabled: false,
+  subagentsEnabled: false,
   codexE2bTemplate: undefined,
   sandboxNamespace: "test",
   codexTimeoutMs: 3_600_000,
