@@ -111,7 +111,10 @@ export function loadEnv(): RunnerEnv {
       5 * 60_000,
     ),
     jobLeaseTtlMs: optionalPositiveIntegerEnv("RUNNER_JOB_LEASE_TTL_MS", 300_000),
-    codexChatLeaseTtlMs: optionalPositiveIntegerEnv("RUNNER_CODEX_CHAT_LEASE_TTL_MS", 90_000),
+    codexChatLeaseTtlMs: optionalPositiveIntegerEnv(
+      "RUNNER_OPENCOMPANY_CODEX_CHAT_LEASE_TTL_MS",
+      90_000,
+    ),
     taskWorkerEnabled: optionalBooleanEnv("RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED", false),
     codexChatSelfHealEnabled: optionalBooleanEnv("RUNNER_CODEX_CHAT_SELF_HEAL_ENABLED", true),
     // Max parallel sessions this instance runs. Sessions are I/O-bound (mostly waiting on
