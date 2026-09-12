@@ -252,11 +252,13 @@ describe("HomeRoute", () => {
       claudeCodeConnected: false,
     });
 
-    render(<HomeRoute chatId={null} projectId="project_1" />);
+    render(<HomeRoute chatId={null} projectId="project_1" projectName="product" />);
     expect(surfaceMock.props?.newChatProjectId).toBe("project_1");
+    expect(surfaceMock.props?.newChatProjectName).toBe("product");
 
     render(<HomeRoute chatId={null} />);
     expect(surfaceMock.props?.newChatProjectId).toBeNull();
+    expect(surfaceMock.props?.newChatProjectName).toBeNull();
   });
 });
 
