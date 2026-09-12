@@ -9,8 +9,51 @@ import {
 import { createLogger } from "@opencompany/observability";
 import type { CodingChatHistory } from "./coding-chat-history";
 import { getDb } from "./db";
+import type { SandboxLatencyObservation } from "./sandbox";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "coding-agent-github" });
+const sandboxLogger = createLogger({ service: "opencompany-runner", runtime: "coding-sandbox" });
+
+export type CodingSandboxAcquisitionContext = {
+  engine: "codex" | "claude_code";
+  codexChatSessionId: string;
+  turnId: string;
+};
+
+export function codingSandboxAcquisitionLogFields(
+  context: CodingSandboxAcquisitionContext,
+  observation: SandboxLatencyObservation,
+) {
+  return {
+    event: "opencompany.runner_coding_sandbox_acquisition",
+    engine: context.engine,
+    codex_chat_session_id: context.codexChatSessionId,
+    turn_id: context.turnId,
+    operation: observation.operation,
+    outcome: observation.outcome,
+    latency_ms: observation.latencyMs,
+    ...(observation.sandboxId ? { sandbox_id: observation.sandboxId } : {}),
+    ...(observation.requestedSandboxId
+      ? { requested_sandbox_id: observation.requestedSandboxId }
+      : {}),
+    ...(observation.errorName ? { error_name: observation.errorName } : {}),
+  };
+}
+
+// Sandbox create/resume dominates a coding turn's time to first output, and a paused sandbox
+// that wedges on restore first shows up here as an "unresponsive" connect. Log every
+// observation so acquisition latency and failure shape are chartable per engine and outcome;
+// "not_found" is the routine expired-sandbox replacement path, not a failure.
+export function logCodingSandboxAcquisition(context: CodingSandboxAcquisitionContext) {
+  return (observation: SandboxLatencyObservation) => {
+    const fields = codingSandboxAcquisitionLogFields(context, observation);
+    if (observation.outcome === "error" || observation.outcome === "unresponsive") {
+      sandboxLogger.warn("Coding sandbox acquisition degraded", fields);
+      return;
+    }
+    sandboxLogger.info("Coding sandbox acquisition observed", fields);
+  };
+}
 
 export const GITHUB_AUTH_HEADER_ENV = "GITHUB_AUTH_HEADER";
 export const GITHUB_RECONNECT_NOTICE =

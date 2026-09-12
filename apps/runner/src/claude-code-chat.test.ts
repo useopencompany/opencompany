@@ -159,6 +159,7 @@ vi.mock("./coding-agent-shared", () => ({
     "GitHub access is temporarily unavailable. This turn continued without GitHub access.",
   buildGitHubCommandEnv: () => ({}),
   createKnownSecretRedactor: () => (value: string) => value,
+  logCodingSandboxAcquisition: () => () => undefined,
   githubSandboxTokenMinimumValidityMs: (turnTimeoutMs: number) => turnTimeoutMs + 600_000,
   loadGitHubAuthForUser: chatMocks.loadGitHubAuthForUser,
   shouldAppendGitHubAuthNotice: (
@@ -527,6 +528,7 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     expect(sandboxMocks.createOrConnectSandbox).toHaveBeenCalledWith(
       expect.objectContaining({
         billingOwner: { namespace: "test", workspaceId: "workspace_1", userWorkosId: "user_1" },
+        onLatency: expect.any(Function),
       }),
     );
   });
