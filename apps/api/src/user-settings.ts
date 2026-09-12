@@ -22,6 +22,8 @@ export type UserPreferenceSet = {
   taskTimeRange: TaskTimeRange;
   autoModelRoutingEnabled: boolean;
   reviewInboxEnabled: boolean;
+  sidebarProjectsEnabled: boolean;
+  subagentsEnabled: boolean;
 };
 
 export type UpdateUserPreferencesCommand = Partial<Omit<UserPreferenceSet, "wikiEnabled">> & {
@@ -51,6 +53,8 @@ const PREFERENCE_COLUMNS = {
   taskTimeRange: users.taskTimeRange,
   autoModelRoutingEnabled: users.autoModelRoutingEnabled,
   reviewInboxEnabled: users.reviewInboxEnabled,
+  sidebarProjectsEnabled: users.sidebarProjectsEnabled,
+  subagentsEnabled: users.subagentsEnabled,
 };
 
 export function createUserSettingsService(input: {
@@ -72,6 +76,8 @@ export function createUserSettingsService(input: {
         "taskSpawningEnabled",
         "autoModelRoutingEnabled",
         "reviewInboxEnabled",
+        "sidebarProjectsEnabled",
+        "subagentsEnabled",
       ] as const) {
         const value = command[field];
         if (value !== undefined && value !== current[field]) changes[field] = value;

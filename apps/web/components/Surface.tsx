@@ -236,6 +236,7 @@ import {
   addOptimisticChatSummary,
   removeOptimisticChatSummary,
 } from "@/lib/optimistic-chat-summaries";
+import { forgetLocalProjectAssignment, noteLocalProjectAssignment } from "@/lib/projects";
 import type { SkillCatalogItem } from "@/lib/skills";
 import type { TaskRow } from "@/lib/task-collections";
 import { STAGE_COPY, STATUS_COPY } from "@/lib/task-display";
@@ -419,6 +420,8 @@ export function Surface({
   schedules = [],
   defaultModel,
   initialChat,
+  newChatProjectId = null,
+  newChatProjectName = null,
   recentChats = [],
   archivedChats = [],
   codexConnected = false,
@@ -441,6 +444,12 @@ export function Surface({
   schedules?: readonly TaskScheduleView[];
   defaultModel: string;
   initialChat: ChatSessionView | null;
+  // A sidebar Project the next new chat should be filed under, set when the reader started it from
+  // that project's row.
+  newChatProjectId?: string | null;
+  // Name of that project. Present only alongside `newChatProjectId`, and swaps the home screen's
+  // activity lists for the project's own prompt.
+  newChatProjectName?: string | null;
   recentChats?: readonly ChatSummaryView[];
   archivedChats?: readonly ChatSummaryView[];
   codexConnected?: boolean;
@@ -654,6 +663,9 @@ export function Surface({
   );
   const hasHomeActivity = homeTasks.length > 0 || homeChats.length > 0 || homeSchedules.length > 0;
   const homeGreetingName = userName.trim() || "there";
+  // A chat started from a project row opens on that project's prompt instead of the home activity
+  // lists, so the reader starts on an empty page scoped to the project they clicked.
+  const newChatProjectPrompt = newChatProjectId ? newChatProjectName?.trim() || null : null;
   const activeTaskConversation =
     taskConversation && initialChat?.id === chatSessionId ? taskConversation : null;
   const backgroundInputDirective = parseBackgroundChatDirective(input);
@@ -2363,16 +2375,24 @@ export function Surface({
     });
     // Clear without revoking previews: the optimistic bubble still shows them.
     composerAttachments.setAttachments([]);
+    // The API files the new Conversation under the project as it creates it; the local note keeps
+    // the sidebar row under that folder for the moment before the project list catches up.
+    const projectId = newSessionId ? newChatProjectId : null;
+    if (projectId && newSessionId) noteLocalProjectAssignment(projectId, newSessionId);
     void sendMessage(message, {
       body: {
         sessionId: requestSessionId,
         newSessionId,
         model,
         engine: messageEngine,
+        ...(projectId ? { projectId } : {}),
       },
     }).catch((error) => {
       setEngineSubmitting(false);
-      if (newSessionId) removeOptimisticChatSummary(newSessionId);
+      if (newSessionId) {
+        removeOptimisticChatSummary(newSessionId);
+        forgetLocalProjectAssignment(newSessionId);
+      }
       const requestChatSessionId = requestSessionId ?? newSessionId;
       clearLocalActiveTurnState(requestChatSessionId);
       cancelChatFirstOutputMeasurement();
@@ -3015,7 +3035,13 @@ export function Surface({
 
       <div className="relative flex min-h-0 w-full flex-1">
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col items-center overflow-hidden">
-          {mode === "home" ? (
+          {mode === "home" && newChatProjectPrompt ? (
+            <div className="flex min-h-0 w-full flex-1 items-center justify-center overflow-y-auto px-6 pb-40">
+              <h1 className="max-w-[720px] text-balance text-center text-[26px] font-semibold leading-tight tracking-tight text-ink">
+                What should we build in {newChatProjectPrompt}?
+              </h1>
+            </div>
+          ) : mode === "home" ? (
             <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
               <div className="flex w-full max-w-[720px] flex-col gap-8 pb-40 pt-16 sm:pt-24">
                 {hasHomeActivity ? (

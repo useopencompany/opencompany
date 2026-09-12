@@ -6,7 +6,7 @@ import {
   chatSummaryState,
   PINNED_CHAT_LIMIT,
 } from "@/lib/chat-ui";
-import { taskHasReadableResult } from "@/lib/review-inbox";
+import { taskHasReadableUpdate } from "@/lib/review-inbox";
 
 export const RECENT_SIDEBAR_CHAT_LIMIT = 8;
 export const RECENT_SIDEBAR_TASK_LIMIT = 8;
@@ -111,8 +111,7 @@ export function isTaskUnfinished(status: TaskStatus) {
  */
 export function sidebarTaskState(task: Pick<SidebarTaskView, "status" | "hasUnseen">): ChatState {
   if (isTaskRunning(task.status)) return "working";
-  const resolvable = taskHasReadableResult(task.status) || task.status === "waiting";
-  return task.hasUnseen && resolvable ? "done_unseen" : "done_seen";
+  return task.hasUnseen && taskHasReadableUpdate(task.status) ? "done_unseen" : "done_seen";
 }
 
 // One list of the work in view, whatever shape it took. Chats and Tasks are two ways to run the

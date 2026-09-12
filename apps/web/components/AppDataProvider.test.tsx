@@ -373,6 +373,25 @@ describe("AppDataProvider", () => {
     expect(screen.getByTestId("task-history").getAttribute("data-home-task-ids")).toBe("task_old");
   });
 
+  it("exposes a waiting Task's unread request to the open-page acknowledgment", async () => {
+    mockLiveQueryRows({
+      tasks: [
+        taskReadModel({ id: "task_waiting", status: "waiting", hasUnseen: true }),
+        taskReadModel({ id: "task_canceled", status: "canceled", hasUnseen: true }),
+      ],
+    });
+
+    render(
+      <AppDataProvider initialData={initialData()}>
+        <UnreadTasksProbe />
+      </AppDataProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("unread-tasks").dataset.taskIds).toBe("task_waiting"),
+    );
+  });
+
   it("keeps multiple API-projected working chats without a second live query", () => {
     const old = "2026-07-01T10:00:00.000Z";
     const chatRow = {
@@ -746,6 +765,36 @@ function TaskHistoryProbe() {
   );
 }
 
+function UnreadTasksProbe() {
+  const data = useAppData();
+  return <div data-testid="unread-tasks" data-task-ids={[...data.unreadTaskIds].join(",")} />;
+}
+
+function taskReadModel(overrides: Record<string, unknown> = {}) {
+  const row = taskRow(overrides);
+  return {
+    ...row,
+    displayId: row.display_id,
+    goal: row.prompt,
+    conversationId: row.session_id,
+    source: "manual" as const,
+    workflowId: row.workflow_id,
+    scheduleId: row.schedule_id,
+    scheduledFor: row.scheduled_for,
+    outcome: {
+      result: row.result,
+      error: row.error,
+      reportedStatus: row.reported_outcome,
+      comment: row.outcome_comment,
+    },
+    hasUnseen: false,
+    archivedAt: row.archived_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    ...overrides,
+  };
+}
+
 function taskRow(overrides: Record<string, unknown> = {}) {
   return {
     id: "task_1",
@@ -804,6 +853,8 @@ function initialData(): AppInitialData {
       autoModelRouting: false,
       legacyBrain: false,
       reviewInbox: false,
+      sidebarProjects: false,
+      subagents: false,
     },
     codexConnected: false,
     claudeCodeConnected: false,

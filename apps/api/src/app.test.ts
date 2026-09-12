@@ -334,6 +334,7 @@ describe("canonical Hono API", () => {
       brainControl: fakeBrainControl(),
       wikiControl: fakeWikiControl(),
       attachments: fakeAttachments(),
+      projects: fakeProjects(),
       userSettings: fakeUserSettings(),
       feedback: fakeFeedback(),
       repoConfigs: fakeRepoConfigs(),
@@ -3647,6 +3648,8 @@ describe("canonical Hono API", () => {
             taskTimeRange: "24h",
             autoModelRoutingEnabled: true,
             reviewInboxEnabled: false,
+            sidebarProjectsEnabled: false,
+            subagentsEnabled: false,
           }),
         },
       });
@@ -3711,6 +3714,8 @@ describe("canonical Hono API", () => {
         taskTimeRange: "7d" as const,
         autoModelRoutingEnabled: false,
         reviewInboxEnabled: false,
+        sidebarProjectsEnabled: false,
+        subagentsEnabled: false,
       }));
       const app = testApp(fakeRepository(), {
         userSettings: { ...fakeUserSettings(), updatePreferences },
@@ -3738,6 +3743,8 @@ describe("canonical Hono API", () => {
       taskTimeRange: "24h" as const,
       autoModelRoutingEnabled: true,
       reviewInboxEnabled: false,
+      sidebarProjectsEnabled: false,
+      subagentsEnabled: false,
     }));
     const app = testApp(fakeRepository(), {
       userSettings: { ...fakeUserSettings(), updatePreferences },
@@ -5312,6 +5319,7 @@ function testApp(
     brainControl: fakeBrainControl(),
     wikiControl: fakeWikiControl(),
     attachments: fakeAttachments(),
+    projects: fakeProjects(),
     userSettings: fakeUserSettings(),
     feedback: fakeFeedback(),
     repoConfigs: fakeRepoConfigs(),
@@ -5635,6 +5643,21 @@ function fakeUserSettings(): Parameters<typeof createApiApp>[0]["userSettings"] 
     setPreferredMcpClient: async () => {
       throw new Error("Unexpected MCP client mutation.");
     },
+  };
+}
+
+function fakeProjects(): Parameters<typeof createApiApp>[0]["projects"] {
+  const unexpected = async () => {
+    throw new Error("Unexpected project access.");
+  };
+  return {
+    list: unexpected,
+    assertOwned: unexpected,
+    create: unexpected,
+    rename: unexpected,
+    remove: unexpected,
+    fileConversation: unexpected,
+    removeConversation: unexpected,
   };
 }
 

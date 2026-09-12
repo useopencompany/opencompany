@@ -21,6 +21,7 @@ import {
   CalendarClock,
   CircleUserRound,
   ExternalLink,
+  FolderOpen,
   Inbox,
   Link2,
   ListTodo,
@@ -33,6 +34,7 @@ import {
   Sparkles,
   Sun,
   UserRound,
+  Users,
   Workflow,
 } from "lucide-react";
 import Link from "next/link";
@@ -42,6 +44,7 @@ import {
   type ReactNode,
   useEffect,
   useMemo,
+  useOptimistic,
   useState,
   useTransition,
 } from "react";
@@ -83,14 +86,23 @@ import {
   updateAutoModelRoutingAction,
   updateBotsAction,
   updateReviewInboxAction,
+  updateSidebarProjectsAction,
+  updateSubagentsAction,
   updateTaskSpawningAction,
 } from "@/lib/user-preferences";
 
 export function HomeRoute({
   chatId,
+  projectId = null,
+  projectName = null,
   initialChat: routeInitialChat = null,
 }: {
   chatId: string | null;
+  // Set when the reader started this chat from a sidebar Project row, so the Conversation the
+  // first message creates is filed there.
+  projectId?: string | null;
+  // Resolved server-side for the project's new-chat screen; always paired with `projectId`.
+  projectName?: string | null;
   initialChat?: ChatSessionView | null;
 }) {
   const data = useAppData();
@@ -125,6 +137,8 @@ export function HomeRoute({
         schedules={data.schedules}
         defaultModel={DEFAULT_MODEL}
         initialChat={initialChat}
+        newChatProjectId={projectId}
+        newChatProjectName={projectName}
         recentChats={data.recentChats}
         archivedChats={data.archivedChats}
         codexConnected={data.codexConnected}
@@ -276,6 +290,20 @@ export function PreferencesSettingsRoute() {
           description="Collect finished chats and tasks in one place, read them side by side, and archive them when you're done."
           checked={featureFlags.reviewInbox}
           update={updateReviewInboxAction}
+        />
+        <BetaFeatureSwitch
+          icon={FolderOpen}
+          label="Projects"
+          description="Group chats and tasks into named folders in the sidebar, and start new chats inside one."
+          checked={featureFlags.sidebarProjects}
+          update={updateSidebarProjectsAction}
+        />
+        <BetaFeatureSwitch
+          icon={Users}
+          label="Subagents"
+          description="Let opencompany hand wide research to helpers that work in their own context and report back, so one answer can cover several sources at once. Uses more credits per message."
+          checked={featureFlags.subagents}
+          update={updateSubagentsAction}
         />
       </section>
     </SettingsContent>
@@ -578,11 +606,13 @@ function BetaFeatureSwitch({
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [optimisticChecked, setOptimisticChecked] = useOptimistic(checked);
 
   const toggle = () => {
-    const nextEnabled = !checked;
+    const nextEnabled = !optimisticChecked;
     setError(null);
     startTransition(async () => {
+      setOptimisticChecked(nextEnabled);
       let result: { ok: boolean };
       try {
         result = await update(nextEnabled);
@@ -615,17 +645,17 @@ function BetaFeatureSwitch({
           <button
             type="button"
             role="switch"
-            aria-checked={checked}
+            aria-checked={optimisticChecked}
             aria-label={label}
             disabled={isPending}
             onClick={toggle}
             className={`ml-auto inline-flex h-6 w-10 shrink-0 items-center rounded-full border transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-60 ${
-              checked ? "border-ink bg-ink" : "border-border bg-surface-muted"
+              optimisticChecked ? "border-ink bg-ink" : "border-border bg-surface-muted"
             }`}
           >
             <span
               className={`block h-4 w-4 rounded-full bg-canvas shadow-sm transition-transform duration-150 ${
-                checked ? "translate-x-[18px]" : "translate-x-1"
+                optimisticChecked ? "translate-x-[18px]" : "translate-x-1"
               }`}
             />
           </button>

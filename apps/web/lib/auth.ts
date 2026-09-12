@@ -27,6 +27,8 @@ export type IdentityUser = {
   autoModelRoutingEnabled: boolean;
   chatCapabilitiesBetaEnabled: boolean;
   reviewInboxEnabled: boolean;
+  sidebarProjectsEnabled: boolean;
+  subagentsEnabled: boolean;
   /** @deprecated Wiki is always enabled. */
   wikiEnabled: true;
   taskViewMode: "board" | "list";
@@ -231,6 +233,8 @@ function identityUser(user: IdentityDto["user"]): IdentityUser {
     autoModelRoutingEnabled: user.autoModelRoutingEnabled,
     chatCapabilitiesBetaEnabled: user.chatCapabilitiesBetaEnabled,
     reviewInboxEnabled: user.reviewInboxEnabled,
+    sidebarProjectsEnabled: user.sidebarProjectsEnabled,
+    subagentsEnabled: user.subagentsEnabled,
     wikiEnabled: true,
     taskViewMode: user.taskViewMode,
     taskTimeRange: user.taskTimeRange,

@@ -38,6 +38,8 @@ const appDataMock = vi.hoisted(() => ({
       autoModelRouting: false,
       legacyBrain: true,
       reviewInbox: false,
+      sidebarProjects: false,
+      subagents: false,
     },
     integrations: {},
     mcpSetup: { preferredClient: null, completedAt: null },
@@ -49,6 +51,8 @@ const userPreferencesMock = vi.hoisted(() => ({
   updateTaskSpawningAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateAutoModelRoutingAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateReviewInboxAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
+  updateSidebarProjectsAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
+  updateSubagentsAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
 }));
 
 const workflowActionsMock = vi.hoisted(() => ({
@@ -172,6 +176,8 @@ vi.mock("@/lib/user-preferences", () => ({
   updateTaskSpawningAction: userPreferencesMock.updateTaskSpawningAction,
   updateAutoModelRoutingAction: userPreferencesMock.updateAutoModelRoutingAction,
   updateReviewInboxAction: userPreferencesMock.updateReviewInboxAction,
+  updateSidebarProjectsAction: userPreferencesMock.updateSidebarProjectsAction,
+  updateSubagentsAction: userPreferencesMock.updateSubagentsAction,
 }));
 
 vi.mock("@/lib/headless-automation-commands", () => ({
@@ -233,6 +239,26 @@ describe("HomeRoute", () => {
       id: "conversation_1",
       runtime: null,
     });
+  });
+
+  it("hands the composer the project a new chat was started from", () => {
+    Object.assign(appDataMock.value, {
+      activeBrain: null,
+      tasks: [],
+      schedules: [],
+      recentChats: [],
+      archivedChats: [],
+      codexConnected: false,
+      claudeCodeConnected: false,
+    });
+
+    render(<HomeRoute chatId={null} projectId="project_1" projectName="product" />);
+    expect(surfaceMock.props?.newChatProjectId).toBe("project_1");
+    expect(surfaceMock.props?.newChatProjectName).toBe("product");
+
+    render(<HomeRoute chatId={null} />);
+    expect(surfaceMock.props?.newChatProjectId).toBeNull();
+    expect(surfaceMock.props?.newChatProjectName).toBeNull();
   });
 });
 
@@ -367,6 +393,53 @@ describe("SettingsRoute", () => {
     await user.click(toggle);
 
     expect(userPreferencesMock.updateReviewInboxAction).toHaveBeenCalledWith(true);
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+  });
+
+  it("shows the Subagents switch off by default and persists opt-in", async () => {
+    const user = userEvent.setup();
+    render(<PreferencesSettingsRoute />);
+
+    const toggle = screen.getByRole("switch", { name: "Subagents" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+
+    await user.click(toggle);
+
+    expect(userPreferencesMock.updateSubagentsAction).toHaveBeenCalledWith(true);
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+  });
+
+  it("shows the Subagents opt-in while the preference save is pending", async () => {
+    let finishSave!: (result: { ok: true; enabled: boolean }) => void;
+    userPreferencesMock.updateSubagentsAction.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishSave = resolve;
+        }),
+    );
+    const user = userEvent.setup();
+    render(<PreferencesSettingsRoute />);
+
+    const toggle = screen.getByRole("switch", { name: "Subagents" });
+    await user.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    expect(toggle).toBeDisabled();
+
+    finishSave({ ok: true, enabled: true });
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+  });
+
+  it("shows the Projects switch off by default and persists opt-in", async () => {
+    const user = userEvent.setup();
+    render(<PreferencesSettingsRoute />);
+
+    const toggle = screen.getByRole("switch", { name: "Projects" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+
+    await user.click(toggle);
+
+    expect(userPreferencesMock.updateSidebarProjectsAction).toHaveBeenCalledWith(true);
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
   });
 

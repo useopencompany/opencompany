@@ -135,7 +135,8 @@ describe("sidebarTaskState", () => {
   it("reports a settled task with an unread result as unseen", () => {
     expect(sidebarTaskState({ status: "succeeded", hasUnseen: true })).toBe("done_unseen");
     expect(sidebarTaskState({ status: "failed", hasUnseen: true })).toBe("done_unseen");
-    // A waiting run has paused for an approval, which is exactly when it needs the dot.
+    // A waiting run has a request to read, even when it is an ordinary question rather than a
+    // connected-action approval.
     expect(sidebarTaskState({ status: "waiting", hasUnseen: true })).toBe("done_unseen");
   });
 

@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { HomeRoute } from "@/components/Routes";
+import { loadProjectName } from "@/lib/projects-server";
 
 type HomePageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -10,5 +11,13 @@ export default async function HomePage({ searchParams }: HomePageProps) {
   const chatParam = Array.isArray(params.chat) ? params.chat[0] : params.chat;
   const chatId = chatParam?.trim();
   if (chatId) redirect(`/chat/${encodeURIComponent(chatId)}`);
-  return <HomeRoute chatId={null} />;
+  // Set by a sidebar Project's new-chat control. The id is only ever handed back to the API, which
+  // rejects a project the reader does not own.
+  const projectParam = Array.isArray(params.project) ? params.project[0] : params.project;
+  const projectId = projectParam?.trim() || null;
+  const projectName = await loadProjectName(projectId);
+  // A project the reader cannot see (deleted, renamed away, or never theirs) falls back to the
+  // normal home screen rather than opening a new chat that could never be filed.
+  if (projectId && !projectName) redirect("/");
+  return <HomeRoute chatId={null} projectId={projectId} projectName={projectName} />;
 }
