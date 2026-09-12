@@ -26,7 +26,7 @@ const MIGRATIONS = [
   "0195_goat_wiki.sql",
   "0220_goat_wiki_folders.sql",
   "0269_wiki_first_class_entity.sql",
-  "0272_default_wiki_company.sql",
+  "0273_default_wiki_company.sql",
 ];
 
 const WS = "ws-acl";

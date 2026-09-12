@@ -982,12 +982,16 @@ function approvalStatusPart(event: HarnessNormalizedEvent): CodexUiStatusPartPay
   const approvalId = readString(event.payload.interactionId);
   const options = Array.isArray(event.payload.options) ? event.payload.options : null;
   const rawInput = isRecord(event.payload.rawInput) ? event.payload.rawInput : null;
+  const kind = readString(event.payload.kind);
+  const locations = Array.isArray(event.payload.locations) ? event.payload.locations : null;
   return {
     state: "approval-requested",
     input: {
       label: "Approval",
       title: readString(event.payload.title),
       action: readString(event.payload.action),
+      ...(kind ? { kind } : {}),
+      ...(locations ? { locations } : {}),
       ...(options ? { options } : {}),
       ...(rawInput ? { rawInput } : {}),
     },

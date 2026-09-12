@@ -1712,6 +1712,27 @@ describe("Sidebar", () => {
       );
     });
 
+    it("swaps the folder icon for the open/closed state instead of showing a chevron", async () => {
+      featureFlagsMock.sidebarProjects = true;
+      recentChatsMock.value = [chatRow("chat_a")];
+      projectsApiMock.listProjects.mockResolvedValue([project("project_1", "Launch", ["chat_a"])]);
+
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+      const projects = await findLoadedProjects();
+      const folder = within(projects).getByRole("button", { name: "Launch" });
+
+      // The icon is decorative, so aria-expanded (covered above) carries the state for assistive
+      // tech. Lucide's per-icon class is the only stable handle on which glyph actually rendered.
+      expect(folder.querySelector(".lucide-folder-open")).not.toBeNull();
+      expect(folder.querySelector(".lucide-chevron-down")).toBeNull();
+
+      await userEvent.click(folder);
+
+      expect(folder.querySelector(".lucide-folder")).not.toBeNull();
+      expect(folder.querySelector(".lucide-folder-open")).toBeNull();
+      expect(folder.querySelector(".lucide-chevron-down")).toBeNull();
+    });
+
     it("collapses the whole Projects section and remembers the choice", async () => {
       featureFlagsMock.sidebarProjects = true;
       recentChatsMock.value = [chatRow("chat_a")];

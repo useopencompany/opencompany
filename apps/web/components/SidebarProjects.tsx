@@ -3,15 +3,7 @@
 import type { ProjectDto } from "@opencompany/protocol";
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import { toast } from "@opencompany/ui/components/sonner";
-import {
-  ChevronDown,
-  Folder,
-  MoreHorizontal,
-  PenLine,
-  Plus,
-  SquarePen,
-  Trash2,
-} from "lucide-react";
+import { Folder, FolderOpen, MoreHorizontal, PenLine, Plus, SquarePen, Trash2 } from "lucide-react";
 import Link from "next/link";
 import {
   type DragEvent,
@@ -424,6 +416,7 @@ function ProjectFolder({
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState(project.name);
   const listId = `sidebar-project-${project.id}`;
+  const FolderIcon = collapsed ? Folder : FolderOpen;
 
   const saveRename = async () => {
     const trimmed = draftName.trim();
@@ -497,21 +490,14 @@ function ProjectFolder({
             aria-controls={collapsed ? undefined : listId}
             className="flex min-w-0 flex-1 items-center gap-2 rounded-l-md py-[5px] pl-2 pr-1 text-left text-ink/90 hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
           >
-            <Folder
+            {/* The folder itself carries the open/closed state, so no separate chevron. */}
+            <FolderIcon
               size={14}
               strokeWidth={1.75}
               aria-hidden="true"
               className="shrink-0 text-ink/60 group-hover/project:text-ink/80"
             />
             <span className="truncate tracking-[-0.005em]">{project.name}</span>
-            <ChevronDown
-              size={12}
-              strokeWidth={2}
-              aria-hidden="true"
-              className={`shrink-0 text-ink/35 transition-transform duration-150 group-hover/project:text-ink/60 ${
-                collapsed ? "-rotate-90" : ""
-              }`}
-            />
           </button>
           <Popover open={menuOpen} onOpenChange={setMenuOpen}>
             <PopoverTrigger

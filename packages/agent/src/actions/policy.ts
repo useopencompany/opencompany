@@ -25,7 +25,7 @@ export const ACTION_CATALOG_POLICIES: Record<ActionCatalogPolicyName, ActionCata
     sourceKinds: ["integration"],
     permissionModes: ["on", "ask"],
     approvalCapable: false,
-    includeAction: includeEveryAction,
+    includeAction: (action) => action.provider !== "session_history",
   },
 };
 

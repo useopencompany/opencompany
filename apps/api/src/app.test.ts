@@ -2,6 +2,7 @@ import { once } from "node:events";
 import { request as requestHttp } from "node:http";
 import { serve } from "@hono/node-server";
 import { createPluginImportResolver } from "@opencompany/agent/plugin-import";
+import { HTML_ARTIFACT_CONTENT_SECURITY_POLICY } from "@opencompany/agent-runtime";
 import { OFFICIAL_PLUGIN_SOURCES } from "@opencompany/agent-runtime/official-plugin-catalog";
 import { captureProductServerEvent } from "@opencompany/analytics/product/server";
 import type { ChatPresentationReader } from "@opencompany/chat-presentation";
@@ -3427,7 +3428,7 @@ describe("canonical Hono API", () => {
       sizeBytes: 18,
       inline: true,
       cacheControl: "private, max-age=86400, immutable",
-      sandbox: false,
+      contentSecurityPolicy: null,
     }));
     const app = testApp(fakeRepository(), {
       chatResources: chatResourceService({ downloadAttachment }),
@@ -3445,6 +3446,32 @@ describe("canonical Hono API", () => {
       messageId: "message_1",
       attachmentId: "attachment_1",
     });
+  });
+
+  it("emits the artifact policy so agent-authored HTML renders without ambient authority", async () => {
+    const downloadArtifact = vi.fn(async () => ({
+      stream: new Response("<h1>Pricing</h1>").body as ReadableStream<Uint8Array>,
+      mediaType: "text/html; charset=utf-8",
+      filename: "pricing-model.html",
+      sizeBytes: 16,
+      inline: true,
+      cacheControl: "private, no-store",
+      contentSecurityPolicy: HTML_ARTIFACT_CONTENT_SECURITY_POLICY,
+    }));
+    const app = testApp(fakeRepository(), {
+      chatResources: chatResourceService({ downloadArtifact }),
+    });
+
+    const response = await app.request("/v1/chat-artifacts/artifact_1/versions/version_1");
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(response.headers.get("content-security-policy")).toBe(
+      HTML_ARTIFACT_CONTENT_SECURITY_POLICY,
+    );
+    expect(response.headers.get("content-security-policy")).not.toContain("allow-same-origin");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("content-disposition")).toContain("inline");
   });
 
   it("uploads and replaces private Brain assets through typed multipart operations", async () => {
@@ -3650,6 +3677,7 @@ describe("canonical Hono API", () => {
             reviewInboxEnabled: false,
             sidebarProjectsEnabled: false,
             subagentsEnabled: false,
+            pastSessionAccessEnabled: false,
           }),
         },
       });
@@ -3716,6 +3744,7 @@ describe("canonical Hono API", () => {
         reviewInboxEnabled: false,
         sidebarProjectsEnabled: false,
         subagentsEnabled: false,
+        pastSessionAccessEnabled: false,
       }));
       const app = testApp(fakeRepository(), {
         userSettings: { ...fakeUserSettings(), updatePreferences },
@@ -3745,6 +3774,7 @@ describe("canonical Hono API", () => {
       reviewInboxEnabled: false,
       sidebarProjectsEnabled: false,
       subagentsEnabled: false,
+      pastSessionAccessEnabled: false,
     }));
     const app = testApp(fakeRepository(), {
       userSettings: { ...fakeUserSettings(), updatePreferences },

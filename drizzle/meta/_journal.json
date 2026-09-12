@@ -1910,7 +1910,14 @@
       "idx": 272,
       "version": "7",
       "when": 1789495600000,
-      "tag": "0272_default_wiki_company",
+      "tag": "0272_opencompany_past_session_access",
+      "breakpoints": true
+    },
+    {
+      "idx": 273,
+      "version": "7",
+      "when": 1789582000000,
+      "tag": "0273_default_wiki_company",
       "breakpoints": true
     }
   ]

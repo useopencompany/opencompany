@@ -3499,7 +3499,9 @@ function chatResourceResponse(asset: ChatResourceDownload) {
     "Cache-Control": asset.cacheControl,
     "X-Content-Type-Options": "nosniff",
     "X-Robots-Tag": "noindex, nofollow, noarchive",
-    ...(asset.sandbox ? { "Content-Security-Policy": "sandbox" } : {}),
+    ...(asset.contentSecurityPolicy
+      ? { "Content-Security-Policy": asset.contentSecurityPolicy }
+      : {}),
   });
   if (asset.sizeBytes !== null) headers.set("Content-Length", String(asset.sizeBytes));
   return new Response(asset.stream, { status: 200, headers });

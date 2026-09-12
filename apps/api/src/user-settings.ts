@@ -24,6 +24,7 @@ export type UserPreferenceSet = {
   reviewInboxEnabled: boolean;
   sidebarProjectsEnabled: boolean;
   subagentsEnabled: boolean;
+  pastSessionAccessEnabled: boolean;
 };
 
 export type UpdateUserPreferencesCommand = Partial<Omit<UserPreferenceSet, "wikiEnabled">> & {
@@ -55,6 +56,7 @@ const PREFERENCE_COLUMNS = {
   reviewInboxEnabled: users.reviewInboxEnabled,
   sidebarProjectsEnabled: users.sidebarProjectsEnabled,
   subagentsEnabled: users.subagentsEnabled,
+  pastSessionAccessEnabled: users.pastSessionAccessEnabled,
 };
 
 export function createUserSettingsService(input: {
@@ -78,6 +80,7 @@ export function createUserSettingsService(input: {
         "reviewInboxEnabled",
         "sidebarProjectsEnabled",
         "subagentsEnabled",
+        "pastSessionAccessEnabled",
       ] as const) {
         const value = command[field];
         if (value !== undefined && value !== current[field]) changes[field] = value;

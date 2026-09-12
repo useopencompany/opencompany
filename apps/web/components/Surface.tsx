@@ -102,6 +102,7 @@ import {
 } from "@/components/CodingWorkspacePanel";
 import { ConversationRuntimeSync } from "@/components/ConversationRuntimeSync";
 import type { ArtifactSelection } from "@/components/chat/ArtifactViewer";
+import { pendingApprovals } from "@/components/chat/approval-presentation";
 import {
   buildChatTaskLookup,
   firstVisibleAssistantOutputKind,
@@ -113,6 +114,7 @@ import {
 import { ChatShareButton } from "@/components/chat/ChatShareButton";
 import { ChatTranscriptSyncError } from "@/components/chat/ChatTranscriptSyncError";
 import { MessageBubble } from "@/components/chat/MessageBubble";
+import { PendingApprovalBanner } from "@/components/chat/PendingApprovalBanner";
 import { PendingActivityIndicator, ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import type { ActionApprovalRequest, CodexToolAction } from "@/components/chat/ToolCallItem";
 import { useChatAttachments } from "@/components/chat/useChatAttachments";
@@ -1106,6 +1108,12 @@ export function Surface({
     }
     return null;
   }, [chatMessages]);
+  // Only the newest assistant turn can still be answered, so it is the only one that can hold a
+  // decision the composer banner should offer to jump back to.
+  const waitingApprovals = useMemo(() => {
+    const message = chatMessages.find((candidate) => candidate.id === latestAssistantMessageId);
+    return message ? pendingApprovals(message) : [];
+  }, [chatMessages, latestAssistantMessageId]);
   const hasMessages = chatMessages.length > 0;
   const latestActiveTurnStartedAtMs = useMemo(
     () => latestChatTurnStartedAtMs(chatMessages),
@@ -3238,6 +3246,7 @@ export function Surface({
             className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center bg-gradient-to-t from-canvas via-canvas to-transparent px-6 pb-6 pt-8"
           >
             <div className="pointer-events-auto relative flex w-full max-w-[720px] flex-col gap-2">
+              <PendingApprovalBanner approvals={waitingApprovals} threadRef={threadRef} />
               {readOnlyNotice ? (
                 <p
                   className="rounded-lg border border-border bg-surface px-3 py-2 text-[12px] leading-4 text-ink-subtle shadow-[0_1px_3px_rgba(0,0,0,0.03)]"

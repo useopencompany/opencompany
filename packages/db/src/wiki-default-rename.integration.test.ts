@@ -17,7 +17,7 @@ const BASE_MIGRATIONS = [
   "0220_goat_wiki_folders.sql",
   "0269_wiki_first_class_entity.sql",
 ];
-const RENAME_MIGRATION = "0272_default_wiki_company.sql";
+const RENAME_MIGRATION = "0273_default_wiki_company.sql";
 
 // One workspace per case 0272 has to tell apart.
 const UNTOUCHED = "ws-untouched";
@@ -79,7 +79,7 @@ beforeAll(async () => {
   await applyMigration(RENAME_MIGRATION);
 });
 
-describe("0272_default_wiki_company", () => {
+describe("0273_default_wiki_company", () => {
   it("renames an untouched default wiki and moves its slug", async () => {
     expect(await defaultWiki(UNTOUCHED)).toEqual({ name: "Company", slug: "company" });
   });

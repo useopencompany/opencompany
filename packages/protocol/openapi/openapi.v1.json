@@ -4405,6 +4405,9 @@
           "subagentsEnabled": {
             "type": "boolean"
           },
+          "pastSessionAccessEnabled": {
+            "type": "boolean"
+          },
           "wikiEnabled": {
             "type": "boolean",
             "enum": [
@@ -4471,6 +4474,7 @@
           "reviewInboxEnabled",
           "sidebarProjectsEnabled",
           "subagentsEnabled",
+          "pastSessionAccessEnabled",
           "wikiEnabled",
           "taskViewMode",
           "taskTimeRange",
@@ -10334,6 +10338,9 @@
           },
           "subagentsEnabled": {
             "type": "boolean"
+          },
+          "pastSessionAccessEnabled": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -10346,7 +10353,8 @@
           "autoModelRoutingEnabled",
           "reviewInboxEnabled",
           "sidebarProjectsEnabled",
-          "subagentsEnabled"
+          "subagentsEnabled",
+          "pastSessionAccessEnabled"
         ],
         "additionalProperties": false
       },
@@ -10395,6 +10403,9 @@
             "type": "boolean"
           },
           "subagentsEnabled": {
+            "type": "boolean"
+          },
+          "pastSessionAccessEnabled": {
             "type": "boolean"
           }
         },
