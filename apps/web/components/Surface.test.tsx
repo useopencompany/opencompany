@@ -2522,9 +2522,9 @@ describe("Surface chat streaming UI", () => {
       return new Response(
         JSON.stringify({
           ok: true,
-          sessionId: requestChatSessionId(init, "goat_chat_claude_fable_1"),
-          userMessageId: "goat_chat_msg_claude_fable_user",
-          assistantMessageId: "goat_chat_msg_claude_fable_assistant",
+          sessionId: requestChatSessionId(init, "conversation_claude_fable_1"),
+          userMessageId: "message_claude_fable_user",
+          assistantMessageId: "message_claude_fable_assistant",
           mode: "started",
         }),
         { status: 202, headers: { "Content-Type": "application/json" } },
