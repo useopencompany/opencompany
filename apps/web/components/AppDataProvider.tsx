@@ -128,9 +128,9 @@ type AppData = AppInitialData & {
   // The Tasks the sidebar lists beside recent chats. Selected here and gated at the render site,
   // so the section label and the rows under it can never disagree about the flag.
   sidebarTasks: SidebarTaskView[];
-  // Every open chat and Task, unbounded by the Recents recency window and row limits. A sidebar
+  // Every open chat and Task, including entries outside the Recents activity window. A sidebar
   // Project lists whatever the reader filed there however old it is, so those rows resolve from
-  // these instead of from the bounded Recents selections.
+  // these instead of from the recent-only selections.
   openChats: ChatSummaryView[];
   openSidebarTasks: SidebarTaskView[];
   // Every open Task whose unread flag stands for an update a reader can clear by opening it,

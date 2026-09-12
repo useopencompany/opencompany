@@ -477,7 +477,7 @@ describe("AppDataProvider", () => {
     expect(screen.getByTestId("recent").getAttribute("data-chat-ids")).toBe("six-days-old");
   });
 
-  it("server-renders the canonical sidebar subset before live conversations hydrate", () => {
+  it("server-renders every recent chat before live conversations hydrate", () => {
     const now = Date.now();
     const data = initialData();
     data.recentChats = [
@@ -518,9 +518,8 @@ describe("AppDataProvider", () => {
     );
 
     expect(html).toContain(
-      'data-chat-ids="recent_0,recent_1,recent_2,recent_3,recent_4,recent_5,recent_6,recent_7"',
+      'data-chat-ids="recent_0,recent_1,recent_2,recent_3,recent_4,recent_5,recent_6,recent_7,recent_8,recent_9"',
     );
-    expect(html).not.toContain("recent_8");
     expect(html).not.toContain("old_idle");
   });
 
