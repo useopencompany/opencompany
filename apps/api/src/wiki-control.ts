@@ -41,6 +41,7 @@ export type WikiControlView = {
   instructions: string;
   access: WikiAccessLevel;
   isDefault: boolean;
+  canManage: boolean;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -117,7 +118,7 @@ export function createWikiControlService(input: { db: DbLike }): WikiControlServ
         { userWorkosId: actor.userId, workspaceId: actor.workspaceId },
         { db },
       );
-      return wikis.map(wikiView);
+      return wikis.map((wiki) => wikiView(wiki, actor));
     },
 
     async createWiki(actor, command) {
@@ -132,7 +133,7 @@ export function createWikiControlService(input: { db: DbLike }): WikiControlServ
           },
           { db },
         );
-        return wikiView(wiki);
+        return wikiView(wiki, actor);
       } catch (error) {
         throw wikiControlError(error);
       }
@@ -149,7 +150,7 @@ export function createWikiControlService(input: { db: DbLike }): WikiControlServ
           },
           { db },
         );
-        return wikiView(wiki);
+        return wikiView(wiki, actor);
       } catch (error) {
         throw wikiControlError(error);
       }
@@ -202,16 +203,20 @@ export function createWikiControlService(input: { db: DbLike }): WikiControlServ
   };
 }
 
-function wikiView(wiki: {
-  id: string;
-  name: string;
-  slug: string;
-  instructions: string;
-  access: WikiAccessLevel;
-  isDefault: boolean;
-  createdAt: Date;
-  updatedAt: Date;
-}): WikiControlView {
+function wikiView(
+  wiki: {
+    id: string;
+    name: string;
+    slug: string;
+    instructions: string;
+    access: WikiAccessLevel;
+    isDefault: boolean;
+    createdByWorkosId: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+  },
+  actor: Actor,
+): WikiControlView {
   return {
     id: wiki.id,
     name: wiki.name,
@@ -219,6 +224,9 @@ function wikiView(wiki: {
     instructions: wiki.instructions,
     access: wiki.access,
     isDefault: wiki.isDefault,
+    // The same rule `requireWikiOwner` enforces, resolved once here so the UI
+    // and the API cannot disagree about who may change a wiki.
+    canManage: actor.role === "admin" || wiki.createdByWorkosId === actor.userId,
     createdAt: wiki.createdAt,
     updatedAt: wiki.updatedAt,
   };

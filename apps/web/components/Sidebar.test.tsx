@@ -119,6 +119,9 @@ vi.mock("@/lib/projects", async (importOriginal) => ({
 const wikisApiMock = vi.hoisted(() => ({
   listWikis: vi.fn(async () => [] as ReturnType<typeof wikiDto>[]),
   createWiki: vi.fn(),
+  updateWiki: vi.fn(),
+  getWikiAccess: vi.fn(),
+  setWikiAccess: vi.fn(),
 }));
 
 vi.mock("@/lib/wikis", async (importOriginal) => ({
@@ -186,6 +189,7 @@ vi.mock("@/components/AppDataProvider", async () => {
       );
       return {
         user: {
+          workosUserId: "user_ada",
           email: "ada@example.com",
           firstName: "Ada",
           lastName: "Lovelace",
@@ -230,14 +234,21 @@ vi.mock("@/components/AppDataProvider", async () => {
   };
 });
 
-function wikiDto(id: string, name: string, slug: string, isDefault = false) {
+function wikiDto(
+  id: string,
+  name: string,
+  slug: string,
+  isDefault = false,
+  overrides: { canManage?: boolean; access?: "workspace" | "restricted" } = {},
+) {
   return {
     id,
     name,
     slug,
     instructions: "",
-    access: "workspace" as const,
+    access: overrides.access ?? ("workspace" as const),
     isDefault,
+    canManage: overrides.canManage ?? true,
     createdAt: "2026-07-14T09:00:00.000Z",
     updatedAt: "2026-07-14T09:00:00.000Z",
   };
@@ -415,6 +426,95 @@ describe("Sidebar", () => {
 
       expect(await screen.findByRole("link", { name: "Handbook" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Wiki" })).toHaveAttribute("aria-expanded", "true");
+    });
+
+    it("offers settings only on a wiki this reader may change", async () => {
+      wikisApiMock.listWikis.mockResolvedValue([
+        wikiDto("goat_wiki_1", "Company", "company", true),
+        wikiDto("goat_wiki_2", "Handbook", "handbook", false, { canManage: false }),
+      ]);
+
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+      await screen.findByRole("region", { name: "Wiki" });
+
+      expect(await screen.findByRole("button", { name: "Company settings" })).toBeInTheDocument();
+      // Only an admin or the creator may change a wiki, so a control that would 403 is not offered.
+      expect(screen.queryByRole("button", { name: "Handbook settings" })).not.toBeInTheDocument();
+    });
+
+    it("reads a restricted wiki with no one else invited as private", async () => {
+      wikisApiMock.listWikis.mockResolvedValue([
+        wikiDto("goat_wiki_2", "C-level", "c-level", false, { access: "restricted" }),
+      ]);
+      // The server always keeps the acting user as a member, so "only me" arrives as one member.
+      wikisApiMock.getWikiAccess.mockResolvedValue({
+        access: "restricted",
+        memberIds: ["user_ada"],
+        workspaceMembers: [
+          { id: "user_ada", email: "ada@example.com", name: "Ada", avatarUrl: null, role: "admin" },
+          { id: "user_bo", email: "bo@example.com", name: "Bo", avatarUrl: null, role: "member" },
+        ],
+      });
+
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+      await userEvent.click(await screen.findByRole("button", { name: "C-level settings" }));
+
+      const dialog = await screen.findByRole("dialog", { name: "C-level settings" });
+      expect(await within(dialog).findByRole("button", { name: /Private/ })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+    });
+
+    it("saves a shared wiki with the people it invites", async () => {
+      wikisApiMock.listWikis.mockResolvedValue([
+        wikiDto("goat_wiki_2", "C-level", "c-level", false, { access: "restricted" }),
+      ]);
+      wikisApiMock.getWikiAccess.mockResolvedValue({
+        access: "restricted",
+        memberIds: ["user_ada"],
+        workspaceMembers: [
+          { id: "user_ada", email: "ada@example.com", name: "Ada", avatarUrl: null, role: "admin" },
+          { id: "user_bo", email: "bo@example.com", name: "Bo", avatarUrl: null, role: "member" },
+        ],
+      });
+      wikisApiMock.setWikiAccess.mockResolvedValue({
+        access: "restricted",
+        memberIds: ["user_ada", "user_bo"],
+        workspaceMembers: [],
+      });
+
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+      await userEvent.click(await screen.findByRole("button", { name: "C-level settings" }));
+      const dialog = await screen.findByRole("dialog", { name: "C-level settings" });
+
+      await userEvent.click(await within(dialog).findByRole("button", { name: /Shared/ }));
+      await userEvent.click(await within(dialog).findByRole("checkbox"));
+      await userEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+
+      // The reader is not sent: the server adds them, so a restricted wiki is never orphaned.
+      expect(wikisApiMock.setWikiAccess).toHaveBeenCalledWith("goat_wiki_2", {
+        access: "restricted",
+        memberIds: ["user_bo"],
+      });
+    });
+
+    it("explains why the default wiki cannot be restricted instead of offering the choice", async () => {
+      wikisApiMock.listWikis.mockResolvedValue([
+        wikiDto("goat_wiki_1", "Company", "company", true),
+      ]);
+      wikisApiMock.getWikiAccess.mockResolvedValue({
+        access: "workspace",
+        memberIds: [],
+        workspaceMembers: [],
+      });
+
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+      await userEvent.click(await screen.findByRole("button", { name: "Company settings" }));
+
+      const dialog = await screen.findByRole("dialog", { name: "Company settings" });
+      expect(within(dialog).getByText(/agents write when no wiki is named/)).toBeInTheDocument();
+      expect(within(dialog).queryByRole("button", { name: /Private/ })).not.toBeInTheDocument();
     });
 
     it("discards an abandoned name and leaves a collapsed section closed", async () => {

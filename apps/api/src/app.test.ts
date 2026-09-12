@@ -5437,6 +5437,7 @@ function fakeWikiControl(): Parameters<typeof createApiApp>[0]["wikiControl"] {
         instructions: "",
         access: "workspace",
         isDefault: true,
+        canManage: true,
         createdAt,
         updatedAt: createdAt,
       },

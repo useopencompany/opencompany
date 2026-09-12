@@ -1981,6 +1981,11 @@ export const WikiSchema = z
     instructions: z.string().max(20_000),
     access: WikiAccessSchema,
     isDefault: z.boolean(),
+    // Whether this actor may rename the wiki, edit its instructions, or change
+    // its access. Resolved server-side from the actor's role and the wiki's
+    // creator so the client never has to hold other members' identities to
+    // decide whether to offer a control that would only 403.
+    canManage: z.boolean(),
     createdAt: TimestampSchema,
     updatedAt: TimestampSchema,
   })
@@ -4534,6 +4539,21 @@ export type WikiAccessDto = z.infer<typeof WikiAccessSchema>;
 export type CreateWikiBody = z.infer<typeof CreateWikiBodySchema>;
 export type UpdateWikiBody = z.infer<typeof UpdateWikiBodySchema>;
 export type SetWikiAccessBody = z.infer<typeof SetWikiAccessBodySchema>;
+// Written out rather than inferred, like `WikiIngestActivityItemDto` above: `z.infer` does not
+// resolve this schema's nested array of objects, so it widens to `any` and every consumer loses
+// its types. Keep it in step with `WikiAccessEnvelopeSchema` by hand -- a type-level guard here
+// would have to compare against that same widened `any` and so could never fail.
+export type WikiAccessDetailsDto = {
+  access: WikiAccessDto;
+  memberIds: string[];
+  workspaceMembers: Array<{
+    id: string;
+    email: string;
+    name: string;
+    avatarUrl: string | null;
+    role: "admin" | "member";
+  }>;
+};
 export type CreateWikiPageBody = z.infer<typeof CreateWikiPageBodySchema>;
 export type UpdateWikiPageBody = z.infer<typeof UpdateWikiPageBodySchema>;
 export type DeleteWikiPageBody = z.infer<typeof DeleteWikiPageBodySchema>;
