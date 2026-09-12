@@ -172,5 +172,9 @@
     "turbo": "^2.10.12",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
+  },
+  "patchedDependencies": {
+    "metro@0.84.4": "patches/metro@0.84.4.patch",
+    "metro-runtime@0.84.4": "patches/metro-runtime@0.84.4.patch"
   }
 }

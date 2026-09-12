@@ -17,6 +17,7 @@ takes precedence. Codex availability is separate from the opencompany engine's G
 | `prod` `/api` | Render product API | database, auth, billing/Stripe, provider ingress, managed capabilities, Auto-routing gateway, Blob, Electric, Redis, and telemetry configuration |
 | `prod` `/electric` | Render Electric sync service | direct production database URL, service auth, persistent storage path, and replication-stream identity |
 | `prod` `/runner` | Render runner | production worker and broker configuration |
+| `prod` `/mobile` | GitHub Actions | EAS and App Store Connect build credentials plus public mobile configuration |
 | `prod` `/release` | GitHub Actions | production URLs, project/service IDs, deploy tokens, DB URL |
 | `prod` `/ci/turbo` | GitHub Actions | optional Turborepo remote-cache credentials |
 
@@ -77,6 +78,11 @@ dedicated AuthKit application in the same WorkOS environment as `WORKOS_CLIENT_I
 and organizations to remain shared while the API selects a fixed mobile session-token verifier.
 Future mobile builds expose the same value as `EXPO_PUBLIC_WORKOS_CLIENT_ID`; neither variable is a
 client secret. Do not copy the mobile client ID into the web runtime unless web gains a real reader.
+
+Mobile builds also require `EXPO_PUBLIC_OPENCOMPANY_API_ORIGIN`, a fully qualified `http` or `https`
+origin for the canonical API. Local Expo builds normally use `http://localhost:3001`; hosted builds
+use `https://api.opencompany.chat`. The value is public and must not contain credentials, a path,
+query parameters, or a fragment.
 
 `CRON_SECRET` must have the same value in prod `/web` and `/api`: web keeps the public cron URL
 while the API owns onboarding-email persistence.
