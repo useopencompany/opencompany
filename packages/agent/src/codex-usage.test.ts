@@ -18,6 +18,7 @@ const payload = {
     primary_window: window,
     secondary_window: { ...window, used_percent: 0, limit_window_seconds: 604_800 },
   },
+  // Per-model side quotas the card deliberately drops; the fixture keeps sending them.
   additional_rate_limits: [
     { limit_name: "Codex Spark", rate_limit: { primary_window: { ...window, used_percent: 100 } } },
   ],
@@ -42,7 +43,7 @@ describe("Codex subscription usage", () => {
     db.loadCodexCredential.mockResolvedValue(credential);
   });
 
-  it("reads only the connected account and returns a sanitized window snapshot", async () => {
+  it("reports the plan windows only, ignoring per-model side quotas", async () => {
     const fetchImpl = vi.fn(async () => Response.json(payload));
     const result = await fetchCodexUsage({ db: {}, userWorkosId: "user_personal", fetchImpl });
     expect(fetchImpl).toHaveBeenCalledWith(
@@ -74,12 +75,6 @@ describe("Codex subscription usage", () => {
           id: "codex:secondary_window",
           label: "Weekly",
           usedPercent: 0,
-          resetsAt: "2033-05-18T03:33:20.000Z",
-        },
-        {
-          id: "extra:0:primary_window",
-          label: "Codex Spark 5-hour",
-          usedPercent: 100,
           resetsAt: "2033-05-18T03:33:20.000Z",
         },
       ],
