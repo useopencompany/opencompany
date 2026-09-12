@@ -8,6 +8,7 @@
         "@neondatabase/serverless": "^1.1.0",
         "@opencompany/db": "workspace:*",
         "@opencompany/wiki": "workspace:*",
+        "@workos-inc/node": "^10.13.0",
         "dotenv": "^17.4.2",
         "drizzle-orm": "^0.45.2",
         "eslint-config-next": "16.2.10",
