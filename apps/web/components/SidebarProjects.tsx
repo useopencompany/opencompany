@@ -293,6 +293,9 @@ export function SidebarProjects({
     if (!created) return;
     setName("");
     setCreating(false);
+    // The new project's row lives below the fold, so a saved one reopens the section. Cancelling
+    // leaves the reader's collapse choice alone.
+    expandSection();
   };
 
   return (
@@ -307,12 +310,7 @@ export function SidebarProjects({
             type="button"
             aria-label="New project"
             title="New project"
-            onClick={() => {
-              // Naming a project the reader cannot see would be a dead end, so creating reopens
-              // the section.
-              expandSection();
-              setCreating(true);
-            }}
+            onClick={() => setCreating(true)}
             className={SIDEBAR_SECTION_ACTION_CLASSNAME}
           >
             <Plus size={13} strokeWidth={2} />
@@ -320,38 +318,38 @@ export function SidebarProjects({
         }
       />
 
+      {creating ? (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void saveNewProject();
+          }}
+          className="px-2 pb-1"
+        >
+          <label className="sr-only" htmlFor="new-project-name">
+            Project name
+          </label>
+          <input
+            id="new-project-name"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            onBlur={() => void saveNewProject()}
+            onKeyDown={(event) => {
+              if (event.key !== "Escape") return;
+              setName("");
+              setCreating(false);
+            }}
+            autoFocus
+            maxLength={80}
+            placeholder="Project name"
+            disabled={saving}
+            className="h-7 w-full rounded-md border border-border bg-canvas px-2 text-[13px] text-ink outline-none placeholder:text-ink-subtle focus:border-border-strong disabled:opacity-60"
+          />
+        </form>
+      ) : null}
+
       {sectionCollapsed ? null : (
         <div id={PROJECTS_LIST_ID}>
-          {creating ? (
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                void saveNewProject();
-              }}
-              className="px-2 pb-1"
-            >
-              <label className="sr-only" htmlFor="new-project-name">
-                Project name
-              </label>
-              <input
-                id="new-project-name"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                onBlur={() => void saveNewProject()}
-                onKeyDown={(event) => {
-                  if (event.key !== "Escape") return;
-                  setName("");
-                  setCreating(false);
-                }}
-                autoFocus
-                maxLength={80}
-                placeholder="Project name"
-                disabled={saving}
-                className="h-7 w-full rounded-md border border-border bg-canvas px-2 text-[13px] text-ink outline-none placeholder:text-ink-subtle focus:border-border-strong disabled:opacity-60"
-              />
-            </form>
-          ) : null}
-
           {state.error ? (
             <div className="px-4 pb-1 text-[11.5px] leading-4">
               <p role="alert" className="text-danger">

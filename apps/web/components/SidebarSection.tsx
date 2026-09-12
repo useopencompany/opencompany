@@ -60,7 +60,10 @@ export function useCollapsedSidebarSection(storageKey: string) {
   );
 
   const toggle = useCallback(() => setCollapsed(!collapsed), [collapsed, setCollapsed]);
-  const expand = useCallback(() => setCollapsed(false), [setCollapsed]);
+  // Already-open sections stay untouched rather than writing the same value back out.
+  const expand = useCallback(() => {
+    if (collapsed) setCollapsed(false);
+  }, [collapsed, setCollapsed]);
 
   return { collapsed, toggle, expand };
 }
@@ -68,10 +71,11 @@ export function useCollapsedSidebarSection(storageKey: string) {
 /**
  * The trailing action on a section header (a "+" for Bots and Projects). Hidden until the header is
  * hovered or focused so the resting sidebar stays quiet; it needs `group/header` on the header row,
- * which `SidebarSectionHeader` provides.
+ * which `SidebarSectionHeader` provides. A coarse pointer has no hover to reveal it with, so on
+ * touch it stays visible -- the sidebar's mobile drawer renders these same headers.
  */
 export const SIDEBAR_SECTION_ACTION_CLASSNAME =
-  "ml-auto flex h-5 w-5 shrink-0 items-center justify-center rounded text-ink/50 opacity-0 transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover/header:opacity-100 group-focus-within/header:opacity-100";
+  "ml-auto flex h-5 w-5 shrink-0 items-center justify-center rounded text-ink/50 opacity-0 transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover/header:opacity-100 group-focus-within/header:opacity-100 pointer-coarse:opacity-100";
 
 export function SidebarSectionHeader({
   label,

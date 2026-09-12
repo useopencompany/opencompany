@@ -148,6 +148,22 @@ it("collapses the bots section and remembers the choice", async () => {
   expect(await screen.findByRole("link", { name: "Research" })).toBeInTheDocument();
 });
 
+it("keeps a collapsed bots section closed when creation is abandoned", async () => {
+  const user = userEvent.setup();
+  window.localStorage.setItem("opencompany-sidebar-bots-collapsed", "true");
+  state.list.mockResolvedValue([]);
+  render(
+    <BotsProvider>
+      <SidebarBots />
+    </BotsProvider>,
+  );
+  await user.click(screen.getByRole("button", { name: "Create bot" }));
+  await user.keyboard("{Escape}");
+
+  expect(state.save).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "Bots" })).toHaveAttribute("aria-expanded", "false");
+});
+
 it("reopens a collapsed bots section when a bot is created", async () => {
   const user = userEvent.setup();
   window.localStorage.setItem("opencompany-sidebar-bots-collapsed", "true");

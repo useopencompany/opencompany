@@ -119,11 +119,7 @@ export function SidebarBots() {
             type="button"
             aria-label="Create bot"
             title="Create bot"
-            onClick={() => {
-              // A new bot lands at the top of this list, so creating one reopens the section.
-              expand();
-              setCreating(true);
-            }}
+            onClick={() => setCreating(true)}
             className={SIDEBAR_SECTION_ACTION_CLASSNAME}
           >
             <Plus size={13} strokeWidth={2} />
@@ -171,7 +167,11 @@ export function SidebarBots() {
           ) : null}
         </div>
       )}
-      {creating ? <BotEditor onClose={() => setCreating(false)} /> : null}
+      {creating ? (
+        // A saved bot's row lives below the fold, so it reopens the section. Cancelling the dialog
+        // leaves the reader's collapse choice alone.
+        <BotEditor onSaved={expand} onClose={() => setCreating(false)} />
+      ) : null}
     </section>
   );
 }
@@ -197,7 +197,15 @@ export function BotSettingsButton({ conversationId }: { conversationId: string }
   );
 }
 
-function BotEditor({ bot, onClose }: { bot?: BotDto; onClose: () => void }) {
+function BotEditor({
+  bot,
+  onSaved,
+  onClose,
+}: {
+  bot?: BotDto;
+  onSaved?: () => void;
+  onClose: () => void;
+}) {
   const router = useRouter();
   const { saved } = useContext(BotsContext);
   const [id] = useState(() => bot?.id ?? crypto.randomUUID());
@@ -238,6 +246,7 @@ function BotEditor({ bot, onClose }: { bot?: BotDto; onClose: () => void }) {
                 !bot,
               );
               saved(result);
+              onSaved?.();
               onClose();
               if (!bot) router.push(`/chat/${result.id}`);
               router.refresh();
