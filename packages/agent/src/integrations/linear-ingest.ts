@@ -5,6 +5,7 @@ import { integrations } from "@opencompany/db/product-schema";
 import { and, desc, eq, ne } from "drizzle-orm";
 import { getAppUrl } from "../app-url";
 import type { LinearSourceProviderState } from "../integration-state";
+import { linearGraphqlRequest } from "./linear-api";
 
 export type LinearIngestStatePayload = {
   userWorkosId: string;
@@ -199,39 +200,6 @@ export function appendLinearIngestStatus(
   url.searchParams.set("setup", status);
   if (status === "error" && reason) url.searchParams.set("reason", reason);
   return `${url.pathname}${url.search}`;
-}
-
-export async function linearGraphqlRequest<T>(input: {
-  token: string;
-  query: string;
-  variables?: Record<string, unknown>;
-}): Promise<T> {
-  const response = await fetch("https://api.linear.app/graphql", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${input.token}`,
-    },
-    body: JSON.stringify({
-      query: input.query,
-      ...(input.variables ? { variables: input.variables } : {}),
-    }),
-  });
-  if (!response.ok) {
-    throw new Error(`Linear GraphQL request failed with ${response.status}.`);
-  }
-
-  const result = (await response.json()) as {
-    data?: T;
-    errors?: Array<{ message?: string }>;
-  };
-  if (result.errors && result.errors.length > 0) {
-    throw new Error(`Linear GraphQL returned ${result.errors[0]?.message ?? "an unknown error"}.`);
-  }
-  if (!result.data) {
-    throw new Error("Linear GraphQL returned no data.");
-  }
-  return result.data;
 }
 
 function linearIngestCallbackUrl() {

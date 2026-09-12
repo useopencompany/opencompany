@@ -73,9 +73,11 @@ export function ConvexDeployKeyConnectionForm({ connected }: { connected: boolea
         </Button>
       </div>
       <p className="text-[11.5px] leading-4 text-ink-faint">
-        Generate a key for one deployment in Convex Settings → Deploy keys. The key stays encrypted
-        on the server. Production supports schema and function inspection only; development data
-        access and function execution require approval by default.
+        Generate a key for one deployment in Convex Settings → Deploy keys. Grant it
+        deployment:functions:runInternalQueries and deployment:data:view so opencompany can verify
+        function and schema access. The key stays encrypted on the server. Production supports
+        schema and function inspection only; development data access and function execution require
+        approval by default.
       </p>
     </div>
   );

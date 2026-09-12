@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { defaultWikiSelectStub, TEST_DEFAULT_WIKI_ID } from "./test-default-wiki";
 import {
   attributeWikiSourceEventClaims,
   claimWikiSourceEvents,
@@ -11,6 +12,7 @@ describe("claimWikiSourceEvents", () => {
     let insertedValues: unknown;
     let conflictTarget: unknown;
     const db = {
+      select: defaultWikiSelectStub(),
       insert: vi.fn(() => ({
         values: vi.fn((values: unknown) => {
           insertedValues = values;
@@ -36,6 +38,11 @@ describe("claimWikiSourceEvents", () => {
       claimedEventKeys: ["message:new"],
     });
     expect(insertedValues).toHaveLength(2);
+    // Claims record the wiki the event was routed to; dedup stays workspace-wide.
+    expect(insertedValues).toMatchObject([
+      { wikiId: TEST_DEFAULT_WIKI_ID },
+      { wikiId: TEST_DEFAULT_WIKI_ID },
+    ]);
     expect(conflictTarget).toMatchObject({ target: expect.any(Array) });
   });
 

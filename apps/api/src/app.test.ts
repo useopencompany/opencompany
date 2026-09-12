@@ -298,6 +298,7 @@ describe("canonical Hono API", () => {
       pluginImports: fakePluginImportService(),
       brainAssets: fakeBrainAssets(),
       brainControl: fakeBrainControl(),
+      wikiControl: fakeWikiControl(),
       attachments: fakeAttachments(),
       userSettings: fakeUserSettings(),
       feedback: fakeFeedback(),
@@ -3557,6 +3558,39 @@ describe("canonical Hono API", () => {
     expect(response.headers.get("retry-after")).toBe("7");
   });
 
+  it("keeps lower-limit provider reads independent of ordinary API reads", async () => {
+    const listOptions = vi.fn(async () => ({
+      provider: "linear" as const,
+      teams: [{ id: "team_1", name: "Engineering", key: "ENG" }],
+      partial: false,
+    }));
+    const resolveLiveViewUrl = vi.fn(async () => "https://live.example.com/session_1");
+    const app = testApp(fakeRepository(), {
+      rateLimiter: new InMemoryApiRateLimiter(() => 0),
+      brainSources: brainSourceService({ listOptions }),
+      browserProfiles: browserProfileService({ resolveLiveViewUrl }),
+    });
+
+    for (let index = 0; index < 120; index += 1) {
+      expect((await app.request("/v1/conversations")).status).toBe(200);
+    }
+
+    const response = await app.request("/v1/integrations/integration_1/brain-source-options", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: "linear" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(listOptions).toHaveBeenCalledWith(actor, "integration_1", { provider: "linear" });
+
+    const liveView = await app.request(
+      "/v1/browser-profiles/profile_1/live-view?sessionId=session_1",
+    );
+    expect(liveView.status).toBe(200);
+    expect(resolveLiveViewUrl).toHaveBeenCalledWith(actor, "profile_1", "session_1");
+  });
+
   it.each(["plugins", "skills"] as const)(
     "keeps %s previews and imports independent of workspace writes and each other",
     async (kind) => {
@@ -5242,6 +5276,7 @@ function testApp(
     pluginImports: fakePluginImportService(),
     brainAssets: fakeBrainAssets(),
     brainControl: fakeBrainControl(),
+    wikiControl: fakeWikiControl(),
     attachments: fakeAttachments(),
     userSettings: fakeUserSettings(),
     feedback: fakeFeedback(),
@@ -5346,6 +5381,35 @@ function fakeBrainControl(): Parameters<typeof createApiApp>[0]["brainControl"] 
     },
     setIntelligence: async () => {
       throw new Error("Unexpected Brain intelligence mutation.");
+    },
+  };
+}
+
+function fakeWikiControl(): Parameters<typeof createApiApp>[0]["wikiControl"] {
+  return {
+    listWikis: async () => [
+      {
+        id: "goat_wiki_1",
+        name: "Wiki",
+        slug: "wiki",
+        instructions: "",
+        access: "workspace",
+        isDefault: true,
+        createdAt,
+        updatedAt: createdAt,
+      },
+    ],
+    createWiki: async () => {
+      throw new Error("Unexpected Wiki creation.");
+    },
+    updateWiki: async () => {
+      throw new Error("Unexpected Wiki update.");
+    },
+    getAccess: async () => {
+      throw new Error("Unexpected Wiki access read.");
+    },
+    setAccess: async () => {
+      throw new Error("Unexpected Wiki access mutation.");
     },
   };
 }
@@ -5964,6 +6028,7 @@ function fakeWikiCommandRepository(
     throw new Error("Unexpected wiki command repository call.");
   };
   return {
+    resolveWiki: async () => fakeResolvedWiki,
     getTree: async () => [],
     resolvePages: async () => ({ pages: [], missing: [] }),
     getBacklinks: async () => [],
@@ -6048,15 +6113,27 @@ function fakePluginImportService(
   return new PluginImportApplicationService(repository, resolver, gatewayLifecycle);
 }
 
+const fakeResolvedWiki = {
+  wikiId: "goat_wiki_1",
+  name: "Wiki",
+  slug: "wiki",
+  instructions: "",
+};
+
 function knowledgeService(overrides: Partial<KnowledgeRepository>) {
-  const repository = new Proxy(overrides, {
-    get(target, operation) {
-      if (operation in target) return target[operation as keyof typeof target];
-      return async () => {
-        throw new Error(`Unexpected knowledge operation: ${String(operation)}.`);
-      };
+  // Every wiki entry point resolves and authorizes its wiki first, so the fake
+  // repository answers that by default.
+  const repository = new Proxy(
+    { resolveWiki: async () => fakeResolvedWiki, ...overrides },
+    {
+      get(target, operation) {
+        if (operation in target) return target[operation as keyof typeof target];
+        return async () => {
+          throw new Error(`Unexpected knowledge operation: ${String(operation)}.`);
+        };
+      },
     },
-  }) as KnowledgeRepository;
+  ) as KnowledgeRepository;
   return new KnowledgeApplicationService(repository);
 }
 

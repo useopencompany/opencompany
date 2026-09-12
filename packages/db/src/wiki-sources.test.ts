@@ -2,6 +2,7 @@ import type { SQL } from "drizzle-orm";
 import { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it, vi } from "vitest";
+import { defaultWikiSelectStub, TEST_DEFAULT_WIKI_ID } from "./test-default-wiki";
 
 const { getDbMock } = vi.hoisted(() => ({ getDbMock: vi.fn() }));
 vi.mock("./client", () => ({ getDb: getDbMock }));
@@ -21,12 +22,14 @@ describe("upsertWikiSource", () => {
     const transaction = vi.fn(() => {
       throw new Error("No transactions support in neon-http driver");
     });
+    const sourceValues = vi.fn(() => ({
+      onConflictDoNothing: vi.fn(() => ({ returning })),
+    }));
     const db = {
-      insert: vi.fn(() => ({
-        values: vi.fn(() => ({
-          onConflictDoNothing: vi.fn(() => ({ returning })),
-        })),
-      })),
+      // Own property: the NeonHttpDatabase prototype below would otherwise
+      // provide an uninitialized `select` that refuses to run.
+      select: defaultWikiSelectStub(),
+      insert: vi.fn(() => ({ values: sourceValues })),
       transaction,
     };
     Object.setPrototypeOf(db, NeonHttpDatabase.prototype);
@@ -47,6 +50,10 @@ describe("upsertWikiSource", () => {
 
     expect(transaction).not.toHaveBeenCalled();
     expect(returning).toHaveBeenCalledOnce();
+    // Sources are workspace-level but name the wiki they feed.
+    expect(sourceValues).toHaveBeenCalledWith(
+      expect.objectContaining({ wikiId: TEST_DEFAULT_WIKI_ID }),
+    );
   });
 });
 
@@ -55,7 +62,7 @@ describe("ensureWikiSourceEnabledOnConnect", () => {
     const returning = vi.fn(async () => []);
     const onConflictDoNothing = vi.fn(() => ({ returning }));
     const values = vi.fn(() => ({ onConflictDoNothing }));
-    const db = { insert: vi.fn(() => ({ values })) };
+    const db = { select: defaultWikiSelectStub(), insert: vi.fn(() => ({ values })) };
 
     await expect(
       ensureWikiSourceEnabledOnConnect({
@@ -70,7 +77,11 @@ describe("ensureWikiSourceEnabledOnConnect", () => {
     ).resolves.toBe(false);
 
     expect(values).toHaveBeenCalledWith(
-      expect.objectContaining({ provider: "granola", enabled: true }),
+      expect.objectContaining({
+        provider: "granola",
+        enabled: true,
+        wikiId: TEST_DEFAULT_WIKI_ID,
+      }),
     );
     expect(onConflictDoNothing).toHaveBeenCalledOnce();
     expect(db).not.toHaveProperty("update");

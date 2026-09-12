@@ -175,6 +175,56 @@ describe("loadHostTools", () => {
     fetchSpy.mockRestore();
   });
 
+  it("prelists skills discovered on earlier chat turns while they remain available", async () => {
+    const execute = vi.fn(async ({ request }: { request: ChatHostToolGatewayRequest }) => ({
+      ok: true as const,
+      result:
+        request.operation === "bootstrap"
+          ? bootstrap
+          : {
+              ok: true,
+              skill: {
+                id: "sales",
+                name: "Sales",
+                description: "Sell thoughtfully.",
+                instructions: "Verify every claim.",
+              },
+            },
+    }));
+    const tools = await loadHostTools(
+      { ...context(), prelistedSkillIds: ["sales", "removed-skill"] },
+      { execute },
+    );
+    assert(tools);
+    const productTools = createProductChatToolContext({
+      model: "moonshotai/kimi-k2.6" as never,
+      ...tools,
+      runWiki: tools.runWiki as never,
+    }).tools;
+    const useSkill = productTools.use_skill as {
+      execute: (args: unknown) => Promise<unknown>;
+    };
+
+    await expect(useSkill.execute({ skill: "sales" })).resolves.toMatchObject({
+      ok: true,
+      skill: { id: "sales" },
+    });
+    expect(tools.skills?.prelistedSkillIds).toEqual(["sales"]);
+    expect(execute.mock.calls.map(([call]) => call.request.operation)).toEqual([
+      "bootstrap",
+      "use_skill",
+    ]);
+  });
+
+  it("prelists every available skill for an approval continuation", async () => {
+    const tools = await loadHostTools(
+      { ...context(), approvalContinuation: true },
+      { execute: async () => ({ ok: true, result: bootstrap }) },
+    );
+
+    expect(tools?.skills?.prelistedSkillIds).toEqual(["sales"]);
+  });
+
   it("rejects unsafe Skill file paths before crossing the runner host boundary", async () => {
     const execute = vi.fn(async ({ request }: { request: ChatHostToolGatewayRequest }) => ({
       ok: true as const,

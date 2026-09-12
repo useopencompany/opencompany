@@ -29,7 +29,7 @@ Start with the [connection guide](/docs/getting-started/connecting-sources) or t
 | --- | --- |
 | **Skills** | Select the Plugin's instructions from the `/` menu or a Workflow step. |
 | **Tools** | Ask the agent to work with the connected provider; the account and permission settings determine what's available. |
-| **Events** | Enable an event for your personal installation, then select it in a Workflow's event trigger. |
+| **Events** | Enable an event for your personal installation, then select it in a Workflow's event trigger. Some events arrive as a signed webhook, others are found by opencompany's regular sync of that service — either way, one task starts per event. |
 
 Enabling a Plugin doesn't activate every Skill in every conversation. The agent applies relevant
 instructions, or you can select a Skill explicitly.
@@ -85,9 +85,10 @@ connection separately when you want to revoke account access.
 ## Convex
 
 Install Convex from **Settings → Plugins**, then connect it using a deployment-scoped deploy key
-from your Convex deployment settings. Use a key beginning with `dev:` or `prod:` and grant
-function inspection so the connection can be validated. Project-wide tokens and self-hosted
-endpoints are not supported. You can replace or disconnect the key from the same plugin page.
+from your Convex deployment settings. Use a key beginning with `dev:` or `prod:`. Grant the key
+`deployment:functions:runInternalQueries` and `deployment:data:view`; opencompany validates both
+function and schema access before saving it. Project-wide tokens and self-hosted endpoints are not
+supported. You can replace or disconnect the key from the same plugin page.
 
 Convex uses the same On, Ask, and Off controls as other plugins:
 

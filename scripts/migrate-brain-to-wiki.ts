@@ -8,8 +8,8 @@
 // - Idempotent: pages write through the wiki storage layer (unchanged bodies
 //   are no-ops), timeline entries dedupe on (at, text), asset rows skip when
 //   the path already exists.
-// - Multiple brains merge into the one workspace wiki; sibling path collisions
-//   get -2/-3 suffixes (logged).
+// - Multiple brains merge into the workspace's default wiki; sibling path
+//   collisions get -2/-3 suffixes (logged).
 // - Evidence and archived docs land under archive/; merged docs are skipped.
 //
 // Usage:
@@ -36,6 +36,7 @@ import {
   type WikiMigrationPlannedPage,
   type WikiMigrationSourceDocument,
 } from "@opencompany/db/wiki-migrate";
+import { requireIngestionWikiId, type WikiScope } from "@opencompany/db/wikis";
 import { deriveWikiTitle, isValidWikiPath } from "@opencompany/wiki";
 import { and, asc, eq } from "drizzle-orm";
 
@@ -130,6 +131,12 @@ for (const workspace of workspaces) {
     continue;
   }
 
+  // Brains migrate into the workspace's default wiki; a restricted wiki is
+  // never a migration target.
+  const scope: WikiScope = {
+    workspaceId: workspace.id,
+    wikiId: await requireIngestionWikiId(workspace.id, db),
+  };
   const counts = { created: 0, updated: 0, unchanged: 0, assets: 0, timeline: 0, invalid: 0 };
   for (const page of plan.pages) {
     if (!isValidWikiPath(page.path)) {
@@ -138,19 +145,19 @@ for (const workspace of workspaces) {
       continue;
     }
     if (page.asset) {
-      const wrote = await writeAssetPage(workspace.id, page);
+      const wrote = await writeAssetPage(scope, page);
       if (wrote) counts.assets += 1;
       continue;
     }
     const result = await writeWikiPage({
-      workspaceId: workspace.id,
+      scope,
       path: page.path,
       body: page.body,
       kind: page.kind,
       actorWorkosId: null,
     });
     counts[result.action] += 1;
-    counts.timeline += await migrateTimeline(workspace.id, result.page.path, page.timeline);
+    counts.timeline += await migrateTimeline(scope, result.page.path, page.timeline);
   }
   console.log(
     `  done: ${counts.created} created, ${counts.updated} updated, ${counts.unchanged} unchanged, ` +
@@ -160,21 +167,22 @@ for (const workspace of workspaces) {
 
 // Binary-backed docs bypass writeWikiPage (which is markdown-only) and copy
 // the asset columns; the blob itself stays at the same storage key.
-async function writeAssetPage(workspaceId: string, page: WikiMigrationPlannedPage) {
+async function writeAssetPage(scope: WikiScope, page: WikiMigrationPlannedPage) {
   const existing = await db
     .select({ id: wikiPages.id })
     .from(wikiPages)
-    .where(and(eq(wikiPages.workspaceId, workspaceId), eq(wikiPages.path, page.path)))
+    .where(and(eq(wikiPages.wikiId, scope.wikiId), eq(wikiPages.path, page.path)))
     .limit(1);
   if (existing.length > 0) return false;
   // Ensure ancestors exist as folders.
   const parentPath = page.path.slice(0, page.path.lastIndexOf("/"));
   if (parentPath) {
-    await createWikiFolder({ workspaceId, path: parentPath, actorWorkosId: null });
+    await createWikiFolder({ scope, path: parentPath, actorWorkosId: null });
   }
   await db.insert(wikiPages).values({
     id: randomUUID(),
-    workspaceId,
+    workspaceId: scope.workspaceId,
+    wikiId: scope.wikiId,
     slug: page.slug,
     path: page.path,
     title: deriveWikiTitle(page.body, page.slug),
@@ -194,12 +202,12 @@ async function writeAssetPage(workspaceId: string, page: WikiMigrationPlannedPag
 }
 
 async function migrateTimeline(
-  workspaceId: string,
+  scope: WikiScope,
   path: string,
   entries: Array<{ at: string; text: string }>,
 ) {
   if (entries.length === 0) return 0;
-  const existing = await listWikiTimeline({ workspaceId, path });
+  const existing = await listWikiTimeline({ scope, path });
   const seen = new Set(existing.map((entry) => `${entry.at.toISOString()}\0${entry.text}`));
   let added = 0;
   for (const entry of entries) {
@@ -208,7 +216,7 @@ async function migrateTimeline(
     const key = `${at.toISOString()}\0${entry.text}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    await addWikiTimelineEntry({ workspaceId, path, at, text: entry.text, actorWorkosId: null });
+    await addWikiTimelineEntry({ scope, path, at, text: entry.text, actorWorkosId: null });
     added += 1;
   }
   return added;

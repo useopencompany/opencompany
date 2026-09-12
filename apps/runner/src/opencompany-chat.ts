@@ -15,6 +15,7 @@ import type {
 import {
   compareChatMessageOrder,
   listedActionSourceIdsFromMessages,
+  listedSkillIdsFromMessages,
   replaceChatUiMessageText,
   textFromChatUiMessage,
   toChatUiMessage,
@@ -238,15 +239,16 @@ export async function runProductChatTurn(input: {
       includeCurrentAssistantMessage: turn.settings.approvalContinuation === true,
     });
     throwIfAborted(generationController.signal);
-    const prelistedActionSourceIds = listedActionSourceIdsFromMessages(
-      storedMessages.map((message) => toChatUiMessage(message)),
-    );
+    const storedUiMessages = storedMessages.map((message) => toChatUiMessage(message));
+    const prelistedActionSourceIds = listedActionSourceIdsFromMessages(storedUiMessages);
+    const prelistedSkillIds = listedSkillIdsFromMessages(storedUiMessages);
     const runtime = await resolveProductChatRuntime({
       turn,
       session,
       env,
       signal: generationController.signal,
       prelistedActionSourceIds,
+      prelistedSkillIds,
       taskContext: input.taskContext,
     });
     runtimeCleanup = runtime.cleanup;
@@ -1149,9 +1151,11 @@ async function resolveProductChatRuntime(input: {
   env: RunnerEnv;
   signal: AbortSignal;
   prelistedActionSourceIds: readonly string[];
+  prelistedSkillIds: readonly string[];
   taskContext?: TaskTurnContext | undefined;
 }) {
-  const { turn, session, env, signal, prelistedActionSourceIds, taskContext } = input;
+  const { turn, session, env, signal, prelistedActionSourceIds, prelistedSkillIds, taskContext } =
+    input;
   const model = session.model as AgentModelId;
   if (!AGENT_MODEL_CATALOG.some((candidate) => candidate.id === model)) {
     throw new Error(`Unsupported opencompany chat model: ${session.model}.`);
@@ -1204,6 +1208,7 @@ async function resolveProductChatRuntime(input: {
     signal,
     mentionedSkillIds: (turn.settings.mentions ?? []).map((mention) => mention.id),
     approvalContinuation: Boolean(turn.settings.approvalContinuation),
+    prelistedSkillIds,
   });
   if (!actionDispatcher || !hostTools) {
     throw new Error("The durable Chat host gateways are not configured.");

@@ -120,6 +120,7 @@ import type { SlackBotSettingsService } from "./slack-bot-settings";
 import type { SlackIngressService } from "./slack-ingress";
 import type { StripeIngressService } from "./stripe-ingress";
 import type { UserSettingsService } from "./user-settings";
+import type { WikiControlService, WikiControlView } from "./wiki-control";
 import type { WikiSourceService } from "./wiki-sources";
 import type { CapabilityApprovalView, WorkspaceCapabilityService } from "./workspace-capabilities";
 import type { WorkspaceControlService } from "./workspace-control";
@@ -203,6 +204,7 @@ export type CreateApiAppInput = {
     };
   }) => Promise<unknown> | unknown;
   brainControl: BrainControlService;
+  wikiControl: WikiControlService;
   attachments: AttachmentUploadService;
   bots?: BotService;
   userSettings: UserSettingsService;
@@ -667,7 +669,7 @@ export function createApiApp(input: CreateApiAppInput) {
     },
     listBrainSourceOptions: async (c) => {
       const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "read", 120);
+      await enforceRateLimit(rateLimiter, actor, "integration-source-options", 120);
       const options = await input.brainSources.listOptions(
         actor,
         c.req.valid("param").integrationId,
@@ -720,7 +722,7 @@ export function createApiApp(input: CreateApiAppInput) {
     },
     getBrowserProfileLiveView: async (c) => {
       const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "read", 120);
+      await enforceRateLimit(rateLimiter, actor, "browser-live-view", 120);
       const { profileId } = c.req.valid("param");
       const { sessionId } = c.req.valid("query");
       const url = await input.browserProfiles.resolveLiveViewUrl(actor, profileId, sessionId);
@@ -1153,10 +1155,48 @@ export function createApiApp(input: CreateApiAppInput) {
       await input.knowledge.deleteBrainFolder(actor, params.brainId, body);
       return c.json({ data: { path: body.path }, meta }, 200);
     },
+    listWikis: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const wikis = await input.wikiControl.listWikis(actor);
+      return c.json({ data: wikis.map(wikiDto), meta }, 200);
+    },
+    createWiki: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const wiki = await input.wikiControl.createWiki(actor, c.req.valid("json"));
+      return c.json({ data: wikiDto(wiki), meta }, 201);
+    },
+    updateWiki: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const wiki = await input.wikiControl.updateWiki(
+        actor,
+        c.req.valid("param").wikiId,
+        c.req.valid("json"),
+      );
+      return c.json({ data: wikiDto(wiki), meta }, 200);
+    },
+    getWikiAccess: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const access = await input.wikiControl.getAccess(actor, c.req.valid("param").wikiId);
+      return c.json({ data: access, meta }, 200);
+    },
+    setWikiAccess: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const access = await input.wikiControl.setAccess(
+        actor,
+        c.req.valid("param").wikiId,
+        c.req.valid("json"),
+      );
+      return c.json({ data: access, meta }, 200);
+    },
     listWikiPages: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);
-      const pages = await input.knowledge.listWikiPages(actor);
+      const pages = await input.knowledge.listWikiPages(actor, c.req.valid("query").wikiId);
       return c.json({ data: pages.map(wikiPageDto), meta }, 200);
     },
     createWikiPage: async (c) => {
@@ -2176,6 +2216,9 @@ export function createApiApp(input: CreateApiAppInput) {
         );
       }
       let messageShapeEpoch: number | undefined;
+      // Set only for the per-wiki shapes, and only to a wiki the actor was just
+      // authorized for — never echoed straight back from the query.
+      let readModelWikiId: string | undefined;
       if (params.readModel === "task-activities-v1") {
         if (!query.taskId || query.conversationId || query.brainId) {
           throw new ApiError(
@@ -2202,7 +2245,18 @@ export function createApiApp(input: CreateApiAppInput) {
             "conversationId and brainId are not valid for this read model.",
           );
         }
-        input.knowledge.authorizeWikiRead(actor);
+        // The page and timeline shapes stream one wiki; import runs stay
+        // workspace-scoped because they live on goat.brain_import_runs.
+        const perWikiShape =
+          params.readModel === "wiki-pages-v2" || params.readModel === "wiki-timeline-v1";
+        if (!perWikiShape && query.wikiId) {
+          throw new ApiError(400, "invalid_request", "wikiId is not valid for this read model.");
+        }
+        // Resolving through the service means a non-member of a restricted wiki
+        // gets 404 here and their stream is never opened, rather than being
+        // filtered after the fact.
+        const wikiId = await input.knowledge.authorizeWikiRead(actor, query.wikiId);
+        if (perWikiShape) readModelWikiId = wikiId;
       } else if (params.readModel === "tasks-v1") {
         if (query.conversationId || query.brainId) {
           throw new ApiError(
@@ -2290,6 +2344,7 @@ export function createApiApp(input: CreateApiAppInput) {
         readModel: params.readModel,
         ...(query.conversationId ? { conversationId: query.conversationId } : {}),
         ...(query.brainId ? { brainId: query.brainId } : {}),
+        ...(readModelWikiId ? { wikiId: readModelWikiId } : {}),
         ...(query.taskId ? { taskId: query.taskId } : {}),
         ...(messageShapeEpoch !== undefined ? { messageShapeEpoch } : {}),
         requestUrl: new URL(c.req.url),
@@ -2930,13 +2985,18 @@ export function createApiApp(input: CreateApiAppInput) {
     if (!parsed.success) {
       throw new ApiError(400, "invalid_request", "A valid wiki command is required.");
     }
-    const { userWorkosId, workspaceId, command } = parsed.data;
+    const { userWorkosId, workspaceId, wikiId, command } = parsed.data;
     // Never trust the caller-supplied tenancy: reload the actor from Postgres.
     const actor = await input.resolveWikiServiceActor({ userWorkosId, workspaceId });
     const isRead = WIKI_READ_COMMANDS.includes(command.command);
     await enforceRateLimit(rateLimiter, actor, isRead ? "wiki_read" : "wiki_write", 120);
     const startedAt = now();
-    const output = await input.wikiCommands.execute({ actor, command, idempotencyKey });
+    const output = await input.wikiCommands.execute({
+      actor,
+      command,
+      idempotencyKey,
+      ...(wikiId ? { wikiId } : {}),
+    });
     logger.info("Internal wiki command executed", {
       event: "opencompany.internal_wiki_command",
       request_id: requestIdFrom(c),
@@ -3490,6 +3550,14 @@ function brainSourceItemDto(item: BrainSourceItem) {
     title: item.title?.slice(0, 512) ?? null,
     lastIngestError: item.lastIngestError?.slice(0, 2_000) ?? null,
     createdAt: item.createdAt.toISOString(),
+  };
+}
+
+function wikiDto(wiki: WikiControlView) {
+  return {
+    ...wiki,
+    createdAt: wiki.createdAt.toISOString(),
+    updatedAt: wiki.updatedAt.toISOString(),
   };
 }
 

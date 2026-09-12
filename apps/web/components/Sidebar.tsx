@@ -37,6 +37,7 @@ import { useAppData } from "@/components/AppDataProvider";
 import { SidebarBots } from "@/components/Bots";
 import { BrainSwitcher } from "@/components/BrainSwitcher";
 import { ChatStateIndicator } from "@/components/ChatStateIndicator";
+import { IntentPrefetchLink } from "@/components/IntentPrefetchLink";
 import { SidebarFeedback } from "@/components/SidebarFeedback";
 import { HOME_NAVIGATION_EVENT, requestChatComposerFocus } from "@/lib/chat-navigation";
 import { clearLocalChatState, useLocalChatStates } from "@/lib/chat-session-state";
@@ -107,9 +108,8 @@ function SidebarNavRow({
   onClick?: MouseEventHandler<HTMLAnchorElement>;
 }) {
   return (
-    <Link
+    <IntentPrefetchLink
       href={href}
-      prefetch
       {...(onClick ? { onClick } : {})}
       aria-current={current ? "page" : undefined}
       className={`group flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-left text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
@@ -130,7 +130,7 @@ function SidebarNavRow({
       {incomplete ? (
         <span aria-hidden="true" className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-warning" />
       ) : null}
-    </Link>
+    </IntentPrefetchLink>
   );
 }
 
@@ -526,7 +526,6 @@ function SidebarWorkList() {
     const pinned = isPinned(chat);
     const optimistic = optimisticChatIds.has(chat.id);
     const prefetchChat = () => {
-      router.prefetch(href);
       void preloadHeadlessChatMessages(chat.id).catch((error: unknown) => {
         console.warn("Could not preload a sidebar chat transcript.", {
           conversationId: chat.id,
@@ -655,12 +654,9 @@ function SidebarChatRow({
           {content}
         </button>
       ) : (
-        <Link
+        <IntentPrefetchLink
           href={href}
-          prefetch
-          onMouseEnter={onPrefetch}
-          onFocus={onPrefetch}
-          onTouchStart={onPrefetch}
+          onIntent={onPrefetch}
           onClick={(event) => {
             if (
               event.button !== 0 ||
@@ -677,7 +673,7 @@ function SidebarChatRow({
           className="flex min-w-0 flex-1 items-center gap-2 rounded-l-md py-[5px] pl-2 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
         >
           {content}
-        </Link>
+        </IntentPrefetchLink>
       )}
       {optimistic ? null : (
         <>
@@ -758,10 +754,10 @@ function SidebarTaskRow({
         aria-current={active ? "page" : undefined}
         className="flex min-w-0 flex-1 items-center gap-2 rounded-l-md py-[5px] pl-2 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
       >
-        <ChatStateIndicator state={state} surface="sidebar" />
-        <span className="truncate tracking-[-0.005em]">{task.name}</span>
-        <span className="ml-auto shrink-0 pl-1.5 text-[11px] leading-none text-ink-faint">
-          {task.displayId}
+        <ChatStateIndicator state={state} surface="sidebar" className="mt-[7px] self-start" />
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate tracking-[-0.005em]">{task.name}</span>
+          <span className="truncate text-[11px] leading-none text-ink-faint">{task.displayId}</span>
         </span>
       </Link>
       {/* Empty stand-in for the chat row's pin control, so the archive icon lands in the same

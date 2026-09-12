@@ -1,13 +1,15 @@
 import { createHmac } from "node:crypto";
 import { createLinearIngestState } from "@opencompany/agent/integrations/linear-ingest";
 import {
-  enqueueWorkflowEventRuns,
   insertLinearIssueEvents,
   listEnabledLinearBrainSourceRoutes,
   listEnabledLinearWikiSourceRoutes,
   listLinearIntegrationsForOrganization,
-  listWorkflowEventTriggerRoutes,
 } from "@opencompany/db/linear";
+import {
+  enqueueWorkflowEventRuns,
+  listWorkflowEventTriggerRoutes,
+} from "@opencompany/db/workflow-event-routes";
 import { listWorkspacesForUser } from "@opencompany/db/workspaces";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./errors";
@@ -17,14 +19,17 @@ vi.mock("@opencompany/db/linear", async (importOriginal) => {
   const original = await importOriginal<typeof import("@opencompany/db/linear")>();
   return {
     ...original,
-    enqueueWorkflowEventRuns: vi.fn(),
     insertLinearIssueEvents: vi.fn(),
     listEnabledLinearBrainSourceRoutes: vi.fn(),
     listEnabledLinearWikiSourceRoutes: vi.fn(),
     listLinearIntegrationsForOrganization: vi.fn(),
-    listWorkflowEventTriggerRoutes: vi.fn(),
   };
 });
+vi.mock("@opencompany/db/workflow-event-routes", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  enqueueWorkflowEventRuns: vi.fn(),
+  listWorkflowEventTriggerRoutes: vi.fn(),
+}));
 vi.mock("@opencompany/db/workspaces", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   listWorkspacesForUser: vi.fn(),
@@ -283,6 +288,10 @@ describe("Linear ingress", () => {
           routes: [
             expect.objectContaining({ workflowId: "workflow_created", event: "issue.created" }),
           ],
+          context: {
+            tag: "linear_issue_context",
+            lines: expect.arrayContaining(["Title: Billing bug"]),
+          },
         }),
         expect.objectContaining({ sentinel: "db" }),
       );

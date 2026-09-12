@@ -128,8 +128,14 @@ export type LinearTeamListResult =
   | (Omit<Extract<BrainSourceOptions, { provider: "linear" }>, "provider"> & { ok: true })
   | { ok: false; error: string };
 
-export async function listLinearTeamsAction(integrationId: string): Promise<LinearTeamListResult> {
-  const result = await listSourceOptions(integrationId, { provider: "linear" });
+export async function listLinearTeamsAction(
+  integrationId: string,
+  options: { includeTriageStateIds?: boolean } = {},
+): Promise<LinearTeamListResult> {
+  const result = await listSourceOptions(integrationId, {
+    provider: "linear",
+    ...(options.includeTriageStateIds ? { includeTriageStateIds: true } : {}),
+  });
   if (!result.ok) return result;
   if (result.data.provider !== "linear") {
     return { ok: false, error: "Linear returned an invalid source-option response." };

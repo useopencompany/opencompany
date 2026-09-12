@@ -38,14 +38,21 @@ export async function validateConvexApiKey(
   const deployment = parseConvexDeployKey(apiKey);
   if (!deployment)
     return { ok: false, error: "Use a deployment-scoped Convex key starting with dev: or prod:." };
+  const checks = [
+    { tool: "functionSpec", permission: "deployment:functions:runInternalQueries" },
+    { tool: "tables", permission: "deployment:data:view" },
+  ] as const;
   try {
-    const result = await runConvexCli({ apiKey, tool: "functionSpec", args: {} });
-    if (result.isError)
-      return {
-        ok: false,
-        error:
-          "Convex rejected the key or its permissions. Enable function inspection and try again.",
-      };
+    for (const check of checks) {
+      const result = await runConvexCli({ apiKey, tool: check.tool, args: {} });
+      if (result.isError)
+        return {
+          ok: false,
+          error:
+            convexPermissionError(result) ??
+            `Convex could not inspect this deployment. Grant ${check.permission} to the deploy key and try again.`,
+        };
+    }
     return { ok: true, deployment: deployment.name };
   } catch {
     return {
@@ -53,6 +60,17 @@ export async function validateConvexApiKey(
       error: "Convex could not validate this deploy key. Check it and try again.",
     };
   }
+}
+
+function convexPermissionError(result: { content: Array<{ type: string; text?: string }> }) {
+  for (const content of result.content) {
+    if (content.type !== "text" || typeof content.text !== "string") continue;
+    const match = /\((deployment:[A-Za-z0-9:]+)\)/u.exec(content.text);
+    if (match?.[1]) {
+      return `Convex denied ${match[1]}. Grant that permission to the deploy key and try again.`;
+    }
+  }
+  return null;
 }
 
 export async function connectConvexMcpIntegration(input: {
