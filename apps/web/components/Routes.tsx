@@ -94,12 +94,15 @@ import {
 export function HomeRoute({
   chatId,
   projectId = null,
+  projectName = null,
   initialChat: routeInitialChat = null,
 }: {
   chatId: string | null;
   // Set when the reader started this chat from a sidebar Project row, so the Conversation the
   // first message creates is filed there.
   projectId?: string | null;
+  // Resolved server-side for the project's new-chat screen; always paired with `projectId`.
+  projectName?: string | null;
   initialChat?: ChatSessionView | null;
 }) {
   const data = useAppData();
@@ -135,6 +138,7 @@ export function HomeRoute({
         defaultModel={DEFAULT_MODEL}
         initialChat={initialChat}
         newChatProjectId={projectId}
+        newChatProjectName={projectName}
         recentChats={data.recentChats}
         archivedChats={data.archivedChats}
         codexConnected={data.codexConnected}
