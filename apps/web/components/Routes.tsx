@@ -34,6 +34,7 @@ import {
   Sparkles,
   Sun,
   UserRound,
+  Users,
   Workflow,
 } from "lucide-react";
 import Link from "next/link";
@@ -85,6 +86,7 @@ import {
   updateBotsAction,
   updateReviewInboxAction,
   updateSidebarProjectsAction,
+  updateSubagentsAction,
   updateTaskSpawningAction,
 } from "@/lib/user-preferences";
 
@@ -290,6 +292,13 @@ export function PreferencesSettingsRoute() {
           description="Group chats and tasks into named folders in the sidebar, and start new chats inside one."
           checked={featureFlags.sidebarProjects}
           update={updateSidebarProjectsAction}
+        />
+        <BetaFeatureSwitch
+          icon={Users}
+          label="Subagents"
+          description="Let opencompany hand wide research to helpers that work in their own context and report back, so one answer can cover several sources at once. Uses more credits per message."
+          checked={featureFlags.subagents}
+          update={updateSubagentsAction}
         />
       </section>
     </SettingsContent>

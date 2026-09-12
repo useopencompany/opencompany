@@ -18,6 +18,7 @@ type UserPreferences = {
   autoModelRoutingEnabled: boolean;
   reviewInboxEnabled: boolean;
   sidebarProjectsEnabled: boolean;
+  subagentsEnabled: boolean;
 };
 
 export async function updateTimezoneAction(timezone: string) {
@@ -80,6 +81,12 @@ export async function updateSidebarProjectsAction(enabled: boolean) {
   revalidatePath("/");
   revalidatePath("/settings/preferences");
   return { ok: true, enabled: preferences.sidebarProjectsEnabled } as const;
+}
+
+export async function updateSubagentsAction(enabled: boolean) {
+  const preferences = await patchPreferences({ subagentsEnabled: enabled === true });
+  revalidatePath("/settings/preferences");
+  return { ok: true, enabled: preferences.subagentsEnabled } as const;
 }
 
 async function patchPreferences(body: Partial<UserPreferences>): Promise<UserPreferences> {

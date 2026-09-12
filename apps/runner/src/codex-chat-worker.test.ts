@@ -1054,7 +1054,6 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     openaiCodexApiKey: "codex",
     exaApiKey: "exa",
     browserEnabled: false,
-    subagentsEnabled: false,
     codexE2bTemplate: undefined,
     sandboxNamespace: "test",
     codexTimeoutMs: 1_200_000,

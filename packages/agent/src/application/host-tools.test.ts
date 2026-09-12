@@ -20,6 +20,7 @@ const context: ChatHostContext = {
   timezone: "Europe/London",
   taskToolsEnabled: true,
   skillToolsEnabled: true,
+  subagentsEnabled: false,
   legacyBrainEnabled: false,
 };
 
@@ -40,6 +41,35 @@ describe("opencompany Chat Task host tools", () => {
     });
     expect(dependencies.listWorkflowCatalog).not.toHaveBeenCalled();
     expect(dependencies.listSchedules).not.toHaveBeenCalled();
+  });
+
+  it("carries the member's subagent preference, except inside a task conversation", async () => {
+    const enabled = { ...context, subagentsEnabled: true };
+
+    await expect(
+      executeChatHostToolService({
+        command: { operation: "bootstrap", sessionId: "runtime_1", runId: "run_1" },
+        dependencies: testDependencies({ loadContext: vi.fn(async () => enabled) }),
+      }),
+    ).resolves.toMatchObject({ ok: true, result: { subagentsEnabled: true } });
+
+    await expect(
+      executeChatHostToolService({
+        command: { operation: "bootstrap", sessionId: "runtime_1", runId: "run_1" },
+        dependencies: testDependencies({
+          loadContext: vi.fn(async () => ({ ...enabled, taskConversation: true })),
+        }),
+      }),
+    ).resolves.toMatchObject({ ok: true, result: { subagentsEnabled: false } });
+  });
+
+  it("leaves subagents off for a member who has not opted in", async () => {
+    await expect(
+      executeChatHostToolService({
+        command: { operation: "bootstrap", sessionId: "runtime_1", runId: "run_1" },
+        dependencies: testDependencies({ loadContext: vi.fn(async () => context) }),
+      }),
+    ).resolves.toMatchObject({ ok: true, result: { subagentsEnabled: false } });
   });
 
   it.each([

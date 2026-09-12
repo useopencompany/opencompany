@@ -4402,6 +4402,9 @@
           "sidebarProjectsEnabled": {
             "type": "boolean"
           },
+          "subagentsEnabled": {
+            "type": "boolean"
+          },
           "wikiEnabled": {
             "type": "boolean",
             "enum": [
@@ -4467,6 +4470,7 @@
           "chatCapabilitiesBetaEnabled",
           "reviewInboxEnabled",
           "sidebarProjectsEnabled",
+          "subagentsEnabled",
           "wikiEnabled",
           "taskViewMode",
           "taskTimeRange",
@@ -10327,6 +10331,9 @@
           },
           "sidebarProjectsEnabled": {
             "type": "boolean"
+          },
+          "subagentsEnabled": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -10338,7 +10345,8 @@
           "taskTimeRange",
           "autoModelRoutingEnabled",
           "reviewInboxEnabled",
-          "sidebarProjectsEnabled"
+          "sidebarProjectsEnabled",
+          "subagentsEnabled"
         ],
         "additionalProperties": false
       },
@@ -10384,6 +10392,9 @@
             "type": "boolean"
           },
           "sidebarProjectsEnabled": {
+            "type": "boolean"
+          },
+          "subagentsEnabled": {
             "type": "boolean"
           }
         },

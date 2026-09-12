@@ -39,6 +39,7 @@ const appDataMock = vi.hoisted(() => ({
       legacyBrain: true,
       reviewInbox: false,
       sidebarProjects: false,
+      subagents: false,
     },
     integrations: {},
     mcpSetup: { preferredClient: null, completedAt: null },
@@ -51,6 +52,7 @@ const userPreferencesMock = vi.hoisted(() => ({
   updateAutoModelRoutingAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateReviewInboxAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateSidebarProjectsAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
+  updateSubagentsAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
 }));
 
 const workflowActionsMock = vi.hoisted(() => ({
@@ -175,6 +177,7 @@ vi.mock("@/lib/user-preferences", () => ({
   updateAutoModelRoutingAction: userPreferencesMock.updateAutoModelRoutingAction,
   updateReviewInboxAction: userPreferencesMock.updateReviewInboxAction,
   updateSidebarProjectsAction: userPreferencesMock.updateSidebarProjectsAction,
+  updateSubagentsAction: userPreferencesMock.updateSubagentsAction,
 }));
 
 vi.mock("@/lib/headless-automation-commands", () => ({
@@ -388,6 +391,19 @@ describe("SettingsRoute", () => {
     await user.click(toggle);
 
     expect(userPreferencesMock.updateReviewInboxAction).toHaveBeenCalledWith(true);
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+  });
+
+  it("shows the Subagents switch off by default and persists opt-in", async () => {
+    const user = userEvent.setup();
+    render(<PreferencesSettingsRoute />);
+
+    const toggle = screen.getByRole("switch", { name: "Subagents" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+
+    await user.click(toggle);
+
+    expect(userPreferencesMock.updateSubagentsAction).toHaveBeenCalledWith(true);
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
   });
 

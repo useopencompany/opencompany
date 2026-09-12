@@ -50,7 +50,6 @@ const env = {
   dictationFinalModel: undefined,
   exaApiKey: undefined,
   browserEnabled: false,
-  subagentsEnabled: false,
   codexE2bTemplate: undefined,
   sandboxNamespace: "test",
   codexTimeoutMs: 1_200_000,

@@ -25,7 +25,8 @@ describe("sidebar project storage", () => {
       CREATE SCHEMA goat;
       CREATE TABLE goat.users (
         workos_user_id text PRIMARY KEY,
-        sidebar_projects_enabled boolean NOT NULL DEFAULT false
+        sidebar_projects_enabled boolean NOT NULL DEFAULT false,
+        subagents_enabled boolean NOT NULL DEFAULT false
       );
       CREATE TABLE goat.workspace_members (workspace_id text, user_workos_id text);
       CREATE TABLE goat.projects (
