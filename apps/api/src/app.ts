@@ -2121,6 +2121,11 @@ export function createApiApp(input: CreateApiAppInput) {
         throw new ApiError(400, "invalid_request", "The event cursor is invalid.");
       }
       const initialRun = await input.chat.getRun(actor, runId);
+      // Only the opencompany engine publishes presentation frames (the runner wires the hot
+      // publisher for that engine alone), and a run's engine never changes. Coding-engine
+      // streams skip the Redis hot path and wake on the durable-event cadence instead of the
+      // presentation cadence.
+      const presentation = initialRun.engine === "opencompany" ? input.presentation : undefined;
       // A cursor may already point at the final durable event. In that case the response body is
       // intentionally empty, so the shared client needs the authenticated status snapshot to
       // distinguish terminal exhaustion from an early network disconnect.
@@ -2163,8 +2168,8 @@ export function createApiApp(input: CreateApiAppInput) {
               durableWake = false;
               nextDurablePollAt = currentTime + EVENT_POLL_MS;
             }
-            if (input.presentation) {
-              const hot = await input.presentation.read({
+            if (presentation) {
+              const hot = await presentation.read({
                 runId,
                 ...(presentationStreamId ? { afterStreamId: presentationStreamId } : {}),
                 limit: CHAT_PRESENTATION_READ_LIMIT,
@@ -2199,7 +2204,7 @@ export function createApiApp(input: CreateApiAppInput) {
             durableWake = await notifier.wait({
               runId,
               signal: streamSignal,
-              timeoutMs: input.presentation ? PRESENTATION_POLL_MS : EVENT_POLL_MS,
+              timeoutMs: presentation ? PRESENTATION_POLL_MS : EVENT_POLL_MS,
             });
           }
         } catch (error) {
