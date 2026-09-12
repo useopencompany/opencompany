@@ -256,8 +256,97 @@ describe("publishChatArtifact", () => {
     expect(blobMocks.put).toHaveBeenCalledWith(
       expect.stringMatching(/^goat-chat-artifacts\/workspace_1\/artifact_/),
       Buffer.from("# Report"),
-      expect.objectContaining({ contentType: "text/markdown", access: "private" }),
+      expect.objectContaining({
+        contentType: "text/markdown",
+        access: "private",
+        abortSignal: expect.any(AbortSignal),
+      }),
     );
+  });
+
+  it("cancels an in-flight artifact upload when the turn is interrupted", async () => {
+    const controller = new AbortController();
+    let markUploadStarted: () => void = () => {};
+    const uploadStarted = new Promise<void>((resolve) => {
+      markUploadStarted = resolve;
+    });
+    dbMocks.select
+      .mockReset()
+      .mockReturnValueOnce(
+        queryBuilder([
+          {
+            session: {
+              id: "codex_session_1",
+              engine: "opencompany",
+              status: "running",
+              activeTurnId: "turn_1",
+              workspaceId: "workspace_1",
+            },
+            turn: {
+              id: "turn_1",
+              status: "running",
+              leaseId: "lease_1",
+              leaseOwner: "worker_1",
+              userWorkosId: "user_1",
+              chatSessionId: "chat_1",
+              assistantMessageId: "assistant_1",
+            },
+          },
+        ]),
+      )
+      .mockReturnValueOnce(queryBuilder([{ status: "running", interruptAt: null }]))
+      .mockReturnValueOnce(queryBuilder([]));
+    dbMocks.execute.mockReset().mockResolvedValueOnce({ rows: [{ count: 0 }] });
+    blobMocks.put.mockImplementationOnce(
+      async (_pathname, _bytes, options: { abortSignal: AbortSignal }) => {
+        markUploadStarted();
+        if (options.abortSignal.aborted) throw options.abortSignal.reason;
+        return new Promise((_resolve, reject) => {
+          options.abortSignal.addEventListener("abort", () => reject(options.abortSignal.reason), {
+            once: true,
+          });
+        });
+      },
+    );
+
+    const publication = publishInBandChatArtifact({
+      codexChatSessionId: "codex_session_1",
+      codexChatTurnId: "turn_1",
+      toolCallId: "call_1",
+      arguments: {
+        filename: "report.md",
+        title: "Quarterly report",
+        content: "# Report",
+      },
+      env: { blobReadWriteToken: "blob_token" },
+      signal: controller.signal,
+    });
+    await uploadStarted;
+    controller.abort(new Error("turn interrupted"));
+
+    await expect(publication).resolves.toEqual({ ok: false, error: "turn interrupted" });
+    expect(dbMocks.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("bounds the rollback delete when the version cannot be recorded", async () => {
+    dbMocks.execute
+      .mockReset()
+      .mockResolvedValueOnce({ rows: [{ count: 0 }] })
+      .mockResolvedValueOnce({ rows: [] });
+
+    await expect(
+      publishChatArtifact({
+        context: context(),
+        input: { path: "report.md", title: "Quarterly report" },
+        toolCallId: "call_1",
+      }),
+    ).rejects.toThrow("The file publication could not be recorded.");
+    expect(blobMocks.del).toHaveBeenCalledWith(
+      "private/artifact/report.md",
+      expect.objectContaining({ abortSignal: expect.any(AbortSignal) }),
+    );
+    const [, delOptions] = blobMocks.del.mock.calls[0] as [string, { abortSignal: AbortSignal }];
+    expect(delOptions.abortSignal.aborted).toBe(false);
   });
 
   it("rejects paths and non-Markdown extensions from the in-band tool", async () => {

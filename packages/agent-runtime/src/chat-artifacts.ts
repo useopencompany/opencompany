@@ -8,7 +8,7 @@ export const PUBLISH_ARTIFACT_TOOL_DESCRIPTION =
   "Publish a finished file from the current sandbox into the chat as a durable user-visible file. Call this only for outputs the user should receive, not source files, repository diffs, logs, or temporary work.";
 
 export const WRITE_ARTIFACT_TOOL_DESCRIPTION =
-  "Create or revise a Markdown artifact in this chat. Use it for finished reports, briefs, plans, and other substantial documents the user should open and iterate on. Send the complete Markdown content on every call. To revise an existing artifact, reuse artifact_id and pass the version currently shown as expected_version.";
+  "Create or revise a Markdown artifact in this chat. Use it for finished reports, briefs, plans, and other substantial documents the user should open and iterate on. Send the complete Markdown content on every call. For a new artifact, omit artifact_id and expected_version. To revise an existing artifact, reuse artifact_id and pass the version currently shown as expected_version.";
 
 export const PUBLISH_ARTIFACT_INPUT_JSON_SCHEMA = {
   type: "object",
@@ -61,12 +61,14 @@ export const WRITE_ARTIFACT_INPUT_JSON_SCHEMA = {
     },
     artifact_id: {
       type: "string",
-      description: "Stable artifact id when publishing a new version of an earlier artifact.",
+      description:
+        "For revisions only: the stable artifact id of an earlier artifact. Omit when creating a new artifact.",
     },
     expected_version: {
       type: "integer",
+      minimum: 1,
       description:
-        "Required with artifact_id. The current version number; prevents overwriting a newer publication.",
+        "For revisions only: the current version number. Required with artifact_id and omitted for a new artifact.",
     },
   },
   required: ["filename", "title", "content"],
