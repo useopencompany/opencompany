@@ -33,8 +33,9 @@ import {
   USE_ACTION_TOOL_NAME,
 } from "@/lib/chat-ui";
 import { githubInstallGapCandidate } from "@/lib/github-repository-access";
+import { ApprovalCard, type ApprovalChoice } from "./ApprovalCard";
+import { type ApprovalPresentation, approvalPresentation } from "./approval-presentation";
 import {
-  actionToolLabel,
   formatDebugValue,
   isBrainToolOutput,
   isRecord,
@@ -232,7 +233,6 @@ function CapabilityApprovalCard({
   } | null>(null);
   const [submitting, setSubmitting] = useState<"accept" | "decline" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const summary = actionApprovalSummary(tool.input);
 
   useEffect(() => {
     if (!tool.toolCallId) return;
@@ -294,71 +294,55 @@ function CapabilityApprovalCard({
     });
   };
 
+  const presentation: ApprovalPresentation = {
+    ...approvalPresentation(tool.input),
+    kind: "capability",
+    source: capabilitySourceLabel(quote?.source ?? action.split(".", 1)[0] ?? ""),
+    question: `Run the ${capabilityActionLabel(quote?.action ?? action).toLowerCase()} lookup?`,
+  };
+
   return (
-    <div
-      data-testid="chat-capability-approval"
-      className="max-w-[92%] rounded-xl border border-border bg-surface px-4 py-3 shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
-    >
-      <div className="text-[12px] font-semibold text-ink">Run paid lookup?</div>
-      <p className="mt-1 text-[12px] leading-5 text-ink-muted">
-        {quote
-          ? `${capabilitySourceLabel(quote.source)} · ${capabilityActionLabel(quote.action)}`
-          : capabilityActionLabel(action)}
-      </p>
-      {summary.lines.length > 0 ? (
-        <dl className="mt-2 space-y-1">
-          {summary.lines.map((line, index) => (
-            <div key={`${line.label}-${index}`} className="flex gap-2 text-[12px] leading-5">
-              <dt className="w-20 shrink-0 text-ink-subtle">{line.label}</dt>
-              <dd className="min-w-0 whitespace-pre-wrap break-words text-ink-muted">
-                {line.value}
-              </dd>
-            </div>
-          ))}
-        </dl>
-      ) : null}
-      {quote ? (
+    <ApprovalCard
+      testId="chat-capability-approval"
+      approvalId={approvalId}
+      presentation={presentation}
+      badge={quote ? `Up to ${formatUsdMicros(quote.maxCostUsdMicros)}` : "Loading price..."}
+      footer={
         <>
-          <p className="mt-2 text-[11px] leading-4 text-ink-subtle">
-            Up to {formatUsdMicros(quote.maxCostUsdMicros)}. The final charge may be lower.
-          </p>
-          <p className="mt-1 text-[11px] leading-4 text-ink-subtle">
-            This would exceed this session&apos;s {formatUsdMicros(quote.sessionBudgetUsdMicros)}{" "}
-            budget.
-          </p>
+          {quote ? (
+            <>
+              <p className="mt-2 text-[11px] leading-4 text-ink-subtle">
+                This lookup is billed to your workspace. The final charge may be lower than{" "}
+                {formatUsdMicros(quote.maxCostUsdMicros)}.
+              </p>
+              <p className="mt-1 text-[11px] leading-4 text-ink-subtle">
+                This would exceed this session&apos;s{" "}
+                {formatUsdMicros(quote.sessionBudgetUsdMicros)} budget.
+              </p>
+            </>
+          ) : null}
+          {detail ? <HistoricalPresentationDetailStatus detail={detail} /> : null}
         </>
-      ) : null}
-      {detail ? <HistoricalPresentationDetailStatus detail={detail} /> : null}
-      <div className="mt-3 flex flex-wrap gap-2">
-        <button
-          type="button"
-          disabled={!approvalAvailable || submitting !== null}
-          onClick={() => decide("accept")}
-          className="rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-canvas transition-opacity hover:opacity-90 disabled:opacity-50"
-        >
-          {submitting === "accept"
-            ? "Running..."
-            : quote?.status === "awaiting_approval"
-              ? `Approve for ${formatUsdMicros(quote.maxCostUsdMicros)}`
+      }
+      allow={[
+        {
+          id: "accept",
+          label:
+            quote && quote.status !== "awaiting_approval"
+              ? capabilityApprovalStatusLabel(quote.status)
               : quote
-                ? capabilityApprovalStatusLabel(quote.status)
-                : "Loading price..."}
-        </button>
-        <button
-          type="button"
-          disabled={submitting !== null}
-          onClick={() => decide("decline")}
-          className="rounded-lg border border-border px-3 py-1.5 text-[12px] font-medium text-ink-muted hover:bg-surface-hover disabled:opacity-50"
-        >
-          Cancel
-        </button>
-      </div>
-      {error ? (
-        <p className="mt-2 text-[11px] text-danger" role="alert">
-          {error}
-        </p>
-      ) : null}
-    </div>
+                ? `Allow for ${formatUsdMicros(quote.maxCostUsdMicros)}`
+                : "Loading price...",
+          busyLabel: "Running...",
+          hint: "\u21b5",
+          disabled: !approvalAvailable,
+        },
+      ]}
+      deny={{ id: "decline", label: "Deny", busyLabel: "Denying...", hint: "Esc" }}
+      onChoose={(choice) => decide(choice === "accept" ? "accept" : "decline")}
+      submitting={submitting}
+      error={error}
+    />
   );
 }
 
@@ -379,7 +363,6 @@ function ActionApprovalCard({
   const [error, setError] = useState<string | null>(null);
   const appData = useAppDataOptional();
   const taskApproval = tool.toolCallId.startsWith("task_action_");
-  const summary = actionApprovalSummary(tool.input);
   const approvalId = tool.approvalId;
   const approvalAvailable = !detail || detail.state === "loaded";
   const action =
@@ -398,62 +381,51 @@ function ActionApprovalCard({
     // and this card unmounts into the resolved row.
   };
 
+  // A custom MCP server can redefine what an action name does at any time, so a standing
+  // permission for one of its actions would not mean what the user agreed to.
+  const alwaysAllowed =
+    allowAlways && !taskApproval && !/^plugin:custom-[a-f0-9]{24}:/.test(action);
+  const allow: ApprovalChoice[] = [
+    ...(alwaysAllowed
+      ? [
+          {
+            id: "accept_always" satisfies ActionApprovalDecision,
+            label: "Always allow",
+            busyLabel: "Saving...",
+            disabled: !approvalAvailable,
+          },
+        ]
+      : []),
+    {
+      id: "accept" satisfies ActionApprovalDecision,
+      label: "Allow once",
+      busyLabel: "Allowing...",
+      hint: "\u21b5",
+      disabled: !approvalAvailable,
+    },
+  ];
+
   return (
-    <div
-      data-testid="chat-action-approval"
-      className="max-w-[92%] rounded-xl border border-border bg-surface px-4 py-3 shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
-    >
-      <div className="text-[12px] font-semibold text-ink">{summary.heading}</div>
-      {action.startsWith("plugin:") && appData?.user.email ? (
-        <p className="mt-1 text-[11.5px] leading-4 text-ink-subtle">as {appData.user.email}</p>
-      ) : null}
-      {summary.lines.length > 0 ? (
-        <dl className="mt-2 space-y-1">
-          {summary.lines.map((line, index) => (
-            <div key={`${line.label}-${index}`} className="flex gap-2 text-[12px] leading-5">
-              <dt className="w-20 shrink-0 text-ink-subtle">{line.label}</dt>
-              <dd className="min-w-0 whitespace-pre-wrap break-words text-ink-muted">
-                {line.value}
-              </dd>
-            </div>
-          ))}
-        </dl>
-      ) : null}
-      {detail ? <HistoricalPresentationDetailStatus detail={detail} /> : null}
-      <div className="mt-3 flex flex-wrap gap-2">
-        <button
-          type="button"
-          disabled={!approvalAvailable || submitting !== null}
-          onClick={() => decide("accept")}
-          className="rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-canvas transition-opacity hover:opacity-90 disabled:opacity-50"
-        >
-          {submitting === "accept" ? "Approving..." : taskApproval ? "Approve once" : "Accept"}
-        </button>
-        {allowAlways && !taskApproval && !/^plugin:custom-[a-f0-9]{24}:/.test(action) ? (
-          <button
-            type="button"
-            disabled={!approvalAvailable || submitting !== null}
-            onClick={() => decide("accept_always")}
-            className="rounded-lg border border-border px-3 py-1.5 text-[12px] font-medium text-ink-muted hover:bg-surface-hover disabled:opacity-50"
-          >
-            {submitting === "accept_always" ? "Saving..." : "Always allow"}
-          </button>
-        ) : null}
-        <button
-          type="button"
-          disabled={submitting !== null}
-          onClick={() => decide("decline")}
-          className="rounded-lg border border-border px-3 py-1.5 text-[12px] font-medium text-ink-muted hover:bg-surface-hover disabled:opacity-50"
-        >
-          {taskApproval ? "Deny" : "Decline"}
-        </button>
-      </div>
-      {error ? (
-        <p className="mt-2 text-[11px] text-danger" role="alert">
-          {error}
-        </p>
-      ) : null}
-    </div>
+    <ApprovalCard
+      testId="chat-action-approval"
+      approvalId={approvalId}
+      presentation={approvalPresentation(tool.input)}
+      footer={
+        <>
+          {action.startsWith("plugin:") && appData?.user.email ? (
+            <p className="mt-2 text-[11.5px] leading-4 text-ink-subtle">
+              Runs as {appData.user.email}
+            </p>
+          ) : null}
+          {detail ? <HistoricalPresentationDetailStatus detail={detail} /> : null}
+        </>
+      }
+      allow={allow}
+      deny={{ id: "decline", label: "Deny", busyLabel: "Denying...", hint: "Esc" }}
+      onChoose={(choice) => decide(choice as ActionApprovalDecision)}
+      submitting={submitting}
+      error={error}
+    />
   );
 }
 
@@ -545,103 +517,6 @@ function formatUsdMicros(value: number) {
     minimumFractionDigits: value < 100_000 ? 3 : 2,
     maximumFractionDigits: value < 100_000 ? 3 : 2,
   }).format(value / 1_000_000);
-}
-
-// Human-readable confirmation content per action; the raw JSON stays behind
-// the regular expandable tool row, never on the card.
-function actionApprovalSummary(input: unknown): {
-  heading: string;
-  lines: Array<{ label: string; value: string }>;
-} {
-  const record = isRecord(input) ? input : {};
-  const action = typeof record.action === "string" ? record.action : "";
-  const params = isRecord(record.params) ? record.params : {};
-
-  if (action === "google_calendar.create_event") {
-    const lines: Array<{ label: string; value: string }> = [];
-    if (typeof params.summary === "string") lines.push({ label: "Event", value: params.summary });
-    const when = formatEventWindow(params.start, params.end, params.time_zone);
-    if (when) lines.push({ label: "When", value: when });
-    if (typeof params.location === "string") {
-      lines.push({ label: "Where", value: params.location });
-    }
-    if (Array.isArray(params.attendees) && params.attendees.length > 0) {
-      lines.push({
-        label: "Invites",
-        value: params.attendees.filter((entry) => typeof entry === "string").join(", "),
-      });
-    }
-    if (typeof params.calendar_id === "string" && params.calendar_id !== "primary") {
-      lines.push({ label: "Calendar", value: params.calendar_id });
-    }
-    if (typeof params.account === "string") {
-      lines.push({ label: "Account", value: params.account });
-    }
-    return { heading: "Add this event to your Google Calendar?", lines };
-  }
-
-  if (action === "x_account.post_tweet") {
-    const posts = Array.isArray(params.posts)
-      ? params.posts.flatMap((post) => {
-          if (!isRecord(post) || typeof post.text !== "string") return [];
-          const account = typeof post.account === "string" ? `${post.account} — ` : "";
-          return [{ label: "Post", value: `${account}${post.text}` }];
-        })
-      : [];
-    if (typeof params.text === "string") {
-      posts.push({ label: "Post", value: params.text });
-    }
-    if (posts.length > 0) return { heading: "Post to X?", lines: posts };
-  }
-
-  return {
-    heading: action
-      ? `Run ${action.startsWith("plugin:") ? actionToolLabel(record) : action.split(".").join(" ")}?`
-      : "Run this action?",
-    lines: Object.entries(params).flatMap(([key, value]) => {
-      if (value === undefined || value === null) return [];
-      const rendered = formatApprovalValue(value);
-      return rendered ? [{ label: key.split("_").join(" "), value: rendered }] : [];
-    }),
-  };
-}
-
-function formatApprovalValue(value: unknown) {
-  if (!Array.isArray(value)) return formatDebugValue(value);
-  if (value.every((entry) => ["string", "number", "boolean"].includes(typeof entry))) {
-    return value.join(", ");
-  }
-  return formatDebugValue(value);
-}
-
-function formatEventWindow(start: unknown, end: unknown, timeZone: unknown) {
-  if (typeof start !== "string" || typeof end !== "string") return null;
-  const allDay = /^\d{4}-\d{2}-\d{2}$/.test(start);
-  if (allDay) {
-    return start === end ? `${start} (all day)` : `${start} – ${end} (all day)`;
-  }
-  const startDate = new Date(start);
-  const endDate = new Date(end);
-  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
-    return `${start} – ${end}`;
-  }
-  const zone = typeof timeZone === "string" && timeZone ? timeZone : undefined;
-  try {
-    const dayFormat = new Intl.DateTimeFormat(undefined, {
-      dateStyle: "medium",
-      ...(zone ? { timeZone: zone } : {}),
-    });
-    const timeFormat = new Intl.DateTimeFormat(undefined, {
-      timeStyle: "short",
-      ...(zone ? { timeZone: zone } : {}),
-    });
-    const sameDay = dayFormat.format(startDate) === dayFormat.format(endDate);
-    return sameDay
-      ? `${dayFormat.format(startDate)}, ${timeFormat.format(startDate)} – ${timeFormat.format(endDate)}`
-      : `${dayFormat.format(startDate)} ${timeFormat.format(startDate)} – ${dayFormat.format(endDate)} ${timeFormat.format(endDate)}`;
-  } catch {
-    return `${start} – ${end}`;
-  }
 }
 
 function CodexPlanRow({
