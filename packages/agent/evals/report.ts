@@ -43,6 +43,22 @@ export function summarize(trials: Trial[], k: number) {
     p50Ms: trials.length ? median(trials.map((t) => t.durationMs)) : null,
   };
 }
+export function summarizeModel(report: Report, model: string) {
+  const trials = report.trials.filter((t) => t.model === model);
+  const cases = report.config.scenarios.flatMap((scenario) =>
+    report.config.variants.map((variant) =>
+      summarize(
+        trials.filter((t) => t.scenario === scenario && t.variant === variant),
+        report.config.k,
+      ),
+    ),
+  );
+  return {
+    model,
+    ...summarize(trials, report.config.k * cases.length),
+    passK: cases.every((c) => c.passK !== null) ? mean(cases.map((c) => c.passK!)) : null,
+  };
+}
 export function printReport(report: Report) {
   console.table(
     report.trials.map((t) => ({
@@ -73,28 +89,7 @@ export function printReport(report: Report) {
       fingerprint: report.fingerprints[key]?.slice(0, 12),
     })),
   );
-  console.table(
-    report.config.models.map((model) => {
-      const trials = report.trials.filter((t) => t.model === model);
-      const cases = [...new Set(trials.map(caseKey))].map((key) =>
-        summarize(
-          trials.filter((t) => caseKey(t) === key),
-          report.config.k,
-        ),
-      );
-      return {
-        model,
-        ...summarize(
-          trials,
-          report.config.k * report.config.scenarios.length * report.config.variants.length,
-        ),
-        passK:
-          cases.length && cases.every((c) => c.passK !== null)
-            ? mean(cases.map((c) => c.passK!))
-            : null,
-      };
-    }),
-  );
+  console.table(report.config.models.map((model) => summarizeModel(report, model)));
   console.log(
     `Known gateway cost: $${report.totalCostUsd.toFixed(6)}${report.trials.some((t) => t.costUsd === null) ? " (incomplete cost metadata)" : ""}. ${report.stopped ? `Stopped: ${report.stopped}.` : "Run complete."}`,
   );

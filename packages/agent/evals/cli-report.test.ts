@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_MODELS, parseCli } from "./cli";
-import { compareReports, latestTrials, type Report, summarize } from "./report";
+import { compareReports, latestTrials, type Report, summarize, summarizeModel } from "./report";
 import type { Trial } from "./types";
 
 export function sampleTrial(overrides: Partial<Trial> = {}): Trial {
@@ -109,6 +109,15 @@ describe("benchmark reports", () => {
     expect(summarize(trials, 2).passK).toBe(0);
     expect(summarize([sampleTrial(), sampleTrial({ repeat: 1 })], 2).passK).toBe(1);
   });
+  it("does not report model pass^k while an entire scenario is still unstarted", () => {
+    const report = sampleReport();
+    report.config.scenarios.push("linear-file-issue");
+    expect(summarizeModel(report, report.config.models[0]!)).toMatchObject({
+      trials: "1/2",
+      passK: null,
+    });
+  });
+
   it("compares identical cases, warns on matching fingerprints and rejects scenario drift", () => {
     const baseline = sampleReport();
     const current = sampleReport([
