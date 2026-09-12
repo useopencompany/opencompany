@@ -1,4 +1,7 @@
-import { CODEX_APPROVAL_TOOL_NAME } from "@opencompany/agent-runtime";
+import {
+  CODEX_APPROVAL_TOOL_NAME,
+  CODEX_SUBAGENT_TOOL_PART_TYPE,
+} from "@opencompany/agent-runtime";
 import { describe, expect, it } from "vitest";
 import type { ChatUiMessage } from "@/lib/chat-ui";
 import { approvalPresentation, pendingApprovals } from "./approval-presentation";
@@ -214,6 +217,35 @@ describe("pending approvals in a turn", () => {
 
     expect(pendingApprovals(message)).toEqual([
       { approvalId: "approval_1", source: "Terminal", question: "Run this command?" },
+    ]);
+  });
+
+  it("sees an approval raised inside a subagent's own trace", () => {
+    const message = {
+      id: "assistant_3",
+      role: "assistant",
+      parts: [
+        {
+          type: CODEX_SUBAGENT_TOOL_PART_TYPE,
+          toolCallId: "subagent_1",
+          state: "input-available",
+          input: { label: "Explore" },
+          children: [
+            {
+              type: "dynamic-tool",
+              toolName: CODEX_APPROVAL_TOOL_NAME,
+              toolCallId: "acp-approval-4",
+              state: "approval-requested",
+              input: { label: "Approval", action: "rg TODO", kind: "execute" },
+              approval: { id: "approval_nested" },
+            },
+          ],
+        } as unknown as ChatUiMessage["parts"][number],
+      ],
+    } as ChatUiMessage;
+
+    expect(pendingApprovals(message)).toEqual([
+      { approvalId: "approval_nested", source: "Terminal", question: "Run this command?" },
     ]);
   });
 

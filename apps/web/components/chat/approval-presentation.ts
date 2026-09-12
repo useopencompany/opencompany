@@ -47,16 +47,31 @@ const APPROVAL_CODE_MAX_CHARS = 2_000;
  * uses to render a decision card, so the banner can never advertise a decision that has no card.
  */
 export function pendingApprovals(message: ChatUiMessage): PendingApproval[] {
-  const parts = message.parts as readonly (Record<string, unknown> & { type: string })[];
+  return pendingApprovalsInParts(
+    message.parts as readonly (Record<string, unknown> & { type: string })[],
+  );
+}
+
+function pendingApprovalsInParts(
+  parts: readonly (Record<string, unknown> & { type: string })[],
+): PendingApproval[] {
   return parts.flatMap((part) => {
     if (!isToolPartRecord(part)) return [];
+    // A subagent carries its own trace, and an approval it raises renders a card just like any
+    // other, so the banner has to see through the nesting too.
+    const children = Array.isArray(part.children)
+      ? pendingApprovalsInParts(part.children as (Record<string, unknown> & { type: string })[])
+      : [];
     const name = toolNameFromPart(part);
-    if (name !== USE_ACTION_TOOL_NAME && name !== CODEX_APPROVAL_TOOL_NAME) return [];
-    if (part.state !== "approval-requested") return [];
+    if (name !== USE_ACTION_TOOL_NAME && name !== CODEX_APPROVAL_TOOL_NAME) return children;
+    if (part.state !== "approval-requested") return children;
     const approvalId = isRecord(part.approval) ? readString(part.approval.id) : null;
-    if (!approvalId) return [];
+    if (!approvalId) return children;
     const presentation = approvalPresentation(part.input);
-    return [{ approvalId, source: presentation.source, question: presentation.question }];
+    return [
+      { approvalId, source: presentation.source, question: presentation.question },
+      ...children,
+    ];
   });
 }
 
