@@ -24,6 +24,11 @@ import {
   useState,
 } from "react";
 import { useAppData } from "@/components/AppDataProvider";
+import {
+  SIDEBAR_SECTION_ACTION_CLASSNAME,
+  SidebarSectionHeader,
+  useCollapsedSidebarSection,
+} from "@/components/SidebarSection";
 import { listBots, saveBot } from "@/lib/bots";
 
 const BotsContext = createContext<{
@@ -92,56 +97,81 @@ export function BotsProvider({ children }: { children: ReactNode }) {
   );
 }
 
+const BOTS_LIST_ID = "sidebar-bots";
+const BOTS_COLLAPSED_STORAGE_KEY = "opencompany-sidebar-bots-collapsed";
+
 export function SidebarBots() {
   const { featureFlags } = useAppData();
   const { bots, loading, error, reload } = useContext(BotsContext);
   const pathname = usePathname();
   const [creating, setCreating] = useState(false);
+  const { collapsed, toggle, expand } = useCollapsedSidebarSection(BOTS_COLLAPSED_STORAGE_KEY);
   if (!featureFlags.bots) return null;
   return (
-    <section className="px-2 pt-4" aria-label="Bots">
-      <div className="flex items-center justify-between px-2 pb-1">
-        <span className="text-xs text-ink-muted">Bots</span>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6"
-          aria-label="Create bot"
-          onClick={() => setCreating(true)}
-        >
-          <Plus size={13} />
-        </Button>
-      </div>
-      <nav aria-label="Bots" className="flex max-h-60 flex-col gap-px overflow-y-auto">
-        {bots.map((bot) => (
-          <Link
-            key={bot.id}
-            href={`/chat/${bot.id}`}
-            aria-current={pathname === `/chat/${bot.id}` ? "page" : undefined}
-            className={`flex items-center gap-2 rounded-md px-2 py-[5px] text-[13px] hover:bg-surface-hover ${pathname === `/chat/${bot.id}` ? "bg-surface-active text-ink" : "text-ink/90"}`}
+    <section className="pt-4" aria-label="Bots">
+      <SidebarSectionHeader
+        label="Bots"
+        collapsed={collapsed}
+        onToggle={toggle}
+        listId={BOTS_LIST_ID}
+        action={
+          <button
+            type="button"
+            aria-label="Create bot"
+            title="Create bot"
+            onClick={() => setCreating(true)}
+            className={SIDEBAR_SECTION_ACTION_CLASSNAME}
           >
-            <Bot size={14} className="shrink-0 text-ink/60" />
-            <span className="truncate">{bot.name}</span>
-          </Link>
-        ))}
-      </nav>
-      {loading && !bots.length ? (
-        <p className="px-2 py-1 text-xs text-ink-muted" role="status">
-          Loading bots…
-        </p>
-      ) : null}
-      {error ? (
-        <div className="px-2 text-xs">
-          <p role="alert">{error}</p>
-          <Button variant="ghost" size="sm" onClick={reload}>
-            Try again
-          </Button>
+            <Plus size={13} strokeWidth={2} />
+          </button>
+        }
+      />
+      {collapsed ? null : (
+        <div id={BOTS_LIST_ID}>
+          <nav aria-label="Bots" className="flex max-h-60 flex-col gap-px overflow-y-auto px-2">
+            {bots.map((bot) => (
+              <Link
+                key={bot.id}
+                href={`/chat/${bot.id}`}
+                aria-current={pathname === `/chat/${bot.id}` ? "page" : undefined}
+                className={`flex items-center gap-2 rounded-md px-2 py-[5px] text-[13px] hover:bg-surface-hover ${pathname === `/chat/${bot.id}` ? "bg-surface-active text-ink" : "text-ink/90"}`}
+              >
+                <Bot size={14} className="shrink-0 text-ink/60" />
+                <span className="truncate">{bot.name}</span>
+              </Link>
+            ))}
+          </nav>
+          {loading && !bots.length ? (
+            <p className="px-4 pb-1 text-[11.5px] leading-4 text-ink-faint" role="status">
+              Loading bots…
+            </p>
+          ) : null}
+          {error ? (
+            <div className="px-4 pb-1 text-[11.5px] leading-4">
+              <p role="alert" className="text-danger">
+                {error}
+              </p>
+              <button
+                type="button"
+                onClick={reload}
+                className="text-ink-subtle underline hover:text-ink"
+              >
+                Try again
+              </button>
+            </div>
+          ) : null}
+          {!loading && !error && !bots.length ? (
+            <p className="px-4 pb-1 text-[11.5px] leading-4 text-ink-faint">
+              Create a bot for ongoing work.
+            </p>
+          ) : null}
         </div>
+      )}
+      {creating ? (
+        // A saved bot's row lives below the fold, so it reopens the section. Cancelling the dialog
+        // leaves the reader's collapse choice alone.
+        <BotEditor onSaved={expand} onClose={() => setCreating(false)} />
       ) : null}
-      {!loading && !error && !bots.length ? (
-        <p className="px-2 py-1 text-xs text-ink-muted">Create a bot for ongoing work.</p>
-      ) : null}
-      {creating ? <BotEditor onClose={() => setCreating(false)} /> : null}
     </section>
   );
 }
@@ -167,7 +197,15 @@ export function BotSettingsButton({ conversationId }: { conversationId: string }
   );
 }
 
-function BotEditor({ bot, onClose }: { bot?: BotDto; onClose: () => void }) {
+function BotEditor({
+  bot,
+  onSaved,
+  onClose,
+}: {
+  bot?: BotDto;
+  onSaved?: () => void;
+  onClose: () => void;
+}) {
   const router = useRouter();
   const { saved } = useContext(BotsContext);
   const [id] = useState(() => bot?.id ?? crypto.randomUUID());
@@ -208,6 +246,7 @@ function BotEditor({ bot, onClose }: { bot?: BotDto; onClose: () => void }) {
                 !bot,
               );
               saved(result);
+              onSaved?.();
               onClose();
               if (!bot) router.push(`/chat/${result.id}`);
               router.refresh();

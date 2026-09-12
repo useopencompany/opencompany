@@ -8,7 +8,6 @@ import {
   Archive,
   BookOpen,
   Check,
-  ChevronDown,
   ChevronsUpDown,
   House,
   Inbox,
@@ -33,7 +32,6 @@ import {
   useEffect,
   useMemo,
   useState,
-  useSyncExternalStore,
   useTransition,
 } from "react";
 import { useAppData } from "@/components/AppDataProvider";
@@ -50,6 +48,7 @@ import {
   type SidebarRowDragProps,
   useSidebarProjects,
 } from "@/components/SidebarProjects";
+import { SidebarSectionHeader, useCollapsedSidebarSection } from "@/components/SidebarSection";
 import { HOME_NAVIGATION_EVENT, requestChatComposerFocus } from "@/lib/chat-navigation";
 import { clearLocalChatState, useLocalChatStates } from "@/lib/chat-session-state";
 import { type ChatSummaryView, chatSummaryState } from "@/lib/chat-ui";
@@ -420,44 +419,15 @@ function SidebarAccountMenu() {
 }
 
 const RECENTS_LIST_ID = "sidebar-recents";
+// Predates the shared section store, so the key keeps its original name and the reader's
+// remembered choice survives.
 const RECENTS_COLLAPSED_STORAGE_KEY = "goat-sidebar-recents-collapsed";
-const recentsCollapsedSubscribers = new Set<() => void>();
-
-function subscribeRecentsCollapsed(onStoreChange: () => void) {
-  recentsCollapsedSubscribers.add(onStoreChange);
-
-  function handleStorage(event: StorageEvent) {
-    if (event.key === RECENTS_COLLAPSED_STORAGE_KEY) onStoreChange();
-  }
-
-  window.addEventListener("storage", handleStorage);
-  return () => {
-    recentsCollapsedSubscribers.delete(onStoreChange);
-    window.removeEventListener("storage", handleStorage);
-  };
-}
-
-function getRecentsCollapsedSnapshot() {
-  // Expanded by default: only an explicit "true" (the user collapsed it before) hides the list.
-  return window.localStorage.getItem(RECENTS_COLLAPSED_STORAGE_KEY) === "true";
-}
-
-function getRecentsCollapsedServerSnapshot() {
-  return false;
-}
-
-function persistRecentsCollapsed(next: boolean) {
-  window.localStorage.setItem(RECENTS_COLLAPSED_STORAGE_KEY, String(next));
-  for (const subscriber of recentsCollapsedSubscribers) subscriber();
-}
 
 function SidebarWorkList() {
   const { featureFlags, openChats, openSidebarTasks, recentChats, sidebarTasks, workspace } =
     useAppData();
-  const recentsCollapsed = useSyncExternalStore(
-    subscribeRecentsCollapsed,
-    getRecentsCollapsedSnapshot,
-    getRecentsCollapsedServerSnapshot,
+  const { collapsed: recentsCollapsed, toggle: toggleRecents } = useCollapsedSidebarSection(
+    RECENTS_COLLAPSED_STORAGE_KEY,
   );
   const projects = useSidebarProjects(featureFlags.sidebarProjects);
   const pathname = usePathname();
@@ -687,12 +657,11 @@ function SidebarWorkList() {
       ) : null}
       {showRecents ? (
         <div>
-          <button
-            type="button"
-            onClick={() => persistRecentsCollapsed(!recentsCollapsed)}
-            aria-expanded={!recentsCollapsed}
-            // Only points at the list while it exists; aria-expanded carries the state either way.
-            aria-controls={recentsCollapsed ? undefined : RECENTS_LIST_ID}
+          <SidebarSectionHeader
+            label="Recents"
+            collapsed={recentsCollapsed}
+            onToggle={toggleRecents}
+            listId={RECENTS_LIST_ID}
             // Dropping a project row here files it back out: Recents is where an unfiled
             // conversation lives, so it is the drag target that means "take it out of the folder".
             onDragOver={(event) => {
@@ -701,20 +670,7 @@ function SidebarWorkList() {
               event.dataTransfer.dropEffect = "move";
             }}
             onDrop={unfileDroppedConversation}
-            className="group mx-2 flex items-center gap-1 rounded-md px-2 pb-1 pt-0.5 text-[11px] font-medium tracking-wide text-ink-subtle transition-colors duration-150 hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-          >
-            Recents
-            {/* One chevron in both states: down when open, rotated to point right when closed, so a
-                collapsed section still reads as "there is more here". */}
-            <ChevronDown
-              size={12}
-              strokeWidth={2}
-              aria-hidden="true"
-              className={`text-ink/40 transition-transform duration-150 group-hover:text-ink/70 ${
-                recentsCollapsed ? "-rotate-90" : ""
-              }`}
-            />
-          </button>
+          />
           {recentsCollapsed ? null : (
             <nav id={RECENTS_LIST_ID} aria-label="Recents" className="flex flex-col gap-px px-2">
               {workItems.length === 0 ? (
