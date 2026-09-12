@@ -5,6 +5,7 @@ import { hasPositiveCreditBalance } from "@opencompany/db/credits";
 import type { ChatMessage, ChatMessageAttachment } from "@opencompany/db/product-schema";
 import { createGatewayAttribution } from "@opencompany/telemetry";
 import {
+  APICallError,
   generateText,
   jsonSchema,
   type LanguageModelUsage,
@@ -20,6 +21,7 @@ import {
   approvalDraftsFromProjection,
   consumeProductChatStream,
   hasHostedTurnCredits,
+  isReplaySafeProductChatInfrastructureFailure,
   opencompanyModelMessagesFromStored,
   productChatGatewayProviderOptions,
 } from "./opencompany-chat";
@@ -643,6 +645,77 @@ describe("consumeProductChatStream", () => {
       endOffset: "Partial text plus newest delta".length,
       delta: " plus newest delta",
     });
+  });
+});
+
+describe("opencompany chat infrastructure recovery", () => {
+  const interruptedSuccessResponse = () =>
+    new APICallError({
+      message: "Failed to process successful response",
+      url: "https://ai-gateway.vercel.sh/v1/ai/language-model",
+      requestBodyValues: {},
+      statusCode: 200,
+      cause: new TypeError("terminated"),
+    });
+
+  it("retries a successful HTTP response that terminates while tool input is streaming", async () => {
+    const failure = interruptedSuccessResponse();
+    let latestProjection: ProductChatProjection = { parts: [] };
+    const project = vi.fn(async (projection: ProductChatProjection) => {
+      latestProjection = projection;
+    });
+
+    await expect(
+      consumeProductChatStream({
+        fullStream: streamParts(
+          { type: "tool-input-start", id: "call_1", toolName: "wiki" },
+          { type: "tool-input-delta", id: "call_1", delta: '{"command":"write","body":"partial' },
+          () => {
+            throw failure;
+          },
+        ),
+        signal: new AbortController().signal,
+        sink: { project, recordStepUsage: vi.fn(async () => undefined) },
+      }),
+    ).rejects.toBe(failure);
+    expect(latestProjection.parts).toEqual([
+      expect.objectContaining({
+        type: "tool-wiki",
+        toolCallId: "call_1",
+        state: "input-streaming",
+      }),
+    ]);
+    expect(isReplaySafeProductChatInfrastructureFailure(failure, latestProjection)).toBe(true);
+  });
+
+  it.each(["input-available", "output-available", "output-error", "approval-requested"])(
+    "does not replay after a tool reached %s",
+    (state) => {
+      expect(
+        isReplaySafeProductChatInfrastructureFailure(interruptedSuccessResponse(), {
+          parts: [
+            {
+              type: "tool-use_action",
+              toolCallId: "call_1",
+              state,
+            },
+          ],
+        }),
+      ).toBe(false);
+    },
+  );
+
+  it("does not retry a successful response processing error with a non-transient shape", () => {
+    const invalidResponse = new APICallError({
+      message: "Response schema validation failed",
+      url: "https://ai-gateway.vercel.sh/v1/ai/language-model",
+      requestBodyValues: {},
+      statusCode: 200,
+    });
+
+    expect(isReplaySafeProductChatInfrastructureFailure(invalidResponse, { parts: [] })).toBe(
+      false,
+    );
   });
 });
 
