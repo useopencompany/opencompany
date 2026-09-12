@@ -24,6 +24,11 @@ import {
   useSyncExternalStore,
 } from "react";
 import {
+  SIDEBAR_SECTION_ACTION_CLASSNAME,
+  SidebarSectionHeader,
+  useCollapsedSidebarSection,
+} from "@/components/SidebarSection";
+import {
   createProject,
   deleteProject,
   fileConversationInProject,
@@ -69,6 +74,8 @@ export function isConversationDrag(event: DragEvent<HTMLElement>) {
   return event.dataTransfer.types.includes(CONVERSATION_DRAG_TYPE);
 }
 
+const PROJECTS_LIST_ID = "sidebar-projects";
+const SECTION_COLLAPSED_STORAGE_KEY = "opencompany-sidebar-projects-collapsed";
 const COLLAPSED_STORAGE_KEY = "opencompany-sidebar-collapsed-projects";
 const collapsedSubscribers = new Set<() => void>();
 const NO_COLLAPSED_PROJECTS = "[]";
@@ -259,7 +266,12 @@ export function SidebarProjects({
   // The project a pending new chat is being started in, so the reader can see where it will land.
   activeProjectId: string | null;
 }) {
-  const { collapsed, toggle } = useCollapsedProjects();
+  const { collapsed: collapsedProjects, toggle: toggleProject } = useCollapsedProjects();
+  const {
+    collapsed: sectionCollapsed,
+    toggle: toggleSection,
+    expand: expandSection,
+  } = useCollapsedSidebarSection(SECTION_COLLAPSED_STORAGE_KEY);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
@@ -285,91 +297,105 @@ export function SidebarProjects({
 
   return (
     <section aria-label="Projects" className="pb-2">
-      <div className="group/header mx-2 flex items-center gap-1 rounded-md px-2 pb-1 pt-0.5">
-        <span className="text-[11px] font-medium tracking-wide text-ink-subtle">Projects</span>
-        <button
-          type="button"
-          aria-label="New project"
-          title="New project"
-          onClick={() => setCreating(true)}
-          className="ml-auto flex h-5 w-5 shrink-0 items-center justify-center rounded text-ink/50 opacity-0 transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover/header:opacity-100 group-focus-within/header:opacity-100"
-        >
-          <Plus size={13} strokeWidth={2} />
-        </button>
-      </div>
-
-      {creating ? (
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            void saveNewProject();
-          }}
-          className="px-2 pb-1"
-        >
-          <label className="sr-only" htmlFor="new-project-name">
-            Project name
-          </label>
-          <input
-            id="new-project-name"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            onBlur={() => void saveNewProject()}
-            onKeyDown={(event) => {
-              if (event.key !== "Escape") return;
-              setName("");
-              setCreating(false);
-            }}
-            autoFocus
-            maxLength={80}
-            placeholder="Project name"
-            disabled={saving}
-            className="h-7 w-full rounded-md border border-border bg-canvas px-2 text-[13px] text-ink outline-none placeholder:text-ink-subtle focus:border-border-strong disabled:opacity-60"
-          />
-        </form>
-      ) : null}
-
-      {state.error ? (
-        <div className="px-4 pb-1 text-[11.5px] leading-4">
-          <p role="alert" className="text-danger">
-            {state.error}
-          </p>
+      <SidebarSectionHeader
+        label="Projects"
+        collapsed={sectionCollapsed}
+        onToggle={toggleSection}
+        listId={PROJECTS_LIST_ID}
+        action={
           <button
             type="button"
-            onClick={state.reload}
-            className="text-ink-subtle underline hover:text-ink"
+            aria-label="New project"
+            title="New project"
+            onClick={() => {
+              // Naming a project the reader cannot see would be a dead end, so creating reopens
+              // the section.
+              expandSection();
+              setCreating(true);
+            }}
+            className={SIDEBAR_SECTION_ACTION_CLASSNAME}
           >
-            Try again
+            <Plus size={13} strokeWidth={2} />
           </button>
+        }
+      />
+
+      {sectionCollapsed ? null : (
+        <div id={PROJECTS_LIST_ID}>
+          {creating ? (
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                void saveNewProject();
+              }}
+              className="px-2 pb-1"
+            >
+              <label className="sr-only" htmlFor="new-project-name">
+                Project name
+              </label>
+              <input
+                id="new-project-name"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                onBlur={() => void saveNewProject()}
+                onKeyDown={(event) => {
+                  if (event.key !== "Escape") return;
+                  setName("");
+                  setCreating(false);
+                }}
+                autoFocus
+                maxLength={80}
+                placeholder="Project name"
+                disabled={saving}
+                className="h-7 w-full rounded-md border border-border bg-canvas px-2 text-[13px] text-ink outline-none placeholder:text-ink-subtle focus:border-border-strong disabled:opacity-60"
+              />
+            </form>
+          ) : null}
+
+          {state.error ? (
+            <div className="px-4 pb-1 text-[11.5px] leading-4">
+              <p role="alert" className="text-danger">
+                {state.error}
+              </p>
+              <button
+                type="button"
+                onClick={state.reload}
+                className="text-ink-subtle underline hover:text-ink"
+              >
+                Try again
+              </button>
+            </div>
+          ) : null}
+
+          <div className="flex flex-col gap-px px-2">
+            {state.projects.map((project) => (
+              <ProjectFolder
+                key={project.id}
+                project={project}
+                items={itemsFor(project)}
+                collapsed={collapsedProjects.has(project.id)}
+                onToggle={() => toggleProject(project.id)}
+                active={activeProjectId === project.id}
+                onDropConversation={(conversationId) => void state.file(project.id, conversationId)}
+                onRename={(next) => state.rename(project.id, next)}
+                onDelete={() => void state.remove(project.id)}
+                renderItem={renderItem}
+              />
+            ))}
+          </div>
+
+          {state.loading && state.projects.length === 0 ? (
+            <p role="status" className="px-4 pb-1 text-[11.5px] leading-4 text-ink-faint">
+              Loading projects…
+            </p>
+          ) : null}
+          {!state.loading && state.projects.length === 0 && !creating && !state.error ? (
+            <p className="px-4 pb-1 text-[11.5px] leading-4 text-ink-faint">
+              Group chats into a project to keep a thread of work together.
+            </p>
+          ) : null}
         </div>
-      ) : null}
-
-      <div className="flex flex-col gap-px px-2">
-        {state.projects.map((project) => (
-          <ProjectFolder
-            key={project.id}
-            project={project}
-            items={itemsFor(project)}
-            collapsed={collapsed.has(project.id)}
-            onToggle={() => toggle(project.id)}
-            active={activeProjectId === project.id}
-            onDropConversation={(conversationId) => void state.file(project.id, conversationId)}
-            onRename={(next) => state.rename(project.id, next)}
-            onDelete={() => void state.remove(project.id)}
-            renderItem={renderItem}
-          />
-        ))}
-      </div>
-
-      {state.loading && state.projects.length === 0 ? (
-        <p role="status" className="px-4 pb-1 text-[11.5px] leading-4 text-ink-faint">
-          Loading projects…
-        </p>
-      ) : null}
-      {!state.loading && state.projects.length === 0 && !creating && !state.error ? (
-        <p className="px-4 pb-1 text-[11.5px] leading-4 text-ink-faint">
-          Group chats into a project to keep a thread of work together.
-        </p>
-      ) : null}
+      )}
     </section>
   );
 }

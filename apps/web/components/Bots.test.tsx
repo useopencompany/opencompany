@@ -23,6 +23,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   state.enabled = true;
   state.list.mockResolvedValue([]);
+  window.localStorage.clear();
 });
 afterEach(cleanup);
 it("hides bots and does not fetch when disabled", () => {
@@ -116,4 +117,54 @@ it("retains existing bots when creation finishes before the initial list loads",
   });
   expect(screen.getByRole("link", { name: "New assistant" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Existing assistant" })).toBeInTheDocument();
+});
+
+it("collapses the bots section and remembers the choice", async () => {
+  const user = userEvent.setup();
+  state.list.mockResolvedValue([{ id: "bot_1", name: "Research", description: "Find customers" }]);
+  const { unmount } = render(
+    <BotsProvider>
+      <SidebarBots />
+    </BotsProvider>,
+  );
+  expect(await screen.findByRole("link", { name: "Research" })).toBeInTheDocument();
+  const toggle = screen.getByRole("button", { name: "Bots" });
+  expect(toggle).toHaveAttribute("aria-expanded", "true");
+
+  await user.click(toggle);
+
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+  expect(screen.queryByRole("link", { name: "Research" })).not.toBeInTheDocument();
+
+  unmount();
+  render(
+    <BotsProvider>
+      <SidebarBots />
+    </BotsProvider>,
+  );
+
+  expect(screen.getByRole("button", { name: "Bots" })).toHaveAttribute("aria-expanded", "false");
+  await user.click(screen.getByRole("button", { name: "Bots" }));
+  expect(await screen.findByRole("link", { name: "Research" })).toBeInTheDocument();
+});
+
+it("reopens a collapsed bots section when a bot is created", async () => {
+  const user = userEvent.setup();
+  window.localStorage.setItem("opencompany-sidebar-bots-collapsed", "true");
+  state.list.mockResolvedValue([]);
+  state.save.mockImplementation(async (bot) => {
+    state.list.mockResolvedValue([bot]);
+    return bot;
+  });
+  render(
+    <BotsProvider>
+      <SidebarBots />
+    </BotsProvider>,
+  );
+  await user.click(screen.getByRole("button", { name: "Create bot" }));
+  await user.type(screen.getByLabelText("Name"), "Research");
+  await user.click(screen.getByRole("button", { name: "Create bot" }));
+
+  expect(await screen.findByRole("link", { name: "Research" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Bots" })).toHaveAttribute("aria-expanded", "true");
 });

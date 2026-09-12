@@ -1415,6 +1415,55 @@ describe("Sidebar", () => {
       );
     });
 
+    it("collapses the whole Projects section and remembers the choice", async () => {
+      featureFlagsMock.sidebarProjects = true;
+      recentChatsMock.value = [chatRow("chat_a")];
+      projectsApiMock.listProjects.mockResolvedValue([project("project_1", "Launch", ["chat_a"])]);
+
+      const { unmount } = render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+      await findProjects("Launch");
+      const section = screen.getByRole("button", { name: "Projects" });
+      expect(section).toHaveAttribute("aria-expanded", "true");
+
+      await userEvent.click(section);
+
+      expect(section).toHaveAttribute("aria-expanded", "false");
+      expect(screen.queryByRole("button", { name: "Launch" })).toBeNull();
+      // The header stays put while collapsed so the section is still findable.
+      expect(screen.getByRole("button", { name: "Projects" })).toBeInTheDocument();
+
+      unmount();
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+      expect(screen.getByRole("button", { name: "Projects" })).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      );
+      await waitFor(() => expect(projectsApiMock.listProjects).toHaveBeenCalled());
+      expect(screen.queryByRole("button", { name: "Launch" })).toBeNull();
+
+      await userEvent.click(screen.getByRole("button", { name: "Projects" }));
+
+      expect(await screen.findByRole("button", { name: "Launch" })).toBeInTheDocument();
+    });
+
+    it("reopens a collapsed Projects section when a new project is started", async () => {
+      featureFlagsMock.sidebarProjects = true;
+      window.localStorage.setItem("opencompany-sidebar-projects-collapsed", "true");
+      projectsApiMock.listProjects.mockResolvedValue([]);
+
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+      await screen.findByRole("region", { name: "Projects" });
+
+      await userEvent.click(screen.getByRole("button", { name: "New project" }));
+
+      expect(screen.getByRole("button", { name: "Projects" })).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      );
+      expect(screen.getByLabelText("Project name")).toBeInTheDocument();
+    });
+
     it("starts a new chat in a project and marks that project as the target", async () => {
       featureFlagsMock.sidebarProjects = true;
       searchParamsMock.value = new URLSearchParams("project=project_1");
