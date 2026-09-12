@@ -74,6 +74,7 @@ const sandboxMocks = vi.hoisted(() => ({
   createOrConnectSandbox: vi.fn(),
   isRetryableCommandStreamError: vi.fn(),
   isRetryableSandboxAcquisitionError: vi.fn(),
+  isUnresponsiveGuestError: vi.fn(),
 }));
 
 const skillMocks = vi.hoisted(() => ({
@@ -257,6 +258,7 @@ vi.mock("./sandbox", () => ({
   createOrConnectSandbox: sandboxMocks.createOrConnectSandbox,
   isRetryableCommandStreamError: sandboxMocks.isRetryableCommandStreamError,
   isRetryableSandboxAcquisitionError: sandboxMocks.isRetryableSandboxAcquisitionError,
+  isUnresponsiveGuestError: sandboxMocks.isUnresponsiveGuestError,
 }));
 
 vi.mock("./codex-managed-skills", () => ({
@@ -498,6 +500,7 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     sandboxMocks.createOrConnectSandbox.mockResolvedValue(fakeSandbox("sbx_existing"));
     sandboxMocks.isRetryableCommandStreamError.mockReturnValue(false);
     sandboxMocks.isRetryableSandboxAcquisitionError.mockReturnValue(false);
+    sandboxMocks.isUnresponsiveGuestError.mockReturnValue(false);
     skillMocks.materializeClaudeSkillSnapshotsForSession.mockResolvedValue(undefined);
     taskMocks.buildTaskTerminalProjection.mockReturnValue({ taskId: "goat_task_1" });
     taskMocks.markTaskTurnRunning.mockResolvedValue(undefined);
@@ -1167,6 +1170,60 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       expect(result.value.finalize).not.toHaveBeenCalled();
     }
     expect(taskMocks.buildTaskTerminalProjection).not.toHaveBeenCalled();
+  });
+
+  it("defers a wedged sandbox guest during turn preparation instead of failing its durable task", async () => {
+    const error = new Error(
+      "[deadline_exceeded] the operation timed out: This error is likely due to exceeding 'timeoutMs'",
+    );
+    error.name = "TimeoutError";
+    sandboxMocks.isUnresponsiveGuestError.mockReturnValue(true);
+    cliMocks.ensureClaudeAcpAdapterInstalled.mockRejectedValueOnce(error);
+    const harnessSpec = harnessSpecForClaudeTask();
+
+    await expect(
+      runClaudeCodeChatTurn({
+        turn: claudeTurn(),
+        session: claudeSession(),
+        taskContext: {
+          task: taskForHarness(harnessSpec),
+          harnessSpec,
+        },
+        env: env(),
+      }),
+    ).rejects.toMatchObject({
+      name: CodexChatRetryableInfrastructureError.name,
+      cause: error,
+      message: "Claude Code's sandbox stopped responding while the turn was being prepared.",
+      diagnosticMessage: expect.stringContaining("[ensure_claude_acp] TimeoutError:"),
+    });
+
+    for (const result of eventMocks.createExternalEngineProjector.mock.results) {
+      expect(result.value.fail).not.toHaveBeenCalled();
+    }
+  });
+
+  it("keeps a command timeout terminal once the engine is driving the turn", async () => {
+    const error = new Error("[deadline_exceeded] the operation timed out");
+    error.name = "TimeoutError";
+    sandboxMocks.isUnresponsiveGuestError.mockReturnValue(true);
+    acpMocks.runTurn.mockRejectedValueOnce(error);
+
+    await expect(
+      runClaudeCodeChatTurn({
+        turn: claudeTurn(),
+        session: claudeSession(),
+        env: env(),
+      }),
+    ).resolves.toBe("settled");
+
+    const projector = eventMocks.createExternalEngineProjector.mock.results[0]?.value;
+    expect(projector.fail).toHaveBeenCalledWith(
+      "[deadline_exceeded] the operation timed out",
+      expect.objectContaining({
+        failureDiagnostic: "[run_turn] TimeoutError: [deadline_exceeded] the operation timed out",
+      }),
+    );
   });
 
   it("fences a reused sandbox before recovery preflight can fail", async () => {

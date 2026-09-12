@@ -180,7 +180,13 @@ export async function probeSandboxGuest(
   });
 }
 
-function isUnresponsiveGuestError(error: unknown) {
+// A wedged guest presents as a command that never answers: either E2B's `TimeoutError` (the
+// command exceeded its `timeoutMs` and was killed server-side) or a lost command stream. Matched
+// by name to stay decoupled from the SDK's class identity, mirroring `commandExitResult`.
+// Only apply this where no command is allowed to run long: the post-connect probe, and the
+// short fixed shell commands the runner issues to bootstrap a coding turn. Once the agent is
+// driving, the same timeout can mean real user work overran its budget and must stay terminal.
+export function isUnresponsiveGuestError(error: unknown) {
   if (!(error instanceof Error)) return false;
   return error.name === "TimeoutError" || isRetryableCommandStreamError(error);
 }
@@ -540,15 +546,6 @@ function isNumber(value: number | null): value is number {
 
 function isString(value: string | null): value is string {
   return typeof value === "string";
-}
-
-// E2B raises a `TimeoutError` when a command exceeds its `timeoutMs` (the process is killed
-// server-side). Matched by name to stay decoupled from the SDK's class identity, mirroring
-// `commandExitResult`. Lets long tool calls capture partial state instead of bubbling a bare throw.
-export function isCommandTimeoutError(error: unknown) {
-  return Boolean(
-    error && typeof error === "object" && (error as { name?: unknown }).name === "TimeoutError",
-  );
 }
 
 // E2B can lose the RPC watch for a still-running background command without raising its regular

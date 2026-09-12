@@ -125,6 +125,7 @@ import {
   createOrConnectSandbox,
   isRetryableCommandStreamError,
   isRetryableSandboxAcquisitionError,
+  isUnresponsiveGuestError,
   managedSandboxMetadata,
 } from "./sandbox";
 import {
@@ -486,6 +487,11 @@ export async function runClaudeCodeChatTurn(input: {
   let pluginDataRuntime: PluginDataRuntime | null = null;
   let pluginMcpRuntime: PluginMcpLauncherRuntime | null = null;
   let executionStage = "fence_previous_turn";
+  // Every sandbox command before this flips is one the runner issues itself to prepare the turn.
+  // They are short, fixed shell calls, so a guest that stops answering them is wedged
+  // infrastructure, not a failed run. Set at `run_turn` rather than enumerated per stage so a new
+  // preflight step is covered without having to remember this boundary.
+  let engineStarted = false;
   try {
     // Fence the old adapter before any fallible preflight awaits. Otherwise repository, auth, or
     // history preparation can fail the durable Run while the detached Claude process keeps
@@ -829,6 +835,7 @@ export async function runClaudeCodeChatTurn(input: {
         ? turn.settings.reasoningEffort
         : null;
     executionStage = "run_turn";
+    engineStarted = true;
     const runAcpOnce = async (resume: string | null, prompt: string) => {
       const harness = new AcpHarness();
       let coreMcpInitObserved = !actionGatewayTicket;
@@ -1169,6 +1176,15 @@ export async function runClaudeCodeChatTurn(input: {
       throw effectiveError;
     } else if (effectiveError instanceof CodexChatRetryableInfrastructureError) {
       throw effectiveError;
+    } else if (!engineStarted && isUnresponsiveGuestError(effectiveError)) {
+      // The retry reacquires the sandbox through `createOrConnectSandbox`, which probes the guest
+      // and reboots or replaces it. Failing the turn here instead would strand the session on the
+      // wedged sandbox and report an E2B SDK message as the user's result.
+      throw new CodexChatRetryableInfrastructureError(
+        "Claude Code's sandbox stopped responding while the turn was being prepared.",
+        effectiveError,
+        failureDiagnostic(executionStage, effectiveError, redact),
+      );
     } else if (isRetryableCommandStreamError(effectiveError)) {
       throw new CodexChatRetryableInfrastructureError(
         "Claude Code lost contact with its sandbox command stream before the turn completed.",

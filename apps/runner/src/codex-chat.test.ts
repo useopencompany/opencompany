@@ -78,7 +78,7 @@ const sandboxMocks = vi.hoisted(() => ({
   armSandboxActiveTimeoutById: vi.fn(),
   armSandboxIdleTimeout: vi.fn(),
   createOrConnectSandbox: vi.fn(),
-  isCommandTimeoutError: vi.fn(),
+  isUnresponsiveGuestError: vi.fn(),
   isRetryableCommandStreamError: vi.fn(),
   isRetryableSandboxAcquisitionError: vi.fn(),
   writeSandboxTextFiles: vi.fn(),
@@ -211,7 +211,7 @@ vi.mock("./sandbox", () => ({
   armSandboxActiveTimeoutById: sandboxMocks.armSandboxActiveTimeoutById,
   armSandboxIdleTimeout: sandboxMocks.armSandboxIdleTimeout,
   createOrConnectSandbox: sandboxMocks.createOrConnectSandbox,
-  isCommandTimeoutError: sandboxMocks.isCommandTimeoutError,
+  isUnresponsiveGuestError: sandboxMocks.isUnresponsiveGuestError,
   isRetryableCommandStreamError: sandboxMocks.isRetryableCommandStreamError,
   isRetryableSandboxAcquisitionError: sandboxMocks.isRetryableSandboxAcquisitionError,
   writeSandboxTextFiles: sandboxMocks.writeSandboxTextFiles,
@@ -666,7 +666,7 @@ describe("runCodexChatTurn over ACP", () => {
     sandboxMocks.armSandboxActiveTimeoutById.mockResolvedValue(true);
     sandboxMocks.armSandboxIdleTimeout.mockResolvedValue(true);
     sandboxMocks.createOrConnectSandbox.mockResolvedValue(fakeSandbox("sbx_existing"));
-    sandboxMocks.isCommandTimeoutError.mockReturnValue(false);
+    sandboxMocks.isUnresponsiveGuestError.mockReturnValue(false);
     sandboxMocks.isRetryableCommandStreamError.mockReturnValue(false);
     sandboxMocks.isRetryableSandboxAcquisitionError.mockReturnValue(false);
     sandboxMocks.writeSandboxTextFiles.mockResolvedValue(undefined);
@@ -832,9 +832,7 @@ describe("runCodexChatTurn over ACP", () => {
     const sandbox = fakeSandbox("sbx_existing");
     sandbox.files.write.mockRejectedValueOnce(timeout);
     sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
-    sandboxMocks.isCommandTimeoutError.mockImplementationOnce(
-      (error: unknown) => error === timeout,
-    );
+    sandboxMocks.isUnresponsiveGuestError.mockImplementation((error: unknown) => error === timeout);
 
     await expect(
       runCodexChatTurn({
@@ -906,7 +904,7 @@ describe("runCodexChatTurn over ACP", () => {
     const timeout = new Error("The operation timed out.");
     timeout.name = "TimeoutError";
     cliMocks.ensureCodexAcpAdapterInstalled.mockRejectedValueOnce(timeout);
-    sandboxMocks.isCommandTimeoutError.mockReturnValueOnce(true);
+    sandboxMocks.isUnresponsiveGuestError.mockReturnValue(true);
 
     await expect(
       runCodexChatTurn({
@@ -920,6 +918,30 @@ describe("runCodexChatTurn over ACP", () => {
       cause: timeout,
       diagnosticMessage: "[ensure_codex_acp] TimeoutError: The operation timed out.",
     });
+  });
+
+  it("keeps a command timeout terminal once the engine is driving the turn", async () => {
+    const timeout = new Error("The operation timed out.");
+    timeout.name = "TimeoutError";
+    acpMocks.runTurn.mockRejectedValueOnce(timeout);
+    sandboxMocks.isUnresponsiveGuestError.mockReturnValue(true);
+
+    await expect(
+      runCodexChatTurn({
+        turn: codexTurn(),
+        session: codexSession(),
+        canonicalAttemptId: "attempt_1",
+        env: env(),
+      }),
+    ).resolves.toBe("settled");
+
+    const projector = eventMocks.createExternalEngineProjector.mock.results[0]?.value;
+    expect(projector.fail).toHaveBeenCalledWith(
+      "The operation timed out.",
+      expect.objectContaining({
+        failureDiagnostic: "[run_turn] TimeoutError: The operation timed out.",
+      }),
+    );
   });
 
   it.each([
