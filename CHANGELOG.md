@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - turn on the projects beta in preferences to group chats and tasks into named folders above recents. drag a row onto a folder to file it, drag it back onto the recents header to take it out, collapse each folder on its own, and start a new chat straight into a project from the folder's new-chat button (#1755) — @louis.
 
 ### Fixed
-- a cloud claude code chat that fails before the model starts now explains why instead of replying with a bare "internal error". claude fable 5.1 is no longer offered for claude code sandboxes, because claude code cannot run it — pick fable 5 or opus 5 instead (#1776) — @louis.
+- a cloud claude code chat that fails before the model starts now explains why instead of replying with a bare "internal error". claude fable 5.1 is no longer offered for claude code sandboxes, because claude code cannot run it — pick fable 5 or opus 5 instead (#1780) — @louis.
 
 ### Changed
 - the sidebar list of chats and tasks is now called recents, and you can collapse it. the chevron beside the label points down when the list is open and right when it is closed, and your choice is remembered (#1751) — @louis.
