@@ -38,6 +38,11 @@ export const CODEX_TOOLBOX_CPU_COUNT = 8;
 export const CODEX_TOOLBOX_MEMORY_MB = 16384;
 export const PLAYWRIGHT_PACKAGE = "playwright@1.60.0";
 export const BUN_VERSION = "1.4.2";
+// SHA256 of bun-linux-x64.zip from the bun-v1.4.2 GitHub release (SHASUMS256.txt). The x64
+// build requires AVX2, which every E2B build host provides; a host without it would fail the
+// `bun --version` check at template build time, not in production.
+export const BUN_LINUX_X64_ZIP_SHA256 =
+  "36368faef7527875d5ffa52e53cd48021741f2a83eb6208a8dd64068d422a913";
 
 const root = { user: "root" } as const;
 const user = { user: "user" } as const;
@@ -99,9 +104,30 @@ export const template = Template()
     ].join(" && "),
     root,
   )
+  // Docker installs from its GPG-signed apt repository (same pattern as gh above) instead of
+  // piping get.docker.com to a shell — the one unverified script this image used to execute.
   .runCmd(
     [
-      "curl -fsSL https://get.docker.com | sh",
+      "mkdir -p -m 755 /etc/apt/keyrings",
+      ". /etc/os-release",
+      'curl -fsSL "https://download.docker.com/linux/${ID}/gpg" | tee /etc/apt/keyrings/docker.asc >/dev/null',
+      "chmod go+r /etc/apt/keyrings/docker.asc",
+      [
+        'echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc]',
+        'https://download.docker.com/linux/${ID} ${VERSION_CODENAME} stable"',
+        "| tee /etc/apt/sources.list.d/docker.list >/dev/null",
+      ].join(" "),
+      "export DEBIAN_FRONTEND=noninteractive",
+      "apt-get update",
+      [
+        "apt-get install -y --no-install-recommends",
+        "docker-ce",
+        "docker-ce-cli",
+        "containerd.io",
+        "docker-buildx-plugin",
+        "docker-compose-plugin",
+      ].join(" "),
+      "rm -rf /var/lib/apt/lists/*",
       "usermod -aG docker user",
       "command -v docker",
       "docker --version",
@@ -113,7 +139,12 @@ export const template = Template()
   .runCmd(
     [
       "if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1 || ! node -e 'process.exit(Number(process.versions.node.split(\".\")[0]) >= 22 ? 0 : 1)'; then",
-      "  curl -fsSL https://deb.nodesource.com/setup_22.x | bash -;",
+      // NodeSource's GPG-signed apt repository replaces its piped setup_22.x script; the
+      // script's only job was configuring exactly this repository.
+      "  mkdir -p -m 755 /etc/apt/keyrings;",
+      "  curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg;",
+      "  chmod go+r /etc/apt/keyrings/nodesource.gpg;",
+      '  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list >/dev/null;',
       "  export DEBIAN_FRONTEND=noninteractive;",
       "  apt-get update;",
       "  apt-get install -y --no-install-recommends nodejs;",
@@ -126,9 +157,17 @@ export const template = Template()
     ].join("\n"),
     root,
   )
+  // Bun installs as a checksum-verified release binary (same pattern as the Infisical CLI
+  // above) instead of piping bun.sh/install to a shell.
   .runCmd(
     [
-      `curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash -s "bun-v${BUN_VERSION}"`,
+      "bun_install_dir=$(mktemp -d /tmp/opencompany-bun.XXXXXX)",
+      `curl -fsSL https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-x64.zip -o "$bun_install_dir/bun.zip"`,
+      `printf '%s  %s\\n' '${BUN_LINUX_X64_ZIP_SHA256}' "$bun_install_dir/bun.zip" | sha256sum -c -`,
+      'unzip -q "$bun_install_dir/bun.zip" -d "$bun_install_dir"',
+      'install -m 0755 "$bun_install_dir/bun-linux-x64/bun" /usr/local/bin/bun',
+      "ln -sf /usr/local/bin/bun /usr/local/bin/bunx",
+      'rm -rf "$bun_install_dir"',
       `test "$(bun --version)" = "${BUN_VERSION}"`,
       `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install -g --prefix /usr/local ${CODEX_CLI_PACKAGE} ${CODEX_ACP_ADAPTER_PACKAGE} ${CLAUDE_CODE_CLI_PACKAGE} ${CLAUDE_CODE_ACP_ADAPTER_PACKAGE} ${PLAYWRIGHT_PACKAGE}`,
       "command -v rg",
