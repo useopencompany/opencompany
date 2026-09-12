@@ -16,7 +16,7 @@ export async function materializePluginPackagesForSession(input: {
   sandbox: SandboxHandle;
   workRoot: string;
   plugins: ImmutablePluginPackage[];
-}): Promise<{ fingerprint: string; count: number }> {
+}): Promise<{ fingerprint: string; count: number; skipped: boolean }> {
   const root = `${input.workRoot}/.opencompany/plugins`;
   const pluginNames = new Set<string>();
   const files = input.plugins.flatMap((plugin) => {
@@ -38,7 +38,15 @@ export async function materializePluginPackagesForSession(input: {
       };
     });
   });
-  await reconcileManagedArtifactTree({
+  const fingerprint = managedArtifactFingerprint(
+    input.plugins.map((plugin) => ({
+      kind: "plugin",
+      id: plugin.name,
+      fields: [plugin.id],
+      files: plugin.files,
+    })),
+  );
+  const { skipped } = await reconcileManagedArtifactTree({
     sandbox: input.sandbox,
     root,
     manifestName: MANAGED_PLUGINS_MANIFEST,
@@ -46,18 +54,9 @@ export async function materializePluginPackagesForSession(input: {
     ids: [...pluginNames],
     files,
     isSafeId: isSafePluginName,
+    fingerprint,
   });
-  return {
-    fingerprint: managedArtifactFingerprint(
-      input.plugins.map((plugin) => ({
-        kind: "plugin",
-        id: plugin.name,
-        fields: [plugin.id],
-        files: plugin.files,
-      })),
-    ),
-    count: input.plugins.length,
-  };
+  return { fingerprint, count: input.plugins.length, skipped };
 }
 
 function assertSafePluginName(name: string) {

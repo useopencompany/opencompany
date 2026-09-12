@@ -12,7 +12,14 @@ function bytes(value: string) {
 
 function fakeSandbox() {
   return {
-    commands: { run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }) },
+    commands: {
+      // The fingerprint probe (the only command using stat) must fail like a missing marker
+      // would, so the suite keeps exercising the full reconcile path by default.
+      run: vi.fn().mockImplementation(async (command: string) => {
+        if (String(command).includes("stat -c")) throw new Error("marker missing");
+        return { stdout: "", stderr: "", exitCode: 0 };
+      }),
+    },
     files: {
       read: vi.fn().mockRejectedValue(new Error("missing")),
       write: vi.fn().mockResolvedValue(undefined),
@@ -95,23 +102,33 @@ describe("materializeCodexSkillSnapshotsForSession", () => {
       path: "/home/user/workspace/codex/.agents/skills/.opencompany-managed-skills.json",
       data: JSON.stringify({ version: 1, skillIds: ["byte-golden"] }, null, 2),
     });
-    const commands = sandbox.commands.run.mock.calls.map(([command]) => String(command));
-    expect(commands[0]).toContain(
+    const [probe, reset, ...rest] = sandbox.commands.run.mock.calls.map(([command]) =>
+      String(command),
+    );
+    expect(probe).toContain("stat -c");
+    expect(reset).toContain(
       "test \"$(realpath -m -- '/home/user/workspace/codex/.agents')\" = '/home/user/workspace/codex/.agents'",
     );
-    expect(commands[0]).toContain("test ! -L '/home/user/workspace/codex/.agents'");
-    expect(commands[0]!.indexOf("realpath -m")).toBeLessThan(commands[0]!.indexOf("mkdir -p"));
-    expect(commands[0]).toContain("mkdir -p");
-    expect(commands[0]).toContain("/home/user/workspace/codex/.agents/skills");
-    expect(commands[0]).toContain("rm -rf");
-    expect(commands[0]).toContain("/home/user/workspace/codex/.agents/skills/byte-golden");
-    expect(commands.some((command) => command.includes("-type f -exec chmod 444"))).toBe(true);
+    expect(reset).toContain("test ! -L '/home/user/workspace/codex/.agents'");
+    expect(reset!.indexOf("realpath -m")).toBeLessThan(reset!.indexOf("mkdir -p"));
+    expect(reset).toContain("mkdir -p");
+    expect(reset).toContain("/home/user/workspace/codex/.agents/skills");
+    expect(reset).toContain("rm -rf");
+    expect(reset).toContain("/home/user/workspace/codex/.agents/skills/byte-golden");
+    // The completion marker is invalidated before the first destructive step so a crash
+    // mid-reconcile can never leave a sealed marker over a partial tree.
+    expect(reset!.indexOf(".opencompany-managed-skills.json.sha256")).toBeGreaterThan(-1);
+    expect(reset!.indexOf("rm -f")).toBeLessThan(reset!.indexOf("rm -rf"));
+    expect(rest.some((command) => command.includes("-type f -exec chmod 444"))).toBe(true);
     expect(
-      commands.some(
-        (command) => command.includes("chmod 555") && command.includes("scripts/run.sh"),
-      ),
+      rest.some((command) => command.includes("chmod 555") && command.includes("scripts/run.sh")),
     ).toBe(true);
-    expect(commands.at(-1)).toContain("chmod 555 '/home/user/workspace/codex/.agents/skills'");
+    expect(rest.at(-2)).toContain("chmod 555 '/home/user/workspace/codex/.agents/skills'");
+    // Sealing runs strictly after the tree is locked read-only.
+    expect(rest.at(-1)).toContain(
+      "chmod 444 '/home/user/workspace/codex/.agents/skills/.opencompany-managed-skills.json.sha256'",
+    );
+    expect(rest.at(-1)).toContain(`printf '%s' '${result.fingerprint}'`);
   });
 
   it("writes and locks an empty managed parent when no Skills are active", async () => {
@@ -131,8 +148,9 @@ describe("materializeCodexSkillSnapshotsForSession", () => {
     });
     const commands = sandbox.commands.run.mock.calls.map(([command]) => String(command));
     expect(commands.some((command) => command.includes("rm -rf"))).toBe(false);
-    expect(commands.at(-1)).toContain("chmod 555 '/home/user/workspace/codex/.agents/skills'");
-    expect(commands).toHaveLength(4);
+    expect(commands.at(-2)).toContain("chmod 555 '/home/user/workspace/codex/.agents/skills'");
+    expect(commands.at(-1)).toContain("chmod 444");
+    expect(commands).toHaveLength(6);
   });
 
   it("reconciles only opencompany-managed Skill names from the manifest", async () => {
@@ -153,12 +171,12 @@ describe("materializeCodexSkillSnapshotsForSession", () => {
     });
 
     const commands = sandbox.commands.run.mock.calls.map(([command]) => String(command));
-    expect(commands[0]).toContain("/home/user/workspace/codex/.agents/skills/old-managed");
-    expect(commands[0]).toContain("/home/user/workspace/codex/.agents/skills/brand-voice");
-    expect(commands[0]).not.toContain(
+    expect(commands[1]).toContain("/home/user/workspace/codex/.agents/skills/old-managed");
+    expect(commands[1]).toContain("/home/user/workspace/codex/.agents/skills/brand-voice");
+    expect(commands[1]).not.toContain(
       "/home/user/workspace/codex/.agents/skills/native-user-skill",
     );
-    expect(commands[0]).not.toContain("rm -rf '/home/user/workspace/codex/.agents/skills' &&");
+    expect(commands[1]).not.toContain("rm -rf '/home/user/workspace/codex/.agents/skills' &&");
   });
 
   it("fingerprints raw contents and executable modes", async () => {
@@ -220,6 +238,59 @@ describe("materializeCodexSkillSnapshotsForSession", () => {
     ).rejects.toThrow("Cannot materialize Skill with unsafe name: ../escape");
     expect(sandbox.commands.run).not.toHaveBeenCalled();
     expect(sandbox.files.write).not.toHaveBeenCalled();
+  });
+});
+
+describe("managed skill tree fingerprint skip", () => {
+  const skills = [
+    {
+      name: "brand-voice",
+      files: [{ path: "SKILL.md", content: bytes("Body."), executable: false }],
+    },
+  ];
+
+  it("skips the rewrite when the sealed marker matches the desired fingerprint", async () => {
+    const sandbox = fakeSandbox();
+    sandbox.commands.run.mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 });
+
+    const result = await materializeCodexSkillSnapshotsForSession({
+      sandbox: sandbox as never,
+      codexWorkRoot: "/home/user/workspace/codex",
+      skills,
+    });
+
+    expect(result.skipped).toBe(true);
+    expect(result.fingerprint).toMatch(/^[a-f0-9]{64}$/);
+    expect(sandbox.files.write).not.toHaveBeenCalled();
+    expect(sandbox.files.read).not.toHaveBeenCalled();
+    expect(sandbox.commands.run).toHaveBeenCalledTimes(1);
+    const probe = String(sandbox.commands.run.mock.calls[0]?.[0]);
+    expect(probe).toContain("test ! -L '/home/user/workspace/codex/.agents'");
+    expect(probe).toContain(
+      "'/home/user/workspace/codex/.agents/skills/.opencompany-managed-skills.json.sha256'",
+    );
+    expect(probe).toContain('test "$(stat -c %u:%g:%a --');
+    expect(probe).toContain('= "0:0:444"');
+    expect(probe).toContain(`= '${result.fingerprint}'`);
+    expect(sandbox.commands.run).toHaveBeenCalledWith(expect.any(String), {
+      user: "root",
+      timeoutMs: 30_000,
+    });
+  });
+
+  it("rebuilds and reseals when the marker probe fails", async () => {
+    const sandbox = fakeSandbox();
+
+    const result = await materializeCodexSkillSnapshotsForSession({
+      sandbox: sandbox as never,
+      codexWorkRoot: "/home/user/workspace/codex",
+      skills,
+    });
+
+    expect(result.skipped).toBe(false);
+    expect(sandbox.files.write).toHaveBeenCalledTimes(1);
+    const commands = sandbox.commands.run.mock.calls.map(([command]) => String(command));
+    expect(commands.at(-1)).toContain(`printf '%s' '${result.fingerprint}'`);
   });
 });
 
