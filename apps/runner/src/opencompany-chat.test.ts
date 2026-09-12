@@ -27,6 +27,7 @@ import {
   ProductChatInterruptedError,
   type ProductChatProjection,
 } from "./opencompany-chat-projector";
+import { createSubagentTraceChannel } from "./opencompany-subagent";
 
 // Contract-level guard: this fixture is typed against the AI SDK's own
 // ToolApprovalRequestOutput, so a real SDK shape change (e.g. flattening
@@ -131,6 +132,78 @@ describe("consumeProductChatStream", () => {
     ).rejects.toBeInstanceOf(KimiToolCallLeakError);
     expect(present).not.toHaveBeenCalled();
     expect(JSON.stringify(project.mock.calls)).not.toContain("<|open|>");
+  });
+
+  it("nests a subagent's live trace under its tool part while the call is still in flight", async () => {
+    let clock = 0;
+    const project = vi.fn(async (_projection: ProductChatProjection) => undefined);
+    const subagentTrace = createSubagentTraceChannel();
+
+    const result = await consumeProductChatStream({
+      fullStream: streamParts(
+        {
+          type: "tool-call",
+          toolCallId: "call_1",
+          toolName: "run_subagent",
+          input: { description: "check pricing", task: "Check pricing" },
+        },
+        // The parent stream is parked on the tool call here, so nothing else would flush this.
+        // Publishing has to write the children through and schedule its own projection.
+        () => {
+          clock = 600;
+          subagentTrace.publish({
+            parentToolCallId: "call_1",
+            children: [{ type: "tool-web_search", toolCallId: "t1", state: "output-available" }],
+          });
+          return { type: "text-start", id: "text_1" };
+        },
+        { type: "text-delta", id: "text_1", text: "Pricing is usage-based." },
+        { type: "text-end", id: "text_1" },
+      ),
+      sink: { project, recordStepUsage: vi.fn(async () => undefined) },
+      signal: new AbortController().signal,
+      flushIntervalMs: 500,
+      now: () => clock,
+      subagentTrace,
+    });
+
+    const liveProjection = project.mock.calls.find((call) =>
+      call[0].parts.some(
+        (part) => part.toolCallId === "call_1" && (part.children as unknown[])?.length === 1,
+      ),
+    );
+    expect(liveProjection, "the trace must be projected before the subagent returns").toBeDefined();
+
+    expect(result.parts[0]).toMatchObject({
+      type: "tool-run_subagent",
+      toolCallId: "call_1",
+      state: "input-available",
+      children: [{ type: "tool-web_search", toolCallId: "t1", state: "output-available" }],
+    });
+  });
+
+  it("ignores a subagent trace for a tool call that is not in the projection", async () => {
+    const project = vi.fn(async (_projection: ProductChatProjection) => undefined);
+    const subagentTrace = createSubagentTraceChannel();
+
+    const result = await consumeProductChatStream({
+      fullStream: streamParts(
+        { type: "text-start", id: "text_1" },
+        () => {
+          subagentTrace.publish({
+            parentToolCallId: "missing",
+            children: [{ type: "text", text: "orphan" }],
+          });
+          return { type: "text-delta", id: "text_1", text: "Done." };
+        },
+        { type: "text-end", id: "text_1" },
+      ),
+      sink: { project, recordStepUsage: vi.fn(async () => undefined) },
+      signal: new AbortController().signal,
+      subagentTrace,
+    });
+
+    expect(result.parts).toEqual([{ type: "text", text: "Done.", state: "done" }]);
   });
 
   it("separates a 50 ms presentation cadence from 500 ms durable projections", async () => {
@@ -574,6 +647,50 @@ describe("consumeProductChatStream", () => {
 });
 
 describe("opencompanyModelMessagesFromStored", () => {
+  it("replays a subagent's summary without its nested trace", async () => {
+    const messages = [
+      storedMessage({ id: "user_1", role: "user", content: "What changed in pricing?" }),
+      storedMessage({
+        id: "assistant_1",
+        role: "assistant",
+        content: "Pricing moved to usage-based.",
+        debugTrace: {
+          schemaVersion: "opencompany.chat.debug.v1",
+          model: "anthropic/claude-sonnet-5",
+          uiMessageParts: [
+            {
+              type: "tool-run_subagent",
+              toolCallId: "call_1",
+              state: "output-available",
+              input: { description: "check pricing", task: "Check pricing" },
+              output: { ok: true, summary: "Pricing moved to usage-based.", steps: 3 },
+              children: [
+                {
+                  type: "tool-web_search",
+                  toolCallId: "t1",
+                  state: "output-available",
+                  input: { query: "pricing page" },
+                  output: { ok: true, results: "forty noisy search hits" },
+                },
+              ],
+            },
+            { type: "text", text: "Pricing moved to usage-based.", state: "done" },
+          ],
+        },
+      }),
+      storedMessage({ id: "user_2", role: "user", content: "And packaging?" }),
+    ];
+
+    const modelMessages = await opencompanyModelMessagesFromStored(messages, "user_2");
+
+    const serialized = JSON.stringify(modelMessages);
+    expect(serialized).toContain("Pricing moved to usage-based.");
+    expect(
+      serialized,
+      "the subagent's intermediate results must stay out of the parent's context",
+    ).not.toContain("forty noisy search hits");
+  });
+
   it("replays encrypted Responses reasoning metadata without exposing it through normal UI serialization", async () => {
     const encryptedContent = "encrypted-reasoning-continuity";
     const messages = [

@@ -223,6 +223,7 @@ describe("Sidebar", () => {
     clearAllOptimisticChatSummaries();
     clearOptimisticArchives();
     consumePendingChatComposerFocus("goat_chat_focus");
+    window.localStorage.clear();
   });
 
   it("renders home, the brain list, and footer links", () => {
@@ -540,12 +541,12 @@ describe("Sidebar", () => {
       "href",
       "/chat/goat_chat_pinned",
     );
-    const recentNav = screen.getByRole("navigation", { name: "Chats" });
+    const recentNav = screen.getByRole("navigation", { name: "Recents" });
     expect(within(recentNav).getByRole("link", { name: "Recent chat" })).toBeInTheDocument();
     expect(within(recentNav).queryByRole("link", { name: "Pinned chat" })).not.toBeInTheDocument();
   });
 
-  it("keeps the list named Chats while Tasks are disabled", () => {
+  it("keeps Tasks out of Recents while Tasks are disabled", () => {
     featureFlagsMock.taskSpawning = false;
     sidebarTasksMock.value = [
       taskRow("task_hidden", { name: "Hidden task", updatedAt: "2026-07-14T09:05:00.000Z" }),
@@ -554,8 +555,7 @@ describe("Sidebar", () => {
 
     render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
-    expect(screen.getByRole("navigation", { name: "Chats" })).toBeInTheDocument();
-    expect(screen.queryByText("Chats and tasks")).not.toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Recents" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Hidden task/ })).not.toBeInTheDocument();
   });
 
@@ -581,14 +581,45 @@ describe("Sidebar", () => {
 
     render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
-    const workNav = screen.getByRole("navigation", { name: "Chats and tasks" });
-    expect(screen.getByText("Chats and tasks")).toBeInTheDocument();
+    const workNav = screen.getByRole("navigation", { name: "Recents" });
+    expect(screen.getByRole("button", { name: "Recents" })).toBeInTheDocument();
     expect(
       within(workNav)
         .getAllByRole("link")
         .map((link) => link.getAttribute("href")),
     ).toEqual(["/chat/chat_newer", "/tasks/T-12", "/chat/chat_older"]);
     expect(within(workNav).getByRole("link", { name: /Middle task/ })).toHaveTextContent("T-12");
+  });
+
+  it("collapses and reopens Recents, and remembers the choice", async () => {
+    const user = userEvent.setup();
+    recentChatsMock.value = [chatRow("chat_only", { title: "Only chat" })];
+
+    const { unmount } = render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    const toggle = screen.getByRole("button", { name: "Recents" });
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("link", { name: "Only chat" })).toBeInTheDocument();
+
+    await user.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("link", { name: "Only chat" })).not.toBeInTheDocument();
+    // The header stays put while collapsed so the section is still findable.
+    expect(screen.getByRole("button", { name: "Recents" })).toBeInTheDocument();
+
+    unmount();
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.getByRole("button", { name: "Recents" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(screen.queryByRole("link", { name: "Only chat" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Recents" }));
+
+    expect(screen.getByRole("link", { name: "Only chat" })).toBeInTheDocument();
   });
 
   it("shows the same unread dot and working spinner for tasks as for chats", () => {

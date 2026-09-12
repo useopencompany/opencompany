@@ -3,6 +3,7 @@ import {
   LEGACY_ACTION_DISCOVERY_INSTRUCTIONS,
 } from "@opencompany/agent-runtime";
 import { MAX_WEB_FETCH_CALLS_PER_TURN, MAX_WEB_SEARCH_CALLS_PER_TURN } from "../chat-limits";
+import { SUBAGENT_BEHAVIOR_LINES } from "../subagent";
 
 function promptBlock(name: string, lines: readonly string[]) {
   return [`<${name}>`, ...lines, `</${name}>`].join("\n");
@@ -167,6 +168,7 @@ export function createProductChatSystemPrompt(
     webSearchEnabled?: boolean;
     browserToolsEnabled?: boolean;
     artifactToolEnabled?: boolean;
+    subagentsEnabled?: boolean;
     wikiToolEnabled?: boolean;
     wikiToolReadOnly?: boolean;
     taskToolsEnabled?: boolean;
@@ -298,6 +300,7 @@ export function createProductChatSystemPrompt(
       ...(skillsAvailable ? CHAT_SKILL_BEHAVIOR_LINES : []),
       ...(workflows.length > 0 ? CHAT_WORKFLOW_BEHAVIOR_LINES : []),
       ...(input.artifactToolEnabled ? CHAT_ARTIFACT_BEHAVIOR_LINES : []),
+      ...(input.subagentsEnabled ? SUBAGENT_BEHAVIOR_LINES : []),
     ]),
     CHAT_SOUL,
   ].join("\n\n");

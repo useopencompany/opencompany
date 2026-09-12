@@ -8,6 +8,7 @@ import {
   Archive,
   BookOpen,
   Check,
+  ChevronDown,
   ChevronsUpDown,
   House,
   Inbox,
@@ -31,6 +32,7 @@ import {
   useEffect,
   useMemo,
   useState,
+  useSyncExternalStore,
   useTransition,
 } from "react";
 import { useAppData } from "@/components/AppDataProvider";
@@ -253,7 +255,7 @@ export function Sidebar({
 
         <SidebarBots />
 
-        {/* Chats and tasks */}
+        {/* Recents */}
         <SidebarWorkList />
 
         {/* Account / settings footer */}
@@ -408,8 +410,45 @@ function SidebarAccountMenu() {
   );
 }
 
+const RECENTS_LIST_ID = "sidebar-recents";
+const RECENTS_COLLAPSED_STORAGE_KEY = "goat-sidebar-recents-collapsed";
+const recentsCollapsedSubscribers = new Set<() => void>();
+
+function subscribeRecentsCollapsed(onStoreChange: () => void) {
+  recentsCollapsedSubscribers.add(onStoreChange);
+
+  function handleStorage(event: StorageEvent) {
+    if (event.key === RECENTS_COLLAPSED_STORAGE_KEY) onStoreChange();
+  }
+
+  window.addEventListener("storage", handleStorage);
+  return () => {
+    recentsCollapsedSubscribers.delete(onStoreChange);
+    window.removeEventListener("storage", handleStorage);
+  };
+}
+
+function getRecentsCollapsedSnapshot() {
+  // Expanded by default: only an explicit "true" (the user collapsed it before) hides the list.
+  return window.localStorage.getItem(RECENTS_COLLAPSED_STORAGE_KEY) === "true";
+}
+
+function getRecentsCollapsedServerSnapshot() {
+  return false;
+}
+
+function persistRecentsCollapsed(next: boolean) {
+  window.localStorage.setItem(RECENTS_COLLAPSED_STORAGE_KEY, String(next));
+  for (const subscriber of recentsCollapsedSubscribers) subscriber();
+}
+
 function SidebarWorkList() {
   const { featureFlags, recentChats, sidebarTasks, workspace } = useAppData();
+  const recentsCollapsed = useSyncExternalStore(
+    subscribeRecentsCollapsed,
+    getRecentsCollapsedSnapshot,
+    getRecentsCollapsedServerSnapshot,
+  );
   const pathname = usePathname();
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -443,14 +482,12 @@ function SidebarWorkList() {
 
   const isPinned = (chat: ChatSummaryView) => pinOverrides.get(chat.id) ?? Boolean(chat.pinnedAt);
   const pinnedChats = recentChats.filter(isPinned);
-  // Tasks follow the same flag as the Tasks nav row, and the label reads from that one condition
-  // so a workspace without the feature is never told the list holds something it cannot.
+  // Tasks follow the same flag as the Tasks nav row.
   const showTasks = featureFlags.taskSpawning;
   const workItems = orderSidebarWorkItems({
     chats: recentChats.filter((chat) => !isPinned(chat)),
     tasks: showTasks ? sidebarTasks : [],
   });
-  const listLabel = showTasks ? "Chats and tasks" : "Chats";
 
   // Keep the footer pinned to the bottom when there is nothing to show.
   if (pinnedChats.length === 0 && workItems.length === 0) {
@@ -581,12 +618,31 @@ function SidebarWorkList() {
       ) : null}
       {workItems.length > 0 ? (
         <div>
-          <div className="px-4 pb-1 text-[11px] font-medium tracking-wide text-ink-subtle">
-            {listLabel}
-          </div>
-          <nav aria-label={listLabel} className="flex flex-col gap-px px-2">
-            {workItems.map(renderRow)}
-          </nav>
+          <button
+            type="button"
+            onClick={() => persistRecentsCollapsed(!recentsCollapsed)}
+            aria-expanded={!recentsCollapsed}
+            // Only points at the list while it exists; aria-expanded carries the state either way.
+            aria-controls={recentsCollapsed ? undefined : RECENTS_LIST_ID}
+            className="group mx-2 flex items-center gap-1 rounded-md px-2 pb-1 pt-0.5 text-[11px] font-medium tracking-wide text-ink-subtle transition-colors duration-150 hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          >
+            Recents
+            {/* One chevron in both states: down when open, rotated to point right when closed, so a
+                collapsed section still reads as "there is more here". */}
+            <ChevronDown
+              size={12}
+              strokeWidth={2}
+              aria-hidden="true"
+              className={`text-ink/40 transition-transform duration-150 group-hover:text-ink/70 ${
+                recentsCollapsed ? "-rotate-90" : ""
+              }`}
+            />
+          </button>
+          {recentsCollapsed ? null : (
+            <nav id={RECENTS_LIST_ID} aria-label="Recents" className="flex flex-col gap-px px-2">
+              {workItems.map(renderRow)}
+            </nav>
+          )}
         </div>
       ) : null}
     </div>

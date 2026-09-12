@@ -1,3 +1,4 @@
+import { ClaudeCodeUsageError, fetchClaudeCodeUsage } from "@opencompany/agent/claude-code-usage";
 import { fetchCodexUsage } from "@opencompany/agent/codex-usage";
 import type { Actor } from "@opencompany/core";
 import {
@@ -21,6 +22,11 @@ import { createEngineAuthService } from "./engine-auth";
 import type { RunnerClient } from "./runner-client";
 
 vi.mock("@opencompany/agent/codex-usage", () => ({ fetchCodexUsage: vi.fn() }));
+
+vi.mock("@opencompany/agent/claude-code-usage", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  fetchClaudeCodeUsage: vi.fn(),
+}));
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -128,6 +134,44 @@ describe("engine auth service", () => {
     await expect(service().getCodexUsage(member)).rejects.toMatchObject({
       status: 503,
       message: "Codex usage is temporarily unavailable. Try again shortly.",
+    });
+  });
+
+  it("reads personal Claude usage for the actor", async () => {
+    vi.mocked(fetchClaudeCodeUsage).mockResolvedValue({
+      windows: [],
+      updatedAt: "2026-09-10T12:00:00.000Z",
+    });
+    await expect(service().getClaudeCodeUsage(member)).resolves.toEqual({
+      windows: [],
+      updatedAt: "2026-09-10T12:00:00.000Z",
+    });
+    expect(fetchClaudeCodeUsage).toHaveBeenCalledWith({
+      db: dbSentinel,
+      userWorkosId: member.userId,
+    });
+  });
+
+  it("keeps a Claude usage failure retryable and free of upstream detail", async () => {
+    vi.mocked(fetchClaudeCodeUsage).mockRejectedValue(new Error("secret-provider-response"));
+    await expect(service().getClaudeCodeUsage(member)).rejects.toMatchObject({
+      status: 503,
+      message: "Claude usage is temporarily unavailable. Try again shortly.",
+    });
+  });
+
+  it("passes a Claude reconnect prompt through as a non-retryable 401", async () => {
+    vi.mocked(fetchClaudeCodeUsage).mockRejectedValue(
+      new ClaudeCodeUsageError(
+        "needs_reauth",
+        "Reconnect Claude Code to view subscription usage.",
+        401,
+      ),
+    );
+    await expect(service().getClaudeCodeUsage(member)).rejects.toMatchObject({
+      status: 401,
+      message: "Reconnect Claude Code to view subscription usage.",
+      retryable: false,
     });
   });
 
