@@ -3733,6 +3733,7 @@ export const IdentityUserSchema = z
     reviewInboxEnabled: z.boolean(),
     sidebarProjectsEnabled: z.boolean(),
     subagentsEnabled: z.boolean(),
+    pastSessionAccessEnabled: z.boolean(),
     /** @deprecated Wiki is always enabled. */
     wikiEnabled: z.literal(true),
     taskViewMode: TaskViewModeSchema,
@@ -3800,6 +3801,7 @@ export const UserPreferencesSchema = z
     reviewInboxEnabled: z.boolean(),
     sidebarProjectsEnabled: z.boolean(),
     subagentsEnabled: z.boolean(),
+    pastSessionAccessEnabled: z.boolean(),
   })
   .strict()
   .openapi("UserPreferences");
@@ -3817,6 +3819,7 @@ export const UpdateUserPreferencesBodySchema = z
     reviewInboxEnabled: z.boolean().optional(),
     sidebarProjectsEnabled: z.boolean().optional(),
     subagentsEnabled: z.boolean().optional(),
+    pastSessionAccessEnabled: z.boolean().optional(),
   })
   .strict()
   .refine((body: Record<string, unknown>) => Object.keys(body).length > 0, {

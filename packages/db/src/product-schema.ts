@@ -762,6 +762,7 @@ export const users = productSchema.table(
     reviewInboxEnabled: boolean("review_inbox_enabled").notNull().default(false),
     sidebarProjectsEnabled: boolean("sidebar_projects_enabled").notNull().default(false),
     subagentsEnabled: boolean("subagents_enabled").notNull().default(false),
+    pastSessionAccessEnabled: boolean("past_session_access_enabled").notNull().default(false),
     // Retained for rollback compatibility after the wiki became the default.
     // Runtime code must not read this legacy per-user preview flag.
     wikiEnabled: boolean("wiki_enabled").notNull().default(false),

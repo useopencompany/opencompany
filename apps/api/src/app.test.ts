@@ -3650,6 +3650,7 @@ describe("canonical Hono API", () => {
             reviewInboxEnabled: false,
             sidebarProjectsEnabled: false,
             subagentsEnabled: false,
+            pastSessionAccessEnabled: false,
           }),
         },
       });
@@ -3716,6 +3717,7 @@ describe("canonical Hono API", () => {
         reviewInboxEnabled: false,
         sidebarProjectsEnabled: false,
         subagentsEnabled: false,
+        pastSessionAccessEnabled: false,
       }));
       const app = testApp(fakeRepository(), {
         userSettings: { ...fakeUserSettings(), updatePreferences },
@@ -3745,6 +3747,7 @@ describe("canonical Hono API", () => {
       reviewInboxEnabled: false,
       sidebarProjectsEnabled: false,
       subagentsEnabled: false,
+      pastSessionAccessEnabled: false,
     }));
     const app = testApp(fakeRepository(), {
       userSettings: { ...fakeUserSettings(), updatePreferences },

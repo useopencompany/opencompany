@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   updateAutoModelRoutingAction,
   updateBotsAction,
+  updatePastSessionAccessAction,
   updateTaskTimeRangeAction,
   updateTaskViewModeAction,
   updateTimezoneAction,
@@ -91,6 +92,15 @@ describe("user preference API actions", () => {
     expect(new URL((requests[0] as Request).url).pathname).toBe("/v1/me/preferences");
     await expect((requests[0] as Request).json()).resolves.toEqual({ botsEnabled: enabled });
     expect(revalidatePath).toHaveBeenCalledWith("/");
+    expect(revalidatePath).toHaveBeenCalledWith("/settings/preferences");
+  });
+
+  it.each([true, false])("persists past session access %s", async (enabled) => {
+    const requests = stubApi(() =>
+      Response.json({ data: { ...preferences, pastSessionAccessEnabled: enabled } }),
+    );
+    await expect(updatePastSessionAccessAction(enabled)).resolves.toEqual({ ok: true, enabled });
+    await expect(requests[0]!.json()).resolves.toEqual({ pastSessionAccessEnabled: enabled });
     expect(revalidatePath).toHaveBeenCalledWith("/settings/preferences");
   });
 

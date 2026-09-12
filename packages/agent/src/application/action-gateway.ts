@@ -50,6 +50,7 @@ export type ActionGatewayServiceDependencies = {
   actionsKilled: () => boolean;
   loadContext: (request: ActionServiceRequest) => Promise<ActionPrincipal | null>;
   resolveCatalog: (input: {
+    conversationId?: string;
     actorId: string;
     workspaceId: string;
   }) => Promise<ResolvedActionCatalog>;
@@ -127,6 +128,7 @@ export async function executeActionHostGatewayService(input: {
   try {
     catalog = projectActionCatalog(
       await dependencies.resolveCatalog({
+        ...(context.policy === "headless" ? {} : { conversationId: context.conversationId }),
         actorId: context.actorId,
         workspaceId: context.workspaceId,
       }),

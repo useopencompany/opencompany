@@ -6,6 +6,7 @@ export type FeatureFlags = {
   reviewInbox: boolean;
   sidebarProjects: boolean;
   subagents: boolean;
+  pastSessionAccess?: boolean;
 };
 
 export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
@@ -16,6 +17,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   reviewInbox: false,
   sidebarProjects: false,
   subagents: false,
+  pastSessionAccess: false,
 };
 
 export const TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE =
@@ -28,6 +30,7 @@ export function featureFlagsFromUser(input: {
   legacyBrainEnabled?: boolean | null | undefined;
   reviewInboxEnabled?: boolean | null | undefined;
   sidebarProjectsEnabled?: boolean | null | undefined;
+  pastSessionAccessEnabled?: boolean | null | undefined;
   subagentsEnabled?: boolean | null | undefined;
 }): FeatureFlags {
   return {
@@ -38,5 +41,6 @@ export function featureFlagsFromUser(input: {
     reviewInbox: input.reviewInboxEnabled === true,
     sidebarProjects: input.sidebarProjectsEnabled === true,
     subagents: input.subagentsEnabled === true,
+    pastSessionAccess: input.pastSessionAccessEnabled === true,
   };
 }
