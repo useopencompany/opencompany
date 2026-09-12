@@ -8,6 +8,11 @@ integration payload, the wiki sweep — stay in the child's context and never en
 Gated by `RUNNER_OPENCOMPANY_SUBAGENTS_ENABLED` (default `false`). Codex and Claude Code sessions
 have their own engine-native subagents and are unaffected by this flag.
 
+Interactive chat only. Background task turns do not get the tool: a task is already the product's
+"go do deeper work" primitive and runs with raised tool budgets, so nesting a second delegation
+layer inside one multiplies cost where nobody is watching it happen. Revisit once interactive usage
+shows what delegation actually costs.
+
 ## What the model sees
 
 One tool, `run_subagent`, taking a short `description` for the UI and a self-contained `task`. The

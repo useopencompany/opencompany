@@ -53,6 +53,9 @@ export function createSubagentTraceChannel(): SubagentTraceChannel {
   return {
     publish: (update) => listener?.(update),
     subscribe: (next) => {
+      // One channel belongs to one turn's projection. A second subscriber would silently replace
+      // the first and drop its traces, so make that state impossible rather than debuggable.
+      if (listener) throw new Error("A subagent trace channel accepts one subscriber per turn.");
       listener = next;
     },
   };
@@ -162,7 +165,17 @@ export function createSubagentRunner(input: {
       });
     };
     const appendChild = (part: ProductChatUiPart) => {
-      if (children.length >= MAX_TRACE_PARTS) return;
+      if (children.length > MAX_TRACE_PARTS) return;
+      // Say that the trace stopped rather than letting later steps vanish from a still-running
+      // subagent. The run itself continues; only its displayed trace is capped.
+      if (children.length === MAX_TRACE_PARTS) {
+        children.push({
+          type: "text",
+          text: `[Trace truncated after ${MAX_TRACE_PARTS} steps. The subagent is still working and its summary will be complete.]`,
+          state: "done",
+        });
+        return;
+      }
       children.push(part);
     };
 

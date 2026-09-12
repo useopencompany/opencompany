@@ -230,11 +230,21 @@ export function createSubagentBudget(
   const maxConcurrent = options.maxConcurrent ?? MAX_CONCURRENT_SUBAGENTS;
   let runsStarted = 0;
   let active = 0;
-  const waiting: Array<(lease: "granted" | "aborted") => void> = [];
+  // Each waiter carries its own settled flag so the queue is correct on its own terms. An abort
+  // settles a waiter in place without removing it, and handing a freed slot to one of those would
+  // strand a run that is still genuinely waiting. Today's single turn-scoped signal settles every
+  // waiter at once so that cannot happen, but the queue should not depend on the caller for it.
+  const waiting: Array<{ settled: boolean; grant: () => void }> = [];
 
   const releaseOne = () => {
     active -= 1;
-    waiting.shift()?.("granted");
+    while (waiting.length > 0) {
+      const next = waiting.shift();
+      if (next && !next.settled) {
+        next.grant();
+        return;
+      }
+    }
   };
 
   return {
@@ -253,8 +263,23 @@ export function createSubagentBudget(
             resolve("aborted");
             return;
           }
-          waiting.push(resolve);
-          options.signal?.addEventListener("abort", () => resolve("aborted"), { once: true });
+          const waiter = {
+            settled: false,
+            grant: () => {
+              waiter.settled = true;
+              resolve("granted");
+            },
+          };
+          waiting.push(waiter);
+          options.signal?.addEventListener(
+            "abort",
+            () => {
+              if (waiter.settled) return;
+              waiter.settled = true;
+              resolve("aborted");
+            },
+            { once: true },
+          );
         });
         if (granted === "aborted") {
           return { ok: false, error: "The turn was interrupted before this subagent could start." };
