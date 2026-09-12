@@ -1,3 +1,5 @@
+// Load .env files before any module that reads process.env at import time.
+import "./load-env";
 import { RedisChatPresentationStream } from "@opencompany/chat-presentation";
 import {
   captureException,
@@ -36,7 +38,6 @@ import { startGranolaPollWorker } from "./granola-poll-worker";
 import { startHubspotFlushWorker } from "./hubspot-flush-worker";
 import { startLinearFlushWorker } from "./linear-flush-worker";
 import { settleExpiredBrokerTokens } from "./llm-broker-tokens";
-import "./load-env";
 import { drainRunnerTasks, type RunnerDrainTask, settlesWithin } from "./runner-shutdown";
 import { startSandboxBillingWorker } from "./sandbox-billing-worker";
 import { startSandboxReconciler } from "./sandbox-reconciler";
