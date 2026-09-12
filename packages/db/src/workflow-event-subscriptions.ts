@@ -29,6 +29,7 @@ export async function validateWorkflowEventSubscription(
         AND integration.user_workos_id = ${input.actor.userId}
         AND integration.provider = ${input.trigger.provider}
         AND integration.status = 'connected'
+        AND integration.external_id <> integration.provider || '_mcp'
         AND integration.workspace_id IS NULL
         AND EXISTS (SELECT 1 FROM goat.workspace_members member WHERE member.workspace_id = ${input.actor.workspaceId} AND member.user_workos_id = ${input.actor.userId})
       ORDER BY plugin.updated_at DESC NULLS LAST
@@ -44,16 +45,29 @@ export async function validateWorkflowEventSubscription(
   if (!declaration || modes[input.trigger.event] !== true) {
     return "Enable this plugin event before activating the workflow.";
   }
+  return workflowEventFilterValidationError(declaration, input.trigger.filters);
+}
+
+export function workflowEventFilterValidationError(
+  declaration: PluginEventDefinition,
+  filters: Record<string, { id: string }>,
+): string | null {
   const declaredFilters = new Map(declaration.filters.map((filter) => [filter.id, filter]));
-  if (Object.keys(input.trigger.filters).some((id) => !declaredFilters.has(id))) {
+  if (Object.keys(filters).some((id) => !declaredFilters.has(id))) {
     return "The workflow contains a filter this plugin event does not declare.";
   }
-  if (
-    declaration.filters.some(
-      (filter) => filter.required && input.trigger.filters[filter.id] === undefined,
-    )
-  ) {
+  if (declaration.filters.some((filter) => filter.required && filters[filter.id] === undefined)) {
     return "Choose a value for every required event filter.";
+  }
+  for (const filter of declaration.filters) {
+    const selected = filters[filter.id];
+    if (
+      selected &&
+      filter.kind === "choice" &&
+      !filter.options.some((option) => option.id === selected.id)
+    ) {
+      return "Choose a supported value for each event filter.";
+    }
   }
   return null;
 }

@@ -168,7 +168,10 @@ export function GranolaIntegrationSetup({
           <li>In the Granola app, open Settings and go to Connectors, then API keys.</li>
           <li>Create a key with access to the notes you want to ingest.</li>
           <li>Copy the grn_ key Granola shows once, paste it here, and save it.</li>
-          <li>Enable Granola from a brain&apos;s Sources settings to route new meeting notes.</li>
+          <li>
+            Turn on Meeting notes ready in this plugin, then select Granola in a workflow event
+            trigger.
+          </li>
         </ol>
         <p className="px-2 text-[13px] leading-5 text-ink-subtle">
           New notes are picked up within a few minutes of Granola finishing their summary and
@@ -197,7 +200,7 @@ function setupStatus(state: GranolaProviderState) {
   }
   return {
     label: "Not connected",
-    detail: "Paste a Granola API key to ingest your meeting notes.",
+    detail: "Paste a Granola API key to receive meeting note events.",
     badge: "Setup",
   };
 }

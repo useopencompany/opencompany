@@ -48,7 +48,11 @@ export async function ensureGranolaSyncState(
 ): Promise<void> {
   await db
     .insert(granolaSyncState)
-    .values({ integrationId: input.integrationId, userWorkosId: input.userWorkosId })
+    .values({
+      integrationId: input.integrationId,
+      userWorkosId: input.userWorkosId,
+      updatedAfterCursor: new Date(),
+    })
     .onConflictDoNothing();
 }
 

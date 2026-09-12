@@ -3,10 +3,7 @@ import {
   AutoModelRoutingError,
   type AutoModelRoutingResolution,
 } from "@opencompany/agent/application/auto-model-routing";
-import type {
-  BrainImportApplicationService,
-  WikiImportApplicationService,
-} from "@opencompany/agent/brain-imports";
+import type { BrainImportApplicationService } from "@opencompany/agent/brain-imports";
 import type { BrainSourceApplicationService } from "@opencompany/agent/brain-sources";
 import type { BrowserProfileApplicationService } from "@opencompany/agent/browser-profiles/service";
 import type {
@@ -122,7 +119,6 @@ import type { SlackIngressService } from "./slack-ingress";
 import type { StripeIngressService } from "./stripe-ingress";
 import type { UserSettingsService } from "./user-settings";
 import type { WikiControlService, WikiControlView } from "./wiki-control";
-import type { WikiSourceService } from "./wiki-sources";
 import type { CapabilityApprovalView, WorkspaceCapabilityService } from "./workspace-capabilities";
 import type { WorkspaceControlService } from "./workspace-control";
 import type { XAccountIngressService } from "./x-account-ingress";
@@ -169,10 +165,8 @@ export type CreateApiAppInput = {
   // Bearer secret for POST /internal/wiki/commands (runner→API). Distinct from
   // the runner's own internal token so the two directions rotate independently.
   wikiCommandsInternalSecret?: string;
-  wikiSources: WikiSourceService;
   brainSources: Pick<BrainSourceApplicationService, "list" | "set" | "remove" | "listOptions">;
   brainImports: Pick<BrainImportApplicationService, "start" | "confirm" | "cancel" | "retry">;
-  wikiImports: Pick<WikiImportApplicationService, "start" | "confirm" | "cancel" | "retry">;
   browserProfiles: Pick<
     BrowserProfileApplicationService,
     | "list"
@@ -987,37 +981,33 @@ export function createApiApp(input: CreateApiAppInput) {
         200,
       );
     },
-    startWikiImport: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 10);
-      const result = await input.wikiImports.start(actor, {
-        idempotencyKey: c.req.valid("header")["idempotency-key"],
-        ...c.req.valid("json"),
-      });
-      return c.json({ data: result, meta }, 201);
-    },
-    confirmWikiImport: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const params = c.req.valid("param");
-      const result = await input.wikiImports.confirm(
-        actor,
-        params.importRunId,
-        c.req.valid("json").enabledProviders,
+    startWikiImport: async () => {
+      throw new ApiError(
+        410,
+        "invalid_request",
+        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
       );
-      return c.json({ data: result, meta }, 200);
     },
-    cancelWikiImport: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const result = await input.wikiImports.cancel(actor, c.req.valid("param").importRunId);
-      return c.json({ data: result, meta }, 200);
+    confirmWikiImport: async () => {
+      throw new ApiError(
+        410,
+        "invalid_request",
+        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
+      );
     },
-    retryWikiImport: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const result = await input.wikiImports.retry(actor, c.req.valid("param").importRunId);
-      return c.json({ data: result, meta }, 200);
+    cancelWikiImport: async () => {
+      throw new ApiError(
+        410,
+        "invalid_request",
+        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
+      );
+    },
+    retryWikiImport: async () => {
+      throw new ApiError(
+        410,
+        "invalid_request",
+        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
+      );
     },
     createBrainDocument: async (c) => {
       const actor = actorFrom(c);
@@ -1260,44 +1250,40 @@ export function createApiApp(input: CreateApiAppInput) {
         201,
       );
     },
-    listWikiSources: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "read", 300);
-      const sources = await input.wikiSources.list(actor);
-      return c.json({ data: sources, meta }, 200);
-    },
-    listWikiIngestActivity: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "read", 300);
-      const query = c.req.valid("query");
-      const activity = await input.wikiSources.listActivity(actor, {
-        limit: query.limit,
-        ...(query.cursor ? { cursor: query.cursor } : {}),
-      });
-      return c.json({ data: activity, meta }, 200);
-    },
-    upsertWikiSource: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const source = await input.wikiSources.upsert(actor, c.req.valid("json"));
-      return c.json({ data: source, meta }, 200);
-    },
-    setWikiSourceEnabled: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const source = await input.wikiSources.setEnabled(
-        actor,
-        c.req.valid("param").sourceId,
-        c.req.valid("json").enabled,
+    listWikiSources: async () => {
+      throw new ApiError(
+        410,
+        "invalid_request",
+        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
       );
-      return c.json({ data: source, meta }, 200);
     },
-    deleteWikiSource: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const { sourceId } = c.req.valid("param");
-      await input.wikiSources.remove(actor, sourceId);
-      return c.json({ data: { sourceId, deleted: true }, meta }, 200);
+    listWikiIngestActivity: async () => {
+      throw new ApiError(
+        410,
+        "invalid_request",
+        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
+      );
+    },
+    upsertWikiSource: async () => {
+      throw new ApiError(
+        410,
+        "invalid_request",
+        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
+      );
+    },
+    setWikiSourceEnabled: async () => {
+      throw new ApiError(
+        410,
+        "invalid_request",
+        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
+      );
+    },
+    deleteWikiSource: async () => {
+      throw new ApiError(
+        410,
+        "invalid_request",
+        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
+      );
     },
     listSkills: async (c) => {
       const actor = actorFrom(c);

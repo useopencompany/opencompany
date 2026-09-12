@@ -13456,41 +13456,102 @@
         "additionalProperties": false
       },
       "PluginEventFilterDefinition": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 64
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "integration_resource"
+                ]
+              },
+              "resourceType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "required": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "label",
+              "kind",
+              "resourceType",
+              "required"
+            ],
+            "additionalProperties": false
           },
-          "label": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 120
-          },
-          "kind": {
-            "type": "string",
-            "enum": [
-              "integration_resource"
-            ]
-          },
-          "resourceType": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 64
-          },
-          "required": {
-            "type": "boolean"
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "choice"
+                ]
+              },
+              "options": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 120
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 1,
+                "maxItems": 64
+              },
+              "required": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "label",
+              "kind",
+              "options",
+              "required"
+            ],
+            "additionalProperties": false
           }
-        },
-        "required": [
-          "id",
-          "label",
-          "kind",
-          "resourceType",
-          "required"
-        ],
-        "additionalProperties": false
+        ]
       },
       "PluginDiscoveredTool": {
         "type": "object",

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "./client";
 import {
   brainSources,
@@ -8,7 +8,6 @@ import {
   type LinearEventAction,
   type LinearEventEntityType,
   linearIssueEvents,
-  wikiSources,
 } from "./product-schema";
 import {
   type WorkflowEventContext,
@@ -55,11 +54,6 @@ export type LinearBrainSourceConfig = {
   events?: LinearEventRef[];
 };
 
-export type LinearWikiSourceConfig = {
-  teams?: LinearTeamRef[];
-  events?: LinearEventRef[];
-};
-
 export type LinearIntegrationForOrganization = {
   id: string;
   workspaceId: string | null;
@@ -71,12 +65,6 @@ export type LinearBrainSourceRoute = {
   integrationId: string;
   brainRef: string;
   config: LinearBrainSourceConfig;
-};
-
-export type LinearWikiSourceRoute = {
-  integrationId: string;
-  workspaceId: string;
-  config: LinearWikiSourceConfig;
 };
 
 export type LinearIssueEventInsert = {
@@ -98,11 +86,7 @@ export function parseLinearBrainSourceConfig(value: unknown): LinearBrainSourceC
   return parseLinearSourceConfig(value);
 }
 
-export function parseLinearWikiSourceConfig(value: unknown): LinearWikiSourceConfig {
-  return parseLinearSourceConfig(value);
-}
-
-function parseLinearSourceConfig(value: unknown): LinearWikiSourceConfig {
+function parseLinearSourceConfig(value: unknown): LinearBrainSourceConfig {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const record = value as Record<string, unknown>;
   const teams = parseTeamRefs(record.teams);
@@ -205,33 +189,6 @@ export async function listEnabledLinearBrainSourceRoutes(
   }));
 }
 
-export async function listEnabledLinearWikiSourceRoutes(
-  integrationIds: readonly string[],
-  db: DbLike = getDb(),
-): Promise<LinearWikiSourceRoute[]> {
-  if (integrationIds.length === 0) return [];
-  const rows = await db
-    .select({
-      integrationId: wikiSources.integrationId,
-      workspaceId: wikiSources.workspaceId,
-      config: wikiSources.config,
-    })
-    .from(wikiSources)
-    .where(
-      and(
-        eq(wikiSources.provider, "linear"),
-        eq(wikiSources.enabled, true),
-        inArray(wikiSources.integrationId, [...integrationIds]),
-      ),
-    );
-
-  return rows.map((row: { integrationId: string; workspaceId: string; config: unknown }) => ({
-    integrationId: row.integrationId,
-    workspaceId: row.workspaceId,
-    config: parseLinearWikiSourceConfig(row.config),
-  }));
-}
-
 export async function insertLinearIssueEvents(
   events: readonly LinearIssueEventInsert[],
   db: DbLike = getDb(),
@@ -297,7 +254,9 @@ export function linearWorkflowRouteMatchesEvent(
   },
 ) {
   if (route.provider !== "linear") return false;
-  if (!workflowEventFiltersMatch(route, { team: input.teamId })) return false;
+  const state = asRecord(input.data?.state);
+  const status = asNonEmptyString(state?.type) ?? asNonEmptyString(input.data?.stateType);
+  if (!workflowEventFiltersMatch(route, { team: input.teamId, status })) return false;
   if (route.event === "issue_enters_triage" && route.legacyTriageStateId) {
     return isLinearIssueEnteringTriage(input, route.legacyTriageStateId);
   }
