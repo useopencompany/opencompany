@@ -413,31 +413,36 @@ describe("remote MCP discovery snapshots", () => {
 });
 
 describe("resolveRemoteMcpActions", () => {
-  it("maps the first-party Calendar MCP auth envelope to the reconnect flow", async () => {
-    const execution = client({
-      result: {
-        isError: true,
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify({
-              error: { code: "auth_expired", message: "Calendar must be reauthorized." },
-            }),
-          },
-        ],
-      },
-    });
-    const calendarRegistration = registration({
-      source: "plugin:google-calendar:google-calendar",
-      connectionProvider: "google_calendar",
-      label: "Google Calendar",
-    });
-    const catalog = await resolveRemoteMcpActions(identity, calendarRegistration, {
-      createClient: vi.fn(async () => execution),
-    });
+  it.each(["google_calendar", "outlook", "outlook-calendar"] as const)(
+    "maps the first-party %s MCP auth envelope to the reconnect flow",
+    async (provider) => {
+      const execution = client({
+        result: {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                error: { code: "auth_expired", message: "Calendar must be reauthorized." },
+              }),
+            },
+          ],
+        },
+      });
+      const calendarRegistration = registration({
+        source: "plugin:google-calendar:google-calendar",
+        connectionProvider: provider,
+        label: "Calendar",
+      });
+      const catalog = await resolveRemoteMcpActions(identity, calendarRegistration, {
+        createClient: vi.fn(async () => execution),
+      });
 
-    await expect(catalog?.actions[0]?.execute({}, context)).rejects.toBeInstanceOf(ActionAuthError);
-  });
+      await expect(catalog?.actions[0]?.execute({}, context)).rejects.toBeInstanceOf(
+        ActionAuthError,
+      );
+    },
+  );
 
   it("does zero tools/list calls during execute and loads credentials only at dispatch", async () => {
     const execution = client({

@@ -1,5 +1,5 @@
 import type { CodexUsage } from "@opencompany/protocol/schemas";
-import { z } from "zod";
+import * as z from "zod";
 import { CodexBackendError, createCodexTokenManager } from "./codex-backend-language-model";
 
 const USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";

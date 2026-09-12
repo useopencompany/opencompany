@@ -7,6 +7,8 @@ export type OfficialMcpPluginName =
   | "github"
   | "gmail"
   | "granola"
+  | "outlook"
+  | "outlook-calendar"
   | "google-admin"
   | "google-calendar"
   | "google-drive"
@@ -57,6 +59,8 @@ export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
     | "github_user"
     | "gmail"
     | "granola"
+    | "outlook"
+    | "outlook-calendar"
     | "google_admin"
     | "google_calendar"
     | "google_drive"
@@ -191,6 +195,33 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     // cannot call. They bind to the personal `grn_` API key connected from Wiki sources.
     eventAccountHref: "/wiki/sources",
     eventAccountLabel: "Add a Granola API key",
+  },
+  outlook: {
+    name: "outlook",
+    kind: "mcp",
+    label: "Outlook",
+    category: "communication",
+    description:
+      "Search and read mail, download attachments, create drafts, and organize your inbox.",
+    source: OFFICIAL_PLUGIN_SOURCES.outlook,
+    connectionProvider: "outlook",
+    connectHref: "/api/integrations/outlook/start?returnTo=/settings/plugins/outlook",
+    accountDescription:
+      "Connect a work, school, or personal Microsoft account. The most recently connected account powers mail tools. Drafts are reviewed and sent in Outlook.",
+  },
+  "outlook-calendar": {
+    name: "outlook-calendar",
+    kind: "mcp",
+    label: "Outlook Calendar",
+    category: "productivity",
+    description:
+      "Read your schedule, check availability, manage events, and respond to invitations.",
+    source: OFFICIAL_PLUGIN_SOURCES["outlook-calendar"],
+    connectionProvider: "outlook-calendar",
+    connectHref:
+      "/api/integrations/outlook-calendar/start?returnTo=/settings/plugins/outlook-calendar",
+    accountDescription:
+      "Connect a work, school, or personal Microsoft account. The most recently connected account powers calendar tools. Colleague availability requires Microsoft 365.",
   },
   "google-admin": {
     name: "google-admin",

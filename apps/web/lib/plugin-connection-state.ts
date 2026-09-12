@@ -1,8 +1,9 @@
-import type {
-  InfisicalProviderState,
-  IntegrationAccountView,
-  IntegrationState,
-  PersonalAccountProvider,
+import {
+  activePluginAccount,
+  type InfisicalProviderState,
+  type IntegrationAccountView,
+  type IntegrationState,
+  type PersonalAccountProvider,
 } from "@/lib/integration-state";
 import {
   GOOGLE_DRIVE_MCP_RECONNECT_REASON,
@@ -65,6 +66,7 @@ export function pluginAccountsFromState(
           statusReason: connection.statusReason,
           scopes: [],
           capabilityModes: connection.capabilityModes,
+          connectedAt: null,
         }
       : null;
     return {
@@ -80,6 +82,8 @@ export function pluginAccountsFromState(
     config.connectionProvider === "gmail" ||
     config.connectionProvider === "google_admin" ||
     config.connectionProvider === "google_calendar" ||
+    config.connectionProvider === "outlook" ||
+    config.connectionProvider === "outlook-calendar" ||
     config.connectionProvider === "google_drive" ||
     config.connectionProvider === "hubspot" ||
     config.connectionProvider === "jamie" ||
@@ -122,6 +126,7 @@ export function pluginAccountsFromState(
               statusReason: connection.statusReason,
               scopes: [],
               capabilityModes: connection.capabilityModes,
+              connectedAt: null,
             }
           : null;
       return {
@@ -143,19 +148,21 @@ export function pluginAccountsFromState(
           : account,
     }));
     const primaryIntegrationId =
-      config.connectionProvider === "gmail"
-        ? state.gmail.integrationId
-        : config.connectionProvider === "slack"
-          ? state.slack.integrationId
-          : config.connectionProvider === "google_calendar"
-            ? state.google_calendar.integrationId
-            : config.connectionProvider === "google_drive"
-              ? state.google_drive.integrationId
-              : config.connectionProvider === "x_account"
-                ? state.x_account.integrationId
-                : config.connectionProvider === "jamie"
-                  ? state.jamie.integrationId
-                  : null;
+      config.connectionProvider === "outlook" || config.connectionProvider === "outlook-calendar"
+        ? activePluginAccount(accounts.map(({ account }) => account))?.integrationId
+        : config.connectionProvider === "gmail"
+          ? state.gmail.integrationId
+          : config.connectionProvider === "slack"
+            ? state.slack.integrationId
+            : config.connectionProvider === "google_calendar"
+              ? state.google_calendar.integrationId
+              : config.connectionProvider === "google_drive"
+                ? state.google_drive.integrationId
+                : config.connectionProvider === "x_account"
+                  ? state.x_account.integrationId
+                  : config.connectionProvider === "jamie"
+                    ? state.jamie.integrationId
+                    : null;
     return {
       accounts,
       permissionConnection:
@@ -177,6 +184,7 @@ export function pluginAccountsFromState(
         statusReason: state.linear.statusReason,
         scopes: [],
         capabilityModes: state.linear.capabilityModes,
+        connectedAt: null,
       }
     : null;
   return {

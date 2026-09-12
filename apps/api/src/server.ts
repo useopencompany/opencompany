@@ -14,6 +14,8 @@ import { createGoogleAdminMcpService } from "@opencompany/agent/integrations/goo
 import { createGoogleCalendarMcpService } from "@opencompany/agent/integrations/google-calendar-mcp-server";
 import { getAvailableHarnessTools } from "@opencompany/agent/integrations/google-data";
 import { createGoogleDriveMcpService } from "@opencompany/agent/integrations/google-drive-mcp-server";
+import { createOutlookCalendarMcpService } from "@opencompany/agent/integrations/outlook-calendar-mcp-server";
+import { createOutlookMcpService } from "@opencompany/agent/integrations/outlook-mcp-server";
 import { createMcpService } from "@opencompany/agent/mcp-http";
 import {
   createPluginGatewayLifecycle,
@@ -76,6 +78,7 @@ import { createIntegrationAccountService } from "./integration-accounts";
 import { createLinearIngress } from "./linear-ingress";
 import { createMcpOAuthIngress } from "./mcp-oauth-ingress";
 import { PostgresMessagePresentationService } from "./message-presentations";
+import { createMicrosoftIngress } from "./microsoft-ingress";
 import { createOnboardingService } from "./onboarding";
 import { createOnboardingEmailService } from "./onboarding-emails";
 import { createRepoConfigService } from "./repo-configs";
@@ -260,6 +263,14 @@ const app = createApiApp({
           db: database.db,
           internalSecret: process.env.API_INTERNAL_TOKEN.trim(),
         }),
+        outlookMcp: createOutlookMcpService({
+          db: database.db,
+          internalSecret: process.env.API_INTERNAL_TOKEN.trim(),
+        }),
+        outlookCalendarMcp: createOutlookCalendarMcpService({
+          db: database.db,
+          internalSecret: process.env.API_INTERNAL_TOKEN.trim(),
+        }),
         googleAdminMcp: createGoogleAdminMcpService({
           db: database.db,
           internalSecret: process.env.API_INTERNAL_TOKEN.trim(),
@@ -318,6 +329,17 @@ const app = createApiApp({
         // Registrations persist the Plugin package name; the gateway binding
         // maps package "github" to the personal github_user integration.
         connectionProvider: "github",
+      }),
+  }),
+  microsoftIngress: createMicrosoftIngress({
+    db: database.db,
+    identify: identityVerifier,
+    refreshPluginRegistrations: ({ provider, userWorkosId, workspaceIds }) =>
+      refreshPluginGatewayRegistrationsForWorkspaces({
+        db: database.db,
+        userWorkosId,
+        workspaceIds,
+        connectionProvider: provider,
       }),
   }),
   googleIngress: createGoogleIngress({

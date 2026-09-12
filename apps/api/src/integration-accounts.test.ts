@@ -157,6 +157,7 @@ describe("integration account service", () => {
             status: "connected",
             scopes: ["gmail.readonly"],
             capabilityModes: { read: "on" },
+            lastSyncedAt: new Date("2026-09-10T12:00:00.000Z"),
           },
           {
             id: "gint_linear_mcp",
@@ -226,6 +227,7 @@ describe("integration account service", () => {
         statusReason: null,
         scopes: ["gmail.readonly"],
         capabilityModes: { read: "on" },
+        connectedAt: "2026-09-10T12:00:00.000Z",
       },
       {
         integrationId: "gint_fathom_mcp",
@@ -238,6 +240,7 @@ describe("integration account service", () => {
         statusReason: null,
         scopes: ["mcp"],
         capabilityModes: { query: "ask" },
+        connectedAt: null,
       },
       {
         integrationId: "gint_betterstack_mcp",
@@ -250,6 +253,7 @@ describe("integration account service", () => {
         statusReason: null,
         scopes: ["read", "write"],
         capabilityModes: { read: "on", query: "ask", write: "ask" },
+        connectedAt: null,
       },
     ]);
   });

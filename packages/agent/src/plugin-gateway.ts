@@ -96,6 +96,12 @@ import {
   loadLinearMcpWorkerConnection,
 } from "./integrations/linear-mcp";
 import {
+  getMicrosoftMcpIntegrationState,
+  loadMicrosoftMcpWorkerConnection,
+  microsoftMcpEndpointUrl,
+  microsoftMcpRuntimeEndpointUrl,
+} from "./integrations/microsoft-mcp";
+import {
   getNeonIntegrationState,
   loadNeonMcpWorkerConnection,
   NEON_MCP_ENDPOINT_URL,
@@ -202,6 +208,20 @@ const providerBindings = {
     endpointUrl: GRANOLA_MCP_ENDPOINT_URL,
     getState: getGranolaMcpIntegrationState,
     loadConnection: loadGranolaMcpWorkerConnection,
+  },
+  outlook: {
+    provider: "outlook",
+    endpointUrl: microsoftMcpEndpointUrl("outlook"),
+    getState: (identity: Identity) => getMicrosoftMcpIntegrationState("outlook", identity),
+    loadConnection: (input: Parameters<typeof loadMicrosoftMcpWorkerConnection>[1]) =>
+      loadMicrosoftMcpWorkerConnection("outlook", input),
+  },
+  "outlook-calendar": {
+    provider: "outlook-calendar",
+    endpointUrl: microsoftMcpEndpointUrl("outlook-calendar"),
+    getState: (identity: Identity) => getMicrosoftMcpIntegrationState("outlook-calendar", identity),
+    loadConnection: (input: Parameters<typeof loadMicrosoftMcpWorkerConnection>[1]) =>
+      loadMicrosoftMcpWorkerConnection("outlook-calendar", input),
   },
   "google-admin": {
     provider: "google_admin",
@@ -539,6 +559,11 @@ function bindRegistration(
     loadConnection = (input) =>
       loadConvexMcpWorkerConnection({ ...input, registrationId: record.id });
     server = { ...record.server, url: convexMcpRuntimeEndpointUrl() };
+  } else if (record.pluginName === "outlook" || record.pluginName === "outlook-calendar") {
+    const provider = record.pluginName;
+    loadConnection = (input) =>
+      loadMicrosoftMcpWorkerConnection(provider, { ...input, registrationId: record.id });
+    server = { ...record.server, url: microsoftMcpRuntimeEndpointUrl(provider) };
   } else if (record.pluginName === "google-admin") {
     loadConnection = (input) =>
       loadGoogleAdminMcpWorkerConnection({ ...input, registrationId: record.id });

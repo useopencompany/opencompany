@@ -8,6 +8,8 @@ export type ActionProviderId =
   | "gmail"
   | "google_admin"
   | "google_calendar"
+  | "outlook"
+  | "outlook-calendar"
   | "google_drive"
   | "granola"
   | "linear"

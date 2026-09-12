@@ -17,16 +17,18 @@ import artifact13 from "./latitude.json";
 import artifact14 from "./linear.json";
 import artifact15 from "./neon.json";
 import artifact16 from "./notion.json";
-import artifact17 from "./posthog.json";
-import artifact19 from "./render.json";
-import artifact18 from "./resend.json";
-import artifact21 from "./signoz.json";
-import artifact22 from "./slack.json";
-import artifact24 from "./stripe.json";
-import artifact23 from "./supabase.json";
-import artifact20 from "./vercel.json";
-import artifact25 from "./x.json";
-import artifact26 from "./yc-advise.json";
+import artifact17 from "./outlook.json";
+import artifact18 from "./outlook-calendar.json";
+import artifact19 from "./posthog.json";
+import artifact21 from "./render.json";
+import artifact20 from "./resend.json";
+import artifact23 from "./signoz.json";
+import artifact24 from "./slack.json";
+import artifact26 from "./stripe.json";
+import artifact25 from "./supabase.json";
+import artifact22 from "./vercel.json";
+import artifact27 from "./x.json";
+import artifact28 from "./yc-advise.json";
 
 export const OFFICIAL_PLUGIN_ARTIFACTS = {
   convex: artifact0,
@@ -46,14 +48,16 @@ export const OFFICIAL_PLUGIN_ARTIFACTS = {
   linear: artifact14,
   neon: artifact15,
   notion: artifact16,
-  posthog: artifact17,
-  resend: artifact18,
-  render: artifact19,
-  vercel: artifact20,
-  signoz: artifact21,
-  slack: artifact22,
-  supabase: artifact23,
-  stripe: artifact24,
-  x: artifact25,
-  "yc-advise": artifact26,
+  outlook: artifact17,
+  "outlook-calendar": artifact18,
+  posthog: artifact19,
+  resend: artifact20,
+  render: artifact21,
+  vercel: artifact22,
+  signoz: artifact23,
+  slack: artifact24,
+  supabase: artifact25,
+  stripe: artifact26,
+  x: artifact27,
+  "yc-advise": artifact28,
 };

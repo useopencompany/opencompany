@@ -30,6 +30,7 @@ export function integrationConnectionError(provider: string | null, reason: stri
       return `${name} requires provider approval before it can connect. It isn't available yet.`;
     case "github_user_denied":
     case "gmail_denied":
+    case "microsoft_denied":
     case "slack_denied":
     case "linear_denied":
     case "granola_denied":
@@ -75,6 +76,10 @@ function providerName(provider: string | null) {
       return "GitHub";
     case "gmail":
       return "Gmail";
+    case "outlook":
+      return "Outlook";
+    case "outlook-calendar":
+      return "Outlook Calendar";
     case "google_calendar":
       return "Google Calendar";
     case "google_drive":

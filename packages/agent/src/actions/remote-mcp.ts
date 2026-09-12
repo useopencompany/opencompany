@@ -599,8 +599,9 @@ function unwrapRemoteMcpResult(
   const joined = texts.join("\n");
   if (result.isError === true) {
     if (
-      (registration.connectionProvider === "google_calendar" ||
-        registration.connectionProvider === "google_admin") &&
+      ["google_admin", "google_calendar", "outlook", "outlook-calendar"].includes(
+        registration.connectionProvider,
+      ) &&
       isAuthExpiredMcpError(joined)
     ) {
       throw remoteAuthError(registration, "auth_expired");
