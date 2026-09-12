@@ -335,6 +335,47 @@ function promptResultEvent(
   };
 }
 
+// The values an adapter accepts for a config option are not fixed: they depend on the connected
+// account's entitlements and, for effort, on the model the session currently holds. Selecting a
+// model rewrites the option set outright — Claude drops the `effort` option entirely for Haiku.
+// Read what the adapter advertises, re-read it after every change, and only send a value the
+// adapter says it will take.
+type AdvertisedOption = { currentValue: string | null; values: string[] };
+
+// Ordered by strength so an unavailable level can degrade to the strongest one the model offers.
+const REASONING_EFFORT_LADDER = ["max", "xhigh", "high", "medium", "low"];
+
+function readAdvertisedOptions(response: Record<string, unknown> | null) {
+  const options = new Map<string, AdvertisedOption>();
+  const entries = Array.isArray(response?.configOptions) ? response.configOptions : [];
+  for (const entry of entries) {
+    const record = readRecord(entry);
+    const id = readString(record?.id);
+    if (!id) continue;
+    const raw = Array.isArray(record?.options) ? record.options : [];
+    const values = raw.flatMap((value) => {
+      const nested = readRecord(value);
+      const group = Array.isArray(nested?.options) ? nested.options : [nested];
+      return group.flatMap((candidate) => {
+        const option = readString(readRecord(candidate)?.value);
+        return option ? [option] : [];
+      });
+    });
+    options.set(id, { currentValue: readString(record?.currentValue), values });
+  }
+  return options;
+}
+
+// A model the account cannot run must fail loudly, but a reasoning effort it cannot run must not:
+// the turn is perfectly answerable at a level the model does offer.
+function degradeReasoningEffort(requested: string, advertised: AdvertisedOption) {
+  const from = REASONING_EFFORT_LADDER.indexOf(requested);
+  if (from < 0) return null;
+  return (
+    REASONING_EFFORT_LADDER.slice(from).find((value) => advertised.values.includes(value)) ?? null
+  );
+}
+
 async function configureSession(
   client: AcpJsonRpcClient,
   adapter: AcpEngineAdapter,
@@ -348,23 +389,28 @@ async function configureSession(
     redact: (value: string) => string;
   },
 ) {
-  const optionIds = new Set(
-    (Array.isArray(sessionResponse?.configOptions) ? sessionResponse.configOptions : []).flatMap(
-      (value) => {
-        const id = readString(readRecord(value)?.id);
-        return id ? [id] : [];
-      },
-    ),
-  );
+  let advertised = readAdvertisedOptions(sessionResponse);
   const config = adapter.configOptions;
+  if (config.model && input.model) {
+    const modelOption = advertised.get(config.model);
+    logger.info("ACP session advertised its selectable models", {
+      event: "opencompany.goat_acp_session_models",
+      engine: adapter.id,
+      requested_model: input.model,
+      current_model: modelOption?.currentValue ?? null,
+      advertised_models: modelOption?.values ?? [],
+    });
+  }
+  // Model first: it decides which effort levels the session then advertises.
   const requested = [
-    { configId: config.model, value: input.model },
+    { configId: config.model, value: input.model, kind: "model" as const },
     {
       configId: config.reasoningEffort?.id,
       value:
         input.reasoningEffort && config.reasoningEffort
           ? config.reasoningEffort.value(input.reasoningEffort)
           : null,
+      kind: "effort" as const,
     },
     {
       configId: config.permissionMode?.id,
@@ -372,6 +418,7 @@ async function configureSession(
         input.permissionMode && config.permissionMode
           ? config.permissionMode.values[input.permissionMode]
           : null,
+      kind: "setting" as const,
     },
     {
       configId: config.collaborationMode?.id,
@@ -379,16 +426,50 @@ async function configureSession(
         input.collaborationMode && config.collaborationMode
           ? config.collaborationMode.values[input.collaborationMode]
           : null,
+      kind: "setting" as const,
     },
   ];
   for (const option of requested) {
-    if (!option.configId || !option.value || !optionIds.has(option.configId)) continue;
+    if (!option.configId || !option.value) continue;
+    const current = advertised.get(option.configId);
+    if (!current) continue;
+    // `ANTHROPIC_MODEL` already places the session on the requested model, and the adapter reports
+    // it as `currentValue` even when it is not separately selectable. Re-asserting it buys nothing
+    // and rejects an out-of-picker model that the session is, in fact, already running.
+    if (current.currentValue === option.value) continue;
+    let value = option.value;
+    // An option that enumerates no values has not told us what it takes; only an explicit list
+    // that omits the value is evidence the adapter would reject it.
+    if (current.values.length > 0 && !current.values.includes(value)) {
+      if (option.kind === "effort") {
+        const degraded = degradeReasoningEffort(value, current);
+        if (!degraded) continue;
+        if (degraded !== value) {
+          logger.info("ACP session does not offer the requested reasoning effort; degrading", {
+            event: "opencompany.goat_acp_reasoning_effort_degraded",
+            engine: adapter.id,
+            requested: value,
+            applied: degraded,
+            advertised: current.values,
+          });
+        }
+        value = degraded;
+        if (current.currentValue === value) continue;
+      }
+      // Model and mode values are still sent verbatim when they are not listed: the adapter
+      // resolves friendly aliases ("claude-opus-5" -> "opus[1m]") that never appear as an option
+      // value. If it cannot, the rejection below names the option.
+    }
     try {
-      await client.requestBeforeExecution("session/set_config_option", {
-        sessionId,
-        configId: option.configId,
-        value: option.value,
-      });
+      const result = readRecord(
+        await client.requestBeforeExecution("session/set_config_option", {
+          sessionId,
+          configId: option.configId,
+          value,
+        }),
+      );
+      const refreshed = readAdvertisedOptions(result);
+      if (refreshed.size > 0) advertised = refreshed;
     } catch (error) {
       // The adapter resolves the requested model against the models the connected account can
       // actually run, so a catalog entry the account is not entitled to is rejected here — before
@@ -400,15 +481,16 @@ async function configureSession(
         event: "opencompany.goat_acp_config_option_rejected",
         engine: adapter.id,
         config_id: option.configId,
-        value: option.value,
+        value,
+        advertised: current.values,
         rpc_code: error.code,
         error: input.redact(error.message),
       });
       throw new AcpConfigOptionRejectedError({
         adapterName: adapter.displayName,
-        kind: option.configId === config.model ? "model" : "setting",
+        kind: option.kind === "model" ? "model" : "setting",
         configId: option.configId,
-        value: option.value,
+        value,
         cause: error,
       });
     }

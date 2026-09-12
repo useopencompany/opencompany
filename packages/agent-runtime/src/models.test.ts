@@ -79,15 +79,12 @@ describe("Claude Code model catalog", () => {
     expect(claudeCodeModelSupportsReasoningEffort("claude-fable-5")).toBe(true);
   });
 
-  // The Claude Code ACP adapter rejects `claude-fable-5-1` for the connected account, which fails
-  // the turn before the model runs. Fable 5.1 stays in AGENT_MODEL_CATALOG for gateway engines.
-  it("does not offer Fable 5.1 for sandbox execution", () => {
-    expect(CLAUDE_CODE_AGENT_MODEL_IDS).not.toContain("anthropic/claude-fable-5.1");
-    expect(isClaudeCodeModelId("anthropic/claude-fable-5.1")).toBe(false);
-    expect(claudeCodeCliModelNameForModelId("anthropic/claude-fable-5.1")).toBeNull();
-    expect(AGENT_MODEL_CATALOG.some((model) => model.id === "anthropic/claude-fable-5.1")).toBe(
-      true,
-    );
+  it("offers Fable 5.1 as an addition and maps its dotted id to the Claude CLI", () => {
+    expect(CLAUDE_CODE_AGENT_MODEL_IDS).toContain("anthropic/claude-fable-5.1");
+    expect(isClaudeCodeModelId("anthropic/claude-fable-5.1")).toBe(true);
+    expect(claudeCodeCliModelNameForModelId("anthropic/claude-fable-5.1")).toBe("claude-fable-5-1");
+    expect(claudeCodeModelSupportsReasoningEffort("anthropic/claude-fable-5.1")).toBe(true);
+    expect(claudeCodeModelSupportsReasoningEffort("claude-fable-5-1")).toBe(true);
   });
 
   it("exposes effort only for adaptive-reasoning models", () => {

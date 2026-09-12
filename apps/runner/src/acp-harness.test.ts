@@ -732,6 +732,125 @@ describe("AcpHarness", () => {
     expect(requests.find((request) => request.method === "session/new")).toBeUndefined();
   });
 
+  // `ANTHROPIC_MODEL` opens the session on the requested model, and the adapter reports it as the
+  // model option's currentValue even for an id that never appears in the selectable list. Setting
+  // it again is redundant and — for exactly those out-of-picker ids — fatal.
+  it("keeps a model the session already holds without re-asserting it", async () => {
+    const transport = fakeAcpSandbox(async (message, emit) => {
+      if (message.method === "initialize") {
+        await emit({ jsonrpc: "2.0", id: message.id, result: { agentCapabilities: {} } });
+      } else if (message.method === "session/new") {
+        await emit({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: {
+            sessionId: "claude_session",
+            configOptions: [
+              {
+                id: "model",
+                currentValue: "claude-fable-5-1",
+                options: [{ value: "default" }, { value: "opus[1m]" }, { value: "sonnet" }],
+              },
+              { id: "effort", currentValue: "default", options: [{ value: "high" }] },
+              { id: "mode", currentValue: "default", options: [{ value: "bypassPermissions" }] },
+            ],
+          },
+        });
+      } else if (message.method === "session/set_config_option") {
+        await emit({ jsonrpc: "2.0", id: message.id, result: { configOptions: [] } });
+      } else if (message.method === "session/prompt") {
+        await emit({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
+      }
+    });
+
+    await new AcpHarness().runTurn(
+      harnessInput(transport.sandbox, {
+        model: "claude-fable-5-1",
+        reasoningEffort: "high",
+        permissionMode: "bypassPermissions",
+      }),
+    );
+
+    const configured = transport.requests
+      .filter((request) => request.method === "session/set_config_option")
+      .map((request) => (request.params as { configId: string; value: string }).configId);
+    expect(configured).not.toContain("model");
+    expect(configured).toContain("mode");
+    expect(transport.requests.some((request) => request.method === "session/prompt")).toBe(true);
+  });
+
+  // Selecting a model rewrites the option set: Claude drops `effort` for Haiku and publishes a
+  // different ladder per model. A reasoning-effort preference the model cannot honour must never
+  // cost the user the turn, so it degrades to the strongest level the model does offer.
+  it("degrades a reasoning effort the selected model does not advertise", async () => {
+    const transport = fakeAcpSandbox(async (message, emit) => {
+      if (message.method === "initialize") {
+        await emit({ jsonrpc: "2.0", id: message.id, result: { agentCapabilities: {} } });
+      } else if (message.method === "session/new") {
+        await emit({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: {
+            sessionId: "claude_session",
+            configOptions: [
+              { id: "model", currentValue: "sonnet", options: [{ value: "claude-fable-5-1" }] },
+              {
+                id: "effort",
+                currentValue: "default",
+                options: [
+                  { value: "low" },
+                  { value: "medium" },
+                  { value: "high" },
+                  { value: "max" },
+                ],
+              },
+            ],
+          },
+        });
+      } else if (message.method === "session/set_config_option") {
+        const params = message.params as { configId: string; value: string };
+        if (params.configId === "model") {
+          // The model switch narrows the ladder: "max" is gone once Fable 5.1 is selected.
+          await emit({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: {
+              configOptions: [
+                {
+                  id: "model",
+                  currentValue: "claude-fable-5-1",
+                  options: [{ value: "claude-fable-5-1" }],
+                },
+                {
+                  id: "effort",
+                  currentValue: "default",
+                  options: [{ value: "low" }, { value: "medium" }, { value: "high" }],
+                },
+              ],
+            },
+          });
+          return;
+        }
+        await emit({ jsonrpc: "2.0", id: message.id, result: { configOptions: [] } });
+      } else if (message.method === "session/prompt") {
+        await emit({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
+      }
+    });
+
+    await new AcpHarness().runTurn(
+      harnessInput(transport.sandbox, { model: "claude-fable-5-1", reasoningEffort: "xhigh" }),
+    );
+
+    const configured = transport.requests
+      .filter((request) => request.method === "session/set_config_option")
+      .map((request) => request.params as { configId: string; value: string });
+    expect(configured).toEqual([
+      { sessionId: "claude_session", configId: "model", value: "claude-fable-5-1" },
+      { sessionId: "claude_session", configId: "effort", value: "high" },
+    ]);
+    expect(transport.requests.some((request) => request.method === "session/prompt")).toBe(true);
+  });
+
   // The adapter answers a rejected config option with a bare `message: "Internal error"` and puts
   // the only description of the mismatch in `data.details`. Both the user notice and the failure
   // diagnostic are built from the error message, so the detail has to survive the transport.
