@@ -32,6 +32,9 @@ export type RunnerEnv = {
   previewProtocol?: "http" | "https" | undefined;
   exaApiKey: string | undefined;
   browserEnabled: boolean;
+  // Explicit opt-in for opencompany-engine subagents. Delegation multiplies model spend per turn,
+  // so it stays off until a deployment turns it on.
+  subagentsEnabled: boolean;
   // Google OAuth client, shared by the Gmail, Google Calendar, and Google Drive integrations. The runner
   // needs it to refresh per-account access tokens against Google's token endpoint.
   googleOAuthClientId?: string | undefined;
@@ -93,6 +96,7 @@ export function loadEnv(): RunnerEnv {
     previewProtocol: optionalPreviewProtocolEnv(),
     exaApiKey: optionalEnv("EXA_API_KEY"),
     browserEnabled: optionalBooleanEnv("RUNNER_OPENCOMPANY_BROWSER_ENABLED", false),
+    subagentsEnabled: optionalBooleanEnv("RUNNER_OPENCOMPANY_SUBAGENTS_ENABLED", false),
     googleOAuthClientId: optionalEnv("GOOGLE_OAUTH_CLIENT_ID"),
     googleOAuthClientSecret: optionalEnv("GOOGLE_OAUTH_CLIENT_SECRET"),
     hubspotOAuthClientId: optionalEnv("OPENCOMPANY_HUBSPOT_CLIENT_ID"),

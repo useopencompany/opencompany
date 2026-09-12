@@ -7,9 +7,12 @@ import {
   TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK,
 } from "@opencompany/agent/chat-agent";
 import type {
+  BrainToolInput,
   ChatUiMessage,
   StoredChatMessage,
+  WebFetchToolInput,
   WebFetchToolOutput,
+  WebSearchToolInput,
   WebSearchToolOutput,
 } from "@opencompany/agent/chat-ui";
 import {
@@ -25,6 +28,7 @@ import { executeChatExaSearch } from "@opencompany/agent/chat-web-search";
 import { guardKimiOutput } from "@opencompany/agent/kimi-output-guard";
 import { resolveProductLanguageModel } from "@opencompany/agent/language-model";
 import { createProductChatSystemPrompt } from "@opencompany/agent/prompts";
+import { createSubagentBudget } from "@opencompany/agent/subagent";
 import {
   AGENT_MODEL_CATALOG,
   CHAT_ARTIFACT_DATA_PART_TYPE,
@@ -88,6 +92,12 @@ import {
   compactProductChatContextIfNeeded,
 } from "./opencompany-context-compaction";
 import { attachHostSkillsToPrompt, loadHostTools } from "./opencompany-host-tools";
+import {
+  createSubagentRunner,
+  createSubagentTraceChannel,
+  replaceSubagentChildren,
+  type SubagentTraceChannel,
+} from "./opencompany-subagent";
 import { rowsFromExecute } from "./sql-exec";
 import {
   buildTaskTerminalProjection,
@@ -109,6 +119,10 @@ const logger = createLogger({
   service: "opencompany-runner",
   runtime: "goat-opencompany-chat",
 });
+
+// Main turn steps index from 0 and context compaction uses -1, so subagent usage rows start well
+// below both and descend.
+const SUBAGENT_USAGE_STEP_INDEX_BASE = -1_000;
 
 export function productChatGatewayProviderOptions(attribution: GatewayAttribution) {
   return gatewayProviderOptions(attribution, GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS);
@@ -242,6 +256,11 @@ export async function runProductChatTurn(input: {
     const storedUiMessages = storedMessages.map((message) => toChatUiMessage(message));
     const prelistedActionSourceIds = listedActionSourceIdsFromMessages(storedUiMessages);
     const prelistedSkillIds = listedSkillIdsFromMessages(storedUiMessages);
+    const subagentTrace = createSubagentTraceChannel();
+    // Subagent steps bill against this turn but are not turn steps. They take their own descending
+    // index so they never collide with a main step's subscription-covered idempotency key, and so
+    // they never become the "latest step" the context-window meter reads.
+    let subagentUsageStepIndex = SUBAGENT_USAGE_STEP_INDEX_BASE;
     const runtime = await resolveProductChatRuntime({
       turn,
       session,
@@ -250,6 +269,9 @@ export async function runProductChatTurn(input: {
       prelistedActionSourceIds,
       prelistedSkillIds,
       taskContext: input.taskContext,
+      subagentTrace,
+      recordSubagentUsage: (usage) =>
+        projector.recordStepUsage({ stepIndex: subagentUsageStepIndex--, usage }),
     });
     runtimeCleanup = runtime.cleanup;
     throwIfAborted(generationController.signal);
@@ -380,6 +402,7 @@ export async function runProductChatTurn(input: {
           : {}),
       },
       initialProjection: projection,
+      subagentTrace,
     });
     await abortWatcher.checkNow();
     const pendingApprovals = approvalDraftsFromProjection(projection);
@@ -494,6 +517,7 @@ export async function consumeProductChatStream(input: {
   presentationFlushIntervalMs?: number;
   now?: () => number;
   initialProjection?: ProductChatProjection;
+  subagentTrace?: SubagentTraceChannel;
 }): Promise<ProductChatProjection> {
   const parts: ProductChatUiPart[] = cloneParts(input.initialProjection?.parts ?? []);
   const textPartIndexes = new Map<string, number>();
@@ -558,6 +582,18 @@ export async function consumeProductChatStream(input: {
     parts[index] = part;
     dirty = true;
   };
+
+  // A subagent's trace arrives while the model stream is parked on its tool call, so nothing else
+  // will flush it. The channel writes the children straight into the parent's tool part and
+  // schedules its own throttled flush, which is what makes the nested trace live rather than
+  // appearing all at once when the subagent returns.
+  input.subagentTrace?.subscribe((update) => {
+    const next = replaceSubagentChildren(parts, update.parentToolCallId, update.children);
+    if (!next) return;
+    parts.splice(0, parts.length, ...next);
+    dirty = true;
+    void flush(false);
+  });
 
   try {
     for await (const value of input.fullStream) {
@@ -1153,6 +1189,8 @@ async function resolveProductChatRuntime(input: {
   prelistedActionSourceIds: readonly string[];
   prelistedSkillIds: readonly string[];
   taskContext?: TaskTurnContext | undefined;
+  subagentTrace: SubagentTraceChannel;
+  recordSubagentUsage: (usage: LanguageModelUsage) => Promise<void>;
 }) {
   const { turn, session, env, signal, prelistedActionSourceIds, prelistedSkillIds, taskContext } =
     input;
@@ -1223,22 +1261,67 @@ async function resolveProductChatRuntime(input: {
       })
     : null;
   const exaApiKey = env.exaApiKey?.trim();
+  // Hoisted out of the tool-context call so the subagent runner can reuse the same read-only
+  // runners rather than constructing a second set with different credentials or limits.
+  const runBrainCli = brain
+    ? (toolInput: BrainToolInput) =>
+        runTaskBrainRead({
+          brainRef: brain.id,
+          userWorkosId: turn.userWorkosId,
+          chatSessionId: session.chatSessionId,
+          gatewayApiKey: env.vercelAiGatewayApiKey,
+          toolInput,
+          db: getDb(),
+        })
+    : null;
+  const webSearch = exaApiKey
+    ? async (toolInput: WebSearchToolInput): Promise<WebSearchToolOutput> => {
+        try {
+          return await executeChatExaSearch({ toolInput, apiKey: exaApiKey, signal, currentDate });
+        } catch (error) {
+          return { ok: false, error: errorMessage(error) };
+        }
+      }
+    : null;
+  const webFetch = exaApiKey
+    ? async (toolInput: WebFetchToolInput): Promise<WebFetchToolOutput> => {
+        try {
+          return await executeChatExaFetch({ toolInput, apiKey: exaApiKey, signal });
+        } catch (error) {
+          return { ok: false, error: errorMessage(error) };
+        }
+      }
+    : null;
+
+  const subagentsEnabled = env.subagentsEnabled && !taskContext;
+  const subagentRunner = subagentsEnabled
+    ? createSubagentRunner({
+        model,
+        gatewayApiKey: env.vercelAiGatewayApiKey,
+        workspaceId,
+        userWorkosId: turn.userWorkosId,
+        chatSessionId: session.chatSessionId,
+        currentDate,
+        signal,
+        budget: createSubagentBudget({ signal }),
+        trace: input.subagentTrace,
+        recordUsage: input.recordSubagentUsage,
+        ...(brain ? { brainRef: brain.id } : {}),
+        runners: {
+          ...(runBrainCli ? { runBrainCli } : {}),
+          ...(hostTools?.runWiki ? { runWiki: hostTools.runWiki as never } : {}),
+          ...(webSearch ? { webSearch } : {}),
+          ...(webFetch ? { webFetch } : {}),
+          ...(actionDispatcher ? { actions: actionDispatcher } : {}),
+          ...(hostTools?.skills ? { skills: hostTools.skills } : {}),
+        },
+      })
+    : null;
+
   const toolContext = createProductChatToolContext({
     model,
     latestUserMessage: turn.prompt,
-    ...(brain
-      ? {
-          runBrainCli: (toolInput) =>
-            runTaskBrainRead({
-              brainRef: brain.id,
-              userWorkosId: turn.userWorkosId,
-              chatSessionId: session.chatSessionId,
-              gatewayApiKey: env.vercelAiGatewayApiKey,
-              toolInput,
-              db: getDb(),
-            }),
-        }
-      : {}),
+    ...(runBrainCli ? { runBrainCli } : {}),
     ...(brainCapture ? { saveToBrain: brainCapture } : {}),
     ...(hostTools?.startTask ? { startTask: hostTools.startTask } : {}),
     ...(hostTools?.scheduleTask ? { scheduleTask: hostTools.scheduleTask } : {}),
@@ -1255,39 +1338,9 @@ async function resolveProductChatRuntime(input: {
     ...(hostTools?.browserProfiles ? { browserProfiles: hostTools.browserProfiles } : {}),
     ...(hostTools?.skills ? { skills: hostTools.skills } : {}),
     ...(hostTools?.workflows ? { workflows: hostTools.workflows } : {}),
-    ...(exaApiKey
-      ? {
-          webSearch: async (toolInput): Promise<WebSearchToolOutput> => {
-            try {
-              return await executeChatExaSearch({
-                toolInput,
-                apiKey: exaApiKey,
-                signal,
-                currentDate,
-              });
-            } catch (error) {
-              return {
-                ok: false,
-                error: errorMessage(error),
-              };
-            }
-          },
-          webFetch: async (toolInput): Promise<WebFetchToolOutput> => {
-            try {
-              return await executeChatExaFetch({
-                toolInput,
-                apiKey: exaApiKey,
-                signal,
-              });
-            } catch (error) {
-              return {
-                ok: false,
-                error: errorMessage(error),
-              };
-            }
-          },
-        }
-      : {}),
+    ...(webSearch ? { webSearch } : {}),
+    ...(webFetch ? { webFetch } : {}),
+    ...(subagentRunner ? { runSubagent: subagentRunner } : {}),
     ...(actionDispatcher ? { actions: actionDispatcher } : {}),
     ...(taskContext
       ? {
@@ -1307,6 +1360,7 @@ async function resolveProductChatRuntime(input: {
     scheduleToolsEnabled: Boolean(hostTools?.bootstrap.taskToolsEnabled),
     wikiToolEnabled: Boolean(hostTools?.runWiki),
     artifactToolEnabled: Boolean(hostTools?.writeArtifact),
+    subagentsEnabled: Boolean(subagentRunner),
     activeBrain: brain
       ? {
           name: brain.name,
