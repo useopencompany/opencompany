@@ -28,7 +28,13 @@ comma-separated exact `AGENT_MODEL_CATALOG` IDs. `--scenarios` accepts comma-sep
 `tag:<tag>` selectors. `--variant` accepts v4, v5, or both. Other catalog models are opt-in.
 
 Providers are pinned with `providerOptions.gateway.only`, using the model's native provider
-(and DeepInfra for Meta); an unavailable pinned route fails instead of silently falling back.
+(and DeepInfra for Meta and DeepSeek V4 Flash); an unavailable pinned route fails instead of
+silently falling back. Qwen 3.8 Max uses Alibaba. For example:
+
+```sh
+bun run bench --scenarios linear-file-issue,linear-ambiguous-update --models deepseek/deepseek-v4-flash,alibaba/qwen3.8-max --k 4
+```
+
 See `providerFor()` when adding a model whose gateway provider differs from its ID prefix.
 The catalog's reasoning options and gateway auto caching are preserved. Benchmark output is
 capped at 4,096 tokens per model step, with no SDK retries; these controls are fingerprinted.
