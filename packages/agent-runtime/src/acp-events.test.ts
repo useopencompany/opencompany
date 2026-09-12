@@ -10,7 +10,7 @@ function update(value: Record<string, unknown>) {
 
 describe("createAcpEventNormalizer", () => {
   it("streams root assistant text and builds a terminal summary with usage", () => {
-    const normalizer = createAcpEventNormalizer();
+    const normalizer = createAcpEventNormalizer({ attemptScopeId: "scope_1" });
     normalizer.beginRun("session_1");
 
     expect(
@@ -24,7 +24,7 @@ describe("createAcpEventNormalizer", () => {
         }),
       ),
     ).toMatchObject([
-      { type: "assistant.delta", payload: { itemId: "acp-message-root", delta: "Hello" } },
+      { type: "assistant.delta", payload: { itemId: "acp-message-root-scope_1", delta: "Hello" } },
     ]);
     normalizer.normalize(
       update({
@@ -63,6 +63,42 @@ describe("createAcpEventNormalizer", () => {
       sessionId: "session_1",
       goal: null,
     });
+  });
+
+  it("scopes generated fallback item ids to the normalizer instance", () => {
+    // A recovered turn reuses its durable turn row but constructs a fresh normalizer whose
+    // counter restarts. Identical generated ids across attempts would collide with the first
+    // attempt's persisted (turn_id, event_key) rows and drop the recovery's new output.
+    const attemptItemIds = () => {
+      const normalizer = createAcpEventNormalizer();
+      normalizer.beginRun("session_1");
+      const thought = (text: string) =>
+        normalizer.normalize(
+          update({ sessionUpdate: "agent_thought_chunk", content: { type: "text", text } }),
+        );
+      const message = (text: string) =>
+        normalizer.normalize(
+          update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text } }),
+        );
+      const events = [
+        ...thought("Inspecting."),
+        ...thought("Resuming."),
+        ...message("Partial"),
+        ...message(" answer"),
+      ];
+      return events.map((event) => event.payload.itemId as string);
+    };
+
+    const firstAttempt = attemptItemIds();
+    const secondAttempt = attemptItemIds();
+
+    // Stable within one attempt: distinct thoughts get distinct ids, both root chunks share one.
+    expect(firstAttempt[0]).not.toBe(firstAttempt[1]);
+    expect(firstAttempt[2]).toBe(firstAttempt[3]);
+    // Unique across attempts: nothing the recovered attempt generates may replay an old key.
+    for (const itemId of secondAttempt) {
+      expect(firstAttempt).not.toContain(itemId);
+    }
   });
 
   it("accumulates usage across a repaired prompt in the same run", () => {
