@@ -118,6 +118,25 @@ describe("Subscription usage display", () => {
     visibility.mockRestore();
   });
 
+  it("polls Claude slowly because each read costs a real inference request", async () => {
+    vi.useFakeTimers();
+    vi.mocked(loadCurrentClaudeCodeUsage).mockResolvedValue({
+      ok: true,
+      usage: { windows: [], updatedAt: new Date().toISOString() },
+    });
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    render(<SubscriptionUsage provider="claude_code" />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(240_000);
+    });
+    expect(loadCurrentClaudeCodeUsage).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(loadCurrentClaudeCodeUsage).toHaveBeenCalledTimes(2);
+    visibility.mockRestore();
+  });
+
   it("ignores a late response after changing connections", async () => {
     let resolve!: (value: Awaited<ReturnType<typeof loadCurrentCodexUsage>>) => void;
     vi.mocked(loadCurrentCodexUsage).mockReturnValueOnce(

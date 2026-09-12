@@ -6,8 +6,9 @@ the equivalent Codex card described in [Codex subscription routing](./codex-subs
 These are account-wide readings, including usage outside opencompany; they are not workspace
 billing or local cost estimates.
 
-Usage is fetched on opening the card, every minute while the tab is visible, and on manual
-refresh. A failed refresh retains the last successful reading with an error; missing windows
+Usage is fetched on opening the card, every five minutes while the tab is visible, and on
+manual refresh. Each read costs a real inference request against the windows it displays, so
+it polls far slower than the Codex card's free usage endpoint. A failed refresh retains the last successful reading with an error; missing windows
 are unavailable, never interpreted as unused allowance. Passed reset times require a fresh
 reading before showing restored allowance.
 
@@ -27,10 +28,17 @@ becomes a window, so model-scoped limits appear without a code change when Anthr
 them. The probe's own cost against the subscription is negligible, but it is a real request:
 the route is limited to six refreshes per minute per actor and times out.
 
+The probe carries the Claude Code system block. Subscription tokens are only accepted for
+inference when the request identifies itself that way, which the CLI supplies for every other
+use of this credential.
+
 A rate-limited (`429`) response still carries the windows, and that reading is exactly what
 the user opened the card for, so headers are read before the response status is considered.
-Only a response with no readable windows is turned into an error. Like the Codex card, a
-failed read must not disconnect an otherwise valid subscription.
+A response that reports windows none of which can be read is an error, not an account
+without limits: telling a subscriber their allowance is unlimited is worse than showing a
+refresh failure. Only a response that reports no windows at all is an account without a
+subscription. Like the Codex card, a failed read must not disconnect an otherwise valid
+subscription.
 
 Responses carry private, non-cacheable headers and contain only normalized windows and a
 timestamp — never credentials.

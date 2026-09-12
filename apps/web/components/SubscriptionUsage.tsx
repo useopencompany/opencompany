@@ -14,11 +14,17 @@ const PROVIDERS = {
     name: "Codex",
     load: loadCurrentCodexUsage,
     barClassName: "bg-[#2b8d98]",
+    refreshMs: 60_000,
   },
   claude_code: {
     name: "Claude",
     load: loadCurrentClaudeCodeUsage,
     barClassName: "bg-[#CC785C]",
+    // Reading Claude usage costs a real inference request that counts against the
+    // windows being shown, so it polls far slower than Codex's free usage endpoint.
+    // Five-hour and weekly windows do not move fast enough to need a closer look,
+    // and the refresh control is there when they do.
+    refreshMs: 300_000,
   },
 } as const satisfies Record<
   UsageProvider,
@@ -28,11 +34,12 @@ const PROVIDERS = {
       { ok: true; usage: SubscriptionUsageSnapshot } | { ok: false; error: string }
     >;
     barClassName: string;
+    refreshMs: number;
   }
 >;
 
 export function SubscriptionUsage({ provider }: { provider: UsageProvider }) {
-  const { name, load, barClassName } = PROVIDERS[provider];
+  const { name, load, barClassName, refreshMs } = PROVIDERS[provider];
   const [usage, setUsage] = useState<SubscriptionUsageSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -69,9 +76,9 @@ export function SubscriptionUsage({ provider }: { provider: UsageProvider }) {
       setNow(Date.now());
       setLoading(true);
       setRefresh((value) => value + 1);
-    }, 60_000);
+    }, refreshMs);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [refreshMs]);
 
   return (
     <div

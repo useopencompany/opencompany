@@ -91,7 +91,25 @@ describe("Claude Code subscription usage", () => {
     expect(result.windows[0]).toMatchObject({ id: "claude-code:5h", usedPercent: 100 });
   });
 
-  it("drops a window whose reset time is unreadable rather than showing it as unused", async () => {
+  it("identifies itself as Claude Code so a subscription token is accepted", async () => {
+    let body: string | undefined;
+    const fetchImpl = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      body = String(init?.body);
+      return new Response(null, { status: 200, headers });
+    });
+    await fetchClaudeCodeUsage({
+      db: dbStub,
+      userWorkosId: "user_1",
+      fetchImpl: fetchImpl as never,
+    });
+    expect(JSON.parse(String(body))).toMatchObject({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 1,
+      system: [{ type: "text", text: "You are Claude Code, Anthropic's official CLI for Claude." }],
+    });
+  });
+
+  it("errors rather than claiming no limits when a reported window cannot be read", async () => {
     const fetchImpl = vi.fn(
       async () =>
         new Response(null, {
@@ -99,6 +117,25 @@ describe("Claude Code subscription usage", () => {
           headers: { "anthropic-ratelimit-unified-5h-utilization": "0.2" },
         }),
     );
+    await expect(
+      fetchClaudeCodeUsage({ db: dbStub, userWorkosId: "user_1", fetchImpl }),
+    ).rejects.toMatchObject({ kind: "backend_error", statusCode: 502 });
+  });
+
+  it("does not read a blank utilization header as a fully unused window", async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(null, {
+          status: 200,
+          headers: { ...headers, "anthropic-ratelimit-unified-5h-utilization": "  " },
+        }),
+    );
+    const result = await fetchClaudeCodeUsage({ db: dbStub, userWorkosId: "user_1", fetchImpl });
+    expect(result.windows.map((window) => window.id)).toEqual(["claude-code:7d"]);
+  });
+
+  it("reports no limits only when Anthropic reported no windows at all", async () => {
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 200 }));
     await expect(
       fetchClaudeCodeUsage({ db: dbStub, userWorkosId: "user_1", fetchImpl }),
     ).resolves.toEqual({ windows: [], updatedAt: expect.any(String) });
