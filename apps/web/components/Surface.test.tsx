@@ -2516,6 +2516,54 @@ describe("Surface chat streaming UI", () => {
     });
   });
 
+  it("selects Fable 5.1 from the Claude picker and submits it", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          sessionId: requestChatSessionId(init, "conversation_claude_fable_1"),
+          userMessageId: "message_claude_fable_user",
+          assistantMessageId: "message_claude_fable_assistant",
+          mode: "started",
+        }),
+        { status: 202, headers: { "Content-Type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} claudeCodeConnected />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByText("Cloud Claude Code sandbox"));
+    await user.click(screen.getByRole("button", { name: "Claude model: Claude Sonnet 5" }));
+    await user.click(screen.getByRole("option", { name: /Claude Fable 5\.1/ }));
+
+    expect(
+      screen.getByRole("button", { name: "Claude model: Claude Fable 5.1" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Claude reasoning effort: High (click to cycle)" }),
+    ).toBeInTheDocument();
+
+    await user.type(
+      screen.getByPlaceholderText("Ask opencompany anything..."),
+      "Inspect this repository",
+    );
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(chatMock.preparedRequestBodies.at(-1)).toMatchObject({
+      model: "anthropic/claude-fable-5.1",
+      engine: {
+        type: "claude_code",
+        schemaVersion: 1,
+        settings: { reasoningEffort: "high" },
+      },
+    });
+  });
+
   it("submits selected Skills to cloud Codex", async () => {
     const user = userEvent.setup();
     knowledgeCommandMocks.listSkillCatalog.mockResolvedValue([
