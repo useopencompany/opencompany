@@ -41,8 +41,10 @@ After applying migration `0238_codex_subscription_routing`:
 ## Subscription usage
 
 The personal Codex card in **Settings → Inference → Coding subscriptions** shows
-remaining allowance and reset times for the connected user's reported limit windows,
-including additional model limits when present. These are account-wide readings,
+remaining allowance and reset times for the connected user's plan limit windows. The
+per-model side quotas the backend also reports (Codex Spark and the like) are left out:
+they are rarely the binding constraint and read as noise next to the plan's own limits.
+These are account-wide readings,
 including usage outside opencompany; they are not workspace billing or local cost estimates.
 The shared model access card does not expose another teammate's personal usage.
 
