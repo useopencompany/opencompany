@@ -101,6 +101,7 @@ function target(actor: HistoryActor) {
     AND NOT EXISTS (SELECT 1 FROM goat.chat_session_shares share WHERE share.chat_session_id = s.id)`;
 }
 
+// Preserve PostgreSQL microseconds as text in cursors; JavaScript Dates are only millisecond-precise.
 export function createSessionHistoryStore(db: Executor = getDb()) {
   return {
     async canAccess(actor: HistoryActor) {
@@ -118,10 +119,12 @@ export function createSessionHistoryStore(db: Executor = getDb()) {
         await db.execute(sql`
         WITH allowed AS (${authorized(actor)})
         SELECT s.id, left(s.title, 200) AS title, s.engine, s.closed_at IS NOT NULL AS archived,
-          activity.at, activity.first_at, activity.message_count, activity.excerpt
+          activity.at, activity.cursor_at, activity.first_at, activity.message_count, activity.excerpt
         FROM goat.chat_sessions s
         JOIN LATERAL (
-          SELECT m.created_at AS at, min(m.created_at) OVER () AS first_at,
+          SELECT m.created_at AS at,
+            to_char(m.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_at,
+            min(m.created_at) OVER () AS first_at,
             count(*) OVER () AS message_count,
             substring(m.content FROM greatest(1, strpos(lower(m.content), lower(${params.query ?? ""})) - 100) FOR 400) AS excerpt
           FROM goat.chat_messages m
@@ -155,7 +158,7 @@ export function createSessionHistoryStore(db: Executor = getDb()) {
             ? encode({
                 key: cursorKey,
                 until: window.until,
-                at: iso(last.at),
+                at: String(last.cursor_at),
                 id: String(last.id),
                 offset: 0,
               })
@@ -181,7 +184,9 @@ export function createSessionHistoryStore(db: Executor = getDb()) {
             SELECT s.id, left(s.title, 200) AS title FROM goat.chat_sessions s
             WHERE s.id = ${request.sessionId} AND ${target(actor)} AND EXISTS (SELECT 1 FROM allowed)
           )
-          SELECT s.id AS session_id, s.title, m.id, m.role, m.created_at, m.updated_at,
+          SELECT s.id AS session_id, s.title, m.id, m.role, m.created_at,
+            to_char(m.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_at,
+            to_char(m.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_updated_at,
             length(m.content) AS total_chars,
             substring(m.content FROM CASE WHEN m.id = ${cursor?.id ?? null} THEN ${cursor?.offset ?? 0} + 1 ELSE 1 END FOR ${PAGE_CHARS + 1}) AS text,
             CASE WHEN jsonb_typeof(m.debug_trace->'toolCalls') = 'array' THEN jsonb_array_length(m.debug_trace->'toolCalls') ELSE 0 END AS tool_call_count
@@ -224,7 +229,7 @@ export function createSessionHistoryStore(db: Executor = getDb()) {
           const offset = cursor?.id === row.id ? cursor.offset : 0;
           if (
             cursor?.id === row.id &&
-            ((cursor.updatedAt && cursor.updatedAt !== iso(row.updated_at)) ||
+            ((cursor.updatedAt && cursor.updatedAt !== String(row.cursor_updated_at)) ||
               offset > Number(row.total_chars))
           ) {
             throw new ActionInvalidParamsError(
@@ -234,10 +239,10 @@ export function createSessionHistoryStore(db: Executor = getDb()) {
           const position = {
             key: cursorKey,
             until: window.until,
-            at: iso(row.created_at),
+            at: String(row.cursor_at),
             id: String(row.id),
             offset,
-            updatedAt: iso(row.updated_at),
+            updatedAt: String(row.cursor_updated_at),
           };
           if (remaining <= 0 || messages.length === PAGE_MESSAGES) {
             nextCursor = encode(position);

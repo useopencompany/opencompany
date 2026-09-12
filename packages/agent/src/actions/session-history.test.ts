@@ -105,6 +105,33 @@ describe("past session history", () => {
     expect(new Set(ids).size).toBe(65);
     expect(ids).toEqual([...ids].sort());
   });
+  it("preserves PostgreSQL microseconds in search and message cursors", async () => {
+    await db.exec(`UPDATE goat.chat_messages SET created_at='2026-09-04T12:00:00.123456Z' WHERE session_id='past';
+      UPDATE goat.chat_messages SET created_at='2026-09-04T12:00:00.123123Z' WHERE session_id='archived';`);
+    const first = await store.find(actor, { ...range, limit: 1 });
+    const second = await store.find(actor, { ...range, limit: 1, cursor: first.nextCursor });
+    expect(first.sessions.map((s) => s.sessionId)).toEqual(["past"]);
+    expect(second.sessions.map((s) => s.sessionId)).toEqual(["archived"]);
+    await db.exec(`DELETE FROM goat.chat_messages WHERE session_id='past';
+      INSERT INTO goat.chat_messages(id,session_id,content,created_at,updated_at)
+      SELECT 'precise_'||lpad((100-n)::text,3,'0'),'past','x',
+      '2026-09-04T12:00:00.123000Z'::timestamptz+n*interval '1 microsecond',
+      '2026-09-04T12:00:00.123456Z' FROM generate_series(1,65)n;`);
+    let cursor: string | undefined;
+    const ids: unknown[] = [];
+    do {
+      const page = await store.read(actor, {
+        ...range,
+        sessions: [{ sessionId: "past", ...(cursor ? { cursor } : {}) }],
+      });
+      ids.push(...page.sessions[0]!.messages.map((m) => m.messageId));
+      cursor = page.sessions[0]!.nextCursor ?? undefined;
+    } while (cursor);
+    expect(ids).toEqual(
+      Array.from({ length: 65 }, (_, i) => "precise_" + String(99 - i).padStart(3, "0")),
+    );
+  });
+
   it("rejects changed messages and cursors reused for another session, range or actor", async () => {
     await db.query("UPDATE goat.chat_messages SET content=$1 WHERE session_id='past'", [
       "x".repeat(12000),
