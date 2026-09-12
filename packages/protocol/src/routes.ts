@@ -67,6 +67,7 @@ import {
   CreateBrowserProfileBodySchema,
   CreateMessageBodySchema,
   CreateMessageEnvelopeSchema,
+  CreateProjectBodySchema,
   CreateTaskBodySchema,
   CreateTaskCommentBodySchema,
   CreateTaskCommentEnvelopeSchema,
@@ -131,7 +132,6 @@ import {
   ProjectBodySchema,
   ProjectConversationBodySchema,
   ProjectListEnvelopeSchema,
-  ProjectSchema,
   PublicChatShareEnvelopeSchema,
   PublicChatShareMetadataEnvelopeSchema,
   ReadModelSchema,
@@ -2008,7 +2008,7 @@ export const createProjectRoute = createRoute({
     body: {
       required: true,
       content: {
-        "application/json": { schema: ProjectSchema.pick({ id: true, name: true }) },
+        "application/json": { schema: CreateProjectBodySchema },
       },
     },
   },

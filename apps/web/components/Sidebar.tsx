@@ -47,6 +47,7 @@ import {
   draggedConversationId,
   isConversationDrag,
   SidebarProjects,
+  type SidebarRowDragProps,
   useSidebarProjects,
 } from "@/components/SidebarProjects";
 import { HOME_NAVIGATION_EVENT, requestChatComposerFocus } from "@/lib/chat-navigation";
@@ -568,6 +569,11 @@ function SidebarWorkList() {
     });
   };
 
+  // Nothing to drag a row into while Projects are off, and a draggable row changes native text
+  // selection, so the handlers only exist when the section does.
+  const rowDragProps = (conversationId: string): SidebarRowDragProps =>
+    projects.enabled ? conversationDragProps(conversationId) : {};
+
   const renderChatRow = (chat: ChatSummaryView) => {
     const href = chatHref(chat.id);
     const pinned = isPinned(chat);
@@ -590,6 +596,7 @@ function SidebarWorkList() {
         localState={localChatStates.get(chat.id) ?? null}
         pinned={pinned}
         pinning={pinningIds.has(chat.id)}
+        dragProps={optimistic ? {} : rowDragProps(chat.id)}
         onPrefetch={prefetchChat}
         onRequestComposerFocus={() => requestChatComposerFocus(chat.id)}
         onTogglePin={() => togglePin(chat.id, chat.title, pinned)}
@@ -608,6 +615,7 @@ function SidebarWorkList() {
         state={item.state}
         href={href}
         active={isTaskRouteActive(pathname, href)}
+        dragProps={rowDragProps(item.task.conversationId)}
         onArchive={() => archiveTask(item.task, href)}
       />
     );
@@ -616,10 +624,12 @@ function SidebarWorkList() {
   // A Project keeps what the reader filed there however old it is, so its rows resolve from the
   // full open set rather than the recency-bounded Recents selections. Recents rows take
   // precedence: they carry the optimistic summary of a chat whose first turn is still in flight.
-  const chatsById = new Map([...openChats, ...recentChats].map((chat) => [chat.id, chat] as const));
-  const tasksByConversation = new Map(
-    [...openSidebarTasks, ...sidebarTasks].map((task) => [task.conversationId, task] as const),
-  );
+  const chatsById = projects.enabled
+    ? new Map([...openChats, ...recentChats].map((chat) => [chat.id, chat] as const))
+    : new Map<string, ChatSummaryView>();
+  const tasksByConversation = projects.enabled
+    ? new Map([...openSidebarTasks, ...sidebarTasks].map((task) => [task.conversationId, task]))
+    : new Map<string, SidebarTaskView>();
   const projectItems = (project: { conversationIds: string[] }) => {
     const chats: ChatSummaryView[] = [];
     const tasks: SidebarTaskView[] = [];
@@ -645,6 +655,11 @@ function SidebarWorkList() {
 
   const pendingProjectId = pathname === "/" ? searchParams.get("project") : null;
   const hasRecents = pinnedChats.length > 0 || workItems.length > 0;
+  // The Recents header is the drop target that takes a row back out of a folder, so it has to
+  // stay on screen while any folder holds something -- otherwise filing the last loose chat
+  // leaves no way to unfile it.
+  const showRecents =
+    workItems.length > 0 || projects.projects.some((project) => project.conversationIds.length > 0);
 
   // Keep the footer pinned to the bottom when there is nothing to show.
   if (!projects.enabled && !hasRecents) {
@@ -670,7 +685,7 @@ function SidebarWorkList() {
           </nav>
         </div>
       ) : null}
-      {workItems.length > 0 ? (
+      {showRecents ? (
         <div>
           <button
             type="button"
@@ -702,7 +717,15 @@ function SidebarWorkList() {
           </button>
           {recentsCollapsed ? null : (
             <nav id={RECENTS_LIST_ID} aria-label="Recents" className="flex flex-col gap-px px-2">
-              {workItems.map(renderRow)}
+              {workItems.length === 0 ? (
+                // Everything loose has been filed. The header is still the target for dragging a
+                // row back out, so say what it is for rather than leaving it looking broken.
+                <p className="px-2 py-[5px] text-[12.5px] leading-4 text-ink-faint">
+                  Drag a chat here to take it out of a project.
+                </p>
+              ) : (
+                workItems.map(renderRow)
+              )}
             </nav>
           )}
         </div>
@@ -733,6 +756,7 @@ function SidebarChatRow({
   localState,
   pinned,
   pinning,
+  dragProps,
   onPrefetch,
   onRequestComposerFocus,
   onTogglePin,
@@ -745,6 +769,9 @@ function SidebarChatRow({
   localState: ReturnType<typeof chatSummaryState> | null;
   pinned: boolean;
   pinning: boolean;
+  // Lets the row be dragged into a sidebar Project. Empty when Projects are off, and for a chat
+  // whose first turn has not landed yet: there is no conversation to file.
+  dragProps: SidebarRowDragProps;
   onPrefetch: () => void;
   onRequestComposerFocus: () => void;
   onTogglePin: () => void;
@@ -759,9 +786,7 @@ function SidebarChatRow({
   );
   return (
     <div
-      // Draggable so the row can be filed into a sidebar Project. A chat whose first turn has not
-      // landed yet has no row to move, so it stays put until it does.
-      {...(optimistic ? {} : conversationDragProps(chat.id))}
+      {...dragProps}
       className={`group flex items-center rounded-md text-[13px] transition-colors duration-150 ${
         active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
       }`}
@@ -854,19 +879,21 @@ function SidebarTaskRow({
   state,
   href,
   active,
+  dragProps,
   onArchive,
 }: {
   task: SidebarTaskView;
   state: ReturnType<typeof chatSummaryState>;
   href: string;
   active: boolean;
+  // Keyed by the conversation behind the Task, the same key a Project stores for a chat.
+  dragProps: SidebarRowDragProps;
   onArchive: () => void;
 }) {
   const archivable = isSettledTaskStatus(task.status);
   return (
     <div
-      // Filed by the conversation behind the Task, the same key a Project stores for a chat.
-      {...conversationDragProps(task.conversationId)}
+      {...dragProps}
       className={`group flex items-center rounded-md text-[13px] transition-colors duration-150 ${
         active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
       }`}

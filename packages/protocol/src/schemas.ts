@@ -4730,6 +4730,7 @@ export const BotListEnvelopeSchema = z
 export type SetSkillScopeBody = z.infer<typeof SetSkillScopeBodySchema>;
 
 export const ProjectBodySchema = z.object({ name: z.string().trim().min(1).max(80) }).strict();
+export const CreateProjectBodySchema = ProjectBodySchema.extend({ id: ResourceIdSchema }).strict();
 export const ProjectSchema = z
   .object({
     id: ResourceIdSchema,
@@ -4741,9 +4742,6 @@ export const ProjectSchema = z
   })
   .strict()
   .openapi("Project");
-export const ProjectEnvelopeSchema = z
-  .object({ data: ProjectSchema, meta: ProtocolMetadataSchema })
-  .strict();
 export const ProjectListEnvelopeSchema = z
   .object({ data: z.array(ProjectSchema), meta: ProtocolMetadataSchema })
   .strict();
@@ -4751,5 +4749,3 @@ export const ProjectConversationBodySchema = z
   .object({ conversationId: ResourceIdSchema })
   .strict();
 export type ProjectDto = z.infer<typeof ProjectSchema>;
-export type ProjectBody = z.infer<typeof ProjectBodySchema>;
-export type ProjectConversationBody = z.infer<typeof ProjectConversationBodySchema>;

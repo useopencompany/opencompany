@@ -15,7 +15,6 @@ import {
 import Link from "next/link";
 import {
   type DragEvent,
-  type FormEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -47,7 +46,12 @@ import type { SidebarWorkItem } from "@/lib/sidebar-items";
  */
 export const CONVERSATION_DRAG_TYPE = "application/x-opencompany-conversation";
 
-export function conversationDragProps(conversationId: string) {
+export type SidebarRowDragProps = {
+  draggable?: true;
+  onDragStart?: (event: DragEvent<HTMLElement>) => void;
+};
+
+export function conversationDragProps(conversationId: string): SidebarRowDragProps {
   return {
     draggable: true,
     onDragStart: (event: DragEvent<HTMLElement>) => {
@@ -262,10 +266,15 @@ export function SidebarProjects({
 
   if (!state.enabled) return null;
 
-  const submitNewProject = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  // Enter and clicking away both save, Escape discards: a half-typed name left behind by a stray
+  // click is worse than either.
+  const saveNewProject = async () => {
     const trimmed = name.trim();
-    if (!trimmed || saving) return;
+    if (saving) return;
+    if (!trimmed) {
+      setCreating(false);
+      return;
+    }
     setSaving(true);
     const created = await state.create(trimmed);
     setSaving(false);
@@ -290,7 +299,13 @@ export function SidebarProjects({
       </div>
 
       {creating ? (
-        <form onSubmit={submitNewProject} className="px-2 pb-1">
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void saveNewProject();
+          }}
+          className="px-2 pb-1"
+        >
           <label className="sr-only" htmlFor="new-project-name">
             Project name
           </label>
@@ -298,9 +313,7 @@ export function SidebarProjects({
             id="new-project-name"
             value={name}
             onChange={(event) => setName(event.target.value)}
-            onBlur={() => {
-              if (!name.trim()) setCreating(false);
-            }}
+            onBlur={() => void saveNewProject()}
             onKeyDown={(event) => {
               if (event.key !== "Escape") return;
               setName("");
@@ -347,6 +360,11 @@ export function SidebarProjects({
         ))}
       </div>
 
+      {state.loading && state.projects.length === 0 ? (
+        <p role="status" className="px-4 pb-1 text-[11.5px] leading-4 text-ink-faint">
+          Loading projects…
+        </p>
+      ) : null}
       {!state.loading && state.projects.length === 0 && !creating && !state.error ? (
         <p className="px-4 pb-1 text-[11.5px] leading-4 text-ink-faint">
           Group chats into a project to keep a thread of work together.
@@ -383,10 +401,13 @@ function ProjectFolder({
   const [draftName, setDraftName] = useState(project.name);
   const listId = `sidebar-project-${project.id}`;
 
-  const submitRename = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const saveRename = async () => {
     const trimmed = draftName.trim();
-    if (!trimmed) return;
+    if (!trimmed) {
+      setDraftName(project.name);
+      setRenaming(false);
+      return;
+    }
     if (trimmed !== project.name && !(await onRename(trimmed))) return;
     setRenaming(false);
   };
@@ -394,7 +415,13 @@ function ProjectFolder({
   return (
     <div>
       {renaming ? (
-        <form onSubmit={submitRename} className="py-0.5">
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void saveRename();
+          }}
+          className="py-0.5"
+        >
           <label className="sr-only" htmlFor={`${listId}-name`}>
             Project name
           </label>
@@ -402,6 +429,7 @@ function ProjectFolder({
             id={`${listId}-name`}
             value={draftName}
             onChange={(event) => setDraftName(event.target.value)}
+            onBlur={() => void saveRename()}
             onKeyDown={(event) => {
               if (event.key !== "Escape") return;
               setDraftName(project.name);

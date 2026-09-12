@@ -1333,7 +1333,13 @@ describe("Sidebar", () => {
           }),
         ).toBeInTheDocument(),
       );
-      expect(screen.queryByRole("navigation", { name: "Recents" })).toBeNull();
+      // Recents keeps its header as the target for dragging the row back out, and says so now
+      // that it holds nothing.
+      const recents = screen.getByRole("navigation", { name: "Recents" });
+      expect(within(recents).queryByRole("link")).toBeNull();
+      expect(
+        within(recents).getByText("Drag a chat here to take it out of a project."),
+      ).toBeInTheDocument();
     });
 
     it("returns a dropped chat to Recents", async () => {
@@ -1415,6 +1421,58 @@ describe("Sidebar", () => {
       );
       expect(within(projects).getByRole("button", { name: "Launch" }).parentElement).toHaveClass(
         "bg-surface-active",
+      );
+    });
+
+    it("renames a project when the reader clicks away from the field", async () => {
+      featureFlagsMock.sidebarProjects = true;
+      recentChatsMock.value = [chatRow("chat_a")];
+      projectsApiMock.listProjects.mockResolvedValue([project("project_1", "Launch", ["chat_a"])]);
+      projectsApiMock.renameProject.mockResolvedValue([
+        project("project_1", "Launch week", ["chat_a"]),
+      ]);
+
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+      const projects = await screen.findByRole("region", { name: "Projects" });
+
+      await userEvent.click(
+        within(projects).getByRole("button", { name: "Project options for Launch" }),
+      );
+      await userEvent.click(screen.getByRole("button", { name: "Rename" }));
+      const field = screen.getByLabelText("Project name");
+      await userEvent.clear(field);
+      await userEvent.type(field, "Launch week");
+      await act(async () => {
+        fireEvent.blur(field);
+      });
+
+      await waitFor(() =>
+        expect(projectsApiMock.renameProject).toHaveBeenCalledWith("project_1", "Launch week"),
+      );
+      expect(await screen.findByText("Launch week")).toBeInTheDocument();
+    });
+
+    it("deletes a project and returns its chats to Recents", async () => {
+      featureFlagsMock.sidebarProjects = true;
+      recentChatsMock.value = [chatRow("chat_a")];
+      projectsApiMock.listProjects.mockResolvedValue([project("project_1", "Launch", ["chat_a"])]);
+      projectsApiMock.deleteProject.mockResolvedValue([]);
+
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+      const projects = await screen.findByRole("region", { name: "Projects" });
+
+      await userEvent.click(
+        within(projects).getByRole("button", { name: "Project options for Launch" }),
+      );
+      await userEvent.click(screen.getByRole("button", { name: /Delete project/ }));
+
+      await waitFor(() => expect(projectsApiMock.deleteProject).toHaveBeenCalledWith("project_1"));
+      await waitFor(() =>
+        expect(
+          within(screen.getByRole("navigation", { name: "Recents" })).getByRole("link", {
+            name: "chat_a title",
+          }),
+        ).toBeInTheDocument(),
       );
     });
 

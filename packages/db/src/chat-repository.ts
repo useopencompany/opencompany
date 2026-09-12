@@ -2865,6 +2865,11 @@ function toPublicAttachment(attachment: ChatMessageAttachment): MessageAttachmen
   };
 }
 
+// Deliberately excludes projectId. This hash detects an Idempotency-Key reused for a different
+// command, and adding a field changes the hash of every message, not just filed ones: a send
+// reserved before a deploy and retried after it would fail as a conflict instead of replaying.
+// Reusing one key with a different project is not something a client can do anyway, because the
+// key is derived from a per-message id.
 function hashCommand(command: CreateMessageCommand) {
   return createHash("sha256")
     .update(
@@ -2879,7 +2884,6 @@ function hashCommand(command: CreateMessageCommand) {
         settings: command.settings ?? {},
         attachmentIds: command.attachmentIds ?? [],
         mentions: command.mentions ?? [],
-        projectId: command.projectId ?? null,
       }),
     )
     .digest("hex");

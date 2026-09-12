@@ -6,7 +6,7 @@ import {
 } from "@opencompany/core";
 import { chatSessions, projects, users, workspaceMembers } from "@opencompany/db/product-schema";
 import type { ProjectDto } from "@opencompany/protocol";
-import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import { ApiError } from "./errors";
 
 export type ProjectService = ReturnType<typeof createProjectService>;
@@ -176,7 +176,7 @@ export function createProjectService(input: { db: DbLike; now?: () => Date }) {
       // a conversation that has since moved somewhere else.
       const [removed] = await input.db
         .update(chatSessions)
-        .set({ projectId: sql`NULL` })
+        .set({ projectId: null })
         .where(
           and(
             eq(chatSessions.id, conversationId),
