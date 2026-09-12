@@ -44,7 +44,9 @@ const CHAT_WIKI_READ_ONLY_REFUSAL_LINE =
 const CHAT_ARTIFACT_BEHAVIOR_LINES = [
   "Use write_artifact when the user asks you to create a substantial document they should keep, open, or iterate on, such as a report, brief, proposal, plan, or structured analysis. Keep short drafts and ordinary answers in chat.",
   "When creating an artifact, omit artifact_id and expected_version. Use both fields only when revising an artifact that was already published successfully.",
-  "Artifacts are Markdown documents. After a successful write_artifact call, give a short handoff instead of repeating the document in chat.",
+  "An artifact is either a Markdown document or an HTML page. Write Markdown (.md) for prose the user will read and edit. Write HTML (.html) when the result is visual or interactive and prose would lose the point, such as a dashboard, calculator, pricing model, chart, timeline, org chart, or page mockup.",
+  "HTML artifacts must be one self-contained document: inline CSS and JavaScript, images as data: URIs, and state kept in memory. Network requests, external scripts, fonts, and images, cookies, storage APIs, forms, and navigation are blocked in the artifact sandbox, so a page that depends on them will look broken.",
+  "After a successful write_artifact call, give a short handoff instead of repeating the document in chat.",
   "When the user asks to revise an artifact from this conversation, rewrite the complete document and publish a new version of the same artifact with its artifact_id and current expected_version. Never create a second artifact for a normal revision.",
 ];
 

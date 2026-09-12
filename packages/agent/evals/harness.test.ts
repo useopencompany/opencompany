@@ -62,6 +62,28 @@ async function run(scenario: Scenario, generate: typeof generateText, budget = n
 }
 
 describe("real harness benchmark", () => {
+  it.each([
+    ["deepseek/deepseek-v4-flash", "deepinfra"],
+    ["alibaba/qwen3.8-max", "alibaba"],
+  ] as const)("pins %s to an available gateway provider", async (model, provider) => {
+    const script = scripted([[text("No changes made: unavailable.")]]);
+    const trial = await runTrial({
+      scenario: get("unavailable"),
+      model,
+      variant: "v5",
+      repeat: 0,
+      apiKey: "synthetic-key",
+      budget: new CostBudget(1),
+      catalog,
+      generate: (async (options) => {
+        expect(options.providerOptions?.gateway).toEqual({ only: [provider], caching: "auto" });
+        return script.generate(options);
+      }) as typeof generateText,
+    });
+    expect(trial.status).toBe("passed");
+    expect(trial.provider).toBe(provider);
+  });
+
   it("uses the production prompt and tool schemas, and fingerprints actual prompt changes", async () => {
     const seen: { system?: unknown; tools?: ToolSet } = {};
     const script = scripted([[text("No changes made: unavailable.")]]);

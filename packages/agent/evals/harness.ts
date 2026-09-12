@@ -38,6 +38,8 @@ export function scenarioFingerprint(scenario: Scenario): string {
   });
 }
 export function providerFor(model: string): string {
+  // Gateway has no native DeepSeek route for this model; pin a supported host.
+  if (model === "deepseek/deepseek-v4-flash") return "deepinfra";
   const prefix = model.split("/")[0]!;
   return (
     (
