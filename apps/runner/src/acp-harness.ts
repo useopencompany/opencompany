@@ -246,6 +246,7 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
         reasoningEffort: input.reasoningEffort,
         permissionMode: input.permissionMode,
         collaborationMode: input.collaborationMode,
+        redact: input.redact,
       });
       // session/load replays historical updates. Drain those (and any config notifications)
       // while projection is still disabled so a reclaimed turn only renders new output.
@@ -344,6 +345,7 @@ async function configureSession(
     reasoningEffort: string | null | undefined;
     permissionMode: "default" | "bypassPermissions" | undefined;
     collaborationMode: "default" | "plan" | undefined;
+    redact: (value: string) => string;
   },
 ) {
   const optionIds = new Set(
@@ -381,11 +383,35 @@ async function configureSession(
   ];
   for (const option of requested) {
     if (!option.configId || !option.value || !optionIds.has(option.configId)) continue;
-    await client.requestBeforeExecution("session/set_config_option", {
-      sessionId,
-      configId: option.configId,
-      value: option.value,
-    });
+    try {
+      await client.requestBeforeExecution("session/set_config_option", {
+        sessionId,
+        configId: option.configId,
+        value: option.value,
+      });
+    } catch (error) {
+      // The adapter resolves the requested model against the models the connected account can
+      // actually run, so a catalog entry the account is not entitled to is rejected here — before
+      // the model produces a single token. That is a deterministic configuration mismatch, not an
+      // engine fault: name the model and the option instead of letting a raw adapter string land
+      // in the user's turn notice.
+      if (!(error instanceof AcpRpcError)) throw error;
+      logger.warn("ACP adapter rejected a session config option", {
+        event: "opencompany.goat_acp_config_option_rejected",
+        engine: adapter.id,
+        config_id: option.configId,
+        value: option.value,
+        rpc_code: error.code,
+        error: input.redact(error.message),
+      });
+      throw new AcpConfigOptionRejectedError({
+        adapterName: adapter.displayName,
+        kind: option.configId === config.model ? "model" : "setting",
+        configId: option.configId,
+        value: option.value,
+        cause: error,
+      });
+    }
   }
 }
 
@@ -736,6 +762,7 @@ class AcpJsonRpcClient {
         new AcpRpcError(
           typeof error.code === "number" ? error.code : -32000,
           readString(error.message) ?? "ACP request failed.",
+          readString(readRecord(error.data)?.details),
         ),
       );
       return;
@@ -889,12 +916,46 @@ class AcpJsonRpcClient {
   }
 }
 
+// A session setting the adapter refuses is a deterministic configuration mismatch: retrying the
+// same turn, on any worker, rejects it again. It is terminal by construction, and its message is
+// what the user reads on the failed turn, so it names the setting rather than quoting the adapter.
+export class AcpConfigOptionRejectedError extends Error {
+  readonly configId: string;
+  readonly value: string;
+  override readonly cause: AcpRpcError;
+
+  constructor(input: {
+    adapterName: string;
+    kind: "model" | "setting";
+    configId: string;
+    value: string;
+    cause: AcpRpcError;
+  }) {
+    super(
+      input.kind === "model"
+        ? `${input.adapterName} cannot run "${input.value}" on the connected account. Pick a different model and send the message again.`
+        : `${input.adapterName} rejected the session setting "${input.configId}" (${input.value}).`,
+    );
+    this.name = "AcpConfigOptionRejectedError";
+    this.configId = input.configId;
+    this.value = input.value;
+    this.cause = input.cause;
+  }
+}
+
+// An adapter that throws a plain Error reports JSON-RPC `message: "Internal error"` and puts the
+// only description of what went wrong in `data.details`. Dropping `data` collapses every such
+// failure into an indistinguishable "Internal error" in the run record and in the user's turn
+// notice, so the detail is folded into the message the moment the response is read.
 class AcpRpcError extends Error {
-  constructor(
-    readonly code: number,
-    message: string,
-  ) {
-    super(message);
+  readonly code: number;
+  readonly details: string | null;
+
+  constructor(code: number, message: string, details?: string | null) {
+    const trimmedDetails = details?.trim() || null;
+    super(trimmedDetails ? `${message}: ${trimmedDetails}` : message);
+    this.code = code;
+    this.details = trimmedDetails;
     this.name = "AcpRpcError";
   }
 }

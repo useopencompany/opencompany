@@ -30,20 +30,15 @@ describe("opencompany model options", () => {
     expect(modelContextWindowTokens("anthropic/claude-opus-5")).toBe(1_000_000);
   });
 
-  it("offers Fable 5.1 in Claude Code sandboxes without adding it to main chat", () => {
-    expect(CLAUDE_CODE_MODELS).toContainEqual(
-      expect.objectContaining({
-        id: "anthropic/claude-fable-5.1",
-        label: "Claude Fable 5.1",
-        supportsImages: true,
-        supportsPdf: true,
-        supportsReasoning: true,
-      }),
+  // The Claude Code ACP adapter rejects `claude-fable-5-1` for the connected account, so the
+  // picker must not offer it: a selected turn fails before the model runs.
+  it("keeps Fable 5.1 out of the Claude Code picker and out of main chat", () => {
+    expect(CLAUDE_CODE_MODELS).not.toContainEqual(
+      expect.objectContaining({ id: "anthropic/claude-fable-5.1" }),
     );
     expect(normalizeConversationModel("claude_code", "anthropic/claude-fable-5.1")).toBe(
-      "anthropic/claude-fable-5.1",
+      CLAUDE_CODE_DEFAULT_MODEL_ID,
     );
-    expect(modelContextWindowTokens("anthropic/claude-fable-5.1")).toBe(1_000_000);
     expect(MODELS).not.toContainEqual(
       expect.objectContaining({ id: "anthropic/claude-fable-5.1" }),
     );

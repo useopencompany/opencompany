@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { CLAUDE_ACP_ENGINE_ADAPTER, CODEX_ACP_ENGINE_ADAPTER } from "./acp-engine-adapters";
 import {
   ACP_EMPTY_RESULT_REPAIR_PROMPT,
+  AcpConfigOptionRejectedError,
   AcpHarness,
   type AcpHarnessTurnInput,
 } from "./acp-harness";
@@ -729,6 +730,54 @@ describe("AcpHarness", () => {
     });
     expect(onExistingSessionInvalidated).not.toHaveBeenCalled();
     expect(requests.find((request) => request.method === "session/new")).toBeUndefined();
+  });
+
+  // The adapter answers a rejected config option with a bare `message: "Internal error"` and puts
+  // the only description of the mismatch in `data.details`. Both the user notice and the failure
+  // diagnostic are built from the error message, so the detail has to survive the transport.
+  it("fails a model the adapter cannot run without starting the prompt", async () => {
+    const transport = fakeAcpSandbox(async (message, emit) => {
+      if (message.method === "initialize") {
+        await emit({ jsonrpc: "2.0", id: message.id, result: { agentCapabilities: {} } });
+      } else if (message.method === "session/new") {
+        await emit({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: { sessionId: "claude_session", configOptions: [{ id: "model" }, { id: "mode" }] },
+        });
+      } else if (message.method === "session/set_config_option") {
+        await emit({
+          jsonrpc: "2.0",
+          id: message.id,
+          error: {
+            code: -32603,
+            message: "Internal error",
+            data: { details: "Invalid value for config option model: claude-fable-5-1" },
+          },
+        });
+      }
+    });
+
+    await expect(
+      new AcpHarness().runTurn(
+        harnessInput(transport.sandbox, {
+          model: "claude-fable-5-1",
+          permissionMode: "bypassPermissions",
+        }),
+      ),
+    ).rejects.toMatchObject({
+      name: AcpConfigOptionRejectedError.name,
+      configId: "model",
+      value: "claude-fable-5-1",
+      message:
+        'Claude Code cannot run "claude-fable-5-1" on the connected account. Pick a different model and send the message again.',
+      cause: {
+        name: "AcpRpcError",
+        code: -32603,
+        message: "Internal error: Invalid value for config option model: claude-fable-5-1",
+      },
+    });
+    expect(transport.requests.some((request) => request.method === "session/prompt")).toBe(false);
   });
 
   it("applies Codex configuration, goals, multimodal prompts, and elicitation", async () => {

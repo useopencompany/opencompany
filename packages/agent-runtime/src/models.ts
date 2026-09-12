@@ -96,11 +96,15 @@ export function codexCliModelNameForModelId(modelId: string): string | null {
 // Sonnet is the default because it is fully covered by Claude subscription limits on
 // every plan; larger tiers are gated behind usage credits on some plans.
 export const CLAUDE_CODE_DEFAULT_MODEL_ID: AgentModelId = "anthropic/claude-sonnet-5";
+// Claude Code runs models the connected Claude account is entitled to, not every model in
+// AGENT_MODEL_CATALOG: the ACP adapter resolves the requested id against that account's own
+// list and rejects anything missing from it, which kills the turn before the first token. Only
+// add an id here once a real Claude Code turn has run on it. Fable 5.1 is deliberately absent —
+// the adapter rejects `claude-fable-5-1` while `claude-fable-5` resolves.
 export const CLAUDE_CODE_AGENT_MODEL_IDS = [
   "anthropic/claude-sonnet-5",
   "anthropic/claude-opus-5",
   "anthropic/claude-opus-4.8",
-  "anthropic/claude-fable-5.1",
   "anthropic/claude-fable-5",
   "anthropic/claude-haiku-4.5",
 ] as const satisfies readonly AgentModelId[];
