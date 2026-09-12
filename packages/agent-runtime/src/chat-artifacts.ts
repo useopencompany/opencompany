@@ -8,7 +8,39 @@ export const PUBLISH_ARTIFACT_TOOL_DESCRIPTION =
   "Publish a finished file from the current sandbox into the chat as a durable user-visible file. Call this only for outputs the user should receive, not source files, repository diffs, logs, or temporary work.";
 
 export const WRITE_ARTIFACT_TOOL_DESCRIPTION =
-  "Create or revise a Markdown artifact in this chat. Use it for finished reports, briefs, plans, and other substantial documents the user should open and iterate on. Send the complete Markdown content on every call. For a new artifact, omit artifact_id and expected_version. To revise an existing artifact, reuse artifact_id and pass the version currently shown as expected_version.";
+  "Create or revise an artifact in this chat. Use a Markdown document (.md) for finished reports, briefs, plans, and other substantial writing, and a self-contained HTML page (.html) when the result is visual or interactive, such as a dashboard, calculator, timeline, diagram, or mockup. Send the complete file content on every call. HTML runs in a locked-down sandbox: put all CSS and JavaScript inline, embed images as data: URIs, and keep state in memory, because network requests, external resources, cookies, storage APIs, forms, and navigation are all blocked. For a new artifact, omit artifact_id and expected_version. To revise an existing artifact, reuse artifact_id and pass the version currently shown as expected_version.";
+
+export type WriteArtifactMediaType = "text/markdown" | "text/html";
+
+const WRITE_ARTIFACT_MEDIA_TYPE_BY_EXTENSION: Readonly<Record<string, WriteArtifactMediaType>> = {
+  ".md": "text/markdown",
+  ".html": "text/html",
+};
+
+/** Resolves the trusted media type for an in-band artifact filename, or null when unsupported. */
+export function writeArtifactMediaType(filename: string): WriteArtifactMediaType | null {
+  const dot = filename.lastIndexOf(".");
+  if (dot < 1) return null;
+  return WRITE_ARTIFACT_MEDIA_TYPE_BY_EXTENSION[filename.slice(dot).toLowerCase()] ?? null;
+}
+
+// Agent-authored HTML is untrusted: a prompt-injected page must not be able to read app state or
+// send anything anywhere. `sandbox` without `allow-same-origin` drops the document into an opaque
+// origin with no cookies, storage, or access to the embedding page, and `default-src 'none'` blocks
+// every fetch, XHR, WebSocket, and beacon, so the only permitted code and data are the bytes we
+// stored. Everything the page needs must therefore be inline.
+export const HTML_ARTIFACT_CONTENT_SECURITY_POLICY = [
+  "default-src 'none'",
+  "script-src 'unsafe-inline'",
+  "style-src 'unsafe-inline'",
+  "img-src data: blob:",
+  "font-src data:",
+  "media-src data: blob:",
+  "base-uri 'none'",
+  "form-action 'none'",
+  "frame-ancestors 'self'",
+  "sandbox allow-scripts",
+].join("; ");
 
 export const PUBLISH_ARTIFACT_INPUT_JSON_SCHEMA = {
   type: "object",
@@ -45,7 +77,8 @@ export const WRITE_ARTIFACT_INPUT_JSON_SCHEMA = {
   properties: {
     filename: {
       type: "string",
-      description: "A user-friendly Markdown filename ending in .md, without directory paths.",
+      description:
+        "A user-friendly filename without directory paths, ending in .md for a Markdown document or .html for a self-contained interactive page.",
     },
     title: {
       type: "string",
@@ -57,7 +90,8 @@ export const WRITE_ARTIFACT_INPUT_JSON_SCHEMA = {
     },
     content: {
       type: "string",
-      description: "The complete Markdown document content for this version.",
+      description:
+        "The complete file content for this version: Markdown for a .md filename, a full HTML document for a .html filename.",
     },
     artifact_id: {
       type: "string",

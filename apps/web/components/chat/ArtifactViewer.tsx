@@ -49,6 +49,21 @@ function ArtifactPreview({ artifact, href }: { artifact: PublishedChatArtifact; 
     );
   }
 
+  if (artifact.mediaType === "text/html") {
+    return (
+      <iframe
+        src={href}
+        title={`${artifact.title} preview`}
+        // Agent-authored HTML is untrusted. The response carries the hardened artifact policy;
+        // this attribute keeps the frame in an opaque origin even if that header is ever lost.
+        sandbox="allow-scripts"
+        referrerPolicy="no-referrer"
+        className="min-h-0 flex-1 bg-white"
+        data-testid="artifact-html-preview"
+      />
+    );
+  }
+
   if (isInlineMediaType(artifact.mediaType)) {
     return (
       <iframe

@@ -737,6 +737,7 @@ describe("createAcpEventNormalizer", () => {
         toolCall: {
           toolCallId: "command_1",
           title: "Run release command",
+          kind: "execute",
           rawInput: { command: "bun publish" },
         },
         options: [{ optionId: "allow_once", name: "Allow once", kind: "allow_once" }],
@@ -751,6 +752,33 @@ describe("createAcpEventNormalizer", () => {
         interactionId: "opencompany_acp_permission_1",
         title: "Run release command",
         action: "bun publish",
+        kind: "execute",
+      },
+    });
+  });
+
+  it("carries the paths a permission request would write to", () => {
+    const normalizer = createAcpEventNormalizer();
+    const [event] = normalizer.normalize({
+      id: 10,
+      interactionId: "opencompany_acp_permission_2",
+      method: "session/request_permission",
+      params: {
+        sessionId: "session_1",
+        toolCall: {
+          toolCallId: "edit_1",
+          title: "Edit apps/web/app/page.tsx",
+          kind: "edit",
+          locations: [{ path: "apps/web/app/page.tsx" }, { line: 4 }],
+        },
+      },
+    });
+
+    expect(event).toMatchObject({
+      type: "approval.requested",
+      payload: {
+        kind: "edit",
+        locations: [{ path: "apps/web/app/page.tsx" }],
       },
     });
   });
