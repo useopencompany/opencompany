@@ -47,10 +47,35 @@ describe("coding engine permission requests", () => {
     ).toMatchObject({
       kind: "files",
       source: "Files",
-      question: "Apply these file changes?",
+      question: "Apply this file change?",
       description: "Edit apps/web/components/Surface.tsx",
       code: null,
       paths: ["apps/web/components/Surface.tsx"],
+    });
+  });
+
+  it("counts the files it is asking about", () => {
+    const twoFiles = approvalPresentation({
+      label: "Approval",
+      action: "Edit",
+      kind: "edit",
+      locations: [{ path: "a.ts" }, { path: "b.ts" }],
+    });
+    expect(twoFiles.question).toBe("Apply these file changes?");
+    expect(
+      approvalPresentation({
+        label: "Approval",
+        action: "Read",
+        kind: "read",
+        locations: [{ path: "a.ts" }],
+      }).question,
+    ).toBe("Read this file?");
+  });
+
+  it("does not dress a generic tool call up as a terminal", () => {
+    expect(approvalPresentation({ label: "Approval", action: "Think" })).toMatchObject({
+      kind: "tool",
+      source: "Coding engine",
     });
   });
 

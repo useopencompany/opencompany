@@ -1,6 +1,6 @@
 "use client";
 
-import { CreditCard, FilePen, Globe, Plug, Terminal } from "lucide-react";
+import { CreditCard, FilePen, Globe, Plug, Terminal, Wrench } from "lucide-react";
 import type { ReactNode } from "react";
 import type { ApprovalKind, ApprovalPresentation } from "./approval-presentation";
 import {
@@ -22,6 +22,7 @@ const KIND_ICONS: Record<ApprovalKind, typeof Terminal> = {
   terminal: Terminal,
   files: FilePen,
   network: Globe,
+  tool: Wrench,
   integration: Plug,
   capability: CreditCard,
 };
@@ -94,9 +95,9 @@ export function ApprovalCard({
         ) : null}
         {presentation.paths.length > 0 ? (
           <ul className="mt-2 space-y-1">
-            {presentation.paths.map((path) => (
+            {presentation.paths.map((path, index) => (
               <li
-                key={path}
+                key={`${path}-${index}`}
                 title={path}
                 className="truncate rounded-md bg-surface-muted px-2 py-1 font-mono text-[11px] leading-4 text-ink/75"
               >
@@ -161,11 +162,12 @@ function ApprovalButton({
   onChoose: (choiceId: string) => void;
 }) {
   const busy = submitting === choice.id;
+  const disabled = choice.disabled || submitting !== null;
   return (
     <button
       type="button"
       {...(primary ? { [APPROVAL_PRIMARY_BUTTON_ATTRIBUTE]: "" } : {})}
-      disabled={choice.disabled || submitting !== null}
+      disabled={disabled}
       onClick={() => onChoose(choice.id)}
       className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-medium transition-colors disabled:opacity-50 ${
         primary
@@ -174,7 +176,7 @@ function ApprovalButton({
       }`}
     >
       {busy ? choice.busyLabel : choice.label}
-      {choice.hint && !busy ? (
+      {choice.hint && !disabled ? (
         // Only truthful once the card holds keyboard focus, which is exactly when the shortcut works.
         <kbd
           aria-hidden="true"

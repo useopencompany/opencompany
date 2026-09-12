@@ -334,7 +334,7 @@ function CapabilityApprovalCard({
                 ? `Allow for ${formatUsdMicros(quote.maxCostUsdMicros)}`
                 : "Loading price...",
           busyLabel: "Running...",
-          hint: "\u21b5",
+          hint: "↵",
           disabled: !approvalAvailable,
         },
       ]}
@@ -400,7 +400,7 @@ function ActionApprovalCard({
       id: "accept" satisfies ActionApprovalDecision,
       label: "Allow once",
       busyLabel: "Allowing...",
-      hint: "\u21b5",
+      hint: "↵",
       disabled: !approvalAvailable,
     },
   ];

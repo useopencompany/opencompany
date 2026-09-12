@@ -13,7 +13,7 @@ import {
 // same card. This module turns the very different tool inputs behind those requests into one
 // shape the card can render, so the decision always reads the same way.
 
-export type ApprovalKind = "terminal" | "files" | "network" | "integration" | "capability";
+export type ApprovalKind = "terminal" | "files" | "network" | "tool" | "integration" | "capability";
 
 export type ApprovalDetailLine = { label: string; value: string };
 
@@ -65,7 +65,7 @@ export function pendingApprovals(message: ChatUiMessage): PendingApproval[] {
  * carrying an `action`, so they are told apart by the fields only one of them has: gateway
  * actions always carry a `params` record, ACP permissions carry the engine's `title`/`rawInput`.
  */
-export function isCodingApprovalInput(input: unknown): boolean {
+function isCodingApprovalInput(input: unknown): boolean {
   if (!isRecord(input) || isRecord(input.params)) return false;
   return input.label === "Approval" || isRecord(input.rawInput) || typeof input.title === "string";
 }
@@ -86,7 +86,7 @@ function codingApprovalPresentation(input: Record<string, unknown>): ApprovalPre
   return {
     kind: CODING_KIND_PRESENTATION[kind].kind,
     source: CODING_KIND_PRESENTATION[kind].source,
-    question: CODING_KIND_PRESENTATION[kind].question,
+    question: CODING_KIND_PRESENTATION[kind].question(paths.length),
     description: title && title !== command ? title : null,
     code,
     paths,
@@ -100,15 +100,31 @@ type CodingApprovalToolKind = "execute" | "edit" | "delete" | "move" | "read" | 
 
 const CODING_KIND_PRESENTATION: Record<
   CodingApprovalToolKind,
-  { kind: ApprovalKind; source: string; question: string }
+  { kind: ApprovalKind; source: string; question: (pathCount: number) => string }
 > = {
-  execute: { kind: "terminal", source: "Terminal", question: "Run this command?" },
-  edit: { kind: "files", source: "Files", question: "Apply these file changes?" },
-  delete: { kind: "files", source: "Files", question: "Delete these files?" },
-  move: { kind: "files", source: "Files", question: "Move these files?" },
-  read: { kind: "files", source: "Files", question: "Read these files?" },
-  fetch: { kind: "network", source: "Network", question: "Fetch this from the web?" },
-  other: { kind: "terminal", source: "Coding engine", question: "Allow this tool call?" },
+  execute: { kind: "terminal", source: "Terminal", question: () => "Run this command?" },
+  edit: {
+    kind: "files",
+    source: "Files",
+    question: (count) => (count === 1 ? "Apply this file change?" : "Apply these file changes?"),
+  },
+  delete: {
+    kind: "files",
+    source: "Files",
+    question: (count) => (count === 1 ? "Delete this file?" : "Delete these files?"),
+  },
+  move: {
+    kind: "files",
+    source: "Files",
+    question: (count) => (count === 1 ? "Move this file?" : "Move these files?"),
+  },
+  read: {
+    kind: "files",
+    source: "Files",
+    question: (count) => (count === 1 ? "Read this file?" : "Read these files?"),
+  },
+  fetch: { kind: "network", source: "Network", question: () => "Fetch this from the web?" },
+  other: { kind: "tool", source: "Coding engine", question: () => "Allow this tool call?" },
 };
 
 /**
@@ -168,7 +184,7 @@ function emptyActionPresentation(source: string): ApprovalPresentation {
 }
 
 /** Reads "Linear" out of `plugin:linear:linear.create_issue` and "X" out of `x_account.post_tweet`. */
-export function actionSourceLabel(action: string): string {
+function actionSourceLabel(action: string): string {
   const slug = actionSourceSlug(action);
   if (!slug) return "Action";
   if (slug.startsWith("custom-")) return "Custom integration";
@@ -268,7 +284,7 @@ function truncateCode(value: string): string {
     : command;
 }
 
-export function formatEventWindow(start: unknown, end: unknown, timeZone: unknown): string | null {
+function formatEventWindow(start: unknown, end: unknown, timeZone: unknown): string | null {
   if (typeof start !== "string" || typeof end !== "string") return null;
   const allDay = /^\d{4}-\d{2}-\d{2}$/.test(start);
   if (allDay) {
