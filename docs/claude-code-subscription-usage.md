@@ -28,9 +28,13 @@ becomes a window, so model-scoped limits appear without a code change when Anthr
 them. The probe's own cost against the subscription is negligible, but it is a real request:
 the route is limited to six refreshes per minute per actor and times out.
 
-The probe carries the Claude Code system block. Subscription tokens are only accepted for
-inference when the request identifies itself that way, which the CLI supplies for every other
-use of this credential.
+The probe carries the Claude Code system block the CLI sends for every other use of this
+credential. Anthropic accepts the probe without it today; sending it keeps the one request
+opencompany makes on its own behalf shaped like the traffic the token was issued for.
+
+Both claims above were checked against a live connected account on 2026-09-12:
+`GET /api/oauth/usage` answered `403 OAuth token does not meet scope requirement user:profile`,
+and the probe returned the Session and Weekly windows.
 
 A rate-limited (`429`) response still carries the windows, and that reading is exactly what
 the user opened the card for, so headers are read before the response status is considered.

@@ -11,10 +11,10 @@ const ANTHROPIC_VERSION = "2023-06-01";
 // `anthropic-ratelimit-unified-*` response headers on any inference call, so the
 // cheapest possible completion is what we use to read them.
 //
-// Subscription tokens are only accepted for inference when the request identifies
-// itself as Claude Code, which is what the CLI supplies for every other use of this
-// credential (see apps/runner/src/claude-code-cli.ts). Without the system block the
-// request is rejected and no windows come back.
+// The system block matches what the CLI sends for every other use of this credential
+// (see apps/runner/src/claude-code-cli.ts). Anthropic accepts the probe without it
+// today; sending it keeps the one request opencompany makes on its own behalf shaped
+// like the Claude Code traffic the token was issued for.
 const PROBE_BODY = JSON.stringify({
   model: "claude-haiku-4-5-20251001",
   max_tokens: 1,
