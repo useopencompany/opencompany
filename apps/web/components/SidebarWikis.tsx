@@ -2,7 +2,7 @@
 
 import type { WikiDto } from "@opencompany/protocol";
 import { toast } from "@opencompany/ui/components/sonner";
-import { BookOpen, Plus } from "lucide-react";
+import { BookOpen, Plus, Settings2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { IntentPrefetchLink } from "@/components/IntentPrefetchLink";
 import {
@@ -10,6 +10,7 @@ import {
   SidebarSectionHeader,
   useCollapsedSidebarSection,
 } from "@/components/SidebarSection";
+import { WikiSettings } from "@/components/WikiSettings";
 import { wikiHref } from "@/lib/wiki-routes";
 import { createWiki, listWikis } from "@/lib/wikis";
 
@@ -85,16 +86,25 @@ export function useSidebarWikis() {
     }
   }, []);
 
-  return { wikis, loading, error, reload, create };
+  // A saved wiki replaces its row in place rather than triggering a reload, so a rename or an
+  // access change is reflected the moment the dialog closes.
+  const replace = useCallback((saved: WikiDto) => {
+    setWikis((current) => current.map((wiki) => (wiki.id === saved.id ? saved : wiki)));
+  }, []);
+
+  return { wikis, loading, error, reload, create, replace };
 }
 
 export function SidebarWikis({
   state,
   activeWikiSlug,
+  currentUserWorkosId,
 }: {
   state: SidebarWikisState;
   /** The wiki the reader is currently inside, so its row reads as the current page. */
   activeWikiSlug: string | null;
+  /** Used to tell "only me" apart from "me and the people I invited". */
+  currentUserWorkosId: string;
 }) {
   const {
     collapsed: sectionCollapsed,
@@ -104,6 +114,7 @@ export function SidebarWikis({
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
+  const [settingsFor, setSettingsFor] = useState<WikiDto | null>(null);
 
   // Enter and clicking away both save, Escape discards -- the same bargain the Projects "+" makes.
   const saveNewWiki = async () => {
@@ -193,7 +204,12 @@ export function SidebarWikis({
 
           <div className="flex flex-col gap-px px-2">
             {state.wikis.map((wiki) => (
-              <WikiRow key={wiki.id} wiki={wiki} active={activeWikiSlug === wiki.slug} />
+              <WikiRow
+                key={wiki.id}
+                wiki={wiki}
+                active={activeWikiSlug === wiki.slug}
+                onOpenSettings={() => setSettingsFor(wiki)}
+              />
             ))}
           </div>
 
@@ -209,26 +225,62 @@ export function SidebarWikis({
           ) : null}
         </div>
       )}
+
+      {settingsFor ? (
+        <WikiSettings
+          wiki={settingsFor}
+          currentUserWorkosId={currentUserWorkosId}
+          onClose={() => setSettingsFor(null)}
+          onSaved={state.replace}
+        />
+      ) : null}
     </section>
   );
 }
 
-function WikiRow({ wiki, active }: { wiki: WikiDto; active: boolean }) {
+function WikiRow({
+  wiki,
+  active,
+  onOpenSettings,
+}: {
+  wiki: WikiDto;
+  active: boolean;
+  onOpenSettings: () => void;
+}) {
   return (
-    <IntentPrefetchLink
-      href={wikiHref(wiki.slug)}
-      aria-current={active ? "page" : undefined}
-      className={`group flex w-full items-center gap-2 rounded-md px-2 py-[5px] text-left text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
-        active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
+    <div
+      className={`group/wiki flex items-center rounded-md pr-1 transition-colors duration-150 ${
+        active ? "bg-surface-active" : "hover:bg-surface-hover"
       }`}
     >
-      <BookOpen
-        size={14}
-        strokeWidth={1.75}
-        aria-hidden="true"
-        className={`shrink-0 ${active ? "text-ink" : "text-ink/60 group-hover:text-ink/80"}`}
-      />
-      <span className="truncate tracking-[-0.005em]">{wiki.name}</span>
-    </IntentPrefetchLink>
+      <IntentPrefetchLink
+        href={wikiHref(wiki.slug)}
+        aria-current={active ? "page" : undefined}
+        className={`flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-[5px] text-left text-[13px] focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+          active ? "text-ink" : "text-ink/90 group-hover/wiki:text-ink"
+        }`}
+      >
+        <BookOpen
+          size={14}
+          strokeWidth={1.75}
+          aria-hidden="true"
+          className={`shrink-0 ${active ? "text-ink" : "text-ink/60 group-hover/wiki:text-ink/80"}`}
+        />
+        <span className="truncate tracking-[-0.005em]">{wiki.name}</span>
+      </IntentPrefetchLink>
+      {/* Only an admin or the wiki's creator may change it, and the server decides which -- an
+          entry point anyone else could reach would only ever 403. */}
+      {wiki.canManage ? (
+        <button
+          type="button"
+          aria-label={`${wiki.name} settings`}
+          title="Wiki settings"
+          onClick={onOpenSettings}
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink/50 opacity-0 transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover/wiki:opacity-100 group-focus-within/wiki:opacity-100 pointer-coarse:opacity-100"
+        >
+          <Settings2 size={13} strokeWidth={2} />
+        </button>
+      ) : null}
+    </div>
   );
 }

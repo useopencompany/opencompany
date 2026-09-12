@@ -1,6 +1,13 @@
 "use client";
 
-import { type CreateWikiBody, createApiClient, type WikiDto } from "@opencompany/protocol";
+import {
+  type CreateWikiBody,
+  createApiClient,
+  type SetWikiAccessBody,
+  type UpdateWikiBody,
+  type WikiAccessDetailsDto,
+  type WikiDto,
+} from "@opencompany/protocol";
 import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "@/lib/headless-chat-api";
 
 function client() {
@@ -31,5 +38,30 @@ export async function createWiki(body: CreateWikiBody): Promise<WikiDto> {
   return data(
     await client().v1.wikis.$post({ json: body }),
     "The wiki could not be created. Please try again.",
+  );
+}
+
+export async function updateWiki(wikiId: string, body: UpdateWikiBody): Promise<WikiDto> {
+  return data(
+    await client().v1.wikis[":wikiId"].$patch({ param: { wikiId }, json: body }),
+    "The wiki could not be updated. Please try again.",
+  );
+}
+
+/** The wiki's access level, who is invited, and the workspace roster to pick from. */
+export async function getWikiAccess(wikiId: string): Promise<WikiAccessDetailsDto> {
+  return data(
+    await client().v1.wikis[":wikiId"].access.$get({ param: { wikiId } }),
+    "Wiki access could not be loaded.",
+  );
+}
+
+export async function setWikiAccess(
+  wikiId: string,
+  body: SetWikiAccessBody,
+): Promise<WikiAccessDetailsDto> {
+  return data(
+    await client().v1.wikis[":wikiId"].access.$put({ param: { wikiId }, json: body }),
+    "Wiki access could not be saved. Please try again.",
   );
 }

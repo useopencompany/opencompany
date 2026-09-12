@@ -85,6 +85,7 @@ import type { RepoConfigView, WorkspaceRepository } from "@/lib/repo-config-acti
 import {
   updateAutoModelRoutingAction,
   updateBotsAction,
+  updatePastSessionAccessAction,
   updateReviewInboxAction,
   updateSidebarProjectsAction,
   updateSubagentsAction,
@@ -263,6 +264,13 @@ export function PreferencesSettingsRoute() {
         <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
           Beta features
         </h2>
+        <BetaFeatureSwitch
+          icon={CalendarClock}
+          label="Past session access"
+          description="Let agents in private chats find and read your past chats in this workspace. Tasks and shared chats are excluded."
+          checked={featureFlags.pastSessionAccess === true}
+          update={updatePastSessionAccessAction}
+        />
         <BetaFeatureSwitch
           icon={Bot}
           label="Bots"
@@ -638,9 +646,7 @@ function BetaFeatureSwitch({
             <span className="block truncate text-[14px] font-medium leading-tight text-ink">
               {label}
             </span>
-            <span className="block truncate text-[12px] leading-4 text-ink-subtle">
-              {description}
-            </span>
+            <span className="block text-[12px] leading-4 text-ink-subtle">{description}</span>
           </div>
           <button
             type="button"

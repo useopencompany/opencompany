@@ -155,7 +155,7 @@ export function Sidebar({
   onToggleCollapsed: () => void;
   showCollapseButton?: boolean;
 }) {
-  const { featureFlags, mcpSetup, reviewCount, sidebarTasks } = useAppData();
+  const { featureFlags, mcpSetup, reviewCount, sidebarTasks, user } = useAppData();
   const wikis = useSidebarWikis();
   const pathname = usePathname();
   const mcpSetupActive = !mcpSetup.completedAt && pathname === "/settings/mcp";
@@ -267,7 +267,11 @@ export function Sidebar({
 
         {/* Wiki: knowledge before agents */}
         <div className="pt-4">
-          <SidebarWikis state={wikis} activeWikiSlug={activeWikiSlug} />
+          <SidebarWikis
+            state={wikis}
+            activeWikiSlug={activeWikiSlug}
+            currentUserWorkosId={user.workosUserId}
+          />
         </div>
 
         <SidebarBots />
