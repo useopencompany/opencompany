@@ -327,9 +327,8 @@ export async function ingestGranolaNote(input: {
   const db = getDb();
   const eventKey = granolaEventClaimKey(note.id);
 
-  // Cheap pre-check before the transcript fetch: a note every routed brain and
-  // wiki workspace has already claimed (an earlier poll, another member's
-  // connection, or an edit bumping updated_at) is a no-op.
+  // Skip the transcript fetch when every routed Brain has already claimed the note
+  // and no workflow needs it. Edits may bump updated_at without creating a new note.
   const alreadyClaimedBrainRefs = await listBrainSourceEventClaimedBrainRefs({
     brainRefs: input.routedBrainRefs,
     sourceProvider: GRANOLA_PROVIDER,

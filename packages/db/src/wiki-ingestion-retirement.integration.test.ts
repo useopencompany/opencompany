@@ -14,6 +14,7 @@ describe("Wiki ingestion retirement migration", () => {
       CREATE TABLE goat.wiki_ingest_jobs (status text, lease_id text, lease_owner text, lease_expires_at timestamptz, completed_at timestamptz, updated_at timestamptz, last_error text, result jsonb DEFAULT '{}');
       CREATE TABLE goat.brain_import_runs (workspace_id text, brain_ref text, status text, lease_id text, lease_owner text, lease_expires_at timestamptz, completed_at timestamptz, updated_at timestamptz, last_error text);
       CREATE TABLE goat.wiki_pages (body text);
+      INSERT INTO goat.workflows VALUES ('event', 'active', '2026-09-12T19:00:00Z'), ('manual', 'draft', '2026-09-12T18:00:00Z');
       INSERT INTO goat.wiki_sources (enabled) VALUES (true);
       INSERT INTO goat.wiki_ingest_jobs (status) VALUES ('queued'), ('running'), ('succeeded');
       INSERT INTO goat.brain_import_runs (workspace_id, brain_ref, status) VALUES ('workspace_1', NULL, 'ingesting'), (NULL, 'brain_1', 'ingesting');
@@ -25,6 +26,12 @@ describe("Wiki ingestion retirement migration", () => {
         "utf8",
       ),
     );
+    expect(
+      (await db.query("SELECT event_activated_at FROM goat.workflows ORDER BY trigger")).rows,
+    ).toEqual([
+      { event_activated_at: new Date("2026-09-12T19:00:00Z") },
+      { event_activated_at: null },
+    ]);
     expect((await db.query("SELECT enabled FROM goat.wiki_sources")).rows).toEqual([
       { enabled: false },
     ]);
