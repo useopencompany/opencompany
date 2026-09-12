@@ -50,7 +50,7 @@ import {
   countAwaitingReview,
   type ReviewItem,
   selectReviewItems,
-  taskHasReadableResult,
+  taskHasReadableUpdate,
 } from "@/lib/review-inbox";
 import { type SidebarTaskView, selectSidebarChats, selectSidebarTasks } from "@/lib/sidebar-items";
 import type { TaskRow } from "@/lib/task-collections";
@@ -133,8 +133,9 @@ type AppData = AppInitialData & {
   // these instead of from the bounded Recents selections.
   openChats: ChatSummaryView[];
   openSidebarTasks: SidebarTaskView[];
-  // Every open Task whose unread flag stands for a result a reader can clear by reading it,
-  // whatever its age. The sidebar list is bounded by recency; the acknowledgment must not be.
+  // Every open Task whose unread flag stands for an update a reader can clear by opening it,
+  // whatever its age. This includes waiting requests, which remain unfinished until answered even
+  // after their unread dot clears. The sidebar list is bounded by recency; acknowledgment is not.
   unreadTaskIds: ReadonlySet<string>;
 };
 
@@ -447,7 +448,7 @@ function AppLiveDataSubscriptions({
     const ids = new Set<string>();
     for (const row of openTaskRows) {
       if (row.archivedAt || !row.hasUnseen) continue;
-      if (!taskHasReadableResult(row.status)) continue;
+      if (!taskHasReadableUpdate(row.status)) continue;
       ids.add(row.id);
     }
     return ids;
