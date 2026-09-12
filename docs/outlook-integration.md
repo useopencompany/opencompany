@@ -41,13 +41,19 @@ Before release, use dedicated work/school and personal Outlook test accounts to:
 2. Confirm every discovered tool belongs to the reviewed group and defaults to `ask`.
 3. Search/read a conversation; create a draft and confirm it was not sent; move, categorize, trash,
    and restore a test message using each returned id.
-4. Download a file attachment, reject a tampered/expired link, then disconnect and verify that
+4. Follow `nextPageToken` to the second page of a `$search` result, of a `get_conversation`
+   whose `$filter` spans more than one page, and of `list_attachments`. `assertPaginationUrl`
+   requires Graph's `@odata.nextLink` to carry every base query parameter with an identical
+   decoded value, so a server-side normalization of `$search` or `$filter` would surface here as
+   "belongs to a different query". The mocked tests build the ideal nextLink themselves and
+   cannot detect this.
+5. Download a file attachment, reject a tampered/expired link, then disconnect and verify that
    previously issued MCP tickets and download links no longer work.
-5. List recurring occurrences, check personal availability, and query Microsoft 365 colleague
+6. List recurring occurrences, check personal availability, and query Microsoft 365 colleague
    schedules (including a per-schedule error). Create, reschedule, respond to, and delete a test event.
-6. Exercise expiry/refresh and refresh-token rotation, then revoke Microsoft consent and verify
+7. Exercise expiry/refresh and refresh-token rotation, then revoke Microsoft consent and verify
    the connection asks for reauthorization.
-7. Inspect catalog, installed row, and detail heading in light/dark mode and at 14/20/24 px.
+8. Inspect catalog, installed row, and detail heading in light/dark mode and at 14/20/24 px.
 
 The unit tests cover mocked Graph responses and real MCP transport handshakes. They do not replace
 live account validation or Microsoft publisher verification.

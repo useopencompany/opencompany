@@ -309,6 +309,20 @@ describe("Outlook Graph behavior", () => {
     expect(result.isError).toBe(true);
     expect(mocks.api).toHaveBeenCalledOnce();
   });
+  it("rejects pagination that drops the conversation filter", async () => {
+    mocks.api.mockResolvedValue({ value: [] });
+    await call("outlook", "get_conversation", { conversationId: "c1" });
+    const widened = new URL(mocks.api.mock.calls[0]![2]);
+    widened.searchParams.delete("$filter");
+
+    const result = await call("outlook", "get_conversation", {
+      conversationId: "c1",
+      pageToken: Buffer.from(widened.toString()).toString("base64url"),
+    });
+
+    expect(result.isError).toBe(true);
+    expect(mocks.api).toHaveBeenCalledOnce();
+  });
   it("rejects pagination that adds query parameters", async () => {
     mocks.api.mockResolvedValue({ value: [] });
     await call("outlook", "search_messages", {});
