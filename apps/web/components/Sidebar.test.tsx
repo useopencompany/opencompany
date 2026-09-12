@@ -499,6 +499,37 @@ describe("Sidebar", () => {
       });
     });
 
+    it("keeps a rename that landed when the access change that followed it failed", async () => {
+      wikisApiMock.listWikis.mockResolvedValue([
+        wikiDto("goat_wiki_2", "C-level", "c-level", false, { access: "restricted" }),
+      ]);
+      wikisApiMock.getWikiAccess.mockResolvedValue({
+        access: "restricted",
+        memberIds: ["user_ada"],
+        workspaceMembers: [
+          { id: "user_ada", email: "ada@example.com", name: "Ada", avatarUrl: null, role: "admin" },
+          { id: "user_bo", email: "bo@example.com", name: "Bo", avatarUrl: null, role: "member" },
+        ],
+      });
+      wikisApiMock.updateWiki.mockResolvedValue({
+        ...wikiDto("goat_wiki_2", "Board", "c-level", false, { access: "restricted" }),
+      });
+      wikisApiMock.setWikiAccess.mockRejectedValue(new Error("Access could not be saved."));
+
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+      await userEvent.click(await screen.findByRole("button", { name: "C-level settings" }));
+      const dialog = await screen.findByRole("dialog", { name: "C-level settings" });
+
+      await userEvent.clear(within(dialog).getByLabelText("Name"));
+      await userEvent.type(within(dialog).getByLabelText("Name"), "Board");
+      await userEvent.click(await within(dialog).findByRole("button", { name: /Shared/ }));
+      await userEvent.click(await within(dialog).findByRole("checkbox"));
+      await userEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+
+      // The rename already reached the server, so the sidebar must not keep showing the old name.
+      expect(await screen.findByRole("link", { name: "Board" })).toBeInTheDocument();
+    });
+
     it("explains why the default wiki cannot be restricted instead of offering the choice", async () => {
       wikisApiMock.listWikis.mockResolvedValue([
         wikiDto("goat_wiki_1", "Company", "company", true),

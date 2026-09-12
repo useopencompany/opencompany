@@ -20,6 +20,19 @@ function accessModeOf(details: WikiAccessDetailsDto, currentUserWorkosId: string
   return details.memberIds.some((id) => id !== currentUserWorkosId) ? "shared" : "private";
 }
 
+/** Whether the picker differs from what the server last reported, so an unchanged visit is silent. */
+function accessChanged(
+  details: WikiAccessDetailsDto,
+  currentUserWorkosId: string,
+  mode: AccessMode,
+  invited: ReadonlySet<string>,
+): boolean {
+  if (accessModeOf(details, currentUserWorkosId) !== mode) return true;
+  if (mode !== "shared") return false;
+  const current = details.memberIds.filter((id) => id !== currentUserWorkosId);
+  return current.length !== invited.size || current.some((id) => !invited.has(id));
+}
+
 export function WikiSettings({
   wiki,
   currentUserWorkosId,
@@ -76,39 +89,34 @@ export function WikiSettings({
       return;
     }
     setSaving(true);
+    // Two independent commands. The name and instructions go first, so a rejected access change
+    // (restricting the default wiki) does not silently discard a rename made in the same visit --
+    // and whatever did land is handed back even if the second command then fails, so the sidebar
+    // never shows a name the server has already replaced.
+    let saved = wiki;
     try {
-      // Two independent commands. The name and instructions are saved first, so a rejected access
-      // change (restricting the default wiki) does not silently discard a rename the user made in
-      // the same visit.
-      let saved = wiki;
       if (trimmed !== wiki.name || instructions !== wiki.instructions) {
         saved = await updateWiki(wiki.id, { name: trimmed, instructions });
       }
-      if (details && !wiki.isDefault) {
-        const nextAccess = mode === "workspace" ? "workspace" : "restricted";
-        const nextMembers = mode === "shared" ? [...invited] : [];
-        const changed =
-          nextAccess !== details.access ||
-          accessModeOf(details, currentUserWorkosId) !== mode ||
-          nextMembers.length !==
-            details.memberIds.filter((id) => id !== currentUserWorkosId).length ||
-          nextMembers.some((id) => !details.memberIds.includes(id));
-        if (changed) {
-          const updated = await setWikiAccess(wiki.id, {
-            access: nextAccess,
-            memberIds: nextMembers,
-          });
-          setDetails(updated);
-          saved = { ...saved, access: updated.access };
-        }
+      if (
+        details &&
+        !wiki.isDefault &&
+        accessChanged(details, currentUserWorkosId, mode, invited)
+      ) {
+        const updated = await setWikiAccess(wiki.id, {
+          access: mode === "workspace" ? "workspace" : "restricted",
+          memberIds: mode === "shared" ? [...invited] : [],
+        });
+        setDetails(updated);
+        saved = { ...saved, access: updated.access };
       }
-      onSaved(saved);
       toast.success("Wiki settings saved.");
       onClose();
     } catch (cause) {
       // The user's edits stay on screen so a failed save is retryable rather than retyped.
       toast.error(cause instanceof Error ? cause.message : "The wiki could not be saved.");
     } finally {
+      onSaved(saved);
       setSaving(false);
     }
   };
