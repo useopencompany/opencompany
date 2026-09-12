@@ -40,6 +40,8 @@ const logger = createLogger({
   runtime: "goat-chat-artifacts",
 });
 
+const CHAT_ARTIFACT_BLOB_OPERATION_TIMEOUT_MS = 60_000;
+
 const MEDIA_TYPE_BY_EXTENSION: Readonly<Record<string, string>> = {
   ".md": "text/markdown",
   ".txt": "text/plain",
@@ -67,6 +69,7 @@ type ArtifactPersistenceContext = {
   engine: CodexChatEngine;
   env: Pick<RunnerEnv, "blobReadWriteToken">;
   checkAbort: () => Promise<void>;
+  signal?: AbortSignal;
 };
 
 type PublishArtifactContext = ArtifactPersistenceContext & {
@@ -252,6 +255,7 @@ async function publishChatArtifactBytes(input: {
     access: "private",
     addRandomSuffix: false,
     contentType: input.input.mediaType,
+    abortSignal: artifactBlobOperationSignal(input.context.signal),
     ...(input.context.env.blobReadWriteToken
       ? { token: input.context.env.blobReadWriteToken }
       : {}),
@@ -429,6 +433,7 @@ export async function publishExternalEngineChatArtifact(input: {
         engine,
         env: input.env,
         checkAbort,
+        ...(input.signal ? { signal: input.signal } : {}),
       },
       input: normalizePublishArtifactInput(input.arguments),
       toolCallId: input.toolCallId,
@@ -514,6 +519,7 @@ export async function publishInBandChatArtifact(input: {
         engine: "opencompany",
         env: input.env,
         checkAbort,
+        ...(input.signal ? { signal: input.signal } : {}),
       },
       input: {
         filename: artifactInput.filename,
@@ -838,6 +844,11 @@ function artifactBlobPath(input: {
     encodeURIComponent(input.artifactId),
     `${encodeURIComponent(input.artifactVersionId)}-${filename}`,
   ].join("/");
+}
+
+function artifactBlobOperationSignal(signal?: AbortSignal) {
+  const timeout = AbortSignal.timeout(CHAT_ARTIFACT_BLOB_OPERATION_TIMEOUT_MS);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
 }
 
 function isPathWithinDirectory(pathname: string, directory: string) {
