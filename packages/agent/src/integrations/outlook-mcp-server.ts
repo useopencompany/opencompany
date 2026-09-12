@@ -247,10 +247,15 @@ export function createOutlookMcpService(
             { displayName: args.name },
           ),
       );
-      const move = (messageId: string, destinationId: string) =>
-        callGraph(context, "POST", graphUrl(`messages/${graphId(messageId)}/move`), {
-          destinationId,
-        });
+      // A move and a categories PATCH both answer with the whole message
+      // resource, body included, so they go through the same truncation the
+      // read tools use instead of returning an unbounded mail body.
+      const move = async (messageId: string, destinationId: string) =>
+        compactMessage(
+          await callGraph(context, "POST", graphUrl(`messages/${graphId(messageId)}/move`), {
+            destinationId,
+          }),
+        );
       register(
         "move_message",
         "Move a message to an Outlook folder. Moving can change the message id; use the returned id for subsequent actions.",
@@ -276,10 +281,12 @@ export function createOutlookMcpService(
           messageId: graphIdSchema,
           categories: z.array(z.string().trim().min(1).max(255)).max(50),
         },
-        (args) =>
-          callGraph(context, "PATCH", graphUrl(`messages/${graphId(args.messageId)}`), {
-            categories: [...new Set(args.categories)],
-          }),
+        async (args) =>
+          compactMessage(
+            await callGraph(context, "PATCH", graphUrl(`messages/${graphId(args.messageId)}`), {
+              categories: [...new Set(args.categories)],
+            }),
+          ),
       );
     },
   });

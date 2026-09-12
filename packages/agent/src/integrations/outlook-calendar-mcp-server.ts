@@ -105,25 +105,14 @@ export function createOutlookCalendarMcpService(input: MicrosoftMcpServiceInput)
         "get_event",
         "Read one Outlook calendar event or occurrence, including its body. Event times are returned in UTC.",
         { eventId: graphIdSchema },
-        async (args) => {
-          const event = graphRecord(
+        async (args) =>
+          compactEvent(
             await callGraph(
               context,
               "GET",
               graphUrl(`events/${graphId(args.eventId)}`, { $select: `${EVENT_FIELDS},body` }),
             ),
-          );
-          if (event.body && typeof event.body === "object") {
-            const body = graphRecord(event.body);
-            if (typeof body.content === "string")
-              return {
-                ...event,
-                body: { contentType: body.contentType, content: body.content.slice(0, 30000) },
-                bodyTruncated: body.content.length > 30000,
-              };
-          }
-          return event;
-        },
+          ),
       );
       register(
         "check_availability",
@@ -199,11 +188,13 @@ export function createOutlookCalendarMcpService(input: MicrosoftMcpServiceInput)
         { ...calendarSchema, ...rangeSchema, ...editableSchema },
         async (args) => {
           validateRange(args);
-          return callGraph(context, "POST", graphUrl(`${calendarPath(args.calendarId)}/events`), {
-            ...eventFields(args),
-            start: graphTime(args.startTime),
-            end: graphTime(args.endTime),
-          });
+          return compactEvent(
+            await callGraph(context, "POST", graphUrl(`${calendarPath(args.calendarId)}/events`), {
+              ...eventFields(args),
+              start: graphTime(args.startTime),
+              end: graphTime(args.endTime),
+            }),
+          );
         },
       );
       register(
@@ -243,12 +234,14 @@ export function createOutlookCalendarMcpService(input: MicrosoftMcpServiceInput)
               throw new Error("Reschedule all-day events in Outlook.");
             validateRange({ startTime, endTime });
           }
-          return callGraph(context, "PATCH", graphUrl(`events/${graphId(eventId)}`), {
-            ...eventFields(fields),
-            ...(startTime && endTime
-              ? { start: graphTime(startTime), end: graphTime(endTime) }
-              : {}),
-          });
+          return compactEvent(
+            await callGraph(context, "PATCH", graphUrl(`events/${graphId(eventId)}`), {
+              ...eventFields(fields),
+              ...(startTime && endTime
+                ? { start: graphTime(startTime), end: graphTime(endTime) }
+                : {}),
+            }),
+          );
         },
       );
       register(
@@ -294,6 +287,26 @@ export function createOutlookCalendarMcpService(input: MicrosoftMcpServiceInput)
       );
     },
   });
+}
+// Reads select the body explicitly, and a create or update answers with the
+// whole event resource including it, so every event leaves through the same
+// bound rather than returning an unbounded body to the model.
+const MAX_EVENT_BODY_CHARS = 30000;
+function compactEvent(value: unknown) {
+  const event = graphRecord(value);
+  if (event.body && typeof event.body === "object") {
+    const body = graphRecord(event.body);
+    if (typeof body.content === "string")
+      return {
+        ...event,
+        body: {
+          contentType: body.contentType,
+          content: body.content.slice(0, MAX_EVENT_BODY_CHARS),
+        },
+        bodyTruncated: body.content.length > MAX_EVENT_BODY_CHARS,
+      };
+  }
+  return event;
 }
 function validateRange(args: { startTime: string; endTime: string }) {
   const start = Date.parse(args.startTime),

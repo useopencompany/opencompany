@@ -297,6 +297,20 @@ describe("Outlook Graph behavior", () => {
     expect(mocks.api.mock.calls[0]![3].body).toEqual({ destinationId });
     expect(mocks.api.mock.calls[0]![2].search).toBe("");
   });
+  it("truncates the message body a write returns, not just the read tools", async () => {
+    const body = { contentType: "text", content: "x".repeat(30001) };
+    mocks.api.mockResolvedValue({ id: "m1", body });
+    for (const [tool, args] of [
+      ["move_message", { messageId: "m1", destinationFolderId: "f1" }],
+      ["archive_message", { messageId: "m1" }],
+      ["trash_message", { messageId: "m1" }],
+      ["categorize_message", { messageId: "m1", categories: ["Red"] }],
+    ] as const) {
+      const result = decode(await call("outlook", tool, args));
+      expect(result.bodyTruncated).toBe(true);
+      expect(result.body.content).toHaveLength(30000);
+    }
+  });
   it("escapes conversation filters and rejects pagination that changes the resource", async () => {
     mocks.api.mockResolvedValue({ value: [] });
     await call("outlook", "get_conversation", { conversationId: "a'b" });
@@ -392,6 +406,24 @@ describe("Outlook Graph behavior", () => {
 
 describe("Outlook Calendar Graph behavior", () => {
   const range = { startTime: "2026-09-10T09:00:00+02:00", endTime: "2026-09-10T10:00:00+02:00" };
+  it("truncates the event body a calendar write returns", async () => {
+    const body = { contentType: "text", content: "y".repeat(30001) };
+    mocks.api.mockResolvedValueOnce({ id: "e1", body });
+    const created = decode(
+      await call("outlook-calendar", "create_event", { subject: "Sync", ...range }),
+    );
+    expect(created.bodyTruncated).toBe(true);
+    expect(created.body.content).toHaveLength(30000);
+
+    mocks.api
+      .mockResolvedValueOnce({ id: "e1", type: "singleInstance", isOnlineMeeting: false })
+      .mockResolvedValueOnce({ id: "e1", body });
+    const updated = decode(
+      await call("outlook-calendar", "update_event", { eventId: "e1", subject: "Sync" }),
+    );
+    expect(updated.bodyTruncated).toBe(true);
+    expect(updated.body.content).toHaveLength(30000);
+  });
   it("expands recurrences through calendarView and reads every availability page for personal accounts", async () => {
     const start = { dateTime: "2026-09-10T07:00:00", timeZone: "UTC" },
       end = { dateTime: "2026-09-10T08:00:00", timeZone: "UTC" };

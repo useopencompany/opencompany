@@ -20,7 +20,9 @@ Mail attachment URLs bind the exact message and attachment, expire after five mi
 the connection, active installation, and current permissions at download time.
 
 Mail is drafts-only. Move/archive/trash returns the new message id. Trash uses Deleted Items,
-with restoration available through move_message. Categorization replaces the message's category
+with restoration available through move_message. Graph answers those writes, a categories PATCH,
+and an event create/update with the whole resource, so message and event bodies are truncated on
+the way out of a write exactly as they are on a read. Categorization replaces the message's category
 names after reading existing values; account master category creation is outside this version.
 File attachments are bounded to 20 MB; embedded items and reference attachments are unsupported.
 
@@ -53,7 +55,13 @@ Before release, use dedicated work/school and personal Outlook test accounts to:
    schedules (including a per-schedule error). Create, reschedule, respond to, and delete a test event.
 7. Exercise expiry/refresh and refresh-token rotation, then revoke Microsoft consent and verify
    the connection asks for reauthorization.
-8. Inspect catalog, installed row, and detail heading in light/dark mode and at 14/20/24 px.
+8. With both plugins connected to the same Microsoft account, decode the `scp` claim of each
+   connection's access token. Entra grants consent per resource, so a calendar token may carry
+   `Mail.ReadWrite` even though the calendar flow never requests it; the refresh in
+   `microsoft-access-token.ts` sends no `scope`, so it inherits whatever the grant holds. Tool
+   surface stays separate either way, but confirm the real blast radius of a stored token and
+   record it before the PR's "separate mail/calendar consent" claim ships.
+9. Inspect catalog, installed row, and detail heading in light/dark mode and at 14/20/24 px.
 
 The unit tests cover mocked Graph responses and real MCP transport handshakes. They do not replace
 live account validation or Microsoft publisher verification.
