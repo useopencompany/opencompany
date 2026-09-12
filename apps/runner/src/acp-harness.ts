@@ -143,11 +143,15 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
       command: input.adapter.command(input.workdir),
       envs: input.envs,
       redact: input.redact,
-      onNotification: async (notification) => {
-        await input.onNotification?.(notification);
-        if (projectUpdates && notification.method === "session/update") {
-          await input.onRuntimeEvents([notification]);
+      onNotificationBatch: async (notifications) => {
+        const updates: AcpNotification[] = [];
+        for (const notification of notifications) {
+          await input.onNotification?.(notification);
+          if (projectUpdates && notification.method === "session/update") {
+            updates.push(notification);
+          }
         }
+        if (updates.length > 0) await input.onRuntimeEvents(updates);
       },
       onServerRequest: async (request) => {
         if (request.method === "session/request_permission") {
@@ -550,7 +554,9 @@ class AcpJsonRpcClient {
   private stopping = false;
   private failure: Error | null = null;
   private lastStderr = "";
-  private processing: Promise<void> = Promise.resolve();
+  private pendingNotifications: AcpNotification[] = [];
+  private notificationPump: Promise<void> = Promise.resolve();
+  private pumping = false;
   private watchGeneration = 0;
   private lastGuestActivityAt = Date.now();
   private guestProbeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -570,7 +576,7 @@ class AcpJsonRpcClient {
       command: string;
       envs: Record<string, string>;
       redact: (value: string) => string;
-      onNotification: (notification: AcpNotification) => Promise<void>;
+      onNotificationBatch: (notifications: AcpNotification[]) => Promise<void>;
       onServerRequest: (request: AcpJsonRpcRequest) => Promise<Record<string, unknown>>;
     },
   ) {}
@@ -658,7 +664,9 @@ class AcpJsonRpcClient {
   }
 
   async flush() {
-    await this.processing;
+    while (this.pendingNotifications.length > 0 || this.pumping) {
+      await this.notificationPump;
+    }
     this.throwIfFailed();
   }
 
@@ -701,13 +709,33 @@ class AcpJsonRpcClient {
     }
     if (!method) return;
     if (this.failure) return;
-    const notification = { method, params: readRecord(record.params) ?? {} };
-    this.processing = this.processing
-      .then(() => {
-        this.throwIfFailed();
-        return this.input.onNotification(notification);
-      })
-      .catch((error) => this.fail(asError(error)));
+    this.pendingNotifications.push({ method, params: readRecord(record.params) ?? {} });
+    this.startNotificationPump();
+  }
+
+  // Notifications are delivered in arrival order but conflated: each pump iteration drains
+  // everything that queued while the previous handler awaited (typically a projection database
+  // write), so a fast token stream costs one downstream handler call per database round trip
+  // instead of one per chunk, and a slow database shrinks into larger batches instead of
+  // growing an unbounded per-notification promise chain.
+  private startNotificationPump() {
+    if (this.pumping) return;
+    this.pumping = true;
+    this.notificationPump = (async () => {
+      try {
+        while (this.pendingNotifications.length > 0 && !this.failure) {
+          const batch = this.pendingNotifications.splice(0);
+          await this.input.onNotificationBatch(batch);
+        }
+      } catch (error) {
+        this.fail(asError(error));
+      } finally {
+        this.pumping = false;
+        // A notification can land between the drain loop's empty check and this reset; re-kick
+        // so it is not stranded until the next stdout chunk.
+        if (this.pendingNotifications.length > 0 && !this.failure) this.startNotificationPump();
+      }
+    })();
   }
 
   private async handleServerRequest(request: AcpJsonRpcRequest) {
@@ -876,6 +904,7 @@ class AcpJsonRpcClient {
   private fail(error: Error) {
     if (this.failure) return;
     this.failure = error;
+    this.pendingNotifications.length = 0;
     this.clearGuestProbe();
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timeout);

@@ -684,6 +684,63 @@ describe("createExternalEngineProjector", () => {
     expect(contentUpdates.at(-1)?.payload).toMatchObject({ content: "First. Second. Third." });
   });
 
+  it("conflates a pushed batch into one projection append", async () => {
+    mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
+    const appendEvents = vi.fn(
+      async (input: Parameters<RunExecutionRepository["appendEvents"]>[0]) =>
+        input.events.map((event, index) => ({ ...event, sequence: index + 1 })),
+    );
+    const projector = createExternalEngineProjector({
+      target: projectorTarget({ canonicalAttemptId: "attempt_1" }),
+      redact: (value) => value,
+      normalizeEvent: acpNormalizer(),
+      execution: { appendEvents } as unknown as RunExecutionRepository,
+    });
+
+    await projector.push([
+      agentMessageChunk("Hello "),
+      agentMessageChunk("world."),
+      fileChangeStartedEvent(),
+    ]);
+
+    // One drained batch produces one append carrying the batch's final content snapshot plus
+    // the tool transition — not one round trip per chunk.
+    expect(appendEvents).toHaveBeenCalledOnce();
+    const events = appendEvents.mock.calls[0]?.[0]?.events ?? [];
+    const contentUpdates = events.filter((event) => event.type === "message.content_updated");
+    expect(contentUpdates).toHaveLength(1);
+    expect(contentUpdates[0]?.payload).toMatchObject({ content: "Hello world." });
+    expect(events.filter((event) => event.type === "tool.started")).toHaveLength(1);
+  });
+
+  it("forces the durable write once when a batch mixes deltas with a boundary", async () => {
+    mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
+    let clock = 0;
+    const projector = createExternalEngineProjector({
+      target: projectorTarget(),
+      redact: (value) => value,
+      normalizeEvent: acpNormalizer(),
+      now: () => clock,
+      assistantWriteDebounceMs: 2000,
+    });
+
+    await projector.push([agentMessageChunk("First. ")]); // clock 0: first write
+    clock = 100;
+    await projector.push([
+      agentMessageChunk("Second. "),
+      fileChangeStartedEvent(),
+      agentMessageChunk("Third."),
+    ]);
+
+    // The boundary forces the batch's single durable write, and that write already carries the
+    // trailing delta applied later in the same batch.
+    const messageWrites = messageUpdates();
+    expect(messageWrites).toHaveLength(2);
+    expect(queryValues(messageWrites[1])).toContainEqual(
+      expect.stringContaining("First. Second. Third."),
+    );
+  });
+
   it("forces a durable write on a part boundary inside the debounce window", async () => {
     mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
     let clock = 0;

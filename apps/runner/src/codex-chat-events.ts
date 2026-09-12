@@ -290,20 +290,24 @@ export function createExternalEngineProjector(input: {
     );
   };
 
-  const handleEvent = async (event: HarnessNormalizedEvent) => {
+  // Applies one event and reports what it requires of the durable sync instead of writing
+  // itself: push() aggregates one sync per pushed batch. "boundary" (tool lifecycle, questions,
+  // plan/goal, etc.) forces the chat_messages write immediately; "streamed" text and reasoning
+  // chunks leave it to the debounce window so a reasoning-heavy turn cannot grow the shape log.
+  const handleEvent = async (
+    event: HarnessNormalizedEvent,
+  ): Promise<"none" | "streamed" | "boundary"> => {
     if (event.type === "command.output") {
       outputAccumulator.push(event);
-      return;
+      return "none";
     }
-    if (event.type === "unknown") return;
+    if (event.type === "unknown") return "none";
 
     if (event.type === "assistant.delta") {
       const projection = applyCodexEventToUiMessageParts(parts, event);
-      if (!projection.changed) return;
+      if (!projection.changed) return "none";
       parts = projection.parts;
-      // High-frequency token stream: debounce the durable write; the live SSE delta still flows.
-      await syncAssistantMessage({ error: turnError });
-      return;
+      return "streamed";
     }
 
     const isNewEvent = await insertEventRow(event);
@@ -311,13 +315,13 @@ export function createExternalEngineProjector(input: {
     if (event.type === "turn.started") {
       const codexTurnId = typeof event.payload.turnId === "string" ? event.payload.turnId : null;
       await markTurnRunning(codexTurnId);
-      return;
+      return "none";
     }
     if (event.type === "turn.completed" || event.type === "usage.updated") {
       // Terminal transitions and usage land in finalize() with the full summary.
-      return;
+      return "none";
     }
-    if (!isNewEvent) return;
+    if (!isNewEvent) return "none";
 
     const commandOutputPreview =
       event.type === "command.completed" || event.type === "command.failed"
@@ -326,15 +330,10 @@ export function createExternalEngineProjector(input: {
           )
         : null;
     const projection = applyCodexEventToUiMessageParts(parts, event, { commandOutputPreview });
-    if (!projection.changed) return;
+    if (!projection.changed) return "none";
     parts = projection.parts;
     if (projection.error) turnError = projection.error;
-    // True part boundaries (tool lifecycle, questions, plan/goal, etc.) commit immediately; streamed
-    // reasoning chunks debounce like text so a reasoning-heavy turn cannot grow the shape log.
-    await syncAssistantMessage({
-      error: turnError,
-      force: !STREAMED_PROJECTION_EVENT_TYPES.has(event.type),
-    });
+    return STREAMED_PROJECTION_EVENT_TYPES.has(event.type) ? "streamed" : "boundary";
   };
 
   const cancelPendingInteractions = async () => {
@@ -524,12 +523,20 @@ export function createExternalEngineProjector(input: {
 
     push(rawEvents: Record<string, unknown>[]) {
       return serializeProjection(async () => {
+        let pendingSync: "none" | "streamed" | "boundary" = "none";
         for (const raw of rawEvents) {
           for (const event of normalizeEvent(raw)) {
             await input.onNormalizedEvent?.(event);
-            await handleEvent(event);
+            const required = await handleEvent(event);
+            if (required === "boundary") pendingSync = "boundary";
+            else if (required === "streamed" && pendingSync === "none") pendingSync = "streamed";
           }
         }
+        if (pendingSync === "none") return;
+        // One sync per pushed batch: the run_events append inside carries the batch's final
+        // content snapshot (content events are full snapshots, so intermediates are redundant),
+        // and every append still performs the lease-loss check.
+        await syncAssistantMessage({ error: turnError, force: pendingSync === "boundary" });
       });
     },
 
