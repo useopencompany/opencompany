@@ -19,7 +19,8 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit --project tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "bench": "bun --env-file=../../.env.local evals/index.ts"
   },
   "dependencies": {
     "@ai-sdk/mcp": "^2.0.44",
