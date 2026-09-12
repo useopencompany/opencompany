@@ -126,6 +126,14 @@ The docs Vercel project has no runtime secrets. CI resolves it through `DOCS_VER
 Infisical `prod` `/release` and rejects a project whose root is not `apps/docs` or whose ID is shared
 with another Vercel surface.
 
+## opencompany engine subagents
+
+`RUNNER_OPENCOMPANY_SUBAGENTS_ENABLED` (Infisical `prod` `/runner`, default `false`) gives the
+opencompany chat engine the `run_subagent` tool. It needs no other credentials: a subagent reuses the
+turn's existing model access and host tool runners. Because each delegated run does its own model
+and tool work, a turn that delegates costs materially more than one that does not — roll it out per
+environment and watch chat cost before enabling it broadly. See [Subagents](./subagents.md).
+
 ## Authenticated browser profiles
 
 Browser profiles use one Browserbase project across the canonical API and runner. Store

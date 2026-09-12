@@ -13,6 +13,8 @@ Start with:
 - [Public launch runbook](./public-launch-runbook.md) — attended visibility change, public-only
   controls, external-fork canary, and rollback.
 - [Chat operations](./chat-operations.md) — `/v1` topology, release verification, and recovery.
+- [Subagents](./subagents.md) — delegated research in the opencompany chat engine, its tool
+  inheritance rules, and its limits.
 - [opencompany context compaction](./context-compaction.md) — long-chat checkpoint behavior,
   safety boundaries, and reviewed reference implementations.
 - [Brain engineering documentation](./brain/README.md) — data model, ingestion, tools, and
