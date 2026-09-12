@@ -23,6 +23,7 @@ export type UserPreferenceSet = {
   autoModelRoutingEnabled: boolean;
   reviewInboxEnabled: boolean;
   sidebarProjectsEnabled: boolean;
+  subagentsEnabled: boolean;
 };
 
 export type UpdateUserPreferencesCommand = Partial<Omit<UserPreferenceSet, "wikiEnabled">> & {
@@ -53,6 +54,7 @@ const PREFERENCE_COLUMNS = {
   autoModelRoutingEnabled: users.autoModelRoutingEnabled,
   reviewInboxEnabled: users.reviewInboxEnabled,
   sidebarProjectsEnabled: users.sidebarProjectsEnabled,
+  subagentsEnabled: users.subagentsEnabled,
 };
 
 export function createUserSettingsService(input: {
@@ -75,6 +77,7 @@ export function createUserSettingsService(input: {
         "autoModelRoutingEnabled",
         "reviewInboxEnabled",
         "sidebarProjectsEnabled",
+        "subagentsEnabled",
       ] as const) {
         const value = command[field];
         if (value !== undefined && value !== current[field]) changes[field] = value;

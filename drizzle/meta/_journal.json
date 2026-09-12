@@ -1898,6 +1898,13 @@
       "when": 1789322800000,
       "tag": "0270_opencompany_sidebar_projects",
       "breakpoints": true
+    },
+    {
+      "idx": 271,
+      "version": "7",
+      "when": 1789409200000,
+      "tag": "0271_opencompany_subagents_preference",
+      "breakpoints": true
     }
   ]
 }

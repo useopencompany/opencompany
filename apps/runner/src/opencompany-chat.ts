@@ -1293,7 +1293,10 @@ async function resolveProductChatRuntime(input: {
       }
     : null;
 
-  const subagentsEnabled = env.subagentsEnabled && !taskContext;
+  // Off unless the member turned the Subagents switch on in Preferences. Bootstrap already
+  // withholds it in a task conversation; taskContext is the runner's own authority for that same
+  // fact, so both are checked rather than trusting the session row alone to classify a task turn.
+  const subagentsEnabled = Boolean(hostTools?.bootstrap.subagentsEnabled) && !taskContext;
   const subagentRunner = subagentsEnabled
     ? createSubagentRunner({
         model,

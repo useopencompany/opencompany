@@ -854,6 +854,7 @@ function initialData(): AppInitialData {
       legacyBrain: false,
       reviewInbox: false,
       sidebarProjects: false,
+      subagents: false,
     },
     codexConnected: false,
     claudeCodeConnected: false,
