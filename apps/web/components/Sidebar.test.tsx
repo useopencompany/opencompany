@@ -1268,13 +1268,15 @@ describe("Sidebar", () => {
       createdAt: "2026-07-01T09:00:00.000Z",
     });
 
-    // The Projects region renders before listProjects resolves, so awaiting the
-    // container alone races the project rows into existence. Wait for a row.
-    const findProjects = async (projectName: string) => {
+    // The region renders before listProjects resolves. Wait for the loading boundary itself so
+    // tests can safely depend on project rows, empty results, or derived membership.
+    async function findLoadedProjects() {
       const projects = await screen.findByRole("region", { name: "Projects" });
-      await within(projects).findByRole("button", { name: projectName });
+      await waitFor(() =>
+        expect(within(projects).queryByText("Loading projects…")).not.toBeInTheDocument(),
+      );
       return projects;
-    };
+    }
 
     it("stays hidden until the Projects preference is on", async () => {
       recentChatsMock.value = [chatRow("chat_1")];
@@ -1298,7 +1300,7 @@ describe("Sidebar", () => {
 
       render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
-      const projects = await findProjects("Launch");
+      const projects = await findLoadedProjects();
       expect(within(projects).getByText("Launch")).toBeInTheDocument();
       expect(within(projects).getByRole("link", { name: "chat_filed title" })).toBeInTheDocument();
       expect(within(projects).getByRole("link", { name: /task_filed name/ })).toBeInTheDocument();
@@ -1319,7 +1321,7 @@ describe("Sidebar", () => {
       ]);
 
       render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
-      const projects = await findProjects("Launch");
+      const projects = await findLoadedProjects();
       const folder = within(projects).getByRole("button", { name: "Launch" });
 
       const target = folder.parentElement;
@@ -1361,9 +1363,7 @@ describe("Sidebar", () => {
       ]);
 
       render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
-      // The drop reads which project holds the chat, so wait for the loaded row rather than the
-      // region the section renders before listProjects resolves.
-      await findProjects("Launch");
+      await findLoadedProjects();
 
       await act(async () => {
         fireEvent.drop(screen.getByRole("button", { name: "Recents" }), {
@@ -1395,7 +1395,7 @@ describe("Sidebar", () => {
       ]);
 
       const { unmount } = render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
-      const projects = await findProjects("Launch");
+      const projects = await findLoadedProjects();
       const folder = within(projects).getByRole("button", { name: "Launch" });
       expect(folder).toHaveAttribute("aria-expanded", "true");
 
@@ -1410,7 +1410,7 @@ describe("Sidebar", () => {
 
       unmount();
       render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
-      const reopened = await findProjects("Launch");
+      const reopened = await findLoadedProjects();
       expect(within(reopened).getByRole("button", { name: "Launch" })).toHaveAttribute(
         "aria-expanded",
         "false",
@@ -1423,7 +1423,7 @@ describe("Sidebar", () => {
       projectsApiMock.listProjects.mockResolvedValue([project("project_1", "Launch", ["chat_a"])]);
 
       const { unmount } = render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
-      await findProjects("Launch");
+      await findLoadedProjects();
       const section = screen.getByRole("button", { name: "Projects" });
       expect(section).toHaveAttribute("aria-expanded", "true");
 
@@ -1500,7 +1500,7 @@ describe("Sidebar", () => {
       projectsApiMock.listProjects.mockResolvedValue([project("project_1", "Launch")]);
 
       render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
-      const projects = await findProjects("Launch");
+      const projects = await findLoadedProjects();
 
       expect(within(projects).getByRole("link", { name: "New chat in Launch" })).toHaveAttribute(
         "href",
@@ -1520,7 +1520,7 @@ describe("Sidebar", () => {
       ]);
 
       render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
-      const projects = await findProjects("Launch");
+      const projects = await findLoadedProjects();
 
       await userEvent.click(
         within(projects).getByRole("button", { name: "Project options for Launch" }),
@@ -1546,7 +1546,7 @@ describe("Sidebar", () => {
       projectsApiMock.deleteProject.mockResolvedValue([]);
 
       render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
-      const projects = await findProjects("Launch");
+      const projects = await findLoadedProjects();
 
       await userEvent.click(
         within(projects).getByRole("button", { name: "Project options for Launch" }),
@@ -1569,7 +1569,7 @@ describe("Sidebar", () => {
       projectsApiMock.createProject.mockResolvedValue([project("project_1", "Launch")]);
 
       render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
-      await screen.findByRole("region", { name: "Projects" });
+      await findLoadedProjects();
 
       await userEvent.click(screen.getByRole("button", { name: "New project" }));
       await userEvent.type(screen.getByLabelText("Project name"), "Launch{Enter}");
