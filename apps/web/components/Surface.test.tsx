@@ -3925,6 +3925,50 @@ describe("Surface chat streaming UI", () => {
     expect(screen.queryByText("No results yet.")).not.toBeInTheDocument();
   });
 
+  it("opens a chat started from a project on that project's prompt", () => {
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={null}
+        userName="Louis"
+        newChatProjectId="project_1"
+        newChatProjectName="product"
+        recentChats={[
+          {
+            id: "conversation_older_1",
+            title: "Older chat",
+            model: DEFAULT_MODEL,
+            engine: "opencompany",
+            preview: "An older chat",
+            updatedAt: "2026-09-01T10:00:00.000Z",
+          },
+        ]}
+      />,
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "What should we build in product?" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("welcome back, Louis")).not.toBeInTheDocument();
+    expect(screen.queryByText("Older chat")).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Ask opencompany anything...")).toBeInTheDocument();
+  });
+
+  it("keeps the plain home screen when a project name is missing", () => {
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={null}
+        userName="Louis"
+        newChatProjectId="project_1"
+      />,
+    );
+
+    expect(screen.getByText("welcome back, Louis")).toBeInTheDocument();
+  });
+
   it("renders recent chat history with links to each chat", () => {
     render(
       <Surface
