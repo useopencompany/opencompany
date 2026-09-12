@@ -29,13 +29,6 @@ vi.mock("@opencompany/db/brain-ingest", () => ({
   BRAIN_AGENT_INGEST_JOB_KIND: "brain_agent_ingest",
   upsertBrainSourceItemAndEnqueue: mocks.upsertBrain,
 }));
-vi.mock("@opencompany/db/wiki-event-claims", () => ({
-  claimWikiSourceEvents: mocks.claimWikiEvents,
-  attributeWikiSourceEventClaims: mocks.attributeWikiClaims,
-}));
-vi.mock("@opencompany/db/wiki-ingest", () => ({
-  upsertWikiSourceItemAndEnqueue: mocks.upsertWiki,
-}));
 vi.mock("./gmail-api", () => ({ fetchGmailThreadSnapshot: mocks.fetchSnapshot }));
 vi.mock("./brain-ingest-worker", () => ({ wakeBrainIngestWorker: mocks.wakeBrain }));
 vi.mock("./wiki-ingest-worker", () => ({ wakeWikiIngestWorker: mocks.wakeWiki }));
@@ -66,7 +59,7 @@ const env = {
   workerConcurrency: 1,
 } as never;
 
-describe("Gmail flush dual routing", () => {
+describe("Gmail flush routing", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     const tx = {
@@ -102,7 +95,7 @@ describe("Gmail flush dual routing", () => {
     });
   });
 
-  it("flushes a received-email window for a matching wiki-only route", async () => {
+  it("does not enqueue retired Wiki routes", async () => {
     mocks.listWikiRoutes.mockResolvedValue([
       {
         integrationId: "integration_1",
@@ -113,12 +106,10 @@ describe("Gmail flush dual routing", () => {
 
     await expect(
       flushGmailThreadWindow(window, env, new AbortController().signal),
-    ).resolves.toMatchObject({ eventCount: 1, enqueued: true });
+    ).resolves.toMatchObject({ eventCount: 1, enqueued: false });
     expect(mocks.upsertBrain).toHaveBeenCalledWith(expect.objectContaining({ brainRefs: [] }));
-    expect(mocks.upsertWiki).toHaveBeenCalledWith(
-      expect.objectContaining({ workspaceId: "workspace_1", rawEventCount: 1 }),
-    );
-    expect(mocks.wakeWiki).toHaveBeenCalledOnce();
+    expect(mocks.upsertWiki).not.toHaveBeenCalled();
+    expect(mocks.wakeWiki).not.toHaveBeenCalled();
     expect(mocks.wakeBrain).not.toHaveBeenCalled();
   });
 

@@ -60,12 +60,6 @@ export async function listGmailPollCandidates(
             AND bs.provider = 'gmail'
             AND bs.enabled = true
         )
-        OR EXISTS (
-          SELECT 1 FROM goat.wiki_sources ws
-          WHERE ws.integration_id = i.id
-            AND ws.provider = 'gmail'
-            AND ws.enabled = true
-        )
       )
   `);
   return rowsFromExecute<GmailPollCandidate>(result);

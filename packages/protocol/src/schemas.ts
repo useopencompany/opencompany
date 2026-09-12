@@ -1685,14 +1685,31 @@ export const PluginCapabilityDefinitionSchema = z
   .openapi("PluginCapabilityDefinition");
 
 export const PluginEventFilterDefinitionSchema = z
-  .object({
-    id: z.string().min(1).max(64),
-    label: z.string().min(1).max(120),
-    kind: z.literal("integration_resource"),
-    resourceType: z.string().min(1).max(64),
-    required: z.boolean(),
-  })
-  .strict()
+  .discriminatedUnion("kind", [
+    z
+      .object({
+        id: z.string().min(1).max(64),
+        label: z.string().min(1).max(120),
+        kind: z.literal("integration_resource"),
+        resourceType: z.string().min(1).max(64),
+        required: z.boolean(),
+      })
+      .strict(),
+    z
+      .object({
+        id: z.string().min(1).max(64),
+        label: z.string().min(1).max(120),
+        kind: z.literal("choice"),
+        options: z
+          .array(
+            z.object({ id: z.string().min(1).max(64), name: z.string().min(1).max(120) }).strict(),
+          )
+          .min(1)
+          .max(64),
+        required: z.boolean(),
+      })
+      .strict(),
+  ])
   .openapi("PluginEventFilterDefinition");
 
 export const PluginEventDefinitionSchema = z

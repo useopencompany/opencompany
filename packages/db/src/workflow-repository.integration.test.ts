@@ -47,6 +47,7 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
   beforeAll(async () => {
     restoreDatabase = await snapshotPGliteSchema(async (database) => {
       await database.exec(BASE_SCHEMA);
+      await database.exec("ALTER TABLE goat.workflows ADD COLUMN event_activated_at timestamptz");
       await database.exec(`
       INSERT INTO goat.users (workos_user_id, task_spawning_enabled)
       VALUES ('migration_user', true);

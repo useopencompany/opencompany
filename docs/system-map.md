@@ -73,6 +73,8 @@ in every step for manual, scheduled, and event triggers. In the editor, adding a
 clearing instructions returns the workflow to Draft; completing the steps does not reactivate it.
 Saving a scheduled draft clears its next run and prepared execution plan. There is one editable
 workflow definition, so Draft also pauses future runs; it is not a separate unpublished version.
+Plugin event setup, delivery guarantees, and Wiki ingestion retirement are documented in
+[Plugin events and workflows](plugin-events.md).
 Scheduled and event runs follow the step instructions. Optional additional run context is shared
 across steps, and existing custom context remains editable.
 

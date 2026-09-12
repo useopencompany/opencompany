@@ -2261,7 +2261,7 @@ export const wikiSources = productSchema.table(
     createdByWorkosId: text("created_by_workos_id")
       .notNull()
       .references(() => users.workosUserId, { onDelete: "cascade" }),
-    enabled: boolean("enabled").notNull().default(true),
+    enabled: boolean("enabled").notNull().default(false),
     config: jsonb("config").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -2279,6 +2279,7 @@ export const wikiSources = productSchema.table(
       columns: [table.integrationId, table.userWorkosId, table.provider],
       foreignColumns: [integrations.id, integrations.userWorkosId, integrations.provider],
     }).onDelete("cascade"),
+    retiredCheck: check("opencompany_wiki_sources_retired_check", sql`${table.enabled} = false`),
     providerCheck: check(
       "opencompany_wiki_sources_provider_check",
       sql`${table.provider} IN ('gmail', 'slack', 'jamie', 'granola', 'linear', 'github')`,
@@ -2435,6 +2436,10 @@ export const wikiIngestJobs = productSchema.table(
     importTargetCheck: check(
       "opencompany_wiki_ingest_jobs_import_target_check",
       sql`(${table.sourceProvider} = 'opencompany-import' AND ${table.integrationId} IS NULL AND ${table.importRunId} IS NOT NULL) OR (${table.sourceProvider} <> 'opencompany-import' AND ${table.integrationId} IS NOT NULL AND ${table.importRunId} IS NULL)`,
+    ),
+    retiredCheck: check(
+      "opencompany_wiki_ingest_jobs_retired_check",
+      sql`${table.status} NOT IN ('queued', 'running')`,
     ),
     statusCheck: check(
       "opencompany_wiki_ingest_jobs_status_check",
@@ -3285,6 +3290,7 @@ export const workflows = productSchema.table(
     scheduleEnabled: boolean("schedule_enabled").notNull().default(false),
     scheduleLastRunAt: timestamp("schedule_last_run_at", { withTimezone: true }),
     scheduleNextRunAt: timestamp("schedule_next_run_at", { withTimezone: true }),
+    eventActivatedAt: timestamp("event_activated_at", { withTimezone: true }),
     eventConfig: jsonb("event_config").$type<WorkflowEventConfig | null>(),
     eventUserWorkosId: text("event_user_workos_id").references(() => users.workosUserId, {
       onDelete: "set null",

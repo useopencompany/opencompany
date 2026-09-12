@@ -29,7 +29,7 @@ export const OFFICIAL_PLUGIN_SOURCES = {
   latitude:
     "https://github.com/useopencompany/plugins/tree/56855e7d53ee3544520ec1fdef84d9e2f5ae6896/latitude",
   linear:
-    "https://github.com/useopencompany/plugins/tree/9addd067ff8311fb3dcbc51285e4a3e671577838/linear",
+    "https://github.com/useopencompany/plugins/tree/7382ea32f0f77e853a095500555ee2ebe6bfe269/linear",
   neon: "https://github.com/useopencompany/plugins/tree/bbec4c01a46b6d7bf1ffffda87af898060dd7916/neon",
   notion:
     "https://github.com/useopencompany/plugins/tree/fb207086016a74e2e5724386c524d275771e5db6/notion",

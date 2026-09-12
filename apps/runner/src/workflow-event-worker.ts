@@ -63,6 +63,30 @@ export async function createNextWorkflowEventTask(
             WHERE actor_user.workos_user_id = event.user_workos_id
               AND actor_user.task_spawning_enabled = true
               AND actor_user.onboarded_at IS NOT NULL
+              AND EXISTS (
+                SELECT 1 FROM goat.workflows workflow
+                JOIN goat.plugins plugin ON plugin.workspace_id = workflow.workspace_id
+                  AND plugin.owner_user_id = event.user_workos_id
+                  AND plugin.name = event.provider
+                  AND plugin.status = 'enabled' AND plugin.archived_at IS NULL
+                  AND plugin.event_modes->event.event_type = 'true'::jsonb
+                JOIN goat.integrations integration ON integration.id = workflow.event_config->>'integrationId'
+                  AND integration.user_workos_id = event.user_workos_id
+                  AND integration.provider = event.provider
+                  AND integration.workspace_id IS NULL AND integration.status = 'connected'
+                  AND integration.external_id <> integration.provider || '_mcp'
+                WHERE workflow.id = event.workflow_id
+                  AND workflow.workspace_id = event.workspace_id
+                  AND workflow.status = 'active' AND workflow.archived_at IS NULL
+                  AND workflow.trigger = 'event'
+                  AND workflow.event_user_workos_id = event.user_workos_id
+                  AND workflow.event_config->>'provider' = event.provider
+                  AND workflow.event_config->>'event' = event.event_type
+                  AND (workflow.event_activated_at IS NULL
+                    OR event.event_at >= workflow.event_activated_at)
+                  AND EXISTS (SELECT 1 FROM jsonb_array_elements(plugin.events) declaration
+                    WHERE declaration->>'id' = event.event_type)
+              )
           ) AS eligible
         FROM goat.workflow_event_runs AS event
         WHERE event.status = 'pending'
@@ -84,9 +108,15 @@ export async function createNextWorkflowEventTask(
     }
 
     let created: { taskId: string };
+    await tx.execute(sql`SAVEPOINT workflow_event_task`);
     try {
       created = await (dependencies.createTask ?? createWorkflowEventTask)(tx, event, now);
+      await tx.execute(sql`RELEASE SAVEPOINT workflow_event_task`);
     } catch (error) {
+      // A SQL error aborts a Postgres transaction until rollback. Undo partial task writes
+      // before persisting backoff, otherwise one bad event can remain pending forever.
+      await tx.execute(sql`ROLLBACK TO SAVEPOINT workflow_event_task`);
+      await tx.execute(sql`RELEASE SAVEPOINT workflow_event_task`);
       const attemptCount = event.attemptCount + 1;
       const failed = attemptCount >= WORKFLOW_EVENT_MAX_ATTEMPTS;
       const nextAttemptAt = new Date(now.getTime() + workflowEventRetryDelayMs(attemptCount));

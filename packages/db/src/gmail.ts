@@ -6,7 +6,6 @@ import {
   type GmailMessageDirection,
   gmailMessageEvents,
   gmailSyncState,
-  wikiSources,
 } from "./product-schema";
 
 type DbLike = any;
@@ -31,24 +30,10 @@ export type GmailBrainSourceConfig = {
   instructions?: string;
 };
 
-// Wiki routing deliberately mirrors the brain config while both ingestion
-// pipelines run. It remains a distinct contract so brain teardown is a clean
-// deletion instead of a shared-type migration.
-export type GmailWikiSourceConfig = {
-  events?: GmailEventRef[];
-  instructions?: string;
-};
-
 export type GmailBrainSourceRoute = {
   integrationId: string;
   brainRef: string;
   config: GmailBrainSourceConfig;
-};
-
-export type GmailWikiSourceRoute = {
-  integrationId: string;
-  workspaceId: string;
-  config: GmailWikiSourceConfig;
 };
 
 export type GmailMessageEventInsert = {
@@ -81,11 +66,7 @@ export function parseGmailBrainSourceConfig(value: unknown): GmailBrainSourceCon
   return parseGmailSourceConfig(value);
 }
 
-export function parseGmailWikiSourceConfig(value: unknown): GmailWikiSourceConfig {
-  return parseGmailSourceConfig(value);
-}
-
-function parseGmailSourceConfig(value: unknown): GmailWikiSourceConfig {
+function parseGmailSourceConfig(value: unknown): GmailBrainSourceConfig {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const record = value as Record<string, unknown>;
   const events = parseEventRefs(record.events);
@@ -139,33 +120,6 @@ export async function listEnabledGmailBrainSourceRoutes(
     integrationId: row.integrationId,
     brainRef: row.brainRef,
     config: parseGmailBrainSourceConfig(row.config),
-  }));
-}
-
-export async function listEnabledGmailWikiSourceRoutes(
-  integrationIds: readonly string[],
-  db: DbLike = getDb(),
-): Promise<GmailWikiSourceRoute[]> {
-  if (integrationIds.length === 0) return [];
-  const rows = await db
-    .select({
-      integrationId: wikiSources.integrationId,
-      workspaceId: wikiSources.workspaceId,
-      config: wikiSources.config,
-    })
-    .from(wikiSources)
-    .where(
-      and(
-        eq(wikiSources.provider, "gmail"),
-        eq(wikiSources.enabled, true),
-        inArray(wikiSources.integrationId, [...integrationIds]),
-      ),
-    );
-
-  return rows.map((row: { integrationId: string; workspaceId: string; config: unknown }) => ({
-    integrationId: row.integrationId,
-    workspaceId: row.workspaceId,
-    config: parseGmailWikiSourceConfig(row.config),
   }));
 }
 
