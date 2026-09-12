@@ -2,6 +2,12 @@ import { describe, expect, it } from "vitest";
 import { featureFlagsFromUser } from "@/lib/feature-flags";
 
 describe("featureFlagsFromUser", () => {
+  it("defaults past session access off and maps explicit opt-in", () => {
+    expect(featureFlagsFromUser({}).pastSessionAccess).toBe(false);
+    expect(featureFlagsFromUser({ pastSessionAccessEnabled: null }).pastSessionAccess).toBe(false);
+    expect(featureFlagsFromUser({ pastSessionAccessEnabled: true }).pastSessionAccess).toBe(true);
+  });
+
   it("defaults background task spawning to off", () => {
     expect(featureFlagsFromUser({}).taskSpawning).toBe(false);
     expect(featureFlagsFromUser({ taskSpawningEnabled: null }).taskSpawning).toBe(false);

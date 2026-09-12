@@ -52,6 +52,7 @@ const userPreferencesMock = vi.hoisted(() => ({
   updateAutoModelRoutingAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateReviewInboxAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateSidebarProjectsAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
+  updatePastSessionAccessAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateSubagentsAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
 }));
 
@@ -178,6 +179,7 @@ vi.mock("@/lib/user-preferences", () => ({
   updateReviewInboxAction: userPreferencesMock.updateReviewInboxAction,
   updateSidebarProjectsAction: userPreferencesMock.updateSidebarProjectsAction,
   updateSubagentsAction: userPreferencesMock.updateSubagentsAction,
+  updatePastSessionAccessAction: userPreferencesMock.updatePastSessionAccessAction,
 }));
 
 vi.mock("@/lib/headless-automation-commands", () => ({
@@ -393,6 +395,22 @@ describe("SettingsRoute", () => {
     await user.click(toggle);
 
     expect(userPreferencesMock.updateReviewInboxAction).toHaveBeenCalledWith(true);
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+  });
+
+  it("enables past session access and restores off when saving fails", async () => {
+    const user = userEvent.setup();
+    userPreferencesMock.updatePastSessionAccessAction.mockRejectedValueOnce(
+      new Error("API unavailable"),
+    );
+    render(<PreferencesSettingsRoute />);
+    const toggle = screen.getByRole("switch", { name: "Past session access" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    await user.click(toggle);
+    expect(await screen.findByText("Could not update this preference.")).toBeInTheDocument();
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    await user.click(toggle);
+    expect(userPreferencesMock.updatePastSessionAccessAction).toHaveBeenLastCalledWith(true);
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
   });
 

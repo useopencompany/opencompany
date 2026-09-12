@@ -19,6 +19,7 @@ type UserPreferences = {
   reviewInboxEnabled: boolean;
   sidebarProjectsEnabled: boolean;
   subagentsEnabled: boolean;
+  pastSessionAccessEnabled: boolean;
 };
 
 export async function updateTimezoneAction(timezone: string) {
@@ -88,6 +89,13 @@ export async function updateSubagentsAction(enabled: boolean) {
   revalidatePath("/");
   revalidatePath("/settings/preferences");
   return { ok: true, enabled: preferences.subagentsEnabled } as const;
+}
+
+export async function updatePastSessionAccessAction(enabled: boolean) {
+  const preferences = await patchPreferences({ pastSessionAccessEnabled: enabled === true });
+  revalidatePath("/");
+  revalidatePath("/settings/preferences");
+  return { ok: true, enabled: preferences.pastSessionAccessEnabled } as const;
 }
 
 async function patchPreferences(body: Partial<UserPreferences>): Promise<UserPreferences> {
