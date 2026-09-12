@@ -252,11 +252,13 @@ describe("HomeRoute", () => {
       claudeCodeConnected: false,
     });
 
-    render(<HomeRoute chatId={null} projectId="project_1" />);
+    render(<HomeRoute chatId={null} projectId="project_1" projectName="product" />);
     expect(surfaceMock.props?.newChatProjectId).toBe("project_1");
+    expect(surfaceMock.props?.newChatProjectName).toBe("product");
 
     render(<HomeRoute chatId={null} />);
     expect(surfaceMock.props?.newChatProjectId).toBeNull();
+    expect(surfaceMock.props?.newChatProjectName).toBeNull();
   });
 });
 
@@ -404,6 +406,27 @@ describe("SettingsRoute", () => {
     await user.click(toggle);
 
     expect(userPreferencesMock.updateSubagentsAction).toHaveBeenCalledWith(true);
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+  });
+
+  it("shows the Subagents opt-in while the preference save is pending", async () => {
+    let finishSave!: (result: { ok: true; enabled: boolean }) => void;
+    userPreferencesMock.updateSubagentsAction.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishSave = resolve;
+        }),
+    );
+    const user = userEvent.setup();
+    render(<PreferencesSettingsRoute />);
+
+    const toggle = screen.getByRole("switch", { name: "Subagents" });
+    await user.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    expect(toggle).toBeDisabled();
+
+    finishSave({ ok: true, enabled: true });
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
   });
 
