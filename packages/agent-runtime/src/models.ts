@@ -134,9 +134,9 @@ export function claudeCodeModelSupportsReasoningEffort(model: string): boolean {
 //   cost (output $/M tokens): ≤$2.50 → 1 · $2.51–$7.50 → 2 · >$7.50 → 3
 // minimax/minimax-m3, xai/grok-build-0.1, anthropic/claude-fable-5.1,
 // anthropic/claude-fable-5, and anthropic/claude-sonnet-5 are estimates (no
-// published benchmark yet) — revisit when Artificial Analysis lists them. openrouter/fusion is a variable panel +
-// judge router and is rated qualitatively from OpenRouter's Fusion defaults
-// rather than a single model benchmark.
+// published benchmark yet) — revisit when Artificial Analysis lists them.
+// openrouter/fusion is a variable panel + judge router and is rated qualitatively
+// from OpenRouter's Fusion defaults rather than a single model benchmark.
 export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "openai/gpt-6-astra",
