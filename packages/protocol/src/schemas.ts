@@ -4322,7 +4322,9 @@ export const UpdateCodexWorkspaceEngineBodySchema = z
   .strict()
   .openapi("UpdateCodexWorkspaceEngineBody");
 
-export type CodexUsage = {
+// Shared by the Codex and Claude Code subscription cards: a provider-agnostic
+// snapshot of the connected account's remaining allowance per limit window.
+export type SubscriptionUsage = {
   windows: {
     id: string;
     label: string;
@@ -4332,7 +4334,7 @@ export type CodexUsage = {
   updatedAt: string;
 };
 
-export const CodexUsageSchema: z.ZodType<CodexUsage> = z
+export const SubscriptionUsageSchema: z.ZodType<SubscriptionUsage> = z
   .object({
     windows: z.array(
       z
@@ -4347,12 +4349,12 @@ export const CodexUsageSchema: z.ZodType<CodexUsage> = z
     updatedAt: z.string().datetime(),
   })
   .strict()
-  .openapi("CodexUsage");
+  .openapi("SubscriptionUsage");
 
-export const CodexUsageEnvelopeSchema = z
-  .object({ data: CodexUsageSchema, meta: ProtocolMetadataSchema })
+export const SubscriptionUsageEnvelopeSchema = z
+  .object({ data: SubscriptionUsageSchema, meta: ProtocolMetadataSchema })
   .strict()
-  .openapi("CodexUsageEnvelope");
+  .openapi("SubscriptionUsageEnvelope");
 
 export const EngineAuthFlowIdSchema = z
   .string()

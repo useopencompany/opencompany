@@ -11778,6 +11778,66 @@
         ],
         "additionalProperties": false
       },
+      "SubscriptionUsageEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SubscriptionUsage"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SubscriptionUsage": {
+        "type": "object",
+        "properties": {
+          "windows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "usedPercent": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "resetsAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "id",
+                "label",
+                "usedPercent",
+                "resetsAt"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "windows",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
       "CodexAuthStatusEnvelope": {
         "type": "object",
         "properties": {
@@ -11873,66 +11933,6 @@
           "lastValidatedAt",
           "lastRotatedAt",
           "workspaceEngine"
-        ],
-        "additionalProperties": false
-      },
-      "CodexUsageEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/CodexUsage"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/ProtocolMetadata"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "CodexUsage": {
-        "type": "object",
-        "properties": {
-          "windows": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "id": {
-                  "type": "string"
-                },
-                "label": {
-                  "type": "string"
-                },
-                "usedPercent": {
-                  "type": "number",
-                  "minimum": 0,
-                  "maximum": 100
-                },
-                "resetsAt": {
-                  "type": "string",
-                  "format": "date-time"
-                }
-              },
-              "required": [
-                "id",
-                "label",
-                "usedPercent",
-                "resetsAt"
-              ],
-              "additionalProperties": false
-            }
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "windows",
-          "updatedAt"
         ],
         "additionalProperties": false
       },
@@ -23692,6 +23692,43 @@
         }
       }
     },
+    "/v1/engine-auth/claude-code/usage": {
+      "get": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current subscription limits for the acting user's connected Claude Code account. Includes usage across apps; never includes credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionUsageEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/engine-auth/codex": {
       "get": {
         "tags": [
@@ -23783,7 +23820,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CodexUsageEnvelope"
+                  "$ref": "#/components/schemas/SubscriptionUsageEnvelope"
                 }
               }
             }

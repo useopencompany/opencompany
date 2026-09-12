@@ -218,6 +218,7 @@ describe("headless protocol", () => {
       "/v1/actions/{actionId}/permissions/always-allow",
       "/v1/integration-accounts/{integrationId}",
       "/v1/engine-auth/claude-code",
+      "/v1/engine-auth/claude-code/usage",
       "/v1/engine-auth/codex",
       "/v1/engine-auth/codex/usage",
       "/v1/engine-auth/codex/workspace",

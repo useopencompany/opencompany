@@ -1,7 +1,7 @@
 "use server";
 
 import { isCodexConnectedForUser as readCodexConnectionForUser } from "@opencompany/agent/application/engine-auth-status";
-import type { CodexUsage } from "@opencompany/protocol";
+import type { SubscriptionUsage } from "@opencompany/protocol";
 import { revalidatePath } from "next/cache";
 import { serverApiClient, serverApiError, serverApiErrorMessage } from "@/lib/server-api-client";
 
@@ -123,7 +123,7 @@ export async function setCodexWorkspaceEngineEnabled(enabled: boolean) {
 }
 
 export async function loadCurrentCodexUsage(): Promise<
-  { ok: true; usage: CodexUsage } | { ok: false; error: string }
+  { ok: true; usage: SubscriptionUsage } | { ok: false; error: string }
 > {
   try {
     const response = await (await serverApiClient()).v1["engine-auth"].codex.usage.$get();

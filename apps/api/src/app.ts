@@ -2585,6 +2585,13 @@ export function createApiApp(input: CreateApiAppInput) {
       const status = await input.engineAuth.saveClaudeCodeToken(actor, c.req.valid("json").token);
       return c.json({ data: status, meta }, 200);
     },
+    getClaudeCodeUsage: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "claude-code-usage", 6);
+      c.header("Cache-Control", "private, no-store");
+      const usage = await input.engineAuth.getClaudeCodeUsage(actor);
+      return c.json({ data: usage, meta }, 200);
+    },
     deleteClaudeCodeAuth: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 60);

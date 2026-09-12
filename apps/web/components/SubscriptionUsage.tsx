@@ -1,13 +1,46 @@
 "use client";
 
-import type { CodexUsage } from "@opencompany/protocol";
+import type { SubscriptionUsage as SubscriptionUsageSnapshot } from "@opencompany/protocol";
 import { Button } from "@opencompany/ui/components/button";
 import { RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
+import { loadCurrentClaudeCodeUsage } from "@/lib/claude-code-auth";
 import { loadCurrentCodexUsage } from "@/lib/codex-auth";
 
-export function CodexSubscriptionUsage() {
-  const [usage, setUsage] = useState<CodexUsage | null>(null);
+type UsageProvider = "codex" | "claude_code";
+
+const PROVIDERS = {
+  codex: {
+    name: "Codex",
+    load: loadCurrentCodexUsage,
+    barClassName: "bg-[#2b8d98]",
+    refreshMs: 60_000,
+  },
+  claude_code: {
+    name: "Claude",
+    load: loadCurrentClaudeCodeUsage,
+    barClassName: "bg-[#CC785C]",
+    // Reading Claude usage costs a real inference request that counts against the
+    // windows being shown, so it polls far slower than Codex's free usage endpoint.
+    // Five-hour and weekly windows do not move fast enough to need a closer look,
+    // and the refresh control is there when they do.
+    refreshMs: 300_000,
+  },
+} as const satisfies Record<
+  UsageProvider,
+  {
+    name: string;
+    load: () => Promise<
+      { ok: true; usage: SubscriptionUsageSnapshot } | { ok: false; error: string }
+    >;
+    barClassName: string;
+    refreshMs: number;
+  }
+>;
+
+export function SubscriptionUsage({ provider }: { provider: UsageProvider }) {
+  const { name, load, barClassName, refreshMs } = PROVIDERS[provider];
+  const [usage, setUsage] = useState<SubscriptionUsageSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refresh, setRefresh] = useState(0);
@@ -15,7 +48,7 @@ export function CodexSubscriptionUsage() {
 
   useEffect(() => {
     let active = true;
-    void loadCurrentCodexUsage()
+    void load()
       .then((result) => {
         if (!active) return;
         if (result.ok) {
@@ -29,13 +62,13 @@ export function CodexSubscriptionUsage() {
       })
       .catch(() => {
         if (!active) return;
-        setError("Codex usage is temporarily unavailable. Try again shortly.");
+        setError(`${name} usage is temporarily unavailable. Try again shortly.`);
         setLoading(false);
       });
     return () => {
       active = false;
     };
-  }, [refresh]);
+  }, [refresh, load, name]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -43,14 +76,14 @@ export function CodexSubscriptionUsage() {
       setNow(Date.now());
       setLoading(true);
       setRefresh((value) => value + 1);
-    }, 60_000);
+    }, refreshMs);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [refreshMs]);
 
   return (
     <div
       className="flex flex-col gap-4 border-t border-border pt-4"
-      aria-label="Codex subscription usage"
+      aria-label={`${name} subscription usage`}
     >
       <div className="flex items-center justify-between gap-2">
         <p className="text-[12px] text-ink-subtle" aria-live="polite">
@@ -64,7 +97,7 @@ export function CodexSubscriptionUsage() {
           variant="ghost"
           size="icon"
           className="size-7 rounded-full text-ink-subtle"
-          aria-label="Refresh Codex usage"
+          aria-label={`Refresh ${name} usage`}
           disabled={loading}
           onClick={() => {
             setLoading(true);
@@ -91,7 +124,7 @@ export function CodexSubscriptionUsage() {
               className="h-1.5 overflow-hidden rounded-full bg-surface-hover"
             >
               <div
-                className={`h-full rounded-full transition-[width] ${remaining <= 10 ? "bg-warning" : "bg-[#2b8d98]"}`}
+                className={`h-full rounded-full transition-[width] ${remaining <= 10 ? "bg-warning" : barClassName}`}
                 style={{ width: `${remaining}%` }}
               />
             </div>
@@ -108,7 +141,7 @@ export function CodexSubscriptionUsage() {
       })}
       {usage && usage.windows.length === 0 ? (
         <p className="text-[12px] leading-5 text-ink-subtle">
-          Codex hasn’t reported usage limits for this account.
+          {name} hasn’t reported usage limits for this account.
         </p>
       ) : null}
       {error ? (

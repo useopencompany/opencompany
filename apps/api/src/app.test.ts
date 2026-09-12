@@ -128,6 +128,40 @@ describe("canonical Hono API", () => {
     });
   });
 
+  it("serves private Claude usage with its own refresh rate limit", async () => {
+    const usage = {
+      windows: [
+        {
+          id: "claude-code:5h",
+          label: "Session",
+          usedPercent: 20,
+          resetsAt: "2026-09-11T00:00:00.000Z",
+        },
+      ],
+      updatedAt: "2026-09-10T12:00:00.000Z",
+    };
+    const getClaudeCodeUsage = vi.fn(async () => usage);
+    const buckets: string[] = [];
+    const app = testApp(fakeRepository(), {
+      engineAuth: engineAuthService({ getClaudeCodeUsage }),
+      rateLimiter: {
+        consume: async ({ bucket, limit }) => {
+          buckets.push(`${bucket}:${limit}`);
+          return { allowed: true };
+        },
+      },
+    });
+    const response = await app.request("/v1/engine-auth/claude-code/usage?userId=someone_else");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(getClaudeCodeUsage).toHaveBeenCalledWith(actor);
+    expect(buckets).toEqual(["claude-code-usage:6"]);
+    await expect(response.json()).resolves.toEqual({
+      data: usage,
+      meta: { apiVersion: "v1", protocolVersion: expect.any(String) },
+    });
+  });
+
   it("serves bots through authenticated validated canonical routes", async () => {
     const bot = { id: "bot_1", name: "Research", description: "Find customers" };
     const create = vi.fn(async () => bot);
@@ -5735,6 +5769,9 @@ function fakeEngineAuth(): Parameters<typeof createApiApp>[0]["engineAuth"] {
     },
     disconnectClaudeCode: async () => {
       throw new Error("Unexpected Claude Code disconnect.");
+    },
+    getClaudeCodeUsage: async () => {
+      throw new Error("Unexpected Claude Code usage read.");
     },
     getCodexUsage: async () => {
       throw new Error("Unexpected Codex usage read.");
