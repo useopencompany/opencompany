@@ -1,4 +1,4 @@
-import type { CodexUsage } from "@opencompany/protocol/schemas";
+import type { SubscriptionUsage } from "@opencompany/protocol/schemas";
 import { z } from "zod";
 import { CodexBackendError, createCodexTokenManager } from "./codex-backend-language-model";
 
@@ -31,7 +31,7 @@ export async function fetchCodexUsage(input: {
   db: Parameters<typeof createCodexTokenManager>[0]["db"];
   userWorkosId: string;
   fetchImpl?: typeof fetch;
-}): Promise<CodexUsage> {
+}): Promise<SubscriptionUsage> {
   // Bound both usage reads and any OAuth refresh through the existing token lease.
   const signal = AbortSignal.timeout(20_000);
   const fetchImpl: typeof fetch = (request, init) =>
@@ -86,8 +86,8 @@ export async function fetchCodexUsage(input: {
   return normalizeCodexUsage(result.data);
 }
 
-function normalizeCodexUsage(data: z.infer<typeof UsageResponseSchema>): CodexUsage {
-  const windows: CodexUsage["windows"] = [];
+function normalizeCodexUsage(data: z.infer<typeof UsageResponseSchema>): SubscriptionUsage {
+  const windows: SubscriptionUsage["windows"] = [];
   const append = (
     limits: z.infer<typeof RateLimitSchema> | null | undefined,
     id: string,

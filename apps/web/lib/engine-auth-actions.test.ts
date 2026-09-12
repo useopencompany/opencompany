@@ -5,6 +5,7 @@ import {
   disconnectClaudeCodeAuth,
   isClaudeCodeConnectedForUser,
   loadCurrentClaudeCodeAuthSettings,
+  loadCurrentClaudeCodeUsage,
   saveClaudeCodeToken,
 } from "./claude-code-auth";
 import {
@@ -66,6 +67,15 @@ describe("engine auth command adapters", () => {
     await expect(loadCurrentCodexUsage()).resolves.toEqual({ ok: true, usage });
     expect(requests[0]?.method).toBe("GET");
     expect(new URL(requests[0]!.url).pathname).toBe("/v1/engine-auth/codex/usage");
+    expect(requests[0]?.headers.get("Cookie")).toBe("wos-session=sealed");
+  });
+
+  it("loads usage through the authenticated Claude Code usage endpoint", async () => {
+    const usage = { windows: [], updatedAt: "2026-09-10T12:00:00.000Z" };
+    const requests = stubApi(() => Response.json({ data: usage, meta }));
+    await expect(loadCurrentClaudeCodeUsage()).resolves.toEqual({ ok: true, usage });
+    expect(requests[0]?.method).toBe("GET");
+    expect(new URL(requests[0]!.url).pathname).toBe("/v1/engine-auth/claude-code/usage");
     expect(requests[0]?.headers.get("Cookie")).toBe("wos-session=sealed");
   });
 

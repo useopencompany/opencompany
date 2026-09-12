@@ -54,7 +54,6 @@ import {
   ClaudeCodeAuthStatusEnvelopeSchema,
   CodexAuthStatusEnvelopeSchema,
   CodexDeviceAuthFlowEnvelopeSchema,
-  CodexUsageEnvelopeSchema,
   CompleteInfisicalAuthBodySchema,
   ConfirmBrainImportBodySchema,
   ConversationEnvelopeSchema,
@@ -178,6 +177,7 @@ import {
   StripeAccountDeleteEnvelopeSchema,
   StripeAccountStateEnvelopeSchema,
   SubmitFeedbackBodySchema,
+  SubscriptionUsageEnvelopeSchema,
   TaskEnvelopeSchema,
   TaskPageSchema,
   TaskScheduleArchiveEnvelopeSchema,
@@ -3583,7 +3583,22 @@ export const getCodexUsageRoute = createRoute({
     200: {
       description:
         "Current subscription limits for the acting user's connected Codex account. Includes usage across apps; never includes credentials.",
-      content: { "application/json": { schema: CodexUsageEnvelopeSchema } },
+      content: { "application/json": { schema: SubscriptionUsageEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getClaudeCodeUsageRoute = createRoute({
+  method: "get",
+  path: "/v1/engine-auth/claude-code/usage",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description:
+        "Current subscription limits for the acting user's connected Claude Code account. Includes usage across apps; never includes credentials.",
+      content: { "application/json": { schema: SubscriptionUsageEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -4025,6 +4040,7 @@ export type V1RouteHandlers = {
   saveClaudeCodeToken: RouteHandler<typeof saveClaudeCodeTokenRoute>;
   deleteClaudeCodeAuth: RouteHandler<typeof deleteClaudeCodeAuthRoute>;
   getCodexAuth: RouteHandler<typeof getCodexAuthRoute>;
+  getClaudeCodeUsage: RouteHandler<typeof getClaudeCodeUsageRoute>;
   getCodexUsage: RouteHandler<typeof getCodexUsageRoute>;
   updateCodexWorkspaceEngine: RouteHandler<typeof updateCodexWorkspaceEngineRoute>;
   startCodexDeviceAuth: RouteHandler<typeof startCodexDeviceAuthRoute>;
@@ -4226,6 +4242,7 @@ export function createV1Router(
       .openapi(getClaudeCodeAuthRoute, handlers.getClaudeCodeAuth)
       .openapi(saveClaudeCodeTokenRoute, handlers.saveClaudeCodeToken)
       .openapi(deleteClaudeCodeAuthRoute, handlers.deleteClaudeCodeAuth)
+      .openapi(getClaudeCodeUsageRoute, handlers.getClaudeCodeUsage)
       .openapi(getCodexAuthRoute, handlers.getCodexAuth)
       .openapi(getCodexUsageRoute, handlers.getCodexUsage)
       .openapi(updateCodexWorkspaceEngineRoute, handlers.updateCodexWorkspaceEngine)
@@ -5750,6 +5767,8 @@ const contractDocumentHandlers: V1RouteHandlers = {
       200,
     ),
   deleteClaudeCodeAuth: (c) => c.json({ data: { deleted: true as const }, meta }, 200),
+  getClaudeCodeUsage: (c) =>
+    c.json({ data: { windows: [], updatedAt: placeholderTime }, meta }, 200),
   getCodexUsage: (c) => c.json({ data: { windows: [], updatedAt: placeholderTime }, meta }, 200),
   getCodexAuth: (c) =>
     c.json(
