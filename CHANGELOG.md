@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- the sidebar list of chats and tasks is now called recents, and you can collapse it. the chevron beside the label points down when the list is open and right when it is closed, and your choice is remembered (#1751) — @louis.
+
 ## [1.26.0] - 2026-09-11
 
 ### Added
