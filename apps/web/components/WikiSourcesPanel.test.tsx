@@ -74,7 +74,7 @@ describe("WikiSourcesPanel", () => {
   });
 
   it("renders a not-connected state with the existing provider connect flow", async () => {
-    render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin />);
+    render(<WikiSourcesPanel defaultWikiSlug="company" workspaceId="workspace_1" isAdmin />);
 
     const connect = await screen.findByRole("link", { name: "Connect Gmail" });
     expect(connect).toHaveAttribute("href", "/api/integrations/gmail/start?returnTo=/wiki/sources");
@@ -83,7 +83,14 @@ describe("WikiSourcesPanel", () => {
   });
 
   it("keeps OAuth connections in onboarding and ships no dead scope placeholder", async () => {
-    render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin mode="onboarding" />);
+    render(
+      <WikiSourcesPanel
+        defaultWikiSlug="company"
+        workspaceId="workspace_1"
+        isAdmin
+        mode="onboarding"
+      />,
+    );
 
     expect(await screen.findByText("Connect your sources")).toBeInTheDocument();
     expect(await screen.findByRole("link", { name: "Connect Gmail" })).toHaveAttribute(
@@ -96,7 +103,7 @@ describe("WikiSourcesPanel", () => {
 
   it("keeps legacy Granola API ingestion on the Wiki source card", async () => {
     const user = userEvent.setup();
-    render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin />);
+    render(<WikiSourcesPanel defaultWikiSlug="company" workspaceId="workspace_1" isAdmin />);
 
     await user.click(await screen.findByRole("button", { name: "Set up Granola" }));
 
@@ -114,14 +121,16 @@ describe("WikiSourcesPanel", () => {
         accountType: "mcp_server",
       }),
     ];
-    render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin />);
+    render(<WikiSourcesPanel defaultWikiSlug="company" workspaceId="workspace_1" isAdmin />);
 
     expect(await screen.findByRole("button", { name: "Set up Granola" })).toBeInTheDocument();
     expect(screen.queryByText("Granola tool access")).not.toBeInTheDocument();
     expect(mocks.upsertWikiSource).not.toHaveBeenCalled();
   });
   it("does not start the live integration collection during server rendering", () => {
-    const html = renderToString(<WikiSourcesPanel workspaceId="workspace_1" isAdmin />);
+    const html = renderToString(
+      <WikiSourcesPanel defaultWikiSlug="company" workspaceId="workspace_1" isAdmin />,
+    );
 
     expect(html).toContain("Loading Wiki sources");
     expect(mocks.useLiveQuery).not.toHaveBeenCalled();
@@ -131,7 +140,7 @@ describe("WikiSourcesPanel", () => {
     mocks.integrations = [integration({ provider: "gmail", accountEmail: "ada@example.com" })];
     mocks.upsertWikiSource.mockResolvedValue(source());
     const user = userEvent.setup();
-    render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin />);
+    render(<WikiSourcesPanel defaultWikiSlug="company" workspaceId="workspace_1" isAdmin />);
 
     const toggle = await screen.findByRole("switch", {
       name: "Enable Gmail source ada@example.com",
@@ -172,7 +181,7 @@ describe("WikiSourcesPanel", () => {
       }),
     );
     const user = userEvent.setup();
-    render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin />);
+    render(<WikiSourcesPanel defaultWikiSlug="company" workspaceId="workspace_1" isAdmin />);
 
     await user.click(await screen.findByRole("button", { name: "Choose events and instructions" }));
     await user.click(screen.getByRole("checkbox", { name: "Email sent" }));
@@ -219,7 +228,7 @@ describe("WikiSourcesPanel", () => {
       }),
     );
     const user = userEvent.setup();
-    render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin />);
+    render(<WikiSourcesPanel defaultWikiSlug="company" workspaceId="workspace_1" isAdmin />);
 
     await user.click(await screen.findByRole("button", { name: "Choose teams and events" }));
     await user.click(await screen.findByRole("checkbox", { name: /Core/u }));
@@ -244,7 +253,7 @@ describe("WikiSourcesPanel", () => {
     mocks.initialIntegrations = initialIntegrationState([
       integrationAccount({ provider: "gmail", accountEmail: "ada@example.com" }),
     ]);
-    render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin />);
+    render(<WikiSourcesPanel defaultWikiSlug="company" workspaceId="workspace_1" isAdmin />);
 
     expect(await screen.findByText("ada@example.com")).toBeInTheDocument();
     expect(screen.queryByLabelText("Loading Wiki sources")).not.toBeInTheDocument();
@@ -258,7 +267,7 @@ describe("WikiSourcesPanel", () => {
     mocks.upsertWikiSource.mockResolvedValue(
       source({ provider: "granola", enabled: true, accountEmail: "ada@example.com" }),
     );
-    render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin />);
+    render(<WikiSourcesPanel defaultWikiSlug="company" workspaceId="workspace_1" isAdmin />);
 
     await waitFor(() =>
       expect(mocks.upsertWikiSource).toHaveBeenCalledWith({
@@ -275,7 +284,7 @@ describe("WikiSourcesPanel", () => {
     mocks.listWikiSources.mockResolvedValue([
       source({ provider: "granola", enabled: false, accountEmail: "ada@example.com" }),
     ]);
-    render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin />);
+    render(<WikiSourcesPanel defaultWikiSlug="company" workspaceId="workspace_1" isAdmin />);
 
     const toggle = await screen.findByRole("switch", {
       name: "Enable Granola source ada@example.com",
@@ -295,7 +304,7 @@ describe("WikiSourcesPanel", () => {
     mocks.listWikiSources.mockResolvedValue([
       source({ enabled: true, accountEmail: "stale@example.com" }),
     ]);
-    render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin />);
+    render(<WikiSourcesPanel defaultWikiSlug="company" workspaceId="workspace_1" isAdmin />);
 
     expect(await screen.findByText("Needs reconnect")).toBeInTheDocument();
     expect(screen.getByText("current@example.com")).toBeInTheDocument();
@@ -307,7 +316,7 @@ describe("WikiSourcesPanel", () => {
     mocks.listWikiSources.mockResolvedValue([
       source({ enabled: true, integrationStatus: "disconnected" }),
     ]);
-    render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin />);
+    render(<WikiSourcesPanel defaultWikiSlug="company" workspaceId="workspace_1" isAdmin />);
 
     expect(await screen.findByText("Needs reconnect")).toBeInTheDocument();
     expect(
@@ -322,7 +331,7 @@ describe("WikiSourcesPanel", () => {
 
   it("shows a recoverable loading error", async () => {
     mocks.listWikiSources.mockRejectedValue(new Error("API unavailable"));
-    render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin />);
+    render(<WikiSourcesPanel defaultWikiSlug="company" workspaceId="workspace_1" isAdmin />);
 
     expect(await screen.findByText("Sources didn't load")).toBeInTheDocument();
     expect(screen.getByText("API unavailable")).toBeInTheDocument();

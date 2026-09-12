@@ -18,8 +18,14 @@ import { type Wiki, type WikiAccessLevel, wikiMembers, wikis } from "./product-s
 
 type DbClient = any;
 
-export const DEFAULT_WIKI_NAME = "Wiki";
-export const DEFAULT_WIKI_SLUG = "wiki";
+export const DEFAULT_WIKI_NAME = "Company";
+export const DEFAULT_WIKI_SLUG = "company";
+/**
+ * Slugs that are static segments under `/wiki/` in the web app. Next resolves a
+ * static segment before the `[wikiSlug]` one, so a wiki holding one of these
+ * would be permanently unreachable at its own URL.
+ */
+export const RESERVED_WIKI_SLUGS: ReadonlySet<string> = new Set(["sources", "import"]);
 const WIKI_SLUG_MAX_LENGTH = 64;
 const WIKI_NAME_MAX_LENGTH = 120;
 const WIKI_INSTRUCTIONS_MAX_BYTES = 20_000;
@@ -302,7 +308,9 @@ async function allocateWikiSlug(db: DbClient, workspaceId: string, name: string)
     .where(eq(wikis.workspaceId, workspaceId));
   const used = new Set(existing.map((row: { slug: string }) => row.slug));
   let slug = base;
-  for (let suffix = 2; used.has(slug); suffix += 1) {
+  // A reserved slug is suffixed exactly like a taken one, so naming a wiki
+  // "Sources" still works and lands on `sources-2`.
+  for (let suffix = 2; used.has(slug) || RESERVED_WIKI_SLUGS.has(slug); suffix += 1) {
     slug = `${base}-${suffix}`;
     if (suffix > 1_000) throw new WikiAccessError("Could not allocate a unique wiki slug.");
   }

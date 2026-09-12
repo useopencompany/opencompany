@@ -25,7 +25,7 @@ describe("WikiIngestActivityFeed", () => {
       }),
     );
 
-    render(<WikiIngestActivityFeed />);
+    render(<WikiIngestActivityFeed wikiSlug="company" />);
 
     expect(screen.getByLabelText("Loading Wiki ingestion activity")).toBeInTheDocument();
     resolvePage?.({ items: [], nextCursor: null });
@@ -48,7 +48,7 @@ describe("WikiIngestActivityFeed", () => {
       nextCursor: null,
     });
 
-    render(<WikiIngestActivityFeed />);
+    render(<WikiIngestActivityFeed wikiSlug="company" />);
 
     expect(await screen.findByText("Succeeded")).toBeInTheDocument();
     for (const outcome of ["Skipped", "Failed", "Running", "Queued"]) {
@@ -58,7 +58,7 @@ describe("WikiIngestActivityFeed", () => {
     expect(screen.getByText("Gateway unavailable")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Launch plan" })).toHaveAttribute(
       "href",
-      "/wiki/projects/launch-plan",
+      "/wiki/company/projects/launch-plan",
     );
   });
 
@@ -67,7 +67,7 @@ describe("WikiIngestActivityFeed", () => {
       .mockRejectedValueOnce(new Error("API unavailable"))
       .mockResolvedValueOnce({ items: [], nextCursor: null });
     const user = userEvent.setup();
-    render(<WikiIngestActivityFeed />);
+    render(<WikiIngestActivityFeed wikiSlug="company" />);
 
     expect(await screen.findByText("Activity didn't load")).toBeInTheDocument();
     expect(screen.getByText("API unavailable")).toBeInTheDocument();
@@ -89,7 +89,7 @@ describe("WikiIngestActivityFeed", () => {
         nextCursor: null,
       });
     const user = userEvent.setup();
-    render(<WikiIngestActivityFeed />);
+    render(<WikiIngestActivityFeed wikiSlug="company" />);
 
     await user.click(await screen.findByRole("button", { name: "Load more" }));
     await waitFor(() =>

@@ -9,13 +9,14 @@ import { Skeleton } from "@opencompany/ui/components/skeleton";
 import { CircleAlert, CircleCheck, CircleMinus, Clock3, Loader2, RotateCw } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { wikiHref } from "@/lib/wiki-routes";
 import { listWikiIngestActivity } from "@/lib/wiki-source-api";
 import { WIKI_SOURCE_PROVIDERS } from "@/lib/wiki-sources/registry";
 
 const ACTIVITY_PAGE_SIZE = 20;
 const MAX_VISIBLE_PAGE_LINKS = 6;
 
-export function WikiIngestActivityFeed() {
+export function WikiIngestActivityFeed({ wikiSlug }: { wikiSlug: string }) {
   const [page, setPage] = useState<WikiIngestActivityPageDto | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
@@ -108,7 +109,7 @@ export function WikiIngestActivityFeed() {
         <Card className="gap-0 overflow-hidden bg-surface py-0">
           <CardContent className="divide-y divide-border-subtle px-0">
             {page.items.map((item) => (
-              <WikiIngestActivityRow key={item.id} item={item} />
+              <WikiIngestActivityRow key={item.id} item={item} wikiSlug={wikiSlug} />
             ))}
           </CardContent>
           {error ? (
@@ -159,7 +160,13 @@ export function WikiIngestActivitySkeleton() {
   );
 }
 
-function WikiIngestActivityRow({ item }: { item: WikiIngestActivityItemDto }) {
+function WikiIngestActivityRow({
+  item,
+  wikiSlug,
+}: {
+  item: WikiIngestActivityItemDto;
+  wikiSlug: string;
+}) {
   const outcome = OUTCOME_PRESENTATION[item.outcome];
   const Icon = outcome.Icon;
   const provider = providerName(item.provider);
@@ -189,14 +196,20 @@ function WikiIngestActivityRow({ item }: { item: WikiIngestActivityItemDto }) {
           <p className="mt-1.5 text-[12px] leading-5 text-ink-muted">{item.reason}</p>
         ) : null}
         {item.outcome === "succeeded" && item.pages.length > 0 ? (
-          <WikiActivityPageLinks pages={item.pages} />
+          <WikiActivityPageLinks pages={item.pages} wikiSlug={wikiSlug} />
         ) : null}
       </div>
     </article>
   );
 }
 
-function WikiActivityPageLinks({ pages }: { pages: WikiIngestActivityItemDto["pages"] }) {
+function WikiActivityPageLinks({
+  pages,
+  wikiSlug,
+}: {
+  pages: WikiIngestActivityItemDto["pages"];
+  wikiSlug: string;
+}) {
   const visible = pages.slice(0, MAX_VISIBLE_PAGE_LINKS);
   const hiddenCount = pages.length - visible.length;
   return (
@@ -213,7 +226,7 @@ function WikiActivityPageLinks({ pages }: { pages: WikiIngestActivityItemDto["pa
         ) : (
           <Link
             key={page.path}
-            href={wikiPageHref(page.path)}
+            href={wikiHref(wikiSlug, page.path)}
             className="inline-flex max-w-[220px] truncate rounded-md border border-border-subtle bg-canvas px-2 py-1 text-[11px] text-ink-muted transition-colors hover:border-border hover:bg-surface-hover hover:text-ink"
             title={`${page.title} · ${page.action}`}
           >
@@ -268,14 +281,6 @@ function mergeActivityItems(
   const byId = new Map(current.map((item) => [item.id, item]));
   for (const item of additions) byId.set(item.id, item);
   return [...byId.values()];
-}
-
-function wikiPageHref(path: string) {
-  return `/wiki/${path
-    .split("/")
-    .filter(Boolean)
-    .map((segment) => encodeURIComponent(segment))
-    .join("/")}`;
 }
 
 function providerName(provider: WikiIngestActivityItemDto["provider"]) {

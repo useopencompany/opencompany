@@ -80,7 +80,8 @@ describe("opencompany workspace creation", () => {
     // point can ever resolve a workspace with no wiki to write to.
     expect(batchedQueries.find((query) => query.table === wikis)?.values).toMatchObject({
       workspaceId: "goat_ws_new",
-      slug: "wiki",
+      name: "Company",
+      slug: "company",
       access: "workspace",
       isDefault: true,
     });
