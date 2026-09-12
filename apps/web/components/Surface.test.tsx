@@ -716,7 +716,7 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Accept" }));
+    await user.click(screen.getByRole("button", { name: "Allow once" }));
 
     await waitFor(() =>
       expect(resolveApproval).toHaveBeenCalledWith({
@@ -734,8 +734,8 @@ describe("Surface chat streaming UI", () => {
 
   it.each([
     { decision: "Always allow", save: "success", expectedIds: [0, 1] },
-    { decision: "Accept", save: "success", expectedIds: [0] },
-    { decision: "Decline", save: "success", expectedIds: [0] },
+    { decision: "Allow once", save: "success", expectedIds: [0] },
+    { decision: "Deny", save: "success", expectedIds: [0] },
     { decision: "Always allow", save: "failure", expectedIds: [0] },
     { decision: "Always allow", save: "rejected", expectedIds: [0] },
   ])(
@@ -813,7 +813,7 @@ describe("Surface chat streaming UI", () => {
           assistantMessageId: "assistant_batch_approval",
           model: DEFAULT_MODEL,
           approvalId: `approval_batch_${index}`,
-          approved: decision !== "Decline",
+          approved: decision !== "Deny",
         });
       }
       if (decision === "Always allow") {
