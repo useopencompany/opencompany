@@ -153,6 +153,60 @@ describe("Chat resource service", () => {
     expect(JSON.stringify(result)).not.toMatch(/blob|pathname|sha256/iu);
   });
 
+  it("serves an HTML artifact inline under the hardened, egress-blocked policy", async () => {
+    const db = fakeDb([
+      [
+        {
+          version: {
+            blobPathname: "private/pathname",
+            filename: "pricing-model.html",
+            mediaType: "text/html",
+            sizeBytes: 24,
+          },
+        },
+      ],
+    ]);
+    const service = createChatResourceService({ db, storage: fakeStorage() });
+
+    const download = await service.downloadArtifact({
+      actor,
+      artifactId: "artifact_1",
+      versionId: "version_1",
+      download: false,
+    });
+
+    expect(download).toMatchObject({ mediaType: "text/html; charset=utf-8", inline: true });
+    expect(download.contentSecurityPolicy).toContain("sandbox allow-scripts");
+    expect(download.contentSecurityPolicy).toContain("default-src 'none'");
+    expect(download.contentSecurityPolicy).not.toContain("allow-same-origin");
+  });
+
+  it("keeps the HTML artifact policy on an explicit download", async () => {
+    const db = fakeDb([
+      [
+        {
+          version: {
+            blobPathname: "private/pathname",
+            filename: "pricing-model.html",
+            mediaType: "text/html",
+            sizeBytes: 24,
+          },
+        },
+      ],
+    ]);
+    const service = createChatResourceService({ db, storage: fakeStorage() });
+
+    const download = await service.downloadArtifact({
+      actor,
+      artifactId: "artifact_1",
+      versionId: "version_1",
+      download: true,
+    });
+
+    expect(download.inline).toBe(false);
+    expect(download.contentSecurityPolicy).toContain("sandbox allow-scripts");
+  });
+
   it("streams only the selected attachment while keeping its locator server-side", async () => {
     const db = fakeDb([
       [

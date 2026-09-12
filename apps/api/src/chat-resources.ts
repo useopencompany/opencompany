@@ -7,6 +7,7 @@ import {
   type StoredChatMessage,
   toChatUiMessage,
 } from "@opencompany/agent/chat-ui";
+import { HTML_ARTIFACT_CONTENT_SECURITY_POLICY } from "@opencompany/agent-runtime";
 import type { Actor } from "@opencompany/core";
 import { newResourceId } from "@opencompany/core/resource-ids";
 import {
@@ -31,6 +32,7 @@ import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { ApiError } from "./errors";
 
 const SHAREABLE_SESSION_KINDS = ["chat", "task"] as const;
+const HTML_MEDIA_TYPE = "text/html";
 const INLINE_MEDIA_TYPES = new Set([
   "application/json",
   "application/pdf",
@@ -39,6 +41,7 @@ const INLINE_MEDIA_TYPES = new Set([
   "image/png",
   "image/webp",
   "text/csv",
+  HTML_MEDIA_TYPE,
   "text/markdown",
   "text/plain",
   "text/tab-separated-values",
@@ -55,7 +58,7 @@ export type ChatResourceDownload = {
   sizeBytes: number | null;
   inline: boolean;
   cacheControl: string;
-  sandbox: boolean;
+  contentSecurityPolicy: string | null;
 };
 
 export type ChatResourceService = {
@@ -382,7 +385,7 @@ export function createChatResourceService(input: {
         sizeBytes: null,
         inline: true,
         cacheControl: "private, max-age=86400, immutable",
-        sandbox: false,
+        contentSecurityPolicy: null,
       };
     },
 
@@ -538,14 +541,21 @@ async function artifactDownload(
   const stream = await storage.get(version.blobPathname);
   if (!stream) throw notFound("Chat artifact bytes not found.");
   const inline = !download && INLINE_MEDIA_TYPES.has(version.mediaType);
+  const html = version.mediaType === HTML_MEDIA_TYPE;
   return {
     stream,
-    mediaType: version.mediaType || "application/octet-stream",
+    // Published text bytes are always UTF-8, and a text/* response without a charset is decoded
+    // with the browser's legacy default, which renders non-ASCII artifact content as mojibake.
+    mediaType: version.mediaType
+      ? `${version.mediaType}${version.mediaType.startsWith("text/") ? "; charset=utf-8" : ""}`
+      : "application/octet-stream",
     filename: version.filename,
     sizeBytes: version.sizeBytes,
     inline,
     cacheControl: "private, no-store",
-    sandbox: inline,
+    // Agent-authored HTML keeps its hardened policy even as a download, so a client that ignores
+    // the attachment disposition still renders it without ambient authority.
+    contentSecurityPolicy: html ? HTML_ARTIFACT_CONTENT_SECURITY_POLICY : inline ? "sandbox" : null,
   };
 }
 
@@ -562,7 +572,7 @@ async function attachmentDownload(
     sizeBytes: attachment.sizeBytes,
     inline: true,
     cacheControl: "private, max-age=86400, immutable",
-    sandbox: false,
+    contentSecurityPolicy: null,
   };
 }
 

@@ -3427,7 +3427,7 @@ describe("canonical Hono API", () => {
       sizeBytes: 18,
       inline: true,
       cacheControl: "private, max-age=86400, immutable",
-      sandbox: false,
+      contentSecurityPolicy: null,
     }));
     const app = testApp(fakeRepository(), {
       chatResources: chatResourceService({ downloadAttachment }),

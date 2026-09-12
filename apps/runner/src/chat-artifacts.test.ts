@@ -203,28 +203,7 @@ describe("publishChatArtifact", () => {
   it("publishes in-band Markdown for an active opencompany turn", async () => {
     dbMocks.select
       .mockReset()
-      .mockReturnValueOnce(
-        queryBuilder([
-          {
-            session: {
-              id: "codex_session_1",
-              engine: "opencompany",
-              status: "running",
-              activeTurnId: "turn_1",
-              workspaceId: "workspace_1",
-            },
-            turn: {
-              id: "turn_1",
-              status: "running",
-              leaseId: "lease_1",
-              leaseOwner: "worker_1",
-              userWorkosId: "user_1",
-              chatSessionId: "chat_1",
-              assistantMessageId: "assistant_1",
-            },
-          },
-        ]),
-      )
+      .mockReturnValueOnce(queryBuilder([activeInBandTurn()]))
       .mockReturnValueOnce(queryBuilder([{ status: "running", interruptAt: null }]))
       .mockReturnValueOnce(queryBuilder([]));
     dbMocks.execute
@@ -264,6 +243,37 @@ describe("publishChatArtifact", () => {
     );
   });
 
+  it("publishes in-band HTML with the media type derived from the filename", async () => {
+    dbMocks.select
+      .mockReset()
+      .mockReturnValueOnce(queryBuilder([activeInBandTurn()]))
+      .mockReturnValueOnce(queryBuilder([{ status: "running", interruptAt: null }]))
+      .mockReturnValueOnce(queryBuilder([]));
+    dbMocks.execute
+      .mockReset()
+      .mockResolvedValueOnce({ rows: [{ count: 0 }] })
+      .mockResolvedValueOnce({ rows: [{ id: "persisted_version" }] });
+
+    const content = "<!doctype html><title>Pricing</title>";
+    const result = await publishInBandChatArtifact({
+      codexChatSessionId: "codex_session_1",
+      codexChatTurnId: "turn_1",
+      toolCallId: "call_1",
+      arguments: { filename: "pricing-model.HTML", title: "Pricing model", content },
+      env: { blobReadWriteToken: "blob_token" },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      artifact: { filename: "pricing-model.HTML", mediaType: "text/html" },
+    });
+    expect(blobMocks.put).toHaveBeenCalledWith(
+      expect.any(String),
+      Buffer.from(content),
+      expect.objectContaining({ contentType: "text/html" }),
+    );
+  });
+
   it("cancels an in-flight artifact upload when the turn is interrupted", async () => {
     const controller = new AbortController();
     let markUploadStarted: () => void = () => {};
@@ -272,28 +282,7 @@ describe("publishChatArtifact", () => {
     });
     dbMocks.select
       .mockReset()
-      .mockReturnValueOnce(
-        queryBuilder([
-          {
-            session: {
-              id: "codex_session_1",
-              engine: "opencompany",
-              status: "running",
-              activeTurnId: "turn_1",
-              workspaceId: "workspace_1",
-            },
-            turn: {
-              id: "turn_1",
-              status: "running",
-              leaseId: "lease_1",
-              leaseOwner: "worker_1",
-              userWorkosId: "user_1",
-              chatSessionId: "chat_1",
-              assistantMessageId: "assistant_1",
-            },
-          },
-        ]),
-      )
+      .mockReturnValueOnce(queryBuilder([activeInBandTurn()]))
       .mockReturnValueOnce(queryBuilder([{ status: "running", interruptAt: null }]))
       .mockReturnValueOnce(queryBuilder([]));
     dbMocks.execute.mockReset().mockResolvedValueOnce({ rows: [{ count: 0 }] });
@@ -349,29 +338,8 @@ describe("publishChatArtifact", () => {
     expect(delOptions.abortSignal.aborted).toBe(false);
   });
 
-  it("rejects paths and non-Markdown extensions from the in-band tool", async () => {
-    dbMocks.select.mockReset().mockReturnValueOnce(
-      queryBuilder([
-        {
-          session: {
-            id: "codex_session_1",
-            engine: "opencompany",
-            status: "running",
-            activeTurnId: "turn_1",
-            workspaceId: "workspace_1",
-          },
-          turn: {
-            id: "turn_1",
-            status: "running",
-            leaseId: "lease_1",
-            leaseOwner: "worker_1",
-            userWorkosId: "user_1",
-            chatSessionId: "chat_1",
-            assistantMessageId: "assistant_1",
-          },
-        },
-      ]),
-    );
+  it("rejects paths and unsupported extensions from the in-band tool", async () => {
+    dbMocks.select.mockReset().mockReturnValueOnce(queryBuilder([activeInBandTurn()]));
     const result = await publishInBandChatArtifact({
       codexChatSessionId: "codex_session_1",
       codexChatTurnId: "turn_1",
@@ -382,7 +350,7 @@ describe("publishChatArtifact", () => {
 
     expect(result).toEqual({
       ok: false,
-      error: "filename must be a Markdown filename ending in .md, without a path.",
+      error: "filename must end in .md or .html, without a path.",
     });
     expect(blobMocks.put).not.toHaveBeenCalled();
   });
@@ -390,28 +358,7 @@ describe("publishChatArtifact", () => {
   it("surfaces optimistic concurrency conflicts without uploading revision bytes", async () => {
     dbMocks.select
       .mockReset()
-      .mockReturnValueOnce(
-        queryBuilder([
-          {
-            session: {
-              id: "codex_session_1",
-              engine: "opencompany",
-              status: "running",
-              activeTurnId: "turn_1",
-              workspaceId: "workspace_1",
-            },
-            turn: {
-              id: "turn_1",
-              status: "running",
-              leaseId: "lease_1",
-              leaseOwner: "worker_1",
-              userWorkosId: "user_1",
-              chatSessionId: "chat_1",
-              assistantMessageId: "assistant_1",
-            },
-          },
-        ]),
-      )
+      .mockReturnValueOnce(queryBuilder([activeInBandTurn()]))
       .mockReturnValueOnce(queryBuilder([{ status: "running", interruptAt: null }]))
       .mockReturnValueOnce(queryBuilder([]))
       .mockReturnValueOnce(
@@ -447,6 +394,27 @@ describe("publishChatArtifact", () => {
     expect(blobMocks.put).not.toHaveBeenCalled();
   });
 });
+
+function activeInBandTurn() {
+  return {
+    session: {
+      id: "codex_session_1",
+      engine: "opencompany",
+      status: "running",
+      activeTurnId: "turn_1",
+      workspaceId: "workspace_1",
+    },
+    turn: {
+      id: "turn_1",
+      status: "running",
+      leaseId: "lease_1",
+      leaseOwner: "worker_1",
+      userWorkosId: "user_1",
+      chatSessionId: "chat_1",
+      assistantMessageId: "assistant_1",
+    },
+  };
+}
 
 function queryBuilder(rows: unknown[]) {
   let builder: Record<string, unknown>;

@@ -1,7 +1,7 @@
 "use client";
 
 import type { PublishedChatArtifact } from "@opencompany/agent-runtime";
-import { Download, ExternalLink, FileText, Loader2, Trash2 } from "lucide-react";
+import { AppWindow, Download, ExternalLink, FileText, Loader2, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 export function ArtifactFileCard({
@@ -20,6 +20,7 @@ export function ArtifactFileCard({
   const [error, setError] = useState<string | null>(null);
   const deleted = locallyDeleted || artifact.state === "deleted";
   const downloadHref = `${href}${href.includes("?") ? "&" : "?"}download=1`;
+  const FileIcon = artifact.mediaType === "text/html" ? AppWindow : FileText;
 
   const deleteArtifact = async () => {
     if (deleted || deleting) return;
@@ -46,7 +47,7 @@ export function ArtifactFileCard({
       data-testid="artifact-file-card"
     >
       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface-muted text-ink-muted">
-        <FileText size={17} strokeWidth={1.8} aria-hidden="true" />
+        <FileIcon size={17} strokeWidth={1.8} aria-hidden="true" />
       </div>
       {onOpen ? (
         <button
