@@ -410,7 +410,6 @@ function SidebarAccountMenu() {
   );
 }
 
-const RECENTS_LABEL = "Recents";
 const RECENTS_LIST_ID = "sidebar-recents";
 const RECENTS_COLLAPSED_STORAGE_KEY = "goat-sidebar-recents-collapsed";
 const recentsCollapsedSubscribers = new Set<() => void>();
@@ -627,7 +626,7 @@ function SidebarWorkList() {
             aria-controls={recentsCollapsed ? undefined : RECENTS_LIST_ID}
             className="group mx-2 flex items-center gap-1 rounded-md px-2 pb-1 pt-0.5 text-[11px] font-medium tracking-wide text-ink-subtle transition-colors duration-150 hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
           >
-            {RECENTS_LABEL}
+            Recents
             {/* One chevron in both states: down when open, rotated to point right when closed, so a
                 collapsed section still reads as "there is more here". */}
             <ChevronDown
@@ -640,11 +639,7 @@ function SidebarWorkList() {
             />
           </button>
           {recentsCollapsed ? null : (
-            <nav
-              id={RECENTS_LIST_ID}
-              aria-label={RECENTS_LABEL}
-              className="flex flex-col gap-px px-2"
-            >
+            <nav id={RECENTS_LIST_ID} aria-label="Recents" className="flex flex-col gap-px px-2">
               {workItems.map(renderRow)}
             </nav>
           )}
