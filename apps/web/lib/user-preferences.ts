@@ -85,6 +85,7 @@ export async function updateSidebarProjectsAction(enabled: boolean) {
 
 export async function updateSubagentsAction(enabled: boolean) {
   const preferences = await patchPreferences({ subagentsEnabled: enabled === true });
+  revalidatePath("/");
   revalidatePath("/settings/preferences");
   return { ok: true, enabled: preferences.subagentsEnabled } as const;
 }

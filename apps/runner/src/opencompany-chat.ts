@@ -1293,9 +1293,9 @@ async function resolveProductChatRuntime(input: {
       }
     : null;
 
-  // Off unless the member turned the Subagents switch on in Preferences. Interactive chat only:
-  // a task is already the deeper-work primitive and runs with raised tool budgets, so nesting a
-  // second delegation layer inside one multiplies cost where nobody is watching it happen.
+  // Off unless the member turned the Subagents switch on in Preferences. Bootstrap already
+  // withholds it in a task conversation; taskContext is the runner's own authority for that same
+  // fact, so both are checked rather than trusting the session row alone to classify a task turn.
   const subagentsEnabled = Boolean(hostTools?.bootstrap.subagentsEnabled) && !taskContext;
   const subagentRunner = subagentsEnabled
     ? createSubagentRunner({
