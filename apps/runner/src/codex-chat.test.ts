@@ -867,7 +867,7 @@ describe("runCodexChatTurn over ACP", () => {
     await expect(
       runCodexChatTurn({
         turn: codexTurn(),
-        session: codexSession(),
+        session: codexSession({ sandboxId: null, codexThreadId: null }),
         canonicalAttemptId: "attempt_1",
         env: env(),
       }),
@@ -890,7 +890,7 @@ describe("runCodexChatTurn over ACP", () => {
 
     const failure = await runCodexChatTurn({
       turn: codexTurn(),
-      session: codexSession(),
+      session: codexSession({ sandboxId: null, codexThreadId: null }),
       canonicalAttemptId: "attempt_1",
       env: env({ internalToken: "runner_secret" }),
     }).catch((error: unknown) => error);
@@ -900,6 +900,51 @@ describe("runCodexChatTurn over ACP", () => {
     expect(diagnostic).toContain("[connect_sandbox] SandboxError: 504:");
     expect(diagnostic).not.toContain("codex_secret");
     expect(diagnostic).not.toContain("runner_secret");
+  });
+
+  it("retries when an existing sandbox cannot be reconnected", async () => {
+    const connectError = new Error("Sandbox control plane request failed.");
+    sandboxMocks.createOrConnectSandbox.mockRejectedValueOnce(connectError);
+
+    await expect(
+      runCodexChatTurn({
+        turn: codexTurn(),
+        session: codexSession(),
+        canonicalAttemptId: "attempt_1",
+        env: env(),
+      }),
+    ).rejects.toMatchObject({
+      name: CodexChatRetryableInfrastructureError.name,
+      cause: connectError,
+      message: "Codex could not reconnect to the existing sandbox before recovery.",
+      diagnosticMessage: "[connect_sandbox] Error: Sandbox control plane request failed.",
+    });
+
+    expect(acpMocks.runTurn).not.toHaveBeenCalled();
+    for (const result of eventMocks.createExternalEngineProjector.mock.results) {
+      expect(result.value.fail).not.toHaveBeenCalled();
+    }
+  });
+
+  it("settles terminally when a fresh session cannot acquire a sandbox", async () => {
+    const createError = new Error("Template not found");
+    sandboxMocks.createOrConnectSandbox.mockRejectedValueOnce(createError);
+
+    await expect(
+      runCodexChatTurn({
+        turn: codexTurn(),
+        session: codexSession({ sandboxId: null, codexThreadId: null }),
+        canonicalAttemptId: "attempt_1",
+        env: env(),
+      }),
+    ).resolves.toBe("settled");
+
+    const projector = eventMocks.createExternalEngineProjector.mock.results[0]?.value;
+    expect(projector.fail).toHaveBeenCalledWith(
+      "Codex sandbox could not be started: Template not found. Send your message again to retry.",
+    );
+    expect(sandboxMocks.isRetryableSandboxAcquisitionError).toHaveBeenCalledWith(createError);
+    expect(acpMocks.runTurn).not.toHaveBeenCalled();
   });
 
   it("retries a Codex ACP setup command timeout as infrastructure failure", async () => {
