@@ -21,24 +21,36 @@ import { Mark } from "../Mark";
  * the density of the real app rather than an enlarged marketing render.
  */
 
-/** Light recessed panel that crops an app card against its right and bottom edges. */
+/**
+ * Light recessed panel that crops an app card against its right and bottom
+ * edges.
+ *
+ * `decorative` is on by default because most of these mockups are dense
+ * simulated chrome — a screen reader gains nothing from eighteen table rows of
+ * invented task names. The chat mockup opts out: its question and answer are
+ * real prose that carries the section's claim.
+ */
 export function Panel({
   children,
   className,
   height = "h-[420px] sm:h-[610px]",
+  decorative = true,
+  ...rest
 }: {
   children: React.ReactNode;
   className?: string;
   height?: string;
-}) {
+  decorative?: boolean;
+} & React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      aria-hidden="true"
+      aria-hidden={decorative || undefined}
       className={cn(
-        "relative overflow-hidden rounded-[8px] border border-border bg-[#f1f1ef]",
+        "relative overflow-hidden rounded-[8px] border border-border bg-sidebar",
         height,
         className,
       )}
+      {...rest}
     >
       {children}
     </div>
@@ -50,7 +62,7 @@ function Card({ children, className }: { children: React.ReactNode; className?: 
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-[8px] border border-border bg-white shadow-sm",
+        "overflow-hidden rounded-[8px] border border-border bg-card shadow-sm",
         className,
       )}
     >
@@ -91,7 +103,7 @@ function Avatars({ people }: { people: string[] }) {
         <span
           key={initials}
           className={cn(
-            "inline-flex size-[18px] items-center justify-center rounded-full border border-white bg-[#e8e8e4] text-[9px] text-foreground/60",
+            "inline-flex size-[18px] items-center justify-center rounded-full border border-card bg-surface-active text-[9px] text-foreground/60",
             i > 0 && "-ml-1.5",
           )}
         >
@@ -133,7 +145,7 @@ function SidebarGroup({ children }: { children: string }) {
 /** The app's left rail, shared by every mockup that shows full chrome. */
 function Sidebar({ active }: { active: string }) {
   return (
-    <div className="flex w-[186px] shrink-0 flex-col border-border border-r bg-[#fafaf9] p-2">
+    <div className="flex w-[186px] shrink-0 flex-col border-border border-r bg-muted p-2">
       <div className="flex h-[26px] items-center gap-2 px-2">
         <Mark className="size-3.5 text-foreground/70" />
         <span className="truncate text-[12px] text-foreground">opencompany</span>
@@ -446,7 +458,7 @@ export function ReviewMockup() {
               Claude Code · 14 files changed · sandbox run 4m 12s
             </span>
           </div>
-          <div className="rounded-[6px] border border-border bg-[#fafaf9] p-3">
+          <div className="rounded-[6px] border border-border bg-muted p-3">
             <Label className="mb-2 uppercase tracking-[0.06em]">What changed</Label>
             <p className="text-[12px] text-foreground/80 leading-[1.6]">
               Wiki pages now read the workspace theme token instead of hard-coding the light
@@ -470,7 +482,7 @@ export function ReviewMockup() {
             ))}
           </div>
           <div className="overflow-hidden rounded-[6px] border border-border">
-            <div className="flex items-center gap-2 border-border border-b bg-[#fafaf9] px-3 py-1.5">
+            <div className="flex items-center gap-2 border-border border-b bg-muted px-3 py-1.5">
               <Label>packages/wiki/src/page-theme.ts</Label>
             </div>
             <div className="font-mono text-[11px] leading-[1.8]">
@@ -489,7 +501,7 @@ export function ReviewMockup() {
             </div>
           </div>
           <div className="overflow-hidden rounded-[6px] border border-border">
-            <div className="flex items-center gap-2 border-border border-b bg-[#fafaf9] px-3 py-1.5">
+            <div className="flex items-center gap-2 border-border border-b bg-muted px-3 py-1.5">
               <Label>apps/web/app/(app)/wiki/page.tsx</Label>
             </div>
             <div className="font-mono text-[11px] leading-[1.8]">
@@ -681,7 +693,7 @@ export function ChatMockup({
   closing: string;
 }) {
   return (
-    <div aria-hidden="true" className="absolute top-10 left-1/2 w-[640px] -translate-x-1/2">
+    <div className="absolute top-10 left-1/2 w-[640px] -translate-x-1/2">
       <Card className="flex h-[560px] flex-col">
         <PaneHeader title="Ask opencompany" meta="Company wiki" />
         <div className="flex-1 space-y-4 p-4">

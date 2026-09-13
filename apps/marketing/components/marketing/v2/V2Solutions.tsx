@@ -1,6 +1,6 @@
 import { cn } from "@opencompany/ui/lib/utils";
 import { Panel, ReviewMockup, WikiMockup, WorkflowMockup } from "./mockups";
-import { Micro, Section } from "./primitives";
+import { Section } from "./primitives";
 import { BODY, GRID } from "./tokens";
 
 const SOLUTIONS = [
@@ -37,7 +37,11 @@ export function V2Solutions() {
             <div className="col-span-12 flex flex-col sm:col-span-4">
               <h3 className={cn(BODY, "text-foreground")}>{title}</h3>
               <p className={cn(BODY, "mt-2 max-w-[340px] text-foreground/50")}>{body}</p>
-              <Micro className="mt-8 sm:mt-auto sm:pt-16">{replaces}</Micro>
+              {/* Sits where the reference puts a customer quote: muted sans at the
+                  bottom of the column, not a mono micro-label. */}
+              <p className="mt-8 max-w-[340px] text-[13px] text-foreground/45 leading-[1.5] sm:mt-auto sm:pt-16">
+                {replaces}
+              </p>
             </div>
             <Panel className="col-span-12 mt-8 sm:col-span-8 sm:col-start-5 sm:mt-0">
               <Mockup />

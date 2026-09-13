@@ -31,16 +31,26 @@ export function SectionHeader({
   index,
 }: {
   title: string;
-  eyebrow: string;
-  index: string;
+  /** Omitted by the closing section, which drops the numbering entirely. */
+  eyebrow?: string | undefined;
+  index?: string | undefined;
 }) {
   return (
     <div className={GRID}>
       <h2 className={cn(DISPLAY, "col-span-12 sm:col-span-7")}>{title}</h2>
-      <Micro className="col-span-6 mt-4 sm:col-span-2 sm:col-start-9 sm:mt-2">{eyebrow}</Micro>
-      <Micro className="col-span-6 mt-4 text-right sm:col-span-2 sm:col-start-11 sm:mt-2">
-        {index}
-      </Micro>
+      {eyebrow ? (
+        <Micro className="col-span-6 mt-4 sm:col-span-2 sm:col-start-9 sm:mt-2">{eyebrow}</Micro>
+      ) : null}
+      {index ? (
+        // Decoration: reading "one point zero" between the heading and its
+        // content tells a screen reader user nothing.
+        <Micro
+          aria-hidden="true"
+          className="col-span-6 mt-4 text-right sm:col-span-2 sm:col-start-11 sm:mt-2"
+        >
+          {index}
+        </Micro>
+      ) : null}
     </div>
   );
 }
@@ -54,8 +64,8 @@ export function Section({
   className,
 }: {
   title: string;
-  eyebrow: string;
-  index: string;
+  eyebrow?: string | undefined;
+  index?: string | undefined;
   children: React.ReactNode;
   className?: string;
 }) {
@@ -66,38 +76,6 @@ export function Section({
         <div className="mt-16 sm:mt-24">{children}</div>
       </div>
     </section>
-  );
-}
-
-/**
- * Buttons in this design are deliberately small — 32px tall, 10px of horizontal
- * padding, 12px type — so they read as controls rather than billboards.
- */
-export function Button({
-  href,
-  variant = "primary",
-  className,
-  children,
-}: {
-  href: string;
-  variant?: "primary" | "secondary" | "onDark";
-  className?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <a
-      href={href}
-      className={cn(
-        "inline-flex h-8 shrink-0 items-center gap-2 whitespace-nowrap rounded-[6px] px-2.5 text-[12px] leading-[1.45] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-        variant === "primary" && "bg-[#0a0a0a] text-white hover:bg-[#0a0a0a]/90",
-        variant === "secondary" &&
-          "bg-foreground/[0.04] text-foreground hover:bg-foreground/[0.08]",
-        variant === "onDark" && "bg-white/90 text-[#0a0a0a] hover:bg-white",
-        className,
-      )}
-    >
-      {children}
-    </a>
   );
 }
 

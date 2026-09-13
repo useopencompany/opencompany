@@ -1,7 +1,7 @@
 import { cn } from "@opencompany/ui/lib/utils";
 import Link from "next/link";
 import { Mark } from "../Mark";
-import { Button } from "./primitives";
+import { Button } from "./V2Button";
 
 const NAV_LINKS = [
   { href: "/use-cases", label: "Use cases", external: false },
@@ -21,7 +21,11 @@ const LINK_CLASS =
 export function V2Nav() {
   return (
     <header className="fixed inset-x-0 top-0 z-50 flex justify-center p-4">
-      <div className="flex items-center gap-1 rounded-[10px] bg-foreground/[0.035] px-1 py-0.5 backdrop-blur-md">
+      {/* The pill is fixed and scrolls over the dark principle and get-started
+          cards, so it needs a background opaque enough to keep its own dark
+          text readable there. A near-transparent tint reads fine against the
+          canvas and then disappears over those sections. */}
+      <div className="flex items-center gap-1 rounded-[10px] border border-border bg-background/85 px-1 py-0.5 shadow-2xs backdrop-blur-md">
         <Link
           href="/"
           className="flex h-7 items-center gap-1.5 px-2 text-foreground"
@@ -50,7 +54,7 @@ export function V2Nav() {
         <a href="https://my.opencompany.chat" className={LINK_CLASS}>
           Log in
         </a>
-        <Button href="/request-demo" className="h-7">
+        <Button href="/request-demo" analyticsIntent="demo" className="h-7">
           Request demo
         </Button>
 

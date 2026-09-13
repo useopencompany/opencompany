@@ -37,7 +37,7 @@ export function WorksWith() {
     <section className="pt-24 sm:pt-32">
       <Micro className="text-center">Works with</Micro>
       <div className="relative mt-10 overflow-hidden [mask-image:linear-gradient(to_right,transparent,black_8%,black_92%,transparent)]">
-        <div className="flex w-max animate-marquee-x items-center gap-16 pr-16">
+        <div className="flex w-max animate-marquee-x transform-gpu items-center gap-16 pr-16">
           {[0, 1].map((copy) => (
             <div
               key={copy}

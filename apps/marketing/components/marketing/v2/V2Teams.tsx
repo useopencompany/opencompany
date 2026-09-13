@@ -16,7 +16,7 @@ type Team = {
 
 /**
  * Typed as a non-empty tuple so `TEAMS[0]` is a guaranteed fallback under
- * `noUncheckedIndexedAccess` — the tab strip always has something selected.
+ * `noUncheckedIndexedAccess` — one role is always selected.
  */
 const TEAMS: [Team, ...Team[]] = [
   {
@@ -81,6 +81,13 @@ const CALLOUTS = [
  * Teams section. The role list on the left swaps the chat answer on the right —
  * the one interactive element on the page, because the claim is that the same
  * question surface serves every function, and a static screenshot can't show that.
+ *
+ * Modelled as a group of toggle buttons rather than an ARIA tablist. A tablist
+ * owes the reader `aria-controls`, a `tabpanel`, and arrow-key navigation, and
+ * it would be announcing a widget that is really a single swapping illustration.
+ * `aria-pressed` describes what actually happens, and the panel it swaps is
+ * readable (`decorative={false}`) and `aria-live`, so the change is perceivable
+ * rather than silent.
  */
 export function V2Teams() {
   const [activeRole, setActiveRole] = useState(TEAMS[0].role);
@@ -90,17 +97,15 @@ export function V2Teams() {
     <Section title="Run the whole company from one workspace" eyebrow="Teams" index="4.0">
       <div className={GRID}>
         <div
-          role="tablist"
-          aria-label="Team"
-          aria-orientation="vertical"
+          aria-label="Choose a team"
+          role="group"
           className="col-span-12 flex flex-col items-start border-border border-l sm:col-span-4"
         >
           {TEAMS.map((team) => (
             <button
               key={team.role}
               type="button"
-              role="tab"
-              aria-selected={team.role === activeRole}
+              aria-pressed={team.role === activeRole}
               onClick={() => setActiveRole(team.role)}
               className={cn(
                 "-ml-px border-transparent border-l py-1.5 pl-6 text-left text-[24px] leading-[1.3] tracking-[-0.02em] transition-colors",
@@ -117,9 +122,10 @@ export function V2Teams() {
         <Panel
           className="col-span-12 mt-8 sm:col-span-8 sm:col-start-5 sm:mt-0"
           height="h-[480px] sm:h-[520px]"
+          decorative={false}
+          aria-live="polite"
         >
           <ChatMockup
-            key={active.role}
             question={active.question}
             answer={active.answer}
             bullets={active.bullets}

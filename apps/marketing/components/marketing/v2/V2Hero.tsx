@@ -1,7 +1,8 @@
 import { cn } from "@opencompany/ui/lib/utils";
 import { WorkspaceMockup } from "./mockups";
-import { Arrow, Button } from "./primitives";
+import { Arrow } from "./primitives";
 import { BODY, DISPLAY, SHELL } from "./tokens";
+import { Button } from "./V2Button";
 
 const CHANGELOG_URL = "https://my.opencompany.chat/changelog#release-1.26.0";
 
@@ -27,8 +28,10 @@ export function V2Hero() {
             across your tools, files, and codebase — not just answer questions.
           </p>
           <div className="mt-7 flex items-center gap-2">
-            <Button href="/request-demo">Request demo</Button>
-            <Button href="https://my.opencompany.chat" variant="secondary">
+            <Button href="/request-demo" analyticsIntent="demo">
+              Request demo
+            </Button>
+            <Button href="https://my.opencompany.chat" variant="secondary" analyticsIntent="signup">
               Sign up
             </Button>
           </div>

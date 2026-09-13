@@ -2,10 +2,16 @@ import { cn } from "@opencompany/ui/lib/utils";
 import { Micro, Section } from "./primitives";
 import { BODY } from "./tokens";
 
-/**
+/*
  * Soft out-of-focus gradients stand in for the reference design's blurred
  * photography. Kept as CSS so the cards cost nothing to load and still give the
  * page its one hit of color.
+ *
+ * The lightest stop of each gradient is held at or below 0.10 relative
+ * luminance so solid white clears 7:1 and the `white/75` footer label clears
+ * 4.9:1 — measured at the lightest point, not the average. The reference runs
+ * lighter photography here and does not clear AA; matching it exactly would
+ * have meant shipping 2.5:1 body copy.
  */
 const CARDS = [
   {
@@ -14,7 +20,7 @@ const CARDS = [
       "We would rather do a few things properly than ship ten that each need a workaround. Every surface in opencompany has to earn its place, and we remove the ones that don't.",
     footer: "Less but better",
     gradient:
-      "bg-[radial-gradient(120%_100%_at_10%_0%,#8a9a8e_0%,#6f7d76_38%,#3f4845_78%,#2a302e_100%)]",
+      "bg-[radial-gradient(120%_100%_at_10%_0%,#4e5a52_0%,#3f4845_38%,#2a302e_78%,#191d1a_100%)]",
   },
   {
     label: "Pricing",
@@ -22,7 +28,7 @@ const CARDS = [
       "opencompany drives the Claude and Codex plans you already pay for. We don't resell agent usage, and usage past your included balance is billed at provider cost with no markup.",
     footer: "Your subscriptions, not ours",
     gradient:
-      "bg-[radial-gradient(120%_100%_at_80%_10%,#9a8f7a_0%,#7d7461_40%,#4a453a_80%,#2e2b25_100%)]",
+      "bg-[radial-gradient(120%_100%_at_80%_10%,#5a5344_0%,#4a453a_40%,#2e2b25_80%,#1b1917_100%)]",
   },
   {
     label: "Platform",
@@ -30,7 +36,7 @@ const CARDS = [
       "The workspace is MIT licensed. Read the code, self-host it, or fork it. The model of how your company works is the last thing that should sit locked inside a vendor's database.",
     footer: "Open source",
     gradient:
-      "bg-[radial-gradient(120%_100%_at_20%_90%,#8b7fa6_0%,#6b6184_40%,#403a52_80%,#282433_100%)]",
+      "bg-[radial-gradient(120%_100%_at_20%_90%,#524a63_0%,#403a52_40%,#282433_80%,#1a181f_100%)]",
   },
 ];
 
@@ -51,9 +57,9 @@ export function V2Principles() {
               gradient,
             )}
           >
-            <p className={cn(BODY, "text-white/60")}>{label}</p>
+            <p className={cn(BODY, "text-white/75")}>{label}</p>
             <p className={cn(BODY, "mt-5 text-pretty text-white")}>{statement}</p>
-            <Micro className="mt-10 text-white/70 sm:mt-auto">{footer}</Micro>
+            <Micro className="mt-10 text-white/75 sm:mt-auto">{footer}</Micro>
           </div>
         ))}
       </div>
