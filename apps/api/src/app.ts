@@ -10,6 +10,7 @@ import type {
   AttioProviderState,
   FathomProviderState,
   GranolaProviderState,
+  JamieEventsProviderState,
   StripeProviderState,
 } from "@opencompany/agent/integration-state";
 import type { ConvexProviderState } from "@opencompany/agent/integrations/convex-mcp";
@@ -104,6 +105,7 @@ import type { GoogleIngressService } from "./google-ingress";
 import type { HubspotIngressService } from "./hubspot-ingress";
 import type { IdentityService } from "./identity";
 import type { IntegrationAccountService } from "./integration-accounts";
+import type { JamieIngressService } from "./jamie-ingress";
 import type { LinearIngressService } from "./linear-ingress";
 import type { McpOAuthIngressService } from "./mcp-oauth-ingress";
 import { type MessagePresentationService, messagePresentationEtag } from "./message-presentations";
@@ -232,6 +234,7 @@ export type CreateApiAppInput = {
   linearIngress?: LinearIngressService;
   hubspotIngress?: HubspotIngressService;
   attioIngress?: AttioIngressService;
+  jamieIngress?: JamieIngressService;
   mcpOAuthIngress?: McpOAuthIngressService;
   xAccountIngress?: XAccountIngressService;
   slackBotIngress?: SlackBotIngressService;
@@ -2512,6 +2515,21 @@ export function createApiApp(input: CreateApiAppInput) {
       );
       return c.json({ data: { state: granolaStateDto(state) }, meta }, 200);
     },
+    createJamieEventsEndpoint: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const state = await input.integrationAccounts.createJamieEventsEndpoint(actor);
+      return c.json({ data: { state: jamieEventsStateDto(state) }, meta }, 200);
+    },
+    connectJamieEventsAccount: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const state = await input.integrationAccounts.connectJamieEvents(
+        actor,
+        c.req.valid("json").apiKey,
+      );
+      return c.json({ data: { state: jamieEventsStateDto(state) }, meta }, 200);
+    },
     connectConvexAccount: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 60);
@@ -3129,6 +3147,13 @@ export function createApiApp(input: CreateApiAppInput) {
     const ingress = input.attioIngress;
     app.use("/webhooks/attio/events", ingressBodyLimit(5 * 1024 * 1024));
     app.post("/webhooks/attio/events", (c) => ingress.webhook(c.req.raw));
+  }
+  if (input.jamieIngress) {
+    const ingress = input.jamieIngress;
+    app.use("/webhooks/jamie/:endpointId", ingressBodyLimit(5 * 1024 * 1024));
+    app.post("/webhooks/jamie/:endpointId", (c) =>
+      ingress.webhook(c.req.param("endpointId"), c.req.raw),
+    );
   }
   if (input.mcpOAuthIngress) {
     const ingress = input.mcpOAuthIngress;
@@ -3834,6 +3859,18 @@ function granolaStateDto(state: GranolaProviderState) {
     accountEmail: state.accountEmail,
     accountName: state.accountName,
     statusReason: state.statusReason,
+  };
+}
+
+function jamieEventsStateDto(state: JamieEventsProviderState) {
+  return {
+    provider: state.provider,
+    connected: state.connected,
+    status: integrationAccountStatusDto(state.status),
+    integrationId: state.integrationId,
+    statusReason: state.statusReason,
+    webhookUrl: state.webhookUrl,
+    lastDeliveryAt: state.lastDeliveryAt,
   };
 }
 

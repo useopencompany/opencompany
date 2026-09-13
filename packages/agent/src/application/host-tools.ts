@@ -238,6 +238,7 @@ export type ChatHostToolServiceDependencies = {
     workspaceId: string;
     actorId: string;
     toolInput: Record<string, unknown>;
+    wikiId?: string;
     /** Stable per-tool-call key, e.g. `agent-wiki:<turnId>:<toolCallId>`. */
     idempotencyKey: string;
   }) => Promise<unknown>;
@@ -552,15 +553,26 @@ async function executeOperation(
         signal,
       });
     }
-    case "wiki":
+    case "wiki": {
+      // An exact empty string is a structured-output placeholder and means
+      // omission. Keep every other explicit string so the command service can
+      // reject an invalid reference instead of silently choosing the default.
+      const wikiId =
+        typeof toolInput.wiki === "string" && toolInput.wiki.length > 0
+          ? toolInput.wiki
+          : undefined;
+      const wikiCommand = { ...toolInput };
+      delete wikiCommand.wiki;
       return dependencies.runWikiTool({
         workspaceId: context.workspaceId,
         actorId: context.actorId,
-        toolInput,
+        toolInput: wikiCommand,
+        ...(wikiId !== undefined ? { wikiId } : {}),
         // Stable execution identity: same (turn, tool call) → same key on retry;
         // two intentional wiki calls in one turn get different keys.
         idempotencyKey: `agent-wiki:${command.runId}:${command.toolCallId ?? command.sessionId}`,
       });
+    }
     case "write_artifact": {
       if (!command.toolCallId) throw new Error("write_artifact requires a stable tool call id.");
       if (!dependencies.writeArtifact) {

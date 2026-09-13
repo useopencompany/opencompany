@@ -1,6 +1,6 @@
 import type { WorkflowEventTriggerRoute } from "@opencompany/db/workflow-event-routes";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { GranolaNotesPage } from "./granola-api";
+import { GranolaApiError, type GranolaNotesPage } from "./granola-api";
 import {
   ingestGranolaNote,
   listGranolaNotesSince,
@@ -243,6 +243,10 @@ describe("Granola meeting.notes_ready workflow routing", () => {
       }),
     ).resolves.toEqual({ enqueued: false, workflowRuns: 1 });
 
+    expect(workerMocks.fetchGranolaNote).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ includeTranscript: false }),
+    );
+
     expect(workerMocks.enqueueWorkflowEventRuns).toHaveBeenCalledWith(
       {
         routes: [expect.objectContaining({ workflowId: "workflow_1" })],
@@ -258,6 +262,21 @@ describe("Granola meeting.notes_ready workflow routing", () => {
         },
       },
       expect.anything(),
+    );
+  });
+
+  it("makes the event durable before a separate Brain transcript fetch fails", async () => {
+    workerMocks.fetchGranolaNote.mockImplementation(async ({ includeTranscript }) => {
+      if (includeTranscript) throw new GranolaApiError("Transcript too large", 413);
+      return { ...granolaPayload(), transcript: null };
+    });
+
+    await expect(
+      ingestMeeting({ routedBrainRefs: ["brain_1"], workflowRoutes: [meetingRoute()] }),
+    ).rejects.toMatchObject({ status: 413 });
+    expect(workerMocks.enqueueWorkflowEventRuns).toHaveBeenCalledOnce();
+    expect(workerMocks.enqueueWorkflowEventRuns.mock.invocationCallOrder[0]).toBeLessThan(
+      workerMocks.fetchGranolaNote.mock.invocationCallOrder[1]!,
     );
   });
 
@@ -391,6 +410,43 @@ describe("Granola poll pass folder scoping", () => {
 
     await expect(poll()).resolves.toEqual({ enqueued: 0, seen: 1, workflowRuns: 1 });
     expect(workerMocks.listGranolaFolders).not.toHaveBeenCalled();
+  });
+
+  it("asks for reconnection if the key is revoked while fetching the note", async () => {
+    workerMocks.listWorkflowEventTriggerRoutes.mockResolvedValue([meetingRoute()]);
+    workerMocks.fetchGranolaNote.mockRejectedValue(new GranolaApiError("Unauthorized", 401));
+
+    await expect(poll()).resolves.toBeNull();
+    expect(workerMocks.markIntegrationStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "needs_reauth", integrationId: "gint_granola_1" }),
+    );
+    expect(workerMocks.completeGranolaSyncPages).not.toHaveBeenCalled();
+    expect(workerMocks.updateGranolaSyncPage).not.toHaveBeenCalled();
+  });
+
+  it("routes other ready meetings after a note failure and retains the cursor for retry", async () => {
+    workerMocks.listWorkflowEventTriggerRoutes.mockResolvedValue([meetingRoute()]);
+    workerMocks.listGranolaNotes.mockResolvedValue({
+      notes: ["note_failed", "note_1"].map((id) => ({
+        id,
+        title: id,
+        updatedAt: new Date().toISOString(),
+        raw: {},
+      })),
+      hasMore: false,
+      cursor: null,
+    });
+    workerMocks.fetchGranolaNote
+      .mockRejectedValueOnce(new GranolaApiError("Note unavailable", 404))
+      .mockResolvedValueOnce(granolaPayload());
+
+    await expect(poll()).rejects.toMatchObject({ status: 404 });
+    expect(workerMocks.enqueueWorkflowEventRuns).toHaveBeenCalledWith(
+      expect.objectContaining({ deliveryId: "note:note_1" }),
+      expect.anything(),
+    );
+    expect(workerMocks.completeGranolaSyncPages).not.toHaveBeenCalled();
+    expect(workerMocks.updateGranolaSyncPage).not.toHaveBeenCalled();
   });
 
   it("leaves the cursor alone when the folder tree a filter needs cannot be read", async () => {

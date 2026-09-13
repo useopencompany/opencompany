@@ -50,6 +50,7 @@ import {
   type HeadlessWikiPageReadModel,
   persistHeadlessWikiPageWrites,
 } from "@/lib/headless-knowledge-collections";
+import { wikiHref, wikiPagePathFromPathname } from "@/lib/wiki-routes";
 
 export type WikiPageData = {
   id: string;
@@ -116,6 +117,8 @@ export function WikiView(props: {
   userWorkosId: string;
   /** The wiki whose pages this view edits. Scopes the Electric collections. */
   wikiId: string;
+  /** The same wiki's slug, which every URL this view produces is rooted at. */
+  wikiSlug: string;
   workspaceId: string;
   pages: WikiPageData[];
   initialPath: string | null;
@@ -178,12 +181,14 @@ function WikiStaticFrame({
 function WikiLiveView({
   userWorkosId,
   wikiId,
+  wikiSlug,
   workspaceId,
   pages: initialPages,
   initialPath,
 }: {
   userWorkosId: string;
   wikiId: string;
+  wikiSlug: string;
   workspaceId: string;
   pages: WikiPageData[];
   initialPath: string | null;
@@ -217,14 +222,19 @@ function WikiLiveView({
     return counts;
   }, [timelineRows]);
 
-  const selectedPath = useMemo(() => {
-    const fromUrl = pathname.replace(/^\/wiki\/?/, "");
-    return fromUrl ? decodeURIComponent(fromUrl) : (initialPath ?? null);
-  }, [pathname, initialPath]);
+  // `navigate` moves the reader with history.pushState rather than the router, so the pathname is
+  // the source of truth once the view has moved off the page the server rendered.
+  const selectedPath = useMemo(
+    () => wikiPagePathFromPathname(pathname, wikiSlug) ?? initialPath ?? null,
+    [pathname, wikiSlug, initialPath],
+  );
 
-  const navigate = useCallback((path: string | null) => {
-    window.history.pushState(null, "", path ? `/wiki/${path}` : "/wiki");
-  }, []);
+  const navigate = useCallback(
+    (path: string | null) => {
+      window.history.pushState(null, "", wikiHref(wikiSlug, path));
+    },
+    [wikiSlug],
+  );
 
   const nodes = useMemo(() => buildTree(pages), [pages]);
   const wikiLinks = useMemo(
@@ -232,9 +242,9 @@ function WikiLiveView({
       Object.fromEntries(
         pages
           .filter((page) => page.nodeType === "page")
-          .map((page) => [page.path, `/wiki/${page.path}`]),
+          .map((page) => [page.path, wikiHref(wikiSlug, page.path)]),
       ),
-    [pages],
+    [pages, wikiSlug],
   );
   const pageTitles = useMemo(
     () =>

@@ -164,6 +164,10 @@
       "types": "./src/gmail.ts",
       "default": "./src/gmail.ts"
     },
+    "./jamie": {
+      "types": "./src/jamie.ts",
+      "default": "./src/jamie.ts"
+    },
     "./granola": {
       "types": "./src/granola.ts",
       "default": "./src/granola.ts"

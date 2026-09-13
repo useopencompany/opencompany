@@ -66,6 +66,7 @@ export type PersistedHostRuntime = {
     workspaceId: string;
     actorId: string;
     toolInput: Record<string, unknown>;
+    wikiId?: string;
     idempotencyKey: string;
   }) => Promise<unknown>;
 };
@@ -194,11 +195,17 @@ export function executePersistedChatHostTool(input: {
             sessionId: session.sessionId,
           }),
       }).execute({ name, args }),
-    runWikiTool: ({ workspaceId, actorId, toolInput, idempotencyKey }) => {
+    runWikiTool: ({ workspaceId, actorId, toolInput, wikiId, idempotencyKey }) => {
       if (!input.runtime.executeWikiCommand) {
         throw new Error("The wiki command client is not configured for this runtime.");
       }
-      return input.runtime.executeWikiCommand({ workspaceId, actorId, toolInput, idempotencyKey });
+      return input.runtime.executeWikiCommand({
+        workspaceId,
+        actorId,
+        toolInput,
+        ...(wikiId ? { wikiId } : {}),
+        idempotencyKey,
+      });
     },
     writeArtifact: () => {
       throw new Error("Artifact publishing is not configured for this runtime.");

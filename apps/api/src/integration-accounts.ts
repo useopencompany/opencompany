@@ -7,6 +7,7 @@ import type {
   AttioProviderState,
   FathomProviderState,
   GranolaProviderState,
+  JamieEventsProviderState,
   StripeProviderState,
 } from "@opencompany/agent/integration-state";
 import { personalAccountsFromRows } from "@opencompany/agent/integration-state";
@@ -41,6 +42,12 @@ import {
   isValidGranolaApiKey,
   validateGranolaApiKey,
 } from "@opencompany/agent/integrations/granola";
+import {
+  ensureJamieEventsEndpoint,
+  getJamieEventsIntegrationState,
+  isValidJamieWebhookKey,
+  saveJamieWebhookKey,
+} from "@opencompany/agent/integrations/jamie-events";
 import {
   connectRenderMcpIntegration,
   getRenderIntegrationState,
@@ -92,6 +99,8 @@ export type IntegrationAccountService = {
   disconnectAttio(actor: Actor, integrationId: string): Promise<void>;
   connectFathom(actor: Actor, apiKey: string): Promise<FathomProviderState>;
   connectGranola(actor: Actor, apiKey: string): Promise<GranolaProviderState>;
+  createJamieEventsEndpoint(actor: Actor): Promise<JamieEventsProviderState>;
+  connectJamieEvents(actor: Actor, webhookKey: string): Promise<JamieEventsProviderState>;
   connectConvex(actor: Actor, apiKey: string): Promise<ConvexProviderState>;
   connectRender(actor: Actor, apiKey: string): Promise<RenderProviderState>;
   connectStripe(actor: Actor, apiKey: string): Promise<StripeProviderState>;
@@ -311,6 +320,48 @@ export function createIntegrationAccountService(input: {
         return await getGranolaIntegrationState(actor.userId, db);
       } catch (error) {
         throw commandFailure(error, "Could not save the Granola API key.", "granola_connect");
+      }
+    },
+
+    // Jamie has no webhook-management API, so the endpoint has to exist before the user can point
+    // Jamie at it. Creating one is idempotent: a second call returns the URL already in Jamie.
+    async createJamieEventsEndpoint(actor) {
+      try {
+        await ensureJamieEventsEndpoint({ userWorkosId: actor.userId, db });
+        return await getJamieEventsIntegrationState(actor.userId, db);
+      } catch (error) {
+        throw commandFailure(
+          error,
+          "Could not create the Jamie webhook endpoint.",
+          "jamie_events_endpoint",
+        );
+      }
+    },
+
+    // Jamie mints the key when the webhook is created and exposes nothing that can validate it, so
+    // the save is trusted and the Events section reports the first verified delivery instead.
+    async connectJamieEvents(actor, webhookKey) {
+      const trimmed = webhookKey.trim();
+      if (!isValidJamieWebhookKey(trimmed)) {
+        throw new ApiError(
+          400,
+          "invalid_request",
+          "Jamie webhook keys start with sk_. Check the key and try again.",
+        );
+      }
+      try {
+        await saveJamieWebhookKey({
+          userWorkosId: actor.userId,
+          webhookSecret: trimmed,
+          db,
+        });
+        return await getJamieEventsIntegrationState(actor.userId, db);
+      } catch (error) {
+        throw commandFailure(
+          error,
+          "Could not save the Jamie webhook key.",
+          "jamie_events_connect",
+        );
       }
     },
 

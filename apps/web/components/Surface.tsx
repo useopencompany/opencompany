@@ -3386,7 +3386,7 @@ export function Surface({
                   <MessageSquare size={13} strokeWidth={2} className="shrink-0" />
                   <span>
                     {isTaskConversationWorking
-                      ? "You can reply when the current run finishes."
+                      ? "Draft your reply now — you can send it when the current run finishes."
                       : taskCommentSubmitting
                         ? "Sending your message…"
                         : "Sending a message resumes this task."}
@@ -3473,12 +3473,9 @@ export function Surface({
                           event.currentTarget.selectionStart,
                         )
                       }
-                      disabled={
-                        backgroundTaskSubmitting ||
-                        taskCommentSubmitting ||
-                        isTaskConversationWorking ||
-                        readOnly
-                      }
+                      // A run in flight gates sending, not composing: the reply stays editable so a
+                      // draft can be written while the task works. onSubmit/onKeyDown hold the send.
+                      disabled={backgroundTaskSubmitting || taskCommentSubmitting || readOnly}
                       readOnly={voiceDictation.isActive}
                       className={cn(
                         "relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-ink outline-none placeholder:text-ink-subtle",

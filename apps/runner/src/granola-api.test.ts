@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GranolaApiTimeoutError, listGranolaNotes } from "./granola-api";
+import { fetchGranolaNote, GranolaApiTimeoutError, listGranolaNotes } from "./granola-api";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -7,6 +7,23 @@ afterEach(() => {
 });
 
 describe("Granola API client", () => {
+  it("can fetch a ready summary when its transcript is too large to return inline", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) =>
+      new URL(String(input)).searchParams.has("include")
+        ? Response.json({ error: { code: "TRANSCRIPT_TOO_LARGE" } }, { status: 413 })
+        : Response.json({ id: "note_1", summary_markdown: "Meeting decisions", transcript: null }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      fetchGranolaNote({ apiKey: "grn_test", noteId: "note_1", includeTranscript: false }),
+    ).resolves.toMatchObject({ summary_markdown: "Meeting decisions" });
+    // Existing import callers still request the transcript by default.
+    await expect(fetchGranolaNote({ apiKey: "grn_test", noteId: "note_1" })).rejects.toMatchObject({
+      status: 413,
+    });
+  });
+
   it("passes the bounded context-import creation window", async () => {
     const fetchMock = vi.fn(async (_input: string | URL | Request) =>
       Response.json({ notes: [], hasMore: false, cursor: null }),

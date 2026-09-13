@@ -10,7 +10,8 @@ export function newResourceId(
     | "task_schedule_run"
     | "share"
     | "artifact"
-    | "artifact_version",
+    | "artifact_version"
+    | "wiki",
 ) {
   return `${resource}_${crypto.randomUUID()}`;
 }

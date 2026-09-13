@@ -2011,7 +2011,15 @@ export const WikiSchema = z
     slug: z.string().min(1).max(64),
     instructions: z.string().max(20_000),
     access: WikiAccessSchema,
+    // The three states a reader sees, resolved server-side: "restricted" alone cannot tell
+    // "only me" from "me and the people I invited", and the client holds no member list.
+    visibility: z.enum(["workspace", "private", "shared"]),
     isDefault: z.boolean(),
+    // Whether this actor may rename the wiki, edit its instructions, or change
+    // its access. Resolved server-side from the actor's role and the wiki's
+    // creator so the client never has to hold other members' identities to
+    // decide whether to offer a control that would only 403.
+    canManage: z.boolean(),
     createdAt: TimestampSchema,
     updatedAt: TimestampSchema,
   })
@@ -2219,8 +2227,7 @@ export const InternalWikiCommandRequestSchema = z
   .object({
     userWorkosId: z.string().min(1).max(256),
     workspaceId: z.string().min(1).max(256),
-    // Which wiki to operate on. Absent means the workspace's default wiki; the
-    // agent tool contract has no wiki selector yet.
+    // Which wiki to operate on. Absent means the workspace's default wiki.
     wikiId: z.string().min(1).max(256).optional(),
     command: WikiCommandSchema,
   })
@@ -2232,8 +2239,32 @@ export type WikiCommandRequest = z.infer<typeof InternalWikiCommandRequestSchema
 export const InternalWikiCommandResponseSchema = z
   .object({
     data: z.union([
-      z.object({ ok: z.literal(true), result: z.unknown() }).strict(),
-      z.object({ ok: z.literal(false), error: z.string() }).strict(),
+      z
+        .object({
+          ok: z.literal(true),
+          result: z.unknown(),
+          wikiContext: z
+            .object({
+              wiki: z.object({ id: z.string(), name: z.string(), slug: z.string() }).strict(),
+              instructions: z.string(),
+            })
+            .strict()
+            .optional(),
+        })
+        .strict(),
+      z
+        .object({
+          ok: z.literal(false),
+          error: z.string(),
+          wikiContext: z
+            .object({
+              wiki: z.object({ id: z.string(), name: z.string(), slug: z.string() }).strict(),
+              instructions: z.string(),
+            })
+            .strict()
+            .optional(),
+        })
+        .strict(),
     ]),
     meta: ProtocolMetadataSchema,
   })
@@ -4274,6 +4305,31 @@ export const GranolaAccountStateEnvelopeSchema = z
   .strict()
   .openapi("GranolaAccountStateEnvelope");
 
+// Jamie's event connection is a webhook the user creates in Jamie against opencompany's fixed
+// endpoint; only the digest of the key Jamie mints is stored. The URL is what the setup UI asks the
+// user to copy, and the last verified delivery is the only confirmation Jamie's key ever works,
+// because Jamie offers nothing to validate it against on save.
+export const JamieEventsAccountStateSchema = z
+  .object({
+    provider: z.literal("jamie"),
+    connected: z.boolean(),
+    status: IntegrationAccountStatusSchema,
+    integrationId: IntegrationAccountIdSchema.nullable(),
+    statusReason: z.string().nullable(),
+    webhookUrl: z.string().url().nullable(),
+    lastDeliveryAt: z.string().datetime().nullable(),
+  })
+  .strict()
+  .openapi("JamieEventsAccountState");
+
+export const JamieEventsAccountStateEnvelopeSchema = z
+  .object({
+    data: z.object({ state: JamieEventsAccountStateSchema }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("JamieEventsAccountStateEnvelope");
+
 export const StripeAccountStateSchema = z
   .object({
     provider: z.literal("stripe"),
@@ -4571,6 +4627,21 @@ export type WikiAccessDto = z.infer<typeof WikiAccessSchema>;
 export type CreateWikiBody = z.infer<typeof CreateWikiBodySchema>;
 export type UpdateWikiBody = z.infer<typeof UpdateWikiBodySchema>;
 export type SetWikiAccessBody = z.infer<typeof SetWikiAccessBodySchema>;
+// Written out rather than inferred, like `WikiIngestActivityItemDto` above: `z.infer` does not
+// resolve this schema's nested array of objects, so it widens to `any` and every consumer loses
+// its types. Keep it in step with `WikiAccessEnvelopeSchema` by hand -- a type-level guard here
+// would have to compare against that same widened `any` and so could never fail.
+export type WikiAccessDetailsDto = {
+  access: WikiAccessDto;
+  memberIds: string[];
+  workspaceMembers: Array<{
+    id: string;
+    email: string;
+    name: string;
+    avatarUrl: string | null;
+    role: "admin" | "member";
+  }>;
+};
 export type CreateWikiPageBody = z.infer<typeof CreateWikiPageBodySchema>;
 export type UpdateWikiPageBody = z.infer<typeof UpdateWikiPageBodySchema>;
 export type DeleteWikiPageBody = z.infer<typeof DeleteWikiPageBodySchema>;
