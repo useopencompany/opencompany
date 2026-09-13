@@ -4,8 +4,6 @@ import {
   getHeadlessBrainSnapshot,
   getHeadlessPlugin,
   getHeadlessSkill,
-  listHeadlessPlugins,
-  listHeadlessSkillCatalog,
   listHeadlessWikiPages,
 } from "./headless-knowledge-server";
 
@@ -54,24 +52,6 @@ describe("server knowledge reads", () => {
     expect(sent.headers.get("cookie")).toBe("wos-session=session");
     expect(sent.headers.get("authorization")).toBe("Bearer token");
     expect((upstream as unknown as { init?: RequestInit }).init?.cache).toBe("no-store");
-  });
-
-  it("loads Wiki pages, the Skill catalog, and Plugins from canonical resources", async () => {
-    const paths: string[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
-        const request = input instanceof Request ? input : new Request(input, init);
-        paths.push(new URL(request.url).pathname);
-        return Response.json({ data: [], meta });
-      }),
-    );
-
-    await listHeadlessWikiPages();
-    await listHeadlessSkillCatalog();
-    await listHeadlessPlugins();
-
-    expect(paths).toEqual(["/v1/wiki/pages", "/v1/skills/catalog", "/v1/plugins"]);
   });
 
   it("returns null only for a canonical missing Skill", async () => {

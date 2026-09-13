@@ -708,10 +708,6 @@ function EventTriggerEditor({
   // A workflow can outlive the event it subscribed to: the plugin can be updated, the event
   // switched back off, or its account disconnected. Keep the selection visible and editable
   // instead of silently retargeting it, but never offer a choice that cannot be bound.
-  const eventChoices = providers
-    .filter((candidate) => candidate.accounts.length > 0)
-    .flatMap((candidate) => candidate.events.map((event) => ({ provider: candidate, event })));
-  const selectedChoiceValue = `${trigger.provider}:${trigger.event}`;
   const accounts = provider?.accounts ?? [];
   const accountOptions = accounts.some((account) => account.integrationId === trigger.integrationId)
     ? accounts
@@ -742,40 +738,59 @@ function EventTriggerEditor({
         </p>
       ) : null}
       <div className="grid gap-3 sm:grid-cols-2">
-        <label className="flex min-w-0 flex-col gap-1.5 sm:col-span-2">
-          <span className="text-[12px] font-medium text-ink-subtle">Event</span>
+        <label className="flex min-w-0 flex-col gap-1.5">
+          <span className="text-[12px] font-medium text-ink-subtle">Plugin</span>
           <select
-            value={selectedChoiceValue}
+            aria-label="Plugin"
+            value={trigger.provider}
             disabled={!canEdit}
             onChange={(changed) => {
-              const choice = eventChoices.find(
-                ({ provider: candidate, event }) =>
-                  `${candidate.provider}:${event.id}` === changed.target.value,
+              const next = providers.find(
+                (candidate) => candidate.provider === changed.target.value,
               );
-              if (!choice?.provider.accounts[0]) return;
-              const account =
-                choice.provider.provider === trigger.provider
-                  ? trigger.integrationId
-                  : choice.provider.accounts[0].integrationId;
+              if (!next?.events[0] || !next.accounts[0]) return;
               onChange({
                 ...trigger,
-                provider: choice.provider.provider,
-                event: choice.event.id,
-                integrationId: account,
+                provider: next.provider,
+                event: next.events[0].id,
+                integrationId: next.accounts[0].integrationId,
                 filters: {},
               });
             }}
             className="h-8 rounded-lg border border-border bg-canvas px-2.5 text-[12.5px] text-ink outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-70"
           >
-            {selectedEvent ? null : (
-              <option value={selectedChoiceValue}>{unavailableEventLabel(trigger.event)}</option>
+            {provider ? null : (
+              <option value={trigger.provider}>{trigger.provider} (unavailable)</option>
             )}
-            {eventChoices.map(({ provider: candidate, event }) => (
+            {providers.map((candidate) => (
               <option
-                key={`${candidate.provider}:${event.id}`}
-                value={`${candidate.provider}:${event.id}`}
+                key={candidate.provider}
+                value={candidate.provider}
+                disabled={candidate.accounts.length === 0}
               >
-                {candidate.label} · {event.label}
+                {candidate.label}
+                {candidate.accounts.length ? "" : " · Connect account"}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex min-w-0 flex-col gap-1.5">
+          <span className="text-[12px] font-medium text-ink-subtle">Event</span>
+          <select
+            aria-label="Event"
+            value={trigger.event}
+            disabled={!canEdit}
+            onChange={(changed) =>
+              onChange({ ...trigger, event: changed.target.value, filters: {} })
+            }
+            className="h-8 rounded-lg border border-border bg-canvas px-2.5 text-[12.5px] text-ink outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-70"
+          >
+            {selectedEvent ? null : (
+              <option value={trigger.event}>{unavailableEventLabel(trigger.event)}</option>
+            )}
+            {(provider?.events ?? []).map((event) => (
+              <option key={event.id} value={event.id}>
+                {event.label}
               </option>
             ))}
           </select>
@@ -785,6 +800,7 @@ function EventTriggerEditor({
             {provider?.label ?? "Provider"} account
           </span>
           <select
+            aria-label="Event account"
             value={trigger.integrationId}
             disabled={!canEdit}
             onChange={(changed) =>
@@ -837,24 +853,39 @@ function EventFilterPicker({
     key: string;
     result: WorkflowEventFilterOptionsResult;
   } | null>(null);
-  const key = `${provider}:${event}:${integrationId}:${filter.resourceType}`;
+  const resourceType = filter.kind === "integration_resource" ? filter.resourceType : null;
+  const key = `${provider}:${event}:${integrationId}:${resourceType}`;
 
   useEffect(() => {
+    if (!resourceType) return;
     let cancelled = false;
     void loadWorkflowEventFilterOptions({
       provider,
-      resourceType: filter.resourceType,
+      resourceType,
       integrationId,
       event,
-    }).then((result) => {
-      if (!cancelled) setState({ key, result });
-    });
+    })
+      .then((result) => {
+        if (!cancelled) setState({ key, result });
+      })
+      .catch(() => {
+        if (!cancelled)
+          setState({
+            key,
+            result: { ok: false, error: "Could not load event filters. Try again." },
+          });
+      });
     return () => {
       cancelled = true;
     };
-  }, [event, filter.resourceType, integrationId, key, provider]);
+  }, [event, resourceType, integrationId, key, provider]);
 
-  const result = state?.key === key ? state.result : null;
+  const result: WorkflowEventFilterOptionsResult | null =
+    filter.kind === "choice"
+      ? { ok: true, options: filter.options }
+      : state?.key === key
+        ? state.result
+        : null;
   const selected = trigger.filters[filter.id] ?? null;
   // Keep a saved value selectable while options load, and after it disappears from the provider.
   const options =

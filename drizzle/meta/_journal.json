@@ -1917,7 +1917,14 @@
       "idx": 273,
       "version": "7",
       "when": 1789582000000,
-      "tag": "0273_default_wiki_company",
+      "tag": "0273_retire_wiki_ingestion",
+      "breakpoints": true
+    },
+    {
+      "idx": 274,
+      "version": "7",
+      "when": 1789668400000,
+      "tag": "0274_default_wiki_company",
       "breakpoints": true
     }
   ]
