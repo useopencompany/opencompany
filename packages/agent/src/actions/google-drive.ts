@@ -13,6 +13,15 @@ import {
   hasGoogleDocsWriteScope,
   hasGoogleSheetsWriteScope,
 } from "../integrations/google-drive-scopes";
+import {
+  type GoogleSheetCellValue,
+  googleSpreadsheetUrl,
+  MAX_SPREADSHEET_CELL_CHARS,
+  MAX_SPREADSHEET_CELLS,
+  MAX_SPREADSHEET_RANGE_CHARS,
+  MAX_SPREADSHEET_WRITE_LINES,
+  sanitizeSpreadsheetValues,
+} from "../integrations/google-sheets-values";
 import { type CapabilityId, effectiveCapabilityMode, providerCapability } from "./capabilities";
 import {
   DOCUMENT_READ_MAX_RESULT_CHARS,
@@ -55,14 +64,6 @@ const MAX_INITIAL_DOCUMENT_TEXT_CHARS = 100_000;
 const MAX_FIND_TEXT_CHARS = 20_000;
 const MAX_REPLACEMENT_TEXT_CHARS = 100_000;
 const DEFAULT_SPREADSHEET_RANGE = "A1:Z100";
-const MAX_SPREADSHEET_RANGE_CHARS = 500;
-const MAX_SPREADSHEET_READ_ROWS = 1_000;
-const MAX_SPREADSHEET_WRITE_ROWS = 500;
-const MAX_SPREADSHEET_COLUMNS = 100;
-const MAX_SPREADSHEET_CELLS = 10_000;
-const MAX_SPREADSHEET_CELL_CHARS = 5_000;
-
-type GoogleSheetCellValue = string | number | boolean | null;
 
 type GoogleDriveConnection = {
   integrationId: string;
@@ -411,7 +412,7 @@ function getSpreadsheetValuesAction(connections: readonly GoogleDriveConnection[
       const response = asRecord(await googleDriveApiCall(context, connection, "GET", url));
       const spreadsheetId = readString(response.spreadsheetId, MAX_FILE_ID_CHARS) ?? fileId;
       const responseRange = readString(response.range, MAX_SPREADSHEET_RANGE_CHARS) ?? range;
-      const shapedValues = sanitizeSpreadsheetValues(response.values, MAX_SPREADSHEET_READ_ROWS);
+      const shapedValues = sanitizeSpreadsheetValues(response.values);
       return {
         account: connectionLabel(connection),
         integrationId: connection.integrationId,
@@ -1297,12 +1298,12 @@ function spreadsheetValuesParamSchema(description: string): JSONSchema7 {
   return {
     type: "array" as const,
     minItems: 1,
-    maxItems: MAX_SPREADSHEET_WRITE_ROWS,
+    maxItems: MAX_SPREADSHEET_WRITE_LINES,
     description,
     items: {
       type: "array" as const,
       minItems: 1,
-      maxItems: MAX_SPREADSHEET_COLUMNS,
+      maxItems: MAX_SPREADSHEET_CELLS,
       items: {
         anyOf: [
           { type: "string", maxLength: MAX_SPREADSHEET_CELL_CHARS },
@@ -1319,9 +1320,9 @@ function requiredSpreadsheetValues(value: unknown): GoogleSheetCellValue[][] {
   if (!Array.isArray(value) || value.length === 0) {
     throw new ActionInvalidParamsError('"values" is required and must be a non-empty 2D array.');
   }
-  if (value.length > MAX_SPREADSHEET_WRITE_ROWS) {
+  if (value.length > MAX_SPREADSHEET_WRITE_LINES) {
     throw new ActionInvalidParamsError(
-      `"values" may include at most ${MAX_SPREADSHEET_WRITE_ROWS} rows or columns.`,
+      `"values" may include at most ${MAX_SPREADSHEET_WRITE_LINES} rows or columns.`,
     );
   }
 
@@ -1332,9 +1333,9 @@ function requiredSpreadsheetValues(value: unknown): GoogleSheetCellValue[][] {
         `"values"[${rowIndex}] must be a non-empty array of cells.`,
       );
     }
-    if (rawRow.length > MAX_SPREADSHEET_COLUMNS) {
+    if (rawRow.length > MAX_SPREADSHEET_CELLS) {
       throw new ActionInvalidParamsError(
-        `"values"[${rowIndex}] may include at most ${MAX_SPREADSHEET_COLUMNS} cells.`,
+        `"values"[${rowIndex}] may include at most ${MAX_SPREADSHEET_CELLS} cells.`,
       );
     }
     cellCount += rawRow.length;
@@ -1373,48 +1374,6 @@ function spreadsheetCellValue(
   throw new ActionInvalidParamsError(
     `"values"[${rowIndex}][${columnIndex}] must be a string, number, boolean, or null.`,
   );
-}
-
-function sanitizeSpreadsheetValues(value: unknown, maxRows: number) {
-  const rows = asArray(value);
-  const values: GoogleSheetCellValue[][] = [];
-  let truncated = rows.length > maxRows;
-  let cellCount = 0;
-
-  for (const rawRow of rows.slice(0, maxRows)) {
-    const row = asArray(rawRow);
-    if (row.length > MAX_SPREADSHEET_COLUMNS) truncated = true;
-    const shapedRow: GoogleSheetCellValue[] = [];
-    for (const rawCell of row.slice(0, MAX_SPREADSHEET_COLUMNS)) {
-      if (cellCount >= MAX_SPREADSHEET_CELLS) {
-        truncated = true;
-        break;
-      }
-      const cell = sanitizeSpreadsheetCell(rawCell);
-      shapedRow.push(cell.value);
-      if (cell.truncated) truncated = true;
-      cellCount += 1;
-    }
-    values.push(shapedRow);
-    if (cellCount >= MAX_SPREADSHEET_CELLS) break;
-  }
-
-  return { values, truncated };
-}
-
-function sanitizeSpreadsheetCell(value: unknown): {
-  value: GoogleSheetCellValue;
-  truncated: boolean;
-} {
-  if (value === null || typeof value === "boolean") return { value, truncated: false };
-  if (typeof value === "number" && Number.isFinite(value)) return { value, truncated: false };
-  if (typeof value === "string") {
-    return {
-      value: truncateText(value, MAX_SPREADSHEET_CELL_CHARS) ?? "",
-      truncated: value.length > MAX_SPREADSHEET_CELL_CHARS,
-    };
-  }
-  return { value: null, truncated: true };
 }
 
 function safeNonNegativeInteger(value: unknown) {
@@ -1492,10 +1451,6 @@ function driveFileSourceRef(fileId: string) {
 
 function googleDocUrl(fileId: string) {
   return `https://docs.google.com/document/d/${encodeURIComponent(fileId)}/edit`;
-}
-
-function googleSpreadsheetUrl(fileId: string) {
-  return `https://docs.google.com/spreadsheets/d/${encodeURIComponent(fileId)}/edit`;
 }
 
 function driveQueryLiteral(value: string) {
