@@ -25,6 +25,7 @@ import {
   GOOGLE_DOCS_WRITE_SCOPE,
   GOOGLE_DRIVE_FILE_SCOPE,
   GOOGLE_DRIVE_READ_SCOPE,
+  GOOGLE_SHEETS_WRITE_SCOPE,
 } from "./google-drive-scopes";
 import { createRemoteMcpStaticBearerAuthProvider } from "./remote-mcp-static-bearer";
 
@@ -33,7 +34,12 @@ const connectedRow = {
   id: "integration_1",
   userWorkosId: "user_1",
   status: "connected",
-  scopes: [GOOGLE_DRIVE_READ_SCOPE, GOOGLE_DRIVE_FILE_SCOPE, GOOGLE_DOCS_WRITE_SCOPE],
+  scopes: [
+    GOOGLE_DRIVE_READ_SCOPE,
+    GOOGLE_DRIVE_FILE_SCOPE,
+    GOOGLE_DOCS_WRITE_SCOPE,
+    GOOGLE_SHEETS_WRITE_SCOPE,
+  ],
   capabilityModes: { read: "ask", query: "ask", write: "ask" },
   toolModes: {},
 };
@@ -97,7 +103,7 @@ describe("opencompany Google Drive MCP server", () => {
     });
   });
 
-  it("discovers only the ten reviewed Drive-compatible tools", async () => {
+  it("discovers only the thirteen reviewed Drive-compatible tools", async () => {
     const response = await service().handle(request({ type: "tools/list" }, "tools/list"));
     expect(response.status).toBe(200);
     const body = await responseJson(response);
@@ -108,10 +114,13 @@ describe("opencompany Google Drive MCP server", () => {
       "download_file_content",
       "get_file_permissions",
       "read_file_content",
+      "get_spreadsheet_values",
       "copy_file",
       "create_file",
       "replace_document_text",
       "replace_document_contents",
+      "update_spreadsheet_values",
+      "append_spreadsheet_values",
     ]);
     expect(mocks.apiCall).not.toHaveBeenCalled();
   });
@@ -151,10 +160,13 @@ describe("opencompany Google Drive MCP server", () => {
         "download_file_content",
         "get_file_permissions",
         "read_file_content",
+        "get_spreadsheet_values",
         "copy_file",
         "create_file",
         "replace_document_text",
         "replace_document_contents",
+        "update_spreadsheet_values",
+        "append_spreadsheet_values",
       ]);
     } finally {
       await client.close();
@@ -584,6 +596,194 @@ describe("opencompany Google Drive MCP server", () => {
     expect(mocks.apiCall).not.toHaveBeenCalled();
   });
 
+  it("reads Sheet values against the first sheet and reports the spreadsheet's tabs", async () => {
+    mocks.apiCall
+      .mockResolvedValueOnce({
+        spreadsheetId: "sheet_1",
+        properties: { title: "Company KPIs" },
+        sheets: [
+          {
+            properties: {
+              sheetId: 0,
+              title: "Louis' weekly",
+              index: 0,
+              gridProperties: { rowCount: 200, columnCount: 40 },
+            },
+          },
+          { properties: { sheetId: 1, title: "Archive", index: 1 } },
+        ],
+      })
+      .mockResolvedValueOnce({
+        range: "'Louis'' weekly'!A1:B2",
+        majorDimension: "ROWS",
+        values: [
+          ["Week", "2026-09-07"],
+          ["# of prs merged", 189],
+        ],
+      });
+
+    const response = await service().handle(
+      request(
+        { type: "tools/call", tool: "get_spreadsheet_values", capability: "query" },
+        "tools/call",
+        { name: "get_spreadsheet_values", arguments: { fileId: "sheet_1" } },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await responseJson(response);
+    const outlineUrl = mocks.apiCall.mock.calls[0]?.[2] as URL;
+    expect(outlineUrl.pathname).toBe("/v4/spreadsheets/sheet_1");
+    const valuesUrl = mocks.apiCall.mock.calls[1]?.[2] as URL;
+    // A1 notation escapes the apostrophe in the sheet title by doubling it.
+    expect(decodeURIComponent(valuesUrl.pathname)).toBe(
+      "/v4/spreadsheets/sheet_1/values/'Louis'' weekly'",
+    );
+    expect(JSON.parse(body.result.content[0].text)).toEqual({
+      spreadsheet: {
+        id: "sheet_1",
+        title: "Company KPIs",
+        viewUrl: "https://docs.google.com/spreadsheets/d/sheet_1/edit",
+        sheets: [
+          { title: "Louis' weekly", index: 0, rowCount: 200, columnCount: 40 },
+          { title: "Archive", index: 1 },
+        ],
+      },
+      range: "'Louis'' weekly'!A1:B2",
+      majorDimension: "ROWS",
+      values: [
+        ["Week", "2026-09-07"],
+        ["# of prs merged", 189],
+      ],
+      truncated: false,
+    });
+  });
+
+  it("overwrites an explicit Sheet range as a user-entered edit", async () => {
+    mocks.apiCall.mockResolvedValueOnce({
+      spreadsheetId: "sheet_1",
+      updatedRange: "'Weekly KPIs'!K4",
+      updatedRows: 1,
+      updatedColumns: 1,
+      updatedCells: 1,
+    });
+
+    const response = await service().handle(
+      request(
+        { type: "tools/call", tool: "update_spreadsheet_values", capability: "write" },
+        "tools/call",
+        {
+          name: "update_spreadsheet_values",
+          arguments: {
+            fileId: "sheet_1",
+            range: "'Weekly KPIs'!K4",
+            values: [[189]],
+          },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await responseJson(response);
+    expect(mocks.apiCall).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "google_drive", integrationId: "integration_1" }),
+      "PUT",
+      expect.objectContaining({ origin: "https://sheets.googleapis.com" }),
+      {
+        signal: expect.any(AbortSignal),
+        body: { range: "'Weekly KPIs'!K4", majorDimension: "ROWS", values: [[189]] },
+      },
+    );
+    const url = mocks.apiCall.mock.calls[0]?.[2] as URL;
+    expect(url.searchParams.get("valueInputOption")).toBe("USER_ENTERED");
+    expect(JSON.parse(body.result.content[0].text)).toEqual({
+      spreadsheet: {
+        id: "sheet_1",
+        viewUrl: "https://docs.google.com/spreadsheets/d/sheet_1/edit",
+        updatedRange: "'Weekly KPIs'!K4",
+        updatedRows: 1,
+        updatedColumns: 1,
+        updatedCells: 1,
+      },
+    });
+  });
+
+  it("appends rows through the Sheets append method rather than an encoded range", async () => {
+    mocks.apiCall.mockResolvedValueOnce({
+      spreadsheetId: "sheet_1",
+      tableRange: "'Weekly KPIs'!A1:K3",
+      updates: { updatedRange: "'Weekly KPIs'!A4:K4", updatedRows: 1, updatedCells: 2 },
+    });
+
+    const response = await service().handle(
+      request(
+        { type: "tools/call", tool: "append_spreadsheet_values", capability: "write" },
+        "tools/call",
+        {
+          name: "append_spreadsheet_values",
+          arguments: {
+            fileId: "sheet_1",
+            range: "'Weekly KPIs'!A1:K",
+            values: [["2026-09-07", 189]],
+          },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await responseJson(response);
+    const url = mocks.apiCall.mock.calls[0]?.[2] as URL;
+    expect(url.pathname.endsWith(":append")).toBe(true);
+    expect(decodeURIComponent(url.pathname)).toBe(
+      "/v4/spreadsheets/sheet_1/values/'Weekly KPIs'!A1:K:append",
+    );
+    expect(url.searchParams.get("insertDataOption")).toBe("INSERT_ROWS");
+    expect(JSON.parse(body.result.content[0].text).spreadsheet).toMatchObject({
+      tableRange: "'Weekly KPIs'!A1:K3",
+      updatedRange: "'Weekly KPIs'!A4:K4",
+      updatedRows: 1,
+      updatedCells: 2,
+    });
+  });
+
+  it("refuses a Sheets write that Google did not confirm for the requested spreadsheet", async () => {
+    mocks.apiCall.mockResolvedValueOnce({ spreadsheetId: "other_sheet", updatedCells: 1 });
+    const response = await service().handle(
+      request(
+        { type: "tools/call", tool: "update_spreadsheet_values", capability: "write" },
+        "tools/call",
+        {
+          name: "update_spreadsheet_values",
+          arguments: { fileId: "sheet_1", range: "A1", values: [["x"]] },
+        },
+      ),
+    );
+    const body = await responseJson(response);
+    expect(body.result).toMatchObject({ isError: true });
+    expect(body.result.content[0].text).toContain("did not confirm");
+  });
+
+  it("bounds a Sheets write before it reaches Google", async () => {
+    const response = await service().handle(
+      request(
+        { type: "tools/call", tool: "update_spreadsheet_values", capability: "write" },
+        "tools/call",
+        {
+          name: "update_spreadsheet_values",
+          arguments: {
+            fileId: "sheet_1",
+            range: "A1",
+            values: Array.from({ length: 200 }, () => Array.from({ length: 100 }, () => "x")),
+          },
+        },
+      ),
+    );
+    const body = await responseJson(response);
+    expect(body.result).toMatchObject({ isError: true });
+    expect(body.result.content[0].text).toContain("10000 cells");
+    expect(mocks.apiCall).not.toHaveBeenCalled();
+  });
+
   it("returns a trusted reconnect envelope when Google revokes access during a call", async () => {
     const { GoogleAccessAuthError } = await import("./google-access-token");
     mocks.apiCall.mockRejectedValueOnce(new GoogleAccessAuthError("revoked"));
@@ -630,6 +830,15 @@ describe("opencompany Google Drive MCP server", () => {
     });
     const missingScope = await service().handle(request({ type: "tools/list" }, "tools/list"));
     expect(missingScope.status).toBe(401);
+
+    mocks.loadIntegration.mockResolvedValueOnce({
+      ...connectedRow,
+      scopes: [GOOGLE_DRIVE_READ_SCOPE, GOOGLE_DRIVE_FILE_SCOPE, GOOGLE_DOCS_WRITE_SCOPE],
+    });
+    const missingSheetsScope = await service().handle(
+      request({ type: "tools/list" }, "tools/list"),
+    );
+    expect(missingSheetsScope.status).toBe(401);
 
     mocks.loadIntegration.mockResolvedValueOnce({
       ...connectedRow,

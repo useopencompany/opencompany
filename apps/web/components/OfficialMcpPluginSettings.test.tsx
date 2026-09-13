@@ -958,7 +958,7 @@ const googleDrivePlugin = {
   source: {
     ...plugin.source,
     path: "google-drive",
-    resolvedCommit: "bae88070e498725de008e358a74bd18bc46ed27c",
+    resolvedCommit: "8b328aa34239234c215e905275c2de3bf4567c29",
   },
   skills: [],
   remoteMcpServers: [
@@ -977,13 +977,25 @@ const googleDrivePlugin = {
           id: "query",
           label: "Read files & permissions",
           defaultMode: "ask",
-          tools: ["download_file_content", "get_file_permissions", "read_file_content"],
+          tools: [
+            "download_file_content",
+            "get_file_permissions",
+            "read_file_content",
+            "get_spreadsheet_values",
+          ],
         },
         {
           id: "write",
           label: "Create & edit files",
           defaultMode: "ask",
-          tools: ["copy_file", "create_file", "replace_document_text", "replace_document_contents"],
+          tools: [
+            "copy_file",
+            "create_file",
+            "replace_document_text",
+            "replace_document_contents",
+            "update_spreadsheet_values",
+            "append_spreadsheet_values",
+          ],
         },
       ],
       tools: [
@@ -993,10 +1005,13 @@ const googleDrivePlugin = {
         driveTool("download_file_content", "query"),
         driveTool("get_file_permissions", "query"),
         driveTool("read_file_content", "query"),
+        driveTool("get_spreadsheet_values", "query"),
         driveTool("copy_file", "write"),
         driveTool("create_file", "write"),
         driveTool("replace_document_text", "write"),
         driveTool("replace_document_contents", "write"),
+        driveTool("update_spreadsheet_values", "write"),
+        driveTool("append_spreadsheet_values", "write"),
       ],
       discoveryStatus: "ready",
       discoveredAt: "2026-09-03T06:00:00.000Z",
@@ -1589,7 +1604,7 @@ describe("Linear plugin settings", () => {
     }
     expect(toolsState).toMatchObject({
       status: "ready",
-      discovery: { status: "ready", toolCount: 10 },
+      discovery: { status: "ready", toolCount: 13 },
     });
     if (toolsState.status !== "ready") throw new Error("Expected discovered Drive tools.");
     expect(
@@ -1607,16 +1622,28 @@ describe("Linear plugin settings", () => {
       {
         id: "query",
         defaultMode: "ask",
-        tools: ["Download file content", "Get file permissions", "Read file content"],
+        tools: [
+          "Download file content",
+          "Get file permissions",
+          "Read file content",
+          "Get spreadsheet values",
+        ],
       },
       {
         id: "write",
         defaultMode: "ask",
-        tools: ["Copy file", "Create file", "Replace document text", "Replace document contents"],
+        tools: [
+          "Copy file",
+          "Create file",
+          "Replace document text",
+          "Replace document contents",
+          "Update spreadsheet values",
+          "Append spreadsheet values",
+        ],
       },
     ]);
     expect(GOOGLE_DRIVE_PLUGIN_SOURCE).toBe(
-      "https://github.com/useopencompany/plugins/tree/bae88070e498725de008e358a74bd18bc46ed27c/google-drive",
+      "https://github.com/useopencompany/plugins/tree/8b328aa34239234c215e905275c2de3bf4567c29/google-drive",
     );
   });
 

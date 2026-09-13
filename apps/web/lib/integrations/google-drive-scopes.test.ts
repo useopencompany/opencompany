@@ -28,15 +28,25 @@ describe("Google Drive OAuth scope capabilities", () => {
     expect(hasGoogleSheetsWriteScope([GOOGLE_DOCS_WRITE_SCOPE])).toBe(false);
   });
 
-  it("requires Docs editing access for the official Drive plugin", () => {
+  it("requires Docs and Sheets editing access for the official Drive plugin", () => {
     expect(googleDriveMcpScopesSatisfied([GOOGLE_DRIVE_READ_SCOPE, GOOGLE_DRIVE_FILE_SCOPE])).toBe(
       false,
     );
+    // A grant made before the Sheets tools shipped is incomplete, so the plugin asks to reconnect
+    // instead of advertising spreadsheet tools that Google would reject.
     expect(
       googleDriveMcpScopesSatisfied([
         GOOGLE_DRIVE_READ_SCOPE,
         GOOGLE_DRIVE_FILE_SCOPE,
         GOOGLE_DOCS_WRITE_SCOPE,
+      ]),
+    ).toBe(false);
+    expect(
+      googleDriveMcpScopesSatisfied([
+        GOOGLE_DRIVE_READ_SCOPE,
+        GOOGLE_DRIVE_FILE_SCOPE,
+        GOOGLE_DOCS_WRITE_SCOPE,
+        GOOGLE_SHEETS_WRITE_SCOPE,
       ]),
     ).toBe(true);
   });
