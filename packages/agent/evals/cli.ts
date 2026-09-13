@@ -89,7 +89,7 @@ export const HELP = `Harness bench (metered; all integration executions are fixt
   bun run bench [--list] [--scenarios id,id|tag:safety] [--models id,id]
     [--k 4] [--variant v4,v5] [--budget-usd 5] [--concurrency 1]
     [--save-baseline [path]] [--compare [path]] [--resume path]
-Defaults: all 8 scenarios, router answer models + Sonnet, v5, k=4.
+Defaults: all 9 scenarios, router answer models + Sonnet, v5, k=4.
 Reports and default baseline: .context/bench/ (repository root).
 Resume inherits the saved configuration; --budget-usd is the cumulative cap.
 Gateway charges arrive after responses: in-flight calls may cross the cap.

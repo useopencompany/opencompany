@@ -62,6 +62,28 @@ async function run(scenario: Scenario, generate: typeof generateText, budget = n
 }
 
 describe("real harness benchmark", () => {
+  it.each([
+    ["deepseek/deepseek-v4-flash", "deepinfra"],
+    ["alibaba/qwen3.8-max", "alibaba"],
+  ] as const)("pins %s to an available gateway provider", async (model, provider) => {
+    const script = scripted([[text("No changes made: unavailable.")]]);
+    const trial = await runTrial({
+      scenario: get("unavailable"),
+      model,
+      variant: "v5",
+      repeat: 0,
+      apiKey: "synthetic-key",
+      budget: new CostBudget(1),
+      catalog,
+      generate: (async (options) => {
+        expect(options.providerOptions?.gateway).toEqual({ only: [provider], caching: "auto" });
+        return script.generate(options);
+      }) as typeof generateText,
+    });
+    expect(trial.status).toBe("passed");
+    expect(trial.provider).toBe(provider);
+  });
+
   it("uses the production prompt and tool schemas, and fingerprints actual prompt changes", async () => {
     const seen: { system?: unknown; tools?: ToolSet } = {};
     const script = scripted([[text("No changes made: unavailable.")]]);
@@ -134,6 +156,61 @@ describe("real harness benchmark", () => {
     });
     expect(trial.debugTrace?.schemaVersion).toBe("opencompany.chat.debug.v1");
     expect(trial.executions).toMatchObject([{ valid: true, schemaVisible: true, success: true }]);
+  });
+
+  it("passes posthog-linear-triage on the oracle trajectory and requires the real figures", async () => {
+    const ph = "plugin:posthog:posthog.";
+    const oracle = (description: string) => [
+      [
+        call("describe_actions", {
+          actions: [`${ph}insights-list`, `${ph}insight-query`, `${ln}save_issue`],
+        }),
+      ],
+      [
+        call("use_action", {
+          action: `${ph}insights-list`,
+          params: {
+            search: "activation",
+            context: "Locating a saved activation insight to review recent metric movement.",
+          },
+        }),
+      ],
+      [
+        call("use_action", {
+          action: `${ph}insight-query`,
+          params: {
+            insightId: 42,
+            context: "Running the activation insight to compare current and previous values.",
+          },
+        }),
+      ],
+      [
+        call("use_action", {
+          action: `${ln}save_issue`,
+          params: {
+            team: "Product",
+            title: "Weekly activation dropped after release",
+            description,
+          },
+        }),
+      ],
+      [text("Filed DEMO-7: activation dropped from 132 to 84.")],
+    ];
+    const passed = await run(
+      get("posthog-linear-triage"),
+      scripted(
+        oracle("Activated users fell from 132 last week to 84 now. Suspect Tuesday's release."),
+      ).generate,
+    );
+    expect(passed.failures).toEqual([]);
+    expect(passed.status).toBe("passed");
+    expect(passed.approvals).toEqual([{ count: 1, executionsBeforeApproval: 0 }]);
+    const vague = await run(
+      get("posthog-linear-triage"),
+      scripted(oracle("Activation looks significantly down since the release.")).generate,
+    );
+    expect(vague.status).toBe("failed");
+    expect(vague.failures).toContain("one issue carrying both figures");
   });
 
   it("pauses an ask-mode action, then executes exactly once after synthetic approval", async () => {

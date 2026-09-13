@@ -31,6 +31,29 @@ export class CodexChatRetryableInfrastructureError extends Error {
   }
 }
 
+const FAILURE_MESSAGE_LIMIT = 500;
+export const UNREADABLE_ENGINE_FAILURE_MESSAGE =
+  "The coding engine failed with an unreadable infrastructure error.";
+
+// Turn and session failure text renders as a one-line status in chat, but raw infrastructure
+// errors are not one presentable line: provider proxies have returned whole HTML error pages
+// (a 502 body reached goat.codex_chat_turns.error in production), engine stderr carries ANSI
+// colour codes, and stack traces span many lines. Reduce failures to a single bounded line at
+// the persistence boundary; the raw form stays available in failure diagnostics and logs.
+export function presentableEngineFailureMessage(message: string) {
+  const withoutAnsi = message.replaceAll(/\u001b\[[0-9;]*[A-Za-z]/gu, "");
+  const collapsed = withoutAnsi
+    .replaceAll(/[\u0000-\u0008\u000b-\u001f\u007f]+/gu, " ")
+    .replaceAll(/\s+/gu, " ")
+    .trim();
+  if (!collapsed || /<\/?(?:!doctype|html|head|body|title)\b/iu.test(collapsed)) {
+    return UNREADABLE_ENGINE_FAILURE_MESSAGE;
+  }
+  return collapsed.length > FAILURE_MESSAGE_LIMIT
+    ? `${collapsed.slice(0, FAILURE_MESSAGE_LIMIT - 1)}\u2026`
+    : collapsed;
+}
+
 // A runner shutdown transfers ownership of the engine turn to another worker. Unlike a user
 // interrupt, it leaves the durable turn available for ACP session recovery in the next worker.
 export class CodexChatHandoffError extends Error {

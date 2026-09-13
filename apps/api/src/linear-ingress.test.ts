@@ -3,7 +3,6 @@ import { createLinearIngestState } from "@opencompany/agent/integrations/linear-
 import {
   insertLinearIssueEvents,
   listEnabledLinearBrainSourceRoutes,
-  listEnabledLinearWikiSourceRoutes,
   listLinearIntegrationsForOrganization,
 } from "@opencompany/db/linear";
 import {
@@ -107,7 +106,6 @@ describe("Linear ingress", () => {
         },
       },
     ] as never);
-    vi.mocked(listEnabledLinearWikiSourceRoutes).mockResolvedValue([]);
     vi.mocked(insertLinearIssueEvents).mockResolvedValue(1);
     vi.mocked(listWorkflowEventTriggerRoutes).mockResolvedValue([]);
     vi.mocked(enqueueWorkflowEventRuns).mockResolvedValue(0);
@@ -179,25 +177,6 @@ describe("Linear ingress", () => {
         ],
         expect.objectContaining({ sentinel: "db" }),
       );
-    });
-
-    it("buffers a selected-team issue for a wiki-only route", async () => {
-      vi.mocked(listEnabledLinearBrainSourceRoutes).mockResolvedValue([]);
-      vi.mocked(listEnabledLinearWikiSourceRoutes).mockResolvedValue([
-        {
-          integrationId: "gint_1",
-          workspaceId: "workspace_1",
-          config: {
-            teams: [{ id: "team_1", name: "Core" }],
-            events: [{ id: "issue_created" }],
-          },
-        },
-      ] as never);
-
-      const response = await ingress().webhook(signedRequest(issueEnvelope()));
-
-      expect(await response.json()).toMatchObject({ ok: true, buffered: 1 });
-      expect(insertLinearIssueEvents).toHaveBeenCalledOnce();
     });
 
     it("drops board-reordering noise updates", async () => {

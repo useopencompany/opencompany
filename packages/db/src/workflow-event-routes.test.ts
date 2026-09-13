@@ -76,7 +76,7 @@ describe("personal workflow event authorization", () => {
       workspaceId: "workspace_1",
       ownerUserId: "user_2",
       name: "linear",
-      events: [{ id: "issue.created" }],
+      events: [{ id: "issue.created", filters: [] }],
       eventModes: { "issue.created": true },
     };
     const db = { select: vi.fn() };

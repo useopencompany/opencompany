@@ -143,11 +143,15 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
       command: input.adapter.command(input.workdir),
       envs: input.envs,
       redact: input.redact,
-      onNotification: async (notification) => {
-        await input.onNotification?.(notification);
-        if (projectUpdates && notification.method === "session/update") {
-          await input.onRuntimeEvents([notification]);
+      onNotificationBatch: async (notifications) => {
+        const updates: AcpNotification[] = [];
+        for (const notification of notifications) {
+          await input.onNotification?.(notification);
+          if (projectUpdates && notification.method === "session/update") {
+            updates.push(notification);
+          }
         }
+        if (updates.length > 0) await input.onRuntimeEvents(updates);
       },
       onServerRequest: async (request) => {
         if (request.method === "session/request_permission") {
@@ -246,6 +250,7 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
         reasoningEffort: input.reasoningEffort,
         permissionMode: input.permissionMode,
         collaborationMode: input.collaborationMode,
+        redact: input.redact,
       });
       // session/load replays historical updates. Drain those (and any config notifications)
       // while projection is still disabled so a reclaimed turn only renders new output.
@@ -334,6 +339,47 @@ function promptResultEvent(
   };
 }
 
+// The values an adapter accepts for a config option are not fixed: they depend on the connected
+// account's entitlements and, for effort, on the model the session currently holds. Selecting a
+// model rewrites the option set outright — Claude drops the `effort` option entirely for Haiku.
+// Read what the adapter advertises, re-read it after every change, and only send a value the
+// adapter says it will take.
+type AdvertisedOption = { currentValue: string | null; values: string[] };
+
+// Ordered by strength so an unavailable level can degrade to the strongest one the model offers.
+const REASONING_EFFORT_LADDER = ["max", "xhigh", "high", "medium", "low"];
+
+function readAdvertisedOptions(response: Record<string, unknown> | null) {
+  const options = new Map<string, AdvertisedOption>();
+  const entries = Array.isArray(response?.configOptions) ? response.configOptions : [];
+  for (const entry of entries) {
+    const record = readRecord(entry);
+    const id = readString(record?.id);
+    if (!id) continue;
+    const raw = Array.isArray(record?.options) ? record.options : [];
+    const values = raw.flatMap((value) => {
+      const nested = readRecord(value);
+      const group = Array.isArray(nested?.options) ? nested.options : [nested];
+      return group.flatMap((candidate) => {
+        const option = readString(readRecord(candidate)?.value);
+        return option ? [option] : [];
+      });
+    });
+    options.set(id, { currentValue: readString(record?.currentValue), values });
+  }
+  return options;
+}
+
+// A model the account cannot run must fail loudly, but a reasoning effort it cannot run must not:
+// the turn is perfectly answerable at a level the model does offer.
+function degradeReasoningEffort(requested: string, advertised: AdvertisedOption) {
+  const from = REASONING_EFFORT_LADDER.indexOf(requested);
+  if (from < 0) return null;
+  return (
+    REASONING_EFFORT_LADDER.slice(from).find((value) => advertised.values.includes(value)) ?? null
+  );
+}
+
 async function configureSession(
   client: AcpJsonRpcClient,
   adapter: AcpEngineAdapter,
@@ -344,25 +390,31 @@ async function configureSession(
     reasoningEffort: string | null | undefined;
     permissionMode: "default" | "bypassPermissions" | undefined;
     collaborationMode: "default" | "plan" | undefined;
+    redact: (value: string) => string;
   },
 ) {
-  const optionIds = new Set(
-    (Array.isArray(sessionResponse?.configOptions) ? sessionResponse.configOptions : []).flatMap(
-      (value) => {
-        const id = readString(readRecord(value)?.id);
-        return id ? [id] : [];
-      },
-    ),
-  );
+  let advertised = readAdvertisedOptions(sessionResponse);
   const config = adapter.configOptions;
+  if (config.model && input.model) {
+    const modelOption = advertised.get(config.model);
+    logger.info("ACP session advertised its selectable models", {
+      event: "opencompany.goat_acp_session_models",
+      engine: adapter.id,
+      requested_model: input.model,
+      current_model: modelOption?.currentValue ?? null,
+      advertised_models: modelOption?.values ?? [],
+    });
+  }
+  // Model first: it decides which effort levels the session then advertises.
   const requested = [
-    { configId: config.model, value: input.model },
+    { configId: config.model, value: input.model, kind: "model" as const },
     {
       configId: config.reasoningEffort?.id,
       value:
         input.reasoningEffort && config.reasoningEffort
           ? config.reasoningEffort.value(input.reasoningEffort)
           : null,
+      kind: "effort" as const,
     },
     {
       configId: config.permissionMode?.id,
@@ -370,6 +422,7 @@ async function configureSession(
         input.permissionMode && config.permissionMode
           ? config.permissionMode.values[input.permissionMode]
           : null,
+      kind: "setting" as const,
     },
     {
       configId: config.collaborationMode?.id,
@@ -377,15 +430,74 @@ async function configureSession(
         input.collaborationMode && config.collaborationMode
           ? config.collaborationMode.values[input.collaborationMode]
           : null,
+      kind: "setting" as const,
     },
   ];
   for (const option of requested) {
-    if (!option.configId || !option.value || !optionIds.has(option.configId)) continue;
-    await client.requestBeforeExecution("session/set_config_option", {
-      sessionId,
-      configId: option.configId,
-      value: option.value,
-    });
+    if (!option.configId || !option.value) continue;
+    const current = advertised.get(option.configId);
+    if (!current) continue;
+    // `ANTHROPIC_MODEL` already places the session on the requested model, and the adapter reports
+    // it as `currentValue` even when it is not separately selectable. Re-asserting it buys nothing
+    // and rejects an out-of-picker model that the session is, in fact, already running.
+    if (current.currentValue === option.value) continue;
+    let value = option.value;
+    // An option that enumerates no values has not told us what it takes; only an explicit list
+    // that omits the value is evidence the adapter would reject it.
+    if (current.values.length > 0 && !current.values.includes(value)) {
+      if (option.kind === "effort") {
+        const degraded = degradeReasoningEffort(value, current);
+        if (!degraded) continue;
+        if (degraded !== value) {
+          logger.info("ACP session does not offer the requested reasoning effort; degrading", {
+            event: "opencompany.goat_acp_reasoning_effort_degraded",
+            engine: adapter.id,
+            requested: value,
+            applied: degraded,
+            advertised: current.values,
+          });
+        }
+        value = degraded;
+        if (current.currentValue === value) continue;
+      }
+      // Model and mode values are still sent verbatim when they are not listed: the adapter
+      // resolves friendly aliases ("claude-opus-5" -> "opus[1m]") that never appear as an option
+      // value. If it cannot, the rejection below names the option.
+    }
+    try {
+      const result = readRecord(
+        await client.requestBeforeExecution("session/set_config_option", {
+          sessionId,
+          configId: option.configId,
+          value,
+        }),
+      );
+      const refreshed = readAdvertisedOptions(result);
+      if (refreshed.size > 0) advertised = refreshed;
+    } catch (error) {
+      // The adapter resolves the requested model against the models the connected account can
+      // actually run, so a catalog entry the account is not entitled to is rejected here — before
+      // the model produces a single token. That is a deterministic configuration mismatch, not an
+      // engine fault: name the model and the option instead of letting a raw adapter string land
+      // in the user's turn notice.
+      if (!(error instanceof AcpRpcError)) throw error;
+      logger.warn("ACP adapter rejected a session config option", {
+        event: "opencompany.goat_acp_config_option_rejected",
+        engine: adapter.id,
+        config_id: option.configId,
+        value,
+        advertised: current.values,
+        rpc_code: error.code,
+        error: input.redact(error.message),
+      });
+      throw new AcpConfigOptionRejectedError({
+        adapterName: adapter.displayName,
+        kind: option.kind === "model" ? "model" : "setting",
+        configId: option.configId,
+        value,
+        cause: error,
+      });
+    }
   }
 }
 
@@ -550,7 +662,9 @@ class AcpJsonRpcClient {
   private stopping = false;
   private failure: Error | null = null;
   private lastStderr = "";
-  private processing: Promise<void> = Promise.resolve();
+  private pendingNotifications: AcpNotification[] = [];
+  private notificationPump: Promise<void> = Promise.resolve();
+  private pumping = false;
   private watchGeneration = 0;
   private lastGuestActivityAt = Date.now();
   private guestProbeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -570,7 +684,7 @@ class AcpJsonRpcClient {
       command: string;
       envs: Record<string, string>;
       redact: (value: string) => string;
-      onNotification: (notification: AcpNotification) => Promise<void>;
+      onNotificationBatch: (notifications: AcpNotification[]) => Promise<void>;
       onServerRequest: (request: AcpJsonRpcRequest) => Promise<Record<string, unknown>>;
     },
   ) {}
@@ -658,7 +772,9 @@ class AcpJsonRpcClient {
   }
 
   async flush() {
-    await this.processing;
+    while (this.pendingNotifications.length > 0 || this.pumping) {
+      await this.notificationPump;
+    }
     this.throwIfFailed();
   }
 
@@ -701,13 +817,33 @@ class AcpJsonRpcClient {
     }
     if (!method) return;
     if (this.failure) return;
-    const notification = { method, params: readRecord(record.params) ?? {} };
-    this.processing = this.processing
-      .then(() => {
-        this.throwIfFailed();
-        return this.input.onNotification(notification);
-      })
-      .catch((error) => this.fail(asError(error)));
+    this.pendingNotifications.push({ method, params: readRecord(record.params) ?? {} });
+    this.startNotificationPump();
+  }
+
+  // Notifications are delivered in arrival order but conflated: each pump iteration drains
+  // everything that queued while the previous handler awaited (typically a projection database
+  // write), so a fast token stream costs one downstream handler call per database round trip
+  // instead of one per chunk, and a slow database shrinks into larger batches instead of
+  // growing an unbounded per-notification promise chain.
+  private startNotificationPump() {
+    if (this.pumping) return;
+    this.pumping = true;
+    this.notificationPump = (async () => {
+      try {
+        while (this.pendingNotifications.length > 0 && !this.failure) {
+          const batch = this.pendingNotifications.splice(0);
+          await this.input.onNotificationBatch(batch);
+        }
+      } catch (error) {
+        this.fail(asError(error));
+      } finally {
+        this.pumping = false;
+        // A notification can land between the drain loop's empty check and this reset; re-kick
+        // so it is not stranded until the next stdout chunk.
+        if (this.pendingNotifications.length > 0 && !this.failure) this.startNotificationPump();
+      }
+    })();
   }
 
   private async handleServerRequest(request: AcpJsonRpcRequest) {
@@ -736,6 +872,7 @@ class AcpJsonRpcClient {
         new AcpRpcError(
           typeof error.code === "number" ? error.code : -32000,
           readString(error.message) ?? "ACP request failed.",
+          readString(readRecord(error.data)?.details),
         ),
       );
       return;
@@ -876,6 +1013,7 @@ class AcpJsonRpcClient {
   private fail(error: Error) {
     if (this.failure) return;
     this.failure = error;
+    this.pendingNotifications.length = 0;
     this.clearGuestProbe();
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timeout);
@@ -889,12 +1027,46 @@ class AcpJsonRpcClient {
   }
 }
 
+// A session setting the adapter refuses is a deterministic configuration mismatch: retrying the
+// same turn, on any worker, rejects it again. It is terminal by construction, and its message is
+// what the user reads on the failed turn, so it names the setting rather than quoting the adapter.
+export class AcpConfigOptionRejectedError extends Error {
+  readonly configId: string;
+  readonly value: string;
+  override readonly cause: AcpRpcError;
+
+  constructor(input: {
+    adapterName: string;
+    kind: "model" | "setting";
+    configId: string;
+    value: string;
+    cause: AcpRpcError;
+  }) {
+    super(
+      input.kind === "model"
+        ? `${input.adapterName} cannot run "${input.value}" on the connected account. Pick a different model and send the message again.`
+        : `${input.adapterName} rejected the session setting "${input.configId}" (${input.value}).`,
+    );
+    this.name = "AcpConfigOptionRejectedError";
+    this.configId = input.configId;
+    this.value = input.value;
+    this.cause = input.cause;
+  }
+}
+
+// An adapter that throws a plain Error reports JSON-RPC `message: "Internal error"` and puts the
+// only description of what went wrong in `data.details`. Dropping `data` collapses every such
+// failure into an indistinguishable "Internal error" in the run record and in the user's turn
+// notice, so the detail is folded into the message the moment the response is read.
 class AcpRpcError extends Error {
-  constructor(
-    readonly code: number,
-    message: string,
-  ) {
-    super(message);
+  readonly code: number;
+  readonly details: string | null;
+
+  constructor(code: number, message: string, details?: string | null) {
+    const trimmedDetails = details?.trim() || null;
+    super(trimmedDetails ? `${message}: ${trimmedDetails}` : message);
+    this.code = code;
+    this.details = trimmedDetails;
     this.name = "AcpRpcError";
   }
 }

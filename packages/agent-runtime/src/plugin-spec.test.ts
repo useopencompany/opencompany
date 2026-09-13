@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, it, test } from "vitest";
 import {
   discoverPluginSkillDirectories,
   PluginSpecError,
@@ -445,4 +445,44 @@ describe("parseMcpConfig", () => {
       expect(result.reason).toMatch(testCase.match);
     });
   }
+});
+
+describe("plugin event choice filters", () => {
+  const event = {
+    id: "issue.created",
+    label: "Issue created",
+    description: "A new issue.",
+    delivery: "webhook",
+    filters: [
+      {
+        id: "status",
+        label: "Status",
+        kind: "choice",
+        required: false,
+        options: [{ id: "triage", name: "Triage" }],
+      },
+    ],
+  };
+  it("preserves declared choices for the editor and server validator", () => {
+    expect(
+      parsePluginEvents({ "so.opencompany.events": [event] }, { trusted: true }).definitions,
+    ).toEqual([event]);
+  });
+  it.each([
+    { options: [] },
+    {
+      options: [
+        { id: "triage", name: "Triage" },
+        { id: "triage", name: "Duplicate" },
+      ],
+    },
+    { options: [{ id: "triage", name: "" }] },
+  ])("rejects empty, duplicated, or malformed choices", ({ options }) => {
+    const result = parsePluginEvents(
+      { "so.opencompany.events": [{ ...event, filters: [{ ...event.filters[0], options }] }] },
+      { trusted: true },
+    );
+    expect(result.definitions).toEqual([]);
+    expect(result.report).toMatchObject({ status: "parsed", issues: [expect.any(String)] });
+  });
 });

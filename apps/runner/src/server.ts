@@ -19,7 +19,6 @@ import { completeInfisicalAuthFlow, startInfisicalAuthFlow } from "./infisical-a
 import { type LlmBrokerOptions, registerLlmBrokerRoutes } from "./llm-broker";
 import { getSandboxLifecycleStatus, killSandbox } from "./sandbox";
 import { enqueueSlackBotEvent } from "./slack-bot-events";
-import { wakeWikiIngestWorker } from "./wiki-ingest-worker";
 
 const logger = createLogger({
   service: "opencompany-runner",
@@ -170,12 +169,7 @@ export function createServer(
 
   app.post("/internal/goat/wiki-ingest/wake", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
-    if (!env.taskWorkerEnabled) {
-      reply.status(503).send({ error: "opencompany workers are disabled." });
-      return;
-    }
-    wakeWikiIngestWorker();
-    reply.status(202).send({ ok: true });
+    return reply.code(410).send({ error: "Wiki ingestion has been retired." });
   });
 
   app.post("/internal/goat/slack-bot/events", async (request, reply) => {

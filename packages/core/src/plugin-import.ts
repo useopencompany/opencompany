@@ -116,10 +116,11 @@ export type PluginCapabilitiesReport =
 export type PluginEventFilterDefinition = {
   id: string;
   label: string;
-  kind: "integration_resource";
-  resourceType: string;
   required: boolean;
-};
+} & (
+  | { kind: "integration_resource"; resourceType: string }
+  | { kind: "choice"; options: { id: string; name: string }[] }
+);
 
 export type PluginEventDelivery = "webhook" | "poll";
 
