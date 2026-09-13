@@ -28,16 +28,21 @@ describe("Google Drive OAuth scope capabilities", () => {
     expect(hasGoogleSheetsWriteScope([GOOGLE_DOCS_WRITE_SCOPE])).toBe(false);
   });
 
-  it("requires Docs editing access for the official Drive plugin", () => {
+  it("keeps the official Drive plugin connected without the Sheets grant", () => {
     expect(googleDriveMcpScopesSatisfied([GOOGLE_DRIVE_READ_SCOPE, GOOGLE_DRIVE_FILE_SCOPE])).toBe(
       false,
     );
-    expect(
-      googleDriveMcpScopesSatisfied([
-        GOOGLE_DRIVE_READ_SCOPE,
-        GOOGLE_DRIVE_FILE_SCOPE,
-        GOOGLE_DOCS_WRITE_SCOPE,
-      ]),
-    ).toBe(true);
+    // An account connected before the Sheets tools shipped keeps every other Drive tool. Only the
+    // spreadsheet tools wait on the extra grant, so no unattended task loses access it already had.
+    const beforeSheetsTools = [
+      GOOGLE_DRIVE_READ_SCOPE,
+      GOOGLE_DRIVE_FILE_SCOPE,
+      GOOGLE_DOCS_WRITE_SCOPE,
+    ];
+    expect(googleDriveMcpScopesSatisfied(beforeSheetsTools)).toBe(true);
+    expect(hasGoogleSheetsWriteScope(beforeSheetsTools)).toBe(false);
+    expect(googleDriveMcpScopesSatisfied([...beforeSheetsTools, GOOGLE_SHEETS_WRITE_SCOPE])).toBe(
+      true,
+    );
   });
 });

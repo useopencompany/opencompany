@@ -447,7 +447,7 @@ describe("Plugin settings", () => {
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/github$/u,
     );
     expect(GOOGLE_DRIVE_PLUGIN_SOURCE).toBe(
-      "https://github.com/useopencompany/plugins/tree/bae88070e498725de008e358a74bd18bc46ed27c/google-drive",
+      "https://github.com/useopencompany/plugins/tree/8b328aa34239234c215e905275c2de3bf4567c29/google-drive",
     );
     expect(LINEAR_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/linear$/u,

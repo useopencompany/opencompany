@@ -9,6 +9,7 @@ import {
   GOOGLE_DOCS_WRITE_SCOPE,
   GOOGLE_DRIVE_FILE_SCOPE,
   GOOGLE_DRIVE_READ_SCOPE,
+  GOOGLE_SHEETS_WRITE_SCOPE,
 } from "./integrations/google-drive-scopes";
 import { SLACK_MCP_RECONNECT_REASON, SLACK_MCP_USER_SCOPES } from "./integrations/slack-scopes";
 
@@ -153,7 +154,12 @@ describe("Google Drive integration state", () => {
         id: "gint_drive",
         provider: "google_drive",
         status: "connected",
-        scopes: [GOOGLE_DRIVE_READ_SCOPE, GOOGLE_DRIVE_FILE_SCOPE, GOOGLE_DOCS_WRITE_SCOPE],
+        scopes: [
+          GOOGLE_DRIVE_READ_SCOPE,
+          GOOGLE_DRIVE_FILE_SCOPE,
+          GOOGLE_DOCS_WRITE_SCOPE,
+          GOOGLE_SHEETS_WRITE_SCOPE,
+        ],
       },
     ]);
 

@@ -25,6 +25,7 @@ import {
   GOOGLE_DOCS_WRITE_SCOPE,
   GOOGLE_DRIVE_FILE_SCOPE,
   GOOGLE_DRIVE_READ_SCOPE,
+  GOOGLE_SHEETS_WRITE_SCOPE,
 } from "./google-drive-scopes";
 
 const connectedRow = {
@@ -34,7 +35,12 @@ const connectedRow = {
   accountEmail: "ada@example.com",
   accountName: "Ada",
   statusReason: null,
-  scopes: [GOOGLE_DRIVE_READ_SCOPE, GOOGLE_DRIVE_FILE_SCOPE, GOOGLE_DOCS_WRITE_SCOPE],
+  scopes: [
+    GOOGLE_DRIVE_READ_SCOPE,
+    GOOGLE_DRIVE_FILE_SCOPE,
+    GOOGLE_DOCS_WRITE_SCOPE,
+    GOOGLE_SHEETS_WRITE_SCOPE,
+  ],
   capabilityModes: { query: "ask" },
   toolModes: { create_file: "off" },
 };

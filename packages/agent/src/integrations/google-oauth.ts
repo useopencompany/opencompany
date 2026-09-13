@@ -94,6 +94,7 @@ export function googleAuthorizationConfigForReturnTo(
       GOOGLE_DRIVE_READ_SCOPE,
       GOOGLE_DRIVE_FILE_SCOPE,
       GOOGLE_DOCS_WRITE_SCOPE,
+      GOOGLE_SHEETS_WRITE_SCOPE,
       ...OPENID_SCOPES,
     ],
   };
