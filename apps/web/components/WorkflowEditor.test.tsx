@@ -1,4 +1,4 @@
-import type { LinearTeamListResult } from "@/lib/brain-source-actions";
+import type { GranolaFolderListResult, LinearTeamListResult } from "@/lib/brain-source-actions";
 import "@testing-library/jest-dom/vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import type { ComponentProps } from "react";
@@ -24,6 +24,16 @@ const brainSourceActionsMock = vi.hoisted(() => ({
       partial: false,
     }),
   ),
+  listGranolaFolders: vi.fn(
+    async (): Promise<GranolaFolderListResult> => ({
+      ok: true,
+      folders: [
+        { id: "fol_acme", name: "Acme", parentFolderId: "fol_customers" },
+        { id: "fol_customers", name: "Customers", parentFolderId: null },
+      ],
+      partial: false,
+    }),
+  ),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -44,6 +54,7 @@ function WorkflowEditor(
 
 vi.mock("@/lib/brain-source-actions", () => ({
   listLinearTeamsAction: brainSourceActionsMock.listLinearTeams,
+  listGranolaFoldersAction: brainSourceActionsMock.listGranolaFolders,
 }));
 
 vi.mock("@/components/MarkdownBrainEditor", () => ({
@@ -315,6 +326,39 @@ describe("WorkflowEditor", () => {
           },
           prompt: "Investigate the issue and propose the next step.",
         },
+      }),
+    );
+  });
+
+  it("scopes a poll-delivered event to a Granola folder, shown by its full path", async () => {
+    render(
+      <WorkflowEditor
+        workflow={workflow}
+        canEdit
+        skillCatalog={[]}
+        eventProviders={[granolaEventProvider()]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("radio", { name: "On an event" }));
+    await act(async () => Promise.resolve());
+
+    expect(brainSourceActionsMock.listGranolaFolders).toHaveBeenCalledWith("gint_granola_1");
+    const folder = screen.getByLabelText("Folder");
+    // Unset means every meeting, so an optional filter keeps the event's existing behavior.
+    expect(folder).toHaveValue("");
+    expect(screen.getByRole("option", { name: "Customers / Acme" })).toBeInTheDocument();
+
+    fireEvent.change(folder, { target: { value: "fol_acme" } });
+    await advanceAutosave();
+
+    expect(workflowActionsMock.update).toHaveBeenLastCalledWith(
+      "workflow_1",
+      expect.objectContaining({
+        trigger: expect.objectContaining({
+          provider: "granola",
+          filters: { folder: { id: "fol_acme", name: "Customers / Acme" } },
+        }),
       }),
     );
   });
@@ -880,7 +924,15 @@ function granolaEventProvider() {
         label: "Meeting notes ready",
         description: "Starts a workflow once Granola finishes the AI summary for a meeting.",
         delivery: "poll" as const,
-        filters: [],
+        filters: [
+          {
+            id: "folder",
+            label: "Folder",
+            kind: "integration_resource" as const,
+            resourceType: "folder",
+            required: false,
+          },
+        ],
       },
     ],
   };

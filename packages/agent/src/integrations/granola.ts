@@ -73,6 +73,105 @@ export async function validateGranolaApiKey(apiKey: string): Promise<GranolaApiK
   };
 }
 
+// Folders are how Granola users separate customer, investor, and internal meetings, so they back
+// the `meeting.notes_ready` event filter. `parent_folder_id` is carried through because the filter
+// matches a folder and its descendants, the same scope Granola's own `folder_id` note query uses.
+export type GranolaFolder = {
+  id: string;
+  name: string;
+  parentFolderId: string | null;
+};
+
+export type GranolaFolderListResult =
+  | { ok: true; folders: GranolaFolder[]; partial: boolean }
+  | { ok: false; reason: "unauthorized" | "unavailable"; error: string };
+
+const GRANOLA_FOLDERS_PAGE_SIZE = 30;
+// Bounds one listing at 600 folders. Beyond that the result is reported as partial rather than
+// presented as the whole tree, so a caller never silently treats a missing folder as absent.
+const GRANOLA_FOLDERS_MAX_PAGES = 20;
+const GRANOLA_FOLDERS_REQUEST_TIMEOUT_MS = 15_000;
+
+export async function listGranolaFolders(input: {
+  apiKey: string;
+  signal?: AbortSignal;
+}): Promise<GranolaFolderListResult> {
+  const folders: GranolaFolder[] = [];
+  const seenCursors = new Set<string>();
+  let cursor: string | null = null;
+  for (let page = 0; page < GRANOLA_FOLDERS_MAX_PAGES; page += 1) {
+    const params = new URLSearchParams({ page_size: String(GRANOLA_FOLDERS_PAGE_SIZE) });
+    if (cursor) params.set("cursor", cursor);
+    const timeout = AbortSignal.timeout(GRANOLA_FOLDERS_REQUEST_TIMEOUT_MS);
+    let response: Response;
+    try {
+      response = await fetch(`${GRANOLA_API_BASE_URL}/folders?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${input.apiKey}` },
+        signal: input.signal ? AbortSignal.any([input.signal, timeout]) : timeout,
+      });
+    } catch (error) {
+      // A caller-driven abort is shutdown, not a Granola failure, and must not be reported as one.
+      if (input.signal?.aborted) throw error;
+      return {
+        ok: false,
+        reason: "unavailable",
+        error: "Could not reach the Granola API. Try again in a moment.",
+      };
+    }
+    if (response.status === 401 || response.status === 403) {
+      return {
+        ok: false,
+        reason: "unauthorized",
+        error: "Granola rejected the saved API key. Save a new key to load folders.",
+      };
+    }
+    if (!response.ok) {
+      return {
+        ok: false,
+        reason: "unavailable",
+        error: `Granola API returned an unexpected error (${response.status}).`,
+      };
+    }
+    let body: { folders?: unknown; hasMore?: unknown; cursor?: unknown };
+    try {
+      body = (await response.json()) as typeof body;
+    } catch {
+      return {
+        ok: false,
+        reason: "unavailable",
+        error: "Granola returned an unreadable folder list.",
+      };
+    }
+    for (const entry of Array.isArray(body.folders) ? body.folders : []) {
+      const folder = parseGranolaFolder(entry);
+      if (folder) folders.push(folder);
+    }
+    const nextCursor = typeof body.cursor === "string" && body.cursor ? body.cursor : null;
+    // A repeated cursor would page forever; treat it as the end of a list we cannot fully trust.
+    if (!body.hasMore || !nextCursor || seenCursors.has(nextCursor)) {
+      return { ok: true, folders, partial: Boolean(body.hasMore) };
+    }
+    seenCursors.add(nextCursor);
+    cursor = nextCursor;
+  }
+  return { ok: true, folders, partial: true };
+}
+
+function parseGranolaFolder(value: unknown): GranolaFolder | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.id !== "string" || !record.id) return null;
+  const name = typeof record.name === "string" ? record.name.trim() : "";
+  return {
+    id: record.id,
+    name: name || record.id,
+    parentFolderId:
+      typeof record.parent_folder_id === "string" && record.parent_folder_id
+        ? record.parent_folder_id
+        : null,
+  };
+}
+
 export async function connectGranolaIntegration(input: {
   userWorkosId: string;
   apiKey: string;

@@ -10,14 +10,15 @@ The initial supported events are:
 | Plugin | Event | Configuration | Delivery |
 | --- | --- | --- | --- |
 | Linear | Issue created (`issue.created`) | Optional team and status category, including Triage | Signed webhook |
-| Granola | Meeting notes ready (`meeting.notes_ready`) | Personal Granola API key | REST polling, normally within five minutes |
+| Granola | Meeting notes ready (`meeting.notes_ready`) | Optional folder, including its subfolders | REST polling, normally within five minutes |
 
 Linear's tool connection and event connection are separate. The event OAuth app must have Issue
 webhooks enabled and point at the API-owned Linear webhook ingress. Its existing client, secret,
 and webhook-signing configuration remain unchanged. Granola's MCP login cannot authorize REST
 polling; save a Granola API key in the plugin's Events section. Saving a key does not enable an
 event or create an ingestion source. Existing Linear installations show an update action to get
-the new optional team and status filters.
+the new optional team and status filters, and existing Granola installations show one for the
+optional folder filter.
 
 ## Contract and ownership
 
@@ -38,6 +39,12 @@ The workflow stores its activation time in `workflows.event_activated_at`. Re-ac
 accounts, or changing routing filters starts a new activation interval; editing step instructions
 or run context keeps the interval. Events older than activation do not start runs. Granola initializes
 its cursor on connection, retains pagination progress, and limits stale-note replay to 24 hours.
+
+A Granola folder filter covers the chosen folder and its subfolders, the scope Granola's own note
+query uses. A poll pass reads the account's folder list once, and only when a route filters on a
+folder, so it can walk a note's direct memberships up to their ancestors. When that read fails the
+pass stops without advancing the cursor and retries, because matching against a partial tree would
+drop runs and then poll past the notes that should have started them.
 
 The runner checks current workflow status, membership, connection, plugin installation, and event
 opt-in again before creating a task. Disabling the workflow or its event stops queued deliveries
@@ -70,4 +77,5 @@ integration tests cover activation cutoffs, duplicate deliveries, revoked subscr
 rollback/backoff, and the retirement migration's retained pages and rejection of old producers.
 
 Provider references: [Linear webhooks](https://linear.app/developers/webhooks),
-[Granola list notes](https://docs.granola.ai/api-reference/list-notes).
+[Granola list notes](https://docs.granola.ai/api-reference/list-notes),
+[Granola list folders](https://docs.granola.ai/api-reference/list-folders).

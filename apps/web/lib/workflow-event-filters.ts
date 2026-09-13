@@ -1,4 +1,9 @@
-import { type LinearTeamListResult, listLinearTeamsAction } from "@/lib/brain-source-actions";
+import {
+  type GranolaFolderListResult,
+  type LinearTeamListResult,
+  listGranolaFoldersAction,
+  listLinearTeamsAction,
+} from "@/lib/brain-source-actions";
 
 // An `integration_resource` filter offers the resources of one connected account. Plugins declare
 // which resource type a filter picks from; resolving that type to real options is platform code,
@@ -45,7 +50,36 @@ const WORKFLOW_EVENT_FILTER_LOADERS: Record<string, WorkflowEventFilterLoader> =
     });
     return { ok: true, options, ...(result.partial ? { partial: true } : {}) };
   },
+  "granola:folder": async ({ integrationId }) => {
+    const result: GranolaFolderListResult = await listGranolaFoldersAction(integrationId);
+    if (!result.ok) return result;
+    const options = granolaFolderOptions(result.folders);
+    return { ok: true, options, ...(result.partial ? { partial: true } : {}) };
+  },
 };
+
+// Granola folders nest and sibling names repeat across branches, so each option shows its full
+// path. The selected folder always covers its subfolders, which the parent's path makes readable.
+function granolaFolderOptions(
+  folders: readonly { id: string; name: string; parentFolderId: string | null }[],
+): WorkflowEventFilterOption[] {
+  const byId = new Map(folders.map((folder) => [folder.id, folder] as const));
+  return folders
+    .map((folder) => {
+      const segments = [folder.name];
+      const seen = new Set([folder.id]);
+      let parentId = folder.parentFolderId;
+      while (parentId && !seen.has(parentId)) {
+        seen.add(parentId);
+        const parent = byId.get(parentId);
+        if (!parent) break;
+        segments.unshift(parent.name);
+        parentId = parent.parentFolderId;
+      }
+      return { id: folder.id, name: segments.join(" / ") };
+    })
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
 
 export function workflowEventFilterLoaderKey(provider: string, resourceType: string) {
   return `${provider}:${resourceType}`;
