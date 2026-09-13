@@ -78,7 +78,7 @@ const sandboxMocks = vi.hoisted(() => ({
   armSandboxActiveTimeoutById: vi.fn(),
   armSandboxIdleTimeout: vi.fn(),
   createOrConnectSandbox: vi.fn(),
-  isCommandTimeoutError: vi.fn(),
+  isUnresponsiveGuestError: vi.fn(),
   isRetryableCommandStreamError: vi.fn(),
   isRetryableSandboxAcquisitionError: vi.fn(),
   writeSandboxTextFiles: vi.fn(),
@@ -212,7 +212,7 @@ vi.mock("./sandbox", () => ({
   armSandboxActiveTimeoutById: sandboxMocks.armSandboxActiveTimeoutById,
   armSandboxIdleTimeout: sandboxMocks.armSandboxIdleTimeout,
   createOrConnectSandbox: sandboxMocks.createOrConnectSandbox,
-  isCommandTimeoutError: sandboxMocks.isCommandTimeoutError,
+  isUnresponsiveGuestError: sandboxMocks.isUnresponsiveGuestError,
   isRetryableCommandStreamError: sandboxMocks.isRetryableCommandStreamError,
   isRetryableSandboxAcquisitionError: sandboxMocks.isRetryableSandboxAcquisitionError,
   writeSandboxTextFiles: sandboxMocks.writeSandboxTextFiles,
@@ -667,7 +667,7 @@ describe("runCodexChatTurn over ACP", () => {
     sandboxMocks.armSandboxActiveTimeoutById.mockResolvedValue(true);
     sandboxMocks.armSandboxIdleTimeout.mockResolvedValue(true);
     sandboxMocks.createOrConnectSandbox.mockResolvedValue(fakeSandbox("sbx_existing"));
-    sandboxMocks.isCommandTimeoutError.mockReturnValue(false);
+    sandboxMocks.isUnresponsiveGuestError.mockReturnValue(false);
     sandboxMocks.isRetryableCommandStreamError.mockReturnValue(false);
     sandboxMocks.isRetryableSandboxAcquisitionError.mockReturnValue(false);
     sandboxMocks.writeSandboxTextFiles.mockResolvedValue(undefined);
@@ -834,9 +834,7 @@ describe("runCodexChatTurn over ACP", () => {
     const sandbox = fakeSandbox("sbx_existing");
     sandbox.files.write.mockRejectedValueOnce(timeout);
     sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
-    sandboxMocks.isCommandTimeoutError.mockImplementationOnce(
-      (error: unknown) => error === timeout,
-    );
+    sandboxMocks.isUnresponsiveGuestError.mockImplementation((error: unknown) => error === timeout);
 
     await expect(
       runCodexChatTurn({
@@ -869,7 +867,7 @@ describe("runCodexChatTurn over ACP", () => {
     await expect(
       runCodexChatTurn({
         turn: codexTurn(),
-        session: codexSession(),
+        session: codexSession({ sandboxId: null, codexThreadId: null }),
         canonicalAttemptId: "attempt_1",
         env: env(),
       }),
@@ -892,7 +890,7 @@ describe("runCodexChatTurn over ACP", () => {
 
     const failure = await runCodexChatTurn({
       turn: codexTurn(),
-      session: codexSession(),
+      session: codexSession({ sandboxId: null, codexThreadId: null }),
       canonicalAttemptId: "attempt_1",
       env: env({ internalToken: "runner_secret" }),
     }).catch((error: unknown) => error);
@@ -904,11 +902,56 @@ describe("runCodexChatTurn over ACP", () => {
     expect(diagnostic).not.toContain("runner_secret");
   });
 
+  it("retries when an existing sandbox cannot be reconnected", async () => {
+    const connectError = new Error("Sandbox control plane request failed.");
+    sandboxMocks.createOrConnectSandbox.mockRejectedValueOnce(connectError);
+
+    await expect(
+      runCodexChatTurn({
+        turn: codexTurn(),
+        session: codexSession(),
+        canonicalAttemptId: "attempt_1",
+        env: env(),
+      }),
+    ).rejects.toMatchObject({
+      name: CodexChatRetryableInfrastructureError.name,
+      cause: connectError,
+      message: "Codex could not reconnect to the existing sandbox before recovery.",
+      diagnosticMessage: "[connect_sandbox] Error: Sandbox control plane request failed.",
+    });
+
+    expect(acpMocks.runTurn).not.toHaveBeenCalled();
+    for (const result of eventMocks.createExternalEngineProjector.mock.results) {
+      expect(result.value.fail).not.toHaveBeenCalled();
+    }
+  });
+
+  it("settles terminally when a fresh session cannot acquire a sandbox", async () => {
+    const createError = new Error("Template not found");
+    sandboxMocks.createOrConnectSandbox.mockRejectedValueOnce(createError);
+
+    await expect(
+      runCodexChatTurn({
+        turn: codexTurn(),
+        session: codexSession({ sandboxId: null, codexThreadId: null }),
+        canonicalAttemptId: "attempt_1",
+        env: env(),
+      }),
+    ).resolves.toBe("settled");
+
+    const projector = eventMocks.createExternalEngineProjector.mock.results[0]?.value;
+    expect(projector.fail).toHaveBeenCalledWith(
+      "Codex sandbox could not be started: Template not found. Send your message again to retry.",
+    );
+    expect(sandboxMocks.isRetryableSandboxAcquisitionError).toHaveBeenCalledWith(createError);
+    expect(acpMocks.runTurn).not.toHaveBeenCalled();
+  });
+
   it("retries a Codex ACP setup command timeout as infrastructure failure", async () => {
     const timeout = new Error("The operation timed out.");
     timeout.name = "TimeoutError";
     cliMocks.ensureCodexAcpAdapterInstalled.mockRejectedValueOnce(timeout);
-    sandboxMocks.isCommandTimeoutError.mockReturnValueOnce(true);
+    sandboxMocks.isUnresponsiveGuestError.mockReturnValue(true);
 
     await expect(
       runCodexChatTurn({
@@ -922,6 +965,30 @@ describe("runCodexChatTurn over ACP", () => {
       cause: timeout,
       diagnosticMessage: "[ensure_codex_acp] TimeoutError: The operation timed out.",
     });
+  });
+
+  it("keeps a command timeout terminal once the engine is driving the turn", async () => {
+    const timeout = new Error("The operation timed out.");
+    timeout.name = "TimeoutError";
+    acpMocks.runTurn.mockRejectedValueOnce(timeout);
+    sandboxMocks.isUnresponsiveGuestError.mockReturnValue(true);
+
+    await expect(
+      runCodexChatTurn({
+        turn: codexTurn(),
+        session: codexSession(),
+        canonicalAttemptId: "attempt_1",
+        env: env(),
+      }),
+    ).resolves.toBe("settled");
+
+    const projector = eventMocks.createExternalEngineProjector.mock.results[0]?.value;
+    expect(projector.fail).toHaveBeenCalledWith(
+      "The operation timed out.",
+      expect.objectContaining({
+        failureDiagnostic: "[run_turn] TimeoutError: The operation timed out.",
+      }),
+    );
   });
 
   it.each([
