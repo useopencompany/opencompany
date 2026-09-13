@@ -1915,13 +1915,13 @@ export function Surface({
           if (!mountedRef.current) return;
           pendingTaskCommentRef.current = null;
           router.refresh();
-          toast.success("Comment posted. The task is running again.");
+          toast.success("Message sent. The task is running again.");
         })
         .catch((error) => {
           if (!mountedRef.current) return;
           if (!inputRef.current?.value) setInput(rawPrompt);
           composerAttachments.setAttachments(pendingAttachments);
-          toast.error(error instanceof Error ? error.message : "Could not post the comment.");
+          toast.error(error instanceof Error ? error.message : "Could not send that message.");
         })
         .finally(() => {
           if (mountedRef.current) setTaskCommentSubmitting(false);
@@ -3386,10 +3386,10 @@ export function Surface({
                   <MessageSquare size={13} strokeWidth={2} className="shrink-0" />
                   <span>
                     {isTaskConversationWorking
-                      ? "You can comment when the current run finishes."
+                      ? "You can reply when the current run finishes."
                       : taskCommentSubmitting
-                        ? "Posting your comment…"
-                        : "Posting a comment resumes this task."}
+                        ? "Sending your message…"
+                        : "Sending a message resumes this task."}
                   </span>
                 </div>
               ) : selectedAdHocTask ? (
@@ -3446,13 +3446,11 @@ export function Surface({
                       name="prompt"
                       value={input}
                       placeholder={
-                        activeTaskConversation
-                          ? "Add a comment…"
-                          : mode === "chat"
-                            ? "Reply..."
-                            : taskSpawningEnabled
-                              ? "Ask a question or describe a task..."
-                              : "Ask opencompany anything..."
+                        activeTaskConversation || mode === "chat"
+                          ? "Reply..."
+                          : taskSpawningEnabled
+                            ? "Ask a question or describe a task..."
+                            : "Ask opencompany anything..."
                       }
                       onChange={onInputChange}
                       onBlur={() => setMentionToken(null)}
@@ -3530,7 +3528,6 @@ export function Surface({
                     }
                     isStopping={!isBackgroundSubmit && isTaskConversationStopping}
                     startsTask={selectedAdHocTask || Boolean(selectedWorkflowMention)}
-                    submitsComment={Boolean(activeTaskConversation)}
                     onStop={stopGeneration}
                   />
                 </div>
@@ -3565,27 +3562,25 @@ export function Surface({
                       </button>
                     </>
                   ) : null}
-                  {activeTaskConversation ? (
-                    <span className="min-h-7 px-1 text-[11.5px] leading-7 text-ink-subtle">
-                      Comments are sent verbatim to this task.
-                    </span>
-                  ) : (
+                  <button
+                    type="button"
+                    aria-label="Start voice dictation"
+                    disabled={
+                      isForegroundTurnWorking ||
+                      backgroundTaskSubmitting ||
+                      isTaskConversationWorking ||
+                      taskCommentSubmitting ||
+                      readOnly ||
+                      voiceDictation.isActive ||
+                      newChatCommandOpen
+                    }
+                    onClick={voiceDictation.start}
+                    className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
+                  >
+                    <Mic size={15} strokeWidth={1.9} />
+                  </button>
+                  {activeTaskConversation ? null : (
                     <>
-                      <button
-                        type="button"
-                        aria-label="Start voice dictation"
-                        disabled={
-                          isForegroundTurnWorking ||
-                          backgroundTaskSubmitting ||
-                          readOnly ||
-                          voiceDictation.isActive ||
-                          newChatCommandOpen
-                        }
-                        onClick={voiceDictation.start}
-                        className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
-                      >
-                        <Mic size={15} strokeWidth={1.9} />
-                      </button>
                       {selectedWorkflow ? (
                         <WorkflowComposerControls
                           selection={workflowComposer}
@@ -6886,14 +6881,12 @@ function SubmitButton({
   isGenerating,
   isStopping = false,
   startsTask = false,
-  submitsComment = false,
   onStop,
 }: {
   disabled: boolean;
   isGenerating: boolean;
   isStopping?: boolean;
   startsTask?: boolean;
-  submitsComment?: boolean;
   onStop: () => void;
 }) {
   if (isStopping) {
@@ -6927,8 +6920,8 @@ function SubmitButton({
   return (
     <button
       type="submit"
-      aria-label={startsTask ? "Start task" : submitsComment ? "Post comment" : "Send message"}
-      title={startsTask ? "Start task" : submitsComment ? "Post comment" : undefined}
+      aria-label={startsTask ? "Start task" : "Send message"}
+      title={startsTask ? "Start task" : undefined}
       disabled={disabled}
       className="mb-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-ink text-canvas transition-opacity duration-150 hover:opacity-90 focus:outline-none disabled:opacity-30"
     >
