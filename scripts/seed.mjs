@@ -61,4 +61,13 @@ await sql`
   on conflict (workspace_id, user_workos_id) do nothing
 `;
 
+// Every workspace has exactly one default wiki. createWorkspace() creates it atomically with
+// the workspace, but this script inserts the workspace directly, so it has to hold the same
+// invariant -- without it every Wiki entry point resolves no wiki and 404s.
+await sql`
+  insert into goat.wikis (id, workspace_id, name, slug, access, is_default, created_by_workos_id, updated_at)
+  values (${`goat_wiki_${randomUUID()}`}, ${workspace.id}, 'Company', 'company', 'workspace', true, ${user.id}, ${now})
+  on conflict do nothing
+`;
+
 console.log(`Seeded ${email} (${user.id}) into workspace ${workspace.id} ("${WORKSPACE_NAME}").`);
