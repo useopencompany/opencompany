@@ -124,6 +124,7 @@ vi.mock("./coding-agent-shared", async (importOriginal) => ({
   createKnownSecretRedactor: (await importOriginal<typeof import("./coding-agent-shared")>())
     .createKnownSecretRedactor,
   gitAuthHeader: (token: string) => `Authorization: Basic ${token}`,
+  logCodingSandboxAcquisition: () => () => undefined,
   githubSandboxTokenMinimumValidityMs: (turnTimeoutMs: number) => turnTimeoutMs + 600_000,
   loadGitHubAuthForUser: githubAuthMocks.loadGitHubAuthForUser,
   shouldAppendGitHubAuthNotice: (
@@ -680,6 +681,7 @@ describe("runCodexChatTurn over ACP", () => {
     expect(sandboxMocks.createOrConnectSandbox).toHaveBeenCalledWith(
       expect.objectContaining({
         billingOwner: { namespace: "test", workspaceId: "workspace_1", userWorkosId: "user_1" },
+        onLatency: expect.any(Function),
       }),
     );
   });
