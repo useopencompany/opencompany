@@ -338,8 +338,7 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
     selectedPort !== null && !ports.some((port) => port.port === selectedPort)
       ? [{ port: selectedPort, isHttp: false, score: 0 }, ...ports]
       : ports;
-  const previewSrc =
-    previewUrl === null ? null : previewPath === "/" ? previewUrl : `${previewUrl}${previewPath}`;
+  const previewSrc = previewUrl === null ? null : composePreviewSrc(previewUrl, previewPath);
 
   const addressValue = addressDraft ?? canonicalAddress;
 
@@ -803,8 +802,30 @@ function parsePreviewAddress(
   if (!match) return null;
   const [, host, portText, rest] = match;
   if (host && !LOCAL_PREVIEW_HOST.test(host)) return null;
-  const path = !rest ? "/" : rest.startsWith("/") ? rest : `/${rest}`;
+  const path = normalizePreviewPath(rest);
+  if (path === null) return null;
   return { port: portText ? Number(portText) : currentPort, path };
+}
+
+// A typed path must stay on the preview capability origin. Round-tripping through the
+// URL parser rejects anything it would resolve onto another host (protocol-relative
+// "//host", backslash variants, …) and returns a normalized, fully-encoded path.
+function normalizePreviewPath(rest: string | undefined): string | null {
+  const candidate = !rest ? "/" : rest.startsWith("/") ? rest : `/${rest}`;
+  try {
+    const resolved = new URL(candidate, "https://sandbox.invalid");
+    if (resolved.origin !== "https://sandbox.invalid") return null;
+    return `${resolved.pathname}${resolved.search}${resolved.hash}`;
+  } catch {
+    return null;
+  }
+}
+
+// Defense in depth at the iframe/window.open sink: the composed URL must keep the
+// capability origin, or we fall back to its root.
+function composePreviewSrc(origin: string, path: string): string {
+  const composed = new URL(path, origin);
+  return composed.origin === new URL(origin).origin ? composed.toString() : origin;
 }
 
 type RuntimeMessage =

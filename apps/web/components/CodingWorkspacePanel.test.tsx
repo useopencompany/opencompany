@@ -330,6 +330,11 @@ describe("CodingWorkspacePanel", () => {
     fireEvent.keyDown(address, { key: "Enter" });
     expect(socket.send).not.toHaveBeenCalled();
     expect(screen.getByRole("alert")).toHaveTextContent("Only localhost can be previewed");
+
+    // A protocol-relative path would resolve onto another host — reject it too.
+    fireEvent.change(address, { target: { value: "//evil.com/x" } });
+    fireEvent.keyDown(address, { key: "Enter" });
+    expect(socket.send).not.toHaveBeenCalled();
     // The rejected edit reverts on blur and the preview stays put.
     fireEvent.blur(address);
     expect(address).toHaveValue("localhost:5173/pricing");
