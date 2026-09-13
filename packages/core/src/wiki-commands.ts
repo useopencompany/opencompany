@@ -563,9 +563,11 @@ export class WikiCommandApplicationService {
   }
 }
 
+// The wiki id is deliberately absent: agents address a wiki by slug, and repeating a UUID on every
+// tool call bought nothing but tokens.
 function toolContext(wiki: WikiCommandTarget): WikiToolContext {
   return {
-    wiki: { id: wiki.wikiId, name: wiki.name, slug: wiki.slug },
+    wiki: { name: wiki.name, slug: wiki.slug },
     instructions: wiki.instructions,
   };
 }
@@ -578,13 +580,11 @@ function wikiNotFound(
   const reason = ambiguous
     ? `The wiki reference "${wanted}" is ambiguous.`
     : `No reachable wiki matches "${wanted}".`;
-  const listing = reachable
-    .map((wiki) => `- ${wiki.wikiId} (${wiki.slug}) — ${wiki.name}`)
-    .join("\n");
+  const listing = reachable.map((wiki) => `- ${wiki.slug} — ${wiki.name}`).join("\n");
   return new CoreError(
     "not_found",
     listing
-      ? `${reason} Pass "wiki" with one of these ids or slugs:\n${listing}`
+      ? `${reason} Pass "wiki" with one of these slugs:\n${listing}`
       : `${reason} You do not have access to any wikis in this workspace.`,
   );
 }

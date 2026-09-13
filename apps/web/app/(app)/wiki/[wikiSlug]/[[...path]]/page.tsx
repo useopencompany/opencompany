@@ -1,7 +1,8 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { WikiView } from "@/components/WikiView";
 import { currentUser } from "@/lib/auth";
 import { listHeadlessWikiPages, listHeadlessWikis } from "@/lib/headless-knowledge-server";
+import { wikiHref } from "@/lib/wiki-routes";
 
 type PageProps = {
   params: Promise<{ wikiSlug: string; path?: string[] }>;
@@ -21,7 +22,7 @@ export default async function WikiPage({ params }: PageProps) {
   // wiki's pages under someone else's URL.
   const wikis = await listHeadlessWikis();
   const wiki = wikis.find((entry) => entry.slug === decodeURIComponent(wikiSlug));
-  if (!wiki) notFound();
+  if (!wiki) return legacyPageRedirect(wikis, wikiSlug, path ?? []);
   const pages = await listHeadlessWikiPages(wiki.id);
   if (pagePath && !pages.some((page) => page.path === pagePath)) notFound();
 
@@ -43,4 +44,29 @@ export default async function WikiPage({ params }: PageProps) {
       initialPath={pagePath || null}
     />
   );
+}
+
+/**
+ * Before per-wiki routes there was one wiki per workspace and `/wiki/<page-path>` addressed a page
+ * in it. Those URLs are in bookmarks, Slack messages and chat transcripts, and after this change
+ * their first segment reads as a wiki slug instead. Resolve them against the default wiki once and
+ * send the reader to the current address rather than showing them a 404 for a page that still
+ * exists.
+ *
+ * Only reached when no wiki matches the first segment, so it cannot shadow a real wiki.
+ */
+async function legacyPageRedirect(
+  wikis: Awaited<ReturnType<typeof listHeadlessWikis>>,
+  wikiSlug: string,
+  rest: string[],
+): Promise<never> {
+  const legacyPath = [wikiSlug, ...rest].map((segment) => decodeURIComponent(segment)).join("/");
+  const fallback = wikis.find((entry) => entry.isDefault);
+  if (fallback) {
+    const pages = await listHeadlessWikiPages(fallback.id);
+    if (pages.some((page) => page.path === legacyPath)) {
+      redirect(wikiHref(fallback.slug, legacyPath));
+    }
+  }
+  notFound();
 }

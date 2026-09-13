@@ -10,7 +10,12 @@ const notFoundMock = vi.hoisted(() =>
   }),
 );
 
-vi.mock("next/navigation", () => ({ notFound: notFoundMock }));
+const redirectMock = vi.hoisted(() =>
+  vi.fn((path: string) => {
+    throw new Error(`redirect:${path}`);
+  }),
+);
+vi.mock("next/navigation", () => ({ notFound: notFoundMock, redirect: redirectMock }));
 vi.mock("@/lib/headless-knowledge-server", () => ({
   listHeadlessWikis: listHeadlessWikisMock,
   listHeadlessWikiPages: listHeadlessWikiPagesMock,
@@ -98,5 +103,38 @@ describe("/wiki/[wikiSlug]/[[...path]]", () => {
     });
 
     expect(rendered.props).toMatchObject({ wikiSlug: "launch pad", initialPath: "q3 plan" });
+  });
+
+  describe("links made before per-wiki routes", () => {
+    // `/wiki/<page-path>` used to address a page in the workspace's single wiki. Those URLs are in
+    // bookmarks, Slack messages and chat transcripts; after this change their first segment reads
+    // as a wiki slug, so without a fallback every one of them 404s on a page that still exists.
+    it("sends a legacy page URL to its current address", async () => {
+      listHeadlessWikisMock.mockResolvedValue([wiki("company", true)]);
+      listHeadlessWikiPagesMock.mockResolvedValue([page("engineering/releases")]);
+
+      await expect(
+        WikiPage({ params: Promise.resolve({ wikiSlug: "engineering", path: ["releases"] }) }),
+      ).rejects.toThrow("redirect:/wiki/company/engineering/releases");
+    });
+
+    it("still 404s a first segment that is neither a wiki nor a page", async () => {
+      listHeadlessWikisMock.mockResolvedValue([wiki("company", true)]);
+      listHeadlessWikiPagesMock.mockResolvedValue([page("engineering/releases")]);
+
+      await expect(
+        WikiPage({ params: Promise.resolve({ wikiSlug: "nope", path: [] }) }),
+      ).rejects.toThrow("notFound");
+      expect(redirectMock).not.toHaveBeenCalled();
+    });
+
+    it("prefers a real wiki over a legacy page path with the same first segment", async () => {
+      listHeadlessWikisMock.mockResolvedValue([wiki("company", true), wiki("engineering", false)]);
+      listHeadlessWikiPagesMock.mockResolvedValue([]);
+      currentUserMock.mockResolvedValue({ user: { workosUserId: "u" }, workspace: { id: "w" } });
+
+      await WikiPage({ params: Promise.resolve({ wikiSlug: "engineering", path: [] }) });
+      expect(redirectMock).not.toHaveBeenCalled();
+    });
   });
 });

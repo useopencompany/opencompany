@@ -12,7 +12,8 @@
 // caller cannot reach a wiki it was never authorized for.
 
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { newResourceId } from "@opencompany/core/resource-ids";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "./client";
 import { type Wiki, type WikiAccessLevel, wikiMembers, wikis } from "./product-schema";
 
@@ -56,7 +57,10 @@ function wikiSlugFromName(name: string): string {
 }
 
 export function newWikiId() {
-  return `goat_wiki_${randomUUID()}`;
+  // `wiki_<uuid>`, not the legacy `goat_wiki_` prefix: new resource ids use the shared factory,
+  // and this id is the one agents used to read back on every tool call. Already-persisted ids stay
+  // opaque and are not rewritten.
+  return newResourceId("wiki");
 }
 
 /**
@@ -214,10 +218,23 @@ export async function updateWikiSettings(
   const db = options.db ?? getDb();
   const name = input.name?.trim().slice(0, WIKI_NAME_MAX_LENGTH);
   if (input.name !== undefined && !name) throw new WikiAccessError("A wiki name is required.");
+  const [current]: Wiki[] = await db
+    .select()
+    .from(wikis)
+    .where(eq(wikis.id, input.wikiId))
+    .limit(1);
+  if (!current) throw new WikiAccessError("Wiki not found.");
+  // The slug follows the name: renaming Marketing to Growth moves it to /wiki/growth. Links to the
+  // old address stop resolving, which is the cost of the address telling the truth.
+  const slug =
+    name && name !== current.name
+      ? await allocateWikiSlug(db, current.workspaceId, name, { excludeWikiId: current.id })
+      : undefined;
   const rows: Wiki[] = await db
     .update(wikis)
     .set({
       ...(name ? { name } : {}),
+      ...(slug ? { slug } : {}),
       ...(input.instructions !== undefined
         ? { instructions: boundedInstructions(input.instructions) }
         : {}),
@@ -243,6 +260,25 @@ export async function updateWikiAccess(
     // The acting user keeps access so the wiki never becomes unreachable.
     await addWikiMember({ wikiId: input.wikiId, userWorkosId: input.actingUserWorkosId }, { db });
   }
+}
+
+/**
+ * How many members each of these wikis has. A restricted wiki always has at least its creator, so
+ * one member means "only me" and more than one means it has been shared -- the distinction the UI
+ * draws but the `access` column cannot express on its own.
+ */
+export async function countWikiMembers(
+  wikiIds: string[],
+  options: { db?: DbClient } = {},
+): Promise<Map<string, number>> {
+  if (wikiIds.length === 0) return new Map();
+  const db = options.db ?? getDb();
+  const rows: Array<{ wikiId: string; total: number }> = await db
+    .select({ wikiId: wikiMembers.wikiId, total: sql<number>`count(*)::int` })
+    .from(wikiMembers)
+    .where(inArray(wikiMembers.wikiId, wikiIds))
+    .groupBy(wikiMembers.wikiId);
+  return new Map(rows.map((row) => [row.wikiId, Number(row.total)]));
 }
 
 export async function listWikiMemberIds(
@@ -300,13 +336,24 @@ export async function replaceWikiMembers(
   `);
 }
 
-async function allocateWikiSlug(db: DbClient, workspaceId: string, name: string): Promise<string> {
+async function allocateWikiSlug(
+  db: DbClient,
+  workspaceId: string,
+  name: string,
+  options: { excludeWikiId?: string } = {},
+): Promise<string> {
   const base = wikiSlugFromName(name) || DEFAULT_WIKI_SLUG;
   const existing = await db
-    .select({ slug: wikis.slug })
+    .select({ id: wikis.id, slug: wikis.slug })
     .from(wikis)
     .where(eq(wikis.workspaceId, workspaceId));
-  const used = new Set(existing.map((row: { slug: string }) => row.slug));
+  // The wiki being renamed does not collide with itself, so renaming "Growth" to "Growth" keeps
+  // `growth` rather than drifting to `growth-2`.
+  const used = new Set(
+    existing
+      .filter((row: { id: string }) => row.id !== options.excludeWikiId)
+      .map((row: { slug: string }) => row.slug),
+  );
   let slug = base;
   // A reserved slug is suffixed exactly like a taken one, so naming a wiki
   // "Sources" still works and lands on `sources-2`.

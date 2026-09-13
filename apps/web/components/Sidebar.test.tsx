@@ -239,7 +239,11 @@ function wikiDto(
   name: string,
   slug: string,
   isDefault = false,
-  overrides: { canManage?: boolean; access?: "workspace" | "restricted" } = {},
+  overrides: {
+    canManage?: boolean;
+    access?: "workspace" | "restricted";
+    visibility?: "workspace" | "private" | "shared";
+  } = {},
 ) {
   return {
     id,
@@ -247,6 +251,8 @@ function wikiDto(
     slug,
     instructions: "",
     access: overrides.access ?? ("workspace" as const),
+    visibility:
+      overrides.visibility ?? (overrides.access === "restricted" ? "private" : "workspace"),
     isDefault,
     canManage: overrides.canManage ?? true,
     createdAt: "2026-07-14T09:00:00.000Z",
@@ -426,6 +432,28 @@ describe("Sidebar", () => {
 
       expect(await screen.findByRole("link", { name: "Handbook" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Wiki" })).toHaveAttribute("aria-expanded", "true");
+    });
+
+    it("badges a private and a shared wiki, and leaves a workspace one unmarked", async () => {
+      wikisApiMock.listWikis.mockResolvedValue([
+        wikiDto("wiki_1", "Company", "company", true),
+        wikiDto("wiki_2", "C-level", "c-level", false, {
+          access: "restricted",
+          visibility: "private",
+        }),
+        wikiDto("wiki_3", "Board", "board", false, {
+          access: "restricted",
+          visibility: "shared",
+        }),
+      ]);
+
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+      const section = await screen.findByRole("region", { name: "Wiki" });
+
+      expect(await within(section).findByText("Private")).toBeInTheDocument();
+      expect(within(section).getByText("Shared with specific people")).toBeInTheDocument();
+      // Workspace access is the norm; badging every row would stop the badge meaning anything.
+      expect(within(section).getAllByText("Private")).toHaveLength(1);
     });
 
     it("offers settings only on a wiki this reader may change", async () => {

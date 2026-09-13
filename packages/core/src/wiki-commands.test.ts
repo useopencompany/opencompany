@@ -75,7 +75,7 @@ const actor = (permissions: readonly string[]): Actor => ({
 const readActor = actor([WIKI_READ_PERMISSION]);
 const writeActor = actor([WIKI_READ_PERMISSION, WIKI_WRITE_PERMISSION]);
 const defaultWikiContext = {
-  wiki: { id: DEFAULT_WIKI.wikiId, name: "Wiki", slug: "wiki" },
+  wiki: { name: "Wiki", slug: "wiki" },
   instructions: "",
 };
 
@@ -297,7 +297,7 @@ describe("WikiCommandApplicationService", () => {
       run(service, readActor, { command: "tree" }, "agent-wiki:turn_1:call_1", "goat_wiki_other"),
     ).rejects.toMatchObject({
       code: "not_found",
-      message: expect.stringContaining("goat_wiki_1 (wiki) — Wiki"),
+      message: expect.stringContaining("- wiki — Wiki"),
     });
     expect(commandCalls(calls)).toHaveLength(0);
   });
@@ -310,7 +310,7 @@ describe("WikiCommandApplicationService", () => {
       run(service, readActor, { command: "tree" }, undefined, "   "),
     ).rejects.toMatchObject({
       code: "not_found",
-      message: expect.stringContaining('Pass "wiki" with one of these ids or slugs'),
+      message: expect.stringContaining('Pass "wiki" with one of these slugs'),
     });
     expect(commandCalls(calls)).toHaveLength(0);
   });
@@ -328,7 +328,7 @@ describe("WikiCommandApplicationService", () => {
       run(service, readActor, { command: "tree" }, undefined, "wiki_reference"),
     ).rejects.toMatchObject({
       code: "not_found",
-      message: expect.stringMatching(/ambiguous[\s\S]*wiki_reference \(one\)[\s\S]*wiki_two/u),
+      message: expect.stringMatching(/ambiguous[\s\S]*- one — One[\s\S]*- wiki_reference — Two/u),
     });
   });
 
@@ -354,7 +354,7 @@ describe("WikiCommandApplicationService", () => {
     );
     expect(output).toMatchObject({
       wikiContext: {
-        wiki: { id: resolvedWiki.wikiId, name: "C-level", slug: "c-level" },
+        wiki: { name: "C-level", slug: "c-level" },
         instructions: "One page per board topic.",
       },
     });

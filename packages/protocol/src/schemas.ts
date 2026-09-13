@@ -2011,6 +2011,9 @@ export const WikiSchema = z
     slug: z.string().min(1).max(64),
     instructions: z.string().max(20_000),
     access: WikiAccessSchema,
+    // The three states a reader sees, resolved server-side: "restricted" alone cannot tell
+    // "only me" from "me and the people I invited", and the client holds no member list.
+    visibility: z.enum(["workspace", "private", "shared"]),
     isDefault: z.boolean(),
     // Whether this actor may rename the wiki, edit its instructions, or change
     // its access. Resolved server-side from the actor's role and the wiki's

@@ -2,7 +2,7 @@
 
 import type { WikiDto } from "@opencompany/protocol";
 import { toast } from "@opencompany/ui/components/sonner";
-import { BookOpen, Plus, Settings2 } from "lucide-react";
+import { BookOpen, Lock, Plus, Settings2, Users } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { IntentPrefetchLink } from "@/components/IntentPrefetchLink";
 import {
@@ -238,6 +238,24 @@ export function SidebarWikis({
   );
 }
 
+/**
+ * Marks a wiki the whole workspace cannot see. Workspace wikis carry no badge: that is the norm,
+ * and a badge on every row would stop meaning anything.
+ */
+function WikiVisibilityBadge({ visibility }: { visibility: WikiDto["visibility"] }) {
+  if (visibility === "workspace") return null;
+  const { Icon, label } =
+    visibility === "private"
+      ? { Icon: Lock, label: "Private" }
+      : { Icon: Users, label: "Shared with specific people" };
+  return (
+    <span title={label} className="shrink-0 text-ink/40 group-hover/wiki:text-ink/60">
+      <Icon size={11} strokeWidth={2} aria-hidden="true" />
+      <span className="sr-only">{label}</span>
+    </span>
+  );
+}
+
 function WikiRow({
   wiki,
   active,
@@ -268,6 +286,9 @@ function WikiRow({
         />
         <span className="truncate tracking-[-0.005em]">{wiki.name}</span>
       </IntentPrefetchLink>
+      {/* Beside the link rather than inside it: nested in the anchor, the badge's label would be
+          read out as part of the link's own name. */}
+      <WikiVisibilityBadge visibility={wiki.visibility} />
       {/* Only an admin or the wiki's creator may change it, and the server decides which -- an
           entry point anyone else could reach would only ever 403. */}
       {wiki.canManage ? (

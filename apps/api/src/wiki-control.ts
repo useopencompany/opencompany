@@ -10,6 +10,7 @@
 import type { Actor } from "@opencompany/core";
 import type { WikiAccessLevel } from "@opencompany/db/product-schema";
 import {
+  countWikiMembers,
   createWiki,
   listWikiMemberIds,
   listWikisForUser,
@@ -40,6 +41,7 @@ export type WikiControlView = {
   slug: string;
   instructions: string;
   access: WikiAccessLevel;
+  visibility: "workspace" | "private" | "shared";
   isDefault: boolean;
   canManage: boolean;
   createdAt: Date;
@@ -118,7 +120,11 @@ export function createWikiControlService(input: { db: DbLike }): WikiControlServ
         { userWorkosId: actor.userId, workspaceId: actor.workspaceId },
         { db },
       );
-      return wikis.map((wiki) => wikiView(wiki, actor));
+      const counts = await countWikiMembers(
+        wikis.filter((wiki) => wiki.access === "restricted").map((wiki) => wiki.id),
+        { db },
+      );
+      return wikis.map((wiki) => wikiView(wiki, actor, counts.get(wiki.id) ?? 0));
     },
 
     async createWiki(actor, command) {
@@ -133,7 +139,8 @@ export function createWikiControlService(input: { db: DbLike }): WikiControlServ
           },
           { db },
         );
-        return wikiView(wiki, actor);
+        // A wiki is created with exactly its creator, so a restricted one starts private.
+        return wikiView(wiki, actor, wiki.access === "restricted" ? 1 : 0);
       } catch (error) {
         throw wikiControlError(error);
       }
@@ -150,7 +157,10 @@ export function createWikiControlService(input: { db: DbLike }): WikiControlServ
           },
           { db },
         );
-        return wikiView(wiki, actor);
+        const counts = await countWikiMembers(wiki.access === "restricted" ? [wiki.id] : [], {
+          db,
+        });
+        return wikiView(wiki, actor, counts.get(wiki.id) ?? 0);
       } catch (error) {
         throw wikiControlError(error);
       }
@@ -203,6 +213,15 @@ export function createWikiControlService(input: { db: DbLike }): WikiControlServ
   };
 }
 
+function wikiVisibility(
+  access: WikiAccessLevel,
+  memberCount: number,
+): "workspace" | "private" | "shared" {
+  if (access === "workspace") return "workspace";
+  // A restricted wiki always holds at least its creator, so one member is "only me".
+  return memberCount > 1 ? "shared" : "private";
+}
+
 function wikiView(
   wiki: {
     id: string;
@@ -216,6 +235,7 @@ function wikiView(
     updatedAt: Date;
   },
   actor: Actor,
+  memberCount: number,
 ): WikiControlView {
   return {
     id: wiki.id,
@@ -223,6 +243,7 @@ function wikiView(
     slug: wiki.slug,
     instructions: wiki.instructions,
     access: wiki.access,
+    visibility: wikiVisibility(wiki.access, memberCount),
     isDefault: wiki.isDefault,
     // The same rule `requireWikiOwner` enforces, resolved once here so the UI
     // and the API cannot disagree about who may change a wiki.

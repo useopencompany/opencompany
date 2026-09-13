@@ -5112,7 +5112,8 @@ describe("POST /internal/wiki/commands", () => {
       data: {
         ok: true,
         wikiContext: {
-          wiki: { id: "wiki_leadership", slug: "leadership" },
+          // Slug and name only: the id is no longer echoed back to the agent.
+          wiki: { name: "Leadership", slug: "leadership" },
           instructions: "Record a decision owner.",
         },
       },
@@ -5277,6 +5278,7 @@ function fakeWikiControl(): Parameters<typeof createApiApp>[0]["wikiControl"] {
         slug: "wiki",
         instructions: "",
         access: "workspace",
+        visibility: "workspace",
         isDefault: true,
         canManage: true,
         createdAt,
