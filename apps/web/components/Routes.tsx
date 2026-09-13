@@ -420,8 +420,8 @@ export function FathomSettingsRoute() {
   return (
     <SettingsContent
       title="Fathom ingestion"
-      description="Legacy API-key ingestion for opencompany Wiki"
-      backLink={{ href: "/wiki/sources", label: "Wiki sources" }}
+      description="Legacy API-key ingestion for Brain"
+      backLink={{ href: "/settings/plugins/fathom", label: "Fathom plugin" }}
     >
       <FathomIntegrationSetup
         initialState={integrations.fathom}

@@ -4,7 +4,7 @@ import { PGlite } from "@electric-sql/pglite";
 import type { Actor } from "@opencompany/core";
 import { drizzle } from "drizzle-orm/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { startBrainImportRunIdempotent, startWikiImportRunIdempotent } from "./brain-import";
+import { startBrainImportRunIdempotent } from "./brain-import";
 import { createTestPGlite } from "./test-pglite";
 
 const migrationPaths = [
@@ -165,22 +165,6 @@ describe("startBrainImportRunIdempotent", () => {
         db,
       }),
     ).rejects.toThrow("Enter a public company website.");
-  });
-
-  it("creates a workspace-scoped Wiki import without a brain", async () => {
-    const created = await startWikiImportRunIdempotent({
-      actor: actor(),
-      idempotencyKey: "wiki-import-1",
-      companyUrl: "acme.com",
-      sourceSelection: { public_web: { enabled: true } },
-      db,
-    });
-
-    expect(created.run).toMatchObject({
-      brainRef: null,
-      workspaceId: "workspace_1",
-      status: "discovering",
-    });
   });
 });
 
