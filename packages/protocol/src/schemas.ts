@@ -2210,8 +2210,7 @@ export const InternalWikiCommandRequestSchema = z
   .object({
     userWorkosId: z.string().min(1).max(256),
     workspaceId: z.string().min(1).max(256),
-    // Which wiki to operate on. Absent means the workspace's default wiki; the
-    // agent tool contract has no wiki selector yet.
+    // Which wiki to operate on. Absent means the workspace's default wiki.
     wikiId: z.string().min(1).max(256).optional(),
     command: WikiCommandSchema,
   })
@@ -2223,8 +2222,32 @@ export type WikiCommandRequest = z.infer<typeof InternalWikiCommandRequestSchema
 export const InternalWikiCommandResponseSchema = z
   .object({
     data: z.union([
-      z.object({ ok: z.literal(true), result: z.unknown() }).strict(),
-      z.object({ ok: z.literal(false), error: z.string() }).strict(),
+      z
+        .object({
+          ok: z.literal(true),
+          result: z.unknown(),
+          wikiContext: z
+            .object({
+              wiki: z.object({ id: z.string(), name: z.string(), slug: z.string() }).strict(),
+              instructions: z.string(),
+            })
+            .strict()
+            .optional(),
+        })
+        .strict(),
+      z
+        .object({
+          ok: z.literal(false),
+          error: z.string(),
+          wikiContext: z
+            .object({
+              wiki: z.object({ id: z.string(), name: z.string(), slug: z.string() }).strict(),
+              instructions: z.string(),
+            })
+            .strict()
+            .optional(),
+        })
+        .strict(),
     ]),
     meta: ProtocolMetadataSchema,
   })

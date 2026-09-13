@@ -615,13 +615,15 @@ export async function runSlackWikiCommand(
   if (!WIKI_READ_COMMANDS.includes(input.toolInput.command)) {
     return { ok: false, error: "I can't write to the Wiki from Slack yet." };
   }
+  const { wiki: wikiId, ...command } = input.toolInput;
   try {
     return await execute({
       origin: input.origin,
       token: input.token,
       workspaceId: input.workspaceId,
       actorId: input.actorId,
-      toolInput: input.toolInput,
+      toolInput: command,
+      ...(wikiId ? { wikiId } : {}),
       idempotencyKey: input.idempotencyKey,
       ...(input.signal ? { signal: input.signal } : {}),
     });

@@ -31,11 +31,13 @@ import {
 } from "@opencompany/telemetry";
 import { flushLatitude, latitudeTelemetry } from "@opencompany/telemetry/latitude";
 import {
+  renderWikiToolContext,
   WIKI_READ_TOOL_DESCRIPTION,
   WIKI_READ_TOOL_INPUT_JSON_SCHEMA,
   WIKI_TOOL_DESCRIPTION,
   WIKI_TOOL_INPUT_JSON_SCHEMA,
   WIKI_TOOL_NAME,
+  type WikiToolContext,
   type WikiToolInput,
   type WikiToolOutput,
 } from "@opencompany/wiki/tool";
@@ -556,6 +558,7 @@ export async function runProductChatAgent(input: {
         stepNumber,
         maxSteps,
         system,
+        wikiContext: toolContext.getSelectedWikiContext(),
         actionCallsExhausted: toolContext.areActionCallsExhausted(),
         toolNames: Object.keys(tools),
       }),
@@ -680,6 +683,7 @@ export function createProductChatToolContext(input: {
   let browserCallCount = 0;
   let internalActionInvocationSequence = 0;
   let internalWikiInvocationSequence = 0;
+  let selectedWikiContext: WikiToolContext | null = null;
   let internalArtifactInvocationSequence = 0;
   let internalWorkspaceSkillInvocationSequence = 0;
   const actionTurnGovernance = createInMemoryActionTurnGovernance({
@@ -879,6 +883,7 @@ export function createProductChatToolContext(input: {
       ),
       execute: async (args, executionContext) => {
         visibleToolActivity = true;
+        selectedWikiContext = null;
         const toolCallId =
           executionContext &&
           typeof executionContext === "object" &&
@@ -886,7 +891,11 @@ export function createProductChatToolContext(input: {
           typeof executionContext.toolCallId === "string"
             ? executionContext.toolCallId
             : `ai-sdk:${++internalWikiInvocationSequence}`;
-        return runWiki(args, { toolCallId });
+        const output = await runWiki(args, { toolCallId });
+        if (output.wikiContext) selectedWikiContext = output.wikiContext;
+        if (!("wikiContext" in output)) return output;
+        const { wikiContext: _wikiContext, ...modelOutput } = output;
+        return modelOutput;
       },
     });
   }
@@ -1789,6 +1798,7 @@ export function createProductChatToolContext(input: {
 
   return {
     areActionCallsExhausted: () => actionCallsExhausted,
+    getSelectedWikiContext: () => selectedWikiContext,
     getStartedTask: () => startedTask,
     hasVisibleToolActivity: () => visibleToolActivity,
     subagentBudget,
@@ -1803,6 +1813,7 @@ export const PRODUCT_CHAT_FINAL_RESPONSE_INSTRUCTION =
 export function prepareProductChatStep(input: {
   system?: string;
   stepNumber: number;
+  wikiContext?: WikiToolContext | null;
   actionCallsExhausted?: boolean;
   toolNames?: string[];
   finalizeAfterApproval?: boolean;
@@ -1810,6 +1821,12 @@ export function prepareProductChatStep(input: {
   maxSteps?: number;
 }) {
   const maxSteps = input.maxSteps ?? CHAT_MAX_STEPS;
+  const contextualSystem = [
+    input.system,
+    input.wikiContext ? renderWikiToolContext(input.wikiContext) : undefined,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
   // The AI SDK executes approved tool calls before the first continuation
   // model step. Keep that step answer-only so a completed write cannot spawn
   // another approval request in the same user turn.
@@ -1818,20 +1835,23 @@ export function prepareProductChatStep(input: {
     // when schemas disappear after tool use, even with toolChoice "none".
     return {
       toolChoice: "none" as const,
-      system: [input.system, PRODUCT_CHAT_FINAL_RESPONSE_INSTRUCTION].filter(Boolean).join("\n\n"),
+      system: [contextualSystem, PRODUCT_CHAT_FINAL_RESPONSE_INSTRUCTION]
+        .filter(Boolean)
+        .join("\n\n"),
     };
   }
   if (input.actionCallsExhausted) {
     return {
       activeTools: (input.toolNames ?? []).filter((name) => name !== USE_ACTION_TOOL_NAME),
       system: [
-        input.system,
+        contextualSystem,
         "The action-call budget for this turn is exhausted. use_action is unavailable. Continue only with other available tools and information already gathered; clearly state any incomplete coverage.",
       ]
         .filter(Boolean)
         .join("\n\n"),
     };
   }
+  if (input.wikiContext) return { system: contextualSystem };
   return {};
 }
 
