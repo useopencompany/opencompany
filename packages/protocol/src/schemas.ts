@@ -1091,6 +1091,7 @@ export const BrainSourceOptionsBodySchema = z.discriminatedUnion("provider", [
       includeTriageStateIds: z.boolean().optional(),
     })
     .strict(),
+  z.object({ provider: z.literal("granola") }).strict(),
   z
     .object({
       provider: z.literal("google_drive"),
@@ -1100,6 +1101,12 @@ export const BrainSourceOptionsBodySchema = z.discriminatedUnion("provider", [
     })
     .strict(),
 ]);
+
+// Granola folders scope the `meeting.notes_ready` event filter. The parent id travels with each
+// folder so a picker can show where a folder sits without a second read.
+const GranolaFolderRefSchema = NamedSourceRefSchema.extend({
+  parentFolderId: z.string().min(1).max(512).nullable(),
+}).strict();
 
 const GoogleDriveOptionSchema = z
   .object({
@@ -1118,6 +1125,13 @@ export const BrainSourceOptionsSchema = z
       .object({
         provider: z.literal("linear"),
         teams: z.array(LinearTeamRefSchema),
+        partial: z.boolean(),
+      })
+      .strict(),
+    z
+      .object({
+        provider: z.literal("granola"),
+        folders: z.array(GranolaFolderRefSchema),
         partial: z.boolean(),
       })
       .strict(),

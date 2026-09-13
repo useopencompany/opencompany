@@ -1404,6 +1404,36 @@ describe("canonical Hono API", () => {
     expect(remove).toHaveBeenCalledWith(actor, "brain_1", "integration_1");
   });
 
+  it("returns Granola folders for a workflow event filter", async () => {
+    const listOptions = vi.fn(async () => ({
+      provider: "granola" as const,
+      folders: [
+        { id: "fol_customers", name: "Customers", parentFolderId: null },
+        { id: "fol_acme", name: "Acme", parentFolderId: "fol_customers" },
+      ],
+      partial: false,
+    }));
+    const app = testApp(fakeRepository(), { brainSources: brainSourceService({ listOptions }) });
+
+    const options = await app.request("/v1/integrations/integration_1/brain-source-options", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: "granola" }),
+    });
+    expect(options.status).toBe(200);
+    await expect(options.json()).resolves.toMatchObject({
+      data: {
+        provider: "granola",
+        folders: [
+          { id: "fol_customers", name: "Customers", parentFolderId: null },
+          { id: "fol_acme", name: "Acme", parentFolderId: "fol_customers" },
+        ],
+        partial: false,
+      },
+    });
+    expect(listOptions).toHaveBeenCalledWith(actor, "integration_1", { provider: "granola" });
+  });
+
   it("rejects invalid source configuration before invoking provider logic", async () => {
     const set = vi.fn(async () => undefined);
     const listOptions = vi.fn(async () => ({
