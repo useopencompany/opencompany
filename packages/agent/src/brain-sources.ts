@@ -35,6 +35,7 @@ import {
   readGoogleDriveResources,
   upsertGoogleDriveSyncCursor,
 } from "@opencompany/db/google-drive";
+import { GRANOLA_CREDENTIAL_KIND } from "@opencompany/db/granola";
 import {
   HUBSPOT_EVENT_TYPES,
   type HubspotEventRef,
@@ -80,6 +81,7 @@ import {
   listGoogleSharedDrives,
   loadOwnGoogleDriveAccount,
 } from "./integrations/google-drive-source";
+import { listGranolaFolders } from "./integrations/granola";
 import { GRANOLA_MCP_EXTERNAL_ID } from "./integrations/granola-mcp";
 import { isLinearAuthenticationError, linearGraphqlRequest } from "./integrations/linear-api";
 
@@ -183,6 +185,7 @@ export type BrainSourceCommand =
 
 export type BrainSourceOptionsCommand =
   | { provider: "linear"; includeTriageStateIds?: boolean }
+  | { provider: "granola" }
   | {
       provider: "google_drive";
       parentId?: string;
@@ -192,6 +195,11 @@ export type BrainSourceOptionsCommand =
 
 export type BrainSourceOptions =
   | { provider: "linear"; teams: LinearTeamRef[]; partial: boolean }
+  | {
+      provider: "granola";
+      folders: Array<{ id: string; name: string; parentFolderId: string | null }>;
+      partial: boolean;
+    }
   | {
       provider: "google_drive";
       files: Array<{
@@ -341,6 +349,8 @@ export class BrainSourceApplicationService {
     switch (command.provider) {
       case "linear":
         return this.listLinearOptions(actor, integration, command.includeTriageStateIds ?? false);
+      case "granola":
+        return this.listGranolaOptions(actor, integration);
       case "google_drive":
         return this.listGoogleDriveOptions(actor, integration, command);
     }
@@ -575,6 +585,50 @@ export class BrainSourceApplicationService {
       enabled: true,
       config: { ...(allFiles ? { allFiles } : {}), resources },
     });
+  }
+
+  private async listGranolaOptions(
+    actor: Actor,
+    integrationId: string,
+  ): Promise<Extract<BrainSourceOptions, { provider: "granola" }>> {
+    const integration = await this.loadSourceIntegration(actor, integrationId, "granola");
+    if (!integration || integration.status !== "connected") {
+      throw new CoreError("conflict", "Save a Granola API key in your settings first.");
+    }
+    const credential = await loadIntegrationCredential({
+      userWorkosId: actor.userId,
+      integrationId,
+      provider: "granola",
+      kind: GRANOLA_CREDENTIAL_KIND,
+      db: this.db,
+    }).catch(() => null);
+    const apiKey = credential?.payload.apiKey;
+    if (typeof apiKey !== "string" || !apiKey) {
+      throw new CoreError("conflict", "Save a Granola API key in your settings first.");
+    }
+    const result = await listGranolaFolders({ apiKey });
+    if (!result.ok) {
+      if (result.reason !== "unauthorized") throw new CoreError("unavailable", result.error);
+      // Surface a revoked key on the plugin page the author is sent to, not just in this response.
+      await markIntegrationStatus({
+        userWorkosId: actor.userId,
+        integrationId,
+        provider: "granola",
+        status: "needs_reauth",
+        statusReason: "Granola rejected the saved API key. Save a new key.",
+        db: this.db,
+      });
+      throw new CoreError("conflict", result.error);
+    }
+    return {
+      provider: "granola",
+      folders: result.folders.map((folder) => ({
+        id: folder.id,
+        name: folder.name,
+        parentFolderId: folder.parentFolderId,
+      })),
+      partial: result.partial,
+    };
   }
 
   private async listLinearOptions(
@@ -1143,10 +1197,18 @@ function requireBrainRead(actor: Actor) {
   }
 }
 
+// Providers whose options also back a workflow event filter, which a workflow author must be able
+// to read without Brain access.
+const WORKFLOW_EVENT_FILTER_SOURCE_PROVIDERS = new Set<BrainSourceOptionsCommand["provider"]>([
+  "linear",
+  "granola",
+]);
+
 function requireSourceOptionsRead(actor: Actor, provider: BrainSourceOptionsCommand["provider"]) {
   if (
     actorHasPermission(actor, BRAIN_READ_PERMISSION) ||
-    (provider === "linear" && actorHasPermission(actor, WORKFLOW_READ_PERMISSION))
+    (WORKFLOW_EVENT_FILTER_SOURCE_PROVIDERS.has(provider) &&
+      actorHasPermission(actor, WORKFLOW_READ_PERMISSION))
   ) {
     return;
   }

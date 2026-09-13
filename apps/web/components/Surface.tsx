@@ -1121,8 +1121,16 @@ export function Surface({
   );
   const transportTurn = useMemo<ActiveChatTurn | null>(() => {
     if (activeTurn || !isGenerating || !chatSessionId) return null;
+    // A resumed stream carries no run id, so the turn is recovered from the transcript. Scope that
+    // lookup to the run the conversation runtime reports as active: the newest assistant message
+    // holding a run id can still belong to an earlier turn, and adopting it would date this turn
+    // from that older run.
+    const activeRunId = conversationRuntime?.activeRunId ?? null;
     const assistantMessage = chatMessages.findLast(
-      (message) => message.role === "assistant" && Boolean(message.metadata?.runId),
+      (message) =>
+        message.role === "assistant" &&
+        Boolean(message.metadata?.runId) &&
+        (activeRunId === null || message.metadata?.runId === activeRunId),
     );
     const runId = assistantMessage?.metadata?.runId;
     if (!assistantMessage || !runId) return null;
@@ -1134,7 +1142,14 @@ export function Surface({
       assistantMessageId: assistantMessage.id,
       startedAtMs,
     };
-  }, [activeTurn, chatMessages, chatSessionId, isGenerating, latestActiveTurnStartedAtMs]);
+  }, [
+    activeTurn,
+    chatMessages,
+    chatSessionId,
+    conversationRuntime,
+    isGenerating,
+    latestActiveTurnStartedAtMs,
+  ]);
   const runtimeTurn = useMemo<ActiveChatTurn | null>(() => {
     const activeRunId = conversationRuntime?.activeRunId;
     if (
@@ -5106,15 +5121,22 @@ function chatMessageStartedAtMs(message: ChatUiMessage) {
   return Number.isFinite(startedAtMs) ? startedAtMs : null;
 }
 
+function chatMessageIsSettledAssistant(message: ChatUiMessage) {
+  return message.role === "assistant" && typeof message.metadata?.timing?.durationMs === "number";
+}
+
 function finalizedChatAssistantOutcome(message: ChatUiMessage | null) {
-  if (!message || typeof message.metadata?.timing?.durationMs !== "number") return null;
-  if (message.metadata.aborted) return "canceled" as const;
-  if (message.metadata.error) return "failed" as const;
+  if (!message || !chatMessageIsSettledAssistant(message)) return null;
+  if (message.metadata?.aborted) return "canceled" as const;
+  if (message.metadata?.error) return "failed" as const;
   return "completed" as const;
 }
 
+// Approximates when the turn still in flight began. The scan stops at the newest settled assistant
+// message because everything before it belongs to a turn that already reported its own duration.
 function latestChatTurnStartedAtMs(messages: readonly ChatUiMessage[]) {
   for (const message of messages.toReversed()) {
+    if (chatMessageIsSettledAssistant(message)) return null;
     const startedAtMs = chatMessageStartedAtMs(message);
     if (startedAtMs !== null) return startedAtMs;
   }
