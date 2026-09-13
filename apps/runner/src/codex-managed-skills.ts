@@ -11,7 +11,7 @@ export async function materializeCodexSkillSnapshotsForSession(input: {
   sandbox: SandboxHandle;
   codexWorkRoot: string;
   skills: NativeSkillSnapshot[];
-}): Promise<{ fingerprint: string; count: number }> {
+}): Promise<{ fingerprint: string; count: number; skipped: boolean }> {
   return materializeManagedNativeSkillTree({
     sandbox: input.sandbox,
     root: `${input.codexWorkRoot}/.agents/skills`,
@@ -23,7 +23,7 @@ export async function materializeClaudeSkillSnapshotsForSession(input: {
   sandbox: SandboxHandle;
   claudeWorkRoot: string;
   skills: NativeSkillSnapshot[];
-}): Promise<{ fingerprint: string; count: number }> {
+}): Promise<{ fingerprint: string; count: number; skipped: boolean }> {
   return materializeManagedNativeSkillTree({
     sandbox: input.sandbox,
     root: `${input.claudeWorkRoot}/.claude/skills`,
@@ -57,7 +57,14 @@ async function materializeManagedNativeSkillTree(input: {
     });
   });
   const ids = [...skillNames];
-  await reconcileManagedArtifactTree({
+  const fingerprint = managedArtifactFingerprint(
+    input.skills.map((skill) => ({
+      kind: "skill",
+      id: skill.name,
+      files: skill.files,
+    })),
+  );
+  const { skipped } = await reconcileManagedArtifactTree({
     sandbox: input.sandbox,
     root: input.root,
     manifestName: MANAGED_SKILLS_MANIFEST,
@@ -65,17 +72,9 @@ async function materializeManagedNativeSkillTree(input: {
     ids,
     files,
     isSafeId: isSafeSkillId,
+    fingerprint,
   });
-  return {
-    fingerprint: managedArtifactFingerprint(
-      input.skills.map((skill) => ({
-        kind: "skill",
-        id: skill.name,
-        files: skill.files,
-      })),
-    ),
-    count: input.skills.length,
-  };
+  return { fingerprint, count: input.skills.length, skipped };
 }
 
 function assertSafeSkillName(name: string) {
