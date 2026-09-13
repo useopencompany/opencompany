@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   isLinearIssueEnteringTriage,
   linearEventTypeFor,
@@ -6,7 +6,6 @@ import {
   linearSelectedEventTypes,
   linearWorkflowRouteMatchesEvent,
   parseLinearBrainSourceConfig,
-  parseLinearWikiSourceConfig,
 } from "./linear";
 
 describe("opencompany Linear brain source config", () => {
@@ -36,21 +35,6 @@ describe("opencompany Linear brain source config", () => {
     });
 
     expect(linearSelectedEventTypes(config)).toEqual(new Set(["issue_created", "comment_created"]));
-  });
-
-  it("parses wiki team scope with the same strict shape as brain routing", () => {
-    expect(
-      parseLinearWikiSourceConfig({
-        teams: [
-          { id: " team_1 ", key: " ENG ", name: " Engineering " },
-          { id: "", name: "Dropped" },
-        ],
-        events: [{ id: "issue_created" }, { id: "unknown" }],
-      }),
-    ).toEqual({
-      teams: [{ id: "team_1", key: "ENG", name: "Engineering" }],
-      events: [{ id: "issue_created" }],
-    });
   });
 
   it("derives issue status-change events from Linear update payloads", () => {
@@ -162,4 +146,25 @@ describe("opencompany Linear brain source config", () => {
       }),
     ).toBe(false);
   });
+});
+
+it("combines team and status filters for newly created issues", () => {
+  const route = {
+    provider: "linear",
+    event: "issue.created",
+    filters: { team: { id: "team_1" }, status: { id: "triage" } },
+  } as unknown as Parameters<typeof linearWorkflowRouteMatchesEvent>[0];
+  const event = {
+    type: "Issue",
+    action: "create",
+    teamId: "team_1",
+    data: { state: { type: "triage" } },
+  };
+  expect(linearWorkflowRouteMatchesEvent(route, event)).toBe(true);
+  expect(linearWorkflowRouteMatchesEvent(route, { ...event, teamId: "team_2" })).toBe(false);
+  expect(
+    linearWorkflowRouteMatchesEvent(route, { ...event, data: { state: { type: "started" } } }),
+  ).toBe(false);
+  expect(linearWorkflowRouteMatchesEvent(route, { ...event, data: {} })).toBe(false);
+  expect(linearWorkflowRouteMatchesEvent(route, { ...event, action: "update" })).toBe(false);
 });

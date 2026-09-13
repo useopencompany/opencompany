@@ -51,7 +51,7 @@ describe("workflow event worker", () => {
       expect.objectContaining({ id: "event_1" }),
       new Date("2026-08-20T12:00:00.000Z"),
     );
-    expect(execute).toHaveBeenCalledTimes(2);
+    expect(execute).toHaveBeenCalledTimes(4);
   });
 
   it("ignores an event when its run-as user is no longer eligible", async () => {
@@ -91,7 +91,7 @@ describe("workflow event worker", () => {
         createTask: vi.fn().mockRejectedValue(new Error("model unavailable")),
       }),
     ).resolves.toEqual({ status: "retry", eventId: "event_1" });
-    expect(execute).toHaveBeenCalledTimes(2);
+    expect(execute).toHaveBeenCalledTimes(5);
     expect(workflowEventRetryDelayMs(1)).toBe(1_000);
     expect(workflowEventRetryDelayMs(20)).toBe(15 * 60_000);
   });

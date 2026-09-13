@@ -40,6 +40,7 @@ import { useAppData } from "@/components/AppDataProvider";
 import { CapabilityModeToggle } from "@/components/CapabilityModeToggle";
 import { ConvexDeployKeyConnectionForm } from "@/components/ConvexDeployKeyConnectionForm";
 import { GitHubRepositoryAccessSection } from "@/components/GitHubRepositoryAccess";
+import { GranolaIntegrationSetup } from "@/components/GranolaIntegrationSetup";
 import { InfisicalPluginConnectionForm } from "@/components/InfisicalPluginConnectionForm";
 import { PluginAccountRow, PluginConnectionFeedback } from "@/components/PluginConnectionSettings";
 import {
@@ -922,6 +923,8 @@ function OfficialMcpPluginDetailView({
 
 function EventsSection({ plugin, canEdit }: { plugin: PluginInstallationDto; canEdit: boolean }) {
   const router = useRouter();
+  const { integrations } = useAppData();
+  const linearAccount = integrations.personalAccounts.linear.find((account) => account.connected);
   const [error, setError] = useState<string | null>(null);
   const [pendingEventId, setPendingEventId] = useState<string | null>(null);
 
@@ -935,13 +938,39 @@ function EventsSection({ plugin, canEdit }: { plugin: PluginInstallationDto; can
   };
 
   return (
-    <section aria-labelledby={`${plugin.name}-events-heading`} className="flex flex-col gap-3">
+    <section
+      id="events"
+      aria-labelledby={`${plugin.name}-events-heading`}
+      className="flex flex-col gap-3"
+    >
       <SectionHeading
         id={`${plugin.name}-events-heading`}
         icon={Webhook}
         title="Events"
         description="Choose which events from your account may start your workflows. Events are off by default."
       />
+      {plugin.name === "linear" ? (
+        <div className="rounded-lg border border-border p-3 text-[13px]">
+          <p className="text-ink-subtle">Connect your Linear workspace to receive issue events.</p>
+          {linearAccount ? (
+            <p className="mt-2 text-ink">
+              Connected · {linearAccount.connectionLabel ?? linearAccount.accountName ?? "Linear"}
+            </p>
+          ) : canEdit ? (
+            <a
+              className={`${buttonVariants({ variant: "outline", size: "sm" })} mt-2`}
+              href="/api/integrations/linear-ingest/start?returnTo=/settings/plugins/linear%23events"
+            >
+              Connect Linear events
+            </a>
+          ) : (
+            <p>Ask an admin to connect Linear events.</p>
+          )}
+        </div>
+      ) : null}
+      {plugin.name === "granola" && canEdit ? (
+        <GranolaIntegrationSetup initialState={integrations.granola} variant="modal" />
+      ) : null}
       <ul className="overflow-hidden rounded-lg border border-border bg-surface">
         {plugin.events.map((event: PluginEventDefinitionDto) => {
           const enabled = plugin.eventModes[event.id] === true;
@@ -959,7 +988,7 @@ function EventsSection({ plugin, canEdit }: { plugin: PluginInstallationDto; can
                 type="button"
                 size="sm"
                 variant={enabled ? "default" : "outline"}
-                disabled={!canEdit || pending}
+                disabled={!canEdit || pendingEventId !== null}
                 aria-pressed={enabled}
                 aria-label={`${event.label}: ${enabled ? "On" : "Off"}`}
                 onClick={() => toggle(event.id, !enabled)}

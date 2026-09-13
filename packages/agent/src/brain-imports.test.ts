@@ -39,9 +39,7 @@ vi.mock("@opencompany/db/brain-import", async (importActual) => ({
   retryWikiImportDiscovery: mocks.retryWikiRun,
 }));
 
-const { BrainImportApplicationService, WikiImportApplicationService } = await import(
-  "./brain-imports"
-);
+const { BrainImportApplicationService } = await import("./brain-imports");
 
 const member: Actor = {
   userId: "user_1",
@@ -206,87 +204,5 @@ describe("BrainImportApplicationService", () => {
     await expect(imports.retry(admin, "brain_1", "gbimp_1")).resolves.toMatchObject({
       status: "discovering",
     });
-  });
-});
-
-describe("WikiImportApplicationService", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.legacyBrainEnabled.mockResolvedValue(false);
-  });
-
-  it("binds a Wiki import to configured source rows and the acting workspace", async () => {
-    const list = vi.fn(
-      async () =>
-        [
-          {
-            provider: "linear",
-            integrationId: "integration_linear",
-            integrationStatus: "connected",
-            canConfigure: true,
-            enabled: true,
-            config: { teams: [{ id: "team_1", name: "Engineering" }] },
-          },
-        ] as never,
-    );
-    const service = new WikiImportApplicationService({}, { list });
-
-    await expect(
-      service.start(wikiAdmin, {
-        idempotencyKey: "wiki-1",
-        companyUrl: "acme.com",
-        sourceSelection: {
-          public_web: { enabled: true },
-          linear: { enabled: true, integrationId: "integration_linear" },
-          fathom: { enabled: true, integrationId: "integration_fathom" },
-        },
-      }),
-    ).resolves.toMatchObject({ importRunId: "gbimp_wiki", status: "discovering" });
-    expect(mocks.startWikiRun).toHaveBeenCalledWith(
-      expect.objectContaining({
-        actor: wikiAdmin,
-        companyUrl: "https://acme.com",
-        sourceSelection: expect.objectContaining({
-          public_web: { enabled: true },
-          linear: expect.objectContaining({ integrationId: "integration_linear" }),
-        }),
-      }),
-    );
-    const call = mocks.startWikiRun.mock.calls[0]?.[0] as {
-      sourceSelection: Record<string, unknown>;
-    };
-    expect(call.sourceSelection.fathom).toBeUndefined();
-  });
-
-  it("rejects members and legacy Brain workspaces", async () => {
-    const service = new WikiImportApplicationService({}, { list: vi.fn(async () => []) });
-    await expect(
-      service.start(
-        { ...wikiAdmin, role: "member" },
-        {
-          idempotencyKey: "wiki-1",
-          companyUrl: "acme.com",
-          sourceSelection: {},
-        },
-      ),
-    ).rejects.toMatchObject({ code: "forbidden" });
-
-    mocks.legacyBrainEnabled.mockResolvedValue(true);
-    await expect(service.cancel(wikiAdmin, "gbimp_wiki")).rejects.toMatchObject({
-      code: "not_found",
-    });
-  });
-
-  it("preserves created-by attribution through confirmation", async () => {
-    const service = new WikiImportApplicationService({}, { list: vi.fn(async () => []) });
-    await service.confirm(wikiAdmin, "gbimp_wiki", ["public_web", "public_web", "fathom"]);
-    expect(mocks.confirmWikiRun).toHaveBeenCalledWith(
-      expect.objectContaining({
-        importRunId: "gbimp_wiki",
-        workspaceId: "workspace_1",
-        actingUserWorkosId: "user_1",
-        enabledProviders: ["public_web"],
-      }),
-    );
   });
 });

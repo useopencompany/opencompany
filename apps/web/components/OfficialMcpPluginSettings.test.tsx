@@ -1,21 +1,20 @@
-import "@testing-library/jest-dom/vitest";
 import type {
   PluginImportPreviewDto,
   PluginInstallationDto,
   PluginRemoteMcpServerDto,
 } from "@opencompany/protocol";
+import type { IntegrationAccountView } from "@/lib/integration-state";
+import "@testing-library/jest-dom/vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { IntegrationAccountView } from "@/lib/integration-state";
 import {
   AttioPluginDetail,
   BetterStackPluginDetailView,
   betterStackToolsStateFromPlugin,
   defaultAttioToolsState,
   defaultFathomToolsState,
-  defaultGranolaToolsState,
   defaultHubSpotToolsState,
   defaultLatitudeToolsState,
   defaultPostHogToolsState,
@@ -30,7 +29,6 @@ import {
   GoogleAdminPluginDetail,
   GoogleCalendarPluginDetail,
   GoogleDrivePluginDetail,
-  GranolaPluginDetail,
   githubToolsStateFromPlugin,
   gmailToolsStateFromPlugin,
   googleCalendarToolsStateFromPlugin,
@@ -66,7 +64,6 @@ import {
   GMAIL_PLUGIN_SOURCE,
   GOOGLE_CALENDAR_PLUGIN_SOURCE,
   GOOGLE_DRIVE_PLUGIN_SOURCE,
-  GRANOLA_PLUGIN_SOURCE,
   HUBSPOT_PLUGIN_SOURCE,
   INFISICAL_PLUGIN_SOURCE,
   JAMIE_PLUGIN_SOURCE,
@@ -167,6 +164,15 @@ const appData = vi.hoisted(() => ({
       accountName: "Acme Analytics",
       integrationId: "gint_posthog_tools",
       capabilityModes: { read: "on", write: "ask" },
+    },
+    granola: {
+      provider: "granola",
+      connected: false,
+      status: "not_connected",
+      integrationId: null,
+      accountEmail: null,
+      accountName: null,
+      statusReason: null,
     },
     granola_mcp: {
       provider: "granola",
@@ -1563,8 +1569,8 @@ describe("Linear plugin settings", () => {
       "/api/integrations/google-drive/start?returnTo=/settings/plugins/google-drive",
     );
     expect(
-      screen.getByRole("link", { name: "Configure Google Drive ingestion in Wiki sources" }),
-    ).toHaveAttribute("href", "/wiki/sources");
+      screen.queryByRole("link", { name: "Configure Google Drive ingestion in Wiki sources" }),
+    ).not.toBeInTheDocument();
     for (const label of ["Browse Drive files", "Read files & permissions", "Create & edit files"]) {
       expect(
         within(screen.getByRole("group", { name: `${label} permission` })).getByRole("button", {
@@ -1645,7 +1651,7 @@ describe("Linear plugin settings", () => {
 
     expect(html).toContain("founder@example.com");
     expect(html).toContain("Read Fathom meetings");
-    expect(html).toContain("Configure legacy Fathom ingestion in Wiki sources");
+    expect(html).not.toContain("Configure legacy Fathom ingestion in Wiki sources");
     expect(FATHOM_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/444dd4dbfaaed6abd2c7c8000024c5be0ff4fa48/fathom",
     );
@@ -1764,7 +1770,7 @@ describe("Linear plugin settings", () => {
     expect(html).toContain("Inspect HubSpot structure");
     expect(html).toContain("Read CRM &amp; marketing data");
     expect(html).toContain("Change HubSpot");
-    expect(html).toContain("Configure HubSpot ingestion in Wiki sources");
+    expect(html).not.toContain("Configure HubSpot ingestion in Wiki sources");
     expect(HUBSPOT_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/6b4e00b71f7d1b388fe5aa225aa86c8d35ba2578/hubspot",
     );
@@ -1847,35 +1853,9 @@ describe("Linear plugin settings", () => {
     expect(html).toContain("Inspect Attio structure");
     expect(html).toContain("Read CRM data");
     expect(html).toContain("Change Attio");
-    expect(html).toContain("Configure Attio ingestion in Wiki sources");
+    expect(html).not.toContain("Configure Attio ingestion in Wiki sources");
     expect(ATTIO_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/0daeec4cff5d5f9925af2901410e1aa6c8baf0d8/attio",
-    );
-    expect(useLiveQuery).not.toHaveBeenCalled();
-  });
-
-  it("maps Granola MCP separately from legacy Wiki ingestion", () => {
-    const granolaPlugin = {
-      ...plugin,
-      id: "plugin_granola",
-      name: "granola",
-      manifest: { name: "granola", description: "Search Granola meeting history." },
-      source: { ...plugin.source, path: "granola" },
-    } satisfies PluginInstallationDto;
-    const html = renderToString(
-      <GranolaPluginDetail
-        pluginState={{ status: "ready", plugin: granolaPlugin }}
-        toolsState={defaultGranolaToolsState()}
-        canEdit
-      />,
-    );
-
-    expect(html).toContain("The Granola account opencompany uses when you search meeting history.");
-    expect(html).toContain("Check Granola account");
-    expect(html).toContain("Read meeting content");
-    expect(html).toContain("Configure legacy Granola API ingestion in Wiki sources");
-    expect(GRANOLA_PLUGIN_SOURCE).toBe(
-      "https://github.com/useopencompany/plugins/tree/8e79573ef91e122f9e0c15c810e7607d1be1d094/granola",
     );
     expect(useLiveQuery).not.toHaveBeenCalled();
   });
