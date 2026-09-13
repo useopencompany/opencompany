@@ -821,11 +821,11 @@ function normalizePreviewPath(rest: string | undefined): string | null {
   }
 }
 
-// Defense in depth at the iframe/window.open sink: the composed URL must keep the
-// capability origin, or we fall back to its root.
+// Defense in depth at the iframe/window.open sink: only an absolute, non-protocol-relative
+// path may ride on the capability origin, so the composed URL cannot leave it.
 function composePreviewSrc(origin: string, path: string): string {
-  const composed = new URL(path, origin);
-  return composed.origin === new URL(origin).origin ? composed.toString() : origin;
+  if (!path.startsWith("/") || path.startsWith("//") || path.startsWith("/\\")) return origin;
+  return path === "/" ? origin : `${origin}${path}`;
 }
 
 type RuntimeMessage =
