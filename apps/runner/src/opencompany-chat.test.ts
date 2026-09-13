@@ -705,6 +705,19 @@ describe("opencompany chat infrastructure recovery", () => {
     },
   );
 
+  // runProductChatTurn classifies the failure only after finalizing streaming text and reasoning.
+  // Tool parts must survive that step as `input-streaming`, or the replay path silently dies.
+  it("still replays once streaming text around the partial tool call has been finalized", () => {
+    expect(
+      isReplaySafeProductChatInfrastructureFailure(interruptedSuccessResponse(), {
+        parts: [
+          { type: "text", text: "Writing that page now.", state: "done" },
+          { type: "tool-wiki", toolCallId: "call_1", state: "input-streaming" },
+        ],
+      }),
+    ).toBe(true);
+  });
+
   it("does not retry a successful response processing error with a non-transient shape", () => {
     const invalidResponse = new APICallError({
       message: "Response schema validation failed",

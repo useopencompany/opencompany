@@ -1539,6 +1539,9 @@ function providerMetadataFrom(part: Record<string, unknown>) {
   return part.providerMetadata ? { providerMetadata: part.providerMetadata } : {};
 }
 
+// Only text and reasoning are finalized. Tool parts deliberately keep `input-streaming` so
+// isReplaySafeProductChatInfrastructureFailure can still tell a partial tool input apart from one
+// that crossed the execute boundary.
 function finalizeStreamingParts(parts: readonly ProductChatUiPart[]) {
   return parts.map((part) =>
     (part.type === "text" || part.type === "reasoning") && part.state === "streaming"
