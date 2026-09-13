@@ -596,6 +596,24 @@ describe("opencompany Google Drive MCP server", () => {
     expect(mocks.apiCall).not.toHaveBeenCalled();
   });
 
+  it("withholds the Sheets tools from an account connected before they shipped", async () => {
+    mocks.loadIntegration.mockResolvedValueOnce({
+      ...connectedRow,
+      scopes: [GOOGLE_DRIVE_READ_SCOPE, GOOGLE_DRIVE_FILE_SCOPE, GOOGLE_DOCS_WRITE_SCOPE],
+    });
+    const response = await service().handle(request({ type: "tools/list" }, "tools/list"));
+
+    expect(response.status).toBe(200);
+    const body = await responseJson(response);
+    const names = body.result.tools.map((tool: { name: string }) => tool.name);
+    expect(names).not.toContain("get_spreadsheet_values");
+    expect(names).not.toContain("update_spreadsheet_values");
+    expect(names).not.toContain("append_spreadsheet_values");
+    // Every other Drive tool still works, so an unattended task keeps the access it already had.
+    expect(names).toHaveLength(10);
+    expect(body.result.instructions ?? "").not.toContain("get_spreadsheet_values");
+  });
+
   it("reads Sheet values against the first sheet and reports the spreadsheet's tabs", async () => {
     mocks.apiCall
       .mockResolvedValueOnce({
@@ -635,9 +653,10 @@ describe("opencompany Google Drive MCP server", () => {
     const outlineUrl = mocks.apiCall.mock.calls[0]?.[2] as URL;
     expect(outlineUrl.pathname).toBe("/v4/spreadsheets/sheet_1");
     const valuesUrl = mocks.apiCall.mock.calls[1]?.[2] as URL;
-    // A1 notation escapes the apostrophe in the sheet title by doubling it.
+    // A1 notation escapes the apostrophe in the sheet title by doubling it, and the default range
+    // is clamped to the sheet's real 200x40 grid rather than asking for every populated cell.
     expect(decodeURIComponent(valuesUrl.pathname)).toBe(
-      "/v4/spreadsheets/sheet_1/values/'Louis'' weekly'",
+      "/v4/spreadsheets/sheet_1/values/'Louis'' weekly'!A1:AN200",
     );
     expect(JSON.parse(body.result.content[0].text)).toEqual({
       spreadsheet: {
@@ -657,6 +676,73 @@ describe("opencompany Google Drive MCP server", () => {
       ],
       truncated: false,
     });
+  });
+
+  it("clamps the default range to the cell budget on an oversized sheet", async () => {
+    mocks.apiCall
+      .mockResolvedValueOnce({
+        spreadsheetId: "sheet_1",
+        properties: { title: "Huge" },
+        sheets: [
+          {
+            properties: {
+              title: "Data",
+              index: 0,
+              gridProperties: { rowCount: 40_000, columnCount: 60 },
+            },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({ range: "Data!A1:BH166", values: [] });
+
+    const response = await service().handle(
+      request(
+        { type: "tools/call", tool: "get_spreadsheet_values", capability: "query" },
+        "tools/call",
+        { name: "get_spreadsheet_values", arguments: { fileId: "sheet_1" } },
+      ),
+    );
+
+    // 60 columns x 166 rows stays inside the 10,000-cell budget, so Google never streams the
+    // other 39,834 rows back for the sanitizer to discard.
+    // The response streams, so read it before asserting on the calls it makes.
+    await responseJson(response);
+    expect(mocks.apiCall.mock.calls).toHaveLength(2);
+    const valuesUrl = mocks.apiCall.mock.calls[1]?.[2] as URL;
+    expect(decodeURIComponent(valuesUrl.pathname)).toBe(
+      "/v4/spreadsheets/sheet_1/values/'Data'!A1:BH166",
+    );
+  });
+
+  it("keeps a columns-major read on its own axis", async () => {
+    mocks.apiCall
+      .mockResolvedValueOnce({
+        spreadsheetId: "sheet_1",
+        sheets: [{ properties: { title: "Data", index: 0 } }],
+      })
+      .mockResolvedValueOnce({
+        range: "Data!A1:B400",
+        majorDimension: "COLUMNS",
+        values: [Array.from({ length: 400 }, (_, index) => index)],
+      });
+
+    const response = await service().handle(
+      request(
+        { type: "tools/call", tool: "get_spreadsheet_values", capability: "query" },
+        "tools/call",
+        {
+          name: "get_spreadsheet_values",
+          arguments: { fileId: "sheet_1", range: "Data!A1:B400", majorDimension: "COLUMNS" },
+        },
+      ),
+    );
+
+    const body = await responseJson(response);
+    const result = JSON.parse(body.result.content[0].text);
+    // Under COLUMNS the inner array is a column of 400 rows, not a row of 400 columns; a
+    // row-shaped cap would have silently dropped most of it.
+    expect(result.values[0]).toHaveLength(400);
+    expect(result.truncated).toBe(false);
   });
 
   it("overwrites an explicit Sheet range as a user-entered edit", async () => {
@@ -835,10 +921,17 @@ describe("opencompany Google Drive MCP server", () => {
       ...connectedRow,
       scopes: [GOOGLE_DRIVE_READ_SCOPE, GOOGLE_DRIVE_FILE_SCOPE, GOOGLE_DOCS_WRITE_SCOPE],
     });
-    const missingSheetsScope = await service().handle(
-      request({ type: "tools/list" }, "tools/list"),
+    const sheetsWithoutGrant = await service().handle(
+      request(
+        { type: "tools/call", tool: "update_spreadsheet_values", capability: "write" },
+        "tools/call",
+        {
+          name: "update_spreadsheet_values",
+          arguments: { fileId: "sheet_1", range: "A1", values: [["x"]] },
+        },
+      ),
     );
-    expect(missingSheetsScope.status).toBe(401);
+    expect(sheetsWithoutGrant.status).toBe(403);
 
     mocks.loadIntegration.mockResolvedValueOnce({
       ...connectedRow,

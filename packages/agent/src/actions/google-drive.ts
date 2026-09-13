@@ -18,10 +18,8 @@ import {
   googleSpreadsheetUrl,
   MAX_SPREADSHEET_CELL_CHARS,
   MAX_SPREADSHEET_CELLS,
-  MAX_SPREADSHEET_COLUMNS,
   MAX_SPREADSHEET_RANGE_CHARS,
-  MAX_SPREADSHEET_READ_ROWS,
-  MAX_SPREADSHEET_WRITE_ROWS,
+  MAX_SPREADSHEET_WRITE_LINES,
   sanitizeSpreadsheetValues,
 } from "../integrations/google-sheets-values";
 import { type CapabilityId, effectiveCapabilityMode, providerCapability } from "./capabilities";
@@ -414,7 +412,7 @@ function getSpreadsheetValuesAction(connections: readonly GoogleDriveConnection[
       const response = asRecord(await googleDriveApiCall(context, connection, "GET", url));
       const spreadsheetId = readString(response.spreadsheetId, MAX_FILE_ID_CHARS) ?? fileId;
       const responseRange = readString(response.range, MAX_SPREADSHEET_RANGE_CHARS) ?? range;
-      const shapedValues = sanitizeSpreadsheetValues(response.values, MAX_SPREADSHEET_READ_ROWS);
+      const shapedValues = sanitizeSpreadsheetValues(response.values);
       return {
         account: connectionLabel(connection),
         integrationId: connection.integrationId,
@@ -1300,12 +1298,12 @@ function spreadsheetValuesParamSchema(description: string): JSONSchema7 {
   return {
     type: "array" as const,
     minItems: 1,
-    maxItems: MAX_SPREADSHEET_WRITE_ROWS,
+    maxItems: MAX_SPREADSHEET_WRITE_LINES,
     description,
     items: {
       type: "array" as const,
       minItems: 1,
-      maxItems: MAX_SPREADSHEET_COLUMNS,
+      maxItems: MAX_SPREADSHEET_CELLS,
       items: {
         anyOf: [
           { type: "string", maxLength: MAX_SPREADSHEET_CELL_CHARS },
@@ -1322,9 +1320,9 @@ function requiredSpreadsheetValues(value: unknown): GoogleSheetCellValue[][] {
   if (!Array.isArray(value) || value.length === 0) {
     throw new ActionInvalidParamsError('"values" is required and must be a non-empty 2D array.');
   }
-  if (value.length > MAX_SPREADSHEET_WRITE_ROWS) {
+  if (value.length > MAX_SPREADSHEET_WRITE_LINES) {
     throw new ActionInvalidParamsError(
-      `"values" may include at most ${MAX_SPREADSHEET_WRITE_ROWS} rows or columns.`,
+      `"values" may include at most ${MAX_SPREADSHEET_WRITE_LINES} rows or columns.`,
     );
   }
 
@@ -1335,9 +1333,9 @@ function requiredSpreadsheetValues(value: unknown): GoogleSheetCellValue[][] {
         `"values"[${rowIndex}] must be a non-empty array of cells.`,
       );
     }
-    if (rawRow.length > MAX_SPREADSHEET_COLUMNS) {
+    if (rawRow.length > MAX_SPREADSHEET_CELLS) {
       throw new ActionInvalidParamsError(
-        `"values"[${rowIndex}] may include at most ${MAX_SPREADSHEET_COLUMNS} cells.`,
+        `"values"[${rowIndex}] may include at most ${MAX_SPREADSHEET_CELLS} cells.`,
       );
     }
     cellCount += rawRow.length;

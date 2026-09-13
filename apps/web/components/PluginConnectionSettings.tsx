@@ -9,6 +9,7 @@ import {
 } from "@/lib/integration-account-actions";
 import type { IntegrationAccountView, PersonalAccountProvider } from "@/lib/integration-state";
 import { gmailMcpScopesSatisfied } from "@/lib/integrations/gmail-scopes";
+import { hasGoogleSheetsWriteScope } from "@/lib/integrations/google-drive-scopes";
 import {
   integrationConnectionError,
   integrationConnectionSuccess,
@@ -79,6 +80,12 @@ export function PluginAccountRow({
   const needsReconnect = account.status === "needs_reauth" || account.status === "sync_failed";
   const needsGmailMcpScope =
     account.provider === "gmail" && account.connected && !gmailMcpScopesSatisfied(account.scopes);
+  // Connected before the Sheets tools shipped: every other Drive tool still works, so offer the
+  // upgrade instead of taking the account offline.
+  const needsDriveSheetsScope =
+    account.provider === "google_drive" &&
+    account.connected &&
+    !hasGoogleSheetsWriteScope(account.scopes);
 
   const beginDisconnect = () => {
     setError(null);
@@ -148,6 +155,14 @@ export function PluginAccountRow({
               className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink"
             >
               Enable full Gmail tools
+            </a>
+          ) : null}
+          {needsDriveSheetsScope ? (
+            <a
+              href={reconnectHref}
+              className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink"
+            >
+              Enable Sheets tools
             </a>
           ) : null}
           <button

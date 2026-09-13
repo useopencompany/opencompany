@@ -6,7 +6,13 @@ export const GOOGLE_SHEETS_WRITE_SCOPE = "https://www.googleapis.com/auth/spread
 const GOOGLE_DRIVE_FULL_SCOPE = "https://www.googleapis.com/auth/drive";
 
 export const GOOGLE_DRIVE_MCP_RECONNECT_REASON =
-  "Reconnect Google Drive to enable plugin file access and Google Docs and Sheets editing.";
+  "Reconnect Google Drive to enable plugin file access and Google Docs editing.";
+
+// The Sheets tools were added after this plugin shipped. An account connected before then keeps
+// every other Drive tool working; only the spreadsheet tools wait on a reconnect that asks for the
+// Sheets grant, so an unattended task never loses Drive access it already had.
+export const GOOGLE_DRIVE_MCP_SHEETS_UPGRADE_REASON =
+  "Reconnect Google Drive to let agents read and edit Google Sheets values.";
 
 const GOOGLE_DOCS_WRITE_SCOPES = new Set([GOOGLE_DOCS_WRITE_SCOPE, GOOGLE_DRIVE_FULL_SCOPE]);
 
@@ -17,8 +23,7 @@ export function googleDriveMcpScopesSatisfied(scopes: readonly string[]) {
   return (
     (granted.has(GOOGLE_DRIVE_READ_SCOPE) || granted.has(GOOGLE_DRIVE_FULL_SCOPE)) &&
     (granted.has(GOOGLE_DRIVE_FILE_SCOPE) || granted.has(GOOGLE_DRIVE_FULL_SCOPE)) &&
-    hasGoogleDocsWriteScope(scopes) &&
-    hasGoogleSheetsWriteScope(scopes)
+    hasGoogleDocsWriteScope(scopes)
   );
 }
 

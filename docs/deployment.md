@@ -153,8 +153,11 @@ stable Google REST API. Google access and refresh tokens are never used as MCP b
 
 The Drive MCP reads and writes Google Sheets values through `get_spreadsheet_values`,
 `update_spreadsheet_values`, and `append_spreadsheet_values`. Those tools need the
-`https://www.googleapis.com/auth/spreadsheets` grant, so the Drive plugin's OAuth start now requests
-it and a connection made before that change reports `needs_reauth` until the account reconnects.
+`https://www.googleapis.com/auth/spreadsheets` grant, which the Drive plugin's OAuth start now
+requests. An account connected before that keeps every other Drive tool: the three Sheets tools are
+simply not registered for it, a stale ticket aimed at one is refused, and plugin settings offer an
+"Enable Sheets tools" reconnect. Reconnecting is the only step, and no unattended task loses Drive
+access it already had.
 
 The Calendar MCP supports `reschedule_event` for an existing event or a single recurring
 occurrence. It patches only the start and end times, retaining the event identity and meeting
