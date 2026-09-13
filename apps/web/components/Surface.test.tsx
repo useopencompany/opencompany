@@ -5434,6 +5434,112 @@ describe("Surface chat streaming UI", () => {
     expect(screen.getByRole("status", { name: "opencompany is working" })).toBeInTheDocument();
   });
 
+  it("times a resumed turn from the active run, not the previous turn left unsettled", () => {
+    chatMock.status = "streaming";
+    const lastNight = new Date(Date.now() - 9 * 60 * 60 * 1000).toISOString();
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "chat_overnight_1",
+          title: "Coding session",
+          model: CLAUDE_CHAT_DEFAULT_MODEL_ID,
+          engine: "claude_code",
+          runtime: {
+            status: "running",
+            activeRunId: "run_today",
+            hasError: false,
+            updatedAt: currentTimestamp(),
+          },
+          activityState: "working",
+          hasUnseen: false,
+          messages: [
+            {
+              id: "user_last_night",
+              role: "user",
+              metadata: { sessionId: "chat_overnight_1", timing: { createdAt: lastNight } },
+              parts: [{ type: "text", text: "Last night" }],
+            },
+            {
+              id: "assistant_last_night",
+              role: "assistant",
+              metadata: {
+                sessionId: "chat_overnight_1",
+                runId: "run_last_night",
+                timing: { createdAt: lastNight },
+              },
+              parts: [{ type: "text", text: "Answered last night" }],
+            },
+            {
+              id: "user_today",
+              role: "user",
+              metadata: {
+                sessionId: "chat_overnight_1",
+                timing: { createdAt: currentTimestamp() },
+              },
+              parts: [{ type: "text", text: "Picking this back up" }],
+            },
+          ],
+        }}
+      />,
+    );
+
+    const indicator = screen.getByRole("status", { name: "Claude Code is working" });
+    expect(within(indicator).getByText(/^\d+\.\ds$/)).toBeInTheDocument();
+  });
+
+  it("keeps the working indicator on a new turn after the previous turn settled", () => {
+    chatMock.status = "streaming";
+    const lastNight = new Date(Date.now() - 9 * 60 * 60 * 1000).toISOString();
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "chat_overnight_2",
+          title: "Coding session",
+          model: CLAUDE_CHAT_DEFAULT_MODEL_ID,
+          engine: "claude_code",
+          runtime: {
+            status: "running",
+            activeRunId: "run_today",
+            hasError: false,
+            updatedAt: currentTimestamp(),
+          },
+          activityState: "working",
+          hasUnseen: false,
+          messages: [
+            {
+              id: "assistant_last_night",
+              role: "assistant",
+              metadata: {
+                sessionId: "chat_overnight_2",
+                runId: "run_last_night",
+                timing: { createdAt: lastNight, durationMs: 12_000 },
+              },
+              parts: [{ type: "text", text: "Answered last night" }],
+            },
+            {
+              id: "user_today",
+              role: "user",
+              metadata: {
+                sessionId: "chat_overnight_2",
+                timing: { createdAt: currentTimestamp() },
+              },
+              parts: [{ type: "text", text: "Picking this back up" }],
+            },
+          ],
+        }}
+      />,
+    );
+
+    const indicator = screen.getByRole("status", { name: "Claude Code is working" });
+    expect(within(indicator).getByText(/^\d+\.\ds$/)).toBeInTheDocument();
+  });
+
   it("does not show a live timer for a finalized turn when stream and runtime state are stale", () => {
     chatMock.status = "streaming";
 
