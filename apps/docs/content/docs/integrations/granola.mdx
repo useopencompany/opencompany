@@ -1,6 +1,6 @@
 ---
 title: Granola
-description: Search and read Granola meeting history through the official MCP plugin.
+description: Read Granola meeting history and start Workflows when meeting notes are ready.
 ---
 
 ## Install and connect
@@ -38,32 +38,50 @@ paid plan.
 
 ## Trigger a Workflow
 
-Granola can start a Workflow as soon as it finishes writing up a meeting.
+Granola's **Meeting notes ready** event (`meeting.notes_ready`) starts a Workflow after Granola
+generates the meeting's AI summary. opencompany checks for new summaries every five minutes; this
+is not an instant notification when the call ends.
 
-1. Open **Settings → Plugins → Granola** and turn on **Meeting notes ready**.
-2. Open a Workflow, choose **On an event**, and select the event and the Granola account.
+1. Open **Settings → Plugins → Granola** and install or update the plugin.
+2. In **Events**, save a personal Granola API key. Create it in Granola's desktop app under
+   **Settings → Connectors → API keys**, with access to the meetings you want to use.
+3. Turn on **Meeting notes ready**. Events are off by default.
+4. Open a Workflow, choose **On an event → Granola → Meeting notes ready**, and select your account.
+5. Optionally choose a folder. It includes meetings in that folder and its subfolders; leaving it
+   empty includes all meetings available to the API key.
+6. Write the step instructions and activate the Workflow before finishing a new meeting.
 
-The event binds to the personal `grn_...` API key connection described below, not to the MCP OAuth
-connection — opencompany discovers finished notes through Granola's REST API. If the account picker
-is empty, add an API key from **Wiki → Sources → Granola** first; you do not need to enable the
-source itself.
+The event uses the personal API-key connection in the plugin's **Events** section. MCP OAuth powers
+the tools separately and does not authorize this polling connection. Saving the key does not turn
+on an event or activate a Workflow, and no Wiki or Brain source is required.
 
-One task starts per meeting, a few minutes after Granola generates the summary, and each meeting
-starts a given Workflow at most once. Meetings Granola finished more than a day earlier don't
-trigger anything, so turning the event on doesn't work through your back catalogue. The task receives the meeting title, time, attendees, note
-URL, and summary as context; it can pull the full transcript with the Granola tools.
+Granola requires **Business or Enterprise API access** to create API keys. Enterprise administrators
+may need to enable API key scopes for members. See [Granola API access](https://docs.granola.ai/introduction).
 
-## Legacy Wiki ingestion
+Each meeting starts a given Workflow at most once, including when a later poll sees an edited
+summary. Events from before Workflow activation and notes last updated more than a day earlier
+are excluded. The task receives the meeting title, time, attendees, note URL, and summary as context.
+The event does not need to download the transcript, so a long transcript cannot block it.
 
-The official MCP plugin serves interactive searches and does not replace continuous Wiki polling.
-Existing personal API-key connections remain available as a legacy ingestion fallback from
-**Wiki → Sources → Granola**. The old Granola card and standalone setup page no longer appear in
-Settings, and MCP OAuth connections are never offered as Wiki sources.
+For a first test, use a step such as:
 
-To keep feeding completed meetings into the Wiki, open the Granola source card, save a personal
-`grn_...` API key, and enable the source. opencompany polls for newly completed summaries and
-transcripts every few minutes. Use **Import company context** to scan a bounded window of older
-notes. Removing or reinstalling the MCP plugin does not delete this separate ingestion connection.
+```text
+Use the meeting summary supplied by this event to list decisions, open questions, and action items.
+Include an owner or due date only when the notes state one.
+```
+
+Wait until Granola has generated the summary, then allow one polling interval and check the
+Workflow's runs. If your steps need more meeting content, connect the MCP account too and configure
+its tool permissions for unattended use. The event toggle does not grant additional tool access.
+
+If no run appears, check the API key's status and note access, the event toggle, the Workflow's
+active status, and any folder filter. A rejected key appears as needing reconnection in **Events**.
+Disabling the event or Workflow prevents pending deliveries from starting new tasks; an already
+running task uses the ordinary task cancellation control.
+
+Automatic provider-to-Wiki ingestion has been retired. Existing API-key connections can be reused
+for events from the plugin page. Removing or reinstalling the plugin does not delete that separate
+connection.
 
 See [Granola's MCP guide](https://docs.granola.ai/help-center/sharing/integrations/mcp) for current
 plan limits, workspace access controls, and provider troubleshooting.

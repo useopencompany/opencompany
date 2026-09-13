@@ -16,8 +16,7 @@ export function GranolaIntegrationSetup({
 }: {
   initialState: GranolaProviderState;
   brainSourcesHref?: string | null;
-  // "modal" embeds the form in the onboarding connect dialog: the Status
-  // section (which duplicates the dialog title) is dropped.
+  // "modal" embeds the form in a dialog or the plugin Events section.
   variant?: "settings" | "modal";
   onSaved?: () => void;
 }) {
@@ -101,6 +100,16 @@ export function GranolaIntegrationSetup({
         <h2 className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
           Granola API key
         </h2>
+        <p className="px-2 text-[13px] leading-5 text-ink-subtle">
+          Meeting events need a separate API key, even if your Granola tools are connected. Granola
+          requires Business or Enterprise API access. On Enterprise, an admin may need to enable API
+          keys for members.
+        </p>
+        {state.status === "needs_reauth" || state.status === "sync_failed" ? (
+          <p role="alert" className="px-2 text-[12px] leading-4 text-warning">
+            {status.detail}
+          </p>
+        ) : null}
         {state.connected ? (
           <div className="mx-2 flex items-start gap-2 rounded-md border border-border bg-surface-muted px-2.5 py-2">
             <Check size={14} strokeWidth={2} className="mt-0.5 shrink-0 text-ink" />
@@ -166,7 +175,7 @@ export function GranolaIntegrationSetup({
         </h2>
         <ol className="list-decimal space-y-2 pl-6 text-[13px] leading-5 text-ink-subtle">
           <li>In the Granola app, open Settings and go to Connectors, then API keys.</li>
-          <li>Create a key with access to the notes you want to ingest.</li>
+          <li>Create a personal key with access to the meetings that should start workflows.</li>
           <li>Copy the grn_ key Granola shows once, paste it here, and save it.</li>
           <li>
             Turn on Meeting notes ready in this plugin, then select Granola in a workflow event
@@ -174,9 +183,9 @@ export function GranolaIntegrationSetup({
           </li>
         </ol>
         <p className="px-2 text-[13px] leading-5 text-ink-subtle">
-          New notes are picked up within a few minutes of Granola finishing their summary and
-          transcript. Live polling does not automatically import older notes; use Import company
-          context when you want to scan recent history.
+          After you activate the workflow, new meeting summaries normally start it within five
+          minutes. Each meeting starts a given workflow at most once. The event includes the
+          summary; reading more meeting content uses your separate Granola tool permissions.
         </p>
       </section>
     </div>
@@ -187,7 +196,7 @@ function setupStatus(state: GranolaProviderState) {
   if (state.connected) {
     return {
       label: state.accountEmail ? `Connected as ${state.accountEmail}` : "Granola is connected",
-      detail: "New meeting notes are picked up by the opencompany Brain ingestion queue.",
+      detail: "Your API key is ready for meeting event workflows.",
       badge: "Connected",
     };
   }
