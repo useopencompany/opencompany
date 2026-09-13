@@ -102,6 +102,7 @@ import {
 } from "@/components/CodingWorkspacePanel";
 import { ConversationRuntimeSync } from "@/components/ConversationRuntimeSync";
 import type { ArtifactSelection } from "@/components/chat/ArtifactViewer";
+import { pendingApprovals } from "@/components/chat/approval-presentation";
 import {
   buildChatTaskLookup,
   firstVisibleAssistantOutputKind,
@@ -113,6 +114,7 @@ import {
 import { ChatShareButton } from "@/components/chat/ChatShareButton";
 import { ChatTranscriptSyncError } from "@/components/chat/ChatTranscriptSyncError";
 import { MessageBubble } from "@/components/chat/MessageBubble";
+import { PendingApprovalBanner } from "@/components/chat/PendingApprovalBanner";
 import { PendingActivityIndicator, ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import type { ActionApprovalRequest, CodexToolAction } from "@/components/chat/ToolCallItem";
 import { useChatAttachments } from "@/components/chat/useChatAttachments";
@@ -421,6 +423,7 @@ export function Surface({
   defaultModel,
   initialChat,
   newChatProjectId = null,
+  newChatProjectName = null,
   recentChats = [],
   archivedChats = [],
   codexConnected = false,
@@ -446,6 +449,9 @@ export function Surface({
   // A sidebar Project the next new chat should be filed under, set when the reader started it from
   // that project's row.
   newChatProjectId?: string | null;
+  // Name of that project. Present only alongside `newChatProjectId`, and swaps the home screen's
+  // activity lists for the project's own prompt.
+  newChatProjectName?: string | null;
   recentChats?: readonly ChatSummaryView[];
   archivedChats?: readonly ChatSummaryView[];
   codexConnected?: boolean;
@@ -659,6 +665,9 @@ export function Surface({
   );
   const hasHomeActivity = homeTasks.length > 0 || homeChats.length > 0 || homeSchedules.length > 0;
   const homeGreetingName = userName.trim() || "there";
+  // A chat started from a project row opens on that project's prompt instead of the home activity
+  // lists, so the reader starts on an empty page scoped to the project they clicked.
+  const newChatProjectPrompt = newChatProjectId ? newChatProjectName?.trim() || null : null;
   const activeTaskConversation =
     taskConversation && initialChat?.id === chatSessionId ? taskConversation : null;
   const backgroundInputDirective = parseBackgroundChatDirective(input);
@@ -1099,6 +1108,12 @@ export function Surface({
     }
     return null;
   }, [chatMessages]);
+  // Only the newest assistant turn can still be answered, so it is the only one that can hold a
+  // decision the composer banner should offer to jump back to.
+  const waitingApprovals = useMemo(() => {
+    const message = chatMessages.find((candidate) => candidate.id === latestAssistantMessageId);
+    return message ? pendingApprovals(message) : [];
+  }, [chatMessages, latestAssistantMessageId]);
   const hasMessages = chatMessages.length > 0;
   const latestActiveTurnStartedAtMs = useMemo(
     () => latestChatTurnStartedAtMs(chatMessages),
@@ -3028,7 +3043,13 @@ export function Surface({
 
       <div className="relative flex min-h-0 w-full flex-1">
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col items-center overflow-hidden">
-          {mode === "home" ? (
+          {mode === "home" && newChatProjectPrompt ? (
+            <div className="flex min-h-0 w-full flex-1 items-center justify-center overflow-y-auto px-6 pb-40">
+              <h1 className="max-w-[720px] text-balance text-center text-[26px] font-semibold leading-tight tracking-tight text-ink">
+                What should we build in {newChatProjectPrompt}?
+              </h1>
+            </div>
+          ) : mode === "home" ? (
             <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
               <div className="flex w-full max-w-[720px] flex-col gap-8 pb-40 pt-16 sm:pt-24">
                 {hasHomeActivity ? (
@@ -3225,6 +3246,7 @@ export function Surface({
             className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center bg-gradient-to-t from-canvas via-canvas to-transparent px-6 pb-6 pt-8"
           >
             <div className="pointer-events-auto relative flex w-full max-w-[720px] flex-col gap-2">
+              <PendingApprovalBanner approvals={waitingApprovals} threadRef={threadRef} />
               {readOnlyNotice ? (
                 <p
                   className="rounded-lg border border-border bg-surface px-3 py-2 text-[12px] leading-4 text-ink-subtle shadow-[0_1px_3px_rgba(0,0,0,0.03)]"

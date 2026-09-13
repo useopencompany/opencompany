@@ -1685,14 +1685,31 @@ export const PluginCapabilityDefinitionSchema = z
   .openapi("PluginCapabilityDefinition");
 
 export const PluginEventFilterDefinitionSchema = z
-  .object({
-    id: z.string().min(1).max(64),
-    label: z.string().min(1).max(120),
-    kind: z.literal("integration_resource"),
-    resourceType: z.string().min(1).max(64),
-    required: z.boolean(),
-  })
-  .strict()
+  .discriminatedUnion("kind", [
+    z
+      .object({
+        id: z.string().min(1).max(64),
+        label: z.string().min(1).max(120),
+        kind: z.literal("integration_resource"),
+        resourceType: z.string().min(1).max(64),
+        required: z.boolean(),
+      })
+      .strict(),
+    z
+      .object({
+        id: z.string().min(1).max(64),
+        label: z.string().min(1).max(120),
+        kind: z.literal("choice"),
+        options: z
+          .array(
+            z.object({ id: z.string().min(1).max(64), name: z.string().min(1).max(120) }).strict(),
+          )
+          .min(1)
+          .max(64),
+        required: z.boolean(),
+      })
+      .strict(),
+  ])
   .openapi("PluginEventFilterDefinition");
 
 export const PluginEventDefinitionSchema = z
@@ -3733,6 +3750,7 @@ export const IdentityUserSchema = z
     reviewInboxEnabled: z.boolean(),
     sidebarProjectsEnabled: z.boolean(),
     subagentsEnabled: z.boolean(),
+    pastSessionAccessEnabled: z.boolean(),
     /** @deprecated Wiki is always enabled. */
     wikiEnabled: z.literal(true),
     taskViewMode: TaskViewModeSchema,
@@ -3800,6 +3818,7 @@ export const UserPreferencesSchema = z
     reviewInboxEnabled: z.boolean(),
     sidebarProjectsEnabled: z.boolean(),
     subagentsEnabled: z.boolean(),
+    pastSessionAccessEnabled: z.boolean(),
   })
   .strict()
   .openapi("UserPreferences");
@@ -3817,6 +3836,7 @@ export const UpdateUserPreferencesBodySchema = z
     reviewInboxEnabled: z.boolean().optional(),
     sidebarProjectsEnabled: z.boolean().optional(),
     subagentsEnabled: z.boolean().optional(),
+    pastSessionAccessEnabled: z.boolean().optional(),
   })
   .strict()
   .refine((body: Record<string, unknown>) => Object.keys(body).length > 0, {

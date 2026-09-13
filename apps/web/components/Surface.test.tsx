@@ -716,7 +716,7 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Accept" }));
+    await user.click(screen.getByRole("button", { name: "Allow once" }));
 
     await waitFor(() =>
       expect(resolveApproval).toHaveBeenCalledWith({
@@ -734,8 +734,8 @@ describe("Surface chat streaming UI", () => {
 
   it.each([
     { decision: "Always allow", save: "success", expectedIds: [0, 1] },
-    { decision: "Accept", save: "success", expectedIds: [0] },
-    { decision: "Decline", save: "success", expectedIds: [0] },
+    { decision: "Allow once", save: "success", expectedIds: [0] },
+    { decision: "Deny", save: "success", expectedIds: [0] },
     { decision: "Always allow", save: "failure", expectedIds: [0] },
     { decision: "Always allow", save: "rejected", expectedIds: [0] },
   ])(
@@ -813,7 +813,7 @@ describe("Surface chat streaming UI", () => {
           assistantMessageId: "assistant_batch_approval",
           model: DEFAULT_MODEL,
           approvalId: `approval_batch_${index}`,
-          approved: decision !== "Decline",
+          approved: decision !== "Deny",
         });
       }
       if (decision === "Always allow") {
@@ -2516,6 +2516,54 @@ describe("Surface chat streaming UI", () => {
     });
   });
 
+  it("selects Fable 5.1 from the Claude picker and submits it", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          sessionId: requestChatSessionId(init, "conversation_claude_fable_1"),
+          userMessageId: "message_claude_fable_user",
+          assistantMessageId: "message_claude_fable_assistant",
+          mode: "started",
+        }),
+        { status: 202, headers: { "Content-Type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} claudeCodeConnected />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByText("Cloud Claude Code sandbox"));
+    await user.click(screen.getByRole("button", { name: "Claude model: Claude Sonnet 5" }));
+    await user.click(screen.getByRole("option", { name: /Claude Fable 5\.1/ }));
+
+    expect(
+      screen.getByRole("button", { name: "Claude model: Claude Fable 5.1" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Claude reasoning effort: High (click to cycle)" }),
+    ).toBeInTheDocument();
+
+    await user.type(
+      screen.getByPlaceholderText("Ask opencompany anything..."),
+      "Inspect this repository",
+    );
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(chatMock.preparedRequestBodies.at(-1)).toMatchObject({
+      model: "anthropic/claude-fable-5.1",
+      engine: {
+        type: "claude_code",
+        schemaVersion: 1,
+        settings: { reasoningEffort: "high" },
+      },
+    });
+  });
+
   it("submits selected Skills to cloud Codex", async () => {
     const user = userEvent.setup();
     knowledgeCommandMocks.listSkillCatalog.mockResolvedValue([
@@ -3923,6 +3971,50 @@ describe("Surface chat streaming UI", () => {
     expect(screen.queryByText("No chats yet.")).not.toBeInTheDocument();
     expect(screen.queryByText("No recurring tasks yet.")).not.toBeInTheDocument();
     expect(screen.queryByText("No results yet.")).not.toBeInTheDocument();
+  });
+
+  it("opens a chat started from a project on that project's prompt", () => {
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={null}
+        userName="Louis"
+        newChatProjectId="project_1"
+        newChatProjectName="product"
+        recentChats={[
+          {
+            id: "conversation_older_1",
+            title: "Older chat",
+            model: DEFAULT_MODEL,
+            engine: "opencompany",
+            preview: "An older chat",
+            updatedAt: "2026-09-01T10:00:00.000Z",
+          },
+        ]}
+      />,
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "What should we build in product?" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("welcome back, Louis")).not.toBeInTheDocument();
+    expect(screen.queryByText("Older chat")).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Ask opencompany anything...")).toBeInTheDocument();
+  });
+
+  it("keeps the plain home screen when a project name is missing", () => {
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={null}
+        userName="Louis"
+        newChatProjectId="project_1"
+      />,
+    );
+
+    expect(screen.getByText("welcome back, Louis")).toBeInTheDocument();
   });
 
   it("renders recent chat history with links to each chat", () => {

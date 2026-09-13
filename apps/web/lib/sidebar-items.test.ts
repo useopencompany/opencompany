@@ -11,7 +11,7 @@ import {
 const now = Date.parse("2026-08-25T12:00:00.000Z");
 
 describe("selectSidebarChats", () => {
-  it("uses one stable policy for pinned, working, recent, and archived chats", () => {
+  it("keeps every recent chat while filtering archived and stale chats", () => {
     const recent = Array.from({ length: 10 }, (_, index) =>
       chat(`recent_${index}`, {
         updatedAt: new Date(now - index * 60_000).toISOString(),
@@ -46,6 +46,8 @@ describe("selectSidebarChats", () => {
       "recent_5",
       "recent_6",
       "recent_7",
+      "recent_8",
+      "recent_9",
     ]);
   });
 });
@@ -69,7 +71,7 @@ describe("selectSidebarTasks", () => {
     expect(selected.map((entry) => entry.id)).toEqual(["old_waiting"]);
   });
 
-  it("bounds the unfinished bucket so a task fan-out cannot fill the column", () => {
+  it("keeps every unfinished task", () => {
     const running = Array.from({ length: 12 }, (_, index) =>
       task(`running_${index}`, {
         status: "running",
@@ -77,10 +79,10 @@ describe("selectSidebarTasks", () => {
       }),
     );
 
-    expect(selectSidebarTasks(running, now)).toHaveLength(8);
+    expect(selectSidebarTasks(running, now)).toHaveLength(12);
   });
 
-  it("keeps running tasks, bounds finished ones by recency, and drops archived ones", () => {
+  it("keeps every recent task and drops archived and stale tasks", () => {
     const recent = Array.from({ length: 10 }, (_, index) =>
       task(`recent_${index}`, {
         status: "succeeded",
@@ -122,6 +124,8 @@ describe("selectSidebarTasks", () => {
       "recent_5",
       "recent_6",
       "recent_7",
+      "recent_8",
+      "recent_9",
     ]);
   });
 });

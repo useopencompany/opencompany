@@ -52,6 +52,7 @@ const userPreferencesMock = vi.hoisted(() => ({
   updateAutoModelRoutingAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateReviewInboxAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateSidebarProjectsAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
+  updatePastSessionAccessAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateSubagentsAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
 }));
 
@@ -178,6 +179,7 @@ vi.mock("@/lib/user-preferences", () => ({
   updateReviewInboxAction: userPreferencesMock.updateReviewInboxAction,
   updateSidebarProjectsAction: userPreferencesMock.updateSidebarProjectsAction,
   updateSubagentsAction: userPreferencesMock.updateSubagentsAction,
+  updatePastSessionAccessAction: userPreferencesMock.updatePastSessionAccessAction,
 }));
 
 vi.mock("@/lib/headless-automation-commands", () => ({
@@ -252,11 +254,13 @@ describe("HomeRoute", () => {
       claudeCodeConnected: false,
     });
 
-    render(<HomeRoute chatId={null} projectId="project_1" />);
+    render(<HomeRoute chatId={null} projectId="project_1" projectName="product" />);
     expect(surfaceMock.props?.newChatProjectId).toBe("project_1");
+    expect(surfaceMock.props?.newChatProjectName).toBe("product");
 
     render(<HomeRoute chatId={null} />);
     expect(surfaceMock.props?.newChatProjectId).toBeNull();
+    expect(surfaceMock.props?.newChatProjectName).toBeNull();
   });
 });
 
@@ -394,6 +398,22 @@ describe("SettingsRoute", () => {
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
   });
 
+  it("enables past session access and restores off when saving fails", async () => {
+    const user = userEvent.setup();
+    userPreferencesMock.updatePastSessionAccessAction.mockRejectedValueOnce(
+      new Error("API unavailable"),
+    );
+    render(<PreferencesSettingsRoute />);
+    const toggle = screen.getByRole("switch", { name: "Past session access" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    await user.click(toggle);
+    expect(await screen.findByText("Could not update this preference.")).toBeInTheDocument();
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    await user.click(toggle);
+    expect(userPreferencesMock.updatePastSessionAccessAction).toHaveBeenLastCalledWith(true);
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+  });
+
   it("shows the Subagents switch off by default and persists opt-in", async () => {
     const user = userEvent.setup();
     render(<PreferencesSettingsRoute />);
@@ -404,6 +424,27 @@ describe("SettingsRoute", () => {
     await user.click(toggle);
 
     expect(userPreferencesMock.updateSubagentsAction).toHaveBeenCalledWith(true);
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+  });
+
+  it("shows the Subagents opt-in while the preference save is pending", async () => {
+    let finishSave!: (result: { ok: true; enabled: boolean }) => void;
+    userPreferencesMock.updateSubagentsAction.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishSave = resolve;
+        }),
+    );
+    const user = userEvent.setup();
+    render(<PreferencesSettingsRoute />);
+
+    const toggle = screen.getByRole("switch", { name: "Subagents" });
+    await user.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    expect(toggle).toBeDisabled();
+
+    finishSave({ ok: true, enabled: true });
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
   });
 

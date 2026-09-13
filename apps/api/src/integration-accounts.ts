@@ -7,7 +7,6 @@ import type {
   AttioProviderState,
   FathomProviderState,
   GranolaProviderState,
-  JamieProviderState,
   StripeProviderState,
 } from "@opencompany/agent/integration-state";
 import { personalAccountsFromRows } from "@opencompany/agent/integration-state";
@@ -63,7 +62,6 @@ import {
   loadIntegrationCredential,
 } from "@opencompany/db/integrations";
 import { brainSources, integrations } from "@opencompany/db/product-schema";
-import { ensureWikiSourceEnabledOnConnect } from "@opencompany/db/wiki-sources";
 import { createLogger } from "@opencompany/observability";
 import type { IntegrationAccountDto } from "@opencompany/protocol";
 import { and, eq, isNull, ne, sql } from "drizzle-orm";
@@ -303,19 +301,11 @@ export function createIntegrationAccountService(input: {
       try {
         const validation = await validateGranolaApiKey(trimmed);
         if (!validation.ok) throw new ApiError(400, "invalid_request", validation.error);
-        const connection = await connectGranolaIntegration({
+        await connectGranolaIntegration({
           userWorkosId: actor.userId,
           apiKey: trimmed,
           accountEmail: validation.accountEmail,
           accountName: validation.accountName,
-          db,
-        });
-        await ensureWikiSourceEnabledOnConnect({
-          workspaceId: actor.workspaceId,
-          provider: "granola",
-          integrationId: connection.integrationId,
-          userWorkosId: actor.userId,
-          createdByWorkosId: actor.userId,
           db,
         });
         return await getGranolaIntegrationState(actor.userId, db);

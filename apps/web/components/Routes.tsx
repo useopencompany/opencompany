@@ -44,6 +44,7 @@ import {
   type ReactNode,
   useEffect,
   useMemo,
+  useOptimistic,
   useState,
   useTransition,
 } from "react";
@@ -84,6 +85,7 @@ import type { RepoConfigView, WorkspaceRepository } from "@/lib/repo-config-acti
 import {
   updateAutoModelRoutingAction,
   updateBotsAction,
+  updatePastSessionAccessAction,
   updateReviewInboxAction,
   updateSidebarProjectsAction,
   updateSubagentsAction,
@@ -93,12 +95,15 @@ import {
 export function HomeRoute({
   chatId,
   projectId = null,
+  projectName = null,
   initialChat: routeInitialChat = null,
 }: {
   chatId: string | null;
   // Set when the reader started this chat from a sidebar Project row, so the Conversation the
   // first message creates is filed there.
   projectId?: string | null;
+  // Resolved server-side for the project's new-chat screen; always paired with `projectId`.
+  projectName?: string | null;
   initialChat?: ChatSessionView | null;
 }) {
   const data = useAppData();
@@ -134,6 +139,7 @@ export function HomeRoute({
         defaultModel={DEFAULT_MODEL}
         initialChat={initialChat}
         newChatProjectId={projectId}
+        newChatProjectName={projectName}
         recentChats={data.recentChats}
         archivedChats={data.archivedChats}
         codexConnected={data.codexConnected}
@@ -258,6 +264,13 @@ export function PreferencesSettingsRoute() {
         <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
           Beta features
         </h2>
+        <BetaFeatureSwitch
+          icon={CalendarClock}
+          label="Past session access"
+          description="Let agents in private chats find and read your past chats in this workspace. Tasks and shared chats are excluded."
+          checked={featureFlags.pastSessionAccess === true}
+          update={updatePastSessionAccessAction}
+        />
         <BetaFeatureSwitch
           icon={Bot}
           label="Bots"
@@ -407,8 +420,8 @@ export function FathomSettingsRoute() {
   return (
     <SettingsContent
       title="Fathom ingestion"
-      description="Legacy API-key ingestion for opencompany Wiki"
-      backLink={{ href: "/wiki/sources", label: "Wiki sources" }}
+      description="Legacy API-key ingestion for Brain"
+      backLink={{ href: "/settings/plugins/fathom", label: "Fathom plugin" }}
     >
       <FathomIntegrationSetup
         initialState={integrations.fathom}
@@ -601,11 +614,13 @@ function BetaFeatureSwitch({
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [optimisticChecked, setOptimisticChecked] = useOptimistic(checked);
 
   const toggle = () => {
-    const nextEnabled = !checked;
+    const nextEnabled = !optimisticChecked;
     setError(null);
     startTransition(async () => {
+      setOptimisticChecked(nextEnabled);
       let result: { ok: boolean };
       try {
         result = await update(nextEnabled);
@@ -631,24 +646,22 @@ function BetaFeatureSwitch({
             <span className="block truncate text-[14px] font-medium leading-tight text-ink">
               {label}
             </span>
-            <span className="block truncate text-[12px] leading-4 text-ink-subtle">
-              {description}
-            </span>
+            <span className="block text-[12px] leading-4 text-ink-subtle">{description}</span>
           </div>
           <button
             type="button"
             role="switch"
-            aria-checked={checked}
+            aria-checked={optimisticChecked}
             aria-label={label}
             disabled={isPending}
             onClick={toggle}
             className={`ml-auto inline-flex h-6 w-10 shrink-0 items-center rounded-full border transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-60 ${
-              checked ? "border-ink bg-ink" : "border-border bg-surface-muted"
+              optimisticChecked ? "border-ink bg-ink" : "border-border bg-surface-muted"
             }`}
           >
             <span
               className={`block h-4 w-4 rounded-full bg-canvas shadow-sm transition-transform duration-150 ${
-                checked ? "translate-x-[18px]" : "translate-x-1"
+                optimisticChecked ? "translate-x-[18px]" : "translate-x-1"
               }`}
             />
           </button>

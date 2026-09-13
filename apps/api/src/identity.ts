@@ -9,7 +9,7 @@ import {
   listWorkspacesForUser,
 } from "@opencompany/db/workspaces";
 import { createLogger } from "@opencompany/observability";
-import type { IdentityDto } from "@opencompany/protocol";
+import { type IdentityDto, IdentitySchema } from "@opencompany/protocol";
 import { recordSignup } from "@opencompany/telemetry";
 import type { WorkOS, User as WorkOSUser } from "@workos-inc/node";
 import { eq } from "drizzle-orm";
@@ -154,7 +154,7 @@ export function createIdentityService(input: {
       brains[0] ??
       null;
 
-    return {
+    return IdentitySchema.parse({
       user: {
         id: user.workosUserId,
         email: user.email,
@@ -168,6 +168,8 @@ export function createIdentityService(input: {
         chatCapabilitiesBetaEnabled: user.chatCapabilitiesBetaEnabled,
         reviewInboxEnabled: user.reviewInboxEnabled,
         sidebarProjectsEnabled: user.sidebarProjectsEnabled,
+        subagentsEnabled: user.subagentsEnabled,
+        pastSessionAccessEnabled: user.pastSessionAccessEnabled,
         wikiEnabled: true as const,
         taskViewMode: user.taskViewMode,
         taskTimeRange: user.taskTimeRange,
@@ -196,7 +198,7 @@ export function createIdentityService(input: {
         intelligence: brain.intelligence,
       })),
       activeBrainId: activeBrain?.id ?? null,
-    };
+    });
   }
 
   async function localUser(identity: ApiIdentity) {

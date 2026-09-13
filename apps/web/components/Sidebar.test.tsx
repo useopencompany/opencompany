@@ -1268,6 +1268,16 @@ describe("Sidebar", () => {
       createdAt: "2026-07-01T09:00:00.000Z",
     });
 
+    // The region renders before listProjects resolves. Wait for the loading boundary itself so
+    // tests can safely depend on project rows, empty results, or derived membership.
+    async function findLoadedProjects() {
+      const projects = await screen.findByRole("region", { name: "Projects" });
+      await waitFor(() =>
+        expect(within(projects).queryByText("Loading projects…")).not.toBeInTheDocument(),
+      );
+      return projects;
+    }
+
     it("stays hidden until the Projects preference is on", async () => {
       recentChatsMock.value = [chatRow("chat_1")];
       projectsApiMock.listProjects.mockResolvedValue([project("project_1", "Launch")]);
@@ -1290,7 +1300,7 @@ describe("Sidebar", () => {
 
       render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
-      const projects = await screen.findByRole("region", { name: "Projects" });
+      const projects = await findLoadedProjects();
       expect(within(projects).getByText("Launch")).toBeInTheDocument();
       expect(within(projects).getByRole("link", { name: "chat_filed title" })).toBeInTheDocument();
       expect(within(projects).getByRole("link", { name: /task_filed name/ })).toBeInTheDocument();
@@ -1311,7 +1321,7 @@ describe("Sidebar", () => {
       ]);
 
       render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
-      const projects = await screen.findByRole("region", { name: "Projects" });
+      const projects = await findLoadedProjects();
       const folder = within(projects).getByRole("button", { name: "Launch" });
 
       const target = folder.parentElement;
@@ -1353,7 +1363,7 @@ describe("Sidebar", () => {
       ]);
 
       render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
-      await screen.findByRole("region", { name: "Projects" });
+      await findLoadedProjects();
 
       await act(async () => {
         fireEvent.drop(screen.getByRole("button", { name: "Recents" }), {
@@ -1385,7 +1395,7 @@ describe("Sidebar", () => {
       ]);
 
       const { unmount } = render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
-      const projects = await screen.findByRole("region", { name: "Projects" });
+      const projects = await findLoadedProjects();
       const folder = within(projects).getByRole("button", { name: "Launch" });
       expect(folder).toHaveAttribute("aria-expanded", "true");
 
@@ -1400,8 +1410,106 @@ describe("Sidebar", () => {
 
       unmount();
       render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
-      const reopened = await screen.findByRole("region", { name: "Projects" });
+      const reopened = await findLoadedProjects();
       expect(within(reopened).getByRole("button", { name: "Launch" })).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      );
+    });
+
+    it("swaps the folder icon for the open/closed state instead of showing a chevron", async () => {
+      featureFlagsMock.sidebarProjects = true;
+      recentChatsMock.value = [chatRow("chat_a")];
+      projectsApiMock.listProjects.mockResolvedValue([project("project_1", "Launch", ["chat_a"])]);
+
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+      const projects = await findLoadedProjects();
+      const folder = within(projects).getByRole("button", { name: "Launch" });
+
+      // The icon is decorative, so aria-expanded (covered above) carries the state for assistive
+      // tech. Lucide's per-icon class is the only stable handle on which glyph actually rendered.
+      expect(folder.querySelector(".lucide-folder-open")).not.toBeNull();
+      expect(folder.querySelector(".lucide-chevron-down")).toBeNull();
+
+      await userEvent.click(folder);
+
+      expect(folder.querySelector(".lucide-folder")).not.toBeNull();
+      expect(folder.querySelector(".lucide-folder-open")).toBeNull();
+      expect(folder.querySelector(".lucide-chevron-down")).toBeNull();
+    });
+
+    it("collapses the whole Projects section and remembers the choice", async () => {
+      featureFlagsMock.sidebarProjects = true;
+      recentChatsMock.value = [chatRow("chat_a")];
+      projectsApiMock.listProjects.mockResolvedValue([project("project_1", "Launch", ["chat_a"])]);
+
+      const { unmount } = render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+      await findLoadedProjects();
+      const section = screen.getByRole("button", { name: "Projects" });
+      expect(section).toHaveAttribute("aria-expanded", "true");
+
+      await userEvent.click(section);
+
+      expect(section).toHaveAttribute("aria-expanded", "false");
+      expect(screen.queryByRole("button", { name: "Launch" })).toBeNull();
+      // The header stays put while collapsed so the section is still findable.
+      expect(screen.getByRole("button", { name: "Projects" })).toBeInTheDocument();
+
+      unmount();
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+      expect(screen.getByRole("button", { name: "Projects" })).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      );
+      await waitFor(() => expect(projectsApiMock.listProjects).toHaveBeenCalled());
+      expect(screen.queryByRole("button", { name: "Launch" })).toBeNull();
+
+      await userEvent.click(screen.getByRole("button", { name: "Projects" }));
+
+      expect(await screen.findByRole("button", { name: "Launch" })).toBeInTheDocument();
+    });
+
+    it("takes a new project name while collapsed and reopens the section once it saves", async () => {
+      featureFlagsMock.sidebarProjects = true;
+      window.localStorage.setItem("opencompany-sidebar-projects-collapsed", "true");
+      projectsApiMock.listProjects.mockResolvedValue([]);
+      projectsApiMock.createProject.mockResolvedValue([project("project_1", "Launch")]);
+
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+      await screen.findByRole("region", { name: "Projects" });
+
+      await userEvent.click(screen.getByRole("button", { name: "New project" }));
+
+      // The name input is above the fold, so a collapsed section can still take one.
+      expect(screen.getByLabelText("Project name")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Projects" })).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      );
+
+      await userEvent.type(screen.getByLabelText("Project name"), "Launch{Enter}");
+
+      expect(await screen.findByRole("button", { name: "Launch" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Projects" })).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      );
+    });
+
+    it("keeps a collapsed Projects section closed when a new project is abandoned", async () => {
+      featureFlagsMock.sidebarProjects = true;
+      window.localStorage.setItem("opencompany-sidebar-projects-collapsed", "true");
+      projectsApiMock.listProjects.mockResolvedValue([]);
+
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+      await screen.findByRole("region", { name: "Projects" });
+
+      await userEvent.click(screen.getByRole("button", { name: "New project" }));
+      await userEvent.keyboard("{Escape}");
+
+      expect(projectsApiMock.createProject).not.toHaveBeenCalled();
+      expect(screen.getByRole("button", { name: "Projects" })).toHaveAttribute(
         "aria-expanded",
         "false",
       );
@@ -1413,7 +1521,7 @@ describe("Sidebar", () => {
       projectsApiMock.listProjects.mockResolvedValue([project("project_1", "Launch")]);
 
       render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
-      const projects = await screen.findByRole("region", { name: "Projects" });
+      const projects = await findLoadedProjects();
 
       expect(within(projects).getByRole("link", { name: "New chat in Launch" })).toHaveAttribute(
         "href",
@@ -1433,7 +1541,7 @@ describe("Sidebar", () => {
       ]);
 
       render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
-      const projects = await screen.findByRole("region", { name: "Projects" });
+      const projects = await findLoadedProjects();
 
       await userEvent.click(
         within(projects).getByRole("button", { name: "Project options for Launch" }),
@@ -1459,7 +1567,7 @@ describe("Sidebar", () => {
       projectsApiMock.deleteProject.mockResolvedValue([]);
 
       render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
-      const projects = await screen.findByRole("region", { name: "Projects" });
+      const projects = await findLoadedProjects();
 
       await userEvent.click(
         within(projects).getByRole("button", { name: "Project options for Launch" }),
@@ -1482,7 +1590,7 @@ describe("Sidebar", () => {
       projectsApiMock.createProject.mockResolvedValue([project("project_1", "Launch")]);
 
       render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
-      await screen.findByRole("region", { name: "Projects" });
+      await findLoadedProjects();
 
       await userEvent.click(screen.getByRole("button", { name: "New project" }));
       await userEvent.type(screen.getByLabelText("Project name"), "Launch{Enter}");

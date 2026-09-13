@@ -151,3 +151,40 @@ describe("workflow event subscription validation", () => {
     ).resolves.toMatch(/enable/i);
   });
 });
+
+it("rejects unsupported choice values even for an enabled plugin event", async () => {
+  const execute = vi.fn(async () => ({
+    rows: [
+      {
+        integrationId: trigger.integrationId,
+        events: [
+          {
+            ...declaration,
+            filters: [
+              {
+                id: "status",
+                label: "Status",
+                kind: "choice",
+                required: false,
+                options: [{ id: "triage", name: "Triage" }],
+              },
+            ],
+          },
+        ],
+        eventModes: { "issue.created": true },
+      },
+    ],
+  }));
+  await expect(
+    validateWorkflowEventSubscription(execute, {
+      actor,
+      trigger: { ...trigger, filters: { status: { id: "invented", name: "Invented" } } },
+    }),
+  ).resolves.toMatch(/supported value/);
+  await expect(
+    validateWorkflowEventSubscription(execute, {
+      actor,
+      trigger: { ...trigger, filters: { status: { id: "triage", name: "Triage" } } },
+    }),
+  ).resolves.toBeNull();
+});

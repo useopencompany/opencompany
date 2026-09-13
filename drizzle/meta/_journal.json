@@ -1905,6 +1905,20 @@
       "when": 1789409200000,
       "tag": "0271_opencompany_subagents_preference",
       "breakpoints": true
+    },
+    {
+      "idx": 272,
+      "version": "7",
+      "when": 1789495600000,
+      "tag": "0272_opencompany_past_session_access",
+      "breakpoints": true
+    },
+    {
+      "idx": 273,
+      "version": "7",
+      "when": 1789582000000,
+      "tag": "0273_retire_wiki_ingestion",
+      "breakpoints": true
     }
   ]
 }

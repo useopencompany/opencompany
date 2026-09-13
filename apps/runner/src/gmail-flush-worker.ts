@@ -13,15 +13,9 @@ import {
   gmailEventTypeForDirection,
   gmailRouteMatchesEvent,
   listEnabledGmailBrainSourceRoutes,
-  listEnabledGmailWikiSourceRoutes,
   newGmailThreadWindowId,
 } from "@opencompany/db/gmail";
 import type { GmailMessageDirection, IntegrationStatus } from "@opencompany/db/product-schema";
-import {
-  attributeWikiSourceEventClaims,
-  claimWikiSourceEvents,
-} from "@opencompany/db/wiki-event-claims";
-import { upsertWikiSourceItemAndEnqueue } from "@opencompany/db/wiki-ingest";
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import { wakeBrainIngestWorker } from "./brain-ingest-worker";
@@ -31,7 +25,6 @@ import { fetchGmailThreadSnapshot, type GmailThreadSnapshot } from "./gmail-api"
 import { googleApiCall } from "./google-api-auth";
 import { createPollingWorker } from "./polling-worker";
 import { rowsFromExecute } from "./sql-exec";
-import { wakeWikiIngestWorker } from "./wiki-ingest-worker";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-gmail-flush" });
 
@@ -129,7 +122,6 @@ export async function flushGmailThreadWindow(
 
   const flushedAt = new Date();
   let brainEnqueued = false;
-  let wikiEnqueued = false;
   const result = await db.transaction(async (tx) => {
     const claimed = rowsFromExecute<BufferedGmailMessageRow>(
       await tx.execute(sql`
@@ -173,10 +165,6 @@ export async function flushGmailThreadWindow(
       integration.status === "connected"
         ? await listEnabledGmailBrainSourceRoutes([window.integrationId], tx)
         : [];
-    const wikiRoutes =
-      integration.status === "connected"
-        ? await listEnabledGmailWikiSourceRoutes([window.integrationId], tx)
-        : [];
     const directions = new Set(claimed.map((row) => row.direction));
     const candidateBrainRefs = brainRoutes
       .filter((route) =>
@@ -185,14 +173,6 @@ export async function flushGmailThreadWindow(
         ),
       )
       .map((route) => route.brainRef);
-    const candidateWikiWorkspaceIds = wikiRoutes
-      .filter((route) =>
-        [...directions].some((direction) =>
-          gmailRouteMatchesEvent(route.config, gmailEventTypeForDirection(direction)),
-        ),
-      )
-      .map((route) => route.workspaceId);
-
     // Cross-member dedup: two members on the same thread each buffer their
     // mailbox's copy of every email. The RFC822 Message-ID is the identity
     // shared across mailboxes; a brain whose claims all lose (thread already
@@ -235,35 +215,6 @@ export async function flushGmailThreadWindow(
     });
 
     brainEnqueued = upserted.enqueued;
-    for (const workspaceId of new Set(candidateWikiWorkspaceIds)) {
-      const claim = await claimWikiSourceEvents({
-        workspaceId,
-        sourceProvider: "gmail",
-        eventKeys,
-        db: tx,
-      });
-      if (claim.claimedCount === 0) continue;
-
-      const wikiUpserted = await upsertWikiSourceItemAndEnqueue({
-        workspaceId,
-        sourceConnectionId: window.integrationId,
-        integrationId: window.integrationId,
-        item,
-        rawPayload: { eventIds: claimed.map((row) => row.id) },
-        rawEventCount: claim.claimedCount,
-        now: flushedAt,
-        db: tx,
-      });
-      await attributeWikiSourceEventClaims({
-        workspaceId,
-        sourceProvider: "gmail",
-        eventKeys: claim.claimedEventKeys,
-        sourceItemId: wikiUpserted.sourceItemId,
-        db: tx,
-      });
-      wikiEnqueued = wikiEnqueued || wikiUpserted.enqueued;
-    }
-
     await tx.execute(sql`
       UPDATE goat.gmail_message_events
       SET source_item_id = ${upserted.sourceItemId}
@@ -285,14 +236,13 @@ export async function flushGmailThreadWindow(
     return {
       sourceItemId: upserted.sourceItemId,
       eventCount: claimed.length,
-      enqueued: upserted.enqueued || wikiEnqueued,
+      enqueued: upserted.enqueued,
       ...(upserted.quotaUpdates ? { quotaUpdates: upserted.quotaUpdates } : {}),
     };
   });
 
   captureProductIngestionQuotaAnalytics(result?.quotaUpdates);
   if (result && brainEnqueued) wakeBrainIngestWorker();
-  if (result && wikiEnqueued) wakeWikiIngestWorker();
   return result;
 }
 

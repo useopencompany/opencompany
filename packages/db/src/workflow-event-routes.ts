@@ -6,6 +6,7 @@
 // redeliveries, and a context block describing what happened.
 
 import { randomUUID } from "node:crypto";
+import type { PluginEventDefinition } from "@opencompany/core";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { getDb } from "./client";
 import {
@@ -15,6 +16,7 @@ import {
   workflowEventRuns,
   workflows,
 } from "./product-schema";
+import { workflowEventFilterValidationError } from "./workflow-event-subscriptions";
 
 type DbLike = any;
 
@@ -42,6 +44,7 @@ export type WorkflowEventTriggerRoute = {
   provider: string;
   event: string;
   filters: Record<string, { id: string }>;
+  activatedAt?: Date;
   legacyTriageStateId?: string;
 };
 
@@ -73,6 +76,7 @@ export async function listWorkflowEventTriggerRoutes(
       workflowSlug: workflows.slug,
       workflowName: workflows.name,
       config: workflows.eventConfig,
+      activatedAt: workflows.eventActivatedAt,
       harnessSpec: workflows.eventHarnessSpec,
     })
     .from(workflows)
@@ -107,16 +111,16 @@ export async function listWorkflowEventTriggerRoutes(
         isNull(plugins.archivedAt),
       ),
     );
-  const enabledEvents = new Set<string>();
+  const enabledEvents = new Map<string, PluginEventDefinition>();
   for (const row of pluginRows as Array<{
     workspaceId: string;
     ownerUserId: string;
-    events: Array<{ id?: unknown }>;
+    events: PluginEventDefinition[];
     eventModes: Record<string, unknown>;
   }>) {
     for (const event of Array.isArray(row.events) ? row.events : []) {
       if (typeof event.id === "string" && row.eventModes?.[event.id] === true) {
-        enabledEvents.add(`${row.workspaceId}:${row.ownerUserId}:${event.id}`);
+        enabledEvents.set(`${row.workspaceId}:${row.ownerUserId}:${event.id}`, event);
       }
     }
   }
@@ -129,6 +133,7 @@ export async function listWorkflowEventTriggerRoutes(
       workflowSlug: string;
       workflowName: string;
       config: unknown;
+      activatedAt?: Date | null;
       harnessSpec: HarnessSpec | null;
     }) => {
       const config = parseWorkflowEventConfig(row.config);
@@ -142,8 +147,13 @@ export async function listWorkflowEventTriggerRoutes(
       ) {
         return [];
       }
+      const declaration = enabledEvents.get(
+        `${row.workspaceId}:${row.userWorkosId}:${config.event}`,
+      )!;
+      if (workflowEventFilterValidationError(declaration, config.filters)) return [];
       return [
         {
+          ...(row.activatedAt ? { activatedAt: row.activatedAt } : {}),
           workflowId: row.workflowId,
           workspaceId: row.workspaceId,
           userWorkosId: row.userWorkosId,
@@ -175,11 +185,14 @@ export async function enqueueWorkflowEventRuns(
   },
   db: DbLike = getDb(),
 ): Promise<number> {
-  if (input.routes.length === 0) return 0;
+  const routes = input.routes.filter(
+    (route) => !route.activatedAt || input.eventAt >= route.activatedAt,
+  );
+  if (routes.length === 0) return 0;
   const rows = await db
     .insert(workflowEventRuns)
     .values(
-      input.routes.map((route) => ({
+      routes.map((route) => ({
         id: `workflow_event_run_${randomUUID()}`,
         workflowId: route.workflowId,
         workspaceId: route.workspaceId,

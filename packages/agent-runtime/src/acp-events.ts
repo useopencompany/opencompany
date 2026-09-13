@@ -82,6 +82,7 @@ export function createAcpEventNormalizer(input: { engineName?: string } = {}) {
     if (method === "session/request_permission") {
       const toolCall = readRecord(params.toolCall) ?? {};
       const toolCallId = readString(toolCall.toolCallId) ?? "acp-permission";
+      const locations = toolLocations(toolCall);
       return [
         normalized("approval.requested", raw, {
           itemId: `acp-approval-${toolCallId}`,
@@ -94,6 +95,10 @@ export function createAcpEventNormalizer(input: { engineName?: string } = {}) {
             readString(readRecord(toolCall.rawInput)?.command) ??
             readString(toolCall.name) ??
             readString(toolCall.title),
+          // The ACP tool kind ("execute", "edit", "fetch", …) and the paths the call touches are
+          // what let the approval card ask a concrete question instead of echoing a raw tool name.
+          kind: readString(toolCall.kind),
+          ...(locations?.length ? { locations } : {}),
           options: Array.isArray(params.options) ? params.options : undefined,
           rawInput: readRecord(toolCall.rawInput) ?? undefined,
         }),

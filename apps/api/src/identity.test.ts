@@ -6,6 +6,7 @@ import {
   listAccessibleBrains,
   listWorkspacesForUser,
 } from "@opencompany/db/workspaces";
+import { IdentitySchema } from "@opencompany/protocol";
 import { recordSignup } from "@opencompany/telemetry";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createIdentityService } from "./identity";
@@ -40,9 +41,14 @@ const localUser = {
   lastName: authUser.lastName,
   avatarUrl: null,
   timezone: "UTC",
+  botsEnabled: false,
   taskSpawningEnabled: true,
   autoModelRoutingEnabled: false,
   chatCapabilitiesBetaEnabled: false,
+  reviewInboxEnabled: false,
+  sidebarProjectsEnabled: false,
+  subagentsEnabled: true,
+  pastSessionAccessEnabled: false,
   wikiEnabled: false,
   taskViewMode: "board",
   taskTimeRange: "7d",
@@ -123,8 +129,15 @@ describe("identity service", () => {
 
     const result = await service.sync(identity);
 
+    expect(() => IdentitySchema.parse(result)).not.toThrow();
     expect(result).toMatchObject({
-      user: { id: authUser.id, email: authUser.email, wikiEnabled: true },
+      user: {
+        id: authUser.id,
+        email: authUser.email,
+        subagentsEnabled: true,
+        pastSessionAccessEnabled: false,
+        wikiEnabled: true,
+      },
       activeWorkspaceId: "goat_ws_company",
       activeBrainId: "brain_general",
     });

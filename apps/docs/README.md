@@ -57,7 +57,8 @@ Before changing a claim, check its implementation:
 
 - UI labels and settings paths: `apps/web/components/SettingsChrome.tsx`, `Routes.tsx`, and the
   relevant feature component.
-- Wiki source availability: `apps/web/lib/wiki-sources/registry.ts` and `WikiSourcesPanel.tsx`.
+- Brain source availability: `apps/web/lib/brain-sources/registry.ts` and `BrainSourceCards.tsx`.
+- Plugin events: `docs/plugin-events.md`, `apps/web/components/OfficialMcpPluginSettings.tsx`, and `WorkflowEditor.tsx`.
 - Roles and feature availability: `apps/api/src/auth.ts` and the relevant application service.
 - Skills and Plugins: their Settings components, package manifests, and runtime permission checks.
 - Tasks and Workflows: the task board, Workflow editor, application services, and runner behavior.

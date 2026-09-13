@@ -1,5 +1,6 @@
 import { resolvePluginGatewayRegistrations } from "../plugin-gateway";
 import { type RemoteMcpGatewayRegistration, resolveRemoteMcpActions } from "./remote-mcp";
+import { resolveSessionHistoryActions } from "./session-history";
 import type {
   ActionProviderCatalog,
   ActionSourceDescriptor,
@@ -40,6 +41,7 @@ export async function resolveActionCatalog(
   input: {
     userWorkosId: string;
     workspaceId: string;
+    chatSessionId?: string;
   },
   deps: ActionCatalogDeps = {},
 ): Promise<ResolvedActionCatalog> {
@@ -70,8 +72,10 @@ export async function resolveActionCatalog(
         actions: managed.actions.filter((action) => action.provider !== "x"),
       }
     : managed;
+  const history = input.chatSessionId ? await resolveSessionHistoryActions(input) : null;
   return {
     providers: [
+      ...(history ? [history.source] : []),
       ...providers.map(
         ({ id, label, description }): ActionSourceDescriptor => ({
           id,
@@ -97,6 +101,10 @@ export async function resolveActionCatalog(
           }),
         ),
     ],
-    actions: [...providers.flatMap((provider) => provider.actions), ...reconciledManaged.actions],
+    actions: [
+      ...providers.flatMap((provider) => provider.actions),
+      ...reconciledManaged.actions,
+      ...(history?.actions ?? []),
+    ],
   };
 }

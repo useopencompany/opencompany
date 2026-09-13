@@ -16,12 +16,10 @@ import {
 import { loadIntegrationCredential } from "@opencompany/db/integrations";
 import {
   type LinearBrainSourceRoute,
-  type LinearWikiSourceRoute,
   linearEventTypeFor,
   linearRouteMatchesEvent,
   linearSelectedTeamIds,
   listEnabledLinearBrainSourceRoutes,
-  listEnabledLinearWikiSourceRoutes,
   newLinearIssueWindowId,
 } from "@opencompany/db/linear";
 import type {
@@ -29,11 +27,6 @@ import type {
   LinearEventAction,
   LinearEventEntityType,
 } from "@opencompany/db/product-schema";
-import {
-  attributeWikiSourceEventClaims,
-  claimWikiSourceEvents,
-} from "@opencompany/db/wiki-event-claims";
-import { upsertWikiSourceItemAndEnqueue } from "@opencompany/db/wiki-ingest";
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import { wakeBrainIngestWorker } from "./brain-ingest-worker";
@@ -41,7 +34,6 @@ import { getDb } from "./db";
 import { fetchLinearIssueSnapshot, type LinearIssueSnapshot } from "./linear-api";
 import { createPollingWorker } from "./polling-worker";
 import { rowsFromExecute } from "./sql-exec";
-import { wakeWikiIngestWorker } from "./wiki-ingest-worker";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-linear-flush" });
 
@@ -118,7 +110,6 @@ export async function flushLinearIssueWindow(window: LinearDueWindow): Promise<{
 
   const flushedAt = new Date();
   let brainEnqueued = false;
-  let wikiEnqueued = false;
   const result = await db.transaction(async (tx) => {
     const claimed = rowsFromExecute<BufferedLinearEventRow>(
       await tx.execute(sql`
@@ -164,14 +155,9 @@ export async function flushLinearIssueWindow(window: LinearDueWindow): Promise<{
       integration.status === "connected"
         ? await listEnabledLinearBrainSourceRoutes([window.integrationId], tx)
         : [];
-    const wikiRoutes =
-      integration.status === "connected"
-        ? await listEnabledLinearWikiSourceRoutes([window.integrationId], tx)
-        : [];
     const teamId = snapshot?.teamId ?? claimed.find((row) => row.teamId)?.teamId ?? null;
     const resolvedRoutes = resolveLinearIssueWindowRoutes({
       brainRoutes,
-      wikiRoutes,
       teamId,
       events: claimed,
     });
@@ -215,35 +201,6 @@ export async function flushLinearIssueWindow(window: LinearDueWindow): Promise<{
     });
     brainEnqueued = upserted.enqueued;
 
-    for (const workspaceId of new Set(resolvedRoutes.wikiWorkspaceIds)) {
-      const claim = await claimWikiSourceEvents({
-        workspaceId,
-        sourceProvider: "linear",
-        eventKeys,
-        db: tx,
-      });
-      if (claim.claimedCount === 0) continue;
-
-      const wikiResult = await upsertWikiSourceItemAndEnqueue({
-        workspaceId,
-        sourceConnectionId: window.integrationId,
-        integrationId: window.integrationId,
-        item,
-        rawPayload: { eventIds: claimed.map((row) => row.id) },
-        rawEventCount: claim.claimedCount,
-        now: flushedAt,
-        db: tx,
-      });
-      await attributeWikiSourceEventClaims({
-        workspaceId,
-        sourceProvider: "linear",
-        eventKeys: claim.claimedEventKeys,
-        sourceItemId: wikiResult.sourceItemId,
-        db: tx,
-      });
-      wikiEnqueued = wikiEnqueued || wikiResult.enqueued;
-    }
-
     await tx.execute(sql`
       UPDATE goat.linear_issue_events
       SET source_item_id = ${upserted.sourceItemId}
@@ -265,7 +222,7 @@ export async function flushLinearIssueWindow(window: LinearDueWindow): Promise<{
     return {
       sourceItemId: upserted.sourceItemId,
       eventCount: claimed.length,
-      enqueued: upserted.enqueued || wikiEnqueued,
+      enqueued: upserted.enqueued,
       skipped: upserted.skipped,
       ...(upserted.quotaUpdates ? { quotaUpdates: upserted.quotaUpdates } : {}),
     };
@@ -273,17 +230,15 @@ export async function flushLinearIssueWindow(window: LinearDueWindow): Promise<{
 
   captureProductIngestionQuotaAnalytics(result?.quotaUpdates);
   if (brainEnqueued) wakeBrainIngestWorker();
-  if (wikiEnqueued) wakeWikiIngestWorker();
   return result;
 }
 
 export function resolveLinearIssueWindowRoutes(input: {
   brainRoutes: readonly LinearBrainSourceRoute[];
-  wikiRoutes: readonly LinearWikiSourceRoute[];
   teamId: string | null;
   events: readonly BufferedLinearEventRow[];
 }) {
-  const matches = (route: LinearBrainSourceRoute | LinearWikiSourceRoute) => {
+  const matches = (route: LinearBrainSourceRoute) => {
     const selected = linearSelectedTeamIds(route.config);
     if (selected.size === 0) return false;
     if (!eventsMatchLinearRoute(route.config, input.events)) return false;
@@ -293,7 +248,6 @@ export function resolveLinearIssueWindowRoutes(input: {
   };
   return {
     brainRefs: input.brainRoutes.filter(matches).map((route) => route.brainRef),
-    wikiWorkspaceIds: input.wikiRoutes.filter(matches).map((route) => route.workspaceId),
   };
 }
 

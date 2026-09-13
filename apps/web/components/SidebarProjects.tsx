@@ -3,15 +3,7 @@
 import type { ProjectDto } from "@opencompany/protocol";
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import { toast } from "@opencompany/ui/components/sonner";
-import {
-  ChevronDown,
-  Folder,
-  MoreHorizontal,
-  PenLine,
-  Plus,
-  SquarePen,
-  Trash2,
-} from "lucide-react";
+import { Folder, FolderOpen, MoreHorizontal, PenLine, Plus, SquarePen, Trash2 } from "lucide-react";
 import Link from "next/link";
 import {
   type DragEvent,
@@ -23,6 +15,11 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import {
+  SIDEBAR_SECTION_ACTION_CLASSNAME,
+  SidebarSectionHeader,
+  useCollapsedSidebarSection,
+} from "@/components/SidebarSection";
 import {
   createProject,
   deleteProject,
@@ -69,6 +66,8 @@ export function isConversationDrag(event: DragEvent<HTMLElement>) {
   return event.dataTransfer.types.includes(CONVERSATION_DRAG_TYPE);
 }
 
+const PROJECTS_LIST_ID = "sidebar-projects";
+const SECTION_COLLAPSED_STORAGE_KEY = "opencompany-sidebar-projects-collapsed";
 const COLLAPSED_STORAGE_KEY = "opencompany-sidebar-collapsed-projects";
 const collapsedSubscribers = new Set<() => void>();
 const NO_COLLAPSED_PROJECTS = "[]";
@@ -259,7 +258,12 @@ export function SidebarProjects({
   // The project a pending new chat is being started in, so the reader can see where it will land.
   activeProjectId: string | null;
 }) {
-  const { collapsed, toggle } = useCollapsedProjects();
+  const { collapsed: collapsedProjects, toggle: toggleProject } = useCollapsedProjects();
+  const {
+    collapsed: sectionCollapsed,
+    toggle: toggleSection,
+    expand: expandSection,
+  } = useCollapsedSidebarSection(SECTION_COLLAPSED_STORAGE_KEY);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
@@ -281,22 +285,30 @@ export function SidebarProjects({
     if (!created) return;
     setName("");
     setCreating(false);
+    // The new project's row lives below the fold, so a saved one reopens the section. Cancelling
+    // leaves the reader's collapse choice alone.
+    expandSection();
   };
 
   return (
     <section aria-label="Projects" className="pb-2">
-      <div className="group/header mx-2 flex items-center gap-1 rounded-md px-2 pb-1 pt-0.5">
-        <span className="text-[11px] font-medium tracking-wide text-ink-subtle">Projects</span>
-        <button
-          type="button"
-          aria-label="New project"
-          title="New project"
-          onClick={() => setCreating(true)}
-          className="ml-auto flex h-5 w-5 shrink-0 items-center justify-center rounded text-ink/50 opacity-0 transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover/header:opacity-100 group-focus-within/header:opacity-100"
-        >
-          <Plus size={13} strokeWidth={2} />
-        </button>
-      </div>
+      <SidebarSectionHeader
+        label="Projects"
+        collapsed={sectionCollapsed}
+        onToggle={toggleSection}
+        listId={PROJECTS_LIST_ID}
+        action={
+          <button
+            type="button"
+            aria-label="New project"
+            title="New project"
+            onClick={() => setCreating(true)}
+            className={SIDEBAR_SECTION_ACTION_CLASSNAME}
+          >
+            <Plus size={13} strokeWidth={2} />
+          </button>
+        }
+      />
 
       {creating ? (
         <form
@@ -328,48 +340,52 @@ export function SidebarProjects({
         </form>
       ) : null}
 
-      {state.error ? (
-        <div className="px-4 pb-1 text-[11.5px] leading-4">
-          <p role="alert" className="text-danger">
-            {state.error}
-          </p>
-          <button
-            type="button"
-            onClick={state.reload}
-            className="text-ink-subtle underline hover:text-ink"
-          >
-            Try again
-          </button>
+      {sectionCollapsed ? null : (
+        <div id={PROJECTS_LIST_ID}>
+          {state.error ? (
+            <div className="px-4 pb-1 text-[11.5px] leading-4">
+              <p role="alert" className="text-danger">
+                {state.error}
+              </p>
+              <button
+                type="button"
+                onClick={state.reload}
+                className="text-ink-subtle underline hover:text-ink"
+              >
+                Try again
+              </button>
+            </div>
+          ) : null}
+
+          <div className="flex flex-col gap-px px-2">
+            {state.projects.map((project) => (
+              <ProjectFolder
+                key={project.id}
+                project={project}
+                items={itemsFor(project)}
+                collapsed={collapsedProjects.has(project.id)}
+                onToggle={() => toggleProject(project.id)}
+                active={activeProjectId === project.id}
+                onDropConversation={(conversationId) => void state.file(project.id, conversationId)}
+                onRename={(next) => state.rename(project.id, next)}
+                onDelete={() => void state.remove(project.id)}
+                renderItem={renderItem}
+              />
+            ))}
+          </div>
+
+          {state.loading && state.projects.length === 0 ? (
+            <p role="status" className="px-4 pb-1 text-[11.5px] leading-4 text-ink-faint">
+              Loading projects…
+            </p>
+          ) : null}
+          {!state.loading && state.projects.length === 0 && !creating && !state.error ? (
+            <p className="px-4 pb-1 text-[11.5px] leading-4 text-ink-faint">
+              Group chats into a project to keep a thread of work together.
+            </p>
+          ) : null}
         </div>
-      ) : null}
-
-      <div className="flex flex-col gap-px px-2">
-        {state.projects.map((project) => (
-          <ProjectFolder
-            key={project.id}
-            project={project}
-            items={itemsFor(project)}
-            collapsed={collapsed.has(project.id)}
-            onToggle={() => toggle(project.id)}
-            active={activeProjectId === project.id}
-            onDropConversation={(conversationId) => void state.file(project.id, conversationId)}
-            onRename={(next) => state.rename(project.id, next)}
-            onDelete={() => void state.remove(project.id)}
-            renderItem={renderItem}
-          />
-        ))}
-      </div>
-
-      {state.loading && state.projects.length === 0 ? (
-        <p role="status" className="px-4 pb-1 text-[11.5px] leading-4 text-ink-faint">
-          Loading projects…
-        </p>
-      ) : null}
-      {!state.loading && state.projects.length === 0 && !creating && !state.error ? (
-        <p className="px-4 pb-1 text-[11.5px] leading-4 text-ink-faint">
-          Group chats into a project to keep a thread of work together.
-        </p>
-      ) : null}
+      )}
     </section>
   );
 }
@@ -400,6 +416,7 @@ function ProjectFolder({
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState(project.name);
   const listId = `sidebar-project-${project.id}`;
+  const FolderIcon = collapsed ? Folder : FolderOpen;
 
   const saveRename = async () => {
     const trimmed = draftName.trim();
@@ -473,21 +490,14 @@ function ProjectFolder({
             aria-controls={collapsed ? undefined : listId}
             className="flex min-w-0 flex-1 items-center gap-2 rounded-l-md py-[5px] pl-2 pr-1 text-left text-ink/90 hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
           >
-            <Folder
+            {/* The folder itself carries the open/closed state, so no separate chevron. */}
+            <FolderIcon
               size={14}
               strokeWidth={1.75}
               aria-hidden="true"
               className="shrink-0 text-ink/60 group-hover/project:text-ink/80"
             />
             <span className="truncate tracking-[-0.005em]">{project.name}</span>
-            <ChevronDown
-              size={12}
-              strokeWidth={2}
-              aria-hidden="true"
-              className={`shrink-0 text-ink/35 transition-transform duration-150 group-hover/project:text-ink/60 ${
-                collapsed ? "-rotate-90" : ""
-              }`}
-            />
           </button>
           <Popover open={menuOpen} onOpenChange={setMenuOpen}>
             <PopoverTrigger
