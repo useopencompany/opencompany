@@ -5223,6 +5223,56 @@
               "provider": {
                 "type": "string",
                 "enum": [
+                  "granola"
+                ]
+              },
+              "folders": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    },
+                    "parentFolderId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1,
+                      "maxLength": 512
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "parentFolderId"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "partial": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "provider",
+              "folders",
+              "partial"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "enum": [
                   "google_drive"
                 ]
               },
@@ -17655,6 +17705,21 @@
                       },
                       "includeTriageStateIds": {
                         "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "provider"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "provider": {
+                        "type": "string",
+                        "enum": [
+                          "granola"
+                        ]
                       }
                     },
                     "required": [

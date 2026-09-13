@@ -1404,9 +1404,11 @@ describe("Surface chat streaming UI", () => {
     expect(screen.queryByText("TASK-1 · Done")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Share task run" })).toBeInTheDocument();
 
+    expect(screen.getByText("Sending a message resumes this task.")).toBeVisible();
+
     const body = "  Please check the afternoon too.\n  Preserve this indent.  ";
-    fireEvent.change(screen.getByPlaceholderText("Add a comment…"), { target: { value: body } });
-    await user.click(screen.getByRole("button", { name: "Post comment" }));
+    fireEvent.change(screen.getByPlaceholderText("Reply..."), { target: { value: body } });
+    await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() =>
       expect(taskCommandMocks.comment).toHaveBeenCalledWith(
@@ -1416,7 +1418,6 @@ describe("Surface chat streaming UI", () => {
       ),
     );
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
-    expect(screen.getByText("Comments are sent verbatim to this task.")).toBeVisible();
   });
 
   it("attaches a dropped screenshot when continuing a session-backed task", async () => {
@@ -1455,7 +1456,7 @@ describe("Surface chat streaming UI", () => {
     });
     expect(await screen.findByText("screenshot.png")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Post comment" }));
+    await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(taskCommandMocks.comment).toHaveBeenCalledWith(
       "task_1",
@@ -1498,13 +1499,13 @@ describe("Surface chat streaming UI", () => {
     );
 
     expect(screen.getByText(/pre-cutover task is available as read-only history/i)).toBeVisible();
-    expect(screen.getByPlaceholderText("Add a comment…")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Post comment" })).toBeDisabled();
+    expect(screen.getByPlaceholderText("Reply...")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Attach files" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Start voice dictation" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start voice dictation" })).toBeDisabled();
     expect(screen.queryByLabelText("Model")).not.toBeInTheDocument();
 
-    const form = screen.getByRole("button", { name: "Post comment" }).closest("form");
+    const form = screen.getByRole("button", { name: "Send message" }).closest("form");
     expect(form).not.toBeNull();
     fireEvent.submit(form!);
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
@@ -1541,10 +1542,10 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText("Add a comment…");
+    const textarea = screen.getByPlaceholderText("Reply...");
     await user.type(textarea, "/prod investigate the mention menu");
     expect(screen.queryByRole("option", { name: /Product work/i })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Post comment" }));
+    await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() =>
       expect(taskCommandMocks.comment).toHaveBeenCalledWith(
@@ -1557,7 +1558,7 @@ describe("Surface chat streaming UI", () => {
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
   });
 
-  it("disables comments while the Task run is active", () => {
+  it("disables the composer while the Task run is active", () => {
     render(
       <Surface
         tasks={[]}
@@ -1584,8 +1585,8 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    expect(screen.getByPlaceholderText("Add a comment…")).toBeDisabled();
-    expect(screen.getByText("You can comment when the current run finishes.")).toBeVisible();
+    expect(screen.getByPlaceholderText("Reply...")).toBeDisabled();
+    expect(screen.getByText("You can reply when the current run finishes.")).toBeVisible();
     expect(screen.queryByTestId("ad-hoc-task-hint")).not.toBeInTheDocument();
     expect(taskCommandMocks.create).not.toHaveBeenCalled();
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
@@ -1671,7 +1672,7 @@ describe("Surface chat streaming UI", () => {
     await waitFor(() =>
       expect(screen.queryByRole("status", { name: "Stopping task…" })).not.toBeInTheDocument(),
     );
-    expect(screen.getByRole("button", { name: "Post comment" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send message" })).toBeInTheDocument();
   });
 
   it("restores the task stop control when cancellation fails", async () => {
@@ -5432,6 +5433,112 @@ describe("Surface chat streaming UI", () => {
       />,
     );
     expect(screen.getByRole("status", { name: "opencompany is working" })).toBeInTheDocument();
+  });
+
+  it("times a resumed turn from the active run, not the previous turn left unsettled", () => {
+    chatMock.status = "streaming";
+    const lastNight = new Date(Date.now() - 9 * 60 * 60 * 1000).toISOString();
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "chat_overnight_1",
+          title: "Coding session",
+          model: CLAUDE_CHAT_DEFAULT_MODEL_ID,
+          engine: "claude_code",
+          runtime: {
+            status: "running",
+            activeRunId: "run_today",
+            hasError: false,
+            updatedAt: currentTimestamp(),
+          },
+          activityState: "working",
+          hasUnseen: false,
+          messages: [
+            {
+              id: "user_last_night",
+              role: "user",
+              metadata: { sessionId: "chat_overnight_1", timing: { createdAt: lastNight } },
+              parts: [{ type: "text", text: "Last night" }],
+            },
+            {
+              id: "assistant_last_night",
+              role: "assistant",
+              metadata: {
+                sessionId: "chat_overnight_1",
+                runId: "run_last_night",
+                timing: { createdAt: lastNight },
+              },
+              parts: [{ type: "text", text: "Answered last night" }],
+            },
+            {
+              id: "user_today",
+              role: "user",
+              metadata: {
+                sessionId: "chat_overnight_1",
+                timing: { createdAt: currentTimestamp() },
+              },
+              parts: [{ type: "text", text: "Picking this back up" }],
+            },
+          ],
+        }}
+      />,
+    );
+
+    const indicator = screen.getByRole("status", { name: "Claude Code is working" });
+    expect(within(indicator).getByText(/^\d+\.\ds$/)).toBeInTheDocument();
+  });
+
+  it("keeps the working indicator on a new turn after the previous turn settled", () => {
+    chatMock.status = "streaming";
+    const lastNight = new Date(Date.now() - 9 * 60 * 60 * 1000).toISOString();
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "chat_overnight_2",
+          title: "Coding session",
+          model: CLAUDE_CHAT_DEFAULT_MODEL_ID,
+          engine: "claude_code",
+          runtime: {
+            status: "running",
+            activeRunId: "run_today",
+            hasError: false,
+            updatedAt: currentTimestamp(),
+          },
+          activityState: "working",
+          hasUnseen: false,
+          messages: [
+            {
+              id: "assistant_last_night",
+              role: "assistant",
+              metadata: {
+                sessionId: "chat_overnight_2",
+                runId: "run_last_night",
+                timing: { createdAt: lastNight, durationMs: 12_000 },
+              },
+              parts: [{ type: "text", text: "Answered last night" }],
+            },
+            {
+              id: "user_today",
+              role: "user",
+              metadata: {
+                sessionId: "chat_overnight_2",
+                timing: { createdAt: currentTimestamp() },
+              },
+              parts: [{ type: "text", text: "Picking this back up" }],
+            },
+          ],
+        }}
+      />,
+    );
+
+    const indicator = screen.getByRole("status", { name: "Claude Code is working" });
+    expect(within(indicator).getByText(/^\d+\.\ds$/)).toBeInTheDocument();
   });
 
   it("does not show a live timer for a finalized turn when stream and runtime state are stale", () => {

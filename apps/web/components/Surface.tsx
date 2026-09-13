@@ -1121,8 +1121,16 @@ export function Surface({
   );
   const transportTurn = useMemo<ActiveChatTurn | null>(() => {
     if (activeTurn || !isGenerating || !chatSessionId) return null;
+    // A resumed stream carries no run id, so the turn is recovered from the transcript. Scope that
+    // lookup to the run the conversation runtime reports as active: the newest assistant message
+    // holding a run id can still belong to an earlier turn, and adopting it would date this turn
+    // from that older run.
+    const activeRunId = conversationRuntime?.activeRunId ?? null;
     const assistantMessage = chatMessages.findLast(
-      (message) => message.role === "assistant" && Boolean(message.metadata?.runId),
+      (message) =>
+        message.role === "assistant" &&
+        Boolean(message.metadata?.runId) &&
+        (activeRunId === null || message.metadata?.runId === activeRunId),
     );
     const runId = assistantMessage?.metadata?.runId;
     if (!assistantMessage || !runId) return null;
@@ -1134,7 +1142,14 @@ export function Surface({
       assistantMessageId: assistantMessage.id,
       startedAtMs,
     };
-  }, [activeTurn, chatMessages, chatSessionId, isGenerating, latestActiveTurnStartedAtMs]);
+  }, [
+    activeTurn,
+    chatMessages,
+    chatSessionId,
+    conversationRuntime,
+    isGenerating,
+    latestActiveTurnStartedAtMs,
+  ]);
   const runtimeTurn = useMemo<ActiveChatTurn | null>(() => {
     const activeRunId = conversationRuntime?.activeRunId;
     if (
@@ -1900,13 +1915,13 @@ export function Surface({
           if (!mountedRef.current) return;
           pendingTaskCommentRef.current = null;
           router.refresh();
-          toast.success("Comment posted. The task is running again.");
+          toast.success("Message sent. The task is running again.");
         })
         .catch((error) => {
           if (!mountedRef.current) return;
           if (!inputRef.current?.value) setInput(rawPrompt);
           composerAttachments.setAttachments(pendingAttachments);
-          toast.error(error instanceof Error ? error.message : "Could not post the comment.");
+          toast.error(error instanceof Error ? error.message : "Could not send that message.");
         })
         .finally(() => {
           if (mountedRef.current) setTaskCommentSubmitting(false);
@@ -3371,10 +3386,10 @@ export function Surface({
                   <MessageSquare size={13} strokeWidth={2} className="shrink-0" />
                   <span>
                     {isTaskConversationWorking
-                      ? "You can comment when the current run finishes."
+                      ? "You can reply when the current run finishes."
                       : taskCommentSubmitting
-                        ? "Posting your comment…"
-                        : "Posting a comment resumes this task."}
+                        ? "Sending your message…"
+                        : "Sending a message resumes this task."}
                   </span>
                 </div>
               ) : selectedAdHocTask ? (
@@ -3431,13 +3446,11 @@ export function Surface({
                       name="prompt"
                       value={input}
                       placeholder={
-                        activeTaskConversation
-                          ? "Add a comment…"
-                          : mode === "chat"
-                            ? "Reply..."
-                            : taskSpawningEnabled
-                              ? "Ask a question or describe a task..."
-                              : "Ask opencompany anything..."
+                        activeTaskConversation || mode === "chat"
+                          ? "Reply..."
+                          : taskSpawningEnabled
+                            ? "Ask a question or describe a task..."
+                            : "Ask opencompany anything..."
                       }
                       onChange={onInputChange}
                       onBlur={() => setMentionToken(null)}
@@ -3515,7 +3528,6 @@ export function Surface({
                     }
                     isStopping={!isBackgroundSubmit && isTaskConversationStopping}
                     startsTask={selectedAdHocTask || Boolean(selectedWorkflowMention)}
-                    submitsComment={Boolean(activeTaskConversation)}
                     onStop={stopGeneration}
                   />
                 </div>
@@ -3550,27 +3562,25 @@ export function Surface({
                       </button>
                     </>
                   ) : null}
-                  {activeTaskConversation ? (
-                    <span className="min-h-7 px-1 text-[11.5px] leading-7 text-ink-subtle">
-                      Comments are sent verbatim to this task.
-                    </span>
-                  ) : (
+                  <button
+                    type="button"
+                    aria-label="Start voice dictation"
+                    disabled={
+                      isForegroundTurnWorking ||
+                      backgroundTaskSubmitting ||
+                      isTaskConversationWorking ||
+                      taskCommentSubmitting ||
+                      readOnly ||
+                      voiceDictation.isActive ||
+                      newChatCommandOpen
+                    }
+                    onClick={voiceDictation.start}
+                    className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
+                  >
+                    <Mic size={15} strokeWidth={1.9} />
+                  </button>
+                  {activeTaskConversation ? null : (
                     <>
-                      <button
-                        type="button"
-                        aria-label="Start voice dictation"
-                        disabled={
-                          isForegroundTurnWorking ||
-                          backgroundTaskSubmitting ||
-                          readOnly ||
-                          voiceDictation.isActive ||
-                          newChatCommandOpen
-                        }
-                        onClick={voiceDictation.start}
-                        className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
-                      >
-                        <Mic size={15} strokeWidth={1.9} />
-                      </button>
                       {selectedWorkflow ? (
                         <WorkflowComposerControls
                           selection={workflowComposer}
@@ -5111,15 +5121,22 @@ function chatMessageStartedAtMs(message: ChatUiMessage) {
   return Number.isFinite(startedAtMs) ? startedAtMs : null;
 }
 
+function chatMessageIsSettledAssistant(message: ChatUiMessage) {
+  return message.role === "assistant" && typeof message.metadata?.timing?.durationMs === "number";
+}
+
 function finalizedChatAssistantOutcome(message: ChatUiMessage | null) {
-  if (!message || typeof message.metadata?.timing?.durationMs !== "number") return null;
-  if (message.metadata.aborted) return "canceled" as const;
-  if (message.metadata.error) return "failed" as const;
+  if (!message || !chatMessageIsSettledAssistant(message)) return null;
+  if (message.metadata?.aborted) return "canceled" as const;
+  if (message.metadata?.error) return "failed" as const;
   return "completed" as const;
 }
 
+// Approximates when the turn still in flight began. The scan stops at the newest settled assistant
+// message because everything before it belongs to a turn that already reported its own duration.
 function latestChatTurnStartedAtMs(messages: readonly ChatUiMessage[]) {
   for (const message of messages.toReversed()) {
+    if (chatMessageIsSettledAssistant(message)) return null;
     const startedAtMs = chatMessageStartedAtMs(message);
     if (startedAtMs !== null) return startedAtMs;
   }
@@ -6864,14 +6881,12 @@ function SubmitButton({
   isGenerating,
   isStopping = false,
   startsTask = false,
-  submitsComment = false,
   onStop,
 }: {
   disabled: boolean;
   isGenerating: boolean;
   isStopping?: boolean;
   startsTask?: boolean;
-  submitsComment?: boolean;
   onStop: () => void;
 }) {
   if (isStopping) {
@@ -6905,8 +6920,8 @@ function SubmitButton({
   return (
     <button
       type="submit"
-      aria-label={startsTask ? "Start task" : submitsComment ? "Post comment" : "Send message"}
-      title={startsTask ? "Start task" : submitsComment ? "Post comment" : undefined}
+      aria-label={startsTask ? "Start task" : "Send message"}
+      title={startsTask ? "Start task" : undefined}
       disabled={disabled}
       className="mb-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-ink text-canvas transition-opacity duration-150 hover:opacity-90 focus:outline-none disabled:opacity-30"
     >

@@ -143,6 +143,21 @@ export async function listLinearTeamsAction(
   return { ok: true, teams: result.data.teams, partial: result.data.partial };
 }
 
+export type GranolaFolderListResult =
+  | (Omit<Extract<BrainSourceOptions, { provider: "granola" }>, "provider"> & { ok: true })
+  | { ok: false; error: string };
+
+export async function listGranolaFoldersAction(
+  integrationId: string,
+): Promise<GranolaFolderListResult> {
+  const result = await listSourceOptions(integrationId, { provider: "granola" });
+  if (!result.ok) return result;
+  if (result.data.provider !== "granola") {
+    return { ok: false, error: "Granola returned an invalid source-option response." };
+  }
+  return { ok: true, folders: result.data.folders, partial: result.data.partial };
+}
+
 export type GoogleDriveResourceListResult =
   | (Omit<Extract<BrainSourceOptions, { provider: "google_drive" }>, "provider"> & {
       ok: true;
