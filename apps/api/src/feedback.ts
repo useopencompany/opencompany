@@ -1,7 +1,7 @@
 import { getAppUrl } from "@opencompany/agent/app-url";
 import type { Actor } from "@opencompany/core";
 import { chatSessions, tasks, users, workspaces } from "@opencompany/db/product-schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull, or } from "drizzle-orm";
 import { ApiError } from "./errors";
 
 // A small feedback report from the sidebar widget. Bug / Feedback / Idea only —
@@ -160,18 +160,17 @@ function titleFromMessage(kind: FeedbackKind, message: string) {
   return `[${titlePrefix(kind)}] ${title}`;
 }
 
-// Lines describing the run the report came from, already scoped to the actor.
-// `null` fields mean the row is gone or was never the reporter's, which is worth
-// saying out loud rather than dropping the reference the reporter was promised.
-type FeedbackReference = {
-  context: FeedbackContext;
-  taskId: string | null;
-  taskDisplayId: string | null;
-  sessionId: string | null;
-};
+// The run the report came from. An unresolved reference means the reporter
+// cannot open the id they submitted — worth saying out loud in the issue rather
+// than dropping the reference the dialog promised them.
+type FeedbackReference =
+  | { kind: "chat" | "task"; id: string; resolved: false }
+  | { kind: "chat"; id: string; resolved: true }
+  | { kind: "task"; id: string; resolved: true; displayId: string; sessionId: string | null };
 
-// Only the reporter's own rows resolve: a chat session is user-owned, a task is
-// workspace-owned. An id that matches neither still gets reported, unresolved.
+// Mirrors the access rules the reporter's own reads use: a chat session is
+// owner-scoped, and a task belongs either to the acting workspace or, when it
+// predates one, to the acting user.
 async function resolveContext(
   db: DbLike,
   actor: Actor,
@@ -183,45 +182,49 @@ async function resolveContext(
       .from(chatSessions)
       .where(and(eq(chatSessions.id, context.id), eq(chatSessions.userWorkosId, actor.userId)))
       .limit(1);
-    return {
-      context,
-      taskId: null,
-      taskDisplayId: null,
-      sessionId: session?.id ?? null,
-    };
+    return session
+      ? { kind: "chat", id: context.id, resolved: true }
+      : { kind: "chat", id: context.id, resolved: false };
   }
 
   const [task] = await db
-    .select({ id: tasks.id, displayId: tasks.displayId, sessionId: tasks.sessionId })
+    .select({ displayId: tasks.displayId, sessionId: tasks.sessionId })
     .from(tasks)
-    .where(and(eq(tasks.id, context.id), eq(tasks.workspaceId, actor.workspaceId)))
+    .where(
+      and(
+        eq(tasks.id, context.id),
+        or(
+          eq(tasks.workspaceId, actor.workspaceId),
+          and(isNull(tasks.workspaceId), eq(tasks.userWorkosId, actor.userId)),
+        ),
+      ),
+    )
     .limit(1);
-  return {
-    context,
-    taskId: task?.id ?? null,
-    taskDisplayId: task?.displayId ?? null,
-    sessionId: task?.sessionId ?? null,
-  };
+  return task
+    ? {
+        kind: "task",
+        id: context.id,
+        resolved: true,
+        displayId: task.displayId,
+        sessionId: task.sessionId,
+      }
+    : { kind: "task", id: context.id, resolved: false };
 }
 
 function referenceLines(reference: FeedbackReference) {
-  const { context } = reference;
-  const path = context.kind === "chat" ? "/chat" : "/tasks";
-  const link = new URL(`${path}/${encodeURIComponent(context.id)}`, getAppUrl()).toString();
+  const segment = reference.kind === "chat" ? "chat" : "tasks";
+  const link = new URL(`/${segment}/${encodeURIComponent(reference.id)}`, getAppUrl()).toString();
 
-  if (context.kind === "chat") {
-    return [
-      `Session: ${context.id}${reference.sessionId ? "" : " (not accessible to the reporter)"}`,
-      `Link: ${link}`,
-    ];
+  if (!reference.resolved) {
+    const label = reference.kind === "chat" ? "Session" : "Task";
+    return [`${label}: ${reference.id} (not accessible to the reporter)`, `Link: ${link}`];
   }
-
-  if (!reference.taskId) {
-    return [`Task: ${context.id} (not accessible to the reporter)`, `Link: ${link}`];
+  if (reference.kind === "chat") {
+    return [`Session: ${reference.id}`, `Link: ${link}`];
   }
 
   return [
-    `Task: ${context.id} (${reference.taskDisplayId})`,
+    `Task: ${reference.id} (${reference.displayId})`,
     ...(reference.sessionId ? [`Session: ${reference.sessionId}`] : []),
     `Link: ${link}`,
   ];

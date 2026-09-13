@@ -3916,7 +3916,7 @@ export const McpSetupEnvelopeSchema = z
 export const FeedbackKindSchema = z.enum(["bug", "feedback", "idea"]);
 
 // What the reporter had open when they hit the feedback button. Only the two
-// references worth chasing a bug through - a chat session or a task - so triage
+// references worth chasing a bug through — a chat session or a task — so triage
 // lands on the exact run instead of guessing from the message.
 export const FeedbackContextSchema = z
   .object({

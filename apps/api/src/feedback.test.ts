@@ -120,7 +120,7 @@ describe("feedback service", () => {
   it("references the task and its session so triage can open the failing run", async () => {
     const { fetchImpl, calls } = routeLinear();
     const service = createFeedbackService({
-      db: fakeDb({ context: [{ id: "tsk_1", displayId: "TASK-42", sessionId: "ses_9" }] }),
+      db: fakeDb({ context: [{ displayId: "TASK-42", sessionId: "ses_9" }] }),
       fetch: fetchImpl,
     });
 
@@ -152,6 +152,24 @@ describe("feedback service", () => {
     const description = descriptionOf(calls);
     expect(description).toContain("Session: ses_9");
     expect(description).toContain("Link: https://my.opencompany.chat/chat/ses_9");
+  });
+
+  it("omits the session line for a task that never started one", async () => {
+    const { fetchImpl, calls } = routeLinear();
+    const service = createFeedbackService({
+      db: fakeDb({ context: [{ displayId: "TASK-7", sessionId: null }] }),
+      fetch: fetchImpl,
+    });
+
+    await service.submit(actor, {
+      kind: "bug",
+      message: "It never picked up the prompt.",
+      context: { kind: "task", id: "tsk_1" },
+    });
+
+    const description = descriptionOf(calls);
+    expect(description).toContain("Task: tsk_1 (TASK-7)");
+    expect(description).not.toContain("Session:");
   });
 
   it("still reports an id that does not resolve for the reporter, marked as such", async () => {
