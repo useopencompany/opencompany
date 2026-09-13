@@ -2,8 +2,10 @@
 
 import { toast } from "@opencompany/ui/components/sonner";
 import { MessageSquarePlus, Send, X } from "lucide-react";
+import { usePathname } from "next/navigation";
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { submitFeedback } from "@/lib/feedback/actions";
+import { feedbackContextFromPathname, feedbackContextLabel } from "@/lib/feedback/context";
 
 // Feedback sits in the middle and is the default, so the most common report is the
 // resting state and one tap reaches Bug or Idea.
@@ -38,6 +40,8 @@ async function sendFeedbackInBackground(formData: FormData) {
 }
 
 function FeedbackDialog({ onClose }: { onClose: () => void }) {
+  const pathname = usePathname();
+  const context = feedbackContextFromPathname(pathname);
   const messageRef = useRef<HTMLTextAreaElement>(null);
   const [kind, setKind] = useState<FeedbackKind>(DEFAULT_KIND);
   const [error, setError] = useState<string | null>(null);
@@ -138,6 +142,8 @@ function FeedbackDialog({ onClose }: { onClose: () => void }) {
             <input type="hidden" name="kind" value={kind} />
           </div>
 
+          <input type="hidden" name="path" value={pathname ?? ""} />
+
           <label className="flex flex-col gap-1.5">
             <span className="text-[11px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
               Feedback
@@ -153,6 +159,14 @@ function FeedbackDialog({ onClose }: { onClose: () => void }) {
               className="min-h-[140px] resize-y rounded-md border border-border bg-surface px-2.5 py-2 text-[13px] leading-5 text-ink outline-none transition-colors placeholder:text-ink/35 focus:border-ink/30 focus:ring-1 focus:ring-ink/15"
             />
           </label>
+
+          {context ? (
+            // Reports from a chat or task carry that reference so triage can open
+            // the exact run instead of asking the reporter for an id.
+            <p className="text-[12px] leading-4 text-ink-subtle">
+              Attaching {feedbackContextLabel(context)} so we can look into it.
+            </p>
+          ) : null}
 
           {error ? (
             <div className="rounded-md border border-danger-border bg-danger-bg px-3 py-2 text-[12.5px] text-danger">
