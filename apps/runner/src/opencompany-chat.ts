@@ -65,7 +65,13 @@ import {
 } from "@opencompany/telemetry";
 import { flushLatitude } from "@opencompany/telemetry/latitude";
 import * as ai from "ai";
-import { convertToModelMessages, type LanguageModelUsage, parsePartialJson, stepCountIs } from "ai";
+import {
+  APICallError,
+  convertToModelMessages,
+  type LanguageModelUsage,
+  parsePartialJson,
+  stepCountIs,
+} from "ai";
 import { asc, eq, sql } from "drizzle-orm";
 import { downloadBlobBytes } from "./attachment-hydration";
 import { loadBotIdentityPrompt } from "./bot-context";
@@ -73,6 +79,7 @@ import { runTaskBrainRead } from "./codex-brain-tool";
 import {
   CodexChatHandoffError,
   CodexChatLeaseLostError,
+  CodexChatRetryableInfrastructureError,
   TaskTurnTerminalError,
 } from "./codex-chat-errors";
 import { getDb } from "./db";
@@ -467,6 +474,31 @@ export async function runProductChatTurn(input: {
     }
     if (effectiveError instanceof CodexChatLeaseLostError) {
       throw effectiveError;
+    }
+    if (isReplaySafeProductChatInfrastructureFailure(effectiveError, projection)) {
+      const diagnostic = productChatInfrastructureFailureDiagnostic(effectiveError);
+      logger.warn("Durable opencompany chat model stream ended before a tool executed", {
+        event: "opencompany.goat_opencompany_chat_stream_retryable_failure",
+        turn_id: turn.id,
+        codex_chat_session_id: session.id,
+        attempt: turn.attempts,
+        error_name: effectiveError.name,
+        error: effectiveError.message,
+        status_code: effectiveError.statusCode,
+        cause_name:
+          effectiveError.cause instanceof Error
+            ? effectiveError.cause.name
+            : typeof effectiveError.cause,
+        cause:
+          effectiveError.cause instanceof Error
+            ? effectiveError.cause.message
+            : String(effectiveError.cause),
+      });
+      throw new CodexChatRetryableInfrastructureError(
+        "The model response stream ended before it could be completed.",
+        effectiveError,
+        diagnostic,
+      );
     }
 
     const message = errorMessage(effectiveError);
@@ -1507,6 +1539,9 @@ function providerMetadataFrom(part: Record<string, unknown>) {
   return part.providerMetadata ? { providerMetadata: part.providerMetadata } : {};
 }
 
+// Only text and reasoning are finalized. Tool parts deliberately keep `input-streaming` so
+// isReplaySafeProductChatInfrastructureFailure can still tell a partial tool input apart from one
+// that crossed the execute boundary.
 function finalizeStreamingParts(parts: readonly ProductChatUiPart[]) {
   return parts.map((part) =>
     (part.type === "text" || part.type === "reasoning") && part.state === "streaming"
@@ -1577,6 +1612,39 @@ function readStringAllowEmpty(value: unknown) {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+export function isReplaySafeProductChatInfrastructureFailure(
+  error: unknown,
+  projection: ProductChatProjection,
+): error is APICallError {
+  if (!APICallError.isInstance(error)) return false;
+  const retryableProviderFailure =
+    error.isRetryable ||
+    (error.statusCode !== undefined &&
+      error.statusCode >= 200 &&
+      error.statusCode < 300 &&
+      error.message === "Failed to process successful response");
+  if (!retryableProviderFailure) return false;
+
+  // A completed tool call may already have crossed an external side-effect boundary. Restarting
+  // the model from the user message could then generate a different tool-call id and execute that
+  // mutation twice. A partial tool input has not reached the SDK's execute boundary and is safe to
+  // discard along with ordinary text/reasoning before the durable worker retries the same turn.
+  return !projection.parts.some(
+    (part) => typeof part.toolCallId === "string" && part.state !== "input-streaming",
+  );
+}
+
+function productChatInfrastructureFailureDiagnostic(error: APICallError) {
+  const status = error.statusCode === undefined ? "unknown" : String(error.statusCode);
+  const cause =
+    error.cause instanceof Error
+      ? `${error.cause.name}: ${error.cause.message}`
+      : error.cause === undefined
+        ? "unknown"
+        : String(error.cause);
+  return `[run_turn] ${error.name} (${status}): ${error.message}; cause: ${cause}`;
 }
 
 function projectionText(projection: ProductChatProjection) {

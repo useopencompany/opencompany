@@ -22,7 +22,7 @@ bun run bench --resume .context/bench/<timestamp>.json --budget-usd 5
 `--list` and `--help` need no key and make no model calls. Every actual trial is metered.
 No extra production environment variables, database, dev server or hosted eval service is needed.
 
-Defaults: all eight scenarios, k=4, v5, concurrency=1, $5 run budget. The small model set follows
+Defaults: all nine scenarios, k=4, v5, concurrency=1, $5 run budget. The small model set follows
 the production router's answer models (Kimi K2.6 and Kimi K3) plus Sonnet 5. `--models` accepts
 comma-separated exact `AGENT_MODEL_CATALOG` IDs. `--scenarios` accepts comma-separated IDs and
 `tag:<tag>` selectors. `--variant` accepts v4, v5, or both. Other catalog models are opt-in.
@@ -60,7 +60,8 @@ and messages are never saved. Eval generations disable external telemetry export
   summaries report p50. Cache hits and provider load affect both costs and timings.
 
 The new Linear scenarios cost roughly $0.01 per Kimi K2.6 trial and $0.02–$0.04 per Kimi K3 or
-Sonnet trial in the initial September 2026 validation. A full default run is 96 trials; plan for
+Sonnet trial in the initial September 2026 validation; the cross-tool `posthog-linear-triage`
+case ranged $0.002 (DeepSeek V4 Flash) to $0.12 (Kimi K3) per trial. A full default run is 108 trials; plan for
 roughly $2–$5, with larger PostHog schemas or failures potentially costing more. Start with one
 model and `--k 1`. These are observed planning estimates, not fixed provider prices.
 

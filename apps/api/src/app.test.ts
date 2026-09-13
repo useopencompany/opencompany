@@ -2481,6 +2481,23 @@ describe("canonical Hono API", () => {
     await expect(response.text()).resolves.toContain("event: run.paused");
   });
 
+  it("skips the presentation hot stream for coding-engine runs", async () => {
+    const read = vi.fn(async () => ({
+      status: "available" as const,
+      entries: [presentationEntry("1786449600000-0", "never delivered")],
+      nextStreamId: "1786449600000-0",
+    }));
+    const fixture = streamingFixture({ presentation: { read }, engine: "claude_code" });
+
+    const body = await responseBody(fixture.app.request("/v1/runs/run_1/events"));
+
+    // A coding engine never publishes presentation frames; its stream must not pay the
+    // hot-path Redis read or the presentation-rate wake cadence.
+    expect(read).not.toHaveBeenCalled();
+    expect(body).not.toContain("message.presentation_delta");
+    expect(body).toContain("event: run.completed");
+  });
+
   it("fans one Redis hot stream out through multiple API instances", async () => {
     const presentation = presentationReader(({ afterStreamId }) =>
       afterStreamId ? [] : [presentationEntry("1786449600000-0", "Hello")],
@@ -6523,6 +6540,7 @@ function streamingFixture(options: {
   attemptCount?: number;
   waitsBeforeTerminal?: number;
   finalStatus?: "completed" | "canceled";
+  engine?: "opencompany" | "codex" | "claude_code";
 }) {
   const repository = fakeRepository();
   const attemptCount = options.attemptCount ?? 1;
@@ -6534,7 +6552,7 @@ function streamingFixture(options: {
     conversationId: "conversation_1",
     triggerMessageId: "message_user_1",
     status: terminal ? finalStatus : "running",
-    engine: "opencompany",
+    engine: options.engine ?? "opencompany",
     model: "provider/default",
     attemptCount,
     createdAt,
