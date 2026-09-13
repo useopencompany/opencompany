@@ -3684,13 +3684,40 @@ describe("canonical Hono API", () => {
       message: "The board drops my column order.",
     });
 
+    const withContext = await app.request("/v1/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "bug",
+        message: "The run stalled halfway.",
+        context: { kind: "task", id: "tsk_1" },
+      }),
+    });
+    expect(withContext.status).toBe(200);
+    expect(submit).toHaveBeenLastCalledWith(actor, {
+      kind: "bug",
+      message: "The run stalled halfway.",
+      context: { kind: "task", id: "tsk_1" },
+    });
+
     const tooShort = await app.request("/v1/feedback", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ kind: "bug", message: "no" }),
     });
     expect(tooShort.status).toBe(400);
-    expect(submit).toHaveBeenCalledTimes(1);
+
+    const unknownContextKind = await app.request("/v1/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "bug",
+        message: "The board drops my column order.",
+        context: { kind: "wiki", id: "page_1" },
+      }),
+    });
+    expect(unknownContextKind.status).toBe(400);
+    expect(submit).toHaveBeenCalledTimes(2);
   });
 
   it("serves repository configs without ever echoing stored env values", async () => {
