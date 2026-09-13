@@ -82,13 +82,16 @@ export type GranolaFolder = {
   parentFolderId: string | null;
 };
 
+// `partial` separates the two ways a listing can fall short. It means only that the account has
+// more folders than one listing reads, which is a property of the account and will not change on
+// a retry. Anything a retry could fix — an unreachable API, an unusable continuation cursor — is
+// `ok: false` instead, so a caller can retry exactly the cases worth retrying.
 export type GranolaFolderListResult =
   | { ok: true; folders: GranolaFolder[]; partial: boolean }
   | { ok: false; reason: "unauthorized" | "unavailable"; error: string };
 
 const GRANOLA_FOLDERS_PAGE_SIZE = 30;
-// Bounds one listing at 600 folders. Beyond that the result is reported as partial rather than
-// presented as the whole tree, so a caller never silently treats a missing folder as absent.
+// Bounds one listing at 600 folders, far past what the teams this serves organize meetings with.
 const GRANOLA_FOLDERS_MAX_PAGES = 20;
 const GRANOLA_FOLDERS_REQUEST_TIMEOUT_MS = 15_000;
 
@@ -147,9 +150,15 @@ export async function listGranolaFolders(input: {
       if (folder) folders.push(folder);
     }
     const nextCursor = typeof body.cursor === "string" && body.cursor ? body.cursor : null;
-    // A repeated cursor would page forever; treat it as the end of a list we cannot fully trust.
-    if (!body.hasMore || !nextCursor || seenCursors.has(nextCursor)) {
-      return { ok: true, folders, partial: Boolean(body.hasMore) };
+    if (!body.hasMore) return { ok: true, folders, partial: false };
+    // Granola says there is more but gave nothing usable to ask for it. That is a provider fault
+    // rather than a large account, so it reports as retryable instead of as a truncated tree.
+    if (!nextCursor || seenCursors.has(nextCursor)) {
+      return {
+        ok: false,
+        reason: "unavailable",
+        error: "Granola did not return a usable folder continuation cursor.",
+      };
     }
     seenCursors.add(nextCursor);
     cursor = nextCursor;

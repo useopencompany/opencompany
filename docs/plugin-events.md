@@ -43,8 +43,10 @@ its cursor on connection, retains pagination progress, and limits stale-note rep
 A Granola folder filter covers the chosen folder and its subfolders, the scope Granola's own note
 query uses. A poll pass reads the account's folder list once, and only when a route filters on a
 folder, so it can walk a note's direct memberships up to their ancestors. When that read fails the
-pass stops without advancing the cursor and retries, because matching against a partial tree would
-drop runs and then poll past the notes that should have started them.
+pass stops without advancing the cursor and retries, because matching against a tree it could not
+read would drop runs and then poll past the notes that should have started them. An account with
+more folders than one listing reads is logged instead: retrying would never read more, so the pass
+proceeds on each note's own membership entries rather than stopping that connection for good.
 
 The runner checks current workflow status, membership, connection, plugin installation, and event
 opt-in again before creating a task. Disabling the workflow or its event stops queued deliveries

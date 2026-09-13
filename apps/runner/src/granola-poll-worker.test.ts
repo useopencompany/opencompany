@@ -403,13 +403,13 @@ describe("Granola poll pass folder scoping", () => {
       error: "Could not reach the Granola API. Try again in a moment.",
     });
 
-    await expect(poll()).rejects.toThrow(/Could not load the whole Granola folder tree/);
+    await expect(poll()).rejects.toThrow(/Could not read the Granola folder tree/);
     expect(workerMocks.completeGranolaSyncPages).not.toHaveBeenCalled();
     expect(workerMocks.updateGranolaSyncPage).not.toHaveBeenCalled();
     expect(workerMocks.enqueueWorkflowEventRuns).not.toHaveBeenCalled();
   });
 
-  it("retries rather than matching a folder filter against a truncated folder tree", async () => {
+  it("keeps polling an account with more folders than one listing reads", async () => {
     workerMocks.listWorkflowEventTriggerRoutes.mockResolvedValue([
       meetingRoute({ folder: { id: "fol_customers" } }),
     ]);
@@ -418,10 +418,15 @@ describe("Granola poll pass folder scoping", () => {
       folders: [{ id: "fol_customers", name: "Customers", parentFolderId: null }],
       partial: true,
     });
+    workerMocks.fetchGranolaNote.mockResolvedValue({
+      ...granolaPayload(),
+      folder_membership: [{ id: "fol_acme", parent_folder_id: "fol_customers" }],
+    });
 
-    await expect(poll()).rejects.toThrow(/whole Granola folder tree/);
-    expect(workerMocks.completeGranolaSyncPages).not.toHaveBeenCalled();
-    expect(workerMocks.enqueueWorkflowEventRuns).not.toHaveBeenCalled();
+    // Retrying would never read more, and failing every pass would stop this connection's
+    // ingestion for good, so the pass completes on the memberships it can still resolve.
+    await expect(poll()).resolves.toEqual({ enqueued: 0, seen: 1, workflowRuns: 1 });
+    expect(workerMocks.completeGranolaSyncPages).toHaveBeenCalled();
   });
 
   it("asks for a new API key when Granola rejects the folder read", async () => {

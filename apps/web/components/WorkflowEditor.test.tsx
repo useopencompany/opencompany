@@ -363,7 +363,7 @@ describe("WorkflowEditor", () => {
     );
   });
 
-  it("saves a filter-free poll-delivered event trigger as soon as an account is bound", async () => {
+  it("saves a poll-delivered event trigger with its optional filter left unset", async () => {
     render(
       <WorkflowEditor
         workflow={workflow}

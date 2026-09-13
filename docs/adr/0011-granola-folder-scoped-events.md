@@ -32,6 +32,11 @@ A failed folder read ends the pass before the cursor advances, and a rejected ke
 connection `needs_reauth` as any other Granola call does. Matching against a tree the platform
 could not read would drop runs and then poll past the notes that should have started them.
 
+The listing separates that retryable failure from a tree larger than one listing reads. The second
+is a property of the account, so retrying would never read more and failing every pass would stop
+that connection's ingestion for good. A truncated tree therefore logs and proceeds on the folders
+it did read plus each note's own membership entries, which still reach one level up.
+
 This is the first filter whose delivery-side value is a set rather than a single id — a note can
 sit in several folders — so `workflowEventFiltersMatch` accepts either and passes when the
 configured id is among the values.
@@ -49,7 +54,9 @@ A folder read outage now delays Brain ingestion for that connection by one inter
 letting the pass complete, because the cursor is shared. That trade buys the guarantee that a
 configured event either fires or visibly retries, and never silently skips.
 
-Beyond 600 folders the listing reports itself partial. The editor says so; the poller still stops
-the pass rather than matching on a tree it knows is incomplete.
+Beyond 600 folders a listing reports itself partial: the editor shows its existing incomplete-options
+warning, and the poller logs and matches less deeply rather than stopping. Deeply nested folders in
+such an account can miss a filter on a distant ancestor. That is the one place this design trades
+reach for keeping an unrelated feature alive, and it is visible in logs rather than silent.
 
 Provider reference: [Granola list folders](https://docs.granola.ai/api-reference/list-folders).

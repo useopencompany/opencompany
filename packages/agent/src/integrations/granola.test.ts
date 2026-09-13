@@ -64,15 +64,14 @@ describe("listGranolaFolders", () => {
     });
   });
 
-  it("stops on a repeated cursor instead of paging forever", async () => {
+  it("reports a repeated cursor as retryable rather than paging forever or claiming a full tree", async () => {
     const fetchMock = respondWith(
       { body: { folders: [], hasMore: true, cursor: "same" } },
       { body: { folders: [], hasMore: true, cursor: "same" } },
     );
-    await expect(listGranolaFolders({ apiKey: "grn_test" })).resolves.toEqual({
-      ok: true,
-      folders: [],
-      partial: true,
+    await expect(listGranolaFolders({ apiKey: "grn_test" })).resolves.toMatchObject({
+      ok: false,
+      reason: "unavailable",
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });

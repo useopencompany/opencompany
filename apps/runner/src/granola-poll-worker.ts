@@ -221,16 +221,27 @@ export async function pollGranolaIntegration(input: {
   let folderParentIds = new Map<string, string | null>();
   if (workflowRoutes.some((route) => route.filters[GRANOLA_FOLDER_FILTER_ID])) {
     const folders = await listGranolaFolders({ apiKey, signal: input.signal });
-    if (!folders.ok && folders.reason === "unauthorized") {
-      await markGranolaNeedsReauth(candidate, "Granola rejected the saved API key.");
-      return null;
+    if (!folders.ok) {
+      if (folders.reason === "unauthorized") {
+        await markGranolaNeedsReauth(candidate, "Granola rejected the saved API key.");
+        return null;
+      }
+      // Matching a folder filter against a tree the platform could not read would drop runs
+      // silently and then advance the cursor past the notes that should have started them. This
+      // failure is retryable, so leave the cursor where it is and take the whole pass again.
+      throw new Error("Could not read the Granola folder tree for an event-filtered workflow.");
     }
-    // Matching a folder filter against a tree the platform knows is incomplete would drop runs
-    // silently and then advance the cursor past the notes that should have started them. A
-    // truncated listing is as unusable here as a failed one, so both leave the cursor and retry.
-    if (!folders.ok || folders.partial) {
-      throw new Error(
-        "Could not load the whole Granola folder tree for an event-filtered workflow.",
+    if (folders.partial) {
+      // The account has more folders than one listing reads, so retrying would never succeed and
+      // failing every pass would stop this connection's ingestion for good. Matching falls back to
+      // each note's own membership entries, which still reach one level up.
+      logger.warn(
+        "opencompany Granola folder tree exceeded one listing; filters match less deeply",
+        {
+          event: "opencompany.goat_granola_folder_tree_truncated",
+          integration_id: candidate.integrationId,
+          folder_count: folders.folders.length,
+        },
       );
     }
     folderParentIds = new Map(
