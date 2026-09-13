@@ -73,10 +73,11 @@ export type PluginCapabilitiesResult = {
 export type PluginEventFilterDefinition = {
   id: string;
   label: string;
-  kind: "integration_resource";
-  resourceType: string;
   required: boolean;
-};
+} & (
+  | { kind: "integration_resource"; resourceType: string }
+  | { kind: "choice"; options: { id: string; name: string }[] }
+);
 
 // `webhook` events reach the platform through a signed provider delivery; `poll` events are
 // discovered by a platform poller that already syncs the provider. The mode is the plugin's
@@ -392,14 +393,27 @@ export function parsePluginEvents(
       const filterId = nonEmptyBoundedString(candidate.id, 64);
       const filterLabel = nonEmptyBoundedString(candidate.label, 120);
       const resourceType = nonEmptyBoundedString(candidate.resourceType, 64);
+      const options = Array.isArray(candidate.options) ? candidate.options : [];
+      const validOptions =
+        options.length > 0 &&
+        options.length <= 64 &&
+        options.every(
+          (option) =>
+            isRecord(option) &&
+            nonEmptyBoundedString(option.id, 64) &&
+            nonEmptyBoundedString(option.name, 120),
+        ) &&
+        new Set(options.map((option) => option.id.trim())).size === options.length;
+      const validKind =
+        candidate.kind === "integration_resource"
+          ? Boolean(resourceType && /^[a-z][a-z0-9_]*$/u.test(resourceType))
+          : candidate.kind === "choice" && validOptions;
       if (
         !filterId ||
         !/^[a-z][a-z0-9_]*$/u.test(filterId) ||
         filterIds.has(filterId) ||
         !filterLabel ||
-        candidate.kind !== "integration_resource" ||
-        !resourceType ||
-        !/^[a-z][a-z0-9_]*$/u.test(resourceType) ||
+        !validKind ||
         typeof candidate.required !== "boolean"
       ) {
         issues.push(`Event \`${id}\` filter at index ${filterIndex} is invalid.`);
@@ -410,9 +424,16 @@ export function parsePluginEvents(
       filters.push({
         id: filterId,
         label: filterLabel,
-        kind: "integration_resource",
-        resourceType,
         required: candidate.required,
+        ...(candidate.kind === "choice"
+          ? {
+              kind: "choice" as const,
+              options: options.map((option) => ({
+                id: option.id.trim(),
+                name: option.name.trim(),
+              })),
+            }
+          : { kind: "integration_resource" as const, resourceType: resourceType! }),
       });
     }
     if (!valid) continue;

@@ -35,7 +35,11 @@ export type ActionProviderId =
   | "infisical"
   | "x_account";
 
-export type ActionSourceId = ActionProviderId | ManagedCapabilitySource | `plugin:${string}`;
+export type ActionSourceId =
+  | ActionProviderId
+  | ManagedCapabilitySource
+  | "session_history"
+  | `plugin:${string}`;
 
 export type ActionErrorCode =
   | "not_connected"

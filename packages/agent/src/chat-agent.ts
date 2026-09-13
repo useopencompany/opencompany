@@ -181,6 +181,18 @@ import {
   WEB_SEARCH_TOOL_DESCRIPTION,
 } from "./prompts";
 import {
+  createSubagentBudget,
+  SUBAGENT_SYSTEM_PROMPT,
+  SUBAGENT_TOOL_DESCRIPTION,
+  SUBAGENT_TOOL_INPUT_JSON_SCHEMA,
+  SUBAGENT_TOOL_NAME,
+  type SubagentBudget,
+  type SubagentRunner,
+  type SubagentToolInput,
+  type SubagentToolOutput,
+  subagentToolSet,
+} from "./subagent";
+import {
   WORKSPACE_SKILL_AUTHORING_INPUT_SCHEMA,
   WORKSPACE_SKILL_EDIT_INPUT_SCHEMA,
   WORKSPACE_SKILLS_INPUT_SCHEMA,
@@ -415,6 +427,14 @@ export async function runProductChatAgent(input: {
   actions?: ActionDispatcher;
   skills?: SkillDispatcher;
   workflows?: WorkflowDispatcher;
+  runSubagent?: SubagentRunner;
+  subagentBudget?: SubagentBudget;
+  subagentDepth?: number;
+  // Set by the runner when this run *is* a subagent rather than the main conversation. It swaps
+  // the main chat prompt for the subagent prompt and narrows the tool set to what a subagent may
+  // use, so the two never drift apart into separate generation paths.
+  subagent?: { depth: number };
+  onStepFinish?: (step: unknown) => void | Promise<void>;
   brainMultiBrain?: { targets: readonly BrainMultiBrainTarget[] };
   currentDate?: Date | string;
   userContext?: ProductChatSystemPromptInput["userContext"];
@@ -469,6 +489,9 @@ export async function runProductChatAgent(input: {
     ...(input.actions ? { actions: input.actions } : {}),
     ...(input.skills ? { skills: input.skills } : {}),
     ...(input.workflows ? { workflows: input.workflows } : {}),
+    ...(input.runSubagent ? { runSubagent: input.runSubagent } : {}),
+    ...(input.subagentBudget ? { subagentBudget: input.subagentBudget } : {}),
+    ...(input.subagentDepth !== undefined ? { subagentDepth: input.subagentDepth } : {}),
     ...(input.brainMultiBrain ? { brainMultiBrain: input.brainMultiBrain } : {}),
   });
 
@@ -489,10 +512,15 @@ export async function runProductChatAgent(input: {
       ? { connectedIntegrations: input.connectedIntegrations }
       : {}),
     skillsAvailable: Boolean(input.skills?.catalog.length),
+    subagentsEnabled: Boolean(input.runSubagent),
     workflows: input.workflows?.catalog ?? [],
   };
+  const subagent = input.subagent;
+  const tools = subagent
+    ? subagentToolSet(toolContext.tools, { depth: subagent.depth })
+    : toolContext.tools;
   const system = [
-    createProductChatSystemPrompt(systemPromptInput),
+    subagent ? SUBAGENT_SYSTEM_PROMPT : createProductChatSystemPrompt(systemPromptInput),
     ...(input.extraSystemBlocks ?? []),
   ].join("\n\n");
 
@@ -529,9 +557,10 @@ export async function runProductChatAgent(input: {
         maxSteps,
         system,
         actionCallsExhausted: toolContext.areActionCallsExhausted(),
-        toolNames: Object.keys(toolContext.tools),
+        toolNames: Object.keys(tools),
       }),
-    tools: toolContext.tools,
+    tools,
+    ...(input.onStepFinish ? { onStepFinish: input.onStepFinish } : {}),
     ...(toolContext.repairToolCall
       ? { experimental_repairToolCall: toolContext.repairToolCall }
       : {}),
@@ -618,6 +647,12 @@ export function createProductChatToolContext(input: {
   // report its own outcome. Absent in interactive chat and the Slack bot, so
   // the update_task_status tool never appears there.
   updateTaskStatus?: UpdateTaskStatusRunner;
+  // Injected by the runner, the only composition root that can build a nested tool context.
+  // `budget` is shared with every nested context so one turn's whole subagent tree draws from
+  // the same run allowance; `depth` is 0 in the main conversation.
+  runSubagent?: SubagentRunner;
+  subagentBudget?: SubagentBudget;
+  subagentDepth?: number;
   // Per-run caps for the tool-call budget. An interactive chat turn uses the
   // module defaults; a long background task raises them.
   limits?: {
@@ -1697,10 +1732,66 @@ export function createProductChatToolContext(input: {
     });
   }
 
+  const runSubagent = input.runSubagent;
+  const subagentBudget = input.subagentBudget ?? createSubagentBudget();
+  const subagentDepth = input.subagentDepth ?? 0;
+  if (runSubagent) {
+    tools[SUBAGENT_TOOL_NAME] = tool<
+      SubagentToolInput,
+      SubagentToolOutput,
+      Record<string, unknown>
+    >({
+      description: SUBAGENT_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<SubagentToolInput>(
+        SUBAGENT_TOOL_INPUT_JSON_SCHEMA as unknown as JSONSchema7,
+      ),
+      execute: async (args, executionContext?: unknown) => {
+        visibleToolActivity = true;
+        const task = typeof args.task === "string" ? args.task.trim() : "";
+        if (!task) {
+          return { ok: false, error: `${SUBAGENT_TOOL_NAME} requires a non-empty task.` };
+        }
+        const description =
+          typeof args.description === "string" && args.description.trim()
+            ? args.description.trim()
+            : "Subagent";
+        // The parent tool call id is what the UI nests the child's live trace under, so a run
+        // without one would execute invisibly. Fail loudly instead.
+        const toolCallId =
+          executionContext &&
+          typeof executionContext === "object" &&
+          "toolCallId" in executionContext &&
+          typeof executionContext.toolCallId === "string"
+            ? executionContext.toolCallId
+            : null;
+        if (!toolCallId) {
+          return {
+            ok: false,
+            error: "The subagent could not be started because its tool call had no id.",
+          };
+        }
+
+        const lease = await subagentBudget.acquire();
+        if (!lease.ok) return { ok: false, error: lease.error };
+        try {
+          return await runSubagent({
+            description,
+            task,
+            toolCallId,
+            depth: subagentDepth + 1,
+          });
+        } finally {
+          lease.release();
+        }
+      },
+    });
+  }
+
   return {
     areActionCallsExhausted: () => actionCallsExhausted,
     getStartedTask: () => startedTask,
     hasVisibleToolActivity: () => visibleToolActivity,
+    subagentBudget,
     repairToolCall,
     tools,
   };

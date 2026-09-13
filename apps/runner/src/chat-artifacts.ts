@@ -11,7 +11,9 @@ import {
   type PublishArtifactToolResponse,
   type PublishedChatArtifact,
   shellQuote,
+  type WriteArtifactMediaType,
   type WriteArtifactToolInput,
+  writeArtifactMediaType,
 } from "@opencompany/agent-runtime";
 import { newResourceId } from "@opencompany/core/resource-ids";
 import {
@@ -40,12 +42,15 @@ const logger = createLogger({
   runtime: "goat-chat-artifacts",
 });
 
+const CHAT_ARTIFACT_BLOB_OPERATION_TIMEOUT_MS = 60_000;
+
 const MEDIA_TYPE_BY_EXTENSION: Readonly<Record<string, string>> = {
   ".md": "text/markdown",
   ".txt": "text/plain",
   ".csv": "text/csv",
   ".tsv": "text/tab-separated-values",
   ".json": "application/json",
+  ".html": "text/html",
   ".srt": "application/x-subrip",
   ".pdf": "application/pdf",
   ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -67,6 +72,7 @@ type ArtifactPersistenceContext = {
   engine: CodexChatEngine;
   env: Pick<RunnerEnv, "blobReadWriteToken">;
   checkAbort: () => Promise<void>;
+  signal?: AbortSignal;
 };
 
 type PublishArtifactContext = ArtifactPersistenceContext & {
@@ -252,6 +258,7 @@ async function publishChatArtifactBytes(input: {
     access: "private",
     addRandomSuffix: false,
     contentType: input.input.mediaType,
+    abortSignal: artifactBlobOperationSignal(input.context.signal),
     ...(input.context.env.blobReadWriteToken
       ? { token: input.context.env.blobReadWriteToken }
       : {}),
@@ -296,7 +303,10 @@ async function publishChatArtifactBytes(input: {
       );
     }
   } catch (error) {
+    // The rollback must still run after the turn was interrupted, so it gets the storage
+    // deadline without the turn signal; otherwise a hung delete replaces a hung upload.
     await del(stored.pathname, {
+      abortSignal: artifactBlobOperationSignal(),
       ...(input.context.env.blobReadWriteToken
         ? { token: input.context.env.blobReadWriteToken }
         : {}),
@@ -429,6 +439,7 @@ export async function publishExternalEngineChatArtifact(input: {
         engine,
         env: input.env,
         checkAbort,
+        ...(input.signal ? { signal: input.signal } : {}),
       },
       input: normalizePublishArtifactInput(input.arguments),
       toolCallId: input.toolCallId,
@@ -514,10 +525,11 @@ export async function publishInBandChatArtifact(input: {
         engine: "opencompany",
         env: input.env,
         checkAbort,
+        ...(input.signal ? { signal: input.signal } : {}),
       },
       input: {
         filename: artifactInput.filename,
-        mediaType: "text/markdown",
+        mediaType: artifactInput.mediaType,
         bytes,
         title: artifactInput.title,
         ...(artifactInput.description !== undefined
@@ -572,14 +584,15 @@ function normalizePublishArtifactInput(value: unknown): PublishArtifactInput {
   };
 }
 
-function normalizeWriteArtifactInput(value: unknown): WriteArtifactToolInput {
+function normalizeWriteArtifactInput(
+  value: unknown,
+): WriteArtifactToolInput & { mediaType: WriteArtifactMediaType } {
   if (!isRecord(value)) throw new Error("write_artifact expects an object input.");
   const filename = requiredBoundedString(value.filename, "filename", 255);
-  if (
-    filename !== path.posix.basename(filename) ||
-    path.posix.extname(filename).toLowerCase() !== ".md"
-  ) {
-    throw new Error("filename must be a Markdown filename ending in .md, without a path.");
+  const mediaType =
+    filename === path.posix.basename(filename) ? writeArtifactMediaType(filename) : null;
+  if (!mediaType) {
+    throw new Error("filename must end in .md or .html, without a path.");
   }
   const title = requiredBoundedString(value.title, "title", 160);
   if (typeof value.content !== "string") throw new Error("content must be a string.");
@@ -595,6 +608,7 @@ function normalizeWriteArtifactInput(value: unknown): WriteArtifactToolInput {
   }
   return {
     filename,
+    mediaType,
     title,
     content: value.content,
     ...(value.description !== undefined
@@ -635,7 +649,7 @@ async function loadPublishableSandboxFile(input: {
   const mediaType = MEDIA_TYPE_BY_EXTENSION[path.posix.extname(filename).toLowerCase()];
   if (!mediaType) {
     throw new Error(
-      "That file type is not supported. Publish Markdown, text, CSV, TSV, JSON, SRT, PDF, DOCX, XLSX, PPTX, PNG, JPEG, or WebP.",
+      "That file type is not supported. Publish Markdown, text, HTML, CSV, TSV, JSON, SRT, PDF, DOCX, XLSX, PPTX, PNG, JPEG, or WebP.",
     );
   }
   const bytes = Buffer.from(await input.sandbox.files.read(realPath, { format: "bytes" }));
@@ -838,6 +852,11 @@ function artifactBlobPath(input: {
     encodeURIComponent(input.artifactId),
     `${encodeURIComponent(input.artifactVersionId)}-${filename}`,
   ].join("/");
+}
+
+function artifactBlobOperationSignal(signal?: AbortSignal) {
+  const timeout = AbortSignal.timeout(CHAT_ARTIFACT_BLOB_OPERATION_TIMEOUT_MS);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
 }
 
 function isPathWithinDirectory(pathname: string, directory: string) {

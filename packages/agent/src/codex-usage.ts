@@ -1,4 +1,4 @@
-import type { CodexUsage } from "@opencompany/protocol/schemas";
+import type { SubscriptionUsage } from "@opencompany/protocol/schemas";
 import * as z from "zod";
 import { CodexBackendError, createCodexTokenManager } from "./codex-backend-language-model";
 
@@ -13,25 +13,19 @@ const RateLimitSchema = z.object({
   primary_window: WindowSchema.nullish(),
   secondary_window: WindowSchema.nullish(),
 });
+// `additional_rate_limits` carries per-model side quotas (Codex Spark and the like).
+// They are rarely the binding constraint and read as noise next to the account windows,
+// so the card shows only the plan's own limits.
 const UsageResponseSchema = z.object({
   account_id: z.string().nullish(),
   rate_limit: RateLimitSchema.nullish(),
-  additional_rate_limits: z
-    .array(
-      z.object({
-        limit_name: z.string().nullish(),
-        metered_feature: z.string().nullish(),
-        rate_limit: RateLimitSchema.nullish(),
-      }),
-    )
-    .nullish(),
 });
 
 export async function fetchCodexUsage(input: {
   db: Parameters<typeof createCodexTokenManager>[0]["db"];
   userWorkosId: string;
   fetchImpl?: typeof fetch;
-}): Promise<CodexUsage> {
+}): Promise<SubscriptionUsage> {
   // Bound both usage reads and any OAuth refresh through the existing token lease.
   const signal = AbortSignal.timeout(20_000);
   const fetchImpl: typeof fetch = (request, init) =>
@@ -86,31 +80,17 @@ export async function fetchCodexUsage(input: {
   return normalizeCodexUsage(result.data);
 }
 
-function normalizeCodexUsage(data: z.infer<typeof UsageResponseSchema>): CodexUsage {
-  const windows: CodexUsage["windows"] = [];
-  const append = (
-    limits: z.infer<typeof RateLimitSchema> | null | undefined,
-    id: string,
-    name: string,
-  ) => {
-    for (const slot of ["primary_window", "secondary_window"] as const) {
-      const window = limits?.[slot];
-      if (!window) continue;
-      windows.push({
-        id: `${id}:${slot}`,
-        label: [name, windowLabel(window.limit_window_seconds)].filter(Boolean).join(" "),
-        usedPercent: Math.min(100, window.used_percent),
-        resetsAt: new Date(window.reset_at * 1_000).toISOString(),
-      });
-    }
-  };
-  append(data.rate_limit, "codex", "");
-  for (const [index, extra] of (data.additional_rate_limits ?? []).entries()) {
-    append(
-      extra.rate_limit,
-      `extra:${index}`,
-      extra.limit_name?.trim() || extra.metered_feature?.trim() || "Additional limit",
-    );
+function normalizeCodexUsage(data: z.infer<typeof UsageResponseSchema>): SubscriptionUsage {
+  const windows: SubscriptionUsage["windows"] = [];
+  for (const slot of ["primary_window", "secondary_window"] as const) {
+    const window = data.rate_limit?.[slot];
+    if (!window) continue;
+    windows.push({
+      id: `codex:${slot}`,
+      label: windowLabel(window.limit_window_seconds),
+      usedPercent: Math.min(100, window.used_percent),
+      resetsAt: new Date(window.reset_at * 1_000).toISOString(),
+    });
   }
   return { windows, updatedAt: new Date().toISOString() };
 }

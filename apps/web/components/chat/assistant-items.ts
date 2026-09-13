@@ -1,3 +1,4 @@
+import { SUBAGENT_TOOL_NAME } from "@opencompany/agent/subagent";
 import type { TaskStatus } from "@opencompany/agent/task-runtime-types";
 import {
   CHAT_ARTIFACT_DATA_PART_TYPE,
@@ -196,7 +197,7 @@ function collectRenderItems(
         brainCitationsFromToolOutput(tool.output),
       );
     }
-    if (tool.name === CODEX_SUBAGENT_TOOL_NAME) {
+    if (tool.name === CODEX_SUBAGENT_TOOL_NAME || tool.name === SUBAGENT_TOOL_NAME) {
       const childParts = Array.isArray(part.children) ? (part.children as RenderablePart[]) : [];
       items.push({
         type: "subagent",
@@ -424,7 +425,7 @@ export function toolLabel(name: string) {
   if (name === CODEX_FILE_CHANGE_TOOL_NAME) return "File change";
   if (name === CODEX_MCP_TOOL_NAME || name === CODEX_DYNAMIC_TOOL_NAME) return "Tool";
   if (name === CODEX_WEB_SEARCH_TOOL_NAME) return "Web search";
-  if (name === CODEX_SUBAGENT_TOOL_NAME) return "Subagent";
+  if (name === CODEX_SUBAGENT_TOOL_NAME || name === SUBAGENT_TOOL_NAME) return "Subagent";
   if (name === START_TASK_TOOL_NAME) return "Task";
   if (name === START_WORKFLOW_TOOL_NAME) return "Workflow";
   if (name === SCHEDULE_TASK_TOOL_NAME) return "Recurring task";
@@ -772,7 +773,7 @@ function codexStateToolDetail(name: string, part: Record<string, unknown>) {
   if (name === CODEX_WEB_SEARCH_TOOL_NAME) {
     return truncateToolPreview(readString(input.query) ?? "Web search");
   }
-  if (name === CODEX_SUBAGENT_TOOL_NAME) {
+  if (name === CODEX_SUBAGENT_TOOL_NAME || name === SUBAGENT_TOOL_NAME) {
     const subagentType = readString(input.subagentType);
     const description = readString(input.description) ?? readString(input.prompt);
     return truncateToolPreview(

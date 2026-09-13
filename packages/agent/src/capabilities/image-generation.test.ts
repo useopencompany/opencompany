@@ -1,18 +1,23 @@
 import { calculatePlatformFeeUsdMicros } from "@opencompany/billing";
 import { describe, expect, it } from "vitest";
-import { imageGenerationCost, imageGenerationPrompt } from "./image-generation";
+import { imageGenerationCost, imageGenerationMessages } from "./image-generation";
 
 describe("managed AI image generation", () => {
   it("builds an image-to-image prompt with the exact reference bytes", () => {
     const reference = new Uint8Array([137, 80, 78, 71]);
 
-    expect(imageGenerationPrompt("Restyle this technical diagram.", reference)).toEqual({
-      text: "Restyle this technical diagram.",
-      images: [reference],
-    });
-    expect(imageGenerationPrompt("Create a technical diagram.")).toBe(
-      "Create a technical diagram.",
-    );
+    expect(imageGenerationMessages("Restyle this technical diagram.", reference)).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Restyle this technical diagram." },
+          { type: "image", image: reference },
+        ],
+      },
+    ]);
+    expect(imageGenerationMessages("Create a technical diagram.")).toEqual([
+      { role: "user", content: "Create a technical diagram." },
+    ]);
   });
 
   it("uses the AI Gateway reported cost for settlement", () => {
@@ -32,6 +37,7 @@ describe("managed AI image generation", () => {
   });
 
   it("rejects missing, negative, and malformed Gateway costs", () => {
+    expect(imageGenerationCost(undefined)).toBeNull();
     expect(imageGenerationCost({})).toBeNull();
     expect(
       imageGenerationCost({

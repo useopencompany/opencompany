@@ -79,6 +79,14 @@ describe("Claude Code model catalog", () => {
     expect(claudeCodeModelSupportsReasoningEffort("claude-fable-5")).toBe(true);
   });
 
+  it("offers Fable 5.1 as an addition and maps its dotted id to the Claude CLI", () => {
+    expect(CLAUDE_CODE_AGENT_MODEL_IDS).toContain("anthropic/claude-fable-5.1");
+    expect(isClaudeCodeModelId("anthropic/claude-fable-5.1")).toBe(true);
+    expect(claudeCodeCliModelNameForModelId("anthropic/claude-fable-5.1")).toBe("claude-fable-5-1");
+    expect(claudeCodeModelSupportsReasoningEffort("anthropic/claude-fable-5.1")).toBe(true);
+    expect(claudeCodeModelSupportsReasoningEffort("claude-fable-5-1")).toBe(true);
+  });
+
   it("exposes effort only for adaptive-reasoning models", () => {
     expect(claudeCodeModelSupportsReasoningEffort("anthropic/claude-sonnet-5")).toBe(true);
     expect(claudeCodeModelSupportsReasoningEffort("claude-opus-4-8")).toBe(true);

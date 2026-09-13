@@ -1,4 +1,3 @@
-import { GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS } from "@opencompany/agent-runtime";
 import { calculateModelUsageCost } from "@opencompany/billing";
 import {
   type NormalizedAttioObjectSourceItem,
@@ -78,15 +77,6 @@ export type BrainIngestTriageInput = {
   signal?: AbortSignal;
 };
 
-export type WikiIngestTriageInput = {
-  prompt: string;
-  gatewayApiKey: string;
-  userWorkosId: string;
-  workspaceId: string;
-  ingestJobId: string;
-  signal?: AbortSignal;
-};
-
 export async function runBrainIngestTriage(
   input: BrainIngestTriageInput,
 ): Promise<BrainIngestTriageTrace> {
@@ -144,54 +134,6 @@ export async function runBrainIngestTriage(
     entityHints: normalizeEntityHints(object.entityHints),
     usage,
     modelCostUsdMicros,
-  };
-}
-
-export async function runWikiIngestTriage(
-  input: WikiIngestTriageInput,
-): Promise<BrainIngestTriageTrace> {
-  const gateway = ai.createGateway({ apiKey: input.gatewayApiKey });
-  const { generateObject } = getBraintrustAISDK(ai);
-  const attribution = createGatewayAttribution({
-    userWorkosId: input.userWorkosId,
-    feature: "wiki-ingest",
-    ingestJobId: input.ingestJobId,
-    tags: ["stage:triage"],
-  });
-  const timeout = AbortSignal.timeout(BRAIN_INGEST_TRIAGE_TIMEOUT_MS);
-  const abortSignal = input.signal ? AbortSignal.any([input.signal, timeout]) : timeout;
-  const result = await generateObject({
-    model: gateway(WIKI_INGEST_TRIAGE_MODEL),
-    schema: ai.jsonSchema(BRAIN_INGEST_TRIAGE_SCHEMA as never),
-    system: WIKI_INGEST_TRIAGE_SYSTEM_PROMPT,
-    prompt: input.prompt,
-    maxOutputTokens: BRAIN_INGEST_TRIAGE_MAX_OUTPUT_TOKENS,
-    abortSignal,
-    ...latitudeTelemetry({
-      name: "wiki-ingest-triage",
-      feature: "wiki-ingest",
-      userId: input.userWorkosId,
-      sessionId: input.ingestJobId,
-      metadata: {
-        model: WIKI_INGEST_TRIAGE_MODEL,
-        workspaceId: input.workspaceId,
-      },
-    }),
-    providerOptions: gatewayProviderOptions(attribution, GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS),
-  });
-  const object = result.object as {
-    decision: "skip" | "ingest";
-    reason: string;
-    entityHints: string[];
-  };
-  const usage = normalizeTriageUsage(result.usage);
-  return {
-    model: WIKI_INGEST_TRIAGE_MODEL,
-    decision: object.decision,
-    reason: normalizeTriageReason(object.reason),
-    entityHints: normalizeEntityHints(object.entityHints),
-    usage,
-    modelCostUsdMicros: priceTriageUsage(WIKI_INGEST_TRIAGE_MODEL, usage),
   };
 }
 

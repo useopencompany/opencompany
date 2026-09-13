@@ -1895,8 +1895,36 @@
     {
       "idx": 270,
       "version": "7",
-      "when": 1789250000000,
-      "tag": "0270_outlook_integrations",
+      "when": 1789322800000,
+      "tag": "0270_opencompany_sidebar_projects",
+      "breakpoints": true
+    },
+    {
+      "idx": 271,
+      "version": "7",
+      "when": 1789409200000,
+      "tag": "0271_opencompany_subagents_preference",
+      "breakpoints": true
+    },
+    {
+      "idx": 272,
+      "version": "7",
+      "when": 1789495600000,
+      "tag": "0272_opencompany_past_session_access",
+      "breakpoints": true
+    },
+    {
+      "idx": 273,
+      "version": "7",
+      "when": 1789582000000,
+      "tag": "0273_retire_wiki_ingestion",
+      "breakpoints": true
+    },
+    {
+      "idx": 274,
+      "version": "7",
+      "when": 1789668400000,
+      "tag": "0274_outlook_integrations",
       "breakpoints": true
     }
   ]

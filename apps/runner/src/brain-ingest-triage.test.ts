@@ -22,56 +22,11 @@ import {
   BRAIN_INGEST_TRIAGE_SOURCE_BYTES,
   BRAIN_INGEST_TRIAGE_SYSTEM_PROMPT,
   runBrainIngestTriage,
-  runWikiIngestTriage,
   truncateTriageSource,
-  WIKI_INGEST_TRIAGE_MODEL,
-  WIKI_INGEST_TRIAGE_SYSTEM_PROMPT,
 } from "./brain-ingest-triage";
 
 beforeEach(() => {
   vi.clearAllMocks();
-});
-
-describe("runWikiIngestTriage", () => {
-  it("attributes the same conservative triage rules to wiki ingestion", async () => {
-    aiMock.generateObject.mockResolvedValueOnce({
-      object: {
-        decision: "skip",
-        reason: "Only a routine acknowledgement.",
-        entityHints: [],
-      },
-      usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120 },
-    });
-
-    const result = await runWikiIngestTriage({
-      prompt: "Classify this GitHub comment.",
-      gatewayApiKey: "gw_test",
-      userWorkosId: "user_123",
-      workspaceId: "workspace_123",
-      ingestJobId: "gwjob_123",
-    });
-
-    expect(aiMock.generateObject).toHaveBeenCalledWith(
-      expect.objectContaining({
-        model: { model: WIKI_INGEST_TRIAGE_MODEL },
-        system: WIKI_INGEST_TRIAGE_SYSTEM_PROMPT,
-        providerOptions: expect.objectContaining({
-          gateway: expect.objectContaining({
-            caching: "auto",
-            tags: expect.arrayContaining(["feature:wiki-ingest", "stage:triage"]),
-          }),
-        }),
-      }),
-    );
-    const generation = aiMock.generateObject.mock.calls[0]?.[0];
-    expect(generation?.providerOptions).not.toHaveProperty("openai");
-    expect(result).toMatchObject({
-      model: WIKI_INGEST_TRIAGE_MODEL,
-      decision: "skip",
-      entityHints: [],
-      modelCostUsdMicros: 20,
-    });
-  });
 });
 
 describe("runBrainIngestTriage", () => {

@@ -2,6 +2,7 @@ import { once } from "node:events";
 import { request as requestHttp } from "node:http";
 import { serve } from "@hono/node-server";
 import { createPluginImportResolver } from "@opencompany/agent/plugin-import";
+import { HTML_ARTIFACT_CONTENT_SECURITY_POLICY } from "@opencompany/agent-runtime";
 import { OFFICIAL_PLUGIN_SOURCES } from "@opencompany/agent-runtime/official-plugin-catalog";
 import { captureProductServerEvent } from "@opencompany/analytics/product/server";
 import type { ChatPresentationReader } from "@opencompany/chat-presentation";
@@ -122,6 +123,40 @@ describe("canonical Hono API", () => {
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     expect(getCodexUsage).toHaveBeenCalledWith(actor);
     expect(buckets).toEqual(["codex-usage:6"]);
+    await expect(response.json()).resolves.toEqual({
+      data: usage,
+      meta: { apiVersion: "v1", protocolVersion: expect.any(String) },
+    });
+  });
+
+  it("serves private Claude usage with its own refresh rate limit", async () => {
+    const usage = {
+      windows: [
+        {
+          id: "claude-code:5h",
+          label: "Session",
+          usedPercent: 20,
+          resetsAt: "2026-09-11T00:00:00.000Z",
+        },
+      ],
+      updatedAt: "2026-09-10T12:00:00.000Z",
+    };
+    const getClaudeCodeUsage = vi.fn(async () => usage);
+    const buckets: string[] = [];
+    const app = testApp(fakeRepository(), {
+      engineAuth: engineAuthService({ getClaudeCodeUsage }),
+      rateLimiter: {
+        consume: async ({ bucket, limit }) => {
+          buckets.push(`${bucket}:${limit}`);
+          return { allowed: true };
+        },
+      },
+    });
+    const response = await app.request("/v1/engine-auth/claude-code/usage?userId=someone_else");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(getClaudeCodeUsage).toHaveBeenCalledWith(actor);
+    expect(buckets).toEqual(["claude-code-usage:6"]);
     await expect(response.json()).resolves.toEqual({
       data: usage,
       meta: { apiVersion: "v1", protocolVersion: expect.any(String) },
@@ -289,10 +324,8 @@ describe("canonical Hono API", () => {
       knowledge: fakeKnowledgeService(),
       wikiCommands: fakeWikiCommandsService(),
       resolveWikiServiceActor: async () => actor,
-      wikiSources: fakeWikiSources(),
       brainSources: fakeBrainSources(),
       brainImports: fakeBrainImports(),
-      wikiImports: fakeWikiImports(),
       browserProfiles: fakeBrowserProfiles(),
       skillImports: fakeSkillImportService(),
       pluginImports: fakePluginImportService(),
@@ -300,6 +333,7 @@ describe("canonical Hono API", () => {
       brainControl: fakeBrainControl(),
       wikiControl: fakeWikiControl(),
       attachments: fakeAttachments(),
+      projects: fakeProjects(),
       userSettings: fakeUserSettings(),
       feedback: fakeFeedback(),
       repoConfigs: fakeRepoConfigs(),
@@ -565,134 +599,6 @@ describe("canonical Hono API", () => {
     expect(JSON.stringify(scheduleBody)).not.toMatch(/workos|workspace_id|harness|goat_/iu);
   });
 
-  it("serves Brain and Wiki resources alongside the immutable Skill catalog", async () => {
-    const assertBrainAccess = vi.fn(async () => undefined);
-    const updateWikiPage = vi.fn(async ({ id }: { id: string }) => ({
-      page: fakeWikiPage({ id }),
-      transactionIds: [71],
-    }));
-    const listSkillCatalog = vi.fn(async () => [
-      {
-        id: "research",
-        name: "Research",
-        description: "Find primary sources.",
-        scope: "company" as const,
-      },
-    ]);
-    const listBrainSourceItems = vi.fn(async () => [
-      {
-        id: "source_item_1",
-        sourceProvider: "goat-chat",
-        sourceType: "capture",
-        externalId: "project-alpha",
-        title: "Alpha",
-        lastIngestError: "x".repeat(2_001),
-        createdAt,
-      },
-    ]);
-    const knowledge = knowledgeService({
-      assertBrainAccess,
-      getBrainSnapshot: async () => ({
-        folders: [
-          {
-            id: "folder_1",
-            path: "projects",
-            source: "custom",
-            createdAt,
-            updatedAt: createdAt,
-          },
-        ],
-        documents: [fakeBrainDocument()],
-      }),
-      updateWikiPage,
-      listBrainSourceItems,
-    });
-    const app = testApp(fakeRepository(), {
-      knowledge,
-      skillImports: fakeSkillImportService({ listCatalog: listSkillCatalog }),
-    });
-
-    const brain = await app.request("/v1/brains/brain_1");
-    expect(brain.status).toBe(200);
-    const brainBody = await brain.json();
-    expect(brainBody).toMatchObject({
-      data: {
-        documents: [
-          {
-            id: "document_1",
-            brainId: "project-alpha",
-            path: "projects/project-alpha.md",
-            body: "# Alpha",
-          },
-        ],
-      },
-    });
-    expect(JSON.stringify(brainBody)).not.toMatch(/brain_ref|workspace_id|asset_storage/iu);
-    expect(assertBrainAccess).toHaveBeenCalledWith({ actor, brainId: "brain_1" });
-
-    const sourceItems = await app.request(
-      "/v1/brains/brain_1/source-items?ids=source_item_1,source_item_1",
-    );
-    expect(sourceItems.status).toBe(200);
-    const sourceItemsBody = await sourceItems.json();
-    expect(sourceItemsBody).toMatchObject({
-      data: [
-        {
-          id: "source_item_1",
-          sourceProvider: "goat-chat",
-          externalId: "project-alpha",
-        },
-      ],
-    });
-    expect(sourceItemsBody.data[0].lastIngestError).toHaveLength(2_000);
-    expect(listBrainSourceItems).toHaveBeenCalledWith({
-      actor,
-      brainId: "brain_1",
-      ids: ["source_item_1"],
-    });
-    expect(JSON.stringify(sourceItemsBody)).not.toMatch(
-      /userWorkosId|brainRef|rawPayload|normalizedPayload|occurredAt|capturedAt|updatedAt/iu,
-    );
-    const tooManySourceItems = await app.request(
-      `/v1/brains/brain_1/source-items?ids=${Array.from(
-        { length: 101 },
-        (_, index) => `source_item_${index}`,
-      ).join(",")}`,
-    );
-    expect(tooManySourceItems.status).toBe(400);
-    expect(listBrainSourceItems).toHaveBeenCalledTimes(1);
-
-    const wiki = await app.request("/v1/wiki/pages/project-alpha", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        body: "# Updated",
-        kind: "project",
-        slug: "alpha",
-        title: "Alpha",
-      }),
-    });
-    expect(wiki.status).toBe(200);
-    await expect(wiki.json()).resolves.toMatchObject({
-      data: { page: { slug: "project-alpha", body: "" }, transactionIds: [71] },
-    });
-    expect(updateWikiPage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        actor,
-        id: "project-alpha",
-        body: "# Updated",
-        slug: "alpha",
-      }),
-    );
-
-    const catalog = await app.request("/v1/skills/catalog");
-    expect(catalog.status).toBe(200);
-    await expect(catalog.json()).resolves.toMatchObject({
-      data: [{ id: "research", name: "Research" }],
-    });
-    expect(listSkillCatalog).toHaveBeenCalledWith({ actor });
-  });
-
   it("previews metadata only and installs an immutable Skill through the API boundary", async () => {
     const resolvedCommit = "a".repeat(40);
     const integrity = `sha256:${"b".repeat(64)}`;
@@ -931,99 +837,6 @@ describe("canonical Hono API", () => {
       error: { code: "invalid_request", retryable: false },
     });
     expect(create).not.toHaveBeenCalled();
-  });
-
-  it("serves and mutates workspace-scoped Wiki sources through typed routes", async () => {
-    const list = vi.fn(async () => [wikiSourceView()]);
-    const listActivity = vi.fn(async () => ({
-      items: [wikiActivityItem()],
-      nextCursor: "cursor_2",
-    }));
-    const upsert = vi.fn(async () => wikiSourceView());
-    const setEnabled = vi.fn(async () => wikiSourceView({ enabled: false }));
-    const remove = vi.fn(async () => undefined);
-    const app = testApp(fakeRepository(), {
-      wikiSources: wikiSourceService({ list, listActivity, upsert, setEnabled, remove }),
-    });
-
-    const listed = await app.request("/v1/wiki/sources");
-    expect(listed.status).toBe(200);
-    const listedBody = await listed.json();
-    expect(listedBody).toMatchObject({
-      data: [{ id: "gwscfg_1", provider: "gmail", enabled: true, canToggle: true }],
-    });
-    expect(JSON.stringify(listedBody)).not.toMatch(/userWorkosId|workspaceId|credential|token/iu);
-    expect(list).toHaveBeenCalledWith(actor);
-
-    const activity = await app.request("/v1/wiki/sources/activity?limit=10&cursor=cursor_1");
-    expect(activity.status).toBe(200);
-    await expect(activity.json()).resolves.toMatchObject({
-      data: {
-        items: [
-          {
-            id: "gwjob_1",
-            provider: "gmail",
-            outcome: "succeeded",
-            pages: [{ path: "projects/launch", action: "updated" }],
-          },
-        ],
-        nextCursor: "cursor_2",
-      },
-    });
-    expect(listActivity).toHaveBeenCalledWith(actor, { limit: 10, cursor: "cursor_1" });
-
-    const configured = await app.request("/v1/wiki/sources", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        integrationId: "integration_1",
-        provider: "gmail",
-        enabled: true,
-        config: { instructions: "Only customer mail" },
-      }),
-    });
-    expect(configured.status).toBe(200);
-    expect(upsert).toHaveBeenCalledWith(actor, {
-      integrationId: "integration_1",
-      provider: "gmail",
-      enabled: true,
-      config: { instructions: "Only customer mail" },
-    });
-
-    const disabled = await app.request("/v1/wiki/sources/gwscfg_1", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled: false }),
-    });
-    expect(disabled.status).toBe(200);
-    await expect(disabled.json()).resolves.toMatchObject({ data: { enabled: false } });
-    expect(setEnabled).toHaveBeenCalledWith(actor, "gwscfg_1", false);
-
-    const removed = await app.request("/v1/wiki/sources/gwscfg_1", { method: "DELETE" });
-    expect(removed.status).toBe(200);
-    await expect(removed.json()).resolves.toMatchObject({
-      data: { sourceId: "gwscfg_1", deleted: true },
-    });
-    expect(remove).toHaveBeenCalledWith(actor, "gwscfg_1");
-  });
-
-  it("rejects unsupported Wiki source providers before invoking source logic", async () => {
-    const upsert = vi.fn(async () => wikiSourceView());
-    const app = testApp(fakeRepository(), {
-      wikiSources: wikiSourceService({ upsert }),
-    });
-    const response = await app.request("/v1/wiki/sources", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        integrationId: "integration_1",
-        provider: "google_drive",
-        enabled: true,
-      }),
-    });
-
-    expect(response.status).toBe(400);
-    expect(upsert).not.toHaveBeenCalled();
   });
 
   it("rejects the retired hand-authored Skill payload instead of reviving its data model", async () => {
@@ -1591,6 +1404,36 @@ describe("canonical Hono API", () => {
     expect(remove).toHaveBeenCalledWith(actor, "brain_1", "integration_1");
   });
 
+  it("returns Granola folders for a workflow event filter", async () => {
+    const listOptions = vi.fn(async () => ({
+      provider: "granola" as const,
+      folders: [
+        { id: "fol_customers", name: "Customers", parentFolderId: null },
+        { id: "fol_acme", name: "Acme", parentFolderId: "fol_customers" },
+      ],
+      partial: false,
+    }));
+    const app = testApp(fakeRepository(), { brainSources: brainSourceService({ listOptions }) });
+
+    const options = await app.request("/v1/integrations/integration_1/brain-source-options", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: "granola" }),
+    });
+    expect(options.status).toBe(200);
+    await expect(options.json()).resolves.toMatchObject({
+      data: {
+        provider: "granola",
+        folders: [
+          { id: "fol_customers", name: "Customers", parentFolderId: null },
+          { id: "fol_acme", name: "Acme", parentFolderId: "fol_customers" },
+        ],
+        partial: false,
+      },
+    });
+    expect(listOptions).toHaveBeenCalledWith(actor, "integration_1", { provider: "granola" });
+  });
+
   it("rejects invalid source configuration before invoking provider logic", async () => {
     const set = vi.fn(async () => undefined);
     const listOptions = vi.fn(async () => ({
@@ -1665,7 +1508,6 @@ describe("canonical Hono API", () => {
     }));
     const app = testApp(fakeRepository(), {
       brainImports: brainImportService({ start, confirm, cancel, retry }),
-      wikiImports: fakeWikiImports(),
     });
 
     const started = await app.request("/v1/brains/brain_1/imports", {
@@ -1732,7 +1574,6 @@ describe("canonical Hono API", () => {
     }));
     const app = testApp(fakeRepository(), {
       brainImports: brainImportService({ start }),
-      wikiImports: fakeWikiImports(),
     });
 
     const missingKey = await app.request("/v1/brains/brain_1/imports", {
@@ -1756,58 +1597,6 @@ describe("canonical Hono API", () => {
     expect(start).not.toHaveBeenCalled();
   });
 
-  it("drives the workspace Wiki import lifecycle without a Brain parameter", async () => {
-    const start = vi.fn(async () => ({
-      importRunId: "gbimp_wiki",
-      status: "discovering" as const,
-      replayed: false,
-    }));
-    const confirm = vi.fn(async () => ({
-      importRunId: "gbimp_wiki",
-      status: "ingesting" as const,
-      replayed: false,
-    }));
-    const cancel = vi.fn(async () => ({
-      importRunId: "gbimp_wiki",
-      status: "canceled" as const,
-      replayed: false,
-    }));
-    const retry = vi.fn(async () => ({
-      importRunId: "gbimp_wiki",
-      status: "discovering" as const,
-      replayed: false,
-    }));
-    const app = testApp(fakeRepository(), {
-      wikiImports: wikiImportService({ start, confirm, cancel, retry }),
-    });
-
-    const started = await app.request("/v1/wiki/imports", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Idempotency-Key": "wiki-import-1" },
-      body: JSON.stringify({
-        companyUrl: "acme.com",
-        sourceSelection: { public_web: { enabled: true } },
-      }),
-    });
-    expect(started.status).toBe(201);
-    expect(start).toHaveBeenCalledWith(actor, {
-      idempotencyKey: "wiki-import-1",
-      companyUrl: "acme.com",
-      sourceSelection: { public_web: { enabled: true } },
-    });
-
-    await app.request("/v1/wiki/imports/gbimp_wiki/confirm", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabledProviders: ["public_web"] }),
-    });
-    expect(confirm).toHaveBeenCalledWith(actor, "gbimp_wiki", ["public_web"]);
-    await app.request("/v1/wiki/imports/gbimp_wiki/cancel", { method: "POST" });
-    expect(cancel).toHaveBeenCalledWith(actor, "gbimp_wiki");
-    await app.request("/v1/wiki/imports/gbimp_wiki/retry", { method: "POST" });
-    expect(retry).toHaveBeenCalledWith(actor, "gbimp_wiki");
-  });
-
   it("maps import state conflicts to typed conflict responses", async () => {
     const app = testApp(fakeRepository(), {
       brainImports: brainImportService({
@@ -1818,7 +1607,6 @@ describe("canonical Hono API", () => {
           );
         },
       }),
-      wikiImports: fakeWikiImports(),
     });
     const response = await app.request("/v1/brains/brain_1/imports/gbimp_1/confirm", {
       method: "POST",
@@ -2739,6 +2527,23 @@ describe("canonical Hono API", () => {
     await expect(response.text()).resolves.toContain("event: run.paused");
   });
 
+  it("skips the presentation hot stream for coding-engine runs", async () => {
+    const read = vi.fn(async () => ({
+      status: "available" as const,
+      entries: [presentationEntry("1786449600000-0", "never delivered")],
+      nextStreamId: "1786449600000-0",
+    }));
+    const fixture = streamingFixture({ presentation: { read }, engine: "claude_code" });
+
+    const body = await responseBody(fixture.app.request("/v1/runs/run_1/events"));
+
+    // A coding engine never publishes presentation frames; its stream must not pay the
+    // hot-path Redis read or the presentation-rate wake cadence.
+    expect(read).not.toHaveBeenCalled();
+    expect(body).not.toContain("message.presentation_delta");
+    expect(body).toContain("event: run.completed");
+  });
+
   it("fans one Redis hot stream out through multiple API instances", async () => {
     const presentation = presentationReader(({ afterStreamId }) =>
       afterStreamId ? [] : [presentationEntry("1786449600000-0", "Hello")],
@@ -3408,7 +3213,7 @@ describe("canonical Hono API", () => {
       sizeBytes: 18,
       inline: true,
       cacheControl: "private, max-age=86400, immutable",
-      sandbox: false,
+      contentSecurityPolicy: null,
     }));
     const app = testApp(fakeRepository(), {
       chatResources: chatResourceService({ downloadAttachment }),
@@ -3426,6 +3231,32 @@ describe("canonical Hono API", () => {
       messageId: "message_1",
       attachmentId: "attachment_1",
     });
+  });
+
+  it("emits the artifact policy so agent-authored HTML renders without ambient authority", async () => {
+    const downloadArtifact = vi.fn(async () => ({
+      stream: new Response("<h1>Pricing</h1>").body as ReadableStream<Uint8Array>,
+      mediaType: "text/html; charset=utf-8",
+      filename: "pricing-model.html",
+      sizeBytes: 16,
+      inline: true,
+      cacheControl: "private, no-store",
+      contentSecurityPolicy: HTML_ARTIFACT_CONTENT_SECURITY_POLICY,
+    }));
+    const app = testApp(fakeRepository(), {
+      chatResources: chatResourceService({ downloadArtifact }),
+    });
+
+    const response = await app.request("/v1/chat-artifacts/artifact_1/versions/version_1");
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(response.headers.get("content-security-policy")).toBe(
+      HTML_ARTIFACT_CONTENT_SECURITY_POLICY,
+    );
+    expect(response.headers.get("content-security-policy")).not.toContain("allow-same-origin");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("content-disposition")).toContain("inline");
   });
 
   it("uploads and replaces private Brain assets through typed multipart operations", async () => {
@@ -3629,6 +3460,9 @@ describe("canonical Hono API", () => {
             taskTimeRange: "24h",
             autoModelRoutingEnabled: true,
             reviewInboxEnabled: false,
+            sidebarProjectsEnabled: false,
+            subagentsEnabled: false,
+            pastSessionAccessEnabled: false,
           }),
         },
       });
@@ -3693,6 +3527,9 @@ describe("canonical Hono API", () => {
         taskTimeRange: "7d" as const,
         autoModelRoutingEnabled: false,
         reviewInboxEnabled: false,
+        sidebarProjectsEnabled: false,
+        subagentsEnabled: false,
+        pastSessionAccessEnabled: false,
       }));
       const app = testApp(fakeRepository(), {
         userSettings: { ...fakeUserSettings(), updatePreferences },
@@ -3720,6 +3557,9 @@ describe("canonical Hono API", () => {
       taskTimeRange: "24h" as const,
       autoModelRoutingEnabled: true,
       reviewInboxEnabled: false,
+      sidebarProjectsEnabled: false,
+      subagentsEnabled: false,
+      pastSessionAccessEnabled: false,
     }));
     const app = testApp(fakeRepository(), {
       userSettings: { ...fakeUserSettings(), updatePreferences },
@@ -5283,10 +5123,8 @@ function testApp(
     knowledge: fakeKnowledgeService(),
     wikiCommands: fakeWikiCommandsService(),
     resolveWikiServiceActor: async () => actor,
-    wikiSources: fakeWikiSources(),
     brainSources: fakeBrainSources(),
     brainImports: fakeBrainImports(),
-    wikiImports: fakeWikiImports(),
     browserProfiles: fakeBrowserProfiles(),
     skillImports: fakeSkillImportService(),
     pluginImports: fakePluginImportService(),
@@ -5294,6 +5132,7 @@ function testApp(
     brainControl: fakeBrainControl(),
     wikiControl: fakeWikiControl(),
     attachments: fakeAttachments(),
+    projects: fakeProjects(),
     userSettings: fakeUserSettings(),
     feedback: fakeFeedback(),
     repoConfigs: fakeRepoConfigs(),
@@ -5569,41 +5408,10 @@ function fakeBrainImports(): Parameters<typeof createApiApp>[0]["brainImports"] 
   };
 }
 
-function fakeWikiImports(): Parameters<typeof createApiApp>[0]["wikiImports"] {
-  return {
-    start: vi.fn(async () => ({
-      importRunId: "gbimp_wiki",
-      status: "discovering" as const,
-      replayed: false,
-    })),
-    confirm: vi.fn(async () => ({
-      importRunId: "gbimp_wiki",
-      status: "ingesting" as const,
-      replayed: false,
-    })),
-    cancel: vi.fn(async () => ({
-      importRunId: "gbimp_wiki",
-      status: "canceled" as const,
-      replayed: false,
-    })),
-    retry: vi.fn(async () => ({
-      importRunId: "gbimp_wiki",
-      status: "discovering" as const,
-      replayed: false,
-    })),
-  };
-}
-
 function brainImportService(
   overrides: Partial<Parameters<typeof createApiApp>[0]["brainImports"]>,
 ): Parameters<typeof createApiApp>[0]["brainImports"] {
   return { ...fakeBrainImports(), ...overrides };
-}
-
-function wikiImportService(
-  overrides: Partial<Parameters<typeof createApiApp>[0]["wikiImports"]>,
-): Parameters<typeof createApiApp>[0]["wikiImports"] {
-  return { ...fakeWikiImports(), ...overrides };
 }
 
 function fakeUserSettings(): Parameters<typeof createApiApp>[0]["userSettings"] {
@@ -5617,6 +5425,21 @@ function fakeUserSettings(): Parameters<typeof createApiApp>[0]["userSettings"] 
     setPreferredMcpClient: async () => {
       throw new Error("Unexpected MCP client mutation.");
     },
+  };
+}
+
+function fakeProjects(): Parameters<typeof createApiApp>[0]["projects"] {
+  const unexpected = async () => {
+    throw new Error("Unexpected project access.");
+  };
+  return {
+    list: unexpected,
+    assertOwned: unexpected,
+    create: unexpected,
+    rename: unexpected,
+    remove: unexpected,
+    fileConversation: unexpected,
+    removeConversation: unexpected,
   };
 }
 
@@ -5752,6 +5575,9 @@ function fakeEngineAuth(): Parameters<typeof createApiApp>[0]["engineAuth"] {
     disconnectClaudeCode: async () => {
       throw new Error("Unexpected Claude Code disconnect.");
     },
+    getClaudeCodeUsage: async () => {
+      throw new Error("Unexpected Claude Code usage read.");
+    },
     getCodexUsage: async () => {
       throw new Error("Unexpected Codex usage read.");
     },
@@ -5806,32 +5632,6 @@ function engineSessionService(
   overrides: Partial<Parameters<typeof createApiApp>[0]["engineSessions"]>,
 ): Parameters<typeof createApiApp>[0]["engineSessions"] {
   return { ...fakeEngineSessions(), ...overrides };
-}
-
-function fakeWikiSources(): Parameters<typeof createApiApp>[0]["wikiSources"] {
-  return {
-    list: async () => {
-      throw new Error("Unexpected Wiki source list.");
-    },
-    listActivity: async () => {
-      throw new Error("Unexpected Wiki activity list.");
-    },
-    upsert: async () => {
-      throw new Error("Unexpected Wiki source mutation.");
-    },
-    setEnabled: async () => {
-      throw new Error("Unexpected Wiki source enabled mutation.");
-    },
-    remove: async () => {
-      throw new Error("Unexpected Wiki source removal.");
-    },
-  };
-}
-
-function wikiSourceService(
-  overrides: Partial<Parameters<typeof createApiApp>[0]["wikiSources"]>,
-): Parameters<typeof createApiApp>[0]["wikiSources"] {
-  return { ...fakeWikiSources(), ...overrides };
 }
 
 function wikiActivityItem() {
@@ -6786,6 +6586,7 @@ function streamingFixture(options: {
   attemptCount?: number;
   waitsBeforeTerminal?: number;
   finalStatus?: "completed" | "canceled";
+  engine?: "opencompany" | "codex" | "claude_code";
 }) {
   const repository = fakeRepository();
   const attemptCount = options.attemptCount ?? 1;
@@ -6797,7 +6598,7 @@ function streamingFixture(options: {
     conversationId: "conversation_1",
     triggerMessageId: "message_user_1",
     status: terminal ? finalStatus : "running",
-    engine: "opencompany",
+    engine: options.engine ?? "opencompany",
     model: "provider/default",
     attemptCount,
     createdAt,
@@ -6870,3 +6671,32 @@ function streamingFixture(options: {
   });
   return { app };
 }
+
+describe("retired Wiki ingestion endpoints", () => {
+  it.each([
+    ["GET", "/v1/wiki/sources", undefined],
+    ["GET", "/v1/wiki/sources/activity", undefined],
+    [
+      "PUT",
+      "/v1/wiki/sources",
+      { provider: "granola", integrationId: "integration_1", enabled: true },
+    ],
+    ["POST", "/v1/wiki/imports", { companyUrl: "https://example.com", sourceSelection: {} }],
+    ["POST", "/v1/wiki/imports/import_1/confirm", { enabledProviders: [] }],
+    ["POST", "/v1/wiki/imports/import_1/cancel", undefined],
+    ["POST", "/v1/wiki/imports/import_1/retry", undefined],
+    ["PATCH", "/v1/wiki/sources/source_1", { enabled: true }],
+    ["DELETE", "/v1/wiki/sources/source_1", undefined],
+  ] as const)("returns 410 for %s %s", async (method, url, body) => {
+    const app = testApp(fakeRepository());
+    const response = await app.request(url, {
+      method,
+      headers: messageHeaders(`retired-${method}`),
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+    expect(response.status).toBe(410);
+    expect(await response.json()).toMatchObject({
+      error: { message: expect.stringContaining("Wiki ingestion has been retired") },
+    });
+  });
+});

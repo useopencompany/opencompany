@@ -88,6 +88,20 @@ describe("user settings service", () => {
     expect(set).toHaveBeenCalledWith({ taskTimeRange: "24h", updatedAt: now });
   });
 
+  it.each([true, false])("persists past session access %s for the acting user", async (enabled) => {
+    const now = new Date("2026-09-12T00:00:00Z");
+    const updated = { ...storedPreferences, pastSessionAccessEnabled: enabled };
+    const { db, set } = fakeDb({
+      selectRows: [{ ...storedPreferences, pastSessionAccessEnabled: !enabled }],
+      updateRows: [updated],
+    });
+    const service = createUserSettingsService({ db, now: () => now });
+    await expect(
+      service.updatePreferences(actor, { pastSessionAccessEnabled: enabled }),
+    ).resolves.toEqual(updated);
+    expect(set).toHaveBeenCalledWith({ pastSessionAccessEnabled: enabled, updatedAt: now });
+  });
+
   it("reports a missing profile as a structured not_found error", async () => {
     const { db } = fakeDb({ selectRows: [] });
     const service = createUserSettingsService({ db });

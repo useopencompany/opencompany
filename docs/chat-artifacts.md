@@ -32,8 +32,9 @@ in-band content:
 - `description` (optional)
 - `artifact_id` plus `expected_version` when publishing a revision
 
-`write_artifact` currently accepts Markdown (`.md`) only. Every edit is a complete-content rewrite
-that creates version N+1. The host validates the active turn and principal, uploads private bytes,
+`write_artifact` accepts Markdown (`.md`) and self-contained HTML (`.html`); the media type comes
+from that extension allowlist and is never sniffed from the content. Every edit is a complete-content
+rewrite that creates version N+1. The host validates the active turn and principal, uploads private bytes,
 and atomically advances the logical artifact. If database persistence fails, the new blob is removed.
 
 Managed capabilities such as image generation can also return the same `PublishedChatArtifact`
@@ -48,8 +49,8 @@ All engines share these hard limits:
 - 5 published versions/files per turn
 - one immutable version per successful tool-call id (idempotent replay)
 
-Sandbox publishing supports Markdown, plain text, CSV, TSV, JSON, SRT, PDF, DOCX, XLSX, PPTX, PNG,
-JPEG, and WebP. The opencompany in-band tool supports Markdown only.
+Sandbox publishing supports Markdown, plain text, HTML, CSV, TSV, JSON, SRT, PDF, DOCX, XLSX, PPTX,
+PNG, JPEG, and WebP. The opencompany in-band tool supports Markdown and HTML.
 
 ## Viewer and HTTP API
 
@@ -61,6 +62,22 @@ The viewer renders Markdown with the shared safe Markdown renderer. Images, PDFs
 text, and JSON use the authorized inline download route, whose response applies the resource
 sandboxing policy. Other formats retain download/open actions without an inline preview.
 
+HTML artifacts render in an iframe with `sandbox="allow-scripts"`, and their bytes are always served
+with `HTML_ARTIFACT_CONTENT_SECURITY_POLICY`. That policy is the whole basis for running
+agent-authored markup on the app origin, so it travels with the response even on a `?download=1`
+request:
+
+- `sandbox allow-scripts` without `allow-same-origin` puts the document in an opaque origin, so it
+  cannot read app cookies, storage, or the embedding page, and cannot submit forms, open popups, or
+  navigate the top-level window.
+- `default-src 'none'` blocks every fetch, XHR, WebSocket, and beacon, which closes the egress path
+  a prompt-injected page would need.
+- Only inline scripts and styles, `data:`/`blob:` images and media, and `data:` fonts are allowed, so
+  an artifact renders from its stored bytes alone and cannot pull in later-changed remote code.
+
+The cost of that policy is real and is stated in the tool contract and chat prompt: HTML artifacts
+must be one self-contained file, with no external resources, no persistence, and no outbound links.
+
 Authenticated endpoints:
 
 - `GET /v1/chat-artifacts/:artifactId/versions` lists immutable version metadata, newest first.
@@ -68,5 +85,6 @@ Authenticated endpoints:
   `?download=1` for an attachment disposition.
 - `DELETE /v1/chat-artifacts/:artifactId` tombstones the artifact and removes its blobs.
 
-Phase 3 formats such as authored HTML and PDF export are intentionally separate. HTML must never be
-rendered on the app origin without a hardened, egress-blocked sandbox.
+PDF export remains a separate, later format. Any future relaxation of the HTML policy, such as an
+allowlisted CDN or outbound requests, needs its own review; today's safety argument depends on the
+artifact being inert and self-contained.

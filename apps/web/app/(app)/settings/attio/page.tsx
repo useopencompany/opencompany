@@ -3,17 +3,19 @@ import { SettingsContent } from "@/components/SettingsChrome";
 import { currentUser } from "@/lib/auth";
 import { getAttioIntegrationState } from "@/lib/integrations/attio";
 
+// Attio's plugin page connects the MCP account for tools. This API-key connection is a separate
+// integration that feeds Brain ingestion, so it keeps its own settings route.
 export default async function AttioSettingsPage() {
   const { user } = await currentUser();
   const state = await getAttioIntegrationState(user.workosUserId);
 
   return (
     <SettingsContent
-      title="Attio Wiki source"
-      description="CRM activity ingestion for opencompany Wiki"
-      backLink={{ href: "/wiki/sources", label: "Wiki sources" }}
+      title="Attio ingestion"
+      description="API-key ingestion for Brain"
+      backLink={{ href: "/settings/plugins/attio", label: "Attio plugin" }}
     >
-      <AttioIntegrationSetup initialState={state} brainSourcesHref="/wiki/sources" />
+      <AttioIntegrationSetup initialState={state} />
     </SettingsContent>
   );
 }

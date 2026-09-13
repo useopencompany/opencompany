@@ -5,12 +5,12 @@ import { useAppData } from "@/components/AppDataProvider";
 import { markHeadlessTaskSeen } from "@/lib/headless-task-commands";
 
 /**
- * Clears a Task's unread result once the reader is actually looking at it.
+ * Clears a Task's unread update once the reader is actually looking at it.
  *
  * A settled run raises the same unread flag a finished chat turn does, on the same column of the
  * same table, so the dot has to clear the same way: from the surface that renders the result. The
  * review queue used to be the only surface that acknowledged one, and it is behind a flag, so a
- * Task read from its own route kept its dot forever.
+ * Task update read from its own route kept its dot forever.
  *
  * Acknowledgment waits for the document to be visible. Restoring a background tab is what makes a
  * result read, not the navigation that queued it up behind ten other tabs.
@@ -27,7 +27,7 @@ export function useTaskSeenAcknowledgement(taskId: string | null) {
 
   useEffect(() => {
     if (!taskId || !unread) {
-      // A later result on the same Task raises the flag again and has to be acknowledged again.
+      // A later update on the same Task raises the flag again and has to be acknowledged again.
       acknowledged.current = null;
       return;
     }

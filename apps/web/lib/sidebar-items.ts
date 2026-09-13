@@ -6,10 +6,7 @@ import {
   chatSummaryState,
   PINNED_CHAT_LIMIT,
 } from "@/lib/chat-ui";
-import { taskHasReadableResult } from "@/lib/review-inbox";
-
-export const RECENT_SIDEBAR_CHAT_LIMIT = 8;
-export const RECENT_SIDEBAR_TASK_LIMIT = 8;
+import { taskHasReadableUpdate } from "@/lib/review-inbox";
 
 type SidebarChatCandidate = {
   id: string;
@@ -39,8 +36,7 @@ export function selectSidebarChats<T extends SidebarChatCandidate>(
         chat.activityState !== "working" &&
         isRecentChatActivity(chat.updatedAt, now),
     )
-    .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-    .slice(0, RECENT_SIDEBAR_CHAT_LIMIT);
+    .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 
   return [...pinned, ...working, ...recent];
 }
@@ -78,16 +74,12 @@ export function selectSidebarTasks<T extends SidebarTaskCandidate>(
   now = Date.now(),
 ): T[] {
   const openTasks = tasks.filter((task) => !task.archivedAt);
-  // Bounded like every other bucket: a workflow fan-out of concurrent Tasks must not push the
-  // reader's chats out of a 256px column. The board holds the rest.
   const unfinished = openTasks
     .filter((task) => isTaskUnfinished(task.status))
-    .toSorted(byUpdatedAtDescending)
-    .slice(0, RECENT_SIDEBAR_TASK_LIMIT);
+    .toSorted(byUpdatedAtDescending);
   const recent = openTasks
     .filter((task) => !isTaskUnfinished(task.status) && isRecentChatActivity(task.updatedAt, now))
-    .toSorted(byUpdatedAtDescending)
-    .slice(0, RECENT_SIDEBAR_TASK_LIMIT);
+    .toSorted(byUpdatedAtDescending);
 
   return [...unfinished, ...recent];
 }
@@ -111,8 +103,7 @@ export function isTaskUnfinished(status: TaskStatus) {
  */
 export function sidebarTaskState(task: Pick<SidebarTaskView, "status" | "hasUnseen">): ChatState {
   if (isTaskRunning(task.status)) return "working";
-  const resolvable = taskHasReadableResult(task.status) || task.status === "waiting";
-  return task.hasUnseen && resolvable ? "done_unseen" : "done_seen";
+  return task.hasUnseen && taskHasReadableUpdate(task.status) ? "done_unseen" : "done_seen";
 }
 
 // One list of the work in view, whatever shape it took. Chats and Tasks are two ways to run the

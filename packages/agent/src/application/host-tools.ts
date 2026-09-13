@@ -26,6 +26,7 @@ export type ChatHostContext = {
   lastName: string | null;
   timezone: string;
   taskToolsEnabled: boolean;
+  subagentsEnabled: boolean;
   skillToolsEnabled: boolean;
   legacyBrainEnabled: boolean;
 };
@@ -624,6 +625,9 @@ async function bootstrap(
     workspaceName: context.workspaceName,
     taskToolsEnabled,
     skillToolsEnabled: context.skillToolsEnabled,
+    // Chat only, for the same reason task tools are withheld from a task conversation: a task is
+    // already the deeper-work primitive, so a second delegation layer inside one is unobserved cost.
+    subagentsEnabled: context.subagentsEnabled && !context.taskConversation,
     browserToolsEnabled: true,
     browserProfiles: browserProfiles.map(({ id, name, siteHost }) => ({ id, name, siteHost })),
     skills,

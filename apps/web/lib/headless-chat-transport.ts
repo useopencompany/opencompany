@@ -112,6 +112,8 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
       ...(!request.sessionId && request.newSessionId
         ? { clientConversationId: request.newSessionId }
         : {}),
+      // Only meaningful while the Conversation is being created; the API rejects it otherwise.
+      ...(!request.sessionId && request.projectId ? { projectId: request.projectId } : {}),
       clientMessageId: latest.id,
       content: textFromMessage(latest),
       engine: request.engine,
@@ -410,6 +412,7 @@ function requestContext(body: object | undefined) {
   return {
     sessionId: stringValue(value.sessionId),
     newSessionId: stringValue(value.newSessionId),
+    projectId: stringValue(value.projectId),
     model: stringValue(value.model),
     engine: chatEngine(value.engine),
   };

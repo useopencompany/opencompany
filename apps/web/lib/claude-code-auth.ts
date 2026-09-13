@@ -1,6 +1,7 @@
 "use server";
 
 import { isClaudeCodeConnectedForUser as readClaudeCodeConnectionForUser } from "@opencompany/agent/application/engine-auth-status";
+import type { SubscriptionUsage } from "@opencompany/protocol";
 import { revalidatePath } from "next/cache";
 import { serverApiClient, serverApiError, serverApiErrorMessage } from "@/lib/server-api-client";
 
@@ -51,4 +52,21 @@ export async function disconnectClaudeCodeAuth() {
   }
   revalidatePath("/settings");
   return { ok: true as const };
+}
+
+export async function loadCurrentClaudeCodeUsage(): Promise<
+  { ok: true; usage: SubscriptionUsage } | { ok: false; error: string }
+> {
+  try {
+    const response = await (await serverApiClient()).v1["engine-auth"]["claude-code"].usage.$get();
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: await serverApiErrorMessage(response, "Claude usage is temporarily unavailable."),
+      };
+    }
+    return { ok: true, usage: (await response.json()).data };
+  } catch {
+    return { ok: false, error: "Claude usage is temporarily unavailable. Try again shortly." };
+  }
 }

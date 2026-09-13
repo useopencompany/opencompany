@@ -123,8 +123,6 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectionProvider: "attio",
     connectHref: "/api/integrations/attio-mcp/start?returnTo=/settings/plugins/attio",
     accountDescription: "The Attio account opencompany uses when you run CRM tools.",
-    ingestionHref: "/wiki/sources",
-    ingestionLabel: "Configure Attio ingestion in Wiki sources",
   },
   betterstack: {
     name: "betterstack",
@@ -148,8 +146,6 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectionProvider: "fathom",
     connectHref: "/api/integrations/fathom-mcp/start?returnTo=/settings/plugins/fathom",
     accountDescription: "The Fathom account opencompany uses when you search meeting content.",
-    ingestionHref: "/wiki/sources",
-    ingestionLabel: "Configure legacy Fathom ingestion in Wiki sources",
   },
   github: {
     name: "github",
@@ -176,8 +172,6 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectionProvider: "gmail",
     connectHref: "/api/integrations/gmail/start?access=mcp&returnTo=/settings/plugins/gmail",
     accountDescription: "The most recently connected Gmail account powers Gmail tools.",
-    ingestionHref: "/wiki/sources",
-    ingestionLabel: "Configure Gmail ingestion in Wiki sources",
   },
   granola: {
     name: "granola",
@@ -189,11 +183,9 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectionProvider: "granola",
     connectHref: "/api/integrations/granola-mcp/start?returnTo=/settings/plugins/granola",
     accountDescription: "The Granola account opencompany uses when you search meeting history.",
-    ingestionHref: "/wiki/sources",
-    ingestionLabel: "Configure legacy Granola API ingestion in Wiki sources",
     // Granola's note events are discovered by polling its REST API, which the MCP OAuth connection
-    // cannot call. They bind to the personal `grn_` API key connected from Wiki sources.
-    eventAccountHref: "/wiki/sources",
+    // cannot call. They bind to the personal API key in the plugin event settings.
+    eventAccountHref: "/settings/plugins/granola#events",
     eventAccountLabel: "Add a Granola API key",
   },
   outlook: {
@@ -259,8 +251,6 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectHref: "/api/integrations/google-drive/start?returnTo=/settings/plugins/google-drive",
     accountDescription:
       "The most recently connected Google Drive account powers plugin tools. Other accounts remain available for Wiki ingestion.",
-    ingestionHref: "/wiki/sources",
-    ingestionLabel: "Configure Google Drive ingestion in Wiki sources",
   },
   hubspot: {
     name: "hubspot",
@@ -272,8 +262,6 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectionProvider: "hubspot",
     connectHref: "/api/integrations/hubspot-mcp/start?returnTo=/settings/plugins/hubspot",
     accountDescription: "The HubSpot account opencompany uses when you run CRM tools.",
-    ingestionHref: "/wiki/sources",
-    ingestionLabel: "Configure HubSpot ingestion in Wiki sources",
   },
   infisical: {
     name: "infisical",
@@ -323,8 +311,8 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectionProvider: "linear",
     connectHref: "/api/integrations/linear/start?returnTo=/settings/plugins/linear",
     accountDescription: "The account opencompany uses when you run Linear tools.",
-    ingestionHref: "/wiki/sources",
-    ingestionLabel: "Configure Linear ingestion in Wiki sources",
+    eventAccountHref: "/settings/plugins/linear#events",
+    eventAccountLabel: "Connect Linear events",
   },
   neon: {
     name: "neon",

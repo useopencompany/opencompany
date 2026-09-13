@@ -86,7 +86,7 @@ describe("resolveWorkflowStepSelection", () => {
     });
   });
 
-  it.each(["anthropic/claude-opus-4.8", "anthropic/claude-opus-5"])(
+  it.each(["anthropic/claude-opus-4.8", "anthropic/claude-opus-5", "anthropic/claude-fable-5.1"])(
     "uses configured coding model %s and effort for cloud coding steps",
     (model) => {
       expect(

@@ -1,8 +1,5 @@
-import { WikiSourcesPanel } from "@/components/WikiSourcesPanel";
-import { currentUser } from "@/lib/auth";
+import { redirect } from "next/navigation";
 
-export default async function WikiSourcesPage() {
-  const { workspace, role } = await currentUser();
-
-  return <WikiSourcesPanel workspaceId={workspace.id} isAdmin={role === "admin"} />;
+export default function RetiredWikiIngestionPage() {
+  redirect("/settings/plugins");
 }

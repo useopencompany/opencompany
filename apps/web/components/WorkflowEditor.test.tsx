@@ -1,8 +1,8 @@
+import type { GranolaFolderListResult, LinearTeamListResult } from "@/lib/brain-source-actions";
 import "@testing-library/jest-dom/vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { LinearTeamListResult } from "@/lib/brain-source-actions";
 import { WorkflowEditor as WorkflowEditorComponent } from "./WorkflowEditor";
 
 const routerMock = vi.hoisted(() => ({
@@ -21,6 +21,16 @@ const brainSourceActionsMock = vi.hoisted(() => ({
     async (): Promise<LinearTeamListResult> => ({
       ok: true,
       teams: [{ id: "team_1", name: "Core", key: "CORE", triageStateId: "state_triage" }],
+      partial: false,
+    }),
+  ),
+  listGranolaFolders: vi.fn(
+    async (): Promise<GranolaFolderListResult> => ({
+      ok: true,
+      folders: [
+        { id: "fol_acme", name: "Acme", parentFolderId: "fol_customers" },
+        { id: "fol_customers", name: "Customers", parentFolderId: null },
+      ],
       partial: false,
     }),
   ),
@@ -44,6 +54,7 @@ function WorkflowEditor(
 
 vi.mock("@/lib/brain-source-actions", () => ({
   listLinearTeamsAction: brainSourceActionsMock.listLinearTeams,
+  listGranolaFoldersAction: brainSourceActionsMock.listGranolaFolders,
 }));
 
 vi.mock("@/components/MarkdownBrainEditor", () => ({
@@ -319,7 +330,40 @@ describe("WorkflowEditor", () => {
     );
   });
 
-  it("saves a filter-free poll-delivered event trigger as soon as an account is bound", async () => {
+  it("scopes a poll-delivered event to a Granola folder, shown by its full path", async () => {
+    render(
+      <WorkflowEditor
+        workflow={workflow}
+        canEdit
+        skillCatalog={[]}
+        eventProviders={[granolaEventProvider()]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("radio", { name: "On an event" }));
+    await act(async () => Promise.resolve());
+
+    expect(brainSourceActionsMock.listGranolaFolders).toHaveBeenCalledWith("gint_granola_1");
+    const folder = screen.getByLabelText("Folder");
+    // Unset means every meeting, so an optional filter keeps the event's existing behavior.
+    expect(folder).toHaveValue("");
+    expect(screen.getByRole("option", { name: "Customers / Acme" })).toBeInTheDocument();
+
+    fireEvent.change(folder, { target: { value: "fol_acme" } });
+    await advanceAutosave();
+
+    expect(workflowActionsMock.update).toHaveBeenLastCalledWith(
+      "workflow_1",
+      expect.objectContaining({
+        trigger: expect.objectContaining({
+          provider: "granola",
+          filters: { folder: { id: "fol_acme", name: "Customers / Acme" } },
+        }),
+      }),
+    );
+  });
+
+  it("saves a poll-delivered event trigger with its optional filter left unset", async () => {
     render(
       <WorkflowEditor
         workflow={workflow}
@@ -421,9 +465,7 @@ describe("WorkflowEditor", () => {
     fireEvent.click(screen.getByRole("radio", { name: "On an event" }));
     await act(async () => Promise.resolve());
 
-    expect(
-      screen.getByRole("option", { name: "Granola · Meeting notes ready" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Meeting notes ready" })).toBeInTheDocument();
     expect(
       screen.queryByRole("option", { name: "Linear · Issue created" }),
     ).not.toBeInTheDocument();
@@ -442,7 +484,7 @@ describe("WorkflowEditor", () => {
     expect(screen.getByRole("radio", { name: "On an event" })).toBeDisabled();
     expect(screen.getByRole("link", { name: "Add a Granola API key" })).toHaveAttribute(
       "href",
-      "/wiki/sources",
+      "/settings/plugins/granola#events",
     );
   });
 
@@ -785,6 +827,61 @@ describe("WorkflowEditor", () => {
     expect(screen.getByRole("button", { name: "Archive workflow" })).toBeDisabled();
     expect(workflowActionsMock.archive).not.toHaveBeenCalled();
   });
+  it("saves a status filter and clears provider filters when switching plugins", async () => {
+    const linear = linearEventProvider();
+    render(
+      <WorkflowEditor
+        workflow={workflow}
+        canEdit
+        skillCatalog={[]}
+        eventProviders={[
+          {
+            ...linear,
+            events: [
+              {
+                ...linear.events[0]!,
+                filters: [
+                  { ...linear.events[0]!.filters[0]!, required: false },
+                  {
+                    id: "status",
+                    label: "Status",
+                    kind: "choice",
+                    required: false,
+                    options: [{ id: "triage", name: "Triage" }],
+                  },
+                ],
+              },
+            ],
+          },
+          granolaEventProvider(),
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("radio", { name: "On an event" }));
+    fireEvent.change(screen.getByLabelText("Status", { selector: "select" }), {
+      target: { value: "triage" },
+    });
+    await advanceAutosave();
+    expect(workflowActionsMock.update).toHaveBeenLastCalledWith(
+      "workflow_1",
+      expect.objectContaining({
+        trigger: expect.objectContaining({
+          provider: "linear",
+          filters: { status: { id: "triage", name: "Triage" } },
+        }),
+      }),
+    );
+    fireEvent.change(screen.getByLabelText("Plugin"), { target: { value: "granola" } });
+    await advanceAutosave();
+    expect(screen.getByLabelText("Event")).toHaveValue("meeting.notes_ready");
+    expect(screen.queryByLabelText("Team")).not.toBeInTheDocument();
+    expect(workflowActionsMock.update).toHaveBeenLastCalledWith(
+      "workflow_1",
+      expect.objectContaining({
+        trigger: expect.objectContaining({ provider: "granola", filters: {} }),
+      }),
+    );
+  });
 });
 
 function linearEventProvider() {
@@ -818,7 +915,7 @@ function granolaEventProvider() {
   return {
     provider: "granola",
     label: "Granola",
-    accountHref: "/wiki/sources",
+    accountHref: "/settings/plugins/granola#events",
     accountLabel: "Add a Granola API key",
     accounts: [{ integrationId: "gint_granola_1", label: "ada@example.com" }],
     events: [
@@ -827,7 +924,15 @@ function granolaEventProvider() {
         label: "Meeting notes ready",
         description: "Starts a workflow once Granola finishes the AI summary for a meeting.",
         delivery: "poll" as const,
-        filters: [],
+        filters: [
+          {
+            id: "folder",
+            label: "Folder",
+            kind: "integration_resource" as const,
+            resourceType: "folder",
+            required: false,
+          },
+        ],
       },
     ],
   };

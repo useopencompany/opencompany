@@ -78,6 +78,13 @@ and organizations to remain shared while the API selects a fixed mobile session-
 Future mobile builds expose the same value as `EXPO_PUBLIC_WORKOS_CLIENT_ID`; neither variable is a
 client secret. Do not copy the mobile client ID into the web runtime unless web gains a real reader.
 
+`OPENCOMPANY_AGENT_USER_EMAIL` and `OPENCOMPANY_AGENT_USER_PASSWORD` identify the shared agent dev
+user in the non-production WorkOS environment. They live in Infisical `dev` `/web` only and are
+pulled by `bun run setup` so agents and headless environments can mint a real sealed session for
+authenticated dev-server verification (`bun run agent:session` after `bun run db:seed`). Provision
+or rotate the user with `bun run agent:provision`; the script refuses `sk_live_` keys, and these
+variables must never exist in a production Infisical path.
+
 `CRON_SECRET` must have the same value in prod `/web` and `/api`: web keeps the public cron URL
 while the API owns onboarding-email persistence.
 

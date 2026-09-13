@@ -14,6 +14,7 @@ const bootstrap: ChatHostBootstrap = {
   workspaceName: "Analytical Engines",
   taskToolsEnabled: true,
   skillToolsEnabled: true,
+  subagentsEnabled: false,
   browserToolsEnabled: true,
   browserProfiles: [{ id: "profile_1", name: "GitHub", siteHost: "github.com" }],
   skills: [{ id: "sales", name: "Sales", description: "Sell thoughtfully." }],
@@ -246,6 +247,7 @@ function context() {
     env: {
       vercelAiGatewayApiKey: "gateway-key",
       browserEnabled: true,
+      subagentsEnabled: false,
       apiOrigin: "http://localhost:3001",
       apiInternalToken: "api-internal-secret",
     },

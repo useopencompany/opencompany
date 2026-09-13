@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import {
   assertSafeRelativePath,
   computeArtifactIntegrity,
@@ -722,7 +723,7 @@ async function validateResolvedPlugin(plugin: ResolvedPluginPackage) {
     plugin.report.events?.status === "parsed"
       ? parsePluginEvents(parsedManifest.extensions, { trusted: true }).definitions
       : [];
-  if (JSON.stringify(parsedEvents) !== JSON.stringify(plugin.events)) {
+  if (!isDeepStrictEqual(parsedEvents, plugin.events)) {
     throw new CoreError(
       "invalid_argument",
       "The Plugin event definitions do not match plugin.json.",
