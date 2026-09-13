@@ -42,6 +42,29 @@
   }
 }
 
+/*
+ * Logo marquee for the /v2 landing variant. The track renders its item list
+ * twice, so translating by exactly -50% loops without a visible seam.
+ */
+@keyframes marquee-x {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-marquee-x {
+  animation: marquee-x 48s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-marquee-x {
+    animation: none;
+  }
+}
+
 .blog-prose {
   color: var(--foreground);
   font-size: 1rem;

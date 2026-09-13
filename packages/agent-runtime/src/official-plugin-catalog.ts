@@ -25,7 +25,7 @@ export const OFFICIAL_PLUGIN_SOURCES = {
   infisical:
     "https://github.com/useopencompany/plugins/tree/f283f509c195464f90f5f78f7e30a9a472b6393b/infisical",
   jamie:
-    "https://github.com/useopencompany/plugins/tree/ad062203fcbb628ad27572d564cd536025f2d6ed/jamie",
+    "https://github.com/useopencompany/plugins/tree/f1463786dd8cf98e48d89948026118c5bb7cb465/jamie",
   latitude:
     "https://github.com/useopencompany/plugins/tree/56855e7d53ee3544520ec1fdef84d9e2f5ae6896/latitude",
   linear:

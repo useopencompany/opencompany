@@ -1558,7 +1558,8 @@ describe("Surface chat streaming UI", () => {
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
   });
 
-  it("disables the composer while the Task run is active", () => {
+  it("keeps the composer typeable but unsendable while the Task run is active", async () => {
+    const user = userEvent.setup();
     render(
       <Surface
         tasks={[]}
@@ -1585,8 +1586,14 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    expect(screen.getByPlaceholderText("Reply...")).toBeDisabled();
-    expect(screen.getByText("You can reply when the current run finishes.")).toBeVisible();
+    const composer = screen.getByPlaceholderText("Reply...");
+    expect(composer).toBeEnabled();
+    await user.type(composer, "also check the staging deploy{Enter}");
+
+    expect(composer).toHaveValue("also check the staging deploy");
+    expect(
+      screen.getByText("Draft your reply now — you can send it when the current run finishes."),
+    ).toBeVisible();
     expect(screen.queryByTestId("ad-hoc-task-hint")).not.toBeInTheDocument();
     expect(taskCommandMocks.create).not.toHaveBeenCalled();
     expect(chatMock.sendMessage).not.toHaveBeenCalled();

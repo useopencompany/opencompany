@@ -3,6 +3,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { BrainWithWorkspace } from "@opencompany/db/workspaces";
 import { getBrainAccess, listAccessibleBrainsForUser } from "@opencompany/db/workspaces";
 import {
+  renderWikiToolContext,
   WIKI_TOOL_COMMANDS,
   WIKI_TOOL_DESCRIPTION,
   WIKI_TOOL_NAME,
@@ -72,6 +73,7 @@ export type McpWikiGateway = {
     userWorkosId: string;
     workspaceId: string;
     command: WikiToolInput;
+    wikiId?: string;
     idempotencyKey: string;
   }): Promise<WikiToolOutput>;
 };
@@ -450,6 +452,7 @@ const wikiNonEmptyString = z.string().check(z.minLength(1));
 // workspaces — chat resolves the workspace from the session instead.
 const wikiToolMcpInputSchema = {
   command: z.enum([...WIKI_TOOL_COMMANDS]),
+  wiki: z.optional(wikiNonEmptyString),
   depth: z.optional(z.number().check(z.int(), z.minimum(0), z.maximum(10))),
   pages: z.optional(
     z.union([
@@ -525,7 +528,7 @@ export function registerWikiTool(server: McpServer, ctx: McpToolContext) {
                 : `Pass "workspace" with one of:\n${listing}`,
           });
         }
-        const { workspace: _workspace, ...command } = args;
+        const { workspace: _workspace, wiki: wikiId, ...command } = args;
         // Stable within the authenticated MCP request; distinct requests get
         // distinct keys so intentional repeat calls are not collapsed.
         const idempotencyKey = `mcp-wiki:${ctx.userWorkosId}:${workspace.id}:${extra?.requestId ?? "request"}`;
@@ -533,6 +536,7 @@ export function registerWikiTool(server: McpServer, ctx: McpToolContext) {
           userWorkosId: ctx.userWorkosId,
           workspaceId: workspace.id,
           command,
+          ...(wikiId ? { wikiId } : {}),
           idempotencyKey,
         });
         if (output.ok && ctx.onSuccessfulWikiCall) {
@@ -544,11 +548,20 @@ export function registerWikiTool(server: McpServer, ctx: McpToolContext) {
             });
           }
         }
-        return mcpTextToolResult(
+        const result = mcpTextToolResult(
           output.ok
             ? { ok: true, stdout: "", stderr: "", parsed: output.result }
             : { ok: false, stdout: "", stderr: "", error: output.error },
         );
+        return output.wikiContext
+          ? {
+              ...result,
+              content: [
+                { type: "text" as const, text: renderWikiToolContext(output.wikiContext) },
+                ...result.content,
+              ],
+            }
+          : result;
       } catch (error) {
         return mcpTextToolResult({
           ok: false,

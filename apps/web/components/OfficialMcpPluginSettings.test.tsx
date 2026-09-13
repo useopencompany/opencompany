@@ -149,6 +149,15 @@ const appData = vi.hoisted(() => ({
       integrationId: "gint_jamie_mcp",
       capabilityModes: { read: "on", query: "ask", write: "ask", draft: "off" },
     },
+    jamie_events: {
+      provider: "jamie",
+      connected: false,
+      status: "not_connected",
+      integrationId: null,
+      statusReason: null,
+      webhookUrl: null,
+      lastDeliveryAt: null,
+    },
     attio: {
       connected: true,
       status: "connected",
@@ -1829,7 +1838,7 @@ describe("Linear plugin settings", () => {
     expect(screen.getByText("Permanently delete tags")).toBeInTheDocument();
     expect(screen.queryByText(/ingestion in Wiki sources/i)).not.toBeInTheDocument();
     expect(JAMIE_PLUGIN_SOURCE).toBe(
-      "https://github.com/useopencompany/plugins/tree/ad062203fcbb628ad27572d564cd536025f2d6ed/jamie",
+      "https://github.com/useopencompany/plugins/tree/f1463786dd8cf98e48d89948026118c5bb7cb465/jamie",
     );
   });
 
