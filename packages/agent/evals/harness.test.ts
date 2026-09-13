@@ -158,6 +158,61 @@ describe("real harness benchmark", () => {
     expect(trial.executions).toMatchObject([{ valid: true, schemaVisible: true, success: true }]);
   });
 
+  it("passes posthog-linear-triage on the oracle trajectory and requires the real figures", async () => {
+    const ph = "plugin:posthog:posthog.";
+    const oracle = (description: string) => [
+      [
+        call("describe_actions", {
+          actions: [`${ph}insights-list`, `${ph}insight-query`, `${ln}save_issue`],
+        }),
+      ],
+      [
+        call("use_action", {
+          action: `${ph}insights-list`,
+          params: {
+            search: "activation",
+            context: "Locating a saved activation insight to review recent metric movement.",
+          },
+        }),
+      ],
+      [
+        call("use_action", {
+          action: `${ph}insight-query`,
+          params: {
+            insightId: 42,
+            context: "Running the activation insight to compare current and previous values.",
+          },
+        }),
+      ],
+      [
+        call("use_action", {
+          action: `${ln}save_issue`,
+          params: {
+            team: "Product",
+            title: "Weekly activation dropped after release",
+            description,
+          },
+        }),
+      ],
+      [text("Filed DEMO-7: activation dropped from 132 to 84.")],
+    ];
+    const passed = await run(
+      get("posthog-linear-triage"),
+      scripted(
+        oracle("Activated users fell from 132 last week to 84 now. Suspect Tuesday's release."),
+      ).generate,
+    );
+    expect(passed.failures).toEqual([]);
+    expect(passed.status).toBe("passed");
+    expect(passed.approvals).toEqual([{ count: 1, executionsBeforeApproval: 0 }]);
+    const vague = await run(
+      get("posthog-linear-triage"),
+      scripted(oracle("Activation looks significantly down since the release.")).generate,
+    );
+    expect(vague.status).toBe("failed");
+    expect(vague.failures).toContain("one issue carrying both figures");
+  });
+
   it("pauses an ask-mode action, then executes exactly once after synthetic approval", async () => {
     const script = scripted([
       [call("describe_actions", { actions: [`${ln}save_issue`] })],
