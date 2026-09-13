@@ -19,9 +19,16 @@ export async function reconcileManagedArtifactTree(input: {
   ids: string[];
   files: ManagedArtifactFile[];
   isSafeId: (id: string) => boolean;
-}) {
+  fingerprint: string;
+}): Promise<{ skipped: boolean }> {
   assertAbsoluteNormalizedPath(input.root);
   const manifestPath = `${input.root}/${input.manifestName}`;
+  const markerPath = `${manifestPath}.sha256`;
+  if (
+    await managedTreeMatchesFingerprint(input.sandbox, input.root, markerPath, input.fingerprint)
+  ) {
+    return { skipped: true };
+  }
   const previousIds = await readManagedIds({ ...input, manifestPath });
   const resetIds = [...new Set([...previousIds, ...input.ids])];
   const verify = verifyManagedPathCommand(input.root);
@@ -32,6 +39,10 @@ export async function reconcileManagedArtifactTree(input: {
       verifyManagedPathCommand(input.root, true),
       `chown ${SANDBOX_ROOT_USER}:${SANDBOX_ROOT_USER} ${shellQuote(input.root)}`,
       `chmod 755 ${shellQuote(input.root)}`,
+      // The marker is the completion witness for the skip fast path. Invalidate it before any
+      // destructive step so a crash mid-reconcile can never leave a matching marker over a
+      // partially rebuilt tree.
+      `rm -f ${shellQuote(markerPath)}`,
       ...resetIds.map((id) => `rm -rf ${shellQuote(`${input.root}/${id}`)}`),
     ].join(" && "),
     { user: SANDBOX_ROOT_USER, timeoutMs: 30_000 },
@@ -86,6 +97,49 @@ export async function reconcileManagedArtifactTree(input: {
     ].join(" && "),
     { user: SANDBOX_ROOT_USER, timeoutMs: 30_000 },
   );
+  // Written only after every content write and permission pass above succeeded; root writes
+  // into the sealed 555 directory via CAP_DAC_OVERRIDE. The sandbox user cannot forge a
+  // root-owned 444 marker, which is what the skip check relies on.
+  await input.sandbox.commands.run(
+    [
+      verifyManagedPathCommand(input.root, true),
+      `printf '%s' ${shellQuote(input.fingerprint)} > ${shellQuote(`${markerPath}.tmp`)}`,
+      `mv -f ${shellQuote(`${markerPath}.tmp`)} ${shellQuote(markerPath)}`,
+      `chown ${SANDBOX_ROOT_USER}:${SANDBOX_ROOT_USER} ${shellQuote(markerPath)}`,
+      `chmod 444 ${shellQuote(markerPath)}`,
+    ].join(" && "),
+    { user: SANDBOX_ROOT_USER, timeoutMs: 30_000 },
+  );
+  return { skipped: false };
+}
+
+// One root-privileged probe decides whether the previous reconcile of this exact content is
+// still sealed on disk: the symlink-free path chain must hold, and the completion marker must
+// be a root-owned, read-only regular file recording the desired fingerprint. Any command
+// failure — including a wedged guest — falls through to the authoritative full reconcile,
+// whose own verification and error handling remain the source of truth.
+async function managedTreeMatchesFingerprint(
+  sandbox: SandboxHandle,
+  root: string,
+  markerPath: string,
+  fingerprint: string,
+) {
+  const quotedMarker = shellQuote(markerPath);
+  try {
+    await sandbox.commands.run(
+      [
+        verifyManagedPathCommand(root, true),
+        `test -f ${quotedMarker}`,
+        `test ! -L ${quotedMarker}`,
+        `test "$(stat -c %u:%g:%a -- ${quotedMarker})" = "0:0:444"`,
+        `test "$(cat ${quotedMarker})" = ${shellQuote(fingerprint)}`,
+      ].join(" && "),
+      { user: SANDBOX_ROOT_USER, timeoutMs: 30_000 },
+    );
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function managedArtifactFingerprint(
