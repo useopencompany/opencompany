@@ -1,3 +1,4 @@
+import { listGranolaFolders } from "@opencompany/agent/integrations/granola";
 import { captureProductIngestionQuotaAnalytics } from "@opencompany/analytics/product";
 import { normalizeGranolaMeetingNote } from "@opencompany/brain";
 import {
@@ -14,9 +15,11 @@ import {
   completeGranolaSyncPages,
   ensureGranolaSyncState,
   GRANOLA_CREDENTIAL_KIND,
+  GRANOLA_FOLDER_FILTER_ID,
   GRANOLA_MEETING_NOTES_READY_EVENT,
   GRANOLA_PROVIDER,
   granolaEventClaimKey,
+  granolaNoteFolderScope,
   granolaWorkflowEventContext,
   granolaWorkflowEventDeliveryId,
   listEnabledGranolaBrainSourceRoutes,
@@ -191,8 +194,8 @@ export async function pollGranolaIntegration(input: {
   const routes = await listEnabledGranolaBrainSourceRoutes([candidate.integrationId], db);
   const routedBrainRefs = [...new Set(routes.map((route) => route.brainRef))];
   // Event routing is authorized per pass, not per note: the plugin event toggle, the workflow
-  // status, and the connection can all change between polls. The declared event carries no
-  // filters, so a route that somehow stored one is dropped rather than fired unfiltered.
+  // status, and the connection can all change between polls. Declared filters are matched per
+  // note, once the note payload that carries its folders has been fetched.
   const workflowRoutes =
     notes.length === 0
       ? []
@@ -211,11 +214,40 @@ export async function pollGranolaIntegration(input: {
             },
             db,
           )
-        ).filter(
-          (route) =>
-            route.event === GRANOLA_MEETING_NOTES_READY_EVENT &&
-            workflowEventFiltersMatch(route, {}),
-        );
+        ).filter((route) => route.event === GRANOLA_MEETING_NOTES_READY_EVENT);
+
+  // Read the folder tree once per pass, and only when a route filters on one. A folder filter
+  // covers the folder's descendants, and a note's membership entry names only its direct parent.
+  let folderParentIds = new Map<string, string | null>();
+  if (workflowRoutes.some((route) => route.filters[GRANOLA_FOLDER_FILTER_ID])) {
+    const folders = await listGranolaFolders({ apiKey, signal: input.signal });
+    if (!folders.ok) {
+      if (folders.reason === "unauthorized") {
+        await markGranolaNeedsReauth(candidate, "Granola rejected the saved API key.");
+        return null;
+      }
+      // Matching a folder filter against a tree the platform could not read would drop runs
+      // silently and then advance the cursor past the notes that should have started them. This
+      // failure is retryable, so leave the cursor where it is and take the whole pass again.
+      throw new Error("Could not read the Granola folder tree for an event-filtered workflow.");
+    }
+    if (folders.partial) {
+      // The account has more folders than one listing reads, so retrying would never succeed and
+      // failing every pass would stop this connection's ingestion for good. Matching falls back to
+      // each note's own membership entries, which still reach one level up.
+      logger.warn(
+        "opencompany Granola folder tree exceeded one listing; filters match less deeply",
+        {
+          event: "opencompany.goat_granola_folder_tree_truncated",
+          integration_id: candidate.integrationId,
+          folder_count: folders.folders.length,
+        },
+      );
+    }
+    folderParentIds = new Map(
+      folders.folders.map((folder) => [folder.id, folder.parentFolderId] as const),
+    );
+  }
 
   let enqueued = 0;
   let workflowRuns = 0;
@@ -227,6 +259,7 @@ export async function pollGranolaIntegration(input: {
       note,
       routedBrainRefs,
       workflowRoutes,
+      folderParentIds,
       signal: input.signal,
     });
     if (result.enqueued) enqueued += 1;
@@ -319,6 +352,7 @@ export async function ingestGranolaNote(input: {
   note: GranolaNoteSummary;
   routedBrainRefs: readonly string[];
   workflowRoutes?: readonly WorkflowEventTriggerRoute[];
+  folderParentIds?: ReadonlyMap<string, string | null>;
   now?: Date;
   signal: AbortSignal;
   fetchNote?: typeof fetchGranolaNote;
@@ -353,6 +387,7 @@ export async function ingestGranolaNote(input: {
     routes: workflowRoutes,
     note,
     payload,
+    folderParentIds: input.folderParentIds ?? new Map(),
     now: input.now ?? new Date(),
     db,
   });
@@ -419,11 +454,17 @@ async function enqueueGranolaWorkflowEventRuns(input: {
   routes: readonly WorkflowEventTriggerRoute[];
   note: GranolaNoteSummary;
   payload: Record<string, unknown>;
+  folderParentIds: ReadonlyMap<string, string | null>;
   now: Date;
   db: ReturnType<typeof getDb>;
 }): Promise<number> {
   if (input.routes.length === 0) return 0;
   if (!hasGranolaSummary(input.payload)) return 0;
+  const folderScope = granolaNoteFolderScope(input.payload, input.folderParentIds);
+  const routes = input.routes.filter((route) =>
+    workflowEventFiltersMatch(route, { [GRANOLA_FOLDER_FILTER_ID]: folderScope }),
+  );
+  if (routes.length === 0) return 0;
   const updatedAt = input.note.updatedAt ? new Date(input.note.updatedAt) : null;
   const eventAt = updatedAt && !Number.isNaN(updatedAt.getTime()) ? updatedAt : input.now;
   // Ingestion is happy to catch up on a backlog; starting an agent task per historical meeting is
@@ -432,7 +473,7 @@ async function enqueueGranolaWorkflowEventRuns(input: {
   if (input.now.getTime() - eventAt.getTime() > GRANOLA_EVENT_MAX_NOTE_AGE_MS) return 0;
   return enqueueWorkflowEventRuns(
     {
-      routes: input.routes,
+      routes,
       deliveryId: granolaWorkflowEventDeliveryId(input.note.id),
       eventAt,
       context: granolaWorkflowEventContext(input.payload),

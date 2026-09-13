@@ -180,6 +180,33 @@ export function granolaWorkflowEventDeliveryId(noteId: string): string {
   return `note:${noteId}`;
 }
 
+// The one filter the Granola package declares for that event.
+export const GRANOLA_FOLDER_FILTER_ID = "folder";
+
+// Every folder the note is scoped to: its direct memberships plus their ancestors. Granola's own
+// note query treats `folder_id` as "this folder and any of its child folders", so a workflow
+// filtered on a parent folder must also fire for a note filed in one of its subfolders. Ancestors
+// come from the account's folder list because a membership entry only names its direct parent.
+export function granolaNoteFolderScope(
+  note: Record<string, unknown>,
+  parentFolderIds: ReadonlyMap<string, string | null>,
+): string[] {
+  const scope = new Set<string>();
+  for (const entry of Array.isArray(note.folder_membership) ? note.folder_membership : []) {
+    const record = asRecord(entry);
+    let folderId = asNonEmptyString(record?.id);
+    // The membership entry's own parent is trusted even when the folder list missed it, so a
+    // truncated list degrades to less reach rather than to no match at all.
+    let parentId = asNonEmptyString(record?.parent_folder_id);
+    while (folderId && !scope.has(folderId)) {
+      scope.add(folderId);
+      folderId = parentId ?? parentFolderIds.get(folderId) ?? null;
+      parentId = null;
+    }
+  }
+  return [...scope];
+}
+
 const GRANOLA_EVENT_ATTENDEE_LIMIT = 20;
 
 // Granola's adapter for the provider-neutral goal composer. The summary carries the bulk of the
