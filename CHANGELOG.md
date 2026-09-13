@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - choosing claude fable 5.1 for a cloud claude code sandbox now works instead of failing the turn with a bare "internal error". a chat that cannot start on the model you picked now says so by name, and a reasoning effort the model does not support steps down instead of ending the turn (#1780) — @louis.
 
 ### Changed
+- the preview pane in cloud coding sandboxes now has a browser-style address bar. type a real url or path — localhost:3000/pricing, :8080, or just /pricing — and press enter to open it. the port picker only appears when more than one server is running, a single refresh button replaces the two identical ones, and the preview opens on its own as soon as your dev server starts listening (#1809) — @louis.
 - the sidebar list of chats and tasks is now called recents, and you can collapse it. the chevron beside the label points down when the list is open and right when it is closed, and your choice is remembered (#1751) — @louis.
 
 ## [1.26.0] - 2026-09-11
