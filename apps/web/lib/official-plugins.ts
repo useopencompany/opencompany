@@ -287,6 +287,10 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectionProvider: "jamie",
     connectHref: "/api/integrations/jamie-mcp/start?returnTo=/settings/plugins/jamie",
     accountDescription: "The Jamie account opencompany uses when you run meeting tools.",
+    // Jamie's meeting events arrive on a webhook the user creates in Jamie; the MCP login cannot
+    // register one. They bind to the webhook key saved in the plugin's Events section.
+    eventAccountHref: "/settings/plugins/jamie#events",
+    eventAccountLabel: "Connect Jamie meeting events",
   },
   latitude: {
     name: "latitude",

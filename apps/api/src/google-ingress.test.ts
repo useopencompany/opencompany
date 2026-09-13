@@ -119,7 +119,7 @@ describe("Google ingress", () => {
     );
   });
 
-  it("requests the official Drive and Docs scopes from the Google Drive plugin page", async () => {
+  it("requests the official Drive, Docs, and Sheets scopes from the Google Drive plugin page", async () => {
     const response = await ingress().start(
       "google_drive",
       new Request(
@@ -132,6 +132,7 @@ describe("Google ingress", () => {
       "https://www.googleapis.com/auth/drive.readonly",
       "https://www.googleapis.com/auth/drive.file",
       "https://www.googleapis.com/auth/documents",
+      "https://www.googleapis.com/auth/spreadsheets",
       "openid",
       "email",
       "profile",

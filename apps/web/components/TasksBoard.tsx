@@ -894,11 +894,13 @@ function TaskCommentComposer({
   const [body, setBody] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const pendingComment = useRef<{ id: string; body: string } | null>(null);
-  const disabled = active || submitting;
+  // A run in flight gates posting, not composing: the textarea below stays editable so a comment
+  // can be drafted while the task works.
+  const postBlocked = active || submitting;
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (disabled || !body.trim()) return;
+    if (postBlocked || !body.trim()) return;
     const command =
       pendingComment.current?.body === body
         ? pendingComment.current
@@ -930,7 +932,7 @@ function TaskCommentComposer({
             setBody(event.target.value);
             if (pendingComment.current?.body !== event.target.value) pendingComment.current = null;
           }}
-          disabled={disabled}
+          disabled={submitting}
           maxLength={10_000}
           rows={3}
           placeholder="Add a comment…"
@@ -939,13 +941,13 @@ function TaskCommentComposer({
         <div className="mt-2 flex items-center justify-between gap-3">
           <span className="text-[11px] leading-4 text-ink-subtle">
             {active
-              ? "You can comment when the current run finishes."
+              ? "Draft your comment now — you can post it when the current run finishes."
               : "Posting a comment resumes this task."}
           </span>
           <button
             type="submit"
             aria-label="Post comment"
-            disabled={disabled || !body.trim()}
+            disabled={postBlocked || !body.trim()}
             className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-ink text-canvas transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
           >
             {submitting ? (

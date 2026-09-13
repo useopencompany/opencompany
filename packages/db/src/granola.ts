@@ -169,8 +169,8 @@ export function granolaEventClaimKey(noteId: string): string {
   return `note:${noteId}`;
 }
 
-// The one event the Granola package declares. Granola's own webhooks are gated to Business and
-// Enterprise plans, so the platform's existing note sync is the delivery path for every account.
+// The one event the Granola package declares. The platform's existing REST poller delivers it
+// for connected API-key accounts; both API keys and webhooks require Granola API access.
 export const GRANOLA_MEETING_NOTES_READY_EVENT = "meeting.notes_ready";
 
 // A note only becomes "ready" once, so the note id is a stable delivery key: the unique

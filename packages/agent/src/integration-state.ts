@@ -107,6 +107,22 @@ export type JamieProviderState = {
   capabilityModes: Record<string, unknown>;
 };
 
+// Jamie's event connection is a webhook the user creates in Jamie pointing at opencompany's fixed
+// endpoint. opencompany stores only the digest of the key Jamie mints, so the state carries the
+// endpoint URL to copy and the last verified delivery rather than an account identity.
+export type JamieEventsProviderState = {
+  provider: "jamie";
+  connected: boolean;
+  status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
+  integrationId: string | null;
+  statusReason: string | null;
+  // Null in the row mapper, which has no app origin to build it from; the server loader that feeds
+  // the settings UI fills it in. Copying it into Jamie is the first setup step, so it is part of
+  // the state rather than something the client reconstructs from its own location.
+  webhookUrl: string | null;
+  lastDeliveryAt: string | null;
+};
+
 // Granola connects with a personal API key minted in the Granola app; the
 // integration id is what the brain-source picker and save action key config
 // rows on.
@@ -291,6 +307,7 @@ export type IntegrationState = {
   hubspot: HubSpotProviderState;
   posthog: PostHogProviderState;
   jamie: JamieProviderState;
+  jamie_events: JamieEventsProviderState;
   slack: SlackProviderState;
   granola: GranolaProviderState;
   granola_mcp: GranolaMcpProviderState;
@@ -330,10 +347,16 @@ type IntegrationStateRow = {
   capability_modes?: Record<string, unknown> | null;
   toolModes?: Record<string, unknown> | null;
   tool_modes?: Record<string, unknown> | null;
-  lastSyncedAt?: string | Date | null;
-  last_synced_at?: string | Date | null;
+  lastSyncedAt?: Date | string | null;
+  last_synced_at?: Date | string | null;
   connectedAt?: string | null;
 };
+
+function isoTimestamp(value: Date | string | null | undefined) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
 
 const JAMIE_MCP_EXTERNAL_ID = "jamie_mcp";
 const FATHOM_MCP_EXTERNAL_ID = "fathom_mcp";
@@ -389,7 +412,7 @@ export function personalAccountsFromRows(
       continue;
     }
     if (row.provider === "jamie") {
-      if ((row.externalId ?? row.external_id) === JAMIE_MCP_EXTERNAL_ID) {
+      if ((row.externalId ?? row.external_id) !== JAMIE_MCP_EXTERNAL_ID) {
         personalAccounts.jamie.push(accountViewFromRow("jamie", row));
       }
       continue;
@@ -448,6 +471,7 @@ export function personalAccountsFromRows(
 export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): IntegrationState {
   const byProvider = new Map<IntegrationProvider, IntegrationStateRow>();
   let granolaMcpRow: IntegrationStateRow | undefined;
+  let jamieEventsRow: IntegrationStateRow | undefined;
   for (const row of rows) {
     if (row.status === "disconnected") continue;
     if (row.workspaceId ?? row.workspace_id) continue;
@@ -481,14 +505,15 @@ export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): 
     }
     // Stripe MCP uses the personal OAuth account, exposed in personalAccounts.
     if (row.provider === "stripe") continue;
-    // Jamie's retired webhook integration used workspace-owned rows. Only the
-    // personal OAuth connector row belongs to the official plugin.
-    if (
-      row.provider === "jamie" &&
-      ((row.workspaceId ?? row.workspace_id) ||
-        (row.externalId ?? row.external_id) !== JAMIE_MCP_EXTERNAL_ID)
-    ) {
-      continue;
+    // Provider "jamie" covers two personal rows: the OAuth MCP connector that powers the plugin's
+    // tools, and the meeting-event webhook connection. Jamie's retired ingestion integration used
+    // workspace-owned rows, which belong to neither.
+    if (row.provider === "jamie") {
+      if (row.workspaceId ?? row.workspace_id) continue;
+      if ((row.externalId ?? row.external_id) !== JAMIE_MCP_EXTERNAL_ID) {
+        jamieEventsRow = row;
+        continue;
+      }
     }
     byProvider.set(row.provider, row);
   }
@@ -502,6 +527,7 @@ export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): 
     hubspot: hubspotProviderState(byProvider.get("hubspot")),
     posthog: posthogProviderState(byProvider.get("posthog")),
     jamie: jamieProviderState(byProvider.get("jamie")),
+    jamie_events: jamieEventsProviderState(jamieEventsRow),
     slack: slackProviderState(byProvider.get("slack")),
     granola: granolaProviderState(byProvider.get("granola")),
     granola_mcp: granolaMcpProviderState(granolaMcpRow),
@@ -785,6 +811,30 @@ function xAccountProviderState(row: IntegrationStateRow | undefined): XAccountPr
     accountName: row.accountName ?? row.account_name ?? null,
     handle: row.connectionLabel ?? row.connection_label ?? null,
     statusReason: row.statusReason ?? row.status_reason ?? null,
+  };
+}
+
+function jamieEventsProviderState(row: IntegrationStateRow | undefined): JamieEventsProviderState {
+  if (!row || row.status === "disconnected") {
+    return {
+      provider: "jamie",
+      connected: false,
+      status: "not_connected",
+      integrationId: null,
+      statusReason: null,
+      webhookUrl: null,
+      lastDeliveryAt: null,
+    };
+  }
+
+  return {
+    provider: "jamie",
+    connected: row.status === "connected",
+    status: row.status,
+    integrationId: row.id ?? null,
+    statusReason: row.statusReason ?? row.status_reason ?? null,
+    webhookUrl: null,
+    lastDeliveryAt: isoTimestamp(row.lastSyncedAt ?? row.last_synced_at),
   };
 }
 

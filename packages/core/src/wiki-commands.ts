@@ -16,6 +16,7 @@ import {
   WIKI_READ_COMMANDS,
   type WikiKind,
   type WikiToolCommand,
+  type WikiToolContext,
   type WikiToolInput,
   type WikiToolOutput,
   wikiPageRefs,
@@ -135,6 +136,8 @@ export type WikiCommandTarget = {
 export type WikiCommandScope = { workspaceId: string; wikiId: string };
 
 export interface WikiCommandRepository {
+  /** Every wiki the actor can currently reach in this workspace. */
+  listWikis(input: { workspaceId: string; userWorkosId: string }): Promise<WikiCommandTarget[]>;
   /**
    * The wiki the actor means — an explicit id, otherwise the workspace's default
    * wiki — or null when it does not exist *or* the actor cannot reach it. The two
@@ -217,8 +220,8 @@ export type ExecuteWikiCommandInput = {
    */
   idempotencyKey: string;
   /**
-   * Which wiki to operate on. Omitted by callers that have no wiki selector yet
-   * (the agent tool contract), which resolves to the workspace's default wiki.
+   * Which wiki to operate on, by id or slug. Omission resolves to the
+   * workspace's default wiki.
    */
   wikiId?: string | undefined;
 };
@@ -228,12 +231,16 @@ export class WikiCommandApplicationService {
 
   async execute(input: ExecuteWikiCommandInput): Promise<WikiToolOutput> {
     const { actor, command, idempotencyKey } = input;
-    const scope = await this.authorize(actor, command.command, input.wikiId);
+    const target = await this.authorize(actor, command.command, input.wikiId);
+    const scope = { workspaceId: actor.workspaceId, wikiId: target.wikiId };
+    const wikiContext = toolContext(target);
     try {
       const result = await this.dispatch(actor, scope, command, idempotencyKey.trim());
-      return { ok: true, result };
+      return { ok: true, result, wikiContext };
     } catch (error) {
-      if (error instanceof WikiCommandError) return { ok: false, error: error.message };
+      if (error instanceof WikiCommandError) {
+        return { ok: false, error: error.message, wikiContext };
+      }
       throw error;
     }
   }
@@ -248,7 +255,7 @@ export class WikiCommandApplicationService {
     actor: Actor,
     command: WikiToolCommand,
     wikiId: string | undefined,
-  ): Promise<WikiCommandScope> {
+  ): Promise<WikiCommandTarget> {
     const permission = WIKI_READ_COMMANDS.includes(command)
       ? WIKI_READ_PERMISSION
       : WIKI_WRITE_PERMISSION;
@@ -259,15 +266,34 @@ export class WikiCommandApplicationService {
     ) {
       throw new CoreError("forbidden", "The actor is not allowed to access Wiki.");
     }
+    const hasWikiSelector = wikiId !== undefined;
+    const wanted = wikiId?.trim() ?? "";
+    let resolvedWikiId: string | undefined;
+    let reachable: WikiCommandTarget[] | undefined;
+    if (hasWikiSelector) {
+      reachable = await this.repository.listWikis({
+        workspaceId: actor.workspaceId,
+        userWorkosId: actor.userId,
+      });
+      const matches = reachable.filter((wiki) => wiki.wikiId === wanted || wiki.slug === wanted);
+      if (matches.length !== 1) {
+        throw wikiNotFound(wanted, reachable, matches.length > 1);
+      }
+      resolvedWikiId = matches[0]?.wikiId;
+    }
     const wiki = await this.repository.resolveWiki({
       workspaceId: actor.workspaceId,
       userWorkosId: actor.userId,
-      wikiId,
+      ...(resolvedWikiId ? { wikiId: resolvedWikiId } : {}),
     });
     // A restricted wiki the actor is not a member of is reported exactly like one
     // that does not exist, so membership cannot be probed.
-    if (!wiki) throw new CoreError("not_found", "Wiki not found.");
-    return { workspaceId: actor.workspaceId, wikiId: wiki.wikiId };
+    if (!wiki) {
+      throw hasWikiSelector
+        ? wikiNotFound(wanted, reachable ?? [], false)
+        : new CoreError("not_found", "The default wiki was not found.");
+    }
+    return wiki;
   }
 
   private async dispatch(
@@ -535,6 +561,32 @@ export class WikiCommandApplicationService {
         );
     }
   }
+}
+
+// The wiki id is deliberately absent: agents address a wiki by slug, and repeating a UUID on every
+// tool call bought nothing but tokens.
+function toolContext(wiki: WikiCommandTarget): WikiToolContext {
+  return {
+    wiki: { name: wiki.name, slug: wiki.slug },
+    instructions: wiki.instructions,
+  };
+}
+
+function wikiNotFound(
+  wanted: string,
+  reachable: WikiCommandTarget[],
+  ambiguous: boolean,
+): CoreError {
+  const reason = ambiguous
+    ? `The wiki reference "${wanted}" is ambiguous.`
+    : `No reachable wiki matches "${wanted}".`;
+  const listing = reachable.map((wiki) => `- ${wiki.slug} — ${wiki.name}`).join("\n");
+  return new CoreError(
+    "not_found",
+    listing
+      ? `${reason} Pass "wiki" with one of these slugs:\n${listing}`
+      : `${reason} You do not have access to any wikis in this workspace.`,
+  );
 }
 
 function requireSingleRef(toolInput: WikiToolInput, command: string): string {

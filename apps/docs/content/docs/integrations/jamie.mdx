@@ -9,8 +9,8 @@ The official Jamie plugin connects opencompany to Jamie's hosted MCP server. It 
 meeting notes, transcripts, people, and action items. With approval, it can also create tasks and
 manage templates and tags.
 
-Jamie webhook ingestion is currently unavailable. Installing the plugin gives the agent on-demand
-access to Jamie; it does not copy completed meetings into Brain or Wiki.
+Installing the plugin gives the agent on-demand access to Jamie; it does not copy completed meetings
+into Brain. Jamie's meeting webhook is used separately, to start Workflows.
 
 ## Connect Jamie
 
@@ -21,6 +21,57 @@ access to Jamie; it does not copy completed meetings into Brain or Wiki.
 
 Jamie MCP requires a Jamie Pro, Team, or Enterprise plan. Authentication uses Jamie's OAuth flow;
 you do not need to create or paste an API key.
+
+## Trigger a Workflow
+
+Jamie's **Meeting completed** event (`meeting.completed`) starts a Workflow as soon as Jamie has
+finished a meeting's summary, transcript, and action items. Jamie pushes it, so there is no polling
+delay.
+
+1. Open **Settings → Plugins → Jamie** and install or update the plugin.
+2. In **Events**, choose **Create endpoint** and copy the URL opencompany shows.
+3. In Jamie, open **Settings → Integrations → Webhooks** and create a webhook:
+   - Paste the endpoint URL and select the `meeting.completed` event.
+   - Choose a **personal** webhook for your own meetings, or a **workspace** webhook for every
+     meeting in your Jamie workspace.
+   - Choose **API Key** authentication and keep the default `x-jamie-api-key` header name.
+4. Copy the `sk_` key Jamie shows once, paste it back into **Events**, and save it.
+5. Turn on **Meeting completed**. Events are off by default.
+6. Open a Workflow, choose **On an event → Jamie → Meeting completed**, and select your account.
+7. Optionally set **Guests** to *Outside your company* or *Internal only*. Leaving it empty runs the
+   Workflow for every completed meeting.
+8. Write the step instructions and activate the Workflow before finishing a new meeting.
+
+Jamie webhooks require a **Plus plan or higher**, and workspace webhooks require Jamie admin access.
+The webhook connection is separate from the MCP OAuth connection that powers the tools; neither can
+create the other.
+
+Each connection has its own endpoint URL, and opencompany encrypts the webhook key and keeps it
+server-side, using it only to recognise Jamie's deliveries. Jamie has nothing that can check a key
+when you save it, so **Events** reports when Jamie last reached opencompany rather than claiming the
+key is valid. Use Jamie's **Test** button on the webhook to get a delivery immediately. If you
+regenerate the key in Jamie, paste the new one here; the URL, the connection, and any Workflow bound
+to it stay the same.
+
+**Guests** is decided from the delivery: a meeting counts as outside your company when anyone on its
+calendar invite or in its transcript has an email domain different from yours. Each meeting starts a
+given Workflow at most once, including across Jamie's delivery retries. Events from before Workflow
+activation are excluded. The task receives the meeting title, time, invitees, speakers, tags, action
+items, and summary as context.
+
+For a first test, use a step such as:
+
+```text
+Use the meeting summary supplied by this event to draft a follow-up email to the external guests.
+Include only commitments the notes actually state, and list the action items with their owners.
+```
+
+**Remove endpoint** in **Events** forgets the key and retires that URL, so Jamie's webhook stops
+being accepted and a new endpoint has to be set up on both sides.
+
+If no run appears, check that the webhook is active in Jamie, that the saved key matches the current
+one, that the event is on, and that the Workflow is active with a matching **Guests** filter. Jamie
+retries a failed delivery five times over about an hour and then emails the webhook's owner.
 
 ## Permission defaults
 
@@ -37,6 +88,8 @@ New or unrecognized Jamie tools require confirmation until they are reviewed and
 - Jamie's MCP integration is available only on supported paid plans.
 - Deleting a tag removes it from every meeting and cannot be undone.
 - Disconnect Jamie or uninstall the plugin to stop future agent access.
+- Jamie's only webhook event is `meeting.completed`; there is no event for edits or deletions.
+- A webhook missed while the endpoint was unreachable for more than about an hour is not replayed.
 
 See [Jamie's MCP documentation](https://docs.meetjamie.ai/integrations/mcp) for provider-specific
 availability and troubleshooting.

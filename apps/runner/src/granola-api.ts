@@ -91,12 +91,13 @@ export async function listGranolaNotes(input: {
 export async function fetchGranolaNote(input: {
   apiKey: string;
   noteId: string;
+  includeTranscript?: boolean;
   signal?: AbortSignal;
   timeoutMs?: number;
 }): Promise<Record<string, unknown>> {
   return granolaApiCall<Record<string, unknown>>({
     apiKey: input.apiKey,
-    path: `/notes/${encodeURIComponent(input.noteId)}?include=transcript`,
+    path: `/notes/${encodeURIComponent(input.noteId)}${input.includeTranscript === false ? "" : "?include=transcript"}`,
     ...(input.signal ? { signal: input.signal } : {}),
     ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
   });

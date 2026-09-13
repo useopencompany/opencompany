@@ -93,7 +93,7 @@ describe("opencompany Google OAuth", () => {
     expect(driveUrl.searchParams.get("scope")).not.toContain("calendar.readonly");
   });
 
-  it("requests the Drive and Docs scopes required by the plugin surface", () => {
+  it("requests the Drive, Docs, and Sheets scopes required by the plugin surface", () => {
     const config = googleAuthorizationConfigForReturnTo(
       GOOGLE_PROVIDER_CONFIG.google_drive,
       "/settings/plugins/google-drive?integration=google_drive",
@@ -103,11 +103,11 @@ describe("opencompany Google OAuth", () => {
       "https://www.googleapis.com/auth/drive.readonly",
       "https://www.googleapis.com/auth/drive.file",
       "https://www.googleapis.com/auth/documents",
+      "https://www.googleapis.com/auth/spreadsheets",
       "openid",
       "email",
       "profile",
     ]);
-    expect(config.scopes).not.toContain("https://www.googleapis.com/auth/spreadsheets");
   });
 
   it("uses direct opencompany callbacks", () => {

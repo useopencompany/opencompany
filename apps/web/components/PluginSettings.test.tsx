@@ -453,7 +453,7 @@ describe("Plugin settings", () => {
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/github$/u,
     );
     expect(GOOGLE_DRIVE_PLUGIN_SOURCE).toBe(
-      "https://github.com/useopencompany/plugins/tree/bae88070e498725de008e358a74bd18bc46ed27c/google-drive",
+      "https://github.com/useopencompany/plugins/tree/8b328aa34239234c215e905275c2de3bf4567c29/google-drive",
     );
     expect(LINEAR_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/linear$/u,
@@ -483,7 +483,7 @@ describe("Plugin settings", () => {
       "https://github.com/useopencompany/plugins/tree/6b4e00b71f7d1b388fe5aa225aa86c8d35ba2578/hubspot",
     );
     expect(JAMIE_PLUGIN_SOURCE).toBe(
-      "https://github.com/useopencompany/plugins/tree/ad062203fcbb628ad27572d564cd536025f2d6ed/jamie",
+      "https://github.com/useopencompany/plugins/tree/f1463786dd8cf98e48d89948026118c5bb7cb465/jamie",
     );
     expect(ATTIO_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/0daeec4cff5d5f9925af2901410e1aa6c8baf0d8/attio",

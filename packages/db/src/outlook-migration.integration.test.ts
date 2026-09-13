@@ -16,7 +16,9 @@ it("adds Outlook providers without removing existing integration providers", asy
     for (const migration of [
       "0262_opencompany_convex_integration.sql",
       "0266_google_admin_integration.sql",
-      "0274_outlook_integrations.sql",
+      // Resolved from the journal: this migration is renumbered every time it lands behind a new
+      // one on main, and hardcoding the index here means the rename silently breaks this test.
+      `${await outlookMigrationTag()}.sql`,
     ]) {
       const sql = await readFile(new URL(`../../../drizzle/${migration}`, import.meta.url), "utf8");
       await db.exec(sql);
@@ -43,3 +45,12 @@ it("adds Outlook providers without removing existing integration providers", asy
     await db.close();
   }
 });
+
+async function outlookMigrationTag() {
+  const journal: { entries: { tag: string }[] } = JSON.parse(
+    await readFile(new URL("../../../drizzle/meta/_journal.json", import.meta.url), "utf8"),
+  );
+  const entry = journal.entries.find(({ tag }) => tag.endsWith("_outlook_integrations"));
+  if (!entry) throw new Error("The Outlook migration is missing from the Drizzle journal.");
+  return entry.tag;
+}

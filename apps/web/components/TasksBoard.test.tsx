@@ -314,15 +314,20 @@ describe("TasksBoardRoute", () => {
     render(<TasksBoardRoute workflowNames={{}} />);
     await user.click(screen.getByRole("link", { name: "Open Research the market" }));
 
+    const sheet = screen.getByRole("dialog");
+    expect(within(sheet).getByRole("button", { name: "Archive" })).toBeDisabled();
     expect(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Archive" }),
-    ).toBeDisabled();
-    expect(within(screen.getByRole("dialog")).getByLabelText("Add a comment")).toBeDisabled();
-    expect(
-      within(screen.getByRole("dialog")).getByText(
-        "You can comment when the current run finishes.",
+      within(sheet).getByText(
+        "Draft your comment now — you can post it when the current run finishes.",
       ),
     ).toBeVisible();
+
+    const composer = within(sheet).getByLabelText("Add a comment");
+    expect(composer).toBeEnabled();
+    fireEvent.change(composer, { target: { value: "also check the staging deploy" } });
+    expect(composer).toHaveValue("also check the staging deploy");
+    expect(within(sheet).getByRole("button", { name: "Post comment" })).toBeDisabled();
+    expect(createCommentMock).not.toHaveBeenCalled();
   });
 
   it("posts a settled Task comment verbatim and resumes through the canonical command", async () => {

@@ -9,6 +9,7 @@ import {
   GOOGLE_DOCS_WRITE_SCOPE,
   GOOGLE_DRIVE_FILE_SCOPE,
   GOOGLE_DRIVE_READ_SCOPE,
+  GOOGLE_SHEETS_WRITE_SCOPE,
 } from "./integrations/google-drive-scopes";
 import { SLACK_MCP_RECONNECT_REASON, SLACK_MCP_USER_SCOPES } from "./integrations/slack-scopes";
 
@@ -153,7 +154,12 @@ describe("Google Drive integration state", () => {
         id: "gint_drive",
         provider: "google_drive",
         status: "connected",
-        scopes: [GOOGLE_DRIVE_READ_SCOPE, GOOGLE_DRIVE_FILE_SCOPE, GOOGLE_DOCS_WRITE_SCOPE],
+        scopes: [
+          GOOGLE_DRIVE_READ_SCOPE,
+          GOOGLE_DRIVE_FILE_SCOPE,
+          GOOGLE_DOCS_WRITE_SCOPE,
+          GOOGLE_SHEETS_WRITE_SCOPE,
+        ],
       },
     ]);
 
@@ -285,7 +291,7 @@ describe("HubSpot integration state", () => {
 });
 
 describe("Jamie integration state", () => {
-  it("ignores retired workspace webhook rows and selects only the personal MCP OAuth row", () => {
+  it("keeps MCP tool authorization separate from the meeting event connection", () => {
     const state = integrationStateFromRows([
       {
         id: "gint_jamie_webhook",
@@ -294,6 +300,15 @@ describe("Jamie integration state", () => {
         externalId: "jamie_webhook",
         accountName: "Retired webhook",
         status: "connected",
+      },
+      {
+        id: "gint_jamie_events",
+        provider: "jamie",
+        externalId: "jamie_webhook_key_sha256:abc",
+        accountType: "jamie_webhook",
+        connectionLabel: "Jamie meetings",
+        status: "connected",
+        lastSyncedAt: new Date("2026-09-12T15:04:00.000Z"),
       },
       {
         id: "gint_jamie_mcp",
@@ -310,13 +325,34 @@ describe("Jamie integration state", () => {
       connected: true,
       capabilityModes: { read: "on", query: "ask", write: "ask", draft: "off" },
     });
+    expect(state.jamie_events).toMatchObject({
+      integrationId: "gint_jamie_events",
+      connected: true,
+      lastDeliveryAt: "2026-09-12T15:04:00.000Z",
+    });
+    // The event connection is what a workflow event trigger binds to, so it is the personal
+    // account; the MCP connector is surfaced as the plugin's tool connection instead.
     expect(state.personalAccounts.jamie).toEqual([
       expect.objectContaining({
-        integrationId: "gint_jamie_mcp",
+        integrationId: "gint_jamie_events",
         provider: "jamie",
         connected: true,
       }),
     ]);
+  });
+
+  it("reports no event connection before a webhook key is saved", () => {
+    const state = integrationStateFromRows([
+      { id: "gint_jamie_mcp", provider: "jamie", externalId: "jamie_mcp", status: "connected" },
+    ]);
+
+    expect(state.jamie_events).toMatchObject({
+      connected: false,
+      status: "not_connected",
+      integrationId: null,
+      lastDeliveryAt: null,
+    });
+    expect(state.personalAccounts.jamie).toEqual([]);
   });
 });
 

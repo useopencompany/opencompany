@@ -42,6 +42,7 @@ import { ConvexDeployKeyConnectionForm } from "@/components/ConvexDeployKeyConne
 import { GitHubRepositoryAccessSection } from "@/components/GitHubRepositoryAccess";
 import { GranolaIntegrationSetup } from "@/components/GranolaIntegrationSetup";
 import { InfisicalPluginConnectionForm } from "@/components/InfisicalPluginConnectionForm";
+import { JamieEventsSetup } from "@/components/JamieEventsSetup";
 import { PluginAccountRow, PluginConnectionFeedback } from "@/components/PluginConnectionSettings";
 import {
   installOfficialMcpPlugin,
@@ -1008,6 +1009,9 @@ function EventsSection({ plugin, canEdit }: { plugin: PluginInstallationDto; can
       ) : null}
       {plugin.name === "granola" && canEdit ? (
         <GranolaIntegrationSetup initialState={integrations.granola} variant="modal" />
+      ) : null}
+      {plugin.name === "jamie" && canEdit ? (
+        <JamieEventsSetup initialState={integrations.jamie_events} />
       ) : null}
       <ul className="overflow-hidden rounded-lg border border-border bg-surface">
         {plugin.events.map((event: PluginEventDefinitionDto) => {

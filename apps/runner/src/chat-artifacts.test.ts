@@ -200,6 +200,26 @@ describe("publishChatArtifact", () => {
     });
   });
 
+  it("treats empty revision placeholders as omitted for a new sandbox artifact", async () => {
+    const result = await executePublishArtifactDynamicTool({
+      context: context(),
+      call: {
+        threadId: "thread_1",
+        turnId: "turn_1",
+        callId: "call_1",
+        namespace: null,
+        tool: "publish_artifact",
+        arguments: { path: "report.md", artifact_id: "", expected_version: 1 },
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(JSON.parse((result.contentItems[0] as { text: string }).text)).toMatchObject({
+      ok: true,
+      artifact: { version: 1, filename: "report.md" },
+    });
+  });
+
   it("publishes in-band Markdown for an active opencompany turn", async () => {
     dbMocks.select
       .mockReset()
@@ -241,6 +261,38 @@ describe("publishChatArtifact", () => {
         abortSignal: expect.any(AbortSignal),
       }),
     );
+  });
+
+  it("treats empty revision placeholders as omitted for a new in-band artifact", async () => {
+    dbMocks.select
+      .mockReset()
+      .mockReturnValueOnce(queryBuilder([activeInBandTurn()]))
+      .mockReturnValueOnce(queryBuilder([{ status: "running", interruptAt: null }]))
+      .mockReturnValueOnce(queryBuilder([]));
+    dbMocks.execute
+      .mockReset()
+      .mockResolvedValueOnce({ rows: [{ count: 0 }] })
+      .mockResolvedValueOnce({ rows: [{ id: "persisted_version" }] });
+
+    const result = await publishInBandChatArtifact({
+      codexChatSessionId: "codex_session_1",
+      codexChatTurnId: "turn_1",
+      toolCallId: "call_1",
+      arguments: {
+        filename: "report.md",
+        title: "Quarterly report",
+        content: "# Report",
+        artifact_id: "",
+        expected_version: 1,
+      },
+      env: { blobReadWriteToken: "blob_token" },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      artifact: { version: 1, filename: "report.md" },
+    });
+    expect(blobMocks.put).toHaveBeenCalledOnce();
   });
 
   it("publishes in-band HTML with the media type derived from the filename", async () => {

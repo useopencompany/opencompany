@@ -371,6 +371,7 @@ export async function runProductChatTurn(input: {
           stepNumber,
           maxSteps: runtime.maxSteps,
           system: runtime.system,
+          wikiContext: runtime.toolContext.getSelectedWikiContext(),
           actionCallsExhausted: runtime.toolContext.areActionCallsExhausted(),
           toolNames: Object.keys(runtime.toolContext.tools),
         }),

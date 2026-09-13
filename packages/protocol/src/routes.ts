@@ -111,6 +111,7 @@ import {
   IntegrationCapabilityModeEnvelopeSchema,
   InviteWorkspaceMemberBodySchema,
   InvokeWorkflowBodySchema,
+  JamieEventsAccountStateEnvelopeSchema,
   LegacyTaskHistoryEnvelopeSchema,
   LegacyTaskPageSchema,
   ManagedCapabilitySourceSchema,
@@ -3370,6 +3371,41 @@ export const connectGranolaAccountRoute = createRoute({
   },
 });
 
+export const connectJamieEventsAccountRoute = createRoute({
+  method: "put",
+  path: "/v1/integration-accounts/jamie-events",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: IntegrationApiKeyBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Jamie meeting events connected for the acting user.",
+      content: { "application/json": { schema: JamieEventsAccountStateEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const createJamieEventsEndpointRoute = createRoute({
+  method: "post",
+  path: "/v1/integration-accounts/jamie-events/endpoint",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: { headers: z.object({ "idempotency-key": z.string().min(1).max(200) }) },
+  responses: {
+    200: {
+      description: "Jamie meeting-event endpoint ready for the acting user to paste into Jamie.",
+      content: { "application/json": { schema: JamieEventsAccountStateEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const connectConvexAccountRoute = createRoute({
   method: "put",
   path: "/v1/integration-accounts/convex",
@@ -4135,6 +4171,8 @@ export type V1RouteHandlers = {
   disconnectAttioAccount: RouteHandler<typeof disconnectAttioAccountRoute>;
   connectFathomAccount: RouteHandler<typeof connectFathomAccountRoute>;
   connectGranolaAccount: RouteHandler<typeof connectGranolaAccountRoute>;
+  createJamieEventsEndpoint: RouteHandler<typeof createJamieEventsEndpointRoute>;
+  connectJamieEventsAccount: RouteHandler<typeof connectJamieEventsAccountRoute>;
   connectConvexAccount: RouteHandler<typeof connectConvexAccountRoute>;
   connectRenderAccount: RouteHandler<typeof connectRenderAccountRoute>;
   connectStripeAccount: RouteHandler<typeof connectStripeAccountRoute>;
@@ -4344,6 +4382,8 @@ export function createV1Router(
       .openapi(disconnectAttioAccountRoute, handlers.disconnectAttioAccount)
       .openapi(connectFathomAccountRoute, handlers.connectFathomAccount)
       .openapi(connectGranolaAccountRoute, handlers.connectGranolaAccount)
+      .openapi(createJamieEventsEndpointRoute, handlers.createJamieEventsEndpoint)
+      .openapi(connectJamieEventsAccountRoute, handlers.connectJamieEventsAccount)
       .openapi(connectConvexAccountRoute, handlers.connectConvexAccount)
       .openapi(connectRenderAccountRoute, handlers.connectRenderAccount)
       .openapi(connectStripeAccountRoute, handlers.connectStripeAccount)
@@ -5756,6 +5796,42 @@ const contractDocumentHandlers: V1RouteHandlers = {
             accountEmail: null,
             accountName: null,
             statusReason: null,
+          },
+        },
+        meta,
+      },
+      200,
+    ),
+  createJamieEventsEndpoint: (c) =>
+    c.json(
+      {
+        data: {
+          state: {
+            provider: "jamie" as const,
+            connected: false,
+            status: "needs_reauth" as const,
+            integrationId: "gint_contract",
+            statusReason: "Add the webhook key Jamie showed when you created the endpoint.",
+            webhookUrl: "https://app.example.com/api/webhooks/jamie/gint_contract",
+            lastDeliveryAt: null,
+          },
+        },
+        meta,
+      },
+      200,
+    ),
+  connectJamieEventsAccount: (c) =>
+    c.json(
+      {
+        data: {
+          state: {
+            provider: "jamie" as const,
+            connected: true,
+            status: "connected" as const,
+            integrationId: "gint_contract",
+            statusReason: null,
+            webhookUrl: "https://app.example.com/api/webhooks/jamie/gint_contract",
+            lastDeliveryAt: null,
           },
         },
         meta,
