@@ -2,7 +2,9 @@
 
 import type { WikiAccessDetailsDto, WikiDto } from "@opencompany/protocol";
 import { toast } from "@opencompany/ui/components/sonner";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { wikiHref, wikiPagePathFromPathname } from "@/lib/wiki-routes";
 import { getWikiAccess, setWikiAccess, updateWiki } from "@/lib/wikis";
 
 /**
@@ -53,6 +55,8 @@ export function WikiSettings({
   const [invited, setInvited] = useState<ReadonlySet<string>>(new Set());
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     let cancelled = false;
@@ -110,6 +114,14 @@ export function WikiSettings({
         setDetails(updated);
         saved = { ...saved, access: updated.access };
       }
+      // Renaming moves the wiki's address. A reader sitting on the old one would 404 on their next
+      // reload, so carry them across, keeping the page they were on.
+      if (saved.slug !== wiki.slug) {
+        const page = wikiPagePathFromPathname(pathname, wiki.slug);
+        if (page !== null || pathname === wikiHref(wiki.slug)) {
+          router.replace(wikiHref(saved.slug, page));
+        }
+      }
       toast.success("Wiki settings saved.");
       onClose();
     } catch (cause) {
@@ -152,7 +164,8 @@ export function WikiSettings({
           {/* The slug is the wiki's URL and is deliberately immutable, so a rename never breaks a
               link someone already shared. */}
           <p className="text-[11.5px] leading-4 text-ink-faint">
-            Its address stays <span className="text-ink-subtle">/wiki/{wiki.slug}</span>.
+            Its address follows the name: <span className="text-ink-subtle">/wiki/{wiki.slug}</span>
+            . Renaming moves it, and links to the old address stop working.
           </p>
         </div>
 

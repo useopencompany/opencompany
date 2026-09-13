@@ -13,7 +13,7 @@ export const OFFICIAL_PLUGIN_SOURCES = {
   gmail:
     "https://github.com/useopencompany/plugins/tree/ff6f34b42796129c2a125a32b3a78e8cae353df6/gmail",
   granola:
-    "https://github.com/useopencompany/plugins/tree/8e79573ef91e122f9e0c15c810e7607d1be1d094/granola",
+    "https://github.com/useopencompany/plugins/tree/22c1fe7d9bafd4fd63d49c3f0b18d1e3e63d0dae/granola",
   "google-admin":
     "https://github.com/useopencompany/plugins/tree/0b2a68c2b347c478a0af52fcf51f83d6704b0f40/google-admin",
   "google-calendar":

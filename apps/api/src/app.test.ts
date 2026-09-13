@@ -1404,6 +1404,36 @@ describe("canonical Hono API", () => {
     expect(remove).toHaveBeenCalledWith(actor, "brain_1", "integration_1");
   });
 
+  it("returns Granola folders for a workflow event filter", async () => {
+    const listOptions = vi.fn(async () => ({
+      provider: "granola" as const,
+      folders: [
+        { id: "fol_customers", name: "Customers", parentFolderId: null },
+        { id: "fol_acme", name: "Acme", parentFolderId: "fol_customers" },
+      ],
+      partial: false,
+    }));
+    const app = testApp(fakeRepository(), { brainSources: brainSourceService({ listOptions }) });
+
+    const options = await app.request("/v1/integrations/integration_1/brain-source-options", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: "granola" }),
+    });
+    expect(options.status).toBe(200);
+    await expect(options.json()).resolves.toMatchObject({
+      data: {
+        provider: "granola",
+        folders: [
+          { id: "fol_customers", name: "Customers", parentFolderId: null },
+          { id: "fol_acme", name: "Acme", parentFolderId: "fol_customers" },
+        ],
+        partial: false,
+      },
+    });
+    expect(listOptions).toHaveBeenCalledWith(actor, "integration_1", { provider: "granola" });
+  });
+
   it("rejects invalid source configuration before invoking provider logic", async () => {
     const set = vi.fn(async () => undefined);
     const listOptions = vi.fn(async () => ({
@@ -5082,7 +5112,8 @@ describe("POST /internal/wiki/commands", () => {
       data: {
         ok: true,
         wikiContext: {
-          wiki: { id: "wiki_leadership", slug: "leadership" },
+          // Slug and name only: the id is no longer echoed back to the agent.
+          wiki: { name: "Leadership", slug: "leadership" },
           instructions: "Record a decision owner.",
         },
       },
@@ -5247,6 +5278,7 @@ function fakeWikiControl(): Parameters<typeof createApiApp>[0]["wikiControl"] {
         slug: "wiki",
         instructions: "",
         access: "workspace",
+        visibility: "workspace",
         isDefault: true,
         canManage: true,
         createdAt,

@@ -132,6 +132,11 @@ export const template = Template()
       "command -v docker",
       "docker --version",
       "docker compose version",
+      // The build environment does not start services on package install, so the end-to-end
+      // smoke boots the daemon itself when absent. Spawned sandboxes still get dockerd from the
+      // package's init integration; nothing from this shell survives the snapshot.
+      "if ! docker info >/dev/null 2>&1; then (dockerd >/var/log/dockerd-build.log 2>&1 &); fi",
+      "timeout 90 sh -c 'until docker info >/dev/null 2>&1; do sleep 2; done'",
       "docker run --rm hello-world",
     ].join(" && "),
     root,

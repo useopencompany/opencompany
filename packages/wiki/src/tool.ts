@@ -34,7 +34,7 @@ export const WIKI_READ_COMMANDS: readonly WikiToolCommand[] = [
 
 export type WikiToolInput = {
   command: WikiToolCommand;
-  /** Wiki id or slug. Omitted means the workspace's default wiki. */
+  /** Wiki slug (an id also resolves, for internal callers). Omitted means the default wiki. */
   wiki?: string | undefined;
   /** tree: maximum descendant depth to return; 0 returns root entries only. */
   depth?: number | undefined;
@@ -67,7 +67,7 @@ export type WikiToolInput = {
 };
 
 export type WikiToolContext = {
-  wiki: { id: string; name: string; slug: string };
+  wiki: { name: string; slug: string };
   /** User-authored operating guidance for this wiki. */
   instructions: string;
 };
@@ -121,13 +121,13 @@ export function normalizeWikiToolInput(input: unknown): unknown {
 }
 
 export const WIKI_TOOL_DESCRIPTION = [
-  "Workspace wikis: folders and markdown pages in a tree, like a filesystem. Pass `wiki` with a wiki id or slug to select one; omitting it selects the workspace's default wiki. Folders are containers and pages are leaf documents. A node's full `path` is its identity; start with `tree`, `read` promising pages, and use `grep` when hunting for a phrase.",
+  "Workspace wikis: folders and markdown pages in a tree, like a filesystem. Pass `wiki` with a wiki slug to select one; omitting it selects the workspace's default wiki. Folders are containers and pages are leaf documents. A node's full `path` is its identity; start with `tree`, `read` promising pages, and use `grep` when hunting for a phrase.",
   'Commands: tree {depth?: 0-10} (folders end in `/`; depth 0 shows root entries; wikis over 40 entries default to depth 0) · read {pages: path|basename|[...]} (page bodies + backlinks; a folder returns its children) · grep {query: regex} · search {query} · recent {since: "2d"} · timeline {pages: path, since?} · mkdir {path, title?} (create a folder and missing ancestor folders) · write {path, body, kind?, title?} (create or overwrite a page; missing ancestor folders are auto-created) · move {pages: path, to: folder-path|"/"} (move a page or folder subtree and update links) · delete {pages: path, recursive?} (recursive is required for a non-empty folder) · timeline-add {pages: path, text, at?}.',
   "Pages link inline with [[path/to/page]] or [[path/to/page|Label]], and to artifacts in other tools with [[source:provider:id]] (e.g. [[source:linear:issue:ENG-123]]) — keep those links when rewriting. Bare basenames resolve only when unique. `kind` is one of project, person, company, research, meeting, other. Writes overwrite the whole page body: read before you rewrite.",
 ].join(" ");
 
 export const WIKI_READ_TOOL_DESCRIPTION = [
-  "Read-only workspace wikis: folders and markdown pages in a tree, like a filesystem. Pass `wiki` with a wiki id or slug to select one; omitting it selects the workspace's default wiki. A node's full `path` is its identity; start with `tree`, read promising pages, and use `grep` when hunting for a phrase.",
+  "Read-only workspace wikis: folders and markdown pages in a tree, like a filesystem. Pass `wiki` with a wiki slug to select one; omitting it selects the workspace's default wiki. A node's full `path` is its identity; start with `tree`, read promising pages, and use `grep` when hunting for a phrase.",
   'Commands: tree {depth?: 0-10} · read {pages: path|basename|[...]} · grep {query: regex} · search {query} · recent {since: "2d"} · timeline {pages: path, since?}.',
   "Pages link inline with [[path/to/page]] or [[path/to/page|Label]], and to artifacts in other tools with [[source:provider:id]]. Bare basenames resolve only when unique.",
 ].join(" ");
@@ -147,7 +147,7 @@ export const WIKI_TOOL_INPUT_JSON_SCHEMA = {
       type: "string",
       maxLength: 256,
       description:
-        "Wiki id or slug. Omit this only when you mean the workspace's default wiki. An invalid or ambiguous reference returns the reachable wiki list.",
+        "Wiki slug. Omit this only when you mean the workspace's default wiki. An invalid or ambiguous reference returns the reachable wiki list.",
     },
     depth: {
       type: "integer",

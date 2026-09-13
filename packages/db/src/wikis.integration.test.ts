@@ -105,6 +105,53 @@ describe("createWiki", () => {
     expect(second.slug).toBe("c-level-2");
   });
 
+  it("moves the slug with the name so the address is not a lie", async () => {
+    const wiki = await createWiki(
+      { workspaceId: WS, name: "Marketing", access: "workspace", createdByWorkosId: FOUNDER },
+      { db },
+    );
+    expect(wiki.slug).toBe("marketing");
+
+    const renamed = await updateWikiSettings({ wikiId: wiki.id, name: "Growth" }, { db });
+    expect(renamed).toMatchObject({ name: "Growth", slug: "growth" });
+  });
+
+  it("suffixes a renamed slug that another wiki already holds", async () => {
+    await createWiki(
+      { workspaceId: WS, name: "Growth", access: "workspace", createdByWorkosId: FOUNDER },
+      { db },
+    );
+    const marketing = await createWiki(
+      { workspaceId: WS, name: "Marketing", access: "workspace", createdByWorkosId: FOUNDER },
+      { db },
+    );
+
+    const renamed = await updateWikiSettings({ wikiId: marketing.id, name: "Growth" }, { db });
+    expect(renamed.slug).toBe("growth-2");
+  });
+
+  it("keeps its own slug when a rename does not change the name", async () => {
+    // Without excluding the wiki from its own collision check this drifts to `growth-2` on every
+    // save, so an instructions edit would silently move the address.
+    const wiki = await createWiki(
+      { workspaceId: WS, name: "Growth", access: "workspace", createdByWorkosId: FOUNDER },
+      { db },
+    );
+    const saved = await updateWikiSettings(
+      { wikiId: wiki.id, name: "Growth", instructions: "One page per channel." },
+      { db },
+    );
+    expect(saved.slug).toBe("growth");
+  });
+
+  it("issues ids without the legacy goat_ prefix", async () => {
+    const wiki = await createWiki(
+      { workspaceId: WS, name: "Growth", access: "workspace", createdByWorkosId: FOUNDER },
+      { db },
+    );
+    expect(wiki.id.startsWith("wiki_")).toBe(true);
+  });
+
   it("suffixes a slug reserved by a static /wiki route", async () => {
     // `/wiki/sources` and `/wiki/import` are pages of their own, so Next would resolve them before
     // ever reaching a wiki holding that slug. Suffixing keeps the name the reader typed.
@@ -339,8 +386,8 @@ describe("updateWikiSettings", () => {
     );
     const renamed = await updateWikiSettings({ wikiId: wiki.id, name: "  Playbook  " }, { db });
     expect(renamed.name).toBe("Playbook");
-    // The slug is stable identity and must not follow a rename.
-    expect(renamed.slug).toBe(wiki.slug);
+    // The slug follows the name, so the address keeps matching what the wiki is called.
+    expect(renamed.slug).toBe("playbook");
     expect(renamed.instructions).toBe("");
 
     const briefed = await updateWikiSettings(
@@ -349,6 +396,8 @@ describe("updateWikiSettings", () => {
     );
     expect(briefed.name).toBe("Playbook");
     expect(briefed.instructions).toBe("One page per team.");
+    // An instructions-only edit leaves the address alone.
+    expect(briefed.slug).toBe("playbook");
   });
 
   it("rejects a blank name and an unknown wiki", async () => {

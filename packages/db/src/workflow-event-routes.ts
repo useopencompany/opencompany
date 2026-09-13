@@ -213,12 +213,17 @@ export async function enqueueWorkflowEventRuns(
 }
 
 // Declared filters are equality matches on an integration resource id. A filter the author left
-// unset (the declaration marked it optional) matches every value.
+// unset (the declaration marked it optional) matches every value. An adapter whose event can sit
+// in several of a resource at once — a Granola note filed in more than one folder — supplies every
+// id it matches, and the filter passes when its value is among them.
 export function workflowEventFiltersMatch(
   route: WorkflowEventTriggerRoute,
-  values: Record<string, string | null | undefined>,
+  values: Record<string, string | readonly string[] | null | undefined>,
 ) {
-  return Object.entries(route.filters).every(([id, filter]) => filter.id === values[id]);
+  return Object.entries(route.filters).every(([id, filter]) => {
+    const value = values[id];
+    return Array.isArray(value) ? value.includes(filter.id) : value === filter.id;
+  });
 }
 
 // Composes the enqueued goal: the authored prompt, then the provider context wrapped in a tag so
