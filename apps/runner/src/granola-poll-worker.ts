@@ -48,7 +48,7 @@ import { rowsFromExecute } from "./sql-exec";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-granola-poll" });
 
-// Granola has no webhooks, so new meeting notes are discovered by polling
+// The plugin declares poll delivery, so new meeting notes are discovered through
 // GET /v1/notes per connected integration with an updated_after cursor. Notes
 // only surface once Granola finishes their AI summary and transcript, so
 // updated_at (not created_at) is the watermark that never skips a
@@ -96,11 +96,24 @@ export async function listGranolaPollCandidates(
         OR EXISTS (
           SELECT 1
           FROM goat.workflows w
+          JOIN goat.plugins p
+            ON p.workspace_id = w.workspace_id
+            AND p.owner_user_id = i.user_workos_id
+            AND p.name = 'granola'
+            AND p.status = 'enabled'
+            AND p.archived_at IS NULL
+            AND p.event_modes->'meeting.notes_ready' = 'true'::jsonb
+            AND EXISTS (SELECT 1 FROM jsonb_array_elements(p.events) event
+              WHERE event->>'id' = 'meeting.notes_ready')
+          JOIN goat.workspace_members member
+            ON member.workspace_id = w.workspace_id
+            AND member.user_workos_id = i.user_workos_id
           WHERE w.trigger = 'event'
             AND w.status = 'active'
             AND w.archived_at IS NULL
             AND w.event_user_workos_id = i.user_workos_id
             AND w.event_config->>'provider' = 'granola'
+            AND w.event_config->>'event' = 'meeting.notes_ready'
             AND w.event_config->>'integrationId' = i.id
         )
       )
@@ -251,20 +264,35 @@ export async function pollGranolaIntegration(input: {
 
   let enqueued = 0;
   let workflowRuns = 0;
+  const noteErrors: unknown[] = [];
   for (const note of notes) {
     if (input.signal.aborted) throw new Error("Granola poll aborted.");
-    const result = await ingestGranolaNote({
-      candidate,
-      apiKey,
-      note,
-      routedBrainRefs,
-      workflowRoutes,
-      folderParentIds,
-      signal: input.signal,
-    });
+    let result: Awaited<ReturnType<typeof ingestGranolaNote>>;
+    try {
+      result = await ingestGranolaNote({
+        candidate,
+        apiKey,
+        note,
+        routedBrainRefs,
+        workflowRoutes,
+        folderParentIds,
+        signal: input.signal,
+      });
+    } catch (error) {
+      if (isGranolaAuthError(error)) {
+        await markGranolaNeedsReauth(candidate, "Granola rejected the saved API key.");
+        return null;
+      }
+      if (input.signal.aborted) throw error;
+      noteErrors.push(error);
+      continue;
+    }
     if (result.enqueued) enqueued += 1;
     workflowRuns += result.workflowRuns;
   }
+  // Finish routing other meetings even if one note or its separate Brain ingestion failed.
+  // Leave the cursor unchanged on failure so the next pass retries without losing either path.
+  if (noteErrors.length > 0) throw noteErrors[0];
 
   // The timestamp watermark only advances after the final page. When a pass
   // reaches its page cap, persist Granola's opaque continuation cursor and the
@@ -377,9 +405,13 @@ export async function ingestGranolaNote(input: {
     return { enqueued: false, workflowRuns: 0 };
   }
 
-  const payload = await (input.fetchNote ?? fetchGranolaNote)({
+  const fetchNote = input.fetchNote ?? fetchGranolaNote;
+  // Events only need the summary. Granola rejects inline transcripts that are too large;
+  // requesting one here would prevent an otherwise-ready meeting from starting its workflow.
+  let payload = await fetchNote({
     apiKey: input.apiKey,
     noteId: note.id,
+    includeTranscript: workflowRoutes.length === 0,
     signal: input.signal,
   });
 
@@ -394,6 +426,16 @@ export async function ingestGranolaNote(input: {
 
   if (pendingBrainRefs.length === 0) {
     return { enqueued: false, workflowRuns };
+  }
+  // Save workflow deliveries before fetching the transcript for a separate Brain subscription.
+  // If that fetch fails, retries deduplicate the delivery already in the durable event inbox.
+  if (workflowRoutes.length > 0) {
+    payload = await fetchNote({
+      apiKey: input.apiKey,
+      noteId: note.id,
+      includeTranscript: true,
+      signal: input.signal,
+    });
   }
   const item = normalizeGranolaMeetingNote(payload, { capturedAt: new Date().toISOString() });
 

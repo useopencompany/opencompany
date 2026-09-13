@@ -20,6 +20,13 @@ event or create an ingestion source. Existing Linear installations show an updat
 the new optional team and status filters, and existing Granola installations show one for the
 optional folder filter.
 
+Granola API keys require Business or Enterprise API access; Enterprise administrators may need to
+enable key scopes for members. The poller requests only the note summary and metadata for workflow
+events. Full transcripts are fetched separately only for an enabled Brain ingestion subscription,
+after the workflow delivery is durable, so an oversized transcript cannot block the event.
+An event-only account is polled only while its owner has an enabled plugin event and an active
+workflow in a workspace they still belong to.
+
 ## Contract and ownership
 
 Reviewed plugin packages declare `so.opencompany.events`. Each event has an ID, label, description,
