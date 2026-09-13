@@ -310,6 +310,7 @@ async function callGateway(
           workspaceId: wikiInput.workspaceId,
           actorId: wikiInput.actorId,
           toolInput: wikiInput.toolInput,
+          ...(wikiInput.wikiId ? { wikiId: wikiInput.wikiId } : {}),
           idempotencyKey: wikiInput.idempotencyKey,
           signal: context.signal,
         }),

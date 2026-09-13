@@ -239,9 +239,14 @@ const app = createApiApp({
     // from Postgres before executing.
     wiki: {
       getAccess: (userWorkosId) => getWikiAccessForUser(userWorkosId, database.db),
-      execute: async ({ userWorkosId, workspaceId, command, idempotencyKey }) => {
+      execute: async ({ userWorkosId, workspaceId, command, wikiId, idempotencyKey }) => {
         const actor = await resolveWikiServiceActor(execute, { userWorkosId, workspaceId });
-        return wikiCommands.execute({ actor, command, idempotencyKey });
+        return wikiCommands.execute({
+          actor,
+          command,
+          ...(wikiId ? { wikiId } : {}),
+          idempotencyKey,
+        });
       },
     },
     ...(process.env.VERCEL_AI_GATEWAY_API_KEY

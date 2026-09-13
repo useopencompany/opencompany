@@ -620,6 +620,46 @@ describe("opencompany Chat Task host tools", () => {
     });
   });
 
+  it("threads a named wiki separately from the command payload", async () => {
+    const runWikiTool = vi.fn(async () => ({ ok: true, result: {} }));
+    const dependencies = testDependencies({ runWikiTool });
+    await executeChatHostToolService({
+      command: {
+        operation: "wiki",
+        sessionId: "runtime_1",
+        runId: "turn_7",
+        toolCallId: "call_named",
+        input: { command: "tree", wiki: "leadership" },
+      },
+      dependencies,
+    });
+    expect(runWikiTool).toHaveBeenCalledWith({
+      workspaceId: "workspace_1",
+      actorId: "user_1",
+      wikiId: "leadership",
+      toolInput: { command: "tree" },
+      idempotencyKey: "agent-wiki:turn_7:call_named",
+    });
+  });
+
+  it("preserves an explicit invalid wiki reference for service-level disambiguation", async () => {
+    const runWikiTool = vi.fn(async () => ({ ok: true, result: {} }));
+    const dependencies = testDependencies({ runWikiTool });
+    await executeChatHostToolService({
+      command: {
+        operation: "wiki",
+        sessionId: "runtime_1",
+        runId: "turn_7",
+        toolCallId: "call_invalid_wiki",
+        input: { command: "tree", wiki: "   " },
+      },
+      dependencies,
+    });
+    expect(runWikiTool).toHaveBeenCalledWith(
+      expect.objectContaining({ wikiId: "   ", toolInput: { command: "tree" } }),
+    );
+  });
+
   it("gives two wiki calls in one turn different idempotency keys", async () => {
     const runWikiTool = vi.fn(async () => ({ ok: true, result: {} }));
     const dependencies = testDependencies({ runWikiTool });

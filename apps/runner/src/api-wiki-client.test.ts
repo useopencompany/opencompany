@@ -54,6 +54,44 @@ describe("executeApiWikiCommand", () => {
     ).resolves.toEqual({ ok: false, error: 'No wiki page "x".' });
   });
 
+  it("posts a selected wiki outside the command payload", async () => {
+    const fetchMock = stubFetch(
+      new Response(
+        JSON.stringify({
+          data: {
+            ok: true,
+            result: { nodes: [] },
+            wikiContext: {
+              wiki: { id: "wiki_leadership", name: "Leadership", slug: "leadership" },
+              instructions: "Record a decision owner.",
+            },
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+
+    await expect(
+      executeApiWikiCommand({
+        ...base,
+        wikiId: "leadership",
+        toolInput: { command: "tree" },
+      }),
+    ).resolves.toMatchObject({
+      wikiContext: {
+        wiki: { id: "wiki_leadership" },
+        instructions: "Record a decision owner.",
+      },
+    });
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({
+      userWorkosId: "user_1",
+      workspaceId: "ws_1",
+      wikiId: "leadership",
+      command: { command: "tree" },
+    });
+  });
+
   it("throws with the request id on a non-2xx response and never leaks the raw body", async () => {
     stubFetch(
       new Response(

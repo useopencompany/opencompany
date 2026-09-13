@@ -5080,6 +5080,51 @@ describe("POST /internal/wiki/commands", () => {
     );
   });
 
+  it("passes a wiki slug through the command service and returns its turn context", async () => {
+    const leadership = {
+      wikiId: "wiki_leadership",
+      name: "Leadership",
+      slug: "leadership",
+      instructions: "Record a decision owner.",
+    };
+    const resolveWiki = vi.fn(async () => leadership);
+    const app = testApp(fakeRepository(), {
+      wikiCommandsInternalSecret: secret,
+      wikiCommands: fakeWikiCommandsService({
+        listWikis: async () => [leadership],
+        resolveWiki,
+      }),
+    });
+
+    const response = await app.request("/internal/wiki/commands", {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({
+        userWorkosId: "user_1",
+        workspaceId: "workspace_1",
+        wikiId: "leadership",
+        command: { command: "tree" },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        ok: true,
+        wikiContext: {
+          // Slug and name only: the id is no longer echoed back to the agent.
+          wiki: { name: "Leadership", slug: "leadership" },
+          instructions: "Record a decision owner.",
+        },
+      },
+    });
+    expect(resolveWiki).toHaveBeenCalledWith({
+      workspaceId: "workspace_1",
+      userWorkosId: "user_1",
+      wikiId: "wiki_leadership",
+    });
+  });
+
   it("applies a command-aware write rate limit", async () => {
     const consume = vi.fn(async () => ({ allowed: false, retryAfterSeconds: 42 }));
     const app = testApp(fakeRepository(), {
@@ -5233,7 +5278,9 @@ function fakeWikiControl(): Parameters<typeof createApiApp>[0]["wikiControl"] {
         slug: "wiki",
         instructions: "",
         access: "workspace",
+        visibility: "workspace",
         isDefault: true,
+        canManage: true,
         createdAt,
         updatedAt: createdAt,
       },
@@ -5828,6 +5875,7 @@ function fakeWikiCommandRepository(
     throw new Error("Unexpected wiki command repository call.");
   };
   return {
+    listWikis: async () => [fakeResolvedWiki],
     resolveWiki: async () => fakeResolvedWiki,
     getTree: async () => [],
     resolvePages: async () => ({ pages: [], missing: [] }),

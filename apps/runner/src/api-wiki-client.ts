@@ -7,7 +7,9 @@
 // the host-tool gateway surfaces a hard error. There is deliberately no direct-DB
 // fallback and no automatic write retry.
 
-export type WikiCommandOutput = { ok: true; result: unknown } | { ok: false; error: string };
+import type { WikiToolOutput } from "@opencompany/wiki";
+
+export type WikiCommandOutput = WikiToolOutput;
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 
@@ -17,6 +19,7 @@ export async function executeApiWikiCommand(input: {
   workspaceId: string;
   actorId: string;
   toolInput: Record<string, unknown>;
+  wikiId?: string;
   idempotencyKey: string;
   signal?: AbortSignal;
   timeoutMs?: number;
@@ -38,6 +41,7 @@ export async function executeApiWikiCommand(input: {
       body: JSON.stringify({
         userWorkosId: input.actorId,
         workspaceId: input.workspaceId,
+        ...(input.wikiId ? { wikiId: input.wikiId } : {}),
         command: input.toolInput,
       }),
       signal: controller.signal,

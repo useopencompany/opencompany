@@ -356,6 +356,7 @@ describe("runner ACP tools MCP", () => {
       await client.connect(transport as Parameters<typeof client.connect>[0]);
       const wikiTool = (await client.listTools()).tools.find((tool) => tool.name === "wiki");
       expect(wikiTool?.inputSchema.properties).toMatchObject({
+        wiki: expect.any(Object),
         depth: expect.any(Object),
         title: expect.any(Object),
       });
@@ -363,6 +364,7 @@ describe("runner ACP tools MCP", () => {
         name: "wiki",
         arguments: {
           command: "write",
+          wiki: "leadership",
           path: "projects/launch",
           body: "# Launch",
         },
@@ -373,6 +375,7 @@ describe("runner ACP tools MCP", () => {
         token: env.apiInternalToken,
         workspaceId: "workspace_1",
         actorId: "user_1",
+        wikiId: "leadership",
         toolInput: {
           command: "write",
           path: "projects/launch",

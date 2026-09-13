@@ -41,12 +41,25 @@ import {
   WikiError,
   writeWikiPage,
 } from "./wiki";
-import { resolveWikiForUser } from "./wikis";
+import { listWikisForUser, resolveWikiForUser } from "./wikis";
 
 type DbClient = any;
 
 export class PostgresWikiCommandRepository implements WikiCommandRepository {
   constructor(private readonly db: DbClient) {}
+
+  async listWikis(input: {
+    workspaceId: string;
+    userWorkosId: string;
+  }): Promise<WikiCommandTarget[]> {
+    const wikis = await listWikisForUser(input, { db: this.db });
+    return wikis.map((wiki) => ({
+      wikiId: wiki.id,
+      name: wiki.name,
+      slug: wiki.slug,
+      instructions: wiki.instructions,
+    }));
+  }
 
   async resolveWiki(input: {
     workspaceId: string;
