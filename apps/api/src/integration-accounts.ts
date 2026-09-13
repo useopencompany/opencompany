@@ -7,6 +7,7 @@ import type {
   AttioProviderState,
   FathomProviderState,
   GranolaProviderState,
+  JamieEventsProviderState,
   StripeProviderState,
 } from "@opencompany/agent/integration-state";
 import { personalAccountsFromRows } from "@opencompany/agent/integration-state";
@@ -41,6 +42,11 @@ import {
   isValidGranolaApiKey,
   validateGranolaApiKey,
 } from "@opencompany/agent/integrations/granola";
+import {
+  connectJamieEventsIntegration,
+  getJamieEventsIntegrationState,
+  isValidJamieWebhookApiKey,
+} from "@opencompany/agent/integrations/jamie-events";
 import {
   connectRenderMcpIntegration,
   getRenderIntegrationState,
@@ -92,6 +98,7 @@ export type IntegrationAccountService = {
   disconnectAttio(actor: Actor, integrationId: string): Promise<void>;
   connectFathom(actor: Actor, apiKey: string): Promise<FathomProviderState>;
   connectGranola(actor: Actor, apiKey: string): Promise<GranolaProviderState>;
+  connectJamieEvents(actor: Actor, apiKey: string): Promise<JamieEventsProviderState>;
   connectConvex(actor: Actor, apiKey: string): Promise<ConvexProviderState>;
   connectRender(actor: Actor, apiKey: string): Promise<RenderProviderState>;
   connectStripe(actor: Actor, apiKey: string): Promise<StripeProviderState>;
@@ -311,6 +318,29 @@ export function createIntegrationAccountService(input: {
         return await getGranolaIntegrationState(actor.userId, db);
       } catch (error) {
         throw commandFailure(error, "Could not save the Granola API key.", "granola_connect");
+      }
+    },
+
+    // Jamie mints the webhook key and shows it once, and exposes nothing that can validate it, so
+    // the save is trusted and the Events section reports the first verified delivery instead.
+    async connectJamieEvents(actor, apiKey) {
+      const trimmed = apiKey.trim();
+      if (!isValidJamieWebhookApiKey(trimmed)) {
+        throw new ApiError(
+          400,
+          "invalid_request",
+          "Jamie webhook keys start with sk_. Check the key and try again.",
+        );
+      }
+      try {
+        await connectJamieEventsIntegration({ userWorkosId: actor.userId, apiKey: trimmed, db });
+        return await getJamieEventsIntegrationState(actor.userId, db);
+      } catch (error) {
+        throw commandFailure(
+          error,
+          "Could not save the Jamie webhook key.",
+          "jamie_events_connect",
+        );
       }
     },
 

@@ -11,6 +11,7 @@ The initial supported events are:
 | --- | --- | --- | --- |
 | Linear | Issue created (`issue.created`) | Optional team and status category, including Triage | Signed webhook |
 | Granola | Meeting notes ready (`meeting.notes_ready`) | Optional folder, including its subfolders | REST polling, normally within five minutes |
+| Jamie | Meeting completed (`meeting.completed`) | Optional guests: outside your company, or internal only | Webhook you create in Jamie |
 
 Linear's tool connection and event connection are separate. The event OAuth app must have Issue
 webhooks enabled and point at the API-owned Linear webhook ingress. Its existing client, secret,
@@ -19,6 +20,26 @@ polling; save a Granola API key in the plugin's Events section. Saving a key doe
 event or create an ingestion source. Existing Linear installations show an update action to get
 the new optional team and status filters, and existing Granola installations show one for the
 optional folder filter.
+
+Jamie has no webhook-management API, so its endpoint is created by hand. The plugin's Events
+section shows one fixed opencompany URL; create a webhook in Jamie's Settings → Integrations →
+Webhooks against it, select `meeting.completed`, keep API Key authentication with the default
+`x-jamie-api-key` header, and save the `sk_` key Jamie shows once back in that section. A personal
+webhook covers your own meetings and a workspace webhook covers everyone's; that choice is made in
+Jamie. Webhooks need a Jamie Plus plan or higher.
+
+opencompany stores only a digest of that key, and the presented key is what binds a delivery to a
+connection. Jamie exposes nothing that can validate a key on save, so the Events section reports
+when Jamie last reached opencompany instead of claiming the key is good; Jamie's own Test button on
+the webhook produces one immediately. Rotating the key in Jamie and saving the new one keeps the
+same connection, so workflows already bound to it keep firing.
+
+The `guests` filter is evaluated from the delivery itself: a meeting is `external` when anyone on
+its calendar event or in its transcript has an email outside the recording user's domain. When the
+payload does not name that domain, neither choice matches and only an unfiltered workflow runs.
+Jamie's delivery id is not documented as stable across retries, so the duplicate key is derived
+from the meeting's own identity — recording user, start time, and title — which makes Jamie's five
+retry attempts and any re-processing idempotent.
 
 Granola API keys require Business or Enterprise API access; Enterprise administrators may need to
 enable key scopes for members. The poller requests only the note summary and metadata for workflow
@@ -81,10 +102,13 @@ before deploying API/runner and then web.
 ## Verification
 
 Focused UI tests cover plugin selection, optional filters, disconnected accounts, and retained
-manual/schedule behavior. Signed Linear ingress tests cover retryable persistence errors. Postgres
+manual/schedule behavior. Signed Linear ingress tests cover retryable persistence errors. Jamie
+ingress tests cover unknown and missing keys, guest-filter matching, a delivery id that survives a
+retry with a new delivery attempt, and the retryable persistence path. Postgres
 integration tests cover activation cutoffs, duplicate deliveries, revoked subscriptions, transactional
 rollback/backoff, and the retirement migration's retained pages and rejection of old producers.
 
 Provider references: [Linear webhooks](https://linear.app/developers/webhooks),
 [Granola list notes](https://docs.granola.ai/api-reference/list-notes),
+[Jamie webhooks](https://docs.meetjamie.ai/developers/webhooks/getting-started),
 [Granola list folders](https://docs.granola.ai/api-reference/list-folders).

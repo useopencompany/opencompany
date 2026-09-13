@@ -5554,6 +5554,9 @@ function fakeIntegrationAccounts(): Parameters<typeof createApiApp>[0]["integrat
     connectGranola: async () => {
       throw new Error("Unexpected Granola connect.");
     },
+    connectJamieEvents: async () => {
+      throw new Error("Unexpected Jamie event connect.");
+    },
     connectConvex: async () => {
       throw new Error("Unexpected Convex connect.");
     },

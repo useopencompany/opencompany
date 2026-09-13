@@ -11,6 +11,13 @@ import {
 import type { OfficialMcpPluginMetadata } from "@/lib/official-plugins";
 
 export type PluginConnectionProvider = PersonalAccountProvider | "posthog" | "stripe";
+
+const PLUGIN_TOOL_ACCESS_LABEL = {
+  attio: "Attio",
+  hubspot: "HubSpot",
+  jamie: "Jamie",
+  posthog: "PostHog",
+} as const;
 export type PluginAccount = { account: IntegrationAccountView<PluginConnectionProvider> };
 export type ManagedPluginConnection = {
   provider: "infisical";
@@ -100,10 +107,13 @@ export function pluginAccountsFromState(
       const account = state.personalAccounts.stripe[0] ?? null;
       return { permissionConnection: account, accounts: account ? [{ account }] : [] };
     }
+    // These plugins' personal account rows are their event connections, not their tool connection,
+    // so the tool connection comes from the provider state instead.
     if (
       config.connectionProvider === "attio" ||
       config.connectionProvider === "posthog" ||
-      config.connectionProvider === "hubspot"
+      config.connectionProvider === "hubspot" ||
+      config.connectionProvider === "jamie"
     ) {
       const provider = config.connectionProvider;
       const connection = state[provider];
@@ -117,8 +127,7 @@ export function pluginAccountsFromState(
               accountEmail: null,
               accountName: connection.accountName,
               connectionLabel:
-                connection.accountName ||
-                `${provider === "attio" ? "Attio" : provider === "hubspot" ? "HubSpot" : "PostHog"} tool access`,
+                connection.accountName || `${PLUGIN_TOOL_ACCESS_LABEL[provider]} tool access`,
               statusReason: connection.statusReason,
               scopes: [],
               capabilityModes: connection.capabilityModes,
@@ -153,9 +162,7 @@ export function pluginAccountsFromState(
               ? state.google_drive.integrationId
               : config.connectionProvider === "x_account"
                 ? state.x_account.integrationId
-                : config.connectionProvider === "jamie"
-                  ? state.jamie.integrationId
-                  : null;
+                : null;
     return {
       accounts,
       permissionConnection:
