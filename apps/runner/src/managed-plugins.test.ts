@@ -75,11 +75,12 @@ describe("materializePluginPackagesForSession", () => {
       },
     ]);
     const commands = sandbox.commands.run.mock.calls.map(([command]) => String(command));
-    expect(commands[0]).toContain(
+    expect(commands[0]).toContain("stat -c");
+    expect(commands[1]).toContain(
       "test \"$(realpath -m -- '/home/user/workspace/codex/.opencompany')\" = '/home/user/workspace/codex/.opencompany'",
     );
-    expect(commands[0]).toContain("test ! -L '/home/user/workspace/codex/.opencompany'");
-    expect(commands[0]!.indexOf("realpath -m")).toBeLessThan(commands[0]!.indexOf("mkdir -p"));
+    expect(commands[1]).toContain("test ! -L '/home/user/workspace/codex/.opencompany'");
+    expect(commands[1]!.indexOf("realpath -m")).toBeLessThan(commands[1]!.indexOf("mkdir -p"));
     expect(commands.some((command) => command.includes("-type d -exec chmod 555"))).toBe(true);
     expect(commands.some((command) => command.includes("-type f -exec chmod 444"))).toBe(true);
     expect(
@@ -101,7 +102,7 @@ describe("materializePluginPackagesForSession", () => {
       plugins: [],
     });
 
-    expect(String(sandbox.commands.run.mock.calls[0]?.[0])).toContain(
+    expect(String(sandbox.commands.run.mock.calls[1]?.[0])).toContain(
       "/home/user/workspace/codex/.opencompany/plugins/disabled-plugin",
     );
   });
@@ -134,7 +135,14 @@ describe("materializePluginPackagesForSession", () => {
 
 function fakeSandbox() {
   return {
-    commands: { run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }) },
+    commands: {
+      // The fingerprint probe (the only command using stat) must fail like a missing marker
+      // would, so the suite keeps exercising the full reconcile path by default.
+      run: vi.fn().mockImplementation(async (command: string) => {
+        if (String(command).includes("stat -c")) throw new Error("marker missing");
+        return { stdout: "", stderr: "", exitCode: 0 };
+      }),
+    },
     files: {
       read: vi.fn().mockRejectedValue(new Error("missing")),
       write: vi.fn().mockResolvedValue(undefined),

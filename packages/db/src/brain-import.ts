@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { isIP } from "node:net";
 import { type Actor, CoreError } from "@opencompany/core";
-import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "./client";
 import { stringifyPostgresJson } from "./postgres-json";
 import {
@@ -13,8 +13,6 @@ import {
   brainIngestJobs,
   brainSourceItems,
   knowledgeCommandIdempotency,
-  wikiIngestJobs,
-  wikiSourceItems,
 } from "./product-schema";
 
 type DbLike = any;
@@ -69,28 +67,13 @@ export async function startBrainImportRunIdempotent(input: {
   });
 }
 
-export async function startWikiImportRunIdempotent(input: {
-  actor: Actor;
-  idempotencyKey: string;
-  companyUrl: string;
-  focus?: string | null;
-  sourceSelection: BrainImportSourceSelection;
-  now?: Date;
-  db?: DbLike;
-}): Promise<{ run: BrainImportRun; idempotentReplay: boolean }> {
-  return startImportRunIdempotent({
-    ...input,
-    target: { brainRef: null, workspaceId: input.actor.workspaceId },
-  });
-}
-
 async function startImportRunIdempotent(input: {
   actor: Actor;
   idempotencyKey: string;
   companyUrl: string;
   focus?: string | null;
   sourceSelection: BrainImportSourceSelection;
-  target: { brainRef: string | null; workspaceId: string | null };
+  target: { brainRef: string; workspaceId: null };
   now?: Date;
   db?: DbLike;
 }): Promise<{ run: BrainImportRun; idempotentReplay: boolean }> {
@@ -172,23 +155,16 @@ async function startImportRunIdempotent(input: {
     // Either a concurrent identical retry won the insert, or another import is still active.
     const winner = await findImportRun(reservation.resourceId, input.target, db);
     if (winner) return { run: winner, idempotentReplay: true };
-    throw new CoreError(
-      "conflict",
-      input.target.brainRef
-        ? "An import is already running for this brain."
-        : "An import is already running for this workspace Wiki.",
-    );
+    throw new CoreError("conflict", "An import is already running for this brain.");
   }
 }
 
 async function findImportRun(
   runId: string,
-  target: { brainRef: string | null; workspaceId: string | null },
+  target: { brainRef: string; workspaceId: null },
   db: DbLike,
 ): Promise<BrainImportRun | null> {
-  const targetWhere = target.brainRef
-    ? eq(brainImportRuns.brainRef, target.brainRef)
-    : eq(brainImportRuns.workspaceId, target.workspaceId!);
+  const targetWhere = eq(brainImportRuns.brainRef, target.brainRef);
   const [run] = await db
     .select()
     .from(brainImportRuns)
@@ -321,41 +297,22 @@ export async function discoverStoredBrainImportCandidates(input: {
       selectedEntries: 0,
     };
 
-  const known = input.run.brainRef
-    ? new Set(
-        (
-          await db
-            .select({ sourceItemId: brainIngestJobs.sourceItemId })
-            .from(brainIngestJobs)
-            .where(
-              and(
-                eq(brainIngestJobs.brainRef, input.run.brainRef),
-                inArray(
-                  brainIngestJobs.sourceItemId,
-                  rows.map((row: { id: string }) => row.id),
-                ),
-              ),
-            )
-        ).map((row: { sourceItemId: string }) => row.sourceItemId),
-      )
-    : new Set(
-        (
-          await db
-            .select({ sourceItemId: brainImportCandidates.sourceItemId })
-            .from(brainImportCandidates)
-            .innerJoin(brainImportRuns, eq(brainImportRuns.id, brainImportCandidates.importRunId))
-            .where(
-              and(
-                eq(brainImportRuns.workspaceId, input.run.workspaceId!),
-                isNotNull(brainImportCandidates.wikiIngestJobId),
-                inArray(
-                  brainImportCandidates.sourceItemId,
-                  rows.map((row: { id: string }) => row.id),
-                ),
-              ),
-            )
-        ).map((row: { sourceItemId: string }) => row.sourceItemId),
-      );
+  const known = new Set(
+    (
+      await db
+        .select({ sourceItemId: brainIngestJobs.sourceItemId })
+        .from(brainIngestJobs)
+        .where(
+          and(
+            eq(brainIngestJobs.brainRef, input.run.brainRef!),
+            inArray(
+              brainIngestJobs.sourceItemId,
+              rows.map((row: { id: string }) => row.id),
+            ),
+          ),
+        )
+    ).map((row: { sourceItemId: string }) => row.sourceItemId),
+  );
   const unknown = rows.filter((row: { id: string }) => !known.has(row.id));
   const eligible = unknown
     .map((row: { id: string; occurredAt: Date; normalizedPayload: unknown }) => ({
@@ -502,83 +459,6 @@ export async function confirmBrainImport(input: {
   return row;
 }
 
-export async function confirmWikiImport(input: {
-  importRunId: string;
-  workspaceId: string;
-  enabledProviders: BrainImportProvider[];
-  actingUserWorkosId: string;
-  db?: DbLike;
-}) {
-  const db = input.db ?? getDb();
-  const enabledProviders = stringifyPostgresJson(input.enabledProviders);
-  const result = await db.execute(sql`
-    WITH confirmed_run AS (
-      UPDATE goat.brain_import_runs
-      SET status = 'ingesting', confirmed_at = now(), next_run_at = now(), updated_at = now()
-      WHERE id = ${input.importRunId}
-        AND workspace_id = ${input.workspaceId}
-        AND status = 'awaiting_confirmation'
-      RETURNING id, workspace_id, user_workos_id, source_selection
-    ),
-    disabled_candidates AS (
-      UPDATE goat.brain_import_candidates AS candidate
-      SET selected = false, updated_at = now()
-      FROM confirmed_run AS run
-      WHERE candidate.import_run_id = run.id
-        AND candidate.provider NOT IN (
-          SELECT value FROM jsonb_array_elements_text(${enabledProviders}::jsonb) AS value
-        )
-      RETURNING candidate.id
-    ),
-    configured_sources AS (
-      INSERT INTO goat.wiki_sources (
-        id, workspace_id, provider, integration_id, user_workos_id,
-        created_by_workos_id, enabled, config, updated_at
-      )
-      SELECT
-        'wksrc_' || md5(run.id || ':' || integration.id),
-        run.workspace_id,
-        source.provider,
-        integration.id,
-        integration.user_workos_id,
-        ${input.actingUserWorkosId},
-        true,
-        COALESCE(source.selection->'config', '{}'::jsonb),
-        now()
-      FROM confirmed_run AS run
-      CROSS JOIN LATERAL jsonb_each(run.source_selection) AS source(provider, selection)
-      INNER JOIN goat.integrations AS integration
-        ON integration.id = source.selection->>'integrationId'
-       AND integration.provider = source.provider
-       AND (
-         (source.provider IN ('github', 'jamie') AND integration.workspace_id = run.workspace_id)
-         OR
-         (source.provider NOT IN ('github', 'jamie')
-           AND integration.workspace_id IS NULL
-           AND integration.user_workos_id = run.user_workos_id)
-       )
-      WHERE source.provider <> 'public_web'
-        AND COALESCE((source.selection->>'enabled')::boolean, false)
-        AND source.provider IN (
-          SELECT value FROM jsonb_array_elements_text(${enabledProviders}::jsonb) AS value
-        )
-      ON CONFLICT (workspace_id, integration_id) DO UPDATE
-      SET enabled = true, config = excluded.config, updated_at = now()
-      RETURNING id
-    )
-    SELECT run.id AS "importRunId", 0::integer AS enqueued
-    FROM confirmed_run AS run
-  `);
-  const row = rowsFromExecute<{ importRunId: string; enqueued: number }>(result)[0];
-  if (!row) {
-    throw new CoreError(
-      "conflict",
-      "This company-context scan is no longer awaiting confirmation.",
-    );
-  }
-  return row;
-}
-
 export async function cancelBrainImport(input: {
   importRunId: string;
   brainRef: string;
@@ -616,41 +496,6 @@ export async function cancelBrainImport(input: {
     )
     SELECT
       run.id AS "importRunId",
-      (SELECT count(*)::integer FROM skipped_jobs) AS "skippedJobs"
-    FROM canceled_run AS run
-  `);
-  const row = rowsFromExecute<{ importRunId: string; skippedJobs: number }>(result)[0];
-  if (!row) throw new CoreError("conflict", "This import is no longer active.");
-  return row;
-}
-
-export async function cancelWikiImport(input: {
-  importRunId: string;
-  workspaceId: string;
-  db?: DbLike;
-}) {
-  const db = input.db ?? getDb();
-  const result = await db.execute(sql`
-    WITH canceled_run AS (
-      UPDATE goat.brain_import_runs
-      SET status = 'canceled', completed_at = now(), lease_id = NULL,
-          lease_owner = NULL, lease_expires_at = NULL, updated_at = now()
-      WHERE id = ${input.importRunId}
-        AND workspace_id = ${input.workspaceId}
-        AND status IN ('discovering', 'awaiting_confirmation', 'ingesting', 'finalizing')
-      RETURNING id
-    ),
-    skipped_jobs AS (
-      UPDATE goat.wiki_ingest_jobs AS job
-      SET status = 'skipped', completed_at = now(),
-          result = jsonb_build_object(
-            'skipped', true, 'reason', 'Import canceled', 'summary', 'Import canceled'
-          ), updated_at = now()
-      FROM canceled_run AS run
-      WHERE job.import_run_id = run.id AND job.status = 'queued'
-      RETURNING job.id
-    )
-    SELECT run.id AS "importRunId",
       (SELECT count(*)::integer FROM skipped_jobs) AS "skippedJobs"
     FROM canceled_run AS run
   `);
@@ -700,37 +545,6 @@ export async function retryBrainImportDiscovery(input: {
   return row;
 }
 
-export async function retryWikiImportDiscovery(input: {
-  importRunId: string;
-  workspaceId: string;
-  db?: DbLike;
-}) {
-  const db = input.db ?? getDb();
-  const result = await db.execute(sql`
-    WITH retried_run AS (
-      UPDATE goat.brain_import_runs
-      SET status = 'discovering', discovery_summary = '{}'::jsonb, result = '{}'::jsonb,
-          last_error = NULL, completed_at = NULL, next_run_at = now(), lease_id = NULL,
-          lease_owner = NULL, lease_expires_at = NULL, updated_at = now()
-      WHERE id = ${input.importRunId}
-        AND workspace_id = ${input.workspaceId}
-        AND status = 'failed'
-        AND confirmed_at IS NULL
-      RETURNING id
-    ),
-    deleted_candidates AS (
-      DELETE FROM goat.brain_import_candidates AS candidate USING retried_run AS run
-      WHERE candidate.import_run_id = run.id RETURNING candidate.id
-    )
-    SELECT run.id AS "importRunId",
-      (SELECT count(*)::integer FROM deleted_candidates) AS "deletedCandidates"
-    FROM retried_run AS run
-  `);
-  const row = rowsFromExecute<{ importRunId: string; deletedCandidates: number }>(result)[0];
-  if (!row) throw new CoreError("conflict", "Only a failed source scan can be retried.");
-  return row;
-}
-
 export async function getBrainImportJobProgress(
   importRunId: string,
   db: DbLike = getDb(),
@@ -756,41 +570,6 @@ export async function getBrainImportJobProgress(
     .innerJoin(brainSourceItems, eq(brainSourceItems.id, brainIngestJobs.sourceItemId))
     .where(eq(brainIngestJobs.importRunId, importRunId))
     .orderBy(brainIngestJobs.createdAt);
-  return {
-    rows,
-    terminal: rows.every((row: { status: string }) =>
-      IMPORT_TERMINAL_JOB_STATUSES.includes(
-        row.status as (typeof IMPORT_TERMINAL_JOB_STATUSES)[number],
-      ),
-    ),
-  };
-}
-
-export async function getWikiImportJobProgress(
-  importRunId: string,
-  db: DbLike = getDb(),
-): Promise<{
-  rows: Array<{
-    status: string;
-    provider: string;
-    sourceRef: string;
-    result: Record<string, unknown>;
-    lastError: string | null;
-  }>;
-  terminal: boolean;
-}> {
-  const rows = await db
-    .select({
-      status: wikiIngestJobs.status,
-      provider: wikiIngestJobs.sourceProvider,
-      sourceRef: wikiSourceItems.sourceRef,
-      result: wikiIngestJobs.result,
-      lastError: wikiIngestJobs.lastError,
-    })
-    .from(wikiIngestJobs)
-    .innerJoin(wikiSourceItems, eq(wikiSourceItems.id, wikiIngestJobs.sourceItemId))
-    .where(eq(wikiIngestJobs.importRunId, importRunId))
-    .orderBy(wikiIngestJobs.createdAt);
   return {
     rows,
     terminal: rows.every((row: { status: string }) =>

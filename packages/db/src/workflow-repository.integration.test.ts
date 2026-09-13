@@ -47,6 +47,7 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
   beforeAll(async () => {
     restoreDatabase = await snapshotPGliteSchema(async (database) => {
       await database.exec(BASE_SCHEMA);
+      await database.exec("ALTER TABLE goat.workflows ADD COLUMN event_activated_at timestamptz");
       await database.exec(`
       INSERT INTO goat.users (workos_user_id, task_spawning_enabled)
       VALUES ('migration_user', true);
@@ -469,6 +470,71 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
         },
       ],
     });
+  });
+
+  it("preserves activation for instruction edits and resets it for routing changes and reactivation", async () => {
+    let clock = now;
+    const service = new WorkflowApplicationService(
+      new PostgresWorkflowRepository(
+        async (query) => {
+          const compiled = dialect.sqlToQuery(query);
+          return database.query(compiled.sql, compiled.params as never[]);
+        },
+        { now: () => clock },
+      ),
+      {
+        planner: fakePlanner(),
+        taskCreator: fakeTaskCreator(),
+        newStepId: () => "step_1",
+        scheduleRules: {
+          normalize: ({ cron, timezone }) => ({ cron, timezone: timezone ?? "UTC", nextRunAt }),
+        },
+      },
+    );
+    const { workflow } = await service.createWorkflow(actor(), {
+      idempotencyKey: "activation-boundaries",
+      name: "Issue review",
+    });
+    let version = workflow.version;
+    const trigger = {
+      type: "event" as const,
+      provider: "linear",
+      event: "issue.created",
+      integrationId: "connection_1",
+      filters: {},
+      prompt: "Review the issue.",
+    };
+    async function save(nextTrigger = trigger, status: "active" | "draft" = "active") {
+      const result = await service.updateWorkflow(actor(), workflow.id, {
+        expectedVersion: version,
+        name: workflow.name,
+        description: "",
+        steps: [
+          {
+            id: "step_1",
+            title: "Review",
+            model: "provider/model",
+            instructions: "Review the issue.",
+          },
+        ],
+        status,
+        trigger: nextTrigger,
+      });
+      version = result.workflow.version;
+      const { rows } = await database.query<{ event_activated_at: Date }>(
+        "SELECT event_activated_at FROM goat.workflows WHERE id = $1",
+        [workflow.id],
+      );
+      return rows[0]!.event_activated_at;
+    }
+    expect(await save()).toEqual(now);
+    clock = new Date(now.getTime() + 60_000);
+    expect(await save({ ...trigger, prompt: "Review carefully." })).toEqual(now);
+    const changedRoute = { ...trigger, integrationId: "connection_2" };
+    expect(await save(changedRoute)).toEqual(clock);
+    await save(changedRoute, "draft");
+    clock = new Date(clock.getTime() + 60_000);
+    expect(await save(changedRoute)).toEqual(clock);
   });
 
   it("keeps Recurring Tasks actor-owned, feature-gated, idempotent, and versioned", async () => {
