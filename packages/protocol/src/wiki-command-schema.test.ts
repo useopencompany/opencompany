@@ -23,6 +23,7 @@ describe("WikiCommandSchema", () => {
   it("normalizes empty optional placeholders emitted by structured-output providers", () => {
     const result = WikiCommandSchema.safeParse({
       command: "tree",
+      wiki: "",
       depth: 2,
       pages: "",
       path: "",
@@ -72,6 +73,12 @@ describe("WikiCommandSchema", () => {
         body: "",
       },
     });
+  });
+
+  it("accepts a wiki id or slug", () => {
+    expect(
+      WikiCommandSchema.safeParse({ command: "tree", wiki: "leadership-notes" }),
+    ).toMatchObject({ success: true, data: { wiki: "leadership-notes" } });
   });
 
   it("enforces the shared JSON Schema size bounds", () => {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { type Actor, WIKI_READ_PERMISSION, WIKI_WRITE_PERMISSION } from "./actor";
 import {
   type ExecuteWikiCommandInput,
@@ -6,6 +6,13 @@ import {
   WikiCommandError,
   type WikiCommandRepository,
 } from "./wiki-commands";
+
+const DEFAULT_WIKI = {
+  wikiId: "goat_wiki_1",
+  name: "Wiki",
+  slug: "wiki",
+  instructions: "",
+} as const;
 
 function fakeRepository(overrides: Partial<WikiCommandRepository> = {}): {
   repository: WikiCommandRepository;
@@ -19,12 +26,8 @@ function fakeRepository(overrides: Partial<WikiCommandRepository> = {}): {
       return result;
     };
   const repository: WikiCommandRepository = {
-    resolveWiki: record("resolveWiki", {
-      wikiId: "goat_wiki_1",
-      name: "Wiki",
-      slug: "wiki",
-      instructions: "",
-    }),
+    listWikis: record("listWikis", [DEFAULT_WIKI]),
+    resolveWiki: record("resolveWiki", DEFAULT_WIKI),
     getTree: record("getTree", []),
     resolvePages: record("resolvePages", { pages: [], missing: [] }),
     getBacklinks: record("getBacklinks", []),
@@ -71,6 +74,10 @@ const actor = (permissions: readonly string[]): Actor => ({
 
 const readActor = actor([WIKI_READ_PERMISSION]);
 const writeActor = actor([WIKI_READ_PERMISSION, WIKI_WRITE_PERMISSION]);
+const defaultWikiContext = {
+  wiki: { id: DEFAULT_WIKI.wikiId, name: "Wiki", slug: "wiki" },
+  instructions: "",
+};
 
 function run(
   service: WikiCommandApplicationService,
@@ -89,7 +96,7 @@ function run(
 
 /** Every execute resolves the wiki first; assertions care about what follows. */
 function commandCalls(calls: Array<{ method: string; input: unknown }>) {
-  return calls.filter((call) => call.method !== "resolveWiki");
+  return calls.filter((call) => call.method !== "resolveWiki" && call.method !== "listWikis");
 }
 
 describe("WikiCommandApplicationService", () => {
@@ -115,6 +122,7 @@ describe("WikiCommandApplicationService", () => {
     const output = await run(service, readActor, { command: "tree" });
     expect(output).toEqual({
       ok: true,
+      wikiContext: defaultWikiContext,
       result: {
         nodes: [],
         depth: "unlimited",
@@ -144,6 +152,7 @@ describe("WikiCommandApplicationService", () => {
 
     expect(output).toEqual({
       ok: true,
+      wikiContext: defaultWikiContext,
       result: {
         nodes: [
           {
@@ -217,7 +226,11 @@ describe("WikiCommandApplicationService", () => {
     const { repository } = fakeRepository();
     const service = new WikiCommandApplicationService(repository);
     const output = await run(service, readActor, { command: "read" });
-    expect(output).toEqual({ ok: false, error: 'read requires "pages" (path(s) or basename(s)).' });
+    expect(output).toEqual({
+      ok: false,
+      error: 'read requires "pages" (path(s) or basename(s)).',
+      wikiContext: defaultWikiContext,
+    });
   });
 
   it("maps repository WikiCommandError to the tool contract", async () => {
@@ -235,6 +248,7 @@ describe("WikiCommandApplicationService", () => {
     expect(output).toEqual({
       ok: false,
       error: 'A wiki node already exists at "projects/plan".',
+      wikiContext: defaultWikiContext,
     });
   });
 
@@ -276,32 +290,79 @@ describe("WikiCommandApplicationService", () => {
     expect(commandCalls(calls)).toHaveLength(0);
   });
 
-  it("reports an unreachable wiki as not_found so membership cannot be probed", async () => {
-    const { repository, calls } = fakeRepository({ resolveWiki: async () => null });
+  it("reports an unreachable wiki as not_found with the reachable list", async () => {
+    const { repository, calls } = fakeRepository();
     const service = new WikiCommandApplicationService(repository);
     await expect(
       run(service, readActor, { command: "tree" }, "agent-wiki:turn_1:call_1", "goat_wiki_other"),
-    ).rejects.toMatchObject({ code: "not_found" });
+    ).rejects.toMatchObject({
+      code: "not_found",
+      message: expect.stringContaining("goat_wiki_1 (wiki) — Wiki"),
+    });
     expect(commandCalls(calls)).toHaveLength(0);
   });
 
-  it("runs every command against the resolved wiki rather than the actor's workspace", async () => {
-    const { repository, calls } = fakeRepository({
-      resolveWiki: async () => ({
-        wikiId: "goat_wiki_clevel",
-        name: "C-level",
-        slug: "c-level",
-        instructions: "One page per board topic.",
-      }),
+  it("does not treat an explicit blank reference as the default wiki", async () => {
+    const { repository, calls } = fakeRepository();
+    const service = new WikiCommandApplicationService(repository);
+
+    await expect(
+      run(service, readActor, { command: "tree" }, undefined, "   "),
+    ).rejects.toMatchObject({
+      code: "not_found",
+      message: expect.stringContaining('Pass "wiki" with one of these ids or slugs'),
+    });
+    expect(commandCalls(calls)).toHaveLength(0);
+  });
+
+  it("reports an id-versus-slug ambiguity as not_found with every reachable wiki", async () => {
+    const { repository } = fakeRepository({
+      listWikis: async () => [
+        { wikiId: "wiki_reference", name: "One", slug: "one", instructions: "" },
+        { wikiId: "wiki_two", name: "Two", slug: "wiki_reference", instructions: "" },
+      ],
     });
     const service = new WikiCommandApplicationService(repository);
-    await run(
+
+    await expect(
+      run(service, readActor, { command: "tree" }, undefined, "wiki_reference"),
+    ).rejects.toMatchObject({
+      code: "not_found",
+      message: expect.stringMatching(/ambiguous[\s\S]*wiki_reference \(one\)[\s\S]*wiki_two/u),
+    });
+  });
+
+  it("runs every command against the resolved wiki rather than the actor's workspace", async () => {
+    const resolvedWiki = {
+      wikiId: "goat_wiki_clevel",
+      name: "C-level",
+      slug: "c-level",
+      instructions: "One page per board topic.",
+    };
+    const resolveWiki = vi.fn(async () => resolvedWiki);
+    const { repository, calls } = fakeRepository({
+      listWikis: async () => [resolvedWiki],
+      resolveWiki,
+    });
+    const service = new WikiCommandApplicationService(repository);
+    const output = await run(
       service,
       readActor,
       { command: "search", query: "runway" },
       undefined,
-      "goat_wiki_clevel",
+      "c-level",
     );
+    expect(output).toMatchObject({
+      wikiContext: {
+        wiki: { id: resolvedWiki.wikiId, name: "C-level", slug: "c-level" },
+        instructions: "One page per board topic.",
+      },
+    });
+    expect(resolveWiki).toHaveBeenCalledWith({
+      workspaceId: "ws_1",
+      userWorkosId: "user_1",
+      wikiId: "goat_wiki_clevel",
+    });
     expect(commandCalls(calls)).toEqual([
       {
         method: "search",
@@ -320,6 +381,7 @@ describe("WikiCommandApplicationService", () => {
     });
     expect(output).toEqual({
       ok: true,
+      wikiContext: defaultWikiContext,
       result: { page: "projects/plan", at: "2026-01-02T03:04:05.000Z", text: "shipped" },
     });
   });

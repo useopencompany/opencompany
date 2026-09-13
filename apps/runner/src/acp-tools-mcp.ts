@@ -746,7 +746,7 @@ function registerExternalEngineWikiTool(input: {
             }
           : { workspaces: [] };
       },
-      execute: async ({ userWorkosId, workspaceId, command, idempotencyKey }) => {
+      execute: async ({ userWorkosId, workspaceId, command, wikiId, idempotencyKey }) => {
         const current =
           userWorkosId === initialContext.actorId && workspaceId === initialContext.workspaceId
             ? await currentContext()
@@ -760,6 +760,7 @@ function registerExternalEngineWikiTool(input: {
           workspaceId: current.workspaceId,
           actorId: current.actorId,
           toolInput: command,
+          ...(wikiId ? { wikiId } : {}),
           idempotencyKey: externalEngineWikiIdempotencyKey(
             input.capability.codexChatTurnId,
             idempotencyKey,
