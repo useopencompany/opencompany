@@ -5747,7 +5747,18 @@
           "access": {
             "$ref": "#/components/schemas/WikiAccess"
           },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "workspace",
+              "private",
+              "shared"
+            ]
+          },
           "isDefault": {
+            "type": "boolean"
+          },
+          "canManage": {
             "type": "boolean"
           },
           "createdAt": {
@@ -5765,7 +5776,9 @@
           "slug",
           "instructions",
           "access",
+          "visibility",
           "isDefault",
+          "canManage",
           "createdAt",
           "updatedAt"
         ],
