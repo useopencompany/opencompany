@@ -4303,6 +4303,31 @@ export const GranolaAccountStateEnvelopeSchema = z
   .strict()
   .openapi("GranolaAccountStateEnvelope");
 
+// Jamie's event connection is a webhook the user creates in Jamie against opencompany's fixed
+// endpoint; only the digest of the key Jamie mints is stored. The URL is what the setup UI asks the
+// user to copy, and the last verified delivery is the only confirmation Jamie's key ever works,
+// because Jamie offers nothing to validate it against on save.
+export const JamieEventsAccountStateSchema = z
+  .object({
+    provider: z.literal("jamie"),
+    connected: z.boolean(),
+    status: IntegrationAccountStatusSchema,
+    integrationId: IntegrationAccountIdSchema.nullable(),
+    statusReason: z.string().nullable(),
+    webhookUrl: z.string().url().nullable(),
+    lastDeliveryAt: z.string().datetime().nullable(),
+  })
+  .strict()
+  .openapi("JamieEventsAccountState");
+
+export const JamieEventsAccountStateEnvelopeSchema = z
+  .object({
+    data: z.object({ state: JamieEventsAccountStateSchema }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("JamieEventsAccountStateEnvelope");
+
 export const StripeAccountStateSchema = z
   .object({
     provider: z.literal("stripe"),

@@ -475,6 +475,8 @@ function AppLiveDataSubscriptions({
       claude_code: initialData.integrations.claude_code,
       infisical: initialData.integrations.infisical,
       jamie: initialData.integrations.jamie,
+      // Its endpoint URL is derived from the app origin, which the row projection does not carry.
+      jamie_events: initialData.integrations.jamie_events,
     };
   }, [initialData.integrations, integrationRows, integrationsLoading]);
 

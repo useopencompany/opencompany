@@ -23,6 +23,7 @@ import { getGoogleIntegrationState } from "@/lib/integrations/google-data";
 import { getGranolaIntegrationState } from "@/lib/integrations/granola";
 import { getGranolaMcpIntegrationState } from "@/lib/integrations/granola-mcp";
 import { getHubSpotMcpIntegrationState } from "@/lib/integrations/hubspot-mcp";
+import { getJamieEventsIntegrationState } from "@/lib/integrations/jamie-events";
 import { getJamieMcpIntegrationState } from "@/lib/integrations/jamie-mcp";
 import { getLinearIntegrationState } from "@/lib/integrations/linear-mcp";
 import { getPersonalAccounts } from "@/lib/integrations/personal-accounts";
@@ -46,6 +47,7 @@ export async function AppShell({ children }: { children: ReactNode }) {
     hubspot,
     posthog,
     jamie,
+    jamieEvents,
     slack,
     granola,
     granolaMcp,
@@ -86,6 +88,11 @@ export async function AppShell({ children }: { children: ReactNode }) {
       "jamie_integration",
       () => getJamieMcpIntegrationState(user.workosUserId),
       emptyIntegrations.jamie,
+    ),
+    loadOptionalAppShellData(
+      "jamie_events_integration",
+      () => getJamieEventsIntegrationState(user.workosUserId),
+      emptyIntegrations.jamie_events,
     ),
     loadOptionalAppShellData(
       "slack_integration",
@@ -184,6 +191,7 @@ export async function AppShell({ children }: { children: ReactNode }) {
       hubspot,
       posthog,
       jamie,
+      jamieEvents,
       slack,
       granola,
       granolaMcp,
@@ -265,6 +273,7 @@ function buildIntegrationState(input: {
   hubspot: IntegrationState["hubspot"];
   posthog: IntegrationState["posthog"];
   jamie: IntegrationState["jamie"];
+  jamieEvents: IntegrationState["jamie_events"];
   slack: IntegrationState["slack"];
   granola: IntegrationState["granola"];
   granolaMcp: IntegrationState["granola_mcp"];
@@ -285,6 +294,7 @@ function buildIntegrationState(input: {
     hubspot: input.hubspot,
     posthog: input.posthog,
     jamie: input.jamie,
+    jamie_events: input.jamieEvents,
     slack: input.slack,
     granola: input.granola,
     granola_mcp: input.granolaMcp,
