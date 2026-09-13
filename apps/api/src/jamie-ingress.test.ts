@@ -1,8 +1,6 @@
 import { JAMIE_WEBHOOK_API_KEY_HEADER } from "@opencompany/agent/integrations/jamie-constants";
-import {
-  listJamieEventIntegrationsForApiKey,
-  markJamieEventsDelivered,
-} from "@opencompany/db/jamie";
+import { loadJamieWebhookSecret } from "@opencompany/agent/integrations/jamie-events";
+import { findJamieEventConnection, markJamieEventsDelivered } from "@opencompany/db/jamie";
 import {
   enqueueWorkflowEventRuns,
   listWorkflowEventTriggerRoutes,
@@ -12,8 +10,11 @@ import { createJamieIngress } from "./jamie-ingress";
 
 vi.mock("@opencompany/db/jamie", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  listJamieEventIntegrationsForApiKey: vi.fn(),
+  findJamieEventConnection: vi.fn(),
   markJamieEventsDelivered: vi.fn(),
+}));
+vi.mock("@opencompany/agent/integrations/jamie-events", () => ({
+  loadJamieWebhookSecret: vi.fn(),
 }));
 vi.mock("@opencompany/db/workflow-event-routes", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -21,9 +22,10 @@ vi.mock("@opencompany/db/workflow-event-routes", async (importOriginal) => ({
   enqueueWorkflowEventRuns: vi.fn(),
 }));
 
-const API_KEY = "sk_jamie_webhook_key_value";
+const ENDPOINT_ID = "gint_jamie_events";
+const WEBHOOK_KEY = "sk_jamie_webhook_key_value";
 const CONNECTION = {
-  id: "gint_jamie_events",
+  id: ENDPOINT_ID,
   workspaceId: null,
   userWorkosId: "user_1",
   status: "connected" as const,
@@ -74,21 +76,26 @@ function meetingDelivery(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function jamieRequest(body: unknown, apiKey: string | null = API_KEY) {
-  return new Request("https://api.example.com/webhooks/jamie/events", {
+function jamieRequest(body: unknown, webhookKey: string | null = WEBHOOK_KEY) {
+  return new Request(`https://api.example.com/webhooks/jamie/${ENDPOINT_ID}`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      ...(apiKey ? { [JAMIE_WEBHOOK_API_KEY_HEADER]: apiKey } : {}),
+      ...(webhookKey ? { [JAMIE_WEBHOOK_API_KEY_HEADER]: webhookKey } : {}),
     },
     body: JSON.stringify(body),
   });
 }
 
+function deliver(body: unknown, webhookKey: string | null = WEBHOOK_KEY) {
+  return ingress().webhook(ENDPOINT_ID, jamieRequest(body, webhookKey));
+}
+
 describe("Jamie ingress", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(listJamieEventIntegrationsForApiKey).mockResolvedValue([CONNECTION]);
+    vi.mocked(findJamieEventConnection).mockResolvedValue(CONNECTION);
+    vi.mocked(loadJamieWebhookSecret).mockResolvedValue(WEBHOOK_KEY);
     vi.mocked(markJamieEventsDelivered).mockResolvedValue(undefined);
     vi.mocked(listWorkflowEventTriggerRoutes).mockResolvedValue([route()] as never);
     vi.mocked(enqueueWorkflowEventRuns).mockResolvedValue(1);
@@ -99,12 +106,12 @@ describe("Jamie ingress", () => {
   });
 
   it("enqueues one run per matched route and passes the injected db through", async () => {
-    const response = await ingress().webhook(jamieRequest(meetingDelivery()));
+    const response = await deliver(meetingDelivery());
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true, workflowRuns: 1 });
-    expect(listJamieEventIntegrationsForApiKey).toHaveBeenCalledWith(
-      API_KEY,
+    expect(findJamieEventConnection).toHaveBeenCalledWith(
+      ENDPOINT_ID,
       expect.objectContaining({ sentinel: "db" }),
     );
     const enqueued = vi.mocked(enqueueWorkflowEventRuns).mock.calls[0]?.[0];
@@ -113,24 +120,32 @@ describe("Jamie ingress", () => {
     expect(enqueued?.context.lines.join("\n")).toContain("Acme wants SSO");
   });
 
-  it("rejects a delivery with no key and one with an unknown key", async () => {
-    const missing = await ingress().webhook(jamieRequest(meetingDelivery(), null));
+  it("rejects a missing key, an unknown endpoint, and a wrong key alike", async () => {
+    const missing = await deliver(meetingDelivery(), null);
     expect(missing.status).toBe(401);
-    expect(listJamieEventIntegrationsForApiKey).not.toHaveBeenCalled();
+    expect(findJamieEventConnection).not.toHaveBeenCalled();
 
-    vi.mocked(listJamieEventIntegrationsForApiKey).mockResolvedValue([]);
-    const unknown = await ingress().webhook(jamieRequest(meetingDelivery()));
-    expect(unknown.status).toBe(401);
+    vi.mocked(findJamieEventConnection).mockResolvedValue(null);
+    const unknownEndpoint = await deliver(meetingDelivery());
+    expect(unknownEndpoint.status).toBe(401);
+    // An unknown endpoint is rejected before any credential is read.
+    expect(loadJamieWebhookSecret).not.toHaveBeenCalled();
+
+    vi.mocked(findJamieEventConnection).mockResolvedValue(CONNECTION);
+    const wrongKey = await deliver(meetingDelivery(), "sk_someone_elses_key_value");
+    expect(wrongKey.status).toBe(401);
+    // The three rejections are indistinguishable to an unauthenticated caller.
+    await expect(wrongKey.json()).resolves.toEqual(await unknownEndpoint.clone().json());
     expect(enqueueWorkflowEventRuns).not.toHaveBeenCalled();
   });
 
   it("derives a delivery id from the meeting rather than the delivery attempt", async () => {
-    await ingress().webhook(jamieRequest(meetingDelivery()));
+    await deliver(meetingDelivery());
     const first = vi.mocked(enqueueWorkflowEventRuns).mock.calls[0]?.[0]?.deliveryId;
 
     const retry = meetingDelivery();
     retry.metadata = { id: "99999999", event: "meeting.completed", created: 1_764_600_060 };
-    await ingress().webhook(jamieRequest(retry));
+    await deliver(retry);
 
     expect(vi.mocked(enqueueWorkflowEventRuns).mock.calls[1]?.[0]?.deliveryId).toBe(first);
   });
@@ -139,25 +154,26 @@ describe("Jamie ingress", () => {
     vi.mocked(listWorkflowEventTriggerRoutes).mockResolvedValue([
       route({ guests: { id: "internal" } }),
     ] as never);
-    await ingress().webhook(jamieRequest(meetingDelivery()));
+    await deliver(meetingDelivery());
     expect(enqueueWorkflowEventRuns).not.toHaveBeenCalled();
 
     vi.mocked(listWorkflowEventTriggerRoutes).mockResolvedValue([
       route({ guests: { id: "external" } }),
     ] as never);
-    await ingress().webhook(jamieRequest(meetingDelivery()));
+    await deliver(meetingDelivery());
     expect(enqueueWorkflowEventRuns).toHaveBeenCalledTimes(1);
   });
 
   it("records the delivery but routes nothing for an event it does not declare", async () => {
-    const response = await ingress().webhook(
-      jamieRequest({ metadata: { id: "1", event: "meeting.started", created: 1 }, data: {} }),
-    );
+    const response = await deliver({
+      metadata: { id: "1", event: "meeting.started", created: 1 },
+      data: {},
+    });
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true, ignored: true });
     expect(markJamieEventsDelivered).toHaveBeenCalledWith(
-      expect.objectContaining({ integrationIds: ["gint_jamie_events"] }),
+      expect.objectContaining({ integrationId: ENDPOINT_ID }),
       expect.objectContaining({ sentinel: "db" }),
     );
     expect(listWorkflowEventTriggerRoutes).not.toHaveBeenCalled();
@@ -166,7 +182,7 @@ describe("Jamie ingress", () => {
   it("asks Jamie to retry when a durable write fails", async () => {
     vi.mocked(enqueueWorkflowEventRuns).mockRejectedValue(new Error("connection terminated"));
 
-    const response = await ingress().webhook(jamieRequest(meetingDelivery()));
+    const response = await deliver(meetingDelivery());
 
     expect(response.status).toBe(503);
   });

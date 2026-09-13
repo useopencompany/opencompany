@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   jamieMeetingGuestScope,
-  jamieWebhookKeyExternalId,
   jamieWorkflowEventContext,
   jamieWorkflowEventDeliveryId,
 } from "./jamie";
@@ -14,14 +13,6 @@ function meeting(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
-
-describe("jamieWebhookKeyExternalId", () => {
-  it("keys on the digest, ignoring surrounding whitespace", () => {
-    expect(jamieWebhookKeyExternalId(" sk_abc ")).toBe(jamieWebhookKeyExternalId("sk_abc"));
-    expect(jamieWebhookKeyExternalId("sk_abc")).not.toContain("sk_abc");
-    expect(jamieWebhookKeyExternalId("sk_abc")).not.toBe(jamieWebhookKeyExternalId("sk_abd"));
-  });
-});
 
 describe("jamieWorkflowEventDeliveryId", () => {
   it("is stable for the same meeting and distinct across meetings", () => {

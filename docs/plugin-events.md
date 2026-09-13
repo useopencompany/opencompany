@@ -21,18 +21,20 @@ event or create an ingestion source. Existing Linear installations show an updat
 the new optional team and status filters, and existing Granola installations show one for the
 optional folder filter.
 
-Jamie has no webhook-management API, so its endpoint is created by hand. The plugin's Events
-section shows one fixed opencompany URL; create a webhook in Jamie's Settings → Integrations →
+Jamie has no webhook-management API, so its endpoint is created by hand. Create the endpoint in the
+plugin's Events section, copy its URL, then create a webhook in Jamie's Settings → Integrations →
 Webhooks against it, select `meeting.completed`, keep API Key authentication with the default
 `x-jamie-api-key` header, and save the `sk_` key Jamie shows once back in that section. A personal
 webhook covers your own meetings and a workspace webhook covers everyone's; that choice is made in
 Jamie. Webhooks need a Jamie Plus plan or higher.
 
-opencompany stores only a digest of that key, and the presented key is what binds a delivery to a
-connection. Jamie exposes nothing that can validate a key on save, so the Events section reports
-when Jamie last reached opencompany instead of claiming the key is good; Jamie's own Test button on
-the webhook produces one immediately. Rotating the key in Jamie and saving the new one keeps the
-same connection, so workflows already bound to it keep firing.
+Each connection has its own endpoint URL, so a delivery is routed by the id in its path and its key
+is then compared in constant time against the secret stored for that connection. An endpoint with
+no key yet stays disconnected, and an event trigger only binds to a connected account. Jamie
+exposes nothing that can validate a key on save, so the Events section reports when Jamie last
+reached opencompany instead of claiming the key is good; Jamie's own Test button on the webhook
+produces one immediately. Rotating the key in Jamie and saving the new one keeps the same
+connection and the same URL, so workflows already bound to it keep firing.
 
 The `guests` filter is evaluated from the delivery itself: a meeting is `external` when anyone on
 its calendar event or in its transcript has an email outside the recording user's domain. When the
@@ -103,8 +105,8 @@ before deploying API/runner and then web.
 
 Focused UI tests cover plugin selection, optional filters, disconnected accounts, and retained
 manual/schedule behavior. Signed Linear ingress tests cover retryable persistence errors. Jamie
-ingress tests cover unknown and missing keys, guest-filter matching, a delivery id that survives a
-retry with a new delivery attempt, and the retryable persistence path. Postgres
+ingress tests cover a missing key, an unknown endpoint, a wrong key, guest-filter matching, a
+delivery id that survives a retry with a new delivery attempt, and the retryable persistence path. Postgres
 integration tests cover activation cutoffs, duplicate deliveries, revoked subscriptions, transactional
 rollback/backoff, and the retirement migration's retained pages and rejection of old producers.
 

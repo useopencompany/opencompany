@@ -43,9 +43,10 @@ import {
   validateGranolaApiKey,
 } from "@opencompany/agent/integrations/granola";
 import {
-  connectJamieEventsIntegration,
+  ensureJamieEventsEndpoint,
   getJamieEventsIntegrationState,
-  isValidJamieWebhookApiKey,
+  isValidJamieWebhookKey,
+  saveJamieWebhookKey,
 } from "@opencompany/agent/integrations/jamie-events";
 import {
   connectRenderMcpIntegration,
@@ -98,7 +99,8 @@ export type IntegrationAccountService = {
   disconnectAttio(actor: Actor, integrationId: string): Promise<void>;
   connectFathom(actor: Actor, apiKey: string): Promise<FathomProviderState>;
   connectGranola(actor: Actor, apiKey: string): Promise<GranolaProviderState>;
-  connectJamieEvents(actor: Actor, apiKey: string): Promise<JamieEventsProviderState>;
+  createJamieEventsEndpoint(actor: Actor): Promise<JamieEventsProviderState>;
+  connectJamieEvents(actor: Actor, webhookKey: string): Promise<JamieEventsProviderState>;
   connectConvex(actor: Actor, apiKey: string): Promise<ConvexProviderState>;
   connectRender(actor: Actor, apiKey: string): Promise<RenderProviderState>;
   connectStripe(actor: Actor, apiKey: string): Promise<StripeProviderState>;
@@ -321,11 +323,26 @@ export function createIntegrationAccountService(input: {
       }
     },
 
-    // Jamie mints the webhook key and shows it once, and exposes nothing that can validate it, so
+    // Jamie has no webhook-management API, so the endpoint has to exist before the user can point
+    // Jamie at it. Creating one is idempotent: a second call returns the URL already in Jamie.
+    async createJamieEventsEndpoint(actor) {
+      try {
+        await ensureJamieEventsEndpoint({ userWorkosId: actor.userId, db });
+        return await getJamieEventsIntegrationState(actor.userId, db);
+      } catch (error) {
+        throw commandFailure(
+          error,
+          "Could not create the Jamie webhook endpoint.",
+          "jamie_events_endpoint",
+        );
+      }
+    },
+
+    // Jamie mints the key when the webhook is created and exposes nothing that can validate it, so
     // the save is trusted and the Events section reports the first verified delivery instead.
-    async connectJamieEvents(actor, apiKey) {
-      const trimmed = apiKey.trim();
-      if (!isValidJamieWebhookApiKey(trimmed)) {
+    async connectJamieEvents(actor, webhookKey) {
+      const trimmed = webhookKey.trim();
+      if (!isValidJamieWebhookKey(trimmed)) {
         throw new ApiError(
           400,
           "invalid_request",
@@ -333,7 +350,11 @@ export function createIntegrationAccountService(input: {
         );
       }
       try {
-        await connectJamieEventsIntegration({ userWorkosId: actor.userId, apiKey: trimmed, db });
+        await saveJamieWebhookKey({
+          userWorkosId: actor.userId,
+          webhookSecret: trimmed,
+          db,
+        });
         return await getJamieEventsIntegrationState(actor.userId, db);
       } catch (error) {
         throw commandFailure(

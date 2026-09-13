@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { getDb } from "./client";
 import { integrations } from "./product-schema";
 import type { WorkflowEventContext, WorkflowEventIntegration } from "./workflow-event-routes";
@@ -10,26 +10,20 @@ export const JAMIE_PROVIDER = "jamie" as const;
 // Jamie's MCP connector shares provider "jamie" under the `jamie_mcp` external id. The account
 // type is what keeps the event connection apart from it.
 export const JAMIE_EVENTS_ACCOUNT_TYPE = "jamie_webhook" as const;
+export const JAMIE_EVENTS_CREDENTIAL_KIND = "webhook_secret" as const;
 // The one event the Jamie package declares, and the one filter it declares for it.
 export const JAMIE_MEETING_COMPLETED_EVENT = "meeting.completed";
 export const JAMIE_GUESTS_FILTER_ID = "guests";
 
-// Jamie mints the webhook key and shows it once, so opencompany never needs to reproduce it: the
-// digest is both the connection's identity and the credential check. Storing only the digest means
-// a database disclosure cannot forge deliveries, and an exact match on it is the whole
-// verification — a hash lookup reveals nothing about a near-miss key.
-export function jamieWebhookKeyExternalId(apiKey: string) {
-  return `jamie_webhook_key_sha256:${createHash("sha256").update(apiKey.trim(), "utf8").digest("hex")}`;
-}
-
-// Every connected event connection that presented key belongs to. Two members of one Jamie
-// workspace may each connect the same workspace webhook; both asked for its meetings, so the
-// delivery routes to both.
-export async function listJamieEventIntegrationsForApiKey(
-  apiKey: string,
+// Jamie has no webhook-management API, so each connection gets its own endpoint URL and the
+// delivery is routed by the opencompany-minted id in that path. Looking the connection up by its
+// own primary key means an unauthenticated probe is rejected by one indexed read, before any
+// credential is decrypted.
+export async function findJamieEventConnection(
+  endpointId: string,
   db: DbLike = getDb(),
-): Promise<WorkflowEventIntegration[]> {
-  return db
+): Promise<WorkflowEventIntegration | null> {
+  const [row] = await db
     .select({
       id: integrations.id,
       workspaceId: integrations.workspaceId,
@@ -39,27 +33,28 @@ export async function listJamieEventIntegrationsForApiKey(
     .from(integrations)
     .where(
       and(
+        eq(integrations.id, endpointId),
         eq(integrations.provider, JAMIE_PROVIDER),
-        eq(integrations.externalId, jamieWebhookKeyExternalId(apiKey)),
         eq(integrations.accountType, JAMIE_EVENTS_ACCOUNT_TYPE),
         eq(integrations.status, "connected"),
         isNull(integrations.workspaceId),
       ),
-    );
+    )
+    .limit(1);
+  return row ?? null;
 }
 
 // Stamped on every verified delivery so the plugin's Events section can say when Jamie last
 // reached opencompany. Jamie cannot validate a key on paste, so this is the only honest
 // confirmation the setup worked.
 export async function markJamieEventsDelivered(
-  input: { integrationIds: readonly string[]; now: Date },
+  input: { integrationId: string; now: Date },
   db: DbLike = getDb(),
 ): Promise<void> {
-  if (input.integrationIds.length === 0) return;
   await db
     .update(integrations)
     .set({ lastSyncedAt: input.now, updatedAt: input.now })
-    .where(inArray(integrations.id, [...input.integrationIds]));
+    .where(eq(integrations.id, input.integrationId));
 }
 
 export type JamieMeetingPayload = Record<string, unknown>;

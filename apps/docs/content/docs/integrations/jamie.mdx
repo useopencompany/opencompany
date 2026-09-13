@@ -29,7 +29,7 @@ finished a meeting's summary, transcript, and action items. Jamie pushes it, so 
 delay.
 
 1. Open **Settings → Plugins → Jamie** and install or update the plugin.
-2. In **Events**, copy the endpoint URL opencompany shows.
+2. In **Events**, choose **Create endpoint** and copy the URL opencompany shows.
 3. In Jamie, open **Settings → Integrations → Webhooks** and create a webhook:
    - Paste the endpoint URL and select the `meeting.completed` event.
    - Choose a **personal** webhook for your own meetings, or a **workspace** webhook for every
@@ -46,11 +46,12 @@ Jamie webhooks require a **Plus plan or higher**, and workspace webhooks require
 The webhook connection is separate from the MCP OAuth connection that powers the tools; neither can
 create the other.
 
-opencompany stores only a digest of the webhook key, so it can recognise Jamie's deliveries but can
-never replay or reveal it. Jamie has nothing that can check a key when you save it, so **Events**
-reports when Jamie last reached opencompany rather than claiming the key is valid. Use Jamie's
-**Test** button on the webhook to get a delivery immediately. If you regenerate the key in Jamie,
-paste the new one here; the connection and any Workflow bound to it stay the same.
+Each connection has its own endpoint URL, and opencompany encrypts the webhook key and keeps it
+server-side, using it only to recognise Jamie's deliveries. Jamie has nothing that can check a key
+when you save it, so **Events** reports when Jamie last reached opencompany rather than claiming the
+key is valid. Use Jamie's **Test** button on the webhook to get a delivery immediately. If you
+regenerate the key in Jamie, paste the new one here; the URL, the connection, and any Workflow bound
+to it stay the same.
 
 **Guests** is decided from the delivery: a meeting counts as outside your company when anyone on its
 calendar invite or in its transcript has an email domain different from yours. Each meeting starts a

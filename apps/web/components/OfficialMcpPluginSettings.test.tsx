@@ -155,7 +155,7 @@ const appData = vi.hoisted(() => ({
       status: "not_connected",
       integrationId: null,
       statusReason: null,
-      webhookUrl: "https://app.example.com/api/webhooks/jamie/events",
+      webhookUrl: null,
       lastDeliveryAt: null,
     },
     attio: {

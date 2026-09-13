@@ -21,21 +21,31 @@ Jamie's own settings, and Jamie mints the key there and shows it once.
 ## Decision
 
 The Jamie package declares one `webhook` event, `meeting.completed`, matching Jamie's own event
-name. The platform publishes one fixed ingress, `/api/webhooks/jamie/events`, that every Jamie
-webhook can point at, and the connection is made by pasting the key Jamie minted into the plugin's
-Events section.
+name. Each connection publishes its own ingress URL, `/api/webhooks/jamie/<integration id>`, and the
+connection is made by creating the endpoint here, pasting its URL into Jamie, and saving the key
+Jamie minted back into the plugin's Events section.
 
-That key is the connection's identity. opencompany stores only its SHA-256 digest, as the
-integration row's `external_id`, and a delivery is bound to a connection by looking its presented
-key up as a digest. Nothing recoverable is kept, so a database disclosure cannot forge a delivery,
-and an exact match on a digest is the whole credential check — a hash lookup tells an attacker
-nothing about a near-miss key. Jamie's own recommendation is API-key authentication; its HMAC
-alternative would instead require storing a replayable secret and a per-connection URL, and the
-same key compromise forges deliveries either way.
+Routing a delivery is therefore a primary-key read on the id in its own path, which rejects an
+unauthenticated probe before any credential is decrypted. The presented key is then compared in
+constant time against the secret stored in `integration_credentials` under the existing
+`webhook_secret` kind — the same envelope encryption, bound to the same user/integration/provider
+AAD, that already protects Attio's webhook secret and every OAuth token in the product. An unknown
+endpoint, a missing key, and a wrong key are all reported identically, so the response is not an
+enumeration oracle.
+
+Digesting the key and keying the lookup on that digest was the first shape of this change. It
+avoids storing anything replayable, but it makes the routing read a scan over a growing table on an
+unauthenticated path, and it hashes a third-party credential with a fast hash — defensible for a
+high-entropy `sk_` token, but not something to assert quietly. Since a Jamie webhook key grants no
+access to Jamie at all and can only be used to send opencompany meeting payloads, storing it beside
+credentials that are strictly more powerful is the smaller commitment, and it keeps the ingress a
+single indexed read.
 
 Jamie cannot validate a key on save, so the save is trusted and every verified delivery stamps
 `last_synced_at`. The Events section reports that timestamp, which is the only honest confirmation
-that a pasted key works, and points at Jamie's Test button for getting one immediately.
+that a pasted key works, and points at Jamie's Test button for getting one immediately. An endpoint
+that has no key yet stays `needs_reauth`, and an event trigger only binds to a connected row, so a
+half-finished setup cannot route anything.
 
 Because a Jamie payload carries no meeting id — only a per-delivery id whose stability across retry
 attempts is undocumented — the delivery key is derived from the meeting's own identity: a digest of
@@ -56,12 +66,18 @@ a workflow trigger binds to.
 ## Consequences
 
 Adding a webhook-backed event no longer requires an opencompany-owned OAuth app. A provider whose
-users can create their own endpoint needs one public path, a digest column, and an ingress adapter
-— which is a materially smaller commitment than either alternative was for Jamie.
+users can create their own endpoint needs a per-connection path, a stored secret, and an ingress
+adapter — a materially smaller commitment than either alternative was for Jamie.
 
-Setup is manual and two-sided: copy a URL out of opencompany, create the webhook in Jamie, bring
-the key back. That is one paste more than Granola's and it cannot be verified until Jamie sends
+Setup is manual and two-sided: create the endpoint, copy its URL into Jamie, bring the key back.
+That is a click and a paste more than Granola's, and it cannot be verified until Jamie sends
 something, which is why the last-delivery timestamp is part of the feature rather than a nicety.
+
+The stored key is recoverable by anything that can both read the credentials table and use the
+encryption key. That is the same exposure every other integration credential in the product
+already has, and a Jamie webhook key is the least powerful of them: it can be replayed to feed
+opencompany fabricated meetings, which the goal composer already treats as untrusted external
+content, and it opens nothing in Jamie.
 
 The `guests` filter is decided by the payload, not by anything the user maintains, so it works
 from the first meeting. Tags would have been the other candidate and were left out: they are

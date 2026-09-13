@@ -2515,6 +2515,12 @@ export function createApiApp(input: CreateApiAppInput) {
       );
       return c.json({ data: { state: granolaStateDto(state) }, meta }, 200);
     },
+    createJamieEventsEndpoint: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const state = await input.integrationAccounts.createJamieEventsEndpoint(actor);
+      return c.json({ data: { state: jamieEventsStateDto(state) }, meta }, 200);
+    },
     connectJamieEventsAccount: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 60);
@@ -3144,8 +3150,10 @@ export function createApiApp(input: CreateApiAppInput) {
   }
   if (input.jamieIngress) {
     const ingress = input.jamieIngress;
-    app.use("/webhooks/jamie/events", ingressBodyLimit(5 * 1024 * 1024));
-    app.post("/webhooks/jamie/events", (c) => ingress.webhook(c.req.raw));
+    app.use("/webhooks/jamie/:endpointId", ingressBodyLimit(5 * 1024 * 1024));
+    app.post("/webhooks/jamie/:endpointId", (c) =>
+      ingress.webhook(c.req.param("endpointId"), c.req.raw),
+    );
   }
   if (input.mcpOAuthIngress) {
     const ingress = input.mcpOAuthIngress;

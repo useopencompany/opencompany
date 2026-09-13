@@ -5,33 +5,47 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { JamieEventsProviderState } from "@/lib/integration-state";
 import { JamieEventsSetup } from "./JamieEventsSetup";
 
-const actions = vi.hoisted(() => ({ save: vi.fn(), refresh: vi.fn() }));
+const actions = vi.hoisted(() => ({ save: vi.fn(), create: vi.fn(), refresh: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: actions.refresh }) }));
 vi.mock("@/lib/integrations/jamie-events-actions", () => ({
   saveJamieWebhookKeyAction: actions.save,
+  createJamieWebhookEndpointAction: actions.create,
 }));
 
-const WEBHOOK_URL = "https://app.example.com/api/webhooks/jamie/events";
+const WEBHOOK_URL = "https://app.example.com/api/webhooks/jamie/gint_1";
 
-const disconnected: JamieEventsProviderState = {
+const noEndpoint: JamieEventsProviderState = {
   provider: "jamie",
   connected: false,
   status: "not_connected",
   integrationId: null,
   statusReason: null,
-  webhookUrl: WEBHOOK_URL,
+  webhookUrl: null,
   lastDeliveryAt: null,
+};
+
+// The endpoint exists but Jamie's key has not been saved, so nothing can be delivered yet.
+const disconnected: JamieEventsProviderState = {
+  ...noEndpoint,
+  status: "needs_reauth",
+  integrationId: "gint_1",
+  webhookUrl: WEBHOOK_URL,
 };
 
 describe("Jamie event account setup", () => {
   beforeEach(() => vi.clearAllMocks());
   afterEach(cleanup);
 
-  it("offers the endpoint to copy into Jamie before anything is connected", async () => {
+  it("creates the endpoint first, then offers its URL to copy into Jamie", async () => {
+    actions.create.mockResolvedValue({ ok: true, state: disconnected });
     const user = userEvent.setup();
-    render(<JamieEventsSetup initialState={disconnected} />);
+    render(<JamieEventsSetup initialState={noEndpoint} />);
 
-    expect(screen.getByText(WEBHOOK_URL)).toBeInTheDocument();
+    // Nothing can be pasted into Jamie until the endpoint it points at exists.
+    expect(screen.queryByLabelText("Webhook key")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Create endpoint" }));
+    expect(await screen.findByText(WEBHOOK_URL)).toBeInTheDocument();
+
     expect(screen.getByText(/keep the default x-jamie-api-key header/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Copy the Jamie endpoint URL" }));
     await expect(navigator.clipboard.readText()).resolves.toBe(WEBHOOK_URL);
