@@ -96,6 +96,10 @@ export function codexCliModelNameForModelId(modelId: string): string | null {
 // Sonnet is the default because it is fully covered by Claude subscription limits on
 // every plan; larger tiers are gated behind usage credits on some plans.
 export const CLAUDE_CODE_DEFAULT_MODEL_ID: AgentModelId = "anthropic/claude-sonnet-5";
+// Claude Code runs models the connected Claude account is entitled to, not every model in
+// AGENT_MODEL_CATALOG. The runner sets ANTHROPIC_MODEL so the session opens on the requested id,
+// then reconciles against the models the adapter advertises; an id the account cannot run fails
+// the turn by name instead of silently answering on a different model.
 export const CLAUDE_CODE_AGENT_MODEL_IDS = [
   "anthropic/claude-sonnet-5",
   "anthropic/claude-opus-5",
