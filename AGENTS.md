@@ -129,6 +129,21 @@ This section applies only when the system prompt gives you a staged environment 
 2. Run `bun install --frozen-lockfile`, then `bun run setup`, before starting any development process.
 3. Start `bun run dev:web` only after setup succeeds.
 
+#### Authenticated dev-server verification
+
+The dev WorkOS environment has a shared agent user (credentials come through `bun run setup` from
+Infisical `dev` `/web`). To verify authenticated routes without a browser sign-in:
+
+1. `bun run db:seed` — gives the agent user an onboarded workspace in the branch database.
+2. `bun run agent:session` — prints a sealed `wos-session` cookie value to stdout.
+3. Send it on requests to the web app (`:3002`) or API (`:3001`), e.g.
+   `curl -H "Cookie: wos-session=$(bun run --silent agent:session)" http://localhost:3002/`.
+
+This is a real WorkOS session, so middleware, refresh, and API cookie verification run unchanged.
+If the sandbox lacks the Stripe CLI or ngrok, set `STRIPE_LISTEN_DISABLED=1`,
+`OPENCOMPANY_NGROK_REQUIRED=0`, `OPENCOMPANY_NGROK_URL=""`, and a placeholder
+`OPENCOMPANY_STRIPE_WEBHOOK_SECRET` in `.env.override.local` before starting the dev stack.
+
 Cloud setup refreshes the schema-only `cloud-base` Neon branch and creates a sandbox-unique child branch from it. Do not override that parent or start the dev server against an unset `DATABASE_URL`.
 
 Local dev logs: `bun run dev` and `bun run dev:stream` write Turbo task output to `.context/logs/dev-turbo.json`. Use `bun run dev:logs -- --source runner --tail 100`, `bun run dev:logs -- --source web --tail 100`, `bun run dev:logs -- --errors`, or `bun run dev:logs -- --grep <text>` when debugging. The log file is gitignored and may contain sensitive terminal output, so summarize relevant lines instead of pasting large raw excerpts.

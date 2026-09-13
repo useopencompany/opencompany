@@ -167,6 +167,9 @@ const AGENT_TELEMETRY_ENV_KEYS = [
   "LATITUDE_TELEMETRY_DISABLED",
 ];
 const AGENT_MCP_ENV_KEYS = ["SIGNOZ_MCP_REGION", "SIGNOZ_MCP_URL"];
+// Shared agent dev user for authenticated dev-server verification; see
+// scripts/agent-provision.mjs and scripts/agent-session.mjs.
+const AGENT_DEV_USER_ENV_KEYS = ["OPENCOMPANY_AGENT_USER_EMAIL", "OPENCOMPANY_AGENT_USER_PASSWORD"];
 const OPTIONAL_SHARED_DEV_ENV_KEYS = [
   "NEON_PARENT_BRANCH",
   "NEON_API_KEY",
@@ -191,6 +194,7 @@ const OPTIONAL_SHARED_DEV_ENV_KEYS = [
   ...RUNTIME_OBSERVABILITY_ENV_KEYS,
   ...AGENT_TELEMETRY_ENV_KEYS,
   ...AGENT_MCP_ENV_KEYS,
+  ...AGENT_DEV_USER_ENV_KEYS,
 ];
 const SHARED_DEV_ENV_KEYS = [
   ...WORKOS_ENV_KEYS,
