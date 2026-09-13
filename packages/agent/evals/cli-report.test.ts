@@ -55,7 +55,7 @@ describe("benchmark CLI", () => {
     const options = parseCli([]);
     expect(options.k).toBe(4);
     expect(options.models).toEqual(DEFAULT_MODELS);
-    expect(options.scenarios).toHaveLength(8);
+    expect(options.scenarios).toHaveLength(9);
     expect(options.variants).toEqual(["v5"]);
   });
   it("filters id/tag unions and optional baseline paths", () => {
