@@ -243,6 +243,38 @@ describe("publishChatArtifact", () => {
     );
   });
 
+  it("treats empty revision placeholders as omitted for a new in-band artifact", async () => {
+    dbMocks.select
+      .mockReset()
+      .mockReturnValueOnce(queryBuilder([activeInBandTurn()]))
+      .mockReturnValueOnce(queryBuilder([{ status: "running", interruptAt: null }]))
+      .mockReturnValueOnce(queryBuilder([]));
+    dbMocks.execute
+      .mockReset()
+      .mockResolvedValueOnce({ rows: [{ count: 0 }] })
+      .mockResolvedValueOnce({ rows: [{ id: "persisted_version" }] });
+
+    const result = await publishInBandChatArtifact({
+      codexChatSessionId: "codex_session_1",
+      codexChatTurnId: "turn_1",
+      toolCallId: "call_1",
+      arguments: {
+        filename: "report.md",
+        title: "Quarterly report",
+        content: "# Report",
+        artifact_id: "",
+        expected_version: 1,
+      },
+      env: { blobReadWriteToken: "blob_token" },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      artifact: { version: 1, filename: "report.md" },
+    });
+    expect(blobMocks.put).toHaveBeenCalledOnce();
+  });
+
   it("publishes in-band HTML with the media type derived from the filename", async () => {
     dbMocks.select
       .mockReset()
