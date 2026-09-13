@@ -313,13 +313,19 @@ export async function runCodexChatTurn(input: {
   } catch (error) {
     const abort = shouldAbort?.();
     if (abort) throw abort;
-    if (isRetryableSandboxAcquisitionError(error)) {
+    // A session with a persisted sandbox has not been fenced yet: settling the turn terminally
+    // here could leave a detached engine process mutating the workspace, and connect failures
+    // against a healthy durable sandbox include unclassified provider shapes. Treat every
+    // reconnect failure as retryable, matching runClaudeCodeChatTurn.
+    if (session.sandboxId || isRetryableSandboxAcquisitionError(error)) {
       const redactAcquisitionError = createKnownSecretRedactor([
         auth.kind === "api" ? auth.apiKeyValue : JSON.stringify(auth.authJson),
         env.internalToken,
       ]);
       throw new CodexChatRetryableInfrastructureError(
-        "Codex sandbox capacity is temporarily unavailable.",
+        session.sandboxId
+          ? "Codex could not reconnect to the existing sandbox before recovery."
+          : "Codex sandbox capacity is temporarily unavailable.",
         error,
         failureDiagnostic("connect_sandbox", error, redactAcquisitionError),
       );
