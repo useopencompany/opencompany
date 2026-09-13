@@ -3915,10 +3915,22 @@ export const McpSetupEnvelopeSchema = z
 
 export const FeedbackKindSchema = z.enum(["bug", "feedback", "idea"]);
 
+// What the reporter had open when they hit the feedback button. Only the two
+// references worth chasing a bug through - a chat session or a task - so triage
+// lands on the exact run instead of guessing from the message.
+export const FeedbackContextSchema = z
+  .object({
+    kind: z.enum(["chat", "task"]),
+    id: z.string().trim().min(1).max(128),
+  })
+  .strict()
+  .openapi("FeedbackContext");
+
 export const SubmitFeedbackBodySchema = z
   .object({
     kind: FeedbackKindSchema,
     message: z.string().trim().min(3).max(4_000),
+    context: FeedbackContextSchema.optional(),
   })
   .strict()
   .openapi("SubmitFeedbackBody");

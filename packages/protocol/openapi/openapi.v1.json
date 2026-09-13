@@ -10579,11 +10579,36 @@
             "type": "string",
             "minLength": 3,
             "maxLength": 4000
+          },
+          "context": {
+            "$ref": "#/components/schemas/FeedbackContext"
           }
         },
         "required": [
           "kind",
           "message"
+        ],
+        "additionalProperties": false
+      },
+      "FeedbackContext": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "chat",
+              "task"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "kind",
+          "id"
         ],
         "additionalProperties": false
       },

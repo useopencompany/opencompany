@@ -11,10 +11,13 @@ const actor: Actor = {
   authenticationMethod: "session",
 };
 
-function fakeDb(rows: { user?: unknown[]; workspace?: unknown[] } = {}) {
+function fakeDb(rows: { user?: unknown[]; workspace?: unknown[]; context?: unknown[] } = {}) {
+  // The service reads user, then workspace, then (only with a context) the
+  // referenced chat session or task.
   const results = [
     rows.user ?? [{ email: "ana@acme.example", firstName: "Ana", lastName: "Ng" }],
     rows.workspace ?? [{ id: "gws_1", name: "Acme" }],
+    rows.context ?? [],
   ];
   let call = 0;
   return {
@@ -69,10 +72,16 @@ function routeLinear(overrides: { issue?: unknown } = {}) {
   return { fetchImpl, calls };
 }
 
+function descriptionOf(calls: Array<{ query: string; variables: Record<string, unknown> }>) {
+  const issueCall = calls.find((call) => call.query.includes("FeedbackCreateIssue"));
+  return (issueCall?.variables.input as { description: string }).description;
+}
+
 describe("feedback service", () => {
   beforeEach(() => {
     process.env.LINEAR_API_KEY = "lin_api_test";
     process.env.OPENCOMPANY_FEEDBACK_LINEAR_TEAM_ID = "team_1";
+    process.env.OPENCOMPANY_NEXT_PUBLIC_APP_URL = "https://my.opencompany.chat";
   });
 
   afterEach(() => {
@@ -81,6 +90,7 @@ describe("feedback service", () => {
     delete process.env.OPENCOMPANY_FEEDBACK_LINEAR_TEAM_ID;
     delete process.env.OPENCOMPANY_FEEDBACK_LINEAR_PROJECT_ID;
     delete process.env.OPENCOMPANY_FEEDBACK_LINEAR_LABELS;
+    delete process.env.OPENCOMPANY_NEXT_PUBLIC_APP_URL;
   });
 
   it("creates a triaged Linear issue with the actor's identity in the description", async () => {
@@ -105,6 +115,67 @@ describe("feedback service", () => {
     expect(input.description).toContain("Submitted by: Ana Ng <ana@acme.example>");
     expect(input.description).toContain("Workspace: Acme (gws_1)");
     expect(input.description).toContain("Type: bug");
+  });
+
+  it("references the task and its session so triage can open the failing run", async () => {
+    const { fetchImpl, calls } = routeLinear();
+    const service = createFeedbackService({
+      db: fakeDb({ context: [{ id: "tsk_1", displayId: "TASK-42", sessionId: "ses_9" }] }),
+      fetch: fetchImpl,
+    });
+
+    await service.submit(actor, {
+      kind: "bug",
+      message: "The run stalled halfway.",
+      context: { kind: "task", id: "tsk_1" },
+    });
+
+    const description = descriptionOf(calls);
+    expect(description).toContain("Task: tsk_1 (TASK-42)");
+    expect(description).toContain("Session: ses_9");
+    expect(description).toContain("Link: https://my.opencompany.chat/tasks/tsk_1");
+  });
+
+  it("references a chat session the reporter owns", async () => {
+    const { fetchImpl, calls } = routeLinear();
+    const service = createFeedbackService({
+      db: fakeDb({ context: [{ id: "ses_9" }] }),
+      fetch: fetchImpl,
+    });
+
+    await service.submit(actor, {
+      kind: "bug",
+      message: "The reply repeated itself.",
+      context: { kind: "chat", id: "ses_9" },
+    });
+
+    const description = descriptionOf(calls);
+    expect(description).toContain("Session: ses_9");
+    expect(description).toContain("Link: https://my.opencompany.chat/chat/ses_9");
+  });
+
+  it("still reports an id that does not resolve for the reporter, marked as such", async () => {
+    const { fetchImpl, calls } = routeLinear();
+    const service = createFeedbackService({ db: fakeDb({ context: [] }), fetch: fetchImpl });
+
+    await service.submit(actor, {
+      kind: "bug",
+      message: "Something broke.",
+      context: { kind: "task", id: "tsk_other" },
+    });
+
+    expect(descriptionOf(calls)).toContain("Task: tsk_other (not accessible to the reporter)");
+  });
+
+  it("omits the reference block when the report came from outside a session", async () => {
+    const { fetchImpl, calls } = routeLinear();
+    const service = createFeedbackService({ db: fakeDb(), fetch: fetchImpl });
+
+    await service.submit(actor, { kind: "idea", message: "Add a weekly digest email." });
+
+    const description = descriptionOf(calls);
+    expect(description).not.toContain("Session:");
+    expect(description).not.toContain("Link:");
   });
 
   it("surfaces delivery failures as retryable unavailable errors with the upstream message", async () => {
