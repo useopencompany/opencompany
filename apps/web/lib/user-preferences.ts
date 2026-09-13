@@ -17,6 +17,9 @@ type UserPreferences = {
   taskTimeRange: TaskTimeRange;
   autoModelRoutingEnabled: boolean;
   reviewInboxEnabled: boolean;
+  sidebarProjectsEnabled: boolean;
+  subagentsEnabled: boolean;
+  pastSessionAccessEnabled: boolean;
 };
 
 export async function updateTimezoneAction(timezone: string) {
@@ -72,6 +75,27 @@ export async function updateReviewInboxAction(enabled: boolean) {
   revalidatePath("/");
   revalidatePath("/settings/preferences");
   return { ok: true, enabled: preferences.reviewInboxEnabled } as const;
+}
+
+export async function updateSidebarProjectsAction(enabled: boolean) {
+  const preferences = await patchPreferences({ sidebarProjectsEnabled: enabled === true });
+  revalidatePath("/");
+  revalidatePath("/settings/preferences");
+  return { ok: true, enabled: preferences.sidebarProjectsEnabled } as const;
+}
+
+export async function updateSubagentsAction(enabled: boolean) {
+  const preferences = await patchPreferences({ subagentsEnabled: enabled === true });
+  revalidatePath("/");
+  revalidatePath("/settings/preferences");
+  return { ok: true, enabled: preferences.subagentsEnabled } as const;
+}
+
+export async function updatePastSessionAccessAction(enabled: boolean) {
+  const preferences = await patchPreferences({ pastSessionAccessEnabled: enabled === true });
+  revalidatePath("/");
+  revalidatePath("/settings/preferences");
+  return { ok: true, enabled: preferences.pastSessionAccessEnabled } as const;
 }
 
 async function patchPreferences(body: Partial<UserPreferences>): Promise<UserPreferences> {

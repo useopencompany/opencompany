@@ -45,10 +45,17 @@ type AcpToolCall = {
   outputText: string;
 };
 
-export function createAcpEventNormalizer(input: { engineName?: string } = {}) {
+export function createAcpEventNormalizer(
+  input: { engineName?: string; attemptScopeId?: string } = {},
+) {
   const toolCalls = new Map<string, AcpToolCall>();
   const messageText = new Map<string, string>();
   const messageOrder: string[] = [];
+  // Generated fallback item ids seed the durable (turn_id, event_key) dedup downstream, and a
+  // recovered turn reuses its turn row with a fresh normalizer whose counter restarts at zero.
+  // Scope them to this normalizer instance (one per engine-run attempt) so a recovery's new
+  // output is never dropped as a replay of the interrupted attempt's identically numbered ids.
+  const attemptScopeId = input.attemptScopeId ?? globalThis.crypto.randomUUID();
   let currentSessionId: string | null = null;
   let summary: AcpTurnSummary | null = null;
   let goal: AcpGoalSummary | null = null;
@@ -82,6 +89,7 @@ export function createAcpEventNormalizer(input: { engineName?: string } = {}) {
     if (method === "session/request_permission") {
       const toolCall = readRecord(params.toolCall) ?? {};
       const toolCallId = readString(toolCall.toolCallId) ?? "acp-permission";
+      const locations = toolLocations(toolCall);
       return [
         normalized("approval.requested", raw, {
           itemId: `acp-approval-${toolCallId}`,
@@ -94,6 +102,10 @@ export function createAcpEventNormalizer(input: { engineName?: string } = {}) {
             readString(readRecord(toolCall.rawInput)?.command) ??
             readString(toolCall.name) ??
             readString(toolCall.title),
+          // The ACP tool kind ("execute", "edit", "fetch", …) and the paths the call touches are
+          // what let the approval card ask a concrete question instead of echoing a raw tool name.
+          kind: readString(toolCall.kind),
+          ...(locations?.length ? { locations } : {}),
           options: Array.isArray(params.options) ? params.options : undefined,
           rawInput: readRecord(toolCall.rawInput) ?? undefined,
         }),
@@ -143,7 +155,9 @@ export function createAcpEventNormalizer(input: { engineName?: string } = {}) {
       if (text == null || !text) return [];
       const itemId =
         readString(update.messageId) ??
-        (parentToolCallId ? `acp-message-${parentToolCallId}` : "acp-message-root");
+        (parentToolCallId
+          ? `acp-message-${parentToolCallId}`
+          : `acp-message-root-${attemptScopeId}`);
       if (!parentToolCallId) {
         if (!messageText.has(itemId)) messageOrder.push(itemId);
         messageText.set(itemId, `${messageText.get(itemId) ?? ""}${text}`);
@@ -157,7 +171,9 @@ export function createAcpEventNormalizer(input: { engineName?: string } = {}) {
       return text
         ? [
             normalized("reasoning.completed", raw, {
-              itemId: readString(update.messageId) ?? `acp-thought-${generatedMessageId++}`,
+              itemId:
+                readString(update.messageId) ??
+                `acp-thought-${attemptScopeId}-${generatedMessageId++}`,
               text,
               parentToolCallId,
             }),

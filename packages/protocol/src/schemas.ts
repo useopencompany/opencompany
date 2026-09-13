@@ -1091,6 +1091,7 @@ export const BrainSourceOptionsBodySchema = z.discriminatedUnion("provider", [
       includeTriageStateIds: z.boolean().optional(),
     })
     .strict(),
+  z.object({ provider: z.literal("granola") }).strict(),
   z
     .object({
       provider: z.literal("google_drive"),
@@ -1100,6 +1101,12 @@ export const BrainSourceOptionsBodySchema = z.discriminatedUnion("provider", [
     })
     .strict(),
 ]);
+
+// Granola folders scope the `meeting.notes_ready` event filter. The parent id travels with each
+// folder so a picker can show where a folder sits without a second read.
+const GranolaFolderRefSchema = NamedSourceRefSchema.extend({
+  parentFolderId: z.string().min(1).max(512).nullable(),
+}).strict();
 
 const GoogleDriveOptionSchema = z
   .object({
@@ -1118,6 +1125,13 @@ export const BrainSourceOptionsSchema = z
       .object({
         provider: z.literal("linear"),
         teams: z.array(LinearTeamRefSchema),
+        partial: z.boolean(),
+      })
+      .strict(),
+    z
+      .object({
+        provider: z.literal("granola"),
+        folders: z.array(GranolaFolderRefSchema),
         partial: z.boolean(),
       })
       .strict(),
@@ -1685,14 +1699,31 @@ export const PluginCapabilityDefinitionSchema = z
   .openapi("PluginCapabilityDefinition");
 
 export const PluginEventFilterDefinitionSchema = z
-  .object({
-    id: z.string().min(1).max(64),
-    label: z.string().min(1).max(120),
-    kind: z.literal("integration_resource"),
-    resourceType: z.string().min(1).max(64),
-    required: z.boolean(),
-  })
-  .strict()
+  .discriminatedUnion("kind", [
+    z
+      .object({
+        id: z.string().min(1).max(64),
+        label: z.string().min(1).max(120),
+        kind: z.literal("integration_resource"),
+        resourceType: z.string().min(1).max(64),
+        required: z.boolean(),
+      })
+      .strict(),
+    z
+      .object({
+        id: z.string().min(1).max(64),
+        label: z.string().min(1).max(120),
+        kind: z.literal("choice"),
+        options: z
+          .array(
+            z.object({ id: z.string().min(1).max(64), name: z.string().min(1).max(120) }).strict(),
+          )
+          .min(1)
+          .max(64),
+        required: z.boolean(),
+      })
+      .strict(),
+  ])
   .openapi("PluginEventFilterDefinition");
 
 export const PluginEventDefinitionSchema = z
@@ -3134,6 +3165,9 @@ export const CreateMessageBodySchema = z
     model: z.string().min(1).max(256).optional(),
     attachmentIds: z.array(ResourceIdSchema).max(5).optional(),
     mentions: z.array(MessageMentionSchema).max(16).optional(),
+    // Files the Conversation this message creates under a sidebar Project. Only meaningful for a
+    // new Conversation; an existing one is moved through the Project's own membership routes.
+    projectId: ResourceIdSchema.optional(),
   })
   .strict()
   .refine(
@@ -3142,6 +3176,11 @@ export const CreateMessageBodySchema = z
     {
       message: "conversationId and clientConversationId are mutually exclusive",
     },
+  )
+  .refine(
+    (body: { conversationId?: string; projectId?: string }) =>
+      !(body.conversationId && body.projectId),
+    { message: "projectId applies only to a new conversation" },
   )
   .refine(
     (body: { content: string; attachmentIds?: string[] }) =>
@@ -3725,6 +3764,9 @@ export const IdentityUserSchema = z
     autoModelRoutingEnabled: z.boolean(),
     chatCapabilitiesBetaEnabled: z.boolean(),
     reviewInboxEnabled: z.boolean(),
+    sidebarProjectsEnabled: z.boolean(),
+    subagentsEnabled: z.boolean(),
+    pastSessionAccessEnabled: z.boolean(),
     /** @deprecated Wiki is always enabled. */
     wikiEnabled: z.literal(true),
     taskViewMode: TaskViewModeSchema,
@@ -3790,6 +3832,9 @@ export const UserPreferencesSchema = z
     taskTimeRange: TaskTimeRangeSchema,
     autoModelRoutingEnabled: z.boolean(),
     reviewInboxEnabled: z.boolean(),
+    sidebarProjectsEnabled: z.boolean(),
+    subagentsEnabled: z.boolean(),
+    pastSessionAccessEnabled: z.boolean(),
   })
   .strict()
   .openapi("UserPreferences");
@@ -3805,6 +3850,9 @@ export const UpdateUserPreferencesBodySchema = z
     taskTimeRange: TaskTimeRangeSchema.optional(),
     autoModelRoutingEnabled: z.boolean().optional(),
     reviewInboxEnabled: z.boolean().optional(),
+    sidebarProjectsEnabled: z.boolean().optional(),
+    subagentsEnabled: z.boolean().optional(),
+    pastSessionAccessEnabled: z.boolean().optional(),
   })
   .strict()
   .refine((body: Record<string, unknown>) => Object.keys(body).length > 0, {
@@ -4324,7 +4372,9 @@ export const UpdateCodexWorkspaceEngineBodySchema = z
   .strict()
   .openapi("UpdateCodexWorkspaceEngineBody");
 
-export type CodexUsage = {
+// Shared by the Codex and Claude Code subscription cards: a provider-agnostic
+// snapshot of the connected account's remaining allowance per limit window.
+export type SubscriptionUsage = {
   windows: {
     id: string;
     label: string;
@@ -4334,7 +4384,7 @@ export type CodexUsage = {
   updatedAt: string;
 };
 
-export const CodexUsageSchema: z.ZodType<CodexUsage> = z
+export const SubscriptionUsageSchema: z.ZodType<SubscriptionUsage> = z
   .object({
     windows: z.array(
       z
@@ -4349,12 +4399,12 @@ export const CodexUsageSchema: z.ZodType<CodexUsage> = z
     updatedAt: z.string().datetime(),
   })
   .strict()
-  .openapi("CodexUsage");
+  .openapi("SubscriptionUsage");
 
-export const CodexUsageEnvelopeSchema = z
-  .object({ data: CodexUsageSchema, meta: ProtocolMetadataSchema })
+export const SubscriptionUsageEnvelopeSchema = z
+  .object({ data: SubscriptionUsageSchema, meta: ProtocolMetadataSchema })
   .strict()
-  .openapi("CodexUsageEnvelope");
+  .openapi("SubscriptionUsageEnvelope");
 
 export const EngineAuthFlowIdSchema = z
   .string()
@@ -4720,3 +4770,24 @@ export const BotListEnvelopeSchema = z
   .strict();
 
 export type SetSkillScopeBody = z.infer<typeof SetSkillScopeBodySchema>;
+
+export const ProjectBodySchema = z.object({ name: z.string().trim().min(1).max(80) }).strict();
+export const CreateProjectBodySchema = ProjectBodySchema.extend({ id: ResourceIdSchema }).strict();
+export const ProjectSchema = z
+  .object({
+    id: ResourceIdSchema,
+    name: z.string(),
+    // The chats and Tasks filed under this project, newest first. Both kinds are Conversations,
+    // so one list covers the sidebar rows for either.
+    conversationIds: z.array(ResourceIdSchema),
+    createdAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("Project");
+export const ProjectListEnvelopeSchema = z
+  .object({ data: z.array(ProjectSchema), meta: ProtocolMetadataSchema })
+  .strict();
+export const ProjectConversationBodySchema = z
+  .object({ conversationId: ResourceIdSchema })
+  .strict();
+export type ProjectDto = z.infer<typeof ProjectSchema>;

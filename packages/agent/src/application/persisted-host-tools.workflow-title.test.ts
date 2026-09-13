@@ -62,6 +62,7 @@ describe("persisted workflow host tools", () => {
           taskToolsEnabled: true,
           taskConversation: false,
           skillToolsEnabled: true,
+          subagentsEnabled: false,
           legacyBrainEnabled: false,
         })),
       },

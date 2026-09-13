@@ -186,6 +186,8 @@ export type CreateMessageCommand = {
   settings?: Readonly<Record<string, unknown>>;
   attachmentIds?: readonly string[];
   mentions?: readonly MessageMention[];
+  /** Files the Conversation this message creates under a sidebar Project. New Conversations only. */
+  projectId?: string;
 };
 
 export type CreateMessageResult = {
@@ -465,6 +467,12 @@ export class ChatApplicationService {
         "conversationId and clientConversationId cannot both be provided.",
       );
     }
+    if (input.conversationId && input.projectId) {
+      throw new CoreError(
+        "invalid_argument",
+        "projectId applies only when a new Conversation is created.",
+      );
+    }
     const runtimeModel = input.runtimeModel?.trim();
     if (
       runtimeModel !== undefined &&
@@ -493,6 +501,7 @@ export class ChatApplicationService {
         : {}),
       ...(attachmentIds.length ? { attachmentIds } : {}),
       ...(mentions.length ? { mentions } : {}),
+      ...(input.projectId ? { projectId: resourceId(input.projectId, "projectId") } : {}),
     };
     return this.repository.createMessageAndRun({ actor, command });
   }

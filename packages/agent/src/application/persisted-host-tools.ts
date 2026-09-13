@@ -263,6 +263,7 @@ async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostCo
       lastName: users.lastName,
       timezone: users.timezone,
       taskSpawningEnabled: users.taskSpawningEnabled,
+      subagentsEnabled: users.subagentsEnabled,
       legacyBrainEnabled: workspaces.legacyBrainEnabled,
       workspaceName: workspaces.name,
       workspaceRole: workspaceMembers.role,
@@ -309,6 +310,8 @@ async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostCo
     lastName: row.lastName,
     timezone: row.timezone,
     taskToolsEnabled: row.taskSpawningEnabled && row.workspaceRole === "admin",
+    // Read-only and personal, so unlike task spawning this needs no admin role.
+    subagentsEnabled: row.subagentsEnabled,
     skillToolsEnabled: true,
     legacyBrainEnabled: row.legacyBrainEnabled,
   };

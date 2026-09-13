@@ -306,6 +306,14 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
               : null
           },
           event_config = ${eventDriven ? stringifyPostgresJson(input.trigger) : null}::jsonb,
+          event_activated_at = CASE WHEN ${eventDriven} THEN
+            CASE WHEN workflow.status = 'active' AND ${input.status} = 'active'
+              AND workflow.event_user_workos_id = ${input.actor.userId}
+              AND (workflow.event_config - 'prompt') =
+                  (${eventDriven ? stringifyPostgresJson(input.trigger) : null}::jsonb - 'prompt')
+              THEN COALESCE(workflow.event_activated_at, ${now})
+              ELSE ${now} END
+            ELSE NULL END,
           event_user_workos_id = ${eventDriven ? input.actor.userId : null},
           event_harness_spec = ${
             input.event?.execution ? stringifyPostgresJson(input.event.execution.payload) : null

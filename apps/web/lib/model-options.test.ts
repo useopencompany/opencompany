@@ -30,6 +30,26 @@ describe("opencompany model options", () => {
     expect(modelContextWindowTokens("anthropic/claude-opus-5")).toBe(1_000_000);
   });
 
+  it("offers Fable 5.1 in Claude Code sandboxes without adding it to main chat", () => {
+    expect(CLAUDE_CODE_MODELS).toContainEqual(
+      expect.objectContaining({
+        id: "anthropic/claude-fable-5.1",
+        label: "Claude Fable 5.1",
+        supportsImages: true,
+        supportsPdf: true,
+        supportsReasoning: true,
+      }),
+    );
+    expect(normalizeConversationModel("claude_code", "anthropic/claude-fable-5.1")).toBe(
+      "anthropic/claude-fable-5.1",
+    );
+    expect(modelContextWindowTokens("anthropic/claude-fable-5.1")).toBe(1_000_000);
+    expect(MODELS).not.toContainEqual(
+      expect.objectContaining({ id: "anthropic/claude-fable-5.1" }),
+    );
+    expect(normalizeModel("anthropic/claude-fable-5.1")).toBe(DEFAULT_MODEL);
+  });
+
   it("defaults new chats to Kimi K3", () => {
     expect(DEFAULT_MODEL).toBe("moonshotai/kimi-k3");
     expect(normalizeModel(undefined)).toBe("moonshotai/kimi-k3");

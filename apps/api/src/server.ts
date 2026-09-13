@@ -1,10 +1,7 @@
 import { serve } from "@hono/node-server";
 import { getAppUrl } from "@opencompany/agent/app-url";
 import { resolvePersistedAutoModelRouting } from "@opencompany/agent/application/persisted-auto-model-routing";
-import {
-  BrainImportApplicationService,
-  WikiImportApplicationService,
-} from "@opencompany/agent/brain-imports";
+import { BrainImportApplicationService } from "@opencompany/agent/brain-imports";
 import { BrainSourceApplicationService } from "@opencompany/agent/brain-sources";
 import { BrowserProfileApplicationService } from "@opencompany/agent/browser-profiles/service";
 import { createCustomMcpService } from "@opencompany/agent/custom-mcp";
@@ -78,6 +75,7 @@ import { createMcpOAuthIngress } from "./mcp-oauth-ingress";
 import { PostgresMessagePresentationService } from "./message-presentations";
 import { createOnboardingService } from "./onboarding";
 import { createOnboardingEmailService } from "./onboarding-emails";
+import { createProjectService } from "./projects";
 import { createRepoConfigService } from "./repo-configs";
 import { PostgresRunEventNotifier } from "./run-event-notifier";
 import { createRunnerClient } from "./runner-client";
@@ -89,7 +87,6 @@ import { createSlackIngress } from "./slack-ingress";
 import { createStripeIngress } from "./stripe-ingress";
 import { createUserSettingsService } from "./user-settings";
 import { createWikiControlService } from "./wiki-control";
-import { createWikiSourceService } from "./wiki-sources";
 import { createWorkspaceCapabilityService } from "./workspace-capabilities";
 import { createWorkspaceControlService } from "./workspace-control";
 import { createXAccountIngress } from "./x-account-ingress";
@@ -134,11 +131,9 @@ const knowledge = new KnowledgeApplicationService(knowledgeRepository);
 const wikiCommands = new WikiCommandApplicationService(
   new PostgresWikiCommandRepository(database.db),
 );
-const wikiSources = createWikiSourceService({ db: database.db });
 const wikiControl = createWikiControlService({ db: database.db });
 const brainSources = new BrainSourceApplicationService(database.db);
 const brainImports = new BrainImportApplicationService(database.db, brainSources);
-const wikiImports = new WikiImportApplicationService(database.db, wikiSources);
 const browserProfiles = new BrowserProfileApplicationService(database.db);
 const skillImports = new SkillImportApplicationService(
   new PostgresSkillBundleRepository(database.db),
@@ -170,10 +165,8 @@ const app = createApiApp({
     ? { wikiCommandsInternalSecret: process.env.API_INTERNAL_TOKEN.trim() }
     : {}),
   wikiControl,
-  wikiSources,
   brainSources,
   brainImports,
-  wikiImports,
   browserProfiles,
   skillImports,
   pluginImports,
@@ -217,6 +210,7 @@ const app = createApiApp({
     db: database.db,
     defaultModel: process.env.OPENCOMPANY_DEFAULT_CHAT_MODEL ?? "moonshotai/kimi-k3",
   }),
+  projects: createProjectService({ db: database.db }),
   userSettings: createUserSettingsService({ db: database.db }),
   feedback: createFeedbackService({ db: database.db }),
   repoConfigs: createRepoConfigService({ db: database.db }),

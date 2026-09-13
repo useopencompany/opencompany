@@ -26,7 +26,7 @@ import {
   recordHistogram,
 } from "@opencompany/telemetry";
 import { del, put } from "@vercel/blob";
-import { createGateway, generateImage, type ImageModelProviderMetadata } from "ai";
+import { createGateway, generateText, type ProviderMetadata, type UserModelMessage } from "ai";
 import { and, asc, eq, sql } from "drizzle-orm";
 import {
   type ActionExecuteContext,
@@ -153,7 +153,7 @@ export async function executeImageGenerationCapability(input: {
   spec: ManagedCapabilityImageActionSpec;
   params: Record<string, unknown>;
   context: ActionExecuteContext;
-  generateImageImpl?: typeof generateImage;
+  generateTextImpl?: typeof generateText;
   now?: () => Date;
 }) {
   if (isManagedCapabilitiesKilled() || isManagedCapabilityActionKilled(input.spec.id)) {
@@ -237,12 +237,12 @@ export async function executeImageGenerationCapability(input: {
   });
 
   const gateway = createGateway({ apiKey });
-  let result: Awaited<ReturnType<typeof generateImage>>;
+  let result: Awaited<ReturnType<typeof generateText>>;
   try {
-    result = await (input.generateImageImpl ?? generateImage)({
-      model: gateway.image(mapped.model),
-      prompt: imageGenerationPrompt(mapped.prompt, referenceImage?.bytes),
-      aspectRatio: mapped.aspectRatio,
+    // Gemini produces images as multimodal language-model output on AI Gateway.
+    result = await (input.generateTextImpl ?? generateText)({
+      model: gateway(mapped.model),
+      messages: imageGenerationMessages(mapped.prompt, referenceImage?.bytes),
       abortSignal: input.context.signal,
       maxRetries: 1,
       providerOptions: gatewayProviderOptions(
@@ -252,11 +252,24 @@ export async function executeImageGenerationCapability(input: {
           chatSessionId,
         }),
         {
-          google: { imageConfig: { imageSize: mapped.resolution } },
+          google: {
+            responseModalities: ["IMAGE"],
+            imageConfig: { aspectRatio: mapped.aspectRatio, imageSize: mapped.resolution },
+          },
         },
       ),
     });
   } catch (error) {
+    await settleFailedImageGeneration(auditRun, error).catch(() => undefined);
+    throw error;
+  }
+
+  const image = result.files.find((file) => file.mediaType.startsWith("image/"));
+  if (!image) {
+    const error = new ActionExecutionError(
+      "provider_error",
+      "The provider did not return an image.",
+    );
     await settleFailedImageGeneration(auditRun, error).catch(() => undefined);
     throw error;
   }
@@ -276,8 +289,8 @@ export async function executeImageGenerationCapability(input: {
   let artifact: PublishedChatArtifact;
   try {
     artifact = await publishGeneratedImage({
-      image: result.image.uint8Array,
-      mediaType: result.image.mediaType,
+      image: image.uint8Array,
+      mediaType: image.mediaType,
       title: mapped.title ?? "Generated image",
       prompt: mapped.prompt,
       workspaceId,
@@ -489,12 +502,25 @@ async function assertArtifactPublicationAvailable(sourceTurnId: string) {
   }
 }
 
-export function imageGenerationPrompt(prompt: string, referenceImage?: Uint8Array) {
-  return referenceImage ? { text: prompt, images: [referenceImage] } : prompt;
+export function imageGenerationMessages(
+  prompt: string,
+  referenceImage?: Uint8Array,
+): UserModelMessage[] {
+  return [
+    {
+      role: "user",
+      content: referenceImage
+        ? [
+            { type: "text", text: prompt },
+            { type: "image", image: referenceImage },
+          ]
+        : prompt,
+    },
+  ];
 }
 
-export function imageGenerationCost(providerMetadata: ImageModelProviderMetadata) {
-  const gateway = asRecord(providerMetadata.gateway);
+export function imageGenerationCost(providerMetadata: ProviderMetadata | undefined) {
+  const gateway = asRecord(providerMetadata?.gateway);
   if (!gateway || typeof gateway.cost !== "string") return null;
   const costUsd = Number(gateway.cost);
   if (!Number.isFinite(costUsd) || costUsd < 0) return null;

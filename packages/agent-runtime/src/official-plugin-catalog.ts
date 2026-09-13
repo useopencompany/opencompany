@@ -13,7 +13,7 @@ export const OFFICIAL_PLUGIN_SOURCES = {
   gmail:
     "https://github.com/useopencompany/plugins/tree/ff6f34b42796129c2a125a32b3a78e8cae353df6/gmail",
   granola:
-    "https://github.com/useopencompany/plugins/tree/8e79573ef91e122f9e0c15c810e7607d1be1d094/granola",
+    "https://github.com/useopencompany/plugins/tree/22c1fe7d9bafd4fd63d49c3f0b18d1e3e63d0dae/granola",
   "google-admin":
     "https://github.com/useopencompany/plugins/tree/0b2a68c2b347c478a0af52fcf51f83d6704b0f40/google-admin",
   "google-calendar":
@@ -29,7 +29,7 @@ export const OFFICIAL_PLUGIN_SOURCES = {
   latitude:
     "https://github.com/useopencompany/plugins/tree/56855e7d53ee3544520ec1fdef84d9e2f5ae6896/latitude",
   linear:
-    "https://github.com/useopencompany/plugins/tree/9addd067ff8311fb3dcbc51285e4a3e671577838/linear",
+    "https://github.com/useopencompany/plugins/tree/655139c06aecefe87b5a755c90d4a71b98d026f5/linear",
   neon: "https://github.com/useopencompany/plugins/tree/bbec4c01a46b6d7bf1ffffda87af898060dd7916/neon",
   notion:
     "https://github.com/useopencompany/plugins/tree/fb207086016a74e2e5724386c524d275771e5db6/notion",

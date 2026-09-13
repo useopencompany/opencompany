@@ -1,6 +1,6 @@
 import { Sandbox } from "e2b";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { connectSandbox, createOrConnectSandbox } from "./sandbox";
+import { connectSandbox, createOrConnectSandbox, isUnresponsiveGuestError } from "./sandbox";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -19,6 +19,26 @@ function fakeSandbox(sandboxId: string, run: () => Promise<unknown>) {
     setTimeout: vi.fn(async () => {}),
   } as never;
 }
+
+describe("isUnresponsiveGuestError", () => {
+  // The literal error E2B raised at the `ensure_claude_acp` bootstrap stage of TASK-733, which
+  // was reported to the user as a failed run instead of being retried onto healthy infrastructure.
+  it("classifies an E2B command deadline as a wedged guest", () => {
+    const error = timeoutError(
+      "[deadline_exceeded] the operation timed out: This error is likely due to exceeding 'timeoutMs' — the total time a long running request (like command execution or directory watch) can be active. It can be modified by passing 'timeoutMs' when making the request. Use '0' to disable the timeout.",
+    );
+
+    expect(isUnresponsiveGuestError(error)).toBe(true);
+  });
+
+  it("leaves ordinary sandbox failures alone", () => {
+    const error = new Error("envd exploded");
+    error.name = "SandboxError";
+
+    expect(isUnresponsiveGuestError(error)).toBe(false);
+    expect(isUnresponsiveGuestError("not an error")).toBe(false);
+  });
+});
 
 describe("connectSandbox guest recovery", () => {
   it("returns the connected sandbox when the guest answers the probe", async () => {

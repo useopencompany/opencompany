@@ -57,6 +57,7 @@ export type ChatHostBootstrap = {
   workspaceName: string;
   taskToolsEnabled: boolean;
   skillToolsEnabled: boolean;
+  subagentsEnabled: boolean;
   browserToolsEnabled: boolean;
   browserProfiles: Array<{
     id: string;

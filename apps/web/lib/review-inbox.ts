@@ -40,20 +40,25 @@ export type TaskCandidate = Pick<
   "id" | "displayId" | "name" | "conversationId" | "status" | "hasUnseen" | "archivedAt"
 > & { updatedAt: string };
 
-// A Task carries a readable result only once its run settled with one. `waiting` is excluded on
-// purpose: settlement raises the same unread flag when a run pauses for an action approval, and
-// that is a request for input rather than a result to read. `canceled` had no result to produce.
+// A Task carries a readable result only once its run settled with one. `waiting` is excluded from
+// the review queue because it is a request for input rather than a finished result. It still has a
+// readable update, though: opening the Task acknowledges that request while `waiting` continues to
+// keep the row at the front of the sidebar until the reader answers it.
 const TASK_RESULT_STATUSES = new Set<TaskReadModel["status"]>(["succeeded", "failed"]);
+const TASK_UPDATE_STATUSES = new Set<TaskReadModel["status"]>([...TASK_RESULT_STATUSES, "waiting"]);
 
 /**
  * Whether a Task's unread flag stands for a result someone can read.
  *
- * Shared with the sidebar, which acknowledges the flag when a reader opens the Task. Only a Task
- * that finished with something to read can be satisfied by having been read: an approval request
- * is answered by approving it, so opening its page must not clear the signal.
+ * Used by the review queue, which contains finished work rather than Tasks awaiting input.
  */
 export function taskHasReadableResult(status: TaskReadModel["status"]): boolean {
   return TASK_RESULT_STATUSES.has(status);
+}
+
+/** Whether opening a Task shows the update represented by its unread flag. */
+export function taskHasReadableUpdate(status: TaskReadModel["status"]): boolean {
+  return TASK_UPDATE_STATUSES.has(status);
 }
 
 // Read items stay until they are archived, so the queue needs its own tail: every unread item is

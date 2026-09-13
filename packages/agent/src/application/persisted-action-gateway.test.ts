@@ -44,6 +44,26 @@ const interactiveContext = {
 };
 
 describe("executeActionGateway", () => {
+  it.each(["foregroundInteractive", "headless"] as const)(
+    "passes a private-chat destination only for %s discovery",
+    async (policy) => {
+      const resolveCatalog = vi.fn(async () => ({ providers: [], actions: [] }));
+      const gateway = createActionGateway({
+        actionsKilled: () => false,
+        loadContext: async () => ({ ...context, policy }),
+        resolveCatalog,
+      });
+      await expect(
+        gateway({ request: listRequest(), signal: new AbortController().signal }),
+      ).resolves.toMatchObject({ ok: true, sources: [] });
+      expect(resolveCatalog).toHaveBeenCalledWith({
+        actorId: context.actorId,
+        workspaceId: context.workspaceId,
+        ...(policy === "headless" ? {} : { conversationId: context.conversationId }),
+      });
+    },
+  );
+
   it("admits an identical non-idempotent write only once across fresh tool ids and gateway instances", async () => {
     const action = {
       ...createReadAction(),

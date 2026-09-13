@@ -70,6 +70,14 @@ Delete an abandoned branch with `bun run db:branch:delete` after resolving its e
 
 Open the web app and sign in through WorkOS. Confirm the API-backed identity resolves, send a
 foreground chat message, reload during or after the Run, and confirm the durable result converges.
+
+Headless environments (coding agents, CI-like sandboxes) verify the same authenticated surface
+without a browser sign-in: run `bun run db:seed` to give the shared agent dev user an onboarded
+workspace in the branch database, then send the sealed cookie printed by `bun run agent:session`
+on requests, for example
+`curl -H "Cookie: wos-session=$(bun run --silent agent:session)" http://localhost:3002/`.
+The credentials arrive through `bun run setup`; `bun run agent:provision` (re)creates the WorkOS
+user when needed. See [Environment variables](./env-vars.md) for the variable contract.
 For changes touching the runner, create the relevant task or cloud coding turn and verify its
 durable status in the UI. For billing work, run `bun run setup:stripe` and confirm the local Stripe
 listener forwards a signed event through `/api/stripe/webhook` to the API-owned handler.

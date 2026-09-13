@@ -1,3 +1,4 @@
+import { listGranolaFolders } from "@opencompany/agent/integrations/granola";
 import { captureProductIngestionQuotaAnalytics } from "@opencompany/analytics/product";
 import { normalizeGranolaMeetingNote } from "@opencompany/brain";
 import {
@@ -14,9 +15,11 @@ import {
   completeGranolaSyncPages,
   ensureGranolaSyncState,
   GRANOLA_CREDENTIAL_KIND,
+  GRANOLA_FOLDER_FILTER_ID,
   GRANOLA_MEETING_NOTES_READY_EVENT,
   GRANOLA_PROVIDER,
   granolaEventClaimKey,
+  granolaNoteFolderScope,
   granolaWorkflowEventContext,
   granolaWorkflowEventDeliveryId,
   listEnabledGranolaBrainSourceRoutes,
@@ -24,13 +27,6 @@ import {
   updateGranolaSyncPage,
 } from "@opencompany/db/granola";
 import { loadIntegrationCredential, markIntegrationStatus } from "@opencompany/db/integrations";
-import {
-  attributeWikiSourceEventClaims,
-  claimWikiSourceEvents,
-  listWikiSourceEventClaimedWorkspaceIds,
-} from "@opencompany/db/wiki-event-claims";
-import { upsertWikiSourceItemAndEnqueue } from "@opencompany/db/wiki-ingest";
-import { listEnabledWikiSourcesForIntegration } from "@opencompany/db/wiki-sources";
 import {
   enqueueWorkflowEventRuns,
   listWorkflowEventTriggerRoutes,
@@ -49,7 +45,6 @@ import {
 } from "./granola-api";
 import { createPollingWorker } from "./polling-worker";
 import { rowsFromExecute } from "./sql-exec";
-import { wakeWikiIngestWorker } from "./wiki-ingest-worker";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-granola-poll" });
 
@@ -100,13 +95,6 @@ export async function listGranolaPollCandidates(
         )
         OR EXISTS (
           SELECT 1
-          FROM goat.wiki_sources ws
-          WHERE ws.integration_id = i.id
-            AND ws.provider = 'granola'
-            AND ws.enabled = true
-        )
-        OR EXISTS (
-          SELECT 1
           FROM goat.workflows w
           WHERE w.trigger = 'event'
             AND w.status = 'active'
@@ -143,10 +131,31 @@ export async function pollGranolaIntegration(input: {
   );
   if (!state) return null;
 
-  // First poll after connect: anchor the cursor at "now" — no backfill.
+  // Recover connections made before cursors were initialized on connect.
+  // Anchor at the earliest active subscription so the first poll cannot skip its first note.
   if (!state.updatedAfterCursor) {
+    const routes = await listWorkflowEventTriggerRoutes(
+      {
+        provider: GRANOLA_PROVIDER,
+        integrations: [
+          {
+            id: candidate.integrationId,
+            workspaceId: null,
+            userWorkosId: candidate.userWorkosId,
+            status: "connected",
+          },
+        ],
+      },
+      db,
+    );
+    const start = new Date(
+      Math.min(
+        Date.now(),
+        ...routes.flatMap((route) => (route.activatedAt ? [route.activatedAt.getTime()] : [])),
+      ),
+    );
     await updateGranolaSyncCursor(
-      { integrationId: candidate.integrationId, updatedAfterCursor: new Date() },
+      { integrationId: candidate.integrationId, updatedAfterCursor: start },
       db,
     );
     return { enqueued: 0, seen: 0, workflowRuns: 0 };
@@ -184,17 +193,9 @@ export async function pollGranolaIntegration(input: {
 
   const routes = await listEnabledGranolaBrainSourceRoutes([candidate.integrationId], db);
   const routedBrainRefs = [...new Set(routes.map((route) => route.brainRef))];
-  const wikiSources = await listEnabledWikiSourcesForIntegration(candidate.integrationId, db);
-  const routedWikiWorkspaceIds = [
-    ...new Set(
-      wikiSources
-        .filter((source) => source.provider === GRANOLA_PROVIDER)
-        .map((source) => source.workspaceId),
-    ),
-  ];
   // Event routing is authorized per pass, not per note: the plugin event toggle, the workflow
-  // status, and the connection can all change between polls. The declared event carries no
-  // filters, so a route that somehow stored one is dropped rather than fired unfiltered.
+  // status, and the connection can all change between polls. Declared filters are matched per
+  // note, once the note payload that carries its folders has been fetched.
   const workflowRoutes =
     notes.length === 0
       ? []
@@ -213,11 +214,40 @@ export async function pollGranolaIntegration(input: {
             },
             db,
           )
-        ).filter(
-          (route) =>
-            route.event === GRANOLA_MEETING_NOTES_READY_EVENT &&
-            workflowEventFiltersMatch(route, {}),
-        );
+        ).filter((route) => route.event === GRANOLA_MEETING_NOTES_READY_EVENT);
+
+  // Read the folder tree once per pass, and only when a route filters on one. A folder filter
+  // covers the folder's descendants, and a note's membership entry names only its direct parent.
+  let folderParentIds = new Map<string, string | null>();
+  if (workflowRoutes.some((route) => route.filters[GRANOLA_FOLDER_FILTER_ID])) {
+    const folders = await listGranolaFolders({ apiKey, signal: input.signal });
+    if (!folders.ok) {
+      if (folders.reason === "unauthorized") {
+        await markGranolaNeedsReauth(candidate, "Granola rejected the saved API key.");
+        return null;
+      }
+      // Matching a folder filter against a tree the platform could not read would drop runs
+      // silently and then advance the cursor past the notes that should have started them. This
+      // failure is retryable, so leave the cursor where it is and take the whole pass again.
+      throw new Error("Could not read the Granola folder tree for an event-filtered workflow.");
+    }
+    if (folders.partial) {
+      // The account has more folders than one listing reads, so retrying would never succeed and
+      // failing every pass would stop this connection's ingestion for good. Matching falls back to
+      // each note's own membership entries, which still reach one level up.
+      logger.warn(
+        "opencompany Granola folder tree exceeded one listing; filters match less deeply",
+        {
+          event: "opencompany.goat_granola_folder_tree_truncated",
+          integration_id: candidate.integrationId,
+          folder_count: folders.folders.length,
+        },
+      );
+    }
+    folderParentIds = new Map(
+      folders.folders.map((folder) => [folder.id, folder.parentFolderId] as const),
+    );
+  }
 
   let enqueued = 0;
   let workflowRuns = 0;
@@ -228,8 +258,8 @@ export async function pollGranolaIntegration(input: {
       apiKey,
       note,
       routedBrainRefs,
-      routedWikiWorkspaceIds,
       workflowRoutes,
+      folderParentIds,
       signal: input.signal,
     });
     if (result.enqueued) enqueued += 1;
@@ -321,8 +351,8 @@ export async function ingestGranolaNote(input: {
   apiKey: string;
   note: GranolaNoteSummary;
   routedBrainRefs: readonly string[];
-  routedWikiWorkspaceIds: readonly string[];
   workflowRoutes?: readonly WorkflowEventTriggerRoute[];
+  folderParentIds?: ReadonlyMap<string, string | null>;
   now?: Date;
   signal: AbortSignal;
   fetchNote?: typeof fetchGranolaNote;
@@ -331,35 +361,19 @@ export async function ingestGranolaNote(input: {
   const db = getDb();
   const eventKey = granolaEventClaimKey(note.id);
 
-  // Cheap pre-check before the transcript fetch: a note every routed brain and
-  // wiki workspace has already claimed (an earlier poll, another member's
-  // connection, or an edit bumping updated_at) is a no-op.
-  const [alreadyClaimedBrainRefs, alreadyClaimedWikiWorkspaceIds] = await Promise.all([
-    listBrainSourceEventClaimedBrainRefs({
-      brainRefs: input.routedBrainRefs,
-      sourceProvider: GRANOLA_PROVIDER,
-      eventKey,
-      db,
-    }),
-    listWikiSourceEventClaimedWorkspaceIds({
-      workspaceIds: input.routedWikiWorkspaceIds,
-      sourceProvider: GRANOLA_PROVIDER,
-      eventKey,
-      db,
-    }),
-  ]);
+  // Skip the transcript fetch when every routed Brain has already claimed the note
+  // and no workflow needs it. Edits may bump updated_at without creating a new note.
+  const alreadyClaimedBrainRefs = await listBrainSourceEventClaimedBrainRefs({
+    brainRefs: input.routedBrainRefs,
+    sourceProvider: GRANOLA_PROVIDER,
+    eventKey,
+    db,
+  });
   const pendingBrainRefs = input.routedBrainRefs.filter(
     (brainRef) => !alreadyClaimedBrainRefs.has(brainRef),
   );
-  const pendingWikiWorkspaceIds = input.routedWikiWorkspaceIds.filter(
-    (workspaceId) => !alreadyClaimedWikiWorkspaceIds.has(workspaceId),
-  );
   const workflowRoutes = input.workflowRoutes ?? [];
-  if (
-    pendingBrainRefs.length === 0 &&
-    pendingWikiWorkspaceIds.length === 0 &&
-    workflowRoutes.length === 0
-  ) {
+  if (pendingBrainRefs.length === 0 && workflowRoutes.length === 0) {
     return { enqueued: false, workflowRuns: 0 };
   }
 
@@ -373,11 +387,12 @@ export async function ingestGranolaNote(input: {
     routes: workflowRoutes,
     note,
     payload,
+    folderParentIds: input.folderParentIds ?? new Map(),
     now: input.now ?? new Date(),
     db,
   });
 
-  if (pendingBrainRefs.length === 0 && pendingWikiWorkspaceIds.length === 0) {
+  if (pendingBrainRefs.length === 0) {
     return { enqueued: false, workflowRuns };
   }
   const item = normalizeGranolaMeetingNote(payload, { capturedAt: new Date().toISOString() });
@@ -428,39 +443,7 @@ export async function ingestGranolaNote(input: {
     if (brainEnqueued) wakeBrainIngestWorker();
   }
 
-  let wikiEnqueued = false;
-  for (const workspaceId of pendingWikiWorkspaceIds) {
-    const result = await db.transaction(async (tx: any) => {
-      const claim = await claimWikiSourceEvents({
-        workspaceId,
-        sourceProvider: GRANOLA_PROVIDER,
-        eventKeys: [eventKey],
-        db: tx,
-      });
-      if (claim.claimedCount === 0) return null;
-
-      const upserted = await upsertWikiSourceItemAndEnqueue({
-        workspaceId,
-        sourceConnectionId: candidate.integrationId,
-        integrationId: candidate.integrationId,
-        item,
-        rawPayload: payload,
-        db: tx,
-      });
-      await attributeWikiSourceEventClaims({
-        workspaceId,
-        sourceProvider: GRANOLA_PROVIDER,
-        eventKeys: claim.claimedEventKeys,
-        sourceItemId: upserted.sourceItemId,
-        db: tx,
-      });
-      return upserted;
-    });
-    wikiEnqueued = wikiEnqueued || Boolean(result?.enqueued);
-  }
-  if (wikiEnqueued) wakeWikiIngestWorker();
-
-  return { enqueued: brainEnqueued || wikiEnqueued, workflowRuns };
+  return { enqueued: brainEnqueued, workflowRuns };
 }
 
 // The list endpoint only returns notes Granola has finished summarizing, but a note whose summary
@@ -471,11 +454,17 @@ async function enqueueGranolaWorkflowEventRuns(input: {
   routes: readonly WorkflowEventTriggerRoute[];
   note: GranolaNoteSummary;
   payload: Record<string, unknown>;
+  folderParentIds: ReadonlyMap<string, string | null>;
   now: Date;
   db: ReturnType<typeof getDb>;
 }): Promise<number> {
   if (input.routes.length === 0) return 0;
   if (!hasGranolaSummary(input.payload)) return 0;
+  const folderScope = granolaNoteFolderScope(input.payload, input.folderParentIds);
+  const routes = input.routes.filter((route) =>
+    workflowEventFiltersMatch(route, { [GRANOLA_FOLDER_FILTER_ID]: folderScope }),
+  );
+  if (routes.length === 0) return 0;
   const updatedAt = input.note.updatedAt ? new Date(input.note.updatedAt) : null;
   const eventAt = updatedAt && !Number.isNaN(updatedAt.getTime()) ? updatedAt : input.now;
   // Ingestion is happy to catch up on a backlog; starting an agent task per historical meeting is
@@ -484,7 +473,7 @@ async function enqueueGranolaWorkflowEventRuns(input: {
   if (input.now.getTime() - eventAt.getTime() > GRANOLA_EVENT_MAX_NOTE_AGE_MS) return 0;
   return enqueueWorkflowEventRuns(
     {
-      routes: input.routes,
+      routes,
       deliveryId: granolaWorkflowEventDeliveryId(input.note.id),
       eventAt,
       context: granolaWorkflowEventContext(input.payload),

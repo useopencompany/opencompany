@@ -13,7 +13,7 @@ import {
 } from "@/lib/codex-auth";
 import type { ClaudeCodeProviderState, CodexProviderState } from "@/lib/integration-state";
 
-import { CodexSubscriptionUsage } from "./CodexSubscriptionUsage";
+import { SubscriptionUsage } from "./SubscriptionUsage";
 
 export function InferenceSettingsPanel({
   codex,
@@ -205,7 +205,7 @@ function CodexSubscriptionCard({ integration }: { integration: CodexProviderStat
             <p className="text-[12px] leading-4 text-warning">{error ?? flow?.statusReason}</p>
           ) : null}
           {integration.connected && !flow ? (
-            <CodexSubscriptionUsage key={integration.lastValidatedAt ?? "connected"} />
+            <SubscriptionUsage key={integration.lastValidatedAt ?? "connected"} provider="codex" />
           ) : null}
         </div>
       }
@@ -303,6 +303,12 @@ function ClaudeCodeSubscriptionCard({ integration }: { integration: ClaudeCodePr
             </div>
           ) : null}
           {error ? <p className="text-[12px] leading-4 text-warning">{error}</p> : null}
+          {integration.connected && !showForm ? (
+            <SubscriptionUsage
+              key={integration.lastValidatedAt ?? "connected"}
+              provider="claude_code"
+            />
+          ) : null}
         </div>
       }
       footer={

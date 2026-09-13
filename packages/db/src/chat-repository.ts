@@ -946,10 +946,12 @@ export class PostgresChatRepository implements ChatRepository {
       ),
       created_chat AS (
         INSERT INTO goat.chat_sessions (
-          id, user_workos_id, title, model, engine, kind, last_seen_at, created_at, updated_at
+          id, user_workos_id, project_id, title, model, engine, kind, last_seen_at,
+          created_at, updated_at
         )
         SELECT
-          reservation.conversation_id, ${input.actor.userId}, ${title},
+          reservation.conversation_id, ${input.actor.userId},
+          ${input.command.projectId ?? null}::text, ${title},
           ${input.command.model}, ${input.command.engine}, 'chat', ${now}, ${now}, ${now}
         FROM winner AS reservation
         WHERE ${input.command.conversationId ?? null}::text IS NULL
@@ -2863,6 +2865,11 @@ function toPublicAttachment(attachment: ChatMessageAttachment): MessageAttachmen
   };
 }
 
+// Deliberately excludes projectId. This hash detects an Idempotency-Key reused for a different
+// command, and adding a field changes the hash of every message, not just filed ones: a send
+// reserved before a deploy and retried after it would fail as a conflict instead of replaying.
+// Reusing one key with a different project is not something a client can do anyway, because the
+// key is derived from a per-message id.
 function hashCommand(command: CreateMessageCommand) {
   return createHash("sha256")
     .update(

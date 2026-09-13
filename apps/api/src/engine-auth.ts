@@ -1,4 +1,5 @@
 import { validateClaudeCodeToken } from "@opencompany/agent/claude-code-token";
+import { ClaudeCodeUsageError, fetchClaudeCodeUsage } from "@opencompany/agent/claude-code-usage";
 import { CodexBackendError } from "@opencompany/agent/codex-backend-language-model";
 import { fetchCodexUsage } from "@opencompany/agent/codex-usage";
 import type { Actor } from "@opencompany/core";
@@ -20,7 +21,7 @@ import {
   loadInfisicalConnectionMetadata,
 } from "@opencompany/db/infisical-auth";
 import { createLogger } from "@opencompany/observability";
-import type { CodexUsage } from "@opencompany/protocol";
+import type { SubscriptionUsage } from "@opencompany/protocol";
 import { ApiError } from "./errors";
 import type { RunnerClient } from "./runner-client";
 
@@ -81,7 +82,8 @@ export type EngineAuthService = {
   saveClaudeCodeToken(actor: Actor, token: string): Promise<EngineAuthConnectionStatus>;
   disconnectClaudeCode(actor: Actor): Promise<void>;
   getCodexStatus(actor: Actor): Promise<CodexAuthStatus>;
-  getCodexUsage(actor: Actor): Promise<CodexUsage>;
+  getClaudeCodeUsage(actor: Actor): Promise<SubscriptionUsage>;
+  getCodexUsage(actor: Actor): Promise<SubscriptionUsage>;
   setCodexWorkspaceEngine(actor: Actor, enabled: boolean): Promise<CodexAuthStatus>;
   startCodexDeviceAuth(actor: Actor): Promise<CodexDeviceAuthFlow>;
   pollCodexDeviceAuth(actor: Actor, flowId: string): Promise<CodexDeviceAuthFlow>;
@@ -152,6 +154,27 @@ export function createEngineAuthService(input: {
           503,
           "unavailable",
           "Codex usage is temporarily unavailable. Try again shortly.",
+          true,
+        );
+      }
+    },
+
+    async getClaudeCodeUsage(actor) {
+      try {
+        return await fetchClaudeCodeUsage({ db, userWorkosId: actor.userId });
+      } catch (error) {
+        if (error instanceof ClaudeCodeUsageError) {
+          throw new ApiError(
+            error.statusCode,
+            "unavailable",
+            error.message,
+            error.kind !== "needs_reauth",
+          );
+        }
+        throw new ApiError(
+          503,
+          "unavailable",
+          "Claude usage is temporarily unavailable. Try again shortly.",
           true,
         );
       }

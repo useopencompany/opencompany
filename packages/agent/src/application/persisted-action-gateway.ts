@@ -46,9 +46,13 @@ import {
 const defaultDependencies: ActionGatewayServiceDependencies = {
   actionsKilled: isChatActionsKilled,
   loadContext: loadCodexActionContext,
-  resolveCatalog: ({ actorId, workspaceId }) =>
+  resolveCatalog: ({ actorId, workspaceId, conversationId }) =>
     resolveActionCatalog(
-      { userWorkosId: actorId, workspaceId },
+      {
+        userWorkosId: actorId,
+        workspaceId,
+        ...(conversationId ? { chatSessionId: conversationId } : {}),
+      },
       { resolveManagedCapabilities: resolveManagedCapabilities },
     ),
   executeAction: ({ actorId, conversationId, ...input }) =>

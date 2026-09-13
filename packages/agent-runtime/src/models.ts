@@ -96,10 +96,15 @@ export function codexCliModelNameForModelId(modelId: string): string | null {
 // Sonnet is the default because it is fully covered by Claude subscription limits on
 // every plan; larger tiers are gated behind usage credits on some plans.
 export const CLAUDE_CODE_DEFAULT_MODEL_ID: AgentModelId = "anthropic/claude-sonnet-5";
+// Claude Code runs models the connected Claude account is entitled to, not every model in
+// AGENT_MODEL_CATALOG. The runner sets ANTHROPIC_MODEL so the session opens on the requested id,
+// then reconciles against the models the adapter advertises; an id the account cannot run fails
+// the turn by name instead of silently answering on a different model.
 export const CLAUDE_CODE_AGENT_MODEL_IDS = [
   "anthropic/claude-sonnet-5",
   "anthropic/claude-opus-5",
   "anthropic/claude-opus-4.8",
+  "anthropic/claude-fable-5.1",
   "anthropic/claude-fable-5",
   "anthropic/claude-haiku-4.5",
 ] as const satisfies readonly AgentModelId[];
@@ -131,11 +136,11 @@ export function claudeCodeModelSupportsReasoningEffort(model: string): boolean {
 //   capability (AA index): <40 → 1 · 40–52 → 2 · ≥53 → 3 (flagships nudged up at borderlines)
 //   speed (output tok/sec): <60 → 1 · 60–150 → 2 · >150 → 3
 //   cost (output $/M tokens): ≤$2.50 → 1 · $2.51–$7.50 → 2 · >$7.50 → 3
-// minimax/minimax-m3, xai/grok-build-0.1, anthropic/claude-fable-5, and
-// anthropic/claude-sonnet-5 are estimates (no published benchmark yet) — revisit
-// when Artificial Analysis lists them. openrouter/fusion is a variable panel +
-// judge router and is rated qualitatively from OpenRouter's Fusion defaults
-// rather than a single model benchmark.
+// minimax/minimax-m3, xai/grok-build-0.1, anthropic/claude-fable-5.1,
+// anthropic/claude-fable-5, and anthropic/claude-sonnet-5 are estimates (no
+// published benchmark yet) — revisit when Artificial Analysis lists them.
+// openrouter/fusion is a variable panel + judge router and is rated qualitatively
+// from OpenRouter's Fusion defaults rather than a single model benchmark.
 export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "openai/gpt-6-astra",
@@ -430,6 +435,26 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     supportsImages: true,
     supportsPdf: true,
     ratings: { capability: 3, speed: 2, cost: 3 },
+    reasoning: {
+      providerOptions: {
+        anthropic: {
+          thinkingBudget: 0.001,
+        },
+      },
+      exposure: "hidden",
+    },
+  },
+  {
+    id: "anthropic/claude-fable-5.1",
+    type: "model",
+    contextWindowTokens: 1_000_000,
+    label: "Claude Fable 5.1",
+    description: "Anthropic's most capable model for long-running, complex agent work.",
+    category: "Deep",
+    supportsReasoning: true,
+    supportsImages: true,
+    supportsPdf: true,
+    ratings: { capability: 3, speed: 1, cost: 3 },
     reasoning: {
       providerOptions: {
         anthropic: {

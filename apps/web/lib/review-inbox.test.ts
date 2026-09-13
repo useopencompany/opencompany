@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { countAwaitingReview, selectReviewItems, taskHasReadableResult } from "@/lib/review-inbox";
+import {
+  countAwaitingReview,
+  selectReviewItems,
+  taskHasReadableResult,
+  taskHasReadableUpdate,
+} from "@/lib/review-inbox";
 
 type ConversationInput = Parameters<typeof selectReviewItems>[0]["conversations"][number];
 type TaskInput = Parameters<typeof selectReviewItems>[0]["tasks"][number];
@@ -35,11 +40,19 @@ describe("taskHasReadableResult", () => {
   it("covers only the runs that settled with something to read", () => {
     expect(taskHasReadableResult("succeeded")).toBe(true);
     expect(taskHasReadableResult("failed")).toBe(true);
-    // An approval request is answered by approving it, not by opening the page, so the surfaces
-    // that acknowledge a read result must leave this one alone.
     expect(taskHasReadableResult("waiting")).toBe(false);
     expect(taskHasReadableResult("running")).toBe(false);
     expect(taskHasReadableResult("canceled")).toBe(false);
+  });
+});
+
+describe("taskHasReadableUpdate", () => {
+  it("covers results and requests for input that are acknowledged when opened", () => {
+    expect(taskHasReadableUpdate("succeeded")).toBe(true);
+    expect(taskHasReadableUpdate("failed")).toBe(true);
+    expect(taskHasReadableUpdate("waiting")).toBe(true);
+    expect(taskHasReadableUpdate("running")).toBe(false);
+    expect(taskHasReadableUpdate("canceled")).toBe(false);
   });
 });
 

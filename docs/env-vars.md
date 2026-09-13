@@ -84,6 +84,13 @@ origin for the canonical API. Local Expo builds normally use `http://localhost:3
 use `https://api.opencompany.chat`. The value is public and must not contain credentials, a path,
 query parameters, or a fragment.
 
+`OPENCOMPANY_AGENT_USER_EMAIL` and `OPENCOMPANY_AGENT_USER_PASSWORD` identify the shared agent dev
+user in the non-production WorkOS environment. They live in Infisical `dev` `/web` only and are
+pulled by `bun run setup` so agents and headless environments can mint a real sealed session for
+authenticated dev-server verification (`bun run agent:session` after `bun run db:seed`). Provision
+or rotate the user with `bun run agent:provision`; the script refuses `sk_live_` keys, and these
+variables must never exist in a production Infisical path.
+
 `CRON_SECRET` must have the same value in prod `/web` and `/api`: web keeps the public cron URL
 while the API owns onboarding-email persistence.
 

@@ -84,10 +84,8 @@ it.each(
       />,
     );
     if (summary) {
-      expect(screen.getByRole("button", { name: "Approve once" })).toBeDisabled();
-      await waitFor(() =>
-        expect(screen.getByRole("button", { name: "Approve once" })).toBeEnabled(),
-      );
+      expect(screen.getByRole("button", { name: "Allow once" })).toBeDisabled();
+      await waitFor(() => expect(screen.getByRole("button", { name: "Allow once" })).toBeEnabled());
       expect(presentationMocks.load).toHaveBeenCalledOnce();
     } else {
       expect(presentationMocks.load).not.toHaveBeenCalled();
@@ -97,14 +95,17 @@ it.each(
     expect(screen.getByText("The feature is live.")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Always allow" })).not.toBeInTheDocument();
     await userEvent.click(
-      screen.getByRole("button", { name: decision === "accept" ? "Approve once" : "Deny" }),
+      screen.getByRole("button", { name: decision === "accept" ? "Allow once" : "Deny" }),
     );
     expect(onActionApproval).toHaveBeenCalledExactlyOnceWith({
       approvalId: "approval_task_action_draft",
       action: "plugin:gmail:gmail.create_draft",
       decision,
     });
-    expect(screen.getByRole("button", { name: "Deny" })).toBeDisabled();
+    // The card stays mounted until the decision lands, with every choice locked while it is sent.
+    expect(
+      screen.getByRole("button", { name: decision === "accept" ? "Deny" : "Denying..." }),
+    ).toBeDisabled();
   },
 );
 
@@ -141,7 +142,7 @@ it.each([
       {...access}
     />,
   );
-  expect(screen.queryByRole("button", { name: "Approve once" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Allow once" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Deny" })).not.toBeInTheDocument();
   expect(screen.getByTestId("chat-tool-call-codex_approval")).toBeVisible();
   expect(onActionApproval).not.toHaveBeenCalled();
@@ -200,16 +201,16 @@ it.each([CODEX_APPROVAL_TOOL_NAME, "use_action"])(
 
     expect(screen.getByTestId("chat-action-approval")).toBeVisible();
     expect(screen.getByText("Loading details…")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Approve once" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Allow once" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Deny" })).toBeEnabled();
-    await userEvent.click(screen.getByRole("button", { name: "Approve once" }));
+    await userEvent.click(screen.getByRole("button", { name: "Allow once" }));
     expect(onActionApproval).not.toHaveBeenCalled();
 
     await act(async () => resolvePresentation({ ...message, parts: [part] }));
     expect(screen.getByText(recipients.join(", "))).toBeVisible();
     expect(screen.getByText(body)).toBeVisible();
-    expect(screen.getByRole("button", { name: "Approve once" })).toBeEnabled();
-    await userEvent.click(screen.getByRole("button", { name: "Approve once" }));
+    expect(screen.getByRole("button", { name: "Allow once" })).toBeEnabled();
+    await userEvent.click(screen.getByRole("button", { name: "Allow once" }));
     expect(onActionApproval).toHaveBeenCalledExactlyOnceWith({
       approvalId: "approval_task_action_draft",
       action: "plugin:gmail:gmail.create_draft",
@@ -250,14 +251,12 @@ it.each(["retry", "deny"])(
       />,
     );
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not load the request.");
-    expect(screen.getByRole("button", { name: "Approve once" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Allow once" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Deny" })).toBeEnabled();
     if (nextAction === "retry") {
       presentationMocks.load.mockResolvedValueOnce(message);
       await userEvent.click(screen.getByRole("button", { name: "Retry" }));
-      await waitFor(() =>
-        expect(screen.getByRole("button", { name: "Approve once" })).toBeEnabled(),
-      );
+      await waitFor(() => expect(screen.getByRole("button", { name: "Allow once" })).toBeEnabled());
       expect(presentationMocks.load).toHaveBeenCalledTimes(2);
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
       expect(onActionApproval).not.toHaveBeenCalled();
@@ -268,7 +267,7 @@ it.each(["retry", "deny"])(
         action: "plugin:gmail:gmail.create_draft",
         decision: "decline",
       });
-      expect(screen.getByRole("button", { name: "Deny" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Denying..." })).toBeDisabled();
     }
   },
 );
@@ -436,14 +435,15 @@ describe("MessageBubble historical presentation details", () => {
     );
 
     expect(screen.getByTestId("chat-action-approval")).toBeVisible();
-    expect(screen.getByText("Run Slack · Slack Search Public And Private?")).toBeVisible();
+    expect(screen.getByText("Slack")).toBeVisible();
+    expect(screen.getByText("Run search public and private in Slack?")).toBeVisible();
     expect(screen.getByText("launch plan")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Accept" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Allow once" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Always allow" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Decline" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Accept" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Deny" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Allow once" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Always allow" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Decline" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Deny" })).toBeEnabled();
     expect(presentationMocks.load).toHaveBeenCalledOnce();
     expect(onActionApproval).not.toHaveBeenCalled();
 
@@ -457,9 +457,9 @@ describe("MessageBubble historical presentation details", () => {
 
     expect(screen.queryByTestId("chat-action-approval")).not.toBeInTheDocument();
     expect(screen.getByTestId("chat-tool-call-use_action")).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Accept" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Allow once" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Always allow" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Decline" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Deny" })).not.toBeInTheDocument();
     expect(presentationMocks.load).toHaveBeenCalledOnce();
   });
 
@@ -1012,9 +1012,10 @@ describe("MessageBubble assistant errors", () => {
       />,
     );
 
-    expect(screen.getByText("Run Linear · Save Comment?")).toBeVisible();
-    expect(screen.getByText("as louis@example.com")).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Decline" }));
+    expect(screen.getByText("Linear")).toBeVisible();
+    expect(screen.getByText("Run save comment in Linear?")).toBeVisible();
+    expect(screen.getByText("Runs as louis@example.com")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Deny" }));
     await waitFor(() =>
       expect(onActionApproval).toHaveBeenCalledWith({
         approvalId: "approval_plugin_1",
@@ -1227,7 +1228,7 @@ describe("MessageBubble assistant errors", () => {
     render(<MessageBubble message={message} taskLookup={emptyTaskLookup} readOnly />);
 
     expect(screen.queryByText("Approve paid capability?")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Approve once" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Allow once" })).not.toBeInTheDocument();
     expect(screen.getByText("Private follow-up")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Private follow-up/ })).not.toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
@@ -1371,17 +1372,17 @@ describe("MessageBubble assistant errors", () => {
       />,
     );
 
-    expect(screen.getByText("Run paid lookup?")).toBeVisible();
+    expect(screen.getByText("Run the find person email lookup?")).toBeVisible();
     expect(await screen.findByText(/Up to \$0\.36/)).toBeVisible();
     expect(screen.getByText("ada@example.com")).toBeVisible();
     expect(screen.getByText(/session's \$0\.10 budget/)).toBeVisible();
     if (summary) {
-      expect(screen.getByRole("button", { name: "Approve for $0.36" })).toBeDisabled();
-      expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Allow for $0.36" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Deny" })).toBeEnabled();
       expect(presentationMocks.load).toHaveBeenCalledOnce();
       await act(async () => resolvePresentation(message));
     }
-    await user.click(screen.getByRole("button", { name: "Approve for $0.36" }));
+    await user.click(screen.getByRole("button", { name: "Allow for $0.36" }));
     await waitFor(() =>
       expect(onActionApproval).toHaveBeenCalledWith({
         approvalId: "approval_1",
@@ -1419,14 +1420,65 @@ describe("MessageBubble assistant errors", () => {
       />,
     );
 
-    expect(screen.getByText("Run bun test?")).toBeVisible();
+    expect(screen.getByText("Terminal")).toBeVisible();
+    expect(screen.getByText("Run this command?")).toBeVisible();
+    expect(screen.getByText("Run tests")).toBeVisible();
+    expect(screen.getByText("bun test")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Always allow" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Accept" }));
+    await user.click(screen.getByRole("button", { name: "Allow once" }));
     await waitFor(() =>
       expect(onActionApproval).toHaveBeenCalledWith({
         approvalId: "opencompany_acp_permission_1",
         action: "bun test",
         decision: "accept",
+      }),
+    );
+  });
+
+  it("denies with Escape only once the card holds keyboard focus", async () => {
+    const user = userEvent.setup();
+    const onActionApproval = vi.fn(async () => undefined);
+    const message: ChatUiMessage = {
+      id: "assistant_acp_escape",
+      role: "assistant",
+      metadata: { sessionId: "chat_session_1", runId: "run_1" },
+      parts: [
+        {
+          type: "dynamic-tool",
+          toolName: CODEX_APPROVAL_TOOL_NAME,
+          toolCallId: "acp-approval-command_2",
+          state: "approval-requested",
+          input: {
+            label: "Approval",
+            title: "Remove the build output",
+            action: "rm -rf build",
+            kind: "execute",
+            rawInput: { command: "rm -rf build" },
+          },
+          approval: { id: "opencompany_acp_permission_2" },
+        },
+      ],
+    };
+
+    render(
+      <MessageBubble
+        message={message}
+        taskLookup={emptyTaskLookup}
+        onActionApproval={onActionApproval}
+        allowActionApproval
+      />,
+    );
+
+    await user.keyboard("{Escape}");
+    expect(onActionApproval).not.toHaveBeenCalled();
+
+    screen.getByRole("button", { name: "Allow once" }).focus();
+    await user.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(onActionApproval).toHaveBeenCalledExactlyOnceWith({
+        approvalId: "opencompany_acp_permission_2",
+        action: "rm -rf build",
+        decision: "decline",
       }),
     );
   });

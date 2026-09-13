@@ -76,7 +76,7 @@ describe("personal workflow event authorization", () => {
       workspaceId: "workspace_1",
       ownerUserId: "user_2",
       name: "linear",
-      events: [{ id: "issue.created" }],
+      events: [{ id: "issue.created", filters: [] }],
       eventModes: { "issue.created": true },
     };
     const db = { select: vi.fn() };
@@ -144,5 +144,13 @@ describe("workflow event filter matching", () => {
       false,
     );
     expect(workflowEventFiltersMatch(route({ folder: { id: "fol_1" } }), {})).toBe(false);
+  });
+
+  it("matches a multi-valued resource when the filtered id is among its values", () => {
+    const filtered = route({ folder: { id: "fol_1" } });
+    expect(workflowEventFiltersMatch(filtered, { folder: ["fol_2", "fol_1"] })).toBe(true);
+    expect(workflowEventFiltersMatch(filtered, { folder: ["fol_2"] })).toBe(false);
+    expect(workflowEventFiltersMatch(filtered, { folder: [] })).toBe(false);
+    expect(workflowEventFiltersMatch(route({}), { folder: [] })).toBe(true);
   });
 });
