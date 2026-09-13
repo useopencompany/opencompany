@@ -200,6 +200,26 @@ describe("publishChatArtifact", () => {
     });
   });
 
+  it("treats empty revision placeholders as omitted for a new sandbox artifact", async () => {
+    const result = await executePublishArtifactDynamicTool({
+      context: context(),
+      call: {
+        threadId: "thread_1",
+        turnId: "turn_1",
+        callId: "call_1",
+        namespace: null,
+        tool: "publish_artifact",
+        arguments: { path: "report.md", artifact_id: "", expected_version: 1 },
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(JSON.parse((result.contentItems[0] as { text: string }).text)).toMatchObject({
+      ok: true,
+      artifact: { version: 1, filename: "report.md" },
+    });
+  });
+
   it("publishes in-band Markdown for an active opencompany turn", async () => {
     dbMocks.select
       .mockReset()
