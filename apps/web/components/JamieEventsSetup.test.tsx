@@ -5,8 +5,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { JamieEventsProviderState } from "@/lib/integration-state";
 import { JamieEventsSetup } from "./JamieEventsSetup";
 
-const actions = vi.hoisted(() => ({ save: vi.fn(), create: vi.fn(), refresh: vi.fn() }));
+const actions = vi.hoisted(() => ({
+  save: vi.fn(),
+  create: vi.fn(),
+  disconnect: vi.fn(),
+  refresh: vi.fn(),
+}));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: actions.refresh }) }));
+vi.mock("@/lib/integration-account-actions", () => ({
+  disconnectIntegrationAccountAction: actions.disconnect,
+}));
 vi.mock("@/lib/integrations/jamie-events-actions", () => ({
   saveJamieWebhookKeyAction: actions.save,
   createJamieWebhookEndpointAction: actions.create,
@@ -96,5 +104,19 @@ describe("Jamie event account setup", () => {
     expect(await screen.findByText("Could not save the Jamie webhook key.")).toBeInTheDocument();
     expect(screen.getByLabelText("Webhook key")).toHaveValue("sk_jamie_webhook_key");
     expect(actions.refresh).not.toHaveBeenCalled();
+  });
+
+  it("removes the endpoint and returns to the zero state", async () => {
+    actions.disconnect.mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    render(
+      <JamieEventsSetup initialState={{ ...disconnected, connected: true, status: "connected" }} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Remove endpoint" }));
+
+    expect(actions.disconnect).toHaveBeenCalledWith("gint_1");
+    expect(await screen.findByRole("button", { name: "Create endpoint" })).toBeInTheDocument();
+    expect(screen.queryByText(WEBHOOK_URL)).not.toBeInTheDocument();
   });
 });

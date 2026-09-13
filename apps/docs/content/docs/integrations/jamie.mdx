@@ -66,6 +66,9 @@ Use the meeting summary supplied by this event to draft a follow-up email to the
 Include only commitments the notes actually state, and list the action items with their owners.
 ```
 
+**Remove endpoint** in **Events** forgets the key and retires that URL, so Jamie's webhook stops
+being accepted and a new endpoint has to be set up on both sides.
+
 If no run appears, check that the webhook is active in Jamie, that the saved key matches the current
 one, that the event is on, and that the Workflow is active with a matching **Guests** filter. Jamie
 retries a failed delivery five times over about an hour and then emails the webhook's owner.

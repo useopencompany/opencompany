@@ -2,9 +2,10 @@
 
 import { Button } from "@opencompany/ui/components/button";
 import { Input } from "@opencompany/ui/components/input";
-import { Check, Copy, ExternalLink, Loader2, Plus } from "lucide-react";
+import { Check, Copy, ExternalLink, Loader2, Plus, Unplug } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { disconnectIntegrationAccountAction } from "@/lib/integration-account-actions";
 import type { JamieEventsProviderState } from "@/lib/integration-state";
 import { JAMIE_WEBHOOK_API_KEY_HEADER } from "@/lib/integrations/jamie-constants";
 import {
@@ -31,6 +32,30 @@ export function JamieEventsSetup({ initialState }: { initialState: JamieEventsPr
         return;
       }
       setState(result.state);
+      setWebhookKey("");
+      router.refresh();
+    });
+  }
+
+  function disconnect() {
+    const integrationId = state.integrationId;
+    if (!integrationId) return;
+    setError(null);
+    startTransition(async () => {
+      const result = await disconnectIntegrationAccountAction(integrationId);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setState({
+        provider: "jamie",
+        connected: false,
+        status: "not_connected",
+        integrationId: null,
+        statusReason: null,
+        webhookUrl: null,
+        lastDeliveryAt: null,
+      });
       setWebhookKey("");
       router.refresh();
     });
@@ -136,14 +161,20 @@ export function JamieEventsSetup({ initialState }: { initialState: JamieEventsPr
             >
               Jamie webhook setup <ExternalLink className="size-3" />
             </a>
-            <Button
-              size="sm"
-              disabled={isPending || !webhookKey.trim()}
-              onClick={() => run(() => saveJamieWebhookKeyAction(webhookKey))}
-            >
-              {isPending ? <Loader2 className="animate-spin" /> : <Check />}
-              {state.connected ? "Update webhook key" : "Save webhook key"}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" disabled={isPending} onClick={disconnect}>
+                <Unplug />
+                Remove endpoint
+              </Button>
+              <Button
+                size="sm"
+                disabled={isPending || !webhookKey.trim()}
+                onClick={() => run(() => saveJamieWebhookKeyAction(webhookKey))}
+              >
+                {isPending ? <Loader2 className="animate-spin" /> : <Check />}
+                {state.connected ? "Update webhook key" : "Save webhook key"}
+              </Button>
+            </div>
           </div>
         </>
       ) : null}
@@ -152,7 +183,8 @@ export function JamieEventsSetup({ initialState }: { initialState: JamieEventsPr
       <p className="text-[11.5px] leading-4 text-ink-faint">
         Webhooks need a Jamie Plus plan or higher. opencompany encrypts the key, keeps it
         server-side, and uses it only to recognise Jamie&apos;s deliveries. Jamie has no way to
-        check a key on save; a wrong one shows up as deliveries that never arrive.
+        check a key on save; a wrong one shows up as deliveries that never arrive. Removing the
+        endpoint forgets the key and retires its URL, so a new one has to be set up in Jamie.
       </p>
     </div>
   );

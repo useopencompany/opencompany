@@ -87,12 +87,10 @@ export async function saveJamieWebhookKey(input: {
 }): Promise<{ integrationId: string }> {
   const db = input.db ?? getDb();
   const now = input.now ?? new Date();
-  const { integrationId } = await ensureJamieEventsEndpoint({
-    userWorkosId: input.userWorkosId,
-    now,
-    db,
-  });
   const existing = await findJamieEventsRow(input.userWorkosId, db);
+  const integrationId =
+    existing?.id ??
+    (await ensureJamieEventsEndpoint({ userWorkosId: input.userWorkosId, now, db })).integrationId;
 
   await saveIntegrationCredential({
     userWorkosId: input.userWorkosId,
