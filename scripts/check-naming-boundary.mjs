@@ -187,6 +187,9 @@ const baseEnvKeys = envKeys(
 // `.env.example` still matches origin/main modulo the rename map; genuinely new
 // variables are declared here so the check accepts them.
 const addedEnvKeys = [
+  "MICROSOFT_OAUTH_CLIENT_ID",
+  "MICROSOFT_OAUTH_CLIENT_SECRET",
+  "MICROSOFT_INTEGRATION_STATE_SECRET",
   "API_INTERNAL_TOKEN",
   "BUN_CONFIG_MAX_HTTP_REQUESTS",
   "DOCS_VERCEL_PROJECT_ID",

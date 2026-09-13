@@ -11441,6 +11441,8 @@
               "gmail",
               "google_admin",
               "google_calendar",
+              "outlook",
+              "outlook-calendar",
               "google_drive",
               "linear",
               "github_user",
@@ -11506,6 +11508,11 @@
             "additionalProperties": {
               "nullable": true
             }
+          },
+          "connectedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
           }
         },
         "required": [
@@ -11518,7 +11525,8 @@
           "connectionLabel",
           "statusReason",
           "scopes",
-          "capabilityModes"
+          "capabilityModes",
+          "connectedAt"
         ],
         "additionalProperties": false
       },

@@ -113,6 +113,14 @@ services:
         sync: false
       - key: GOOGLE_INTEGRATION_STATE_SECRET
         sync: false
+      # Microsoft OAuth ingress for the Outlook mail and calendar plugins. The
+      # state secret also derives the PKCE verifier, so only the API needs it.
+      - key: MICROSOFT_OAUTH_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: MICROSOFT_INTEGRATION_STATE_SECRET
+        sync: false
       # Official Slack plugin OAuth + Linear ingest OAuth/webhook ingress.
       - key: OPENCOMPANY_SLACK_CLIENT_ID
         sync: false
@@ -398,6 +406,11 @@ services:
       - key: GOOGLE_OAUTH_CLIENT_ID
         sync: false
       - key: GOOGLE_OAUTH_CLIENT_SECRET
+        sync: false
+      # Microsoft OAuth client, used by the runner to refresh Outlook access tokens.
+      - key: MICROSOFT_OAUTH_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_OAUTH_CLIENT_SECRET
         sync: false
       # X OAuth client, used by the runner to refresh access tokens before posting.
       - key: OPENCOMPANY_X_CLIENT_ID

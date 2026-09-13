@@ -19,6 +19,7 @@ import type { GmailMcpService } from "@opencompany/agent/integrations/gmail-mcp-
 import type { GoogleAdminMcpService } from "@opencompany/agent/integrations/google-admin-mcp-server";
 import type { GoogleCalendarMcpService } from "@opencompany/agent/integrations/google-calendar-mcp-server";
 import type { GoogleDriveMcpService } from "@opencompany/agent/integrations/google-drive-mcp-server";
+import type { MicrosoftMcpService } from "@opencompany/agent/integrations/microsoft-mcp-server";
 import type { RenderProviderState } from "@opencompany/agent/integrations/render-mcp";
 import type { McpService } from "@opencompany/agent/mcp-http";
 import { captureProductServerEvent } from "@opencompany/analytics/product/server";
@@ -109,6 +110,7 @@ import type { JamieIngressService } from "./jamie-ingress";
 import type { LinearIngressService } from "./linear-ingress";
 import type { McpOAuthIngressService } from "./mcp-oauth-ingress";
 import { type MessagePresentationService, messagePresentationEtag } from "./message-presentations";
+import type { MicrosoftIngressService } from "./microsoft-ingress";
 import type { OnboardingService } from "./onboarding";
 import type { OnboardingEmailService } from "./onboarding-emails";
 import type { ProjectService } from "./projects";
@@ -212,6 +214,9 @@ export type CreateApiAppInput = {
   slackBotSettings: SlackBotSettingsService;
   mcp?: McpService;
   gmailMcp?: GmailMcpService;
+  outlookMcp?: MicrosoftMcpService & { downloadAttachment(request: Request): Promise<Response> };
+  outlookCalendarMcp?: MicrosoftMcpService;
+  microsoftIngress?: MicrosoftIngressService;
   googleAdminMcp?: GoogleAdminMcpService;
   googleCalendarMcp?: GoogleCalendarMcpService;
   convexMcp?: ConvexMcpService;
@@ -2978,6 +2983,21 @@ export function createApiApp(input: CreateApiAppInput) {
     app.get("/mcp/plugins/gmail/attachments/download", (c) =>
       input.gmailMcp!.downloadAttachment(c.req.raw),
     );
+  }
+  if (input.outlookMcp) {
+    app.post("/mcp/plugins/outlook", (c) => input.outlookMcp!.handle(c.req.raw));
+    app.get("/mcp/plugins/outlook/attachments/download", (c) =>
+      input.outlookMcp!.downloadAttachment(c.req.raw),
+    );
+  }
+  if (input.outlookCalendarMcp)
+    app.post("/mcp/plugins/outlook-calendar", (c) => input.outlookCalendarMcp!.handle(c.req.raw));
+  if (input.microsoftIngress) {
+    const ingress = input.microsoftIngress;
+    for (const provider of ["outlook", "outlook-calendar"] as const) {
+      app.get(`/integrations/${provider}/start`, (c) => ingress.start(provider, c.req.raw));
+      app.get(`/integrations/${provider}/callback`, (c) => ingress.callback(provider, c.req.raw));
+    }
   }
   if (input.googleAdminMcp) {
     app.post("/mcp/plugins/google-admin", (c) => input.googleAdminMcp!.handle(c.req.raw));

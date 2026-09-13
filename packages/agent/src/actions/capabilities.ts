@@ -86,6 +86,40 @@ export const PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
+  outlook: [
+    {
+      id: "query",
+      label: "Read Outlook",
+      description: "Search and read messages, conversations, drafts, folders, and attachments.",
+      defaultMode: "ask",
+    },
+    {
+      id: "draft",
+      label: "Create drafts",
+      description: "Save email drafts for you to review and send in Outlook.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Organize Outlook",
+      description: "Move, archive, trash, and categorize messages and create folders.",
+      defaultMode: "ask",
+    },
+  ],
+  "outlook-calendar": [
+    {
+      id: "query",
+      label: "Read calendars",
+      description: "Read events and check calendar availability.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Manage events",
+      description: "Create, update, and delete events and respond to meeting invitations.",
+      defaultMode: "ask",
+    },
+  ],
   google_calendar: [
     {
       id: "read",

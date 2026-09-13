@@ -270,6 +270,7 @@ describe("Electric read models", () => {
               status_reason: null,
               scopes: JSON.stringify(["repo"]),
               capability_modes: JSON.stringify({ repositories: "on" }),
+              last_synced_at: "2026-09-10T12:00:00.000Z",
               oauth_access_token: "must-not-cross",
             },
           },
@@ -296,6 +297,8 @@ describe("Electric read models", () => {
       "gmail",
       "google_admin",
       "google_calendar",
+      "outlook",
+      "outlook-calendar",
       "google_drive",
       "linear",
       "github",
@@ -335,6 +338,7 @@ describe("Electric read models", () => {
       statusReason: null,
       scopes: ["repo"],
       capabilityModes: { repositories: "on" },
+      lastSyncedAt: "2026-09-10T12:00:00.000Z",
     });
   });
 

@@ -460,6 +460,7 @@ function readModelShape(input: {
           "status_reason",
           "scopes",
           "capability_modes",
+          "last_synced_at",
         ],
         where:
           `"user_workos_id" = $1 AND "workspace_id" IS NULL AND CAST($2 AS text) = CAST($2 AS text) ` +
@@ -1276,6 +1277,7 @@ const READ_MODEL_COLUMN_NAMES = {
     status_reason: "statusReason",
     scopes: "scopes",
     capability_modes: "capabilityModes",
+    last_synced_at: "lastSyncedAt",
   },
   "brain-folders-v1": {
     id: "id",

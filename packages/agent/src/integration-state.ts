@@ -7,6 +7,7 @@ import {
   GOOGLE_CALENDAR_MCP_RECONNECT_REASON,
   googleCalendarMcpScopesSatisfied,
 } from "./integrations/google-calendar-scopes";
+import { microsoftScopesSatisfied } from "./integrations/microsoft-scopes";
 import { SLACK_MCP_RECONNECT_REASON, slackMcpScopesSatisfied } from "./integrations/slack-scopes";
 
 export type GoogleProviderState = {
@@ -265,12 +266,17 @@ export type IntegrationAccountView<Provider extends string = PersonalAccountProv
   scopes: string[];
   // Sparse per-connection capability overrides; registry defaults fill gaps.
   capabilityModes: Record<string, unknown>;
+  // When the account was last connected or reconnected. Permission edits do not
+  // change it, so it stays stable while the user edits capability modes.
+  connectedAt: string | null;
 };
 
 export type PersonalAccountProvider =
   | "gmail"
   | "google_admin"
   | "google_calendar"
+  | "outlook"
+  | "outlook-calendar"
   | "google_drive"
   | "linear"
   | "github_user"
@@ -343,6 +349,7 @@ type IntegrationStateRow = {
   tool_modes?: Record<string, unknown> | null;
   lastSyncedAt?: Date | string | null;
   last_synced_at?: Date | string | null;
+  connectedAt?: string | null;
 };
 
 function isoTimestamp(value: Date | string | null | undefined) {
@@ -365,6 +372,8 @@ export function personalAccountsFromRows(
     gmail: [],
     google_admin: [],
     google_calendar: [],
+    outlook: [],
+    "outlook-calendar": [],
     google_drive: [],
     linear: [],
     github_user: [],
@@ -436,6 +445,8 @@ export function personalAccountsFromRows(
       row.provider === "gmail" ||
       row.provider === "google_admin" ||
       row.provider === "google_calendar" ||
+      row.provider === "outlook" ||
+      row.provider === "outlook-calendar" ||
       row.provider === "google_drive" ||
       row.provider === "github_user" ||
       row.provider === "slack" ||
@@ -565,12 +576,19 @@ function accountViewFromRow(
     provider === "google_calendar" &&
     row.status === "connected" &&
     !googleCalendarMcpScopesSatisfied(scopes);
+  const needsMicrosoftGrant =
+    (provider === "outlook" || provider === "outlook-calendar") &&
+    row.status === "connected" &&
+    !microsoftScopesSatisfied(provider, scopes);
   const needsGoogleAdminPluginGrant =
     provider === "google_admin" &&
     row.status === "connected" &&
     !googleAdminMcpScopesSatisfied(scopes);
   const needsPluginGrant =
-    needsSlackPluginGrant || needsGoogleCalendarPluginGrant || needsGoogleAdminPluginGrant;
+    needsSlackPluginGrant ||
+    needsGoogleCalendarPluginGrant ||
+    needsGoogleAdminPluginGrant ||
+    needsMicrosoftGrant;
   return {
     integrationId: row.id ?? "",
     provider,
@@ -579,16 +597,59 @@ function accountViewFromRow(
     accountEmail: row.accountEmail ?? row.account_email ?? null,
     accountName: row.accountName ?? row.account_name ?? null,
     connectionLabel: row.connectionLabel ?? row.connection_label ?? null,
-    statusReason: needsGoogleAdminPluginGrant
-      ? GOOGLE_ADMIN_MCP_RECONNECT_REASON
-      : needsSlackPluginGrant
-        ? SLACK_MCP_RECONNECT_REASON
-        : needsGoogleCalendarPluginGrant
-          ? GOOGLE_CALENDAR_MCP_RECONNECT_REASON
-          : (row.statusReason ?? row.status_reason ?? null),
+    statusReason: needsMicrosoftGrant
+      ? "Reconnect your Microsoft account to grant the required permissions."
+      : needsGoogleAdminPluginGrant
+        ? GOOGLE_ADMIN_MCP_RECONNECT_REASON
+        : needsSlackPluginGrant
+          ? SLACK_MCP_RECONNECT_REASON
+          : needsGoogleCalendarPluginGrant
+            ? GOOGLE_CALENDAR_MCP_RECONNECT_REASON
+            : (row.statusReason ?? row.status_reason ?? null),
     scopes,
     capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
+    connectedAt: connectionTimestamp(row),
   };
+}
+
+function connectionTimestamp(row: IntegrationStateRow): string | null {
+  const value = row.connectedAt ?? row.lastSyncedAt ?? row.last_synced_at ?? null;
+  if (value === null) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+/**
+ * The single account that powers an official plugin's tools.
+ *
+ * Plugin copy promises "the most recently connected account powers tools", and
+ * `connectedAt` is the only column that tracks exactly that: it moves on connect
+ * and reconnect but never when the user edits permissions. Settings and the MCP
+ * loaders both select through this function so the account a user edits is the
+ * account their tools actually run against, whatever order the rows arrive in.
+ * Accounts with no timestamp sort last, and the id tie-breaker keeps equal
+ * timestamps deterministic.
+ */
+export function activePluginAccount<
+  Account extends { integrationId: string; connectedAt: string | null },
+>(accounts: readonly Account[]): Account | null {
+  let active: Account | null = null;
+  for (const account of accounts) {
+    if (active === null || comparePluginAccountRecency(account, active) > 0) active = account;
+  }
+  return active;
+}
+
+type PluginAccountRecency = { integrationId: string; connectedAt: string | null };
+
+function comparePluginAccountRecency(a: PluginAccountRecency, b: PluginAccountRecency): number {
+  if (a.connectedAt !== b.connectedAt) {
+    if (a.connectedAt === null) return -1;
+    if (b.connectedAt === null) return 1;
+    return a.connectedAt < b.connectedAt ? -1 : 1;
+  }
+  if (a.integrationId === b.integrationId) return 0;
+  return a.integrationId < b.integrationId ? -1 : 1;
 }
 
 export const googleIntegrationStateFromRows = integrationStateFromRows;
