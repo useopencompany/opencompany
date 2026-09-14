@@ -1151,21 +1151,26 @@ export function Surface({
     latestActiveTurnStartedAtMs,
   ]);
   const runtimeTurn = useMemo<ActiveChatTurn | null>(() => {
-    const activeRunId = conversationRuntime?.activeRunId;
+    const runtime = conversationRuntime;
+    const activeRunId = runtime?.activeRunId ?? null;
+    // Electric can deliver the active status before its Run id during a refresh. Preserve the
+    // runtime-owned turn in that gap; the transport checkpoint remains available for Stop.
     if (
       activeTurn ||
       transportTurn ||
       !chatSessionId ||
-      !activeRunId ||
-      !isChatRuntimeActive(conversationRuntime)
+      !runtime ||
+      !isChatRuntimeActive(runtime)
     ) {
       return null;
     }
-    const run = liveChat.runsById.get(activeRunId);
-    const assistantMessage = chatMessages.findLast(
-      (message) => message.role === "assistant" && message.metadata?.runId === activeRunId,
-    );
-    const runtimeUpdatedAtMs = Date.parse(conversationRuntime.updatedAt);
+    const run = activeRunId ? liveChat.runsById.get(activeRunId) : null;
+    const assistantMessage = activeRunId
+      ? chatMessages.findLast(
+          (message) => message.role === "assistant" && message.metadata?.runId === activeRunId,
+        )
+      : null;
+    const runtimeUpdatedAtMs = Date.parse(runtime.updatedAt);
     const startedAtMs =
       (assistantMessage ? chatMessageStartedAtMs(assistantMessage) : null) ??
       latestActiveTurnStartedAtMs ??
@@ -1200,7 +1205,11 @@ export function Surface({
     finalizedAssistantOutcome: finalizedChatAssistantOutcome(finalizedAssistantMessage),
     runtimeStatus: conversationRuntime?.status ?? null,
     runtimeMatchesTurn: Boolean(
-      foregroundTurn?.runId && conversationRuntime?.activeRunId === foregroundTurn.runId,
+      foregroundTurn &&
+        isChatRuntimeActive(conversationRuntime) &&
+        (!conversationRuntime?.activeRunId ||
+          !foregroundTurn.runId ||
+          conversationRuntime.activeRunId === foregroundTurn.runId),
     ),
     transportStatus: status,
     submitting: engineSubmitting,
