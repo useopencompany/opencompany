@@ -60,6 +60,16 @@ const nextConfig = {
         permanent: false,
       },
       {
+        source: "/settings/attio",
+        destination: "/plugins/attio/ingestion",
+        permanent: false,
+      },
+      {
+        source: "/settings/fathom",
+        destination: "/plugins/fathom/ingestion",
+        permanent: false,
+      },
+      {
         source: "/settings/granola",
         destination: "/wiki/sources",
         permanent: false,

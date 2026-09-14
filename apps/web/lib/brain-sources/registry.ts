@@ -38,7 +38,7 @@ export const BRAIN_SOURCE_PROVIDERS: BrainSourceProviderDef[] = [
     icon: Video,
     connectionKind: "api_key",
     available: true,
-    connectHref: "/settings/fathom",
+    connectHref: "/plugins/fathom/ingestion",
     docsHref: `${DOCS_ORIGIN}/docs/integrations/fathom`,
   },
   {
@@ -84,7 +84,7 @@ export const BRAIN_SOURCE_PROVIDERS: BrainSourceProviderDef[] = [
     icon: Contact,
     connectionKind: "api_key",
     available: true,
-    connectHref: "/settings/attio",
+    connectHref: "/plugins/attio/ingestion",
     docsHref: `${DOCS_ORIGIN}/docs/integrations/attio`,
   },
 ];

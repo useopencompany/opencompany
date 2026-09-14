@@ -8,6 +8,8 @@ describe("settings redirects", () => {
     ["/settings/plugins/:path*", "/plugins/:path*"],
     ["/settings/skills", "/skills"],
     ["/settings/skills/:path*", "/skills/:path*"],
+    ["/settings/attio", "/plugins/attio/ingestion"],
+    ["/settings/fathom", "/plugins/fathom/ingestion"],
     ["/settings/granola", "/wiki/sources"],
     ["/settings/jamie", "/plugins/jamie"],
     ["/settings/stripe", "/plugins/stripe"],

@@ -1,6 +1,6 @@
 # Custom hosted MCP servers (PRO-228)
 
-Settings → Plugins → Add custom MCP creates a standard immutable package from a public HTTPS
+Plugins → Add custom MCP creates a standard immutable package from a public HTTPS
 Streamable HTTP endpoint. The source is explicitly `custom_mcp`; it has no synthetic Git commit.
 The package uses the existing workspace installation lifecycle. Connections, encrypted headers,
 discovered tools, health, and per-tool permissions belong to the acting member, with no workspace

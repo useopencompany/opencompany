@@ -438,7 +438,7 @@ function AppearanceSection() {
   );
 }
 
-export function FathomSettingsRoute() {
+export function FathomIngestionRoute() {
   const { activeBrain, featureFlags, integrations } = useAppData();
   const brainSourcesHref =
     featureFlags.legacyBrain && activeBrain

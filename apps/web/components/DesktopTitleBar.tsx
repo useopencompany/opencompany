@@ -28,8 +28,6 @@ const SETTINGS_TITLES: Record<string, string> = {
   "/settings/workspace/inference": "Inference",
   "/settings/repositories": "Repositories",
   "/settings/mcp": "MCP",
-  "/settings/attio": "Attio",
-  "/settings/fathom": "Fathom ingestion",
 };
 
 function pathSegmentLabel(value: string | undefined, fallback: string) {

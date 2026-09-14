@@ -80,12 +80,21 @@ export function googleProviderConfigForAccess(
     : GOOGLE_PROVIDER_CONFIG[provider];
 }
 
+// The Drive plugin page moved from /settings/plugins/google-drive to /plugins/google-drive.
+// returnTo is a query value rather than a request path, so the legacy route redirect never
+// rewrites it: a tab opened before the move still sends the old path and has to reach the same
+// scope set, or the connect succeeds with ingestion-only scopes and the Drive tools fail later.
+const DRIVE_PLUGIN_RETURN_PATHS = new Set([
+  "/plugins/google-drive",
+  "/settings/plugins/google-drive",
+]);
+
 export function googleAuthorizationConfigForReturnTo(
   config: GoogleProviderConfig,
   returnTo: string,
 ): GoogleProviderConfig {
   const returnPath = new URL(sanitizeReturnTo(returnTo), "https://opencompany.invalid").pathname;
-  if (config.provider !== "google_drive" || returnPath !== "/plugins/google-drive") {
+  if (config.provider !== "google_drive" || !DRIVE_PLUGIN_RETURN_PATHS.has(returnPath)) {
     return config;
   }
   return {

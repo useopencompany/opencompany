@@ -1,6 +1,5 @@
 "use client";
 
-import { cn } from "@opencompany/ui/lib/utils";
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowLeft,
@@ -21,7 +20,6 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
 import { useAppDataOptional } from "@/components/AppDataProvider";
 import { IntentPrefetchLink } from "@/components/IntentPrefetchLink";
 
