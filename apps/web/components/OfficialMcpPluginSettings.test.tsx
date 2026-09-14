@@ -1452,7 +1452,7 @@ describe("Linear plugin settings", () => {
     expect(searchIssues).toHaveTextContent("On");
 
     await userEvent.click(searchIssues);
-    await userEvent.click(screen.getByRole("option", { name: "Ask" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Ask" }));
     expect(accountActions.setIntegrationToolModeAction).toHaveBeenCalledWith(
       "gint_linear_tools",
       "linear_search_issues",
@@ -1494,12 +1494,54 @@ describe("Linear plugin settings", () => {
 
     await userEvent.click(searchIssues);
     // The inherit option names the mode the tool returns to, so releasing it is never a guess.
-    await userEvent.click(screen.getByRole("option", { name: "Use group (On)" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Use group (On)" }));
     expect(accountActions.setIntegrationToolModeAction).toHaveBeenCalledWith(
       "gint_linear_tools",
       "linear_search_issues",
       "inherit",
     );
+  });
+
+  it("resolves an unset group from the package default the group toggle shows", async () => {
+    // "query" is not in Linear's capability registry, so a tool row that fell back to the registry
+    // would read On while its own group header read Ask.
+    const packageDefaultState: PluginToolsState = {
+      ...toolsState,
+      groups: [
+        {
+          id: "query",
+          label: "Read Linear",
+          description: "Look up Linear work.",
+          modeKey: "query",
+          defaultMode: "ask",
+          curated: true,
+          tools: toolsState.groups[0]!.tools,
+        },
+      ],
+    };
+    const unsetAccount = account("gint_linear_tools", "Linear tool access", {}, "linear");
+    render(
+      <LinearPluginDetailView
+        pluginState={{ status: "ready", plugin }}
+        accountsState={{
+          status: "ready",
+          accounts: [{ account: unsetAccount }],
+          permissionConnection: unsetAccount,
+        }}
+        toolsState={packageDefaultState}
+        canEdit
+      />,
+    );
+
+    expect(
+      within(screen.getByRole("group", { name: "Read Linear permission" })).getByRole("button", {
+        name: "Ask",
+      }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(screen.getByRole("button", { name: /^1 tool/ }));
+    expect(
+      screen.getByRole("combobox", { name: "Permission for Search issues" }),
+    ).toHaveTextContent("Ask");
   });
 
   it("uses the shared Google Admin account, OAuth, permission, and uninstall controls", async () => {

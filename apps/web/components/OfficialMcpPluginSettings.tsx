@@ -1708,18 +1708,25 @@ function ToolGroupCard({
   const [isPending, startTransition] = useTransition();
   const [open, setOpen] = useState(false);
   const connectionProvider = permissionConnection?.provider ?? provider;
-  const groupMode = effectiveCapabilityMode(
-    connectionProvider,
-    group.modeKey,
-    permissionConnection?.capabilityModes ?? { [group.modeKey]: group.defaultMode },
+  const storedCapabilityModes = permissionConnection?.capabilityModes;
+  // The package's declared default, not the registry's, is what the group toggle shows for an
+  // unset group, so the tool rows have to resolve against the same fallback or a tool would claim
+  // a mode its own group header contradicts.
+  const capabilityModes =
+    storedCapabilityModes && Object.hasOwn(storedCapabilityModes, group.modeKey)
+      ? storedCapabilityModes
+      : { ...storedCapabilityModes, [group.modeKey]: group.defaultMode };
+  const groupMode = effectiveCapabilityMode(connectionProvider, group.modeKey, capabilityModes);
+  const [toolModes, setOptimisticToolModes] = useOptimistic(
+    (permissionConnection?.toolModes ?? {}) as Record<string, unknown>,
   );
-  const toolModes = permissionConnection?.toolModes;
   const overrides = group.tools.filter((tool) => storedToolMode(toolModes, tool.toolName));
   const editable = Boolean(permissionConnection) && !isPending;
 
   const setToolMode = (toolName: string, mode: ToolMode) => {
     if (!permissionConnection || isPending) return;
     startTransition(async () => {
+      setOptimisticToolModes(nextToolModes(toolModes, { [toolName]: mode }));
       const result = await setIntegrationToolModeAction(
         permissionConnection.integrationId,
         toolName,
@@ -1736,6 +1743,14 @@ function ToolGroupCard({
   const clearOverrides = () => {
     if (!permissionConnection || isPending || overrides.length === 0) return;
     startTransition(async () => {
+      setOptimisticToolModes(
+        nextToolModes(
+          toolModes,
+          Object.fromEntries(overrides.map((tool) => [tool.toolName, "inherit" as const])),
+        ),
+      );
+      // Sequential on purpose: each write is a jsonb merge on the same connection row, so
+      // concurrent requests could drop one another's key.
       for (const tool of overrides) {
         const result = await setIntegrationToolModeAction(
           permissionConnection.integrationId,
@@ -1825,16 +1840,10 @@ function ToolGroupCard({
                         capabilityId: group.modeKey,
                         curated: group.curated,
                         toolId: tool.toolName,
-                        capabilityModes: permissionConnection?.capabilityModes ?? {
-                          [group.modeKey]: group.defaultMode,
-                        },
+                        capabilityModes,
                         toolModes,
                       })}
-                      inheritedMode={
-                        group.curated && groupMode !== "off"
-                          ? groupMode
-                          : inheritedUncuratedMode(groupMode)
-                      }
+                      inheritedMode={group.curated ? groupMode : inheritedUncuratedMode(groupMode)}
                       inheritLabel="Use group"
                       overridden={Boolean(storedToolMode(toolModes, tool.toolName))}
                       disabled={!editable}
@@ -1855,6 +1864,20 @@ function ToolGroupCard({
 // classification exists, and the menu has to name the mode the gateway will actually apply.
 function inheritedUncuratedMode(groupMode: CapabilityMode): CapabilityMode {
   return groupMode === "off" ? "off" : "ask";
+}
+
+// Mirrors what the server does to the stored map, so the optimistic render matches the row that
+// comes back: "inherit" removes the key, any other mode writes it.
+function nextToolModes(
+  current: Record<string, unknown>,
+  changes: Record<string, ToolMode>,
+): Record<string, unknown> {
+  const next = { ...current };
+  for (const [toolName, mode] of Object.entries(changes)) {
+    if (mode === "inherit") delete next[toolName];
+    else next[toolName] = mode;
+  }
+  return next;
 }
 
 function storedToolMode(stored: unknown, toolName: string): CapabilityMode | undefined {
