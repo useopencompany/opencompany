@@ -27,24 +27,22 @@ export function SandboxSettingsPanel({
   sandboxSizeOptions: SandboxSizeOptionView[];
 }) {
   return (
-    <div className="flex flex-col gap-10">
-      <section aria-labelledby="sandbox-size-heading" className="flex flex-col gap-4">
-        <div className="flex flex-col gap-1">
-          <h2 id="sandbox-size-heading" className="text-[15px] font-semibold text-ink">
-            Sandbox size
-          </h2>
-          <p className="text-[13px] leading-5 text-ink-subtle">
-            Every new session starts on this size. Sandbox time is billed per second on the vCPU and
-            memory it holds, so a smaller size costs less per hour.
-          </p>
-        </div>
-        <SandboxSizeCard
-          sandboxSize={sandboxSize}
-          options={sandboxSizeOptions}
-          canManage={canManage}
-        />
-      </section>
-    </div>
+    <section aria-labelledby="sandbox-size-heading" className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1">
+        <h2 id="sandbox-size-heading" className="text-[15px] font-semibold text-ink">
+          Sandbox size
+        </h2>
+        <p className="text-[13px] leading-5 text-ink-subtle">
+          Every new session starts on this size. Sandbox time is billed per second on the vCPU and
+          memory it holds, so a smaller size costs less per hour.
+        </p>
+      </div>
+      <SandboxSizeCard
+        sandboxSize={sandboxSize}
+        options={sandboxSizeOptions}
+        canManage={canManage}
+      />
+    </section>
   );
 }
 
