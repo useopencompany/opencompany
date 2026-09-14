@@ -9,6 +9,7 @@ import {
 } from "@opencompany/agent-runtime";
 import { workflowActivationDisabledReason } from "@opencompany/core/workflows";
 import type { PluginEventFilterDefinitionDto } from "@opencompany/protocol";
+import { Button } from "@opencompany/ui/components/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import {
   CalendarClock,
@@ -31,7 +32,8 @@ import { useRouter } from "next/navigation";
 import { type ReactNode, useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { Markdown } from "@/components/Markdown";
 import { MarkdownBrainEditor } from "@/components/MarkdownBrainEditor";
-import { ScopeField } from "@/components/ScopeControls";
+import { ScopePicker } from "@/components/ScopeControls";
+import { StatusDot } from "@/components/StatusDot";
 import {
   StepCloudRuntimeControls,
   StepRuntimePicker,
@@ -298,20 +300,16 @@ export function WorkflowEditor({
         <div className="flex shrink-0 items-center gap-2">
           <SaveIndicator state={saveState} canEdit={canEdit} onRetry={saveLatest} />
           {canEdit ? (
-            <button
-              type="button"
+            <Button
+              variant="outline"
+              size="sm"
               disabled={isRunning || runActionDisabledReason !== null}
               title={runActionDisabledReason ?? "Test this workflow"}
               onClick={runNow}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[12.5px] font-medium text-ink shadow-sm transition-colors hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {isRunning ? (
-                <Loader2 size={13} strokeWidth={2} className="animate-spin" />
-              ) : (
-                <Play size={13} strokeWidth={2} />
-              )}
+              {isRunning ? <Loader2 className="animate-spin" /> : <Play />}
               {isRunning ? "Starting…" : "Test"}
-            </button>
+            </Button>
           ) : null}
           {canEdit ? (
             <EditorMoreMenu
@@ -350,6 +348,13 @@ export function WorkflowEditor({
                 onChange={(status) => patch({ status })}
                 disabled={!canEdit}
               />
+              <ScopePicker
+                scope={draft.scope}
+                onChange={(scope) => patch({ scope })}
+                disabled={!canEdit}
+                canManage={canEdit && canManageScope}
+                managedTooltip="Only the creator or a workspace admin can change this workflow's visibility."
+              />
               <span className="text-ink-faint">·</span>
               <span className="inline-flex min-w-0 items-center gap-1.5 text-[12.5px] text-ink-subtle">
                 <UserRound size={14} strokeWidth={1.8} />
@@ -359,18 +364,6 @@ export function WorkflowEditor({
             </div>
           </header>
 
-          <ScopeField
-            scope={draft.scope}
-            onChange={(scope) => patch({ scope })}
-            disabled={!canEdit}
-            canManage={canEdit && canManageScope}
-            hint={(scope) =>
-              scope === "personal"
-                ? "Only you can see and run this workflow"
-                : "Everyone in the workspace can run and edit this workflow"
-            }
-            managedTooltip="Only the creator or a workspace admin can change this workflow's visibility."
-          />
           <TriggerSection
             triggers={draft.triggers}
             canEdit={canEdit}
@@ -516,15 +509,6 @@ function StatusPicker({
         ))}
       </PopoverContent>
     </Popover>
-  );
-}
-
-function StatusDot({ status }: { status: WorkflowStatus }) {
-  return (
-    <span
-      aria-hidden="true"
-      className={`h-1.5 w-1.5 rounded-full ${status === "active" ? "bg-success" : "bg-ink-faint"}`}
-    />
   );
 }
 
