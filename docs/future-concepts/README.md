@@ -21,6 +21,9 @@ enduring decisions into an ADR when it is implemented.
 - [LinkedIn network in Chat](./linkedin-network-main-chat-research.md) — a user-provided LinkedIn
   connections import and a private relationship-query surface that remains separate from managed
   public LinkedIn research.
+- [Tool-level permission overrides](./tool-level-permissions.md) — keeping the capability group as
+  the control while letting a single tool be an explicit exception, so "always allow" in chat stops
+  widening a whole group.
 - [Draft posts on a connected X account](./x-drafts-api-research.md) — why no public X API can save
   a draft post to a user's account, what the Ads API and Articles draft endpoints actually do, and
   why the draft stays in opencompany.

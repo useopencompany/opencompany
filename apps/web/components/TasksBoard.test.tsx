@@ -47,6 +47,13 @@ const summaryMock = vi.hoisted(() => ({
 }));
 const activityRowsMock = vi.hoisted(() => ({ rows: [] as Array<Record<string, unknown>> }));
 
+const routerMock = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }));
+
+vi.mock("next/navigation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next/navigation")>();
+  return { ...actual, useRouter: () => routerMock };
+});
+
 vi.mock("@tanstack/react-db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@tanstack/react-db")>();
   return {
@@ -145,6 +152,17 @@ describe("TasksBoardRoute", () => {
       },
       error: null,
     };
+  });
+
+  it("keeps the workspace's routines and their controls on the Tasks page", () => {
+    render(<TasksBoardRoute workflowNames={{}} />);
+
+    const routines = screen.getByRole("heading", { name: "Routines" }).closest("section");
+    expect(routines).not.toBeNull();
+    expect(within(routines!).getByText("Monday briefing")).toBeInTheDocument();
+    expect(
+      within(routines!).getByRole("button", { name: "Pause Monday briefing" }),
+    ).toBeInTheDocument();
   });
 
   it("buckets all non-archived task sources into the four board columns", () => {

@@ -1,5 +1,6 @@
 "use client";
 
+import { scheduleSummary } from "@opencompany/agent-runtime";
 import type {
   SkillBundleFileMetadataDto,
   SkillImportCandidateDto,
@@ -10,6 +11,17 @@ import type {
   SkillSourceDto,
 } from "@opencompany/protocol";
 import { Button } from "@opencompany/ui/components/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@opencompany/ui/components/dialog";
+import { FilterPills } from "@opencompany/ui/components/filter-pills";
+import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
+import { toast } from "@opencompany/ui/components/sonner";
 import { useLiveQuery } from "@tanstack/react-db";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -27,9 +39,12 @@ import {
   Mail,
   Monitor,
   Moon,
+  MoreHorizontal,
+  Pencil,
   Plus,
   Sparkles,
   Sun,
+  Trash2,
   UserRound,
   Users,
   Workflow,
@@ -73,7 +88,10 @@ import { useTaskRun } from "@/components/useTaskRun";
 import { useTaskSeenAcknowledgement } from "@/components/useTaskSeenAcknowledgement";
 import type { ChatSessionView } from "@/lib/chat-ui";
 import { getHeadlessWorkflows } from "@/lib/headless-automation-collections";
-import { createHeadlessWorkflow } from "@/lib/headless-automation-commands";
+import {
+  archiveHeadlessWorkflow,
+  createHeadlessWorkflow,
+} from "@/lib/headless-automation-commands";
 import type { WorkflowListItem } from "@/lib/headless-automation-types";
 import {
   archiveHeadlessSkill,
@@ -99,6 +117,7 @@ import {
   updateSubagentsAction,
   updateTaskSpawningAction,
 } from "@/lib/user-preferences";
+import { DEFAULT_WORKFLOW_MODEL_TOKEN, WORKFLOW_MODEL_OPTIONS } from "@/lib/workflow-model-options";
 
 export function HomeRoute({
   chatId,
@@ -115,7 +134,6 @@ export function HomeRoute({
   initialChat?: ChatSessionView | null;
 }) {
   const data = useAppData();
-  const userName = data.user.firstName?.trim() || data.user.email.split("@")[0] || "there";
   const initialChat = useMemo(() => {
     if (!chatId) return null;
     if (routeInitialChat?.id === chatId) return routeInitialChat;
@@ -143,7 +161,6 @@ export function HomeRoute({
         key={data.activeBrain?.id ?? "no-brain"}
         tasks={data.tasks}
         allTasks={data.allTasks}
-        schedules={data.schedules}
         defaultModel={DEFAULT_MODEL}
         initialChat={initialChat}
         newChatProjectId={projectId}
@@ -155,7 +172,6 @@ export function HomeRoute({
         taskSpawningEnabled={data.featureFlags.taskSpawning}
         autoModelRoutingEnabled={data.featureFlags.autoModelRouting}
         workspaceId={data.workspace.id}
-        userName={userName}
         userWorkosId={data.user.workosUserId}
       />
     </main>
@@ -712,6 +728,8 @@ function getInitials(firstName: string | null, lastName: string | null, email: s
 
 // --- Workflows ---------------------------------------------------------------
 
+const WORKFLOW_RUN_WINDOW_MS = 30 * 24 * 60 * 60 * 1_000;
+
 export function WorkflowsRoute({
   workflows,
   workspaceId,
@@ -722,8 +740,12 @@ export function WorkflowsRoute({
   canEdit: boolean;
 }) {
   const router = useRouter();
+  const data = useAppData();
   const [creating, setCreating] = useState(false);
-  const [scopeFilter, setScopeFilter] = useState<ScopeFilter>("all");
+  const [scope, setScope] = useState<SkillScope>("company");
+  const [workflowToDelete, setWorkflowToDelete] = useState<WorkflowListItem | null>(null);
+  const [deletedWorkflowIds, setDeletedWorkflowIds] = useState<ReadonlySet<string>>(new Set());
+  const [isDeleting, startDeleting] = useTransition();
   const hydrated = useHydrated();
   const workflowCollection = useMemo(
     () => (hydrated ? getHeadlessWorkflows(workspaceId) : null),
@@ -736,18 +758,35 @@ export function WorkflowsRoute({
   const visibleWorkflows = useMemo(
     () =>
       ((!hydrated || workflowsLoading ? workflows : (workflowRows ?? [])) as WorkflowListItem[])
-        .filter(
-          (workflow) =>
-            !workflow.archivedAt && (scopeFilter === "all" || workflow.scope === scopeFilter),
-        )
+        .filter((workflow) => !workflow.archivedAt && !deletedWorkflowIds.has(workflow.id))
         .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
-    [hydrated, scopeFilter, workflowRows, workflows, workflowsLoading],
+    [deletedWorkflowIds, hydrated, workflowRows, workflows, workflowsLoading],
   );
+  const runStats = useMemo(
+    () => workflowRunStats(data.allTasks ?? data.tasks),
+    [data.allTasks, data.tasks],
+  );
+  const scopedWorkflows = visibleWorkflows.filter((workflow) => workflow.scope === scope);
+
+  const deleteWorkflow = () => {
+    if (!workflowToDelete || isDeleting) return;
+    const workflow = workflowToDelete;
+    startDeleting(async () => {
+      try {
+        await archiveHeadlessWorkflow(workflow.id, { expectedVersion: workflow.version });
+        setDeletedWorkflowIds((current) => new Set(current).add(workflow.id));
+        setWorkflowToDelete(null);
+        toast.success(`Deleted “${workflow.name}”.`);
+      } catch (cause) {
+        toast.error(cause instanceof Error ? cause.message : "The workflow could not be deleted.");
+      }
+    });
+  };
 
   return (
     <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
       <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
-        <div className="flex w-full max-w-[760px] flex-col gap-8 pb-24 pt-16 sm:pt-24">
+        <div className="flex w-full max-w-[1040px] flex-col gap-8 pb-24 pt-16 sm:pt-24">
           <header className="flex items-start justify-between gap-4">
             <div className="flex flex-col gap-1.5">
               <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-ink">
@@ -759,38 +798,95 @@ export function WorkflowsRoute({
               </p>
             </div>
             {canEdit ? (
-              <button
-                type="button"
-                onClick={() => setCreating(true)}
-                className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[13px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-              >
+              <Button size="sm" onClick={() => setCreating(true)} className="shadow-sm">
                 <Plus size={14} strokeWidth={2} />
                 New workflow
-              </button>
+              </Button>
             ) : null}
           </header>
 
-          <ScopeFilterTabs label="Workflow scope" value={scopeFilter} onChange={setScopeFilter} />
-
-          {visibleWorkflows.length === 0 ? (
-            <EmptyState
-              icon={Workflow}
-              title={scopeFilter === "all" ? "No workflows yet" : `No ${scopeFilter} workflows yet`}
-              description={
-                canEdit
-                  ? "Create a workflow to automate a recurring job. Fire it with # in chat, and each run shows up as a Task."
-                  : "Workflows are automations your workspace admins set up. Fire one with # in chat and each run becomes a Task."
-              }
+          <section aria-labelledby="workflow-list-heading" className="flex min-w-0 flex-col gap-3">
+            <h2 id="workflow-list-heading" className="sr-only">
+              Workflow list
+            </h2>
+            <FilterPills
+              label="Workflow scope"
+              value={scope}
+              onChange={setScope}
+              options={[
+                {
+                  value: "company",
+                  label: "Company",
+                  count: visibleWorkflows.filter((workflow) => workflow.scope === "company").length,
+                },
+                {
+                  value: "personal",
+                  label: "Personal",
+                  count: visibleWorkflows.filter((workflow) => workflow.scope === "personal")
+                    .length,
+                },
+              ]}
             />
-          ) : (
-            <ul className="flex flex-col gap-2">
-              {visibleWorkflows.map((workflow) => (
-                <li key={workflow.slug}>
-                  <WorkflowListRow workflow={workflow} />
-                </li>
-              ))}
-            </ul>
-          )}
+
+            {scopedWorkflows.length === 0 ? (
+              <EmptyState
+                icon={Workflow}
+                title={`No ${scope} workflows yet`}
+                description={
+                  canEdit
+                    ? "Create a workflow to automate a recurring job. Fire it with # in chat, and each run shows up as a Task."
+                    : "Workflows are automations your workspace admins set up. Fire one with # in chat and each run becomes a Task."
+                }
+              />
+            ) : (
+              <div className="overflow-x-auto rounded-xl border border-border bg-surface">
+                <table className="w-full min-w-[820px] table-fixed text-left">
+                  <caption className="sr-only">Workflows and recent run activity</caption>
+                  <colgroup>
+                    <col className="w-[28%]" />
+                    <col className="w-[19%]" />
+                    <col className="w-[22%]" />
+                    <col className="w-[13%]" />
+                    <col className="w-[15%]" />
+                    <col className="w-12" />
+                  </colgroup>
+                  <thead>
+                    <tr className="border-b border-border-subtle text-[11.5px] font-medium text-ink-subtle">
+                      <th scope="col" className="px-4 py-3 font-medium">
+                        Name
+                      </th>
+                      <th scope="col" className="px-3 py-3 font-medium">
+                        Model
+                      </th>
+                      <th scope="col" className="px-3 py-3 font-medium">
+                        Trigger
+                      </th>
+                      <th scope="col" className="px-3 py-3 font-medium">
+                        Runs (30d)
+                      </th>
+                      <th scope="col" className="px-3 py-3 font-medium">
+                        Last executed
+                      </th>
+                      <th scope="col" className="py-3 pr-2">
+                        <span className="sr-only">Actions</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {scopedWorkflows.map((workflow) => (
+                      <WorkflowTableRow
+                        key={workflow.id}
+                        workflow={workflow}
+                        stats={runStats.get(workflow.slug)}
+                        canEdit={canEdit}
+                        onDelete={() => setWorkflowToDelete(workflow)}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
         </div>
       </div>
 
@@ -800,7 +896,7 @@ export function WorkflowsRoute({
           namePlaceholder="Weekly investor update"
           descriptionPlaceholder="What this workflow does"
           submitLabel="Create workflow"
-          initialScope={scopeFilter === "personal" ? "personal" : "company"}
+          initialScope={scope}
           scopeHint={(scope) =>
             scope === "personal"
               ? "Only you can see and run it"
@@ -814,53 +910,186 @@ export function WorkflowsRoute({
           onCreated={(slug) => router.push(`/workflows/${encodeURIComponent(slug)}`)}
         />
       ) : null}
+
+      <Dialog
+        open={workflowToDelete !== null}
+        onOpenChange={(open) => {
+          if (!open && !isDeleting) setWorkflowToDelete(null);
+        }}
+      >
+        <DialogContent className="max-w-[420px] gap-5">
+          <DialogHeader>
+            <DialogTitle className="text-[15px]">Delete workflow?</DialogTitle>
+            <DialogDescription className="text-[12.5px] leading-5 text-ink-subtle">
+              “{workflowToDelete?.name}” will be removed from the workflow list. Existing Task runs
+              will stay in your history.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={isDeleting}
+              onClick={() => setWorkflowToDelete(null)}
+            >
+              Cancel
+            </Button>
+            <Button variant="destructive" size="sm" disabled={isDeleting} onClick={deleteWorkflow}>
+              {isDeleting ? <Loader2 className="animate-spin" /> : <Trash2 />}
+              Delete workflow
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </main>
   );
 }
 
-function WorkflowListRow({ workflow }: { workflow: WorkflowListItem }) {
+function WorkflowTableRow({
+  workflow,
+  stats,
+  canEdit,
+  onDelete,
+}: {
+  workflow: WorkflowListItem;
+  stats: { runCount: number; lastExecutedAt: string } | undefined;
+  canEdit: boolean;
+  onDelete: () => void;
+}) {
+  const modelLabel = workflowModelLabel(workflow);
+  const triggerLabel = workflowTriggerLabel(workflow);
+
   return (
-    <IntentPrefetchLink
-      href={`/workflows/${encodeURIComponent(workflow.slug)}`}
-      className="group flex items-center gap-3 rounded-lg border border-border bg-surface px-3.5 py-3 transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-    >
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-2">
-          <span className="truncate text-[14px] font-medium leading-tight text-ink">
+    <tr className="group border-b border-border-subtle text-[13px] text-ink last:border-b-0 hover:bg-surface-hover/60">
+      <td className="px-4 py-3.5">
+        <IntentPrefetchLink
+          href={`/workflows/${encodeURIComponent(workflow.slug)}`}
+          className="flex min-w-0 items-center gap-2 rounded-sm font-medium focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          <span className="truncate" title={workflow.name}>
             {workflow.name}
           </span>
           <ScopeBadge>{workflow.scope === "personal" ? "Personal" : "Company"}</ScopeBadge>
           <ItemStatusBadge status={workflow.status} />
-        </span>
-        {workflow.description.trim() ? (
-          <span className="mt-0.5 block truncate text-[12.5px] leading-5 text-ink-subtle">
-            {workflow.description}
-          </span>
-        ) : null}
-        {workflow.trigger.type === "schedule" ? (
-          <span className="mt-1 inline-flex max-w-full items-center gap-1.5 truncate text-[11.5px] leading-4 text-ink-subtle">
-            <CalendarClock size={12} strokeWidth={1.8} className="shrink-0" />
-            <span className="truncate">
-              {workflow.trigger.cron} · {workflow.trigger.timezone}
-            </span>
-          </span>
-        ) : null}
-        {workflow.trigger.type === "event" ? (
-          <span className="mt-1 inline-flex max-w-full items-center gap-1.5 truncate text-[11.5px] leading-4 text-ink-subtle">
-            <span className="truncate">
-              {workflow.trigger.provider} · {workflow.trigger.event}
-              {workflow.trigger.filters.team
-                ? ` · ${workflow.trigger.filters.team.key ?? workflow.trigger.filters.team.name}`
-                : ""}
-            </span>
-          </span>
-        ) : null}
-      </span>
-      <span className="shrink-0 text-[11.5px] leading-4 text-ink-subtle">
-        {formatRelativeTime(workflow.updatedAt)}
-      </span>
-    </IntentPrefetchLink>
+        </IntentPrefetchLink>
+      </td>
+      <td className="truncate px-3 py-3.5 text-ink-muted" title={modelLabel}>
+        {modelLabel}
+      </td>
+      <td className="truncate px-3 py-3.5 text-ink-muted" title={triggerLabel}>
+        {triggerLabel}
+      </td>
+      <td className="px-3 py-3.5 tabular-nums text-ink-muted">{stats?.runCount ?? 0}</td>
+      <td className="px-3 py-3.5 text-ink-muted">
+        {stats ? formatRelativeTime(stats.lastExecutedAt) : "Never"}
+      </td>
+      <td className="py-2 pr-2 text-right">
+        <WorkflowRowMenu workflow={workflow} canEdit={canEdit} onDelete={onDelete} />
+      </td>
+    </tr>
   );
+}
+
+function WorkflowRowMenu({
+  workflow,
+  canEdit,
+  onDelete,
+}: {
+  workflow: WorkflowListItem;
+  canEdit: boolean;
+  onDelete: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const href = `/workflows/${encodeURIComponent(workflow.slug)}`;
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        type="button"
+        aria-label={`Actions for ${workflow.name}`}
+        className="inline-flex size-7 items-center justify-center rounded-md text-ink-subtle opacity-70 transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover:opacity-100 data-[popup-open]:bg-surface-hover data-[popup-open]:text-ink data-[popup-open]:opacity-100"
+      >
+        <MoreHorizontal size={16} strokeWidth={2} />
+      </PopoverTrigger>
+      <PopoverContent align="end" sideOffset={6} className="w-[180px] bg-surface p-1 text-ink">
+        <IntentPrefetchLink
+          href={href}
+          onClick={() => setOpen(false)}
+          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:bg-surface-hover"
+        >
+          <Pencil size={13} strokeWidth={1.9} />
+          {canEdit ? "Edit details" : "View details"}
+        </IntentPrefetchLink>
+        {canEdit ? (
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              onDelete();
+            }}
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-danger transition-colors duration-150 hover:bg-danger/10 focus:outline-none focus-visible:bg-danger/10"
+          >
+            <Trash2 size={13} strokeWidth={1.9} />
+            Delete
+          </button>
+        ) : null}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function workflowModelLabel(workflow: WorkflowListItem) {
+  const defaultLabel =
+    WORKFLOW_MODEL_OPTIONS.find((option) => option.token === DEFAULT_WORKFLOW_MODEL_TOKEN)?.label ??
+    "Default";
+  const labels = new Set(
+    workflow.steps.map((step) => {
+      const option = WORKFLOW_MODEL_OPTIONS.find((candidate) => candidate.token === step.model);
+      return option?.label ?? (step.model.trim() || defaultLabel);
+    }),
+  );
+  if (labels.size === 0) return defaultLabel;
+  if (labels.size === 1) return Array.from(labels)[0]!;
+  return `${labels.size} models`;
+}
+
+function workflowTriggerLabel(workflow: WorkflowListItem) {
+  const triggers = workflow.triggers?.length ? workflow.triggers : [workflow.trigger];
+  const trigger = triggers[0];
+  if (!trigger || trigger.type === "manual") return "Manual";
+  const label =
+    trigger.type === "schedule"
+      ? scheduleSummary(trigger)
+      : `${titleCaseToken(trigger.provider)} · ${titleCaseToken(trigger.event)}`;
+  return triggers.length > 1 ? `${label} +${triggers.length - 1}` : label;
+}
+
+function titleCaseToken(value: string) {
+  const words = value.trim().replace(/[._-]+/gu, " ");
+  return words ? words.replace(/\b\p{L}/gu, (letter) => letter.toUpperCase()) : "Event";
+}
+
+function workflowRunStats(
+  tasks: readonly { workflowId?: string | null; createdAt: string }[],
+  now = Date.now(),
+) {
+  const stats = new Map<string, { runCount: number; lastExecutedAt: string }>();
+  const windowStart = now - WORKFLOW_RUN_WINDOW_MS;
+  for (const task of tasks) {
+    if (!task.workflowId) continue;
+    const executedAt = new Date(task.createdAt).getTime();
+    if (!Number.isFinite(executedAt)) continue;
+    const current = stats.get(task.workflowId);
+    const lastExecutedAt =
+      !current || executedAt > new Date(current.lastExecutedAt).getTime()
+        ? task.createdAt
+        : current.lastExecutedAt;
+    stats.set(task.workflowId, {
+      runCount: (current?.runCount ?? 0) + (executedAt >= windowStart ? 1 : 0),
+      lastExecutedAt,
+    });
+  }
+  return stats;
 }
 
 // --- Skills (settings) -------------------------------------------------------
@@ -1369,10 +1598,12 @@ export function EmptyState({
   icon: Icon,
   title,
   description,
+  action,
 }: {
   icon: LucideIcon;
   title: string;
   description: string;
+  action?: ReactNode;
 }) {
   return (
     <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border px-6 py-14 text-center">
@@ -1385,6 +1616,7 @@ export function EmptyState({
           {description}
         </p>
       </div>
+      {action ? <div className="mt-1">{action}</div> : null}
     </div>
   );
 }
