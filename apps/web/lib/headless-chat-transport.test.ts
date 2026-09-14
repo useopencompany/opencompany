@@ -640,6 +640,56 @@ describe("canonical Chat transport", () => {
     });
   });
 
+  it("replays from the beginning when a persisted cursor can no longer be decoded", async () => {
+    sessionStorage.setItem(
+      "opencompany:headless-chat:v1:conversation_1",
+      JSON.stringify({
+        checkpointVersion: 2,
+        runId: "run_1",
+        conversationId: "conversation_1",
+        assistantMessageId: "message_assistant_1",
+        model: "model_1",
+        content: "",
+        textSegment: 0,
+        activeToolCalls: [],
+        cursor: "v2:nope",
+        status: "running",
+      }),
+    );
+    const eventCursors: Array<string | null> = [];
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/v1/runs/run_1") return runResponse("running");
+      if (url.pathname.endsWith("/events")) {
+        eventCursors.push(url.searchParams.get("cursor"));
+        return sse([
+          event(1, "message.content_updated", {
+            messageId: "message_assistant_1",
+            content: "hello",
+            complete: true,
+          }),
+          event(2, "run.completed", { messageId: "message_assistant_1" }),
+        ]);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    const transport = new HeadlessChatTransport<UIMessage>({
+      baseUrl: "https://app.example.test",
+      fetch: fetchMock as typeof fetch,
+    });
+
+    const resumed = await transport.reconnectToStream({ chatId: "conversation_1" });
+    expect(resumed).not.toBeNull();
+    const { message, errors } = await consumeUiMessage(resumed!);
+
+    expect(eventCursors).toEqual([null]);
+    expect(errors).toEqual([]);
+    expect(message?.parts).toContainEqual(expect.objectContaining({ text: "hello" }));
+    expect(
+      JSON.parse(sessionStorage.getItem("opencompany:headless-chat:v1:conversation_1") ?? "null"),
+    ).toMatchObject({ cursor: "v1:2" });
+  });
+
   it("does not advance a checkpoint past an event that cannot be projected", async () => {
     sessionStorage.setItem(
       "opencompany:headless-chat:v1:conversation_1",
