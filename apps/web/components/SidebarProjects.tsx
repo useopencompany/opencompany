@@ -78,9 +78,9 @@ export const SIDEBAR_NESTED_ROW_PADDING_CLASSNAME = "pl-[30px]";
 
 const NestedSidebarRowContext = createContext(false);
 
-/** True for rows rendered inside a project folder, which indent to the folder's name. */
-export function useNestedSidebarRow() {
-  return useContext(NestedSidebarRowContext);
+/** The left padding a sidebar row's content carries, indented when the row sits in a folder. */
+export function useSidebarRowPadding() {
+  return useContext(NestedSidebarRowContext) ? SIDEBAR_NESTED_ROW_PADDING_CLASSNAME : "pl-2";
 }
 
 const PROJECTS_LIST_ID = "sidebar-projects";

@@ -45,11 +45,10 @@ import {
   conversationDragProps,
   draggedConversationId,
   isConversationDrag,
-  SIDEBAR_NESTED_ROW_PADDING_CLASSNAME,
   SidebarProjects,
   type SidebarRowDragProps,
-  useNestedSidebarRow,
   useSidebarProjects,
+  useSidebarRowPadding,
 } from "@/components/SidebarProjects";
 import { SidebarSectionHeader, useCollapsedSidebarSection } from "@/components/SidebarSection";
 import { SidebarWikis, useSidebarWikis } from "@/components/SidebarWikis";
@@ -764,7 +763,7 @@ function SidebarChatRow({
   onArchive: () => void;
 }) {
   const state = resolveSidebarChatState({ chat, localState });
-  const contentPadding = useNestedSidebarRow() ? SIDEBAR_NESTED_ROW_PADDING_CLASSNAME : "pl-2";
+  const contentPadding = useSidebarRowPadding();
   const content = (
     <>
       <SidebarChatStateIndicator state={state} />
@@ -878,7 +877,7 @@ function SidebarTaskRow({
   onArchive: () => void;
 }) {
   const archivable = isSettledTaskStatus(task.status);
-  const contentPadding = useNestedSidebarRow() ? SIDEBAR_NESTED_ROW_PADDING_CLASSNAME : "pl-2";
+  const contentPadding = useSidebarRowPadding();
   return (
     <div
       {...dragProps}
