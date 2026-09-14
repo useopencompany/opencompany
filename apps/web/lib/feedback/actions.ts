@@ -1,5 +1,6 @@
 "use server";
 
+import { feedbackContextFromPathname } from "@/lib/feedback/context";
 import { serverApiClient, serverApiErrorMessage } from "@/lib/server-api-client";
 
 // A small feedback report from the sidebar widget. Bug / Feedback / Idea only —
@@ -24,6 +25,9 @@ export async function submitFeedback(
   const rawKind = readString(formData, "kind");
   const message = readString(formData, "message");
   const kind = isFeedbackKind(rawKind) ? rawKind : "feedback";
+  // Re-derive the reference from the submitted path so the action trusts the
+  // same route rules as the dialog rather than a client-supplied id.
+  const context = feedbackContextFromPathname(readString(formData, "path") || null);
 
   if (message.length < 3) {
     return { ok: false, error: "Enter a bit more detail." };
@@ -34,7 +38,7 @@ export async function submitFeedback(
 
   try {
     const response = await (await serverApiClient()).v1.feedback.$post({
-      json: { kind, message },
+      json: { kind, message, ...(context ? { context } : {}) },
     });
     if (!response.ok) {
       return {

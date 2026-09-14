@@ -62,6 +62,43 @@ describe("submitFeedback", () => {
     expect(request.headers.get("origin")).toBe("https://my.opencompany.chat");
   });
 
+  it("attaches the session the reporter is viewing", async () => {
+    const requests = stubApi(() =>
+      Response.json({
+        data: { submitted: true },
+        meta: { apiVersion: "v1", protocolVersion: "1.0.0" },
+      }),
+    );
+
+    await submitFeedback(
+      null,
+      form({ kind: "bug", message: "The run stalled.", path: "/tasks/tsk_1/run" }),
+    );
+
+    await expect((requests[0] as Request).json()).resolves.toMatchObject({
+      context: { kind: "task", id: "tsk_1" },
+    });
+  });
+
+  it("omits context for paths that are not a session", async () => {
+    const requests = stubApi(() =>
+      Response.json({
+        data: { submitted: true },
+        meta: { apiVersion: "v1", protocolVersion: "1.0.0" },
+      }),
+    );
+
+    await submitFeedback(
+      null,
+      form({ kind: "idea", message: "Add dark mode.", path: "/settings/preferences" }),
+    );
+
+    await expect((requests[0] as Request).json()).resolves.toEqual({
+      kind: "idea",
+      message: "Add dark mode.",
+    });
+  });
+
   it("defaults unknown kinds to feedback", async () => {
     const requests = stubApi(() =>
       Response.json({

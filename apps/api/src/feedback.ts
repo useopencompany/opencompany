@@ -1,6 +1,7 @@
+import { getAppUrl } from "@opencompany/agent/app-url";
 import type { Actor } from "@opencompany/core";
-import { users, workspaces } from "@opencompany/db/product-schema";
-import { eq } from "drizzle-orm";
+import { chatSessions, tasks, users, workspaces } from "@opencompany/db/product-schema";
+import { and, eq, isNull, or } from "drizzle-orm";
 import { ApiError } from "./errors";
 
 // A small feedback report from the sidebar widget. Bug / Feedback / Idea only —
@@ -8,8 +9,15 @@ import { ApiError } from "./errors";
 // a team or priority.
 export type FeedbackKind = "bug" | "feedback" | "idea";
 
+// The chat session or task the reporter had open. Resolving it into the issue
+// description is what lets triage open the failing run without a round trip.
+export type FeedbackContext = { kind: "chat" | "task"; id: string };
+
 export type FeedbackService = {
-  submit(actor: Actor, command: { kind: FeedbackKind; message: string }): Promise<void>;
+  submit(
+    actor: Actor,
+    command: { kind: FeedbackKind; message: string; context?: FeedbackContext },
+  ): Promise<void>;
 };
 
 type DbLike = any;
@@ -86,12 +94,17 @@ export function createFeedbackService(input: {
         throw new ApiError(404, "not_found", "The acting workspace was not found.");
       }
 
+      const reference = command.context
+        ? await resolveContext(input.db, actor, command.context)
+        : null;
+
       const title = titleFromMessage(command.kind, command.message);
       const description = buildDescription({
         message: command.message,
         kind: command.kind,
         user,
         workspace,
+        reference,
       });
 
       try {
@@ -147,16 +160,88 @@ function titleFromMessage(kind: FeedbackKind, message: string) {
   return `[${titlePrefix(kind)}] ${title}`;
 }
 
+// The run the report came from. An unresolved reference means the reporter
+// cannot open the id they submitted — worth saying out loud in the issue rather
+// than dropping the reference the dialog promised them.
+type FeedbackReference =
+  | { kind: "chat" | "task"; id: string; resolved: false }
+  | { kind: "chat"; id: string; resolved: true }
+  | { kind: "task"; id: string; resolved: true; displayId: string; sessionId: string | null };
+
+// Mirrors the access rules the reporter's own reads use: a chat session is
+// owner-scoped, and a task belongs either to the acting workspace or, when it
+// predates one, to the acting user.
+async function resolveContext(
+  db: DbLike,
+  actor: Actor,
+  context: FeedbackContext,
+): Promise<FeedbackReference> {
+  if (context.kind === "chat") {
+    const [session] = await db
+      .select({ id: chatSessions.id })
+      .from(chatSessions)
+      .where(and(eq(chatSessions.id, context.id), eq(chatSessions.userWorkosId, actor.userId)))
+      .limit(1);
+    return session
+      ? { kind: "chat", id: context.id, resolved: true }
+      : { kind: "chat", id: context.id, resolved: false };
+  }
+
+  const [task] = await db
+    .select({ displayId: tasks.displayId, sessionId: tasks.sessionId })
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.id, context.id),
+        or(
+          eq(tasks.workspaceId, actor.workspaceId),
+          and(isNull(tasks.workspaceId), eq(tasks.userWorkosId, actor.userId)),
+        ),
+      ),
+    )
+    .limit(1);
+  return task
+    ? {
+        kind: "task",
+        id: context.id,
+        resolved: true,
+        displayId: task.displayId,
+        sessionId: task.sessionId,
+      }
+    : { kind: "task", id: context.id, resolved: false };
+}
+
+function referenceLines(reference: FeedbackReference) {
+  const segment = reference.kind === "chat" ? "chat" : "tasks";
+  const link = new URL(`/${segment}/${encodeURIComponent(reference.id)}`, getAppUrl()).toString();
+
+  if (!reference.resolved) {
+    const label = reference.kind === "chat" ? "Session" : "Task";
+    return [`${label}: ${reference.id} (not accessible to the reporter)`, `Link: ${link}`];
+  }
+  if (reference.kind === "chat") {
+    return [`Session: ${reference.id}`, `Link: ${link}`];
+  }
+
+  return [
+    `Task: ${reference.id} (${reference.displayId})`,
+    ...(reference.sessionId ? [`Session: ${reference.sessionId}`] : []),
+    `Link: ${link}`,
+  ];
+}
+
 function buildDescription({
   message,
   kind,
   user,
   workspace,
+  reference,
 }: {
   message: string;
   kind: FeedbackKind;
   user: { email: string; firstName?: string | null; lastName?: string | null };
   workspace: { id: string; name: string };
+  reference: FeedbackReference | null;
 }) {
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
   const submittedBy = name ? `${name} <${user.email}>` : user.email;
@@ -170,6 +255,7 @@ function buildDescription({
     `User email: ${user.email}`,
     `Workspace: ${workspace.name} (${workspace.id})`,
     `Type: ${kind}`,
+    ...(reference ? referenceLines(reference) : []),
   ].join("\n");
 }
 
