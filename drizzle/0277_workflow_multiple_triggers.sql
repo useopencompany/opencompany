@@ -25,15 +25,20 @@ SET automation_triggers = CASE
     )
   )
   ELSE '[]'::jsonb
-END;--> statement-breakpoint
+END
+WHERE automation_triggers = '[]'::jsonb;--> statement-breakpoint
 
 ALTER TABLE "goat"."workflow_schedule_runs" ADD COLUMN IF NOT EXISTS "trigger_id" text DEFAULT 'legacy' NOT NULL;--> statement-breakpoint
-UPDATE goat.workflow_schedule_runs SET trigger_id = 'trigger-' || workflow_id;--> statement-breakpoint
+UPDATE goat.workflow_schedule_runs
+SET trigger_id = 'trigger-' || workflow_id
+WHERE trigger_id = 'legacy';--> statement-breakpoint
 DROP INDEX IF EXISTS "goat"."goat_workflow_schedule_runs_workflow_for_idx";--> statement-breakpoint
 CREATE UNIQUE INDEX "goat_workflow_schedule_runs_workflow_for_idx" ON "goat"."workflow_schedule_runs" USING btree ("workflow_id", "trigger_id", "scheduled_for");--> statement-breakpoint
 
 ALTER TABLE "goat"."workflow_event_runs" ADD COLUMN IF NOT EXISTS "trigger_id" text DEFAULT 'legacy' NOT NULL;--> statement-breakpoint
-UPDATE goat.workflow_event_runs SET trigger_id = 'trigger-' || workflow_id;--> statement-breakpoint
+UPDATE goat.workflow_event_runs
+SET trigger_id = 'trigger-' || workflow_id
+WHERE trigger_id = 'legacy';--> statement-breakpoint
 DROP INDEX IF EXISTS "goat"."opencompany_workflow_event_runs_workflow_delivery_idx";--> statement-breakpoint
 CREATE UNIQUE INDEX "opencompany_workflow_event_runs_workflow_delivery_idx" ON "goat"."workflow_event_runs" USING btree ("workflow_id", "trigger_id", "provider", "delivery_id");--> statement-breakpoint
 
