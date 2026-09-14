@@ -99,6 +99,7 @@ export function pluginAccountsFromState(
     config.connectionProvider === "render" ||
     config.connectionProvider === "vercel" ||
     config.connectionProvider === "signoz" ||
+    config.connectionProvider === "dash0" ||
     config.connectionProvider === "slack" ||
     config.connectionProvider === "stripe" ||
     config.connectionProvider === "x_account"

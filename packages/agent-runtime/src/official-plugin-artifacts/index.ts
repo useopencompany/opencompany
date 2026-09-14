@@ -3,6 +3,7 @@
 import artifact1 from "./attio.json";
 import artifact2 from "./betterstack.json";
 import artifact0 from "./convex.json";
+import artifact21 from "./dash0.json";
 import artifact3 from "./fathom.json";
 import artifact4 from "./github.json";
 import artifact5 from "./gmail.json";
@@ -20,13 +21,13 @@ import artifact16 from "./notion.json";
 import artifact17 from "./posthog.json";
 import artifact19 from "./render.json";
 import artifact18 from "./resend.json";
-import artifact21 from "./signoz.json";
-import artifact22 from "./slack.json";
-import artifact24 from "./stripe.json";
-import artifact23 from "./supabase.json";
+import artifact22 from "./signoz.json";
+import artifact23 from "./slack.json";
+import artifact25 from "./stripe.json";
+import artifact24 from "./supabase.json";
 import artifact20 from "./vercel.json";
-import artifact25 from "./x.json";
-import artifact26 from "./yc-advise.json";
+import artifact26 from "./x.json";
+import artifact27 from "./yc-advise.json";
 
 export const OFFICIAL_PLUGIN_ARTIFACTS = {
   convex: artifact0,
@@ -50,10 +51,11 @@ export const OFFICIAL_PLUGIN_ARTIFACTS = {
   resend: artifact18,
   render: artifact19,
   vercel: artifact20,
-  signoz: artifact21,
-  slack: artifact22,
-  supabase: artifact23,
-  stripe: artifact24,
-  x: artifact25,
-  "yc-advise": artifact26,
+  dash0: artifact21,
+  signoz: artifact22,
+  slack: artifact23,
+  supabase: artifact24,
+  stripe: artifact25,
+  x: artifact26,
+  "yc-advise": artifact27,
 };

@@ -12,6 +12,12 @@ import {
   verifyBetterStackMcpState,
 } from "@opencompany/agent/integrations/betterstack-mcp";
 import {
+  appendDash0McpStatus,
+  completeDash0McpOAuth,
+  startDash0McpOAuth,
+  verifyDash0McpState,
+} from "@opencompany/agent/integrations/dash0-mcp";
+import {
   appendFathomMcpStatus,
   completeFathomMcpOAuth,
   startFathomMcpOAuth,
@@ -119,6 +125,7 @@ export type McpOAuthProvider =
   | "betterstack"
   | "fathom"
   | "signoz"
+  | "dash0"
   | "vercel";
 
 // Provider ingress composition for the remote-MCP connectors. Each
@@ -167,6 +174,13 @@ const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
     verifyState: verifySigNozMcpState,
     appendStatus: appendSigNozMcpStatus,
     deniedReason: "signoz_denied",
+  },
+  dash0: {
+    start: startDash0McpOAuth,
+    complete: completeDash0McpOAuth,
+    verifyState: verifyDash0McpState,
+    appendStatus: appendDash0McpStatus,
+    deniedReason: "dash0_denied",
   },
   vercel: {
     start: startVercelMcpOAuth,

@@ -285,6 +285,7 @@ export type PersonalAccountProvider =
   | "render"
   | "vercel"
   | "signoz"
+  | "dash0"
   | "latitude"
   | "neon"
   | "notion"
@@ -379,6 +380,7 @@ export function personalAccountsFromRows(
     render: [],
     vercel: [],
     signoz: [],
+    dash0: [],
     latitude: [],
     neon: [],
     notion: [],
@@ -444,6 +446,7 @@ export function personalAccountsFromRows(
       row.provider === "render" ||
       row.provider === "vercel" ||
       row.provider === "signoz" ||
+      row.provider === "dash0" ||
       row.provider === "latitude" ||
       row.provider === "neon" ||
       row.provider === "notion" ||

@@ -318,6 +318,7 @@ describe("Electric read models", () => {
       "render",
       "vercel",
       "signoz",
+      "dash0",
       "stripe",
       "latitude",
       "posthog",
