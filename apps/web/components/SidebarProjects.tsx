@@ -307,9 +307,9 @@ export function SidebarProjects({
     expandSection();
   };
 
+  // The folder list ends in rows that look like Recents' rows, so the section carries the same
+  // breathing room before the next one as the rest of the sidebar and reads as its own group.
   return (
-    // The folder list ends in rows that look like Recents' rows, so it needs the same breathing
-    // room between sections as the rest of the sidebar to read as a separate group.
     <section aria-label="Projects" className="pb-4">
       <SidebarSectionHeader
         label="Projects"
