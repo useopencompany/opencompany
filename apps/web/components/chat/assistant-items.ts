@@ -23,7 +23,9 @@ import {
   CODEX_WEB_SEARCH_TOOL_NAME,
   DELETE_TASK_SCHEDULE_TOOL_NAME,
   EDIT_TASK_SCHEDULE_TOOL_NAME,
+  LEGACY_SLACK_BOT_TOOL_NAME,
   SCHEDULE_TASK_TOOL_NAME,
+  SLACK_BOT_TOOL_NAME,
   START_TASK_TOOL_NAME,
   START_TASK_TOOL_PART_TYPE,
   START_WORKFLOW_TOOL_NAME,
@@ -431,6 +433,7 @@ export function toolLabel(name: string) {
   if (name === SCHEDULE_TASK_TOOL_NAME) return "Recurring task";
   if (name === EDIT_TASK_SCHEDULE_TOOL_NAME) return "Edit routine";
   if (name === DELETE_TASK_SCHEDULE_TOOL_NAME) return "Delete routine";
+  if (name === SLACK_BOT_TOOL_NAME || name === LEGACY_SLACK_BOT_TOOL_NAME) return "Slack bot";
   if (name === WEB_FETCH_TOOL_NAME) return "Web Fetch";
   if (name === WEB_SEARCH_TOOL_NAME) return "Web Search";
   if (name === "browser_open") return "Open page";
@@ -489,6 +492,11 @@ export function toolDetail(
   }
   if (name === EDIT_TASK_SCHEDULE_TOOL_NAME || name === DELETE_TASK_SCHEDULE_TOOL_NAME) {
     return taskScheduleMutationToolDetail(part);
+  }
+  if (name === SLACK_BOT_TOOL_NAME || name === LEGACY_SLACK_BOT_TOOL_NAME) {
+    // The destination is what a reader checks; the message body is already in the transcript.
+    const channel = isRecord(part.input) ? readString(part.input.channel) : null;
+    return channel ? truncateToolPreview(channel) : formatToolInput(part.input);
   }
   if (name === USE_ACTION_TOOL_NAME) {
     return actionToolDetail(part);
