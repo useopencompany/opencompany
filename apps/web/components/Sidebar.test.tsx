@@ -327,8 +327,11 @@ describe("Sidebar", () => {
 
     const plugins = screen.getByRole("link", { name: "Plugins" });
     expect(plugins).toHaveAttribute("href", "/settings/plugins");
+    const skills = screen.getByRole("link", { name: "Skills" });
+    expect(skills).toHaveAttribute("href", "/settings/skills");
     const feedback = screen.getByRole("button", { name: "Feedback" });
-    expect(plugins.nextElementSibling).toBe(feedback);
+    expect(plugins.nextElementSibling).toBe(skills);
+    expect(skills.nextElementSibling).toBe(feedback);
     expect(feedback.nextElementSibling).toBe(account);
     expect(screen.queryByRole("link", { name: "Changelog" })).not.toBeInTheDocument();
   });
@@ -649,6 +652,14 @@ describe("Sidebar", () => {
     render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
     expect(screen.getByRole("link", { name: "Plugins" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("marks Skills active throughout skill settings", () => {
+    pathnameMock.value = "/settings/skills/weekly-report";
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.getByRole("link", { name: "Skills" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Plugins" })).not.toHaveAttribute("aria-current");
   });
 
   it("keeps the wiki visible and hides legacy Brain navigation by default", async () => {

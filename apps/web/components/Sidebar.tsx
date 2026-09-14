@@ -21,6 +21,7 @@ import {
   Puzzle,
   ScrollText,
   Settings,
+  Sparkles,
   Workflow,
 } from "lucide-react";
 import Link from "next/link";
@@ -174,6 +175,7 @@ export function Sidebar({
   const activeWikiSlug = activeWikiSlugFromPathname(pathname);
   const pluginsActive =
     pathname === "/settings/plugins" || pathname.startsWith("/settings/plugins/");
+  const skillsActive = pathname === "/settings/skills" || pathname.startsWith("/settings/skills/");
 
   return (
     <aside
@@ -286,6 +288,12 @@ export function Sidebar({
             icon={Puzzle}
             label="Plugins"
             active={pluginsActive}
+          />
+          <SidebarNavRow
+            href="/settings/skills"
+            icon={Sparkles}
+            label="Skills"
+            active={skillsActive}
           />
           <SidebarFeedback />
           <SidebarAccountMenu />
