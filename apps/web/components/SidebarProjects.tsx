@@ -6,9 +6,11 @@ import { toast } from "@opencompany/ui/components/sonner";
 import { Folder, FolderOpen, MoreHorizontal, PenLine, Plus, SquarePen, Trash2 } from "lucide-react";
 import Link from "next/link";
 import {
+  createContext,
   type DragEvent,
   type ReactNode,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -64,6 +66,21 @@ export function draggedConversationId(event: DragEvent<HTMLElement>) {
 
 export function isConversationDrag(event: DragEvent<HTMLElement>) {
   return event.dataTransfer.types.includes(CONVERSATION_DRAG_TYPE);
+}
+
+/**
+ * Left padding that lines a row's content up with its folder's name -- the folder icon's width
+ * plus the gap after it, on top of the padding every row already carries. Rows keep their
+ * full-width hover and active background so scanning down the list stays a straight edge; only
+ * what the reader reads moves in under the folder.
+ */
+export const SIDEBAR_NESTED_ROW_PADDING_CLASSNAME = "pl-[30px]";
+
+const NestedSidebarRowContext = createContext(false);
+
+/** True for rows rendered inside a project folder, which indent to the folder's name. */
+export function useNestedSidebarRow() {
+  return useContext(NestedSidebarRowContext);
 }
 
 const PROJECTS_LIST_ID = "sidebar-projects";
@@ -291,7 +308,9 @@ export function SidebarProjects({
   };
 
   return (
-    <section aria-label="Projects" className="pb-2">
+    // The folder list ends in rows that look like Recents' rows, so it needs the same breathing
+    // room between sections as the rest of the sidebar to read as a separate group.
+    <section aria-label="Projects" className="pb-4">
       <SidebarSectionHeader
         label="Projects"
         collapsed={sectionCollapsed}
@@ -552,13 +571,19 @@ function ProjectFolder({
         </div>
       )}
       {collapsed ? null : (
-        <div id={listId} className="flex flex-col gap-px">
-          {items.length === 0 ? (
-            <p className="py-[5px] pl-[30px] text-[12.5px] leading-4 text-ink-faint">No chats</p>
-          ) : (
-            items.map(renderItem)
-          )}
-        </div>
+        <NestedSidebarRowContext.Provider value={true}>
+          <div id={listId} className="flex flex-col gap-px">
+            {items.length === 0 ? (
+              <p
+                className={`py-[5px] text-[12.5px] leading-4 text-ink-faint ${SIDEBAR_NESTED_ROW_PADDING_CLASSNAME}`}
+              >
+                No chats
+              </p>
+            ) : (
+              items.map(renderItem)
+            )}
+          </div>
+        </NestedSidebarRowContext.Provider>
       )}
     </div>
   );
