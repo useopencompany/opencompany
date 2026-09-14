@@ -124,7 +124,6 @@ describe("API authentication", () => {
         {
           workspaceId: "workspace_1",
           role: "admin",
-          taskSpawningEnabled: true,
           legacyBrainEnabled: true,
         },
       ],
@@ -203,13 +202,12 @@ describe("API authentication", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it("withholds Workflow and schedule permissions while Tasks & Workflows is disabled", async () => {
+  it("grants Workflow and schedule permissions to every workspace member", async () => {
     const execute = vi.fn(async (_query: SQL) => ({
       rows: [
         {
           workspaceId: "workspace_1",
           role: "member",
-          taskSpawningEnabled: false,
           legacyBrainEnabled: false,
         },
       ],
@@ -238,6 +236,10 @@ describe("API authentication", () => {
       "wiki:read",
       "wiki:write",
       "skill:write",
+      "workflow:read",
+      "workflow:write",
+      "schedule:read",
+      "schedule:write",
     ]);
   });
 
@@ -247,7 +249,6 @@ describe("API authentication", () => {
         {
           workspaceId: "workspace_mobile",
           role: "member",
-          taskSpawningEnabled: false,
           legacyBrainEnabled: false,
         },
       ],
@@ -399,7 +400,6 @@ describe("API authentication", () => {
         {
           workspaceId: "workspace_1",
           role: "admin",
-          taskSpawningEnabled: false,
           legacyBrainEnabled: false,
         },
       ],
@@ -467,7 +467,6 @@ describe("API authentication", () => {
         {
           workspaceId: "workspace_1",
           role: "member",
-          taskSpawningEnabled: true,
           legacyBrainEnabled: false,
         },
       ],
@@ -514,7 +513,6 @@ describe("API authentication", () => {
         {
           workspaceId: "workspace_1",
           role: "member",
-          taskSpawningEnabled: false,
           legacyBrainEnabled: false,
         },
       ],

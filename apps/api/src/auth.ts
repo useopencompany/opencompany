@@ -258,7 +258,6 @@ async function resolveLocalActor(
     SELECT
       member.workspace_id AS "workspaceId",
       member.role,
-      actor_user.task_spawning_enabled AS "taskSpawningEnabled",
       workspace.legacy_brain_enabled AS "legacyBrainEnabled"
     FROM goat.users AS actor_user
     JOIN goat.workspace_members AS member
@@ -286,7 +285,6 @@ async function resolveLocalActor(
   const row = rowsFromExecute<{
     workspaceId: string;
     role: string;
-    taskSpawningEnabled: boolean;
     legacyBrainEnabled: boolean;
   }>(result)[0];
   if (!row) {
@@ -306,13 +304,9 @@ async function resolveLocalActor(
   };
 }
 
-// Role- and flag-derived permission set, the single source of truth shared by
-// the request authenticator and the internal service-actor resolver.
-function actorPermissions(row: {
-  role: string;
-  legacyBrainEnabled: boolean;
-  taskSpawningEnabled: boolean;
-}): string[] {
+// Role-derived permission set, the single source of truth shared by the request
+// authenticator and the internal service-actor resolver.
+function actorPermissions(row: { role: string; legacyBrainEnabled: boolean }): string[] {
   return [
     CHAT_READ_PERMISSION,
     CHAT_WRITE_PERMISSION,
@@ -324,14 +318,10 @@ function actorPermissions(row: {
     ...(row.legacyBrainEnabled ? [BRAIN_READ_PERMISSION] : []),
     SKILL_WRITE_PERMISSION,
     ...(row.role === "admin" && row.legacyBrainEnabled ? [BRAIN_WRITE_PERMISSION] : []),
-    ...(row.taskSpawningEnabled
-      ? [
-          WORKFLOW_READ_PERMISSION,
-          WORKFLOW_WRITE_PERMISSION,
-          SCHEDULE_READ_PERMISSION,
-          SCHEDULE_WRITE_PERMISSION,
-        ]
-      : []),
+    WORKFLOW_READ_PERMISSION,
+    WORKFLOW_WRITE_PERMISSION,
+    SCHEDULE_READ_PERMISSION,
+    SCHEDULE_WRITE_PERMISSION,
   ];
 }
 
@@ -349,7 +339,6 @@ export async function resolveWikiServiceActor(
     SELECT
       member.workspace_id AS "workspaceId",
       member.role,
-      actor_user.task_spawning_enabled AS "taskSpawningEnabled",
       workspace.legacy_brain_enabled AS "legacyBrainEnabled"
     FROM goat.users AS actor_user
     JOIN goat.workspace_members AS member
@@ -363,7 +352,6 @@ export async function resolveWikiServiceActor(
   const row = rowsFromExecute<{
     workspaceId: string;
     role: string;
-    taskSpawningEnabled: boolean;
     legacyBrainEnabled: boolean;
   }>(result)[0];
   if (!row) {

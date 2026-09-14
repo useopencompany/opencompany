@@ -4693,7 +4693,10 @@
             "type": "boolean"
           },
           "taskSpawningEnabled": {
-            "type": "boolean"
+            "type": "boolean",
+            "enum": [
+              true
+            ]
           },
           "autoModelRoutingEnabled": {
             "type": "boolean"
@@ -10720,7 +10723,10 @@
             "maxLength": 100
           },
           "taskSpawningEnabled": {
-            "type": "boolean"
+            "type": "boolean",
+            "enum": [
+              true
+            ]
           },
           "wikiEnabled": {
             "type": "boolean",

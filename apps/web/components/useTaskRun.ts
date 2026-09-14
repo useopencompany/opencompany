@@ -18,7 +18,7 @@ import { buildHarnessRun, type HarnessRunViewModel } from "@/lib/task-harness-ru
  * authoritative record (canonical, or pre-cutover history) replaces it when the fetch lands.
  */
 export function useTaskRun(taskId: string) {
-  const { featureFlags, tasks, taskRows } = useAppData();
+  const { tasks, taskRows } = useAppData();
   const [serverState, setServerState] = useState<{
     taskId: string;
     run: HarnessRunViewModel | null;
@@ -38,7 +38,6 @@ export function useTaskRun(taskId: string) {
   );
 
   useEffect(() => {
-    if (!featureFlags.taskSpawning) return;
     const controller = new AbortController();
     void getHeadlessTask(taskId, {
       fetch: (input, init) => fetch(input, { ...init, signal: controller.signal }),
@@ -94,7 +93,7 @@ export function useTaskRun(taskId: string) {
         if (error instanceof DOMException && error.name === "AbortError") return;
       });
     return () => controller.abort();
-  }, [featureFlags.taskSpawning, taskId]);
+  }, [taskId]);
 
   const currentServerState = serverState?.taskId === taskId ? serverState : null;
   if (currentServerState?.run) return currentServerState.run;

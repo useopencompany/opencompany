@@ -1,10 +1,7 @@
 export const TASK_TEST_BASE_SCHEMA = `
   CREATE SCHEMA goat;
   CREATE SEQUENCE goat.task_display_id_seq;
-  CREATE TABLE goat.users (
-    workos_user_id text PRIMARY KEY,
-    task_spawning_enabled boolean NOT NULL DEFAULT false
-  );
+  CREATE TABLE goat.users (workos_user_id text PRIMARY KEY);
   CREATE TABLE goat.workspaces (id text PRIMARY KEY);
   CREATE TABLE goat.workspace_members (
     id text PRIMARY KEY,

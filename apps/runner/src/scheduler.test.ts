@@ -60,8 +60,7 @@ describe("sweepDueTaskSchedules", () => {
         CREATE TABLE goat.users (
           workos_user_id text PRIMARY KEY,
           email text NOT NULL,
-          timezone text NOT NULL DEFAULT 'UTC',
-          task_spawning_enabled boolean NOT NULL DEFAULT false
+          timezone text NOT NULL DEFAULT 'UTC'
         );
 
         CREATE TABLE goat.task_schedules (
@@ -120,8 +119,8 @@ describe("sweepDueTaskSchedules", () => {
       `);
       await pg.query(
         `
-          INSERT INTO goat.users (workos_user_id, email, timezone, task_spawning_enabled)
-          VALUES ('user_1', 'founder@example.com', 'Europe/Amsterdam', true);
+          INSERT INTO goat.users (workos_user_id, email, timezone)
+          VALUES ('user_1', 'founder@example.com', 'Europe/Amsterdam');
         `,
       );
       await pg.query(`
@@ -263,7 +262,6 @@ describe("sweepDueTaskSchedules", () => {
         trigger: "schedule",
       }),
     );
-    expect(sqlTextFromExecuteCall(execute, 0)).toContain("task_spawning_enabled");
     expect(sqlTextFromExecuteCall(execute, 0)).toContain("schedule.workspace_id IS NOT NULL");
     expect(sqlTextFromExecuteCall(execute, 0)).toContain(
       "member.workspace_id = schedule.workspace_id",

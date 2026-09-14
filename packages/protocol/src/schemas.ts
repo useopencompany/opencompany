@@ -3878,7 +3878,8 @@ export const IdentityUserSchema = z
     avatarUrl: z.string().max(4_096).nullable(),
     timezone: z.string().min(1).max(100),
     botsEnabled: z.boolean().optional(),
-    taskSpawningEnabled: z.boolean(),
+    /** @deprecated Tasks & Workflows is always enabled. */
+    taskSpawningEnabled: z.literal(true),
     autoModelRoutingEnabled: z.boolean(),
     chatCapabilitiesBetaEnabled: z.boolean(),
     reviewInboxEnabled: z.boolean(),
@@ -3943,7 +3944,8 @@ export const UserPreferencesSchema = z
   .object({
     botsEnabled: z.boolean(),
     timezone: z.string().min(1).max(100),
-    taskSpawningEnabled: z.boolean(),
+    /** @deprecated Tasks & Workflows is always enabled. */
+    taskSpawningEnabled: z.literal(true),
     /** @deprecated Wiki is always enabled. */
     wikiEnabled: z.literal(true),
     taskViewMode: TaskViewModeSchema,
@@ -3961,6 +3963,7 @@ export const UpdateUserPreferencesBodySchema = z
   .object({
     botsEnabled: z.boolean().optional(),
     timezone: z.string().min(1).max(100).optional(),
+    /** @deprecated Accepted for compatibility and ignored; Tasks & Workflows is always enabled. */
     taskSpawningEnabled: z.boolean().optional(),
     /** @deprecated Accepted for compatibility and ignored; Wiki is always enabled. */
     wikiEnabled: z.boolean().optional(),

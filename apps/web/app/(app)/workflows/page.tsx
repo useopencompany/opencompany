@@ -1,4 +1,4 @@
-import { TasksWorkflowsDisabledRoute, WorkflowsRoute } from "@/components/Routes";
+import { WorkflowsRoute } from "@/components/Routes";
 import { currentUser } from "@/lib/auth";
 import { listHeadlessWorkflows } from "@/lib/headless-automation-server";
 import { listHeadlessPlugins } from "@/lib/headless-knowledge-server";
@@ -8,9 +8,6 @@ import { listWorkspaceMembersAction, type WorkspaceMemberView } from "@/lib/work
 
 export default async function WorkflowsPage() {
   const context = await currentUser();
-  if (!context.user.taskSpawningEnabled) {
-    return <TasksWorkflowsDisabledRoute />;
-  }
 
   // The API only returns company workflows plus this user's personal ones, so every row here is
   // one they can open and edit. Owner names only decorate that list, so a workspace-settings

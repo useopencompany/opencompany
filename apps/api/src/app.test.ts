@@ -3505,7 +3505,7 @@ describe("canonical Hono API", () => {
       const updatePreferences = vi.fn(async () => ({
         timezone: "UTC",
         botsEnabled,
-        taskSpawningEnabled: false,
+        taskSpawningEnabled: true as const,
         wikiEnabled: true as const,
         taskViewMode: "board" as const,
         taskTimeRange: "7d" as const,
@@ -3535,7 +3535,7 @@ describe("canonical Hono API", () => {
     const updatePreferences = vi.fn(async () => ({
       timezone: "Europe/Berlin",
       botsEnabled: false,
-      taskSpawningEnabled: true,
+      taskSpawningEnabled: true as const,
       wikiEnabled: true as const,
       taskViewMode: "list" as const,
       taskTimeRange: "24h" as const,

@@ -5853,7 +5853,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
       {
         data: {
           timezone: "UTC",
-          taskSpawningEnabled: false,
+          taskSpawningEnabled: true as const,
           wikiEnabled: true as const,
           taskViewMode: "board" as const,
           taskTimeRange: "7d" as const,
@@ -6403,7 +6403,7 @@ function contractIdentity() {
       lastName: "Owner",
       avatarUrl: null,
       timezone: "UTC",
-      taskSpawningEnabled: true,
+      taskSpawningEnabled: true as const,
       autoModelRoutingEnabled: false,
       chatCapabilitiesBetaEnabled: false,
       reviewInboxEnabled: false,

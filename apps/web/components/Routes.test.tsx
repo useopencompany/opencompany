@@ -35,7 +35,6 @@ const appDataMock = vi.hoisted(() => ({
     workspaceMembers: [],
     featureFlags: {
       bots: false,
-      taskSpawning: false,
       autoModelRouting: false,
       legacyBrain: true,
       reviewInbox: false,
@@ -49,7 +48,6 @@ const appDataMock = vi.hoisted(() => ({
 
 const userPreferencesMock = vi.hoisted(() => ({
   updateBotsAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
-  updateTaskSpawningAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateAutoModelRoutingAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateReviewInboxAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateSidebarProjectsAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
@@ -177,7 +175,6 @@ vi.mock("@/components/InferenceSettingsPanel", () => ({
 
 vi.mock("@/lib/user-preferences", () => ({
   updateBotsAction: userPreferencesMock.updateBotsAction,
-  updateTaskSpawningAction: userPreferencesMock.updateTaskSpawningAction,
   updateAutoModelRoutingAction: userPreferencesMock.updateAutoModelRoutingAction,
   updateReviewInboxAction: userPreferencesMock.updateReviewInboxAction,
   updateSidebarProjectsAction: userPreferencesMock.updateSidebarProjectsAction,
@@ -544,9 +541,7 @@ describe("SettingsRoute", () => {
     routerMock.refresh.mockReset();
     userPreferencesMock.updateBotsAction.mockReset();
     appDataMock.value.featureFlags.bots = false;
-    userPreferencesMock.updateTaskSpawningAction.mockClear();
     userPreferencesMock.updateAutoModelRoutingAction.mockClear();
-    appDataMock.value.featureFlags.taskSpawning = false;
     appDataMock.value.featureFlags.autoModelRouting = false;
   });
 
@@ -599,17 +594,10 @@ describe("SettingsRoute", () => {
     expect(screen.getByTestId("inference-settings-panel")).toBeInTheDocument();
   });
 
-  it("shows the Tasks & Workflows switch off by default and persists opt-in", async () => {
-    const user = userEvent.setup();
+  it("no longer offers Tasks & Workflows as a beta opt-in", () => {
     render(<PreferencesSettingsRoute />);
 
-    const toggle = screen.getByRole("switch", { name: "Tasks & Workflows" });
-    expect(toggle).toHaveAttribute("aria-checked", "false");
-
-    await user.click(toggle);
-
-    expect(userPreferencesMock.updateTaskSpawningAction).toHaveBeenCalledWith(true);
-    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+    expect(screen.queryByRole("switch", { name: "Tasks & Workflows" })).not.toBeInTheDocument();
   });
 
   it("shows the For review switch off by default and persists opt-in", async () => {
@@ -689,13 +677,13 @@ describe("SettingsRoute", () => {
   });
 
   it("shows an error when a preference update is rejected", async () => {
-    userPreferencesMock.updateTaskSpawningAction.mockRejectedValueOnce(
+    userPreferencesMock.updateReviewInboxAction.mockRejectedValueOnce(
       new Error("database unavailable"),
     );
     const user = userEvent.setup();
     render(<PreferencesSettingsRoute />);
 
-    await user.click(screen.getByRole("switch", { name: "Tasks & Workflows" }));
+    await user.click(screen.getByRole("switch", { name: "For review" }));
 
     expect(await screen.findByText("Could not update this preference.")).toBeInTheDocument();
     expect(routerMock.refresh).not.toHaveBeenCalled();

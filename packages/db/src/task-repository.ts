@@ -357,7 +357,7 @@ export class PostgresTaskRepository implements TaskRepository {
     const requestHash = hashTaskCommand(input.command);
     const [preflight] = await this.rows<TaskCreateRow>(sql`
       WITH actor_scope AS MATERIALIZED (
-        SELECT "user".task_spawning_enabled AS "featureEnabled"
+        SELECT "user".workos_user_id
         FROM goat.users AS "user"
         JOIN goat.workspace_members AS member
           ON member.user_workos_id = "user".workos_user_id
@@ -366,7 +366,6 @@ export class PostgresTaskRepository implements TaskRepository {
       )
       SELECT
         EXISTS (SELECT 1 FROM actor_scope) AS authorized,
-        COALESCE((SELECT "featureEnabled" FROM actor_scope), false) AS "featureEnabled",
         reservation.command_id AS "commandId",
         reservation.request_hash AS "requestHash",
         reservation.task_id AS "taskId",
@@ -420,9 +419,6 @@ export class PostgresTaskRepository implements TaskRepository {
     }
     if (preflight.commandId) {
       return taskCreateResult(preflight, requestHash);
-    }
-    if (!preflight.featureEnabled) {
-      throw new CoreError("forbidden", "Tasks & Workflows is disabled for this actor.");
     }
 
     const resolvedAttachments =
@@ -482,9 +478,7 @@ export class PostgresTaskRepository implements TaskRepository {
     try {
       rows = await this.rows<TaskCreateRow>(sql`
         WITH actor_scope AS MATERIALIZED (
-          SELECT
-            "user".workos_user_id,
-            "user".task_spawning_enabled AS feature_enabled
+          SELECT "user".workos_user_id
           FROM goat.users AS "user"
           JOIN goat.workspace_members AS member
             ON member.user_workos_id = "user".workos_user_id
@@ -498,13 +492,6 @@ export class PostgresTaskRepository implements TaskRepository {
           WHERE plugin.workspace_id = ${input.actor.workspaceId}
             AND plugin.status = 'enabled'
             AND plugin.owner_user_id = ${input.actor.userId}
-        ),
-        prior AS MATERIALIZED (
-          SELECT *
-          FROM goat.task_command_idempotency
-          WHERE user_workos_id = ${input.actor.userId}
-            AND workspace_id = ${input.actor.workspaceId}
-            AND idempotency_key = ${input.command.idempotencyKey}
         ),
         locked_attachment_commands AS MATERIALIZED (
           -- Completion and cleanup also lock keyed commands before their upload row.
@@ -537,7 +524,6 @@ export class PostgresTaskRepository implements TaskRepository {
             ${input.command.idempotencyKey}, ${requestHash}, ${taskId}, ${conversationId},
             ${messageId}, ${assistantMessageId}, ${runtimeId}, ${runId}, ${now}, ${now}
           FROM actor_scope
-          WHERE actor_scope.feature_enabled = true OR EXISTS (SELECT 1 FROM prior)
           ON CONFLICT (user_workos_id, workspace_id, idempotency_key)
           DO UPDATE SET touched_at = EXCLUDED.touched_at
           RETURNING *
@@ -726,7 +712,6 @@ export class PostgresTaskRepository implements TaskRepository {
         )
         SELECT
           EXISTS (SELECT 1 FROM actor_scope) AS authorized,
-          COALESCE((SELECT feature_enabled FROM actor_scope), false) AS "featureEnabled",
           reservation.command_id AS "commandId",
           reservation.request_hash AS "requestHash",
           reservation.task_id AS "taskId",
@@ -780,9 +765,6 @@ export class PostgresTaskRepository implements TaskRepository {
     const [row] = rows;
     if (!row?.authorized) throw new CoreError("not_found", "Workspace membership not found.");
     if (!row.commandId) {
-      if (!row.featureEnabled) {
-        throw new CoreError("forbidden", "Tasks & Workflows is disabled for this actor.");
-      }
       throw new Error("The Task command reservation was not materialized.");
     }
     if (row.replayed && !row.id) {
@@ -1365,7 +1347,6 @@ type TaskRow = {
 
 type TaskCreateRow = Omit<TaskRow, "conversationId"> & {
   authorized: boolean;
-  featureEnabled: boolean;
   commandId: string | null;
   requestHash: string | null;
   taskId: string | null;
