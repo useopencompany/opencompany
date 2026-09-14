@@ -158,6 +158,8 @@
     "smol-toml@^1": "1.8.0",
     "tar": "7.5.22",
     "undici@^5": "6.28.0",
+    "undici@7.24.7": "7.29.0",
+    "uuid@^7": "11.1.1",
     "uuid@^9": "11.1.1"
   },
   "trustedDependencies": [
@@ -176,5 +178,9 @@
     "turbo": "^2.10.12",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
+  },
+  "patchedDependencies": {
+    "metro@0.84.4": "patches/metro@0.84.4.patch",
+    "metro-runtime@0.84.4": "patches/metro-runtime@0.84.4.patch"
   }
 }
