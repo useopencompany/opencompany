@@ -165,6 +165,7 @@ import {
   SetWikiAccessBodySchema,
   SetWikiSourceEnabledBodySchema,
   SetWorkspaceCapabilityBodySchema,
+  SetWorkspaceSandboxSizeBodySchema,
   SkillArchiveEnvelopeSchema,
   SkillCatalogEnvelopeSchema,
   SkillFileChunkEnvelopeSchema,
@@ -228,6 +229,7 @@ import {
   WorkspaceCapabilitySettingsEnvelopeSchema,
   WorkspaceCommandEnvelopeSchema,
   WorkspaceRenameEnvelopeSchema,
+  WorkspaceSandboxSizeEnvelopeSchema,
   WorkspaceSettingsEnvelopeSchema,
   WorkspaceSkillNameSchema,
 } from "./schemas";
@@ -2965,6 +2967,41 @@ export const renameWorkspaceRoute = createRoute({
   },
 });
 
+export const getWorkspaceSandboxSizeRoute = createRoute({
+  method: "get",
+  path: "/v1/workspace/sandbox-size",
+  tags: ["Workspaces"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Machine size new cloud coding sandboxes start on in the active workspace.",
+      content: { "application/json": { schema: WorkspaceSandboxSizeEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const setWorkspaceSandboxSizeRoute = createRoute({
+  method: "put",
+  path: "/v1/workspace/sandbox-size",
+  tags: ["Workspaces"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: SetWorkspaceSandboxSizeBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description:
+        "Workspace sandbox size updated. Admin only. Existing sessions keep the size they started with.",
+      content: { "application/json": { schema: WorkspaceSandboxSizeEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const inviteWorkspaceMemberRoute = createRoute({
   method: "post",
   path: "/v1/workspace/invitations",
@@ -4046,6 +4083,8 @@ export type V1RouteHandlers = {
   syncIdentity: RouteHandler<typeof syncIdentityRoute>;
   getWorkspaceSettings: RouteHandler<typeof getWorkspaceSettingsRoute>;
   renameWorkspace: RouteHandler<typeof renameWorkspaceRoute>;
+  getWorkspaceSandboxSize: RouteHandler<typeof getWorkspaceSandboxSizeRoute>;
+  setWorkspaceSandboxSize: RouteHandler<typeof setWorkspaceSandboxSizeRoute>;
   inviteWorkspaceMember: RouteHandler<typeof inviteWorkspaceMemberRoute>;
   revokeWorkspaceInvitation: RouteHandler<typeof revokeWorkspaceInvitationRoute>;
   removeWorkspaceMember: RouteHandler<typeof removeWorkspaceMemberRoute>;
@@ -4273,6 +4312,8 @@ export function createV1Router(
       .openapi(syncIdentityRoute, handlers.syncIdentity)
       .openapi(getWorkspaceSettingsRoute, handlers.getWorkspaceSettings)
       .openapi(renameWorkspaceRoute, handlers.renameWorkspace)
+      .openapi(getWorkspaceSandboxSizeRoute, handlers.getWorkspaceSandboxSize)
+      .openapi(setWorkspaceSandboxSizeRoute, handlers.setWorkspaceSandboxSize)
       .openapi(inviteWorkspaceMemberRoute, handlers.inviteWorkspaceMember)
       .openapi(revokeWorkspaceInvitationRoute, handlers.revokeWorkspaceInvitation)
       .openapi(removeWorkspaceMemberRoute, handlers.removeWorkspaceMember)
@@ -5114,6 +5155,8 @@ const contractDocumentHandlers: V1RouteHandlers = {
     ),
   renameWorkspace: (c) =>
     c.json({ data: { id: "workspace_contract", name: "Contract Workspace" }, meta }, 200),
+  getWorkspaceSandboxSize: (c) => c.json({ data: { sandboxSize: "standard" as const }, meta }, 200),
+  setWorkspaceSandboxSize: (c) => c.json({ data: { sandboxSize: "standard" as const }, meta }, 200),
   inviteWorkspaceMember: (c) => c.json({ data: { completed: true as const }, meta }, 201),
   revokeWorkspaceInvitation: (c) => c.json({ data: { completed: true as const }, meta }, 200),
   removeWorkspaceMember: (c) => c.json({ data: { completed: true as const }, meta }, 200),

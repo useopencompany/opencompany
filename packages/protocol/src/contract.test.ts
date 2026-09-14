@@ -223,6 +223,7 @@ describe("v1 protocol contract", () => {
       "/v1/identity",
       "/v1/identity/sync",
       "/v1/workspace",
+      "/v1/workspace/sandbox-size",
       "/v1/workspace/invitations",
       "/v1/workspace/invitations/{invitationId}",
       "/v1/workspace/members/{userId}",

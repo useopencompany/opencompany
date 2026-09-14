@@ -4771,6 +4771,53 @@
         ],
         "additionalProperties": false
       },
+      "WorkspaceSandboxSizeEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "sandboxSize": {
+                "type": "string",
+                "enum": [
+                  "small",
+                  "standard",
+                  "large"
+                ]
+              }
+            },
+            "required": [
+              "sandboxSize"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SetWorkspaceSandboxSizeBody": {
+        "type": "object",
+        "properties": {
+          "sandboxSize": {
+            "type": "string",
+            "enum": [
+              "small",
+              "standard",
+              "large"
+            ]
+          }
+        },
+        "required": [
+          "sandboxSize"
+        ],
+        "additionalProperties": false
+      },
       "WorkspaceCommandEnvelope": {
         "type": "object",
         "properties": {
@@ -17317,6 +17364,88 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/WorkspaceRenameEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/workspace/sandbox-size": {
+      "get": {
+        "tags": [
+          "Workspaces"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Machine size new cloud coding sandboxes start on in the active workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceSandboxSizeEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Workspaces"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetWorkspaceSandboxSizeBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Workspace sandbox size updated. Admin only. Existing sessions keep the size they started with.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceSandboxSizeEnvelope"
                 }
               }
             }

@@ -3623,6 +3623,25 @@ export const WorkspaceRenameEnvelopeSchema = z
   .strict()
   .openapi("WorkspaceRenameEnvelope");
 
+// Machine size for the workspace's cloud coding sandboxes. Mirrors
+// `SANDBOX_SIZES` in @opencompany/core; the wire contract keeps its own literal
+// list so the protocol package stays dependency-free, like
+// ManagedCapabilitySourceSchema above.
+export const SandboxSizeSchema = z.enum(["small", "standard", "large"]);
+
+export const WorkspaceSandboxSizeEnvelopeSchema = z
+  .object({
+    data: z.object({ sandboxSize: SandboxSizeSchema }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("WorkspaceSandboxSizeEnvelope");
+
+export const SetWorkspaceSandboxSizeBodySchema = z
+  .object({ sandboxSize: SandboxSizeSchema })
+  .strict()
+  .openapi("SetWorkspaceSandboxSizeBody");
+
 export const WorkspaceCommandEnvelopeSchema = z
   .object({
     data: z.object({ completed: z.literal(true) }).strict(),

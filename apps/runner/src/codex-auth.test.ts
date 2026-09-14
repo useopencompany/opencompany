@@ -228,7 +228,7 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     openaiCodexApiKey: undefined,
     exaApiKey: "exa",
     browserEnabled: false,
-    codexE2bTemplate: undefined,
+    codexE2bTemplates: { small: undefined, standard: undefined, large: undefined },
     sandboxNamespace: "test",
     codexTimeoutMs: 1_200_000,
     codexModel: "gpt-5.5",
