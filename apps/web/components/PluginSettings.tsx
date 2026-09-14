@@ -451,10 +451,12 @@ export function PluginsSettings({
   plugins,
   canEdit,
   workspaceId,
+  dopplerConnected = false,
 }: {
   plugins: PluginListItemDto[];
   canEdit: boolean;
   workspaceId: string;
+  dopplerConnected?: boolean;
 }) {
   const router = useRouter();
   const { integrations } = useAppData();
@@ -469,8 +471,7 @@ export function PluginsSettings({
     () => new Map(plugins.map((plugin) => [plugin.name.toLocaleLowerCase(), plugin] as const)),
     [plugins],
   );
-  // An enabled MCP plugin without its account connection cannot run, so the catalog must not
-  // claim it is "Enabled". Skills-only plugins never need a connection.
+  // Connection-backed plugins need an account before they can be used.
   const pluginsMissingConnection = useMemo(() => {
     const names = new Set<string>();
     for (const config of Object.values(OFFICIAL_MCP_PLUGINS)) {
@@ -479,8 +480,11 @@ export function PluginsSettings({
         names.add(config.name);
       }
     }
+    if (installedPlugins.get("doppler")?.status === "enabled" && !dopplerConnected) {
+      names.add("doppler");
+    }
     return names;
-  }, [installedPlugins, integrations]);
+  }, [installedPlugins, integrations, dopplerConnected]);
   const installedConfigs = configs.filter((config) => installedPlugins.has(config.name));
   const pluginsWithUpdates = new Set<OfficialPluginName>();
   for (const config of configs) {
@@ -866,7 +870,7 @@ export function OfficialSkillPluginDetail({
   name,
   canEdit,
 }: {
-  name: OfficialSkillPluginName;
+  name: Exclude<OfficialSkillPluginName, "doppler">;
   canEdit: boolean;
 }) {
   const config = OFFICIAL_SKILL_PLUGINS[name];
@@ -928,9 +932,7 @@ export function OfficialSkillPluginDetail({
             </span>
           </div>
           <p className="mt-1 text-[12.5px] leading-5 text-ink-subtle">
-            {name === "doppler"
-              ? "Doppler is preinstalled in coding sandboxes. Install this plugin, then connect your account."
-              : "Official skills-only plugin. No account connection is required."}
+            Official skills-only plugin. No account connection is required.
           </p>
         </div>
         {canEdit ? (
@@ -1003,14 +1005,12 @@ export function PluginDetail({
   title,
   description,
   officialPluginName,
-  connection,
 }: {
   plugin: PluginInstallationDto;
   canEdit: boolean;
   title?: string;
   description?: string;
   officialPluginName?: OfficialPluginName;
-  connection?: ReactNode;
 }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -1046,7 +1046,6 @@ export function PluginDetail({
       }
       backLink={{ href: "/settings/plugins", label: "Plugins" }}
     >
-      {connection}
       {!canEdit ? (
         <p className="text-[13px] leading-5 text-ink-subtle">
           You need plugin write permission to manage your plugins.

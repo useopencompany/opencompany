@@ -4,6 +4,7 @@ import type {
   PluginRemoteMcpServerDto,
 } from "@opencompany/protocol";
 import type { IntegrationAccountView } from "@/lib/integration-state";
+import { DopplerPluginDetail } from "./DopplerPluginSettings";
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -1621,6 +1622,38 @@ describe("Linear plugin settings", () => {
 
     expect(html).toContain("Linear tool access");
     expect(useLiveQuery).not.toHaveBeenCalled();
+  });
+
+  it("gives Doppler standard package controls and a connection-aware status without the inspector", () => {
+    const dopplerPlugin = { ...plugin, name: "doppler", remoteMcpServers: [], events: [] };
+    const settings = { status: null, statusReason: null, accountName: null, lastValidatedAt: null };
+    const view = render(
+      <DopplerPluginDetail
+        pluginState={{ status: "ready", plugin: dopplerPlugin }}
+        settings={settings}
+      />,
+    );
+    expect(screen.getByRole("heading", { level: 1, name: "Doppler" })).toBeInTheDocument();
+    expect(screen.getByText("Requires connection")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Connect Doppler" })).toHaveLength(1);
+    expect(screen.getByText("Advanced package details").closest("details")).not.toHaveAttribute(
+      "open",
+    );
+    expect(screen.getByRole("button", { name: "Uninstall" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Skills" })).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Passive skills|Executable MCP servers|Collision report/),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Enabled")).not.toBeInTheDocument();
+    view.rerender(
+      <DopplerPluginDetail
+        pluginState={{ status: "ready", plugin: dopplerPlugin }}
+        settings={{ ...settings, status: "connected", accountName: "Demo account" }}
+      />,
+    );
+    expect(screen.getByText("Connected")).toBeInTheDocument();
+    expect(screen.getByText("Demo account")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Disconnect" })).toBeInTheDocument();
   });
 
   it("moves the workspace Infisical connection and fixed permissions onto the plugin page", () => {

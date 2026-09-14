@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "@opencompany/ui/components/button";
-import { Check, Copy, ExternalLink, Loader2 } from "lucide-react";
+import { Check, Copy, ExternalLink, Loader2, Users } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import {
@@ -78,32 +78,19 @@ export function DopplerPluginConnectionForm({
     });
 
   return (
-    <section
-      className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-4"
-      aria-label="Doppler connection"
-    >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-[14px] font-semibold text-ink">Sandbox connection</h2>
-          <p className="mt-1 text-[13px] leading-5 text-ink-subtle">
-            Connect your Doppler account once to use it in your coding sandboxes.
-          </p>
-        </div>
-        <span className="rounded-full bg-surface-muted px-2 py-1 text-[12px] text-ink-subtle">
-          {connected
-            ? "Connected"
-            : settings.status === "needs_reauth"
-              ? "Reconnect needed"
-              : "Not connected"}
-        </span>
+    <section className="flex flex-col gap-3" aria-label="Doppler connection">
+      <div className="flex items-center gap-2">
+        <Users className="size-3.5 text-ink-subtle" />
+        <h2 className="text-[13px] font-semibold text-ink">Account</h2>
       </div>
-      {connected && settings.accountName ? (
-        <p className="text-[13px] font-medium text-ink">{settings.accountName}</p>
-      ) : null}
-      <p className="text-[13px] leading-5 text-ink-subtle">
-        Agents receive your account’s Doppler permissions, including secret changes where allowed.
-        Your repository keeps choosing which projects and configs to use.
+      <p className="text-[12px] leading-4 text-ink-subtle">
+        Use Doppler in your coding sandboxes with your account’s secret access and edit permissions.
       </p>
+      {connected || settings.status === "needs_reauth" ? (
+        <div className="rounded-lg border border-border bg-surface px-3 py-2.5 text-[13px] font-medium text-ink">
+          {settings.accountName || "Doppler account"}
+        </div>
+      ) : null}
       {!enabled ? (
         <p className="text-[13px] text-ink-subtle">
           Enable this plugin to use Doppler in your sandboxes.
@@ -161,7 +148,12 @@ export function DopplerPluginConnectionForm({
         </div>
       ) : (
         <div className="flex items-center gap-2">
-          <Button size="sm" disabled={pending} onClick={connect}>
+          <Button
+            variant={connected ? "outline" : "default"}
+            size="sm"
+            disabled={pending}
+            onClick={connect}
+          >
             {pending ? <Loader2 className="animate-spin" /> : null}
             {connected || settings.status === "needs_reauth" ? "Reconnect" : "Connect Doppler"}
           </Button>
@@ -175,12 +167,6 @@ export function DopplerPluginConnectionForm({
       {error || settings.statusReason ? (
         <p role="alert" className="text-[13px] text-danger">
           {error ?? settings.statusReason}
-        </p>
-      ) : null}
-      {connected ? (
-        <p className="text-[12px] leading-5 text-ink-subtle">
-          Disconnect removes managed access before the next agent turn. Already running apps may
-          retain injected environment variables.
         </p>
       ) : null}
     </section>
