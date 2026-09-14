@@ -24,6 +24,7 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 const migrationPaths = [
   "drizzle/0207_goat_headless_workflow_foundation.sql",
   "drizzle/0222_goat_workflow_event_triggers.sql",
+  "drizzle/0275_workflow_multiple_triggers.sql",
 ].map((migration) => path.join(repositoryRoot, migration));
 const dialect = new PgDialect();
 const now = new Date("2026-08-12T08:00:00.000Z");
@@ -37,6 +38,7 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
     workflowVersion: number;
     workflowStepInstructions: string;
     workflowTriggerPrompt: string;
+    workflowTriggerCount: number;
     workflowProjected: boolean;
     workflowScheduleProjected: boolean;
     taskScheduleVersion: number;
@@ -81,6 +83,7 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
           workflow_version: number;
           workflow_step_instructions: string;
           workflow_trigger_prompt: string;
+          workflow_trigger_count: number;
           workflow_projected: boolean;
           workflow_schedule_projected: boolean;
           task_schedule_version: number;
@@ -98,6 +101,7 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
             FROM goat.workflow_read_model_v1 AS projection
             WHERE projection.id = workflow.id
           ) AS workflow_trigger_prompt,
+          jsonb_array_length(workflow.automation_triggers) AS workflow_trigger_count,
           EXISTS (
             SELECT 1 FROM goat.workflow_read_model_v1
             WHERE id = workflow.id AND steps->0->>'instructions' = workflow.instructions
@@ -121,6 +125,7 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
         workflowVersion: migrationRow?.workflow_version ?? 0,
         workflowStepInstructions: migrationRow?.workflow_step_instructions ?? "",
         workflowTriggerPrompt: migrationRow?.workflow_trigger_prompt ?? "",
+        workflowTriggerCount: migrationRow?.workflow_trigger_count ?? 0,
         workflowProjected: migrationRow?.workflow_projected ?? false,
         workflowScheduleProjected: migrationRow?.workflow_schedule_projected ?? false,
         taskScheduleVersion: migrationRow?.task_schedule_version ?? 0,
@@ -188,6 +193,7 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
       workflowVersion: 1,
       workflowStepInstructions: "Preserve these instructions.",
       workflowTriggerPrompt: "Run the legacy workflow.",
+      workflowTriggerCount: 1,
       workflowProjected: true,
       workflowScheduleProjected: true,
       taskScheduleVersion: 1,
@@ -470,6 +476,64 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
         },
       ],
     });
+  });
+
+  it("persists multiple independently executable triggers", async () => {
+    const created = await workflows.createWorkflow(actor(), {
+      idempotencyKey: "multi-trigger-workflow",
+      name: "Issue digest",
+    });
+    const eventTrigger = {
+      id: "trigger_event",
+      type: "event" as const,
+      provider: "linear",
+      event: "issue.created",
+      integrationId: "connection_1",
+      filters: {},
+      prompt: "Review the issue.",
+    };
+    const scheduleTrigger = {
+      id: "trigger_schedule",
+      type: "schedule" as const,
+      cron: "0 9 * * 1",
+      timezone: "UTC",
+      prompt: "Write the weekly digest.",
+      enabled: true,
+    };
+
+    const updated = await workflows.updateWorkflow(actor(), created.workflow.id, {
+      expectedVersion: 1,
+      name: "Issue digest",
+      description: "",
+      steps: [
+        {
+          id: "step_1",
+          title: "Digest",
+          model: "provider/model",
+          instructions: "Review issues and write a digest.",
+        },
+      ],
+      status: "active",
+      trigger: eventTrigger,
+      triggers: [eventTrigger, scheduleTrigger],
+    });
+
+    expect(updated.workflow.triggers).toEqual([
+      expect.objectContaining({ id: "trigger_event", type: "event" }),
+      expect.objectContaining({ id: "trigger_schedule", type: "schedule" }),
+    ]);
+    await expect(
+      database.query<{ trigger_ids: string[] }>(
+        `SELECT ARRAY(
+           SELECT trigger.value->>'id'
+           FROM goat.workflows workflow,
+             jsonb_array_elements(workflow.automation_triggers) trigger(value)
+           WHERE workflow.id = $1
+           ORDER BY trigger.value->>'id'
+         ) AS trigger_ids`,
+        [created.workflow.id],
+      ),
+    ).resolves.toMatchObject({ rows: [{ trigger_ids: ["trigger_event", "trigger_schedule"] }] });
   });
 
   it("preserves activation for instruction edits and resets it for routing changes and reactivation", async () => {

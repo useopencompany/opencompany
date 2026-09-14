@@ -19,6 +19,7 @@ import {
 const routerMock = vi.hoisted(() => ({
   refresh: vi.fn(),
   push: vi.fn(),
+  prefetch: vi.fn(),
 }));
 
 const appDataMock = vi.hoisted(() => ({
@@ -58,6 +59,7 @@ const userPreferencesMock = vi.hoisted(() => ({
 
 const workflowActionsMock = vi.hoisted(() => ({
   createHeadlessWorkflow: vi.fn(async () => ({ slug: "test-workflow" })),
+  archiveHeadlessWorkflow: vi.fn(async () => ({ workflowId: "workflow_1", version: 2 })),
 }));
 
 const workflowLiveQueryMock = vi.hoisted(() => ({
@@ -184,6 +186,7 @@ vi.mock("@/lib/user-preferences", () => ({
 
 vi.mock("@/lib/headless-automation-commands", () => ({
   createHeadlessWorkflow: workflowActionsMock.createHeadlessWorkflow,
+  archiveHeadlessWorkflow: workflowActionsMock.archiveHeadlessWorkflow,
 }));
 
 vi.mock("@/lib/headless-knowledge-commands", () => ({
@@ -270,6 +273,7 @@ describe("WorkflowsRoute", () => {
     workflowLiveQueryMock.hydrated = true;
     workflowLiveQueryMock.isLoading = true;
     workflowActionsMock.createHeadlessWorkflow.mockClear();
+    workflowActionsMock.archiveHeadlessWorkflow.mockClear();
     routerMock.push.mockClear();
   });
 
@@ -312,6 +316,83 @@ describe("WorkflowsRoute", () => {
       }),
     );
     expect(routerMock.push).toHaveBeenCalledWith("/workflows/test-workflow");
+  });
+
+  it("shows the company workflow table and recent run activity", async () => {
+    workflowLiveQueryMock.hydrated = false;
+    workflowLiveQueryMock.isLoading = false;
+    Object.assign(appDataMock.value, {
+      tasks: [
+        {
+          workflowId: "weekly-research",
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    });
+
+    render(
+      <WorkflowsRoute
+        workflows={[workflowListItem({ model: "codex" })]}
+        workspaceId="workspace_1"
+        canEdit
+      />,
+    );
+
+    expect(screen.getByRole("columnheader", { name: "Model" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Trigger" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Runs (30d)" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Last executed" })).toBeInTheDocument();
+    expect(screen.getByText("Codex")).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "1" })).toBeInTheDocument();
+  });
+
+  it("offers edit and delete actions for each workflow", async () => {
+    workflowLiveQueryMock.hydrated = false;
+    workflowLiveQueryMock.isLoading = false;
+    Object.assign(appDataMock.value, { tasks: [] });
+    const user = userEvent.setup();
+
+    render(<WorkflowsRoute workflows={[workflowListItem()]} workspaceId="workspace_1" canEdit />);
+
+    await user.click(screen.getByRole("button", { name: "Actions for Weekly research" }));
+    expect(screen.getByRole("link", { name: "Edit details" })).toHaveAttribute(
+      "href",
+      "/workflows/weekly-research",
+    );
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await user.click(screen.getByRole("button", { name: "Delete workflow" }));
+
+    await waitFor(() =>
+      expect(workflowActionsMock.archiveHeadlessWorkflow).toHaveBeenCalledWith("workflow_1", {
+        expectedVersion: 1,
+      }),
+    );
+    expect(screen.queryByText("Weekly research")).not.toBeInTheDocument();
+  });
+
+  it("marks the personal scope unavailable and routes back to company workflows", async () => {
+    workflowLiveQueryMock.hydrated = false;
+    workflowLiveQueryMock.isLoading = false;
+    Object.assign(appDataMock.value, { tasks: [] });
+    const user = userEvent.setup();
+
+    render(<WorkflowsRoute workflows={[workflowListItem()]} workspaceId="workspace_1" canEdit />);
+
+    const scope = within(screen.getByRole("group", { name: "Workflow scope" }));
+    const company = scope.getByRole("button", { name: /Company/ });
+    const personal = scope.getByRole("button", { name: /Personal/ });
+    expect(company).toHaveAttribute("aria-pressed", "true");
+    expect(company).toHaveTextContent("1");
+    expect(personal).toHaveTextContent("Soon");
+
+    await user.click(personal);
+    expect(personal).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Personal workflows aren’t live yet")).toBeInTheDocument();
+    expect(screen.queryByText("Weekly research")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "View company workflows" }));
+    expect(company).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Weekly research")).toBeInTheDocument();
   });
 });
 
@@ -791,7 +872,7 @@ describe("SkillsSettingsRoute", () => {
   ])("imports a skill from %s with %s visibility", async (filter, scope) => {
     render(<SkillsSettingsRoute skills={[]} canEdit />);
 
-    await userEvent.click(screen.getByRole("button", { name: filter }));
+    await userEvent.click(screen.getByRole("button", { name: new RegExp(`^${filter}`) }));
     await userEvent.click(screen.getByRole("button", { name: "Import skill" }));
     expect(screen.getByRole("combobox", { name: "Visibility" })).toHaveValue(scope);
     await userEvent.type(screen.getByPlaceholderText("github.com/owner/repo"), "github.com/o/r");
@@ -867,7 +948,7 @@ describe("SkillsSettingsRoute", () => {
     async (filter, scope) => {
       render(<SkillsSettingsRoute skills={[]} canEdit />);
 
-      await userEvent.click(screen.getByRole("button", { name: filter }));
+      await userEvent.click(screen.getByRole("button", { name: new RegExp(`^${filter}`) }));
       await userEvent.click(screen.getByRole("button", { name: `New ${scope} skill` }));
       expect(screen.getByRole("combobox", { name: "Visibility" })).toHaveValue(scope);
       await userEvent.type(screen.getByPlaceholderText("investigate-bug"), "incident-review");
@@ -902,31 +983,31 @@ describe("SkillsSettingsRoute", () => {
     };
     render(<SkillsSettingsRoute skills={[workspaceSkillFixture, personal]} canEdit />);
     const filters = within(screen.getByRole("group", { name: "Skill scope" }));
-    expect(filters.getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "true");
+    expect(filters.getByRole("button", { name: /^All/ })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getAllByRole("link")).toHaveLength(2);
 
-    await userEvent.click(filters.getByRole("button", { name: "Company" }));
-    expect(filters.getByRole("button", { name: "Company" })).toHaveAttribute(
+    await userEvent.click(filters.getByRole("button", { name: /^Company/ }));
+    expect(filters.getByRole("button", { name: /^Company/ })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
     expect(screen.getByRole("link")).toHaveAttribute("href", "/settings/skills/installation_1");
 
-    await userEvent.click(filters.getByRole("button", { name: "Personal" }));
-    expect(filters.getByRole("button", { name: "Company" })).toHaveAttribute(
+    await userEvent.click(filters.getByRole("button", { name: /^Personal/ }));
+    expect(filters.getByRole("button", { name: /^Company/ })).toHaveAttribute(
       "aria-pressed",
       "false",
     );
     expect(screen.getByRole("link")).toHaveAttribute("href", "/settings/skills/personal_skill");
 
-    await userEvent.click(filters.getByRole("button", { name: "All" }));
+    await userEvent.click(filters.getByRole("button", { name: /^All/ }));
     expect(screen.getAllByRole("link")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "New personal skill" })).toBeInTheDocument();
   });
 
   it("keeps the selected scope actionable when there are no matching skills", async () => {
     render(<SkillsSettingsRoute skills={[workspaceSkillFixture]} canEdit />);
-    await userEvent.click(screen.getByRole("button", { name: "Personal" }));
+    await userEvent.click(screen.getByRole("button", { name: /^Personal/ }));
     expect(screen.getByText("No personal skills yet")).toBeInTheDocument();
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "New personal skill" }));
@@ -935,7 +1016,7 @@ describe("SkillsSettingsRoute", () => {
 
   it("allows overriding the creation scope without changing the list filter", async () => {
     render(<SkillsSettingsRoute skills={[]} canEdit />);
-    await userEvent.click(screen.getByRole("button", { name: "Company" }));
+    await userEvent.click(screen.getByRole("button", { name: /^Company/ }));
     await userEvent.click(screen.getByRole("button", { name: "New company skill" }));
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Visibility" }), "personal");
     await userEvent.type(screen.getByPlaceholderText("investigate-bug"), "my-notes");
@@ -1012,13 +1093,20 @@ const brainSnapshot = {
   ],
 };
 
-function workflowListItem() {
+function workflowListItem({ model = "" }: { model?: string } = {}) {
   return {
     id: "workflow_1",
     slug: "weekly-research",
     name: "Weekly research",
     description: "Track changes",
-    steps: [],
+    steps: [
+      {
+        id: "step_1",
+        title: "Research",
+        model,
+        instructions: "Track changes",
+      },
+    ],
     status: "draft" as const,
     trigger: { type: "manual" as const },
     version: 1,

@@ -32,6 +32,10 @@ export type WorkflowTrigger =
       nextRunAt: string | null;
     };
 
+export type WorkflowAutomationTrigger =
+  | ({ id: string } & Extract<WorkflowTrigger, { type: "event" }>)
+  | ({ id: string } & Extract<WorkflowTrigger, { type: "schedule" }>);
+
 export type WorkflowDetail = {
   id: string;
   slug: string;
@@ -40,6 +44,8 @@ export type WorkflowDetail = {
   steps: WorkflowStep[];
   status: "draft" | "active";
   trigger: WorkflowTrigger;
+  triggers?: WorkflowAutomationTrigger[];
+  createdByWorkosId?: string | null;
   version: number;
   archivedAt: string | null;
   createdAt: string;

@@ -68,6 +68,30 @@ export type WorkflowTriggerInput =
       enabled?: boolean;
     };
 
+export type WorkflowAutomationTrigger =
+  | ({ id: string } & WorkflowEventTrigger)
+  | {
+      id: string;
+      type: "schedule";
+      cron: string;
+      timezone: string;
+      prompt: string;
+      enabled: boolean;
+      lastRunAt: Date | null;
+      nextRunAt: Date | null;
+    };
+
+export type WorkflowAutomationTriggerInput =
+  | ({ id: string } & Omit<WorkflowEventTrigger, "prompt"> & { prompt?: string | null })
+  | {
+      id: string;
+      type: "schedule";
+      cron: string;
+      timezone?: string | null;
+      prompt?: string | null;
+      enabled?: boolean;
+    };
+
 type NormalizedWorkflowTriggerInput =
   | { type: "manual" }
   | Extract<WorkflowTrigger, { type: "event" }>
@@ -87,6 +111,8 @@ export type Workflow = {
   steps: WorkflowStep[];
   status: WorkflowStatus;
   trigger: WorkflowTrigger;
+  triggers?: WorkflowAutomationTrigger[];
+  createdByWorkosId?: string | null;
   version: number;
   archivedAt: Date | null;
   createdAt: Date;
@@ -220,6 +246,12 @@ export interface WorkflowRepository {
     steps: WorkflowStep[];
     status: WorkflowStatus;
     trigger: WorkflowTriggerInput;
+    automationTriggers?: Array<{
+      trigger: WorkflowAutomationTrigger;
+      userWorkosId: string;
+      activatedAt: Date;
+      execution?: AutomationExecutionPlan;
+    }>;
     schedule?: {
       definition: ScheduleDefinition;
       execution?: AutomationExecutionPlan;
@@ -404,6 +436,7 @@ export class WorkflowApplicationService {
       steps: WorkflowStep[];
       status: WorkflowStatus;
       trigger: WorkflowTriggerInput;
+      triggers?: WorkflowAutomationTriggerInput[];
     },
   ): Promise<WorkflowVersionResult> {
     requirePermission(actor, WORKFLOW_WRITE_PERMISSION, "Workflows");
@@ -413,11 +446,117 @@ export class WorkflowApplicationService {
     if (!current) throw new CoreError("not_found", "Workflow not found.");
     if (current.version !== expectedVersion) throw versionConflict("Workflow");
     const normalized = normalizeWorkflowDefinition(input, this.options.validateDefinition);
+    const { triggers: normalizedTriggers, ...normalizedDefinition } = normalized;
     const activationError = workflowActivationDisabledReason(normalized.steps);
     if (normalized.status === "active" && activationError) {
       throw new CoreError("invalid_argument", activationError);
     }
     const now = this.options.now?.() ?? new Date();
+    if (normalizedTriggers) {
+      const currentTriggers = new Map(
+        (current.triggers ?? []).map((trigger) => [trigger.id, trigger]),
+      );
+      const automationTriggers = await Promise.all(
+        normalizedTriggers.map(async (trigger) => {
+          if (trigger.type === "event") {
+            const publicTrigger: WorkflowAutomationTrigger = {
+              ...trigger,
+              prompt: trigger.prompt?.trim() || "Run this workflow.",
+            };
+            const subscriptionError = await this.options.validateEventSubscription?.({
+              actor,
+              trigger: publicTrigger,
+            });
+            if (subscriptionError) throw new CoreError("invalid_argument", subscriptionError);
+            const execution =
+              normalized.status === "active"
+                ? validatedExecution(
+                    await this.options.planner.prepareWorkflow({
+                      actor,
+                      workflow: { ...current, ...normalizedDefinition, trigger: publicTrigger },
+                      prompt: publicTrigger.prompt,
+                    }),
+                  )
+                : undefined;
+            return {
+              trigger: publicTrigger,
+              userWorkosId: actor.userId,
+              activatedAt: now,
+              ...(execution ? { execution } : {}),
+            };
+          }
+
+          const definition = this.options.scheduleRules.normalize({
+            cron: trigger.cron,
+            ...(trigger.timezone !== undefined ? { timezone: trigger.timezone } : {}),
+            now,
+          });
+          if (!definition) throw invalidSchedule("Workflow");
+          const previous = currentTriggers.get(trigger.id);
+          const publicTrigger: WorkflowAutomationTrigger = {
+            id: trigger.id,
+            type: "schedule",
+            cron: definition.cron,
+            timezone: definition.timezone,
+            prompt: trigger.prompt?.trim() || "Run this workflow.",
+            enabled: trigger.enabled !== false,
+            lastRunAt: previous?.type === "schedule" ? previous.lastRunAt : null,
+            nextRunAt: trigger.enabled === false ? null : definition.nextRunAt,
+          };
+          const execution =
+            publicTrigger.enabled && normalized.status === "active"
+              ? validatedExecution(
+                  await this.options.planner.prepareWorkflow({
+                    actor,
+                    workflow: { ...current, ...normalizedDefinition, trigger: publicTrigger },
+                    prompt: publicTrigger.prompt,
+                  }),
+                )
+              : undefined;
+          return {
+            trigger: publicTrigger,
+            userWorkosId: actor.userId,
+            activatedAt: now,
+            ...(execution ? { execution } : {}),
+          };
+        }),
+      );
+      const result = await this.repository.updateWorkflow({
+        actor,
+        workflowId: id,
+        expectedVersion,
+        ...normalized,
+        trigger: legacyTriggerFromAutomation(automationTriggers[0]?.trigger),
+        automationTriggers,
+        ...(automationTriggers[0]?.trigger.type === "schedule"
+          ? {
+              schedule: {
+                definition: {
+                  cron: automationTriggers[0].trigger.cron,
+                  timezone: automationTriggers[0].trigger.timezone,
+                  nextRunAt:
+                    automationTriggers[0].trigger.nextRunAt ??
+                    this.options.scheduleRules.normalize({
+                      cron: automationTriggers[0].trigger.cron,
+                      timezone: automationTriggers[0].trigger.timezone,
+                      now,
+                    })!.nextRunAt,
+                },
+                ...(automationTriggers[0].execution
+                  ? { execution: automationTriggers[0].execution }
+                  : {}),
+              },
+            }
+          : automationTriggers[0]?.trigger.type === "event"
+            ? {
+                event: automationTriggers[0].execution
+                  ? { execution: automationTriggers[0].execution }
+                  : {},
+              }
+            : {}),
+      });
+      return workflowVersionResult(result);
+    }
     let schedule:
       | { definition: ScheduleDefinition; execution?: AutomationExecutionPlan }
       | undefined;
@@ -435,7 +574,7 @@ export class WorkflowApplicationService {
       if (normalized.trigger.enabled !== false && normalized.status === "active") {
         const pending: Workflow = {
           ...current,
-          ...normalized,
+          ...normalizedDefinition,
           trigger: {
             type: "schedule",
             cron: definition.cron,
@@ -463,7 +602,11 @@ export class WorkflowApplicationService {
       if (subscriptionError) throw new CoreError("invalid_argument", subscriptionError);
       event = {};
       if (normalized.status === "active") {
-        const pending: Workflow = { ...current, ...normalized, trigger: normalized.trigger };
+        const pending: Workflow = {
+          ...current,
+          ...normalizedDefinition,
+          trigger: normalized.trigger,
+        };
         event.execution = validatedExecution(
           await this.options.planner.prepareWorkflow({
             actor,
@@ -547,11 +690,19 @@ export class WorkflowApplicationService {
     idempotencyKeyValue: string,
   ): Promise<CreateTaskResult> {
     requirePermission(actor, WORKFLOW_WRITE_PERMISSION, "Workflows");
-    const workflow = await this.runnableWorkflow(actor, workflowId);
-    if (workflow.trigger.type !== "schedule") {
-      throw new CoreError("invalid_argument", "Workflow does not have a scheduled trigger.");
+    const workflow = await this.repository.getWorkflow({
+      actor,
+      workflowId: resourceId(workflowId, "workflowId"),
+    });
+    if (!workflow) throw new CoreError("not_found", "Workflow not found.");
+    if (workflow.steps.length === 0 || workflow.steps.some((step) => !step.instructions.trim())) {
+      throw new CoreError("invalid_argument", "Workflow is unavailable or incomplete.");
     }
-    const goal = prompt(workflow.trigger.prompt || workflow.name, "A Workflow prompt is required.");
+    const trigger = workflow.triggers?.[0] ?? workflow.trigger;
+    const goal = prompt(
+      trigger.type === "manual" ? workflow.description || workflow.name : trigger.prompt,
+      "A Workflow prompt is required.",
+    );
     const execution = validatedExecution(
       await this.options.planner.prepareWorkflow({ actor, workflow, prompt: goal }),
     );
@@ -561,14 +712,8 @@ export class WorkflowApplicationService {
       name: workflow.name,
       goal,
       execution,
-      source: "schedule",
+      source: "workflow",
       workflowId: workflow.slug,
-    });
-    await this.repository.recordRunNow({
-      actor,
-      workflowId: workflow.id,
-      taskId: created.task.id,
-      occurredAt: created.task.createdAt,
     });
     return created;
   }
@@ -792,6 +937,7 @@ function normalizeWorkflowDefinition(
     steps: WorkflowStep[];
     status: WorkflowStatus;
     trigger: WorkflowTriggerInput;
+    triggers?: WorkflowAutomationTriggerInput[];
   },
   validator?: WorkflowDefinitionValidator,
 ) {
@@ -801,6 +947,7 @@ function normalizeWorkflowDefinition(
     steps: workflowSteps(input.steps),
     status: workflowStatus(input.status),
     trigger: workflowTrigger(input.trigger),
+    ...(input.triggers ? { triggers: workflowAutomationTriggers(input.triggers) } : {}),
   };
   validateWorkflowDefinition(normalized, validator);
   return normalized;
@@ -828,6 +975,49 @@ function validateWorkflowDefinition(
   }
   const providerError = validator?.(input);
   if (providerError) throw new CoreError("invalid_argument", providerError);
+}
+
+function workflowAutomationTriggers(
+  triggers: WorkflowAutomationTriggerInput[],
+): WorkflowAutomationTriggerInput[] {
+  if (triggers.length > 20) {
+    throw new CoreError("invalid_argument", "Workflows support at most twenty triggers.");
+  }
+  const ids = new Set<string>();
+  return triggers.map((trigger, index) => {
+    const id = resourceId(trigger.id, `triggers[${index}].id`);
+    if (ids.has(id))
+      throw new CoreError("invalid_argument", "Workflow trigger IDs must be unique.");
+    ids.add(id);
+    const normalized = workflowTrigger(trigger);
+    if (normalized.type === "manual") {
+      throw new CoreError("invalid_argument", "Manual runs do not need a workflow trigger.");
+    }
+    return { ...normalized, id };
+  });
+}
+
+function legacyTriggerFromAutomation(
+  trigger: WorkflowAutomationTrigger | undefined,
+): WorkflowTriggerInput {
+  if (!trigger) return { type: "manual" };
+  if (trigger.type === "schedule") {
+    return {
+      type: "schedule",
+      cron: trigger.cron,
+      timezone: trigger.timezone,
+      prompt: trigger.prompt,
+      enabled: trigger.enabled,
+    };
+  }
+  return {
+    type: "event",
+    provider: trigger.provider,
+    event: trigger.event,
+    integrationId: trigger.integrationId,
+    filters: trigger.filters,
+    prompt: trigger.prompt,
+  };
 }
 
 function workflowSteps(steps: WorkflowStep[]) {

@@ -63,6 +63,7 @@ const PREDECODED_READ_MODEL_FIELDS = new Set([
   "attachments",
   "steps",
   "trigger",
+  "triggers",
   "timeline",
   "relations",
   "result",
@@ -395,6 +396,8 @@ function readModelShape(input: {
           "steps",
           "status",
           "trigger",
+          "triggers",
+          "created_by_workos_id",
           "version",
           "archived_at",
           "created_at",
@@ -881,6 +884,7 @@ function readModelFieldValue(readModel: ReadModel, name: string, value: unknown)
     name === "presentationSummary" ||
     name === "steps" ||
     name === "trigger" ||
+    name === "triggers" ||
     name === "timeline" ||
     name === "relations" ||
     name === "sources" ||
@@ -1229,6 +1233,8 @@ const READ_MODEL_COLUMN_NAMES = {
     steps: "steps",
     status: "status",
     trigger: "trigger",
+    triggers: "triggers",
+    created_by_workos_id: "createdByWorkosId",
     version: "version",
     archived_at: "archivedAt",
     created_at: "createdAt",

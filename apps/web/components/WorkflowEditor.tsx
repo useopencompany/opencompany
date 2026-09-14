@@ -11,16 +11,19 @@ import { workflowActivationDisabledReason } from "@opencompany/core/workflows";
 import type { PluginEventFilterDefinitionDto } from "@opencompany/protocol";
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import {
-  ArrowLeft,
   CalendarClock,
   Check,
   ChevronDown,
+  ChevronRight,
   Clock,
+  Copy,
   Loader2,
   MoreHorizontal,
   Play,
   Plus,
+  Search,
   Trash2,
+  UserRound,
   Webhook,
 } from "lucide-react";
 import Link from "next/link";
@@ -63,13 +66,12 @@ const AUTOSAVE_DELAY_MS = 1200;
 // Stable identity so the autosave effect is not re-run — and its error banner cleared — on every
 // render of a workflow whose providers were never passed.
 const NO_EVENT_PROVIDERS: WorkflowEventProviderOption[] = [];
-const MAX_WORKFLOW_STEPS = 20;
 
 type WorkflowStatus = WorkflowDetail["status"];
 type WorkflowStep = WorkflowDetail["steps"][number];
 type WorkflowTriggerDraft =
-  | { type: "manual" }
   | {
+      id: string;
       type: "event";
       provider: string;
       event: string;
@@ -80,10 +82,17 @@ type WorkflowTriggerDraft =
       >;
       prompt: string;
     }
-  | { type: "schedule"; cron: string; timezone: string; prompt: string };
+  | {
+      id: string;
+      type: "schedule";
+      cron: string;
+      timezone: string;
+      prompt: string;
+      enabled: boolean;
+    };
 type WorkflowEventTriggerDraft = Extract<WorkflowTriggerDraft, { type: "event" }>;
 type WorkflowDraft = Pick<WorkflowDetail, "name" | "description" | "status" | "steps"> & {
-  trigger: WorkflowTriggerDraft;
+  triggers: WorkflowTriggerDraft[];
 };
 type SaveState = "saved" | "saving" | "error";
 
@@ -93,12 +102,14 @@ export function WorkflowEditor({
   canEdit,
   skillCatalog,
   eventProviders = NO_EVENT_PROVIDERS,
+  owner,
 }: {
   workflow: WorkflowDetail;
   workspaceId: string;
   canEdit: boolean;
   skillCatalog: SkillCatalogItem[];
   eventProviders?: WorkflowEventProviderOption[];
+  owner: { name: string; avatarUrl: string | null };
 }) {
   const router = useRouter();
   const [draft, setDraft] = useState<WorkflowDraft>(() => workflowDraft(workflow));
@@ -151,7 +162,8 @@ export function WorkflowEditor({
           description: snapshot.description,
           steps: snapshot.steps,
           status: snapshot.status,
-          trigger: snapshot.trigger,
+          trigger: legacyWorkflowTrigger(snapshot.triggers[0]),
+          triggers: snapshot.triggers.map(workflowTriggerInput),
         });
         versionRef.current = saved.version;
         result = { ok: true };
@@ -230,32 +242,6 @@ export function WorkflowEditor({
     );
   };
 
-  const addStep = () => {
-    if (!canEdit) return;
-    setDraft((current) => {
-      if (current.steps.length >= MAX_WORKFLOW_STEPS) return current;
-      return workflowDraftWithStatus({
-        ...current,
-        steps: [
-          ...current.steps,
-          { id: newWorkflowStepId(), title: "", model: "", instructions: "" },
-        ],
-      });
-    });
-  };
-
-  const removeStep = (id: string) => {
-    if (!canEdit) return;
-    setDraft((current) =>
-      current.steps.length > 1
-        ? workflowDraftWithStatus({
-            ...current,
-            steps: current.steps.filter((step) => step.id !== id),
-          })
-        : current,
-    );
-  };
-
   const archive = () => {
     if (!canEdit || isRunning) return;
     setSaveError(null);
@@ -270,7 +256,6 @@ export function WorkflowEditor({
   };
 
   const runNow = () => {
-    if (draft.trigger.type !== "schedule") return;
     setSaveError(null);
     startRunning(async () => {
       try {
@@ -294,46 +279,55 @@ export function WorkflowEditor({
 
   return (
     <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
+      <div className="flex h-12 shrink-0 items-center justify-between gap-4 border-b border-border px-4 sm:px-6">
+        <div className="flex min-w-0 items-center gap-1.5 text-[12.5px]">
+          <Link
+            href="/workflows"
+            prefetch
+            className="shrink-0 rounded-md px-1.5 py-1 text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          >
+            Workflows
+          </Link>
+          <ChevronRight size={13} className="shrink-0 text-ink-faint" />
+          <span className="truncate font-medium text-ink">{draft.name || "Untitled workflow"}</span>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <SaveIndicator state={saveState} canEdit={canEdit} onRetry={saveLatest} />
+          {canEdit ? (
+            <button
+              type="button"
+              disabled={isRunning || runActionDisabledReason !== null}
+              title={runActionDisabledReason ?? "Test this workflow"}
+              onClick={runNow}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[12.5px] font-medium text-ink shadow-sm transition-colors hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isRunning ? (
+                <Loader2 size={13} strokeWidth={2} className="animate-spin" />
+              ) : (
+                <Play size={13} strokeWidth={2} />
+              )}
+              {isRunning ? "Starting…" : "Test"}
+            </button>
+          ) : null}
+          {canEdit ? (
+            <EditorMoreMenu
+              onArchive={archive}
+              isArchiving={isArchiving}
+              saveInProgress={saveState === "saving" || isRunning}
+            />
+          ) : null}
+        </div>
+      </div>
       <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
-        <div className="flex w-full max-w-[760px] flex-col gap-7 pb-28 pt-10 sm:pt-14">
-          <div className="flex items-center justify-between gap-4">
-            <BackLink />
-            <div className="flex min-w-0 items-center gap-2">
-              <SaveIndicator state={saveState} canEdit={canEdit} onRetry={saveLatest} />
-              {draft.trigger.type === "schedule" && canEdit ? (
-                <button
-                  type="button"
-                  disabled={isRunning || runActionDisabledReason !== null}
-                  title={runActionDisabledReason ?? "Run this workflow now"}
-                  onClick={runNow}
-                  className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {isRunning ? (
-                    <Loader2 size={13} strokeWidth={2} className="animate-spin" />
-                  ) : (
-                    <Play size={13} strokeWidth={2} />
-                  )}
-                  {isRunning ? "Starting…" : "Run now"}
-                </button>
-              ) : null}
-              {canEdit ? (
-                <EditorMoreMenu
-                  onArchive={archive}
-                  isArchiving={isArchiving}
-                  saveInProgress={saveState === "saving" || isRunning}
-                />
-              ) : null}
-            </div>
-          </div>
-
+        <div className="flex w-full max-w-[780px] flex-col gap-8 pb-28 pt-10 sm:pt-14">
           {saveError ? (
             <p className="text-[12px] text-warning" role="alert">
               {saveError}
             </p>
           ) : null}
 
-          <header className="flex items-start justify-between gap-4">
-            <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <header className="flex flex-col gap-3">
+            <div className="flex min-w-0 flex-col gap-1">
               <InlineTitle
                 value={draft.name}
                 onChange={(name) => patch({ name })}
@@ -345,76 +339,49 @@ export function WorkflowEditor({
                 readOnly={!canEdit}
               />
             </div>
-            <div className="shrink-0 pt-1">
+            <div className="flex flex-wrap items-center gap-2">
               <StatusPicker
                 value={draft.status}
                 activationDisabledReason={activationDisabledReason}
                 onChange={(status) => patch({ status })}
                 disabled={!canEdit}
               />
+              <span className="text-ink-faint">·</span>
+              <span className="inline-flex min-w-0 items-center gap-1.5 text-[12.5px] text-ink-subtle">
+                <UserRound size={14} strokeWidth={1.8} />
+                Owner
+                <span className="truncate font-medium text-ink">{owner.name}</span>
+              </span>
             </div>
           </header>
 
-          {draft.status === "draft" ? (
-            <p className="text-[12.5px] leading-5 text-ink-subtle" role="status">
-              This workflow is a draft and won’t run until you activate it.
-              {activationDisabledReason ? ` ${activationDisabledReason}` : ""}
-            </p>
-          ) : null}
-
           <TriggerSection
-            trigger={draft.trigger}
+            triggers={draft.triggers}
             canEdit={canEdit}
             eventProviders={eventProviders}
-            onChange={(trigger) => patch({ trigger })}
+            onChange={(triggers) => patch({ triggers })}
           />
 
-          <div className="flex flex-col gap-3">
-            <SectionLabel>Steps</SectionLabel>
+          <div className="flex flex-col gap-5">
             {draft.steps.map((step, index) => (
               <StepCard
                 key={step.id}
                 index={index}
                 step={step}
                 canEdit={canEdit}
-                canRemove={canEdit && draft.steps.length > 1}
                 skillCatalog={skillCatalog}
                 onChange={(partial) => updateStep(step.id, partial)}
-                onRemove={() => removeStep(step.id)}
               />
             ))}
-            {canEdit ? (
-              <button
-                type="button"
-                onClick={addStep}
-                disabled={draft.steps.length >= MAX_WORKFLOW_STEPS}
-                className="inline-flex w-fit items-center gap-1.5 rounded-md px-1.5 py-1.5 text-[13px] font-medium text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <Plus size={14} strokeWidth={2} />
-                Add step
-              </button>
-            ) : (
+            {!canEdit ? (
               <p className="text-[12.5px] leading-5 text-ink-subtle">
                 Only workspace admins can edit workflows.
               </p>
-            )}
+            ) : null}
           </div>
         </div>
       </div>
     </main>
-  );
-}
-
-function BackLink() {
-  return (
-    <Link
-      href="/workflows"
-      prefetch
-      className="inline-flex w-fit items-center gap-1.5 rounded-md px-1.5 py-1 text-[12px] text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-    >
-      <ArrowLeft size={14} strokeWidth={2} />
-      Workflows
-    </Link>
   );
 }
 
@@ -520,7 +487,6 @@ function StatusPicker({
             key={option}
             type="button"
             disabled={option === "active" && activationDisabledReason !== null}
-            title={option === "active" ? (activationDisabledReason ?? undefined) : undefined}
             onClick={() => {
               onChange(option);
               setOpen(false);
@@ -547,119 +513,317 @@ function StatusDot({ status }: { status: WorkflowStatus }) {
 }
 
 function TriggerSection({
+  triggers,
+  canEdit,
+  eventProviders,
+  onChange,
+}: {
+  triggers: WorkflowTriggerDraft[];
+  canEdit: boolean;
+  eventProviders: WorkflowEventProviderOption[];
+  onChange: (triggers: WorkflowTriggerDraft[]) => void;
+}) {
+  return (
+    <section className="flex flex-col gap-3">
+      <SectionLabel>Triggers</SectionLabel>
+      <div className="overflow-hidden rounded-xl border border-border bg-surface">
+        {triggers.length === 0 ? (
+          <div className="flex items-center gap-3 px-4 py-4 text-[13px] text-ink-subtle">
+            <Clock size={16} strokeWidth={1.8} />
+            This workflow only runs when you test it manually.
+          </div>
+        ) : (
+          <div className="divide-y divide-border">
+            {triggers.map((trigger) => (
+              <WorkflowTriggerRow
+                key={trigger.id}
+                trigger={trigger}
+                canEdit={canEdit}
+                eventProviders={eventProviders}
+                onChange={(next) =>
+                  onChange(
+                    triggers.map((candidate) => (candidate.id === next.id ? next : candidate)),
+                  )
+                }
+                onRemove={() =>
+                  onChange(triggers.filter((candidate) => candidate.id !== trigger.id))
+                }
+              />
+            ))}
+          </div>
+        )}
+        {canEdit ? (
+          <div className="border-t border-border px-3 py-2.5">
+            <AddTriggerMenu
+              eventProviders={eventProviders}
+              onAdd={(trigger) => onChange([...triggers, trigger])}
+            />
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function WorkflowTriggerRow({
   trigger,
   canEdit,
   eventProviders,
   onChange,
+  onRemove,
 }: {
   trigger: WorkflowTriggerDraft;
   canEdit: boolean;
   eventProviders: WorkflowEventProviderOption[];
   onChange: (trigger: WorkflowTriggerDraft) => void;
+  onRemove: () => void;
 }) {
-  const setManual = () => onChange({ type: "manual" });
-  const setSchedule = () =>
-    onChange(
-      trigger.type === "schedule"
-        ? trigger
-        : {
-            type: "schedule",
-            cron: DEFAULT_WORKFLOW_SCHEDULE_CRON,
-            timezone: DEFAULT_WORKFLOW_SCHEDULE_TIMEZONE,
-            prompt: DEFAULT_WORKFLOW_SCHEDULE_PROMPT,
-          },
-    );
-  const eventsReady = workflowEventProvidersReady(eventProviders);
-  const setEvent = () => {
-    if (trigger.type === "event") {
-      onChange(trigger);
-      return;
-    }
-    const provider = eventProviders.find(
-      (candidate) => candidate.accounts.length > 0 && candidate.events.length > 0,
-    );
-    const account = provider?.accounts[0];
-    const event = provider?.events[0];
-    if (!provider || !account || !event) return;
-    onChange({
-      type: "event",
-      provider: provider.provider,
-      event: event.id,
-      integrationId: account.integrationId,
-      filters: {},
-      prompt: DEFAULT_WORKFLOW_SCHEDULE_PROMPT,
-    });
-  };
-  const updateSchedule = (
-    partial: Partial<Extract<WorkflowTriggerDraft, { type: "schedule" }>>,
-  ) => {
-    if (trigger.type !== "schedule") return;
-    onChange({ ...trigger, ...partial });
-  };
+  const [expanded, setExpanded] = useState(trigger.type === "event");
+  const provider =
+    trigger.type === "event"
+      ? eventProviders.find((candidate) => candidate.provider === trigger.provider)
+      : null;
+  const event =
+    trigger.type === "event"
+      ? provider?.events.find((candidate) => candidate.id === trigger.event)
+      : null;
+  const summary =
+    trigger.type === "schedule"
+      ? scheduleSummary({ cron: trigger.cron, timezone: trigger.timezone })
+      : `${provider?.label ?? trigger.provider} · ${event?.label ?? trigger.event}`;
 
   return (
-    <section className="flex flex-col gap-3">
-      <SectionLabel>Trigger</SectionLabel>
-      <div className="rounded-xl border border-border bg-surface px-3.5 py-3">
-        <div
-          className="inline-flex w-fit rounded-lg border border-border bg-canvas p-1"
-          role="radiogroup"
-          aria-label="Workflow trigger"
+    <div>
+      <div className="group flex items-center gap-3 px-4 py-3">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-canvas text-ink-subtle">
+          {trigger.type === "schedule" ? (
+            <CalendarClock size={15} strokeWidth={1.8} />
+          ) : (
+            <Webhook size={15} strokeWidth={1.8} />
+          )}
+        </span>
+        <button
+          type="button"
+          onClick={() => setExpanded((current) => !current)}
+          aria-expanded={expanded}
+          className="flex min-w-0 flex-1 flex-col items-start rounded-md text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
         >
-          <TriggerModeButton
-            icon={Clock}
-            label="Manual"
-            selected={trigger.type === "manual"}
-            disabled={!canEdit}
-            onSelect={setManual}
-          />
-          <TriggerModeButton
-            icon={CalendarClock}
-            label="On a schedule"
-            selected={trigger.type === "schedule"}
-            disabled={!canEdit}
-            onSelect={setSchedule}
-          />
-          <TriggerModeButton
-            icon={Webhook}
-            label="On an event"
-            selected={trigger.type === "event"}
-            disabled={!canEdit || (!eventsReady && trigger.type !== "event")}
-            onSelect={setEvent}
-          />
-        </div>
-
-        {!eventsReady && trigger.type !== "event" ? (
-          <EventTriggerZeroState providers={eventProviders} />
+          <span className="text-[13px] font-medium text-ink">
+            {trigger.type === "schedule" ? "On a schedule" : "When an event happens"}
+          </span>
+          <span className="truncate text-[12px] text-ink-subtle">{summary}</span>
+        </button>
+        <ChevronDown
+          size={14}
+          className={`shrink-0 text-ink-faint transition-transform ${expanded ? "rotate-180" : ""}`}
+        />
+        {canEdit ? (
+          <button
+            type="button"
+            onClick={onRemove}
+            aria-label={`Remove ${trigger.type} trigger`}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-subtle opacity-0 transition-all hover:bg-danger/10 hover:text-danger focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover:opacity-100"
+          >
+            <Trash2 size={14} strokeWidth={1.8} />
+          </button>
         ) : null}
-
-        {trigger.type === "schedule" ? (
-          <div className="mt-3 flex flex-col gap-3">
+      </div>
+      {expanded ? (
+        <div className="border-t border-border bg-canvas/40 px-4 pb-4 pt-3">
+          {trigger.type === "schedule" ? (
             <ScheduleFrequencyBuilder
               cron={trigger.cron}
               timezone={trigger.timezone}
               canEdit={canEdit}
-              onCronChange={(cron) => updateSchedule({ cron })}
-              onTimezoneChange={(timezone) => updateSchedule({ timezone })}
+              onCronChange={(cron) => onChange({ ...trigger, cron })}
+              onTimezoneChange={(timezone) => onChange({ ...trigger, timezone })}
             />
-            <WorkflowRunContext
-              prompt={trigger.prompt}
+          ) : (
+            <EventTriggerEditor
+              trigger={trigger}
+              providers={eventProviders}
               canEdit={canEdit}
-              onChange={(prompt) => updateSchedule({ prompt })}
+              onChange={onChange}
             />
-          </div>
-        ) : null}
-        {trigger.type === "event" ? (
-          <EventTriggerEditor
-            trigger={trigger}
-            providers={eventProviders}
-            canEdit={canEdit}
-            onChange={onChange}
-          />
-        ) : null}
-      </div>
-    </section>
+          )}
+        </div>
+      ) : null}
+    </div>
   );
+}
+
+function AddTriggerMenu({
+  eventProviders,
+  onAdd,
+}: {
+  eventProviders: WorkflowEventProviderOption[];
+  onAdd: (trigger: WorkflowTriggerDraft) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
+  const provider = eventProviders.find((candidate) => candidate.provider === selectedProvider);
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredProviders = eventProviders.filter(
+    (candidate) =>
+      !normalizedQuery ||
+      candidate.label.toLowerCase().includes(normalizedQuery) ||
+      candidate.events.some((event) => event.label.toLowerCase().includes(normalizedQuery)),
+  );
+  const close = () => {
+    setOpen(false);
+    setQuery("");
+    setSelectedProvider(null);
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        type="button"
+        className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[13px] font-medium text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+      >
+        <Plus size={14} strokeWidth={2} />
+        Add trigger
+      </PopoverTrigger>
+      <PopoverContent align="start" sideOffset={8} className="w-[340px] bg-surface p-0 text-ink">
+        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+          {provider ? (
+            <button
+              type="button"
+              onClick={() => setSelectedProvider(null)}
+              aria-label="Back to trigger types"
+              className="rounded-md p-1 text-ink-subtle hover:bg-surface-hover hover:text-ink"
+            >
+              <ChevronRight size={14} className="rotate-180" />
+            </button>
+          ) : (
+            <Search size={14} className="text-ink-faint" />
+          )}
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={provider ? `Search ${provider.label} events` : "Search triggers"}
+            aria-label="Search triggers"
+            className="h-7 min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-ink-faint"
+          />
+        </div>
+        <div className="max-h-[320px] overflow-y-auto p-1.5">
+          {provider ? (
+            <TriggerEventOptions
+              provider={provider}
+              query={normalizedQuery}
+              onSelect={(eventId, integrationId) => {
+                onAdd({
+                  id: newWorkflowTriggerId(),
+                  type: "event",
+                  provider: provider.provider,
+                  event: eventId,
+                  integrationId,
+                  filters: {},
+                  prompt: DEFAULT_WORKFLOW_SCHEDULE_PROMPT,
+                });
+                close();
+              }}
+            />
+          ) : (
+            <TriggerTypeOptions
+              providers={filteredProviders}
+              query={normalizedQuery}
+              onSchedule={() => {
+                onAdd({
+                  id: newWorkflowTriggerId(),
+                  type: "schedule",
+                  cron: DEFAULT_WORKFLOW_SCHEDULE_CRON,
+                  timezone: DEFAULT_WORKFLOW_SCHEDULE_TIMEZONE,
+                  prompt: DEFAULT_WORKFLOW_SCHEDULE_PROMPT,
+                  enabled: true,
+                });
+                close();
+              }}
+              onProvider={(providerName) => {
+                setSelectedProvider(providerName);
+                setQuery("");
+              }}
+            />
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function TriggerTypeOptions({
+  providers,
+  query,
+  onSchedule,
+  onProvider,
+}: {
+  providers: WorkflowEventProviderOption[];
+  query: string;
+  onSchedule: () => void;
+  onProvider: (provider: string) => void;
+}) {
+  return (
+    <>
+      {!query || "scheduled".includes(query) ? (
+        <button
+          type="button"
+          onClick={onSchedule}
+          className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-surface-hover"
+        >
+          <CalendarClock size={15} className="text-ink-subtle" />
+          <span className="flex-1 text-[13px] font-medium">Scheduled</span>
+          <ChevronRight size={14} className="text-ink-faint" />
+        </button>
+      ) : null}
+      {providers.map((provider) => (
+        <button
+          key={provider.provider}
+          type="button"
+          onClick={() => onProvider(provider.provider)}
+          className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-surface-hover"
+        >
+          <Webhook size={15} className="text-ink-subtle" />
+          <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{provider.label}</span>
+          <ChevronRight size={14} className="text-ink-faint" />
+        </button>
+      ))}
+      {!workflowEventProvidersReady(providers) && !query ? (
+        <EventTriggerZeroState providers={providers} />
+      ) : null}
+    </>
+  );
+}
+
+function TriggerEventOptions({
+  provider,
+  query,
+  onSelect,
+}: {
+  provider: WorkflowEventProviderOption;
+  query: string;
+  onSelect: (eventId: string, integrationId: string) => void;
+}) {
+  const account = provider.accounts[0];
+  return provider.events
+    .filter((event) => !query || event.label.toLowerCase().includes(query))
+    .map((event) => (
+      <button
+        key={event.id}
+        type="button"
+        disabled={!account}
+        onClick={() => account && onSelect(event.id, account.integrationId)}
+        className="flex w-full items-start gap-3 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <Webhook size={15} className="mt-0.5 shrink-0 text-ink-subtle" />
+        <span className="min-w-0 flex-1">
+          <span className="block text-[13px] font-medium">{event.label}</span>
+          <span className="block text-[11.5px] text-ink-subtle">
+            {account ? event.description : `Connect ${provider.label} first`}
+          </span>
+        </span>
+      </button>
+    ));
 }
 
 // Nothing to trigger on yet. Point at the nearest missing step rather than a generic "connect an
@@ -1247,54 +1411,18 @@ function defaultSchedulePreset(
   return { kind, hour, minute };
 }
 
-function TriggerModeButton({
-  icon: Icon,
-  label,
-  selected,
-  disabled,
-  onSelect,
-}: {
-  icon: typeof Clock;
-  label: string;
-  selected: boolean;
-  disabled: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={selected}
-      disabled={disabled}
-      onClick={onSelect}
-      className={`inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[12.5px] font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-default ${
-        selected
-          ? "bg-surface text-ink shadow-[0_1px_2px_rgba(15,15,15,0.08)]"
-          : "text-ink-subtle hover:bg-surface-hover hover:text-ink"
-      }`}
-    >
-      <Icon size={13} strokeWidth={1.9} />
-      {label}
-    </button>
-  );
-}
-
 function StepCard({
   index,
   step,
   canEdit,
-  canRemove,
   skillCatalog,
   onChange,
-  onRemove,
 }: {
   index: number;
   step: WorkflowStep;
   canEdit: boolean;
-  canRemove: boolean;
   skillCatalog: SkillCatalogItem[];
   onChange: (partial: WorkflowStepPatch) => void;
-  onRemove: () => void;
 }) {
   const selectedRuntime = WORKFLOW_MODEL_OPTIONS.find((option) => option.token === step.model);
   const cloudRuntime =
@@ -1321,46 +1449,24 @@ function StepCard({
   };
 
   return (
-    <section className="group rounded-lg border border-border bg-surface">
-      <div className="flex flex-wrap items-center gap-2 border-b border-border px-3.5 py-2.5">
-        <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-md bg-surface-muted px-1 text-[11px] font-medium text-ink-subtle">
-          {index + 1}
-        </span>
-        <input
-          value={step.title}
-          readOnly={!canEdit}
-          maxLength={120}
-          aria-label={`Step ${index + 1} name`}
-          onChange={(event) => onChange({ title: event.target.value })}
-          placeholder="Step name"
-          className="min-w-[160px] flex-1 bg-transparent text-[13.5px] font-medium text-ink outline-none placeholder:text-ink-faint read-only:cursor-default"
-        />
-        <StepRuntimePicker value={step.model} onChange={updateRuntime} disabled={!canEdit} />
-        {canRemove ? (
-          <button
-            type="button"
-            onClick={onRemove}
-            aria-label={`Remove step ${index + 1}`}
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-subtle opacity-0 transition-all duration-150 hover:bg-surface-hover hover:text-danger focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover:opacity-100"
-          >
-            <Trash2 size={14} strokeWidth={1.9} />
-          </button>
-        ) : null}
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <SectionLabel>Agent instructions{index > 0 ? ` ${index + 1}` : ""}</SectionLabel>
+        <div className="flex flex-wrap items-center justify-end gap-1">
+          <span className="mr-1 text-[12px] font-medium text-ink-subtle">Model</span>
+          <StepRuntimePicker value={step.model} onChange={updateRuntime} disabled={!canEdit} />
+          {cloudRuntime ? (
+            <StepCloudRuntimeControls
+              compact
+              engine={cloudRuntime}
+              step={step}
+              disabled={!canEdit}
+              onChange={onChange}
+            />
+          ) : null}
+        </div>
       </div>
-      {cloudRuntime ? (
-        <StepCloudRuntimeControls
-          engine={cloudRuntime}
-          step={step}
-          disabled={!canEdit}
-          onChange={onChange}
-        />
-      ) : null}
-      <div className="px-3.5 py-3">
-        {!step.instructions.trim() ? (
-          <p className="mb-2 text-[12px] leading-5 text-ink-subtle">
-            Add instructions to this step before activating the workflow.
-          </p>
-        ) : null}
+      <section className="rounded-xl border border-border bg-surface px-3.5 py-3">
         {canEdit ? (
           <MarkdownBrainEditor
             content={step.instructions}
@@ -1374,8 +1480,8 @@ function StepCard({
         ) : (
           <p className="text-[13.5px] leading-6 text-ink-subtle/70">No content yet.</p>
         )}
-      </div>
-    </section>
+      </section>
+    </div>
   );
 }
 
@@ -1428,6 +1534,7 @@ function EditorMoreMenu({
   saveInProgress: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
@@ -1440,10 +1547,35 @@ function EditorMoreMenu({
       <PopoverContent align="end" sideOffset={6} className="w-[180px] bg-surface p-1 text-ink">
         <button
           type="button"
+          onClick={() => {
+            void navigator.clipboard.writeText(window.location.href).then(
+              () => {
+                setCopyState("copied");
+                setTimeout(() => setCopyState("idle"), 1_500);
+              },
+              () => setCopyState("error"),
+            );
+            setOpen(false);
+          }}
+          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-ink transition-colors hover:bg-surface-hover"
+        >
+          {copyState === "copied" ? (
+            <Check size={13} strokeWidth={1.9} />
+          ) : (
+            <Copy size={13} strokeWidth={1.9} />
+          )}
+          {copyState === "copied"
+            ? "Copied link"
+            : copyState === "error"
+              ? "Copy failed"
+              : "Copy link"}
+        </button>
+        <button
+          type="button"
           disabled={isArchiving || saveInProgress}
           onClick={() => {
             setOpen(false);
-            onArchive();
+            if (window.confirm("Delete this workflow? This can’t be undone.")) onArchive();
           }}
           className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-danger transition-colors duration-150 hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-60"
         >
@@ -1452,7 +1584,7 @@ function EditorMoreMenu({
           ) : (
             <Trash2 size={13} strokeWidth={1.9} />
           )}
-          Archive workflow
+          Delete workflow
         </button>
       </PopoverContent>
     </Popover>
@@ -1468,22 +1600,73 @@ function SectionLabel({ children }: { children: ReactNode }) {
 }
 
 function workflowDraft(workflow: WorkflowDetail): WorkflowDraft {
+  const triggers: WorkflowTriggerDraft[] = workflow.triggers?.length
+    ? workflow.triggers.map((trigger) =>
+        trigger.type === "schedule"
+          ? {
+              id: trigger.id,
+              type: "schedule",
+              cron: trigger.cron,
+              timezone: trigger.timezone,
+              prompt: trigger.prompt,
+              enabled: trigger.enabled,
+            }
+          : { ...trigger },
+      )
+    : workflow.trigger.type === "schedule"
+      ? [
+          {
+            id: `trigger-${workflow.id}`,
+            type: "schedule",
+            cron: workflow.trigger.cron,
+            timezone: workflow.trigger.timezone,
+            prompt: workflow.trigger.prompt,
+            enabled: workflow.trigger.enabled,
+          },
+        ]
+      : workflow.trigger.type === "event"
+        ? [{ id: `trigger-${workflow.id}`, ...workflow.trigger }]
+        : [];
   return {
     name: workflow.name,
     description: workflow.description,
     status: workflow.status,
     steps: workflow.steps,
-    trigger:
-      workflow.trigger.type === "schedule"
-        ? {
-            type: "schedule",
-            cron: workflow.trigger.cron,
-            timezone: workflow.trigger.timezone,
-            prompt: workflow.trigger.prompt,
-          }
-        : workflow.trigger.type === "event"
-          ? { ...workflow.trigger }
-          : { type: "manual" },
+    triggers,
+  };
+}
+
+function workflowTriggerInput(trigger: WorkflowTriggerDraft) {
+  return trigger.type === "schedule"
+    ? {
+        id: trigger.id,
+        type: "schedule" as const,
+        cron: trigger.cron,
+        timezone: trigger.timezone,
+        prompt: trigger.prompt,
+        enabled: trigger.enabled,
+      }
+    : { ...trigger };
+}
+
+function legacyWorkflowTrigger(trigger: WorkflowTriggerDraft | undefined) {
+  if (!trigger) return { type: "manual" as const };
+  if (trigger.type === "schedule") {
+    return {
+      type: "schedule" as const,
+      cron: trigger.cron,
+      timezone: trigger.timezone,
+      prompt: trigger.prompt,
+      enabled: trigger.enabled,
+    };
+  }
+  return {
+    type: "event" as const,
+    provider: trigger.provider,
+    event: trigger.event,
+    integrationId: trigger.integrationId,
+    filters: trigger.filters,
+    prompt: trigger.prompt,
   };
 }
 
@@ -1516,23 +1699,26 @@ function workflowDraftReadyToSave(
   draft: WorkflowDraft,
   eventProviders: readonly WorkflowEventProviderOption[],
 ) {
-  if (draft.trigger.type !== "event") return true;
-  const { provider, event, integrationId, filters } = draft.trigger;
-  if (!integrationId) return false;
-  if (Object.values(filters).some((filter) => !filter.id || !filter.name)) return false;
-  const declaration = eventProviders
-    .find((candidate) => candidate.provider === provider)
-    ?.events.find((candidate) => candidate.id === event);
-  // The plugin no longer declares this event, so there is nothing to check the filters against.
-  // Let the save through: a server-side rejection is a visible error, silence is not.
-  if (!declaration) return true;
-  return declaration.filters.every(
-    (filter: PluginEventFilterDefinitionDto) => !filter.required || Boolean(filters[filter.id]?.id),
-  );
+  return draft.triggers.every((trigger) => {
+    if (trigger.type !== "event") return true;
+    const { provider, event, integrationId, filters } = trigger;
+    if (!integrationId) return false;
+    if (Object.values(filters).some((filter) => !filter.id || !filter.name)) return false;
+    const declaration = eventProviders
+      .find((candidate) => candidate.provider === provider)
+      ?.events.find((candidate) => candidate.id === event);
+    // The plugin no longer declares this event, so there is nothing to check the filters against.
+    // Let the save through: a server-side rejection is a visible error, silence is not.
+    if (!declaration) return true;
+    return declaration.filters.every(
+      (filter: PluginEventFilterDefinitionDto) =>
+        !filter.required || Boolean(filters[filter.id]?.id),
+    );
+  });
 }
 
-function newWorkflowStepId() {
-  return `step-${globalThis.crypto.randomUUID()}`;
+function newWorkflowTriggerId() {
+  return `trigger-${globalThis.crypto.randomUUID()}`;
 }
 
 function workflowRunDisabledReason({
@@ -1545,7 +1731,6 @@ function workflowRunDisabledReason({
   saveState: SaveState;
 }) {
   if (!canEdit) return "Only workspace admins can run workflows.";
-  if (draft.status !== "active") return "Set the workflow to Active before running it.";
   if (draft.steps.length === 0 || draft.steps.some((step) => !step.instructions.trim())) {
     return "Add instructions to every step before running the workflow.";
   }

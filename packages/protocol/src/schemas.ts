@@ -322,6 +322,60 @@ export const WorkflowTriggerInputSchema = z
   ])
   .openapi("WorkflowTriggerInput");
 
+export const WorkflowAutomationTriggerSchema = z
+  .discriminatedUnion("type", [
+    z
+      .object({
+        id: ResourceIdSchema,
+        type: z.literal("event"),
+        provider: z.string().min(1).max(64),
+        event: z.string().min(1).max(128),
+        integrationId: ResourceIdSchema,
+        filters: z.record(z.string().max(64), WorkflowEventFilterValueSchema),
+        prompt: z.string().min(1).max(10_000),
+      })
+      .strict(),
+    z
+      .object({
+        id: ResourceIdSchema,
+        type: z.literal("schedule"),
+        cron: z.string().min(1).max(128),
+        timezone: z.string().min(1).max(128),
+        prompt: z.string().min(1).max(10_000),
+        enabled: z.boolean(),
+        lastRunAt: TimestampSchema.nullable(),
+        nextRunAt: TimestampSchema.nullable(),
+      })
+      .strict(),
+  ])
+  .openapi("WorkflowAutomationTrigger");
+
+export const WorkflowAutomationTriggerInputSchema = z
+  .discriminatedUnion("type", [
+    z
+      .object({
+        id: ResourceIdSchema,
+        type: z.literal("event"),
+        provider: z.string().min(1).max(64),
+        event: z.string().min(1).max(128),
+        integrationId: ResourceIdSchema,
+        filters: z.record(z.string().max(64), WorkflowEventFilterValueSchema),
+        prompt: z.string().max(10_000).optional(),
+      })
+      .strict(),
+    z
+      .object({
+        id: ResourceIdSchema,
+        type: z.literal("schedule"),
+        cron: z.string().min(1).max(128),
+        timezone: z.string().min(1).max(128).optional(),
+        prompt: z.string().max(10_000).optional(),
+        enabled: z.boolean().optional(),
+      })
+      .strict(),
+  ])
+  .openapi("WorkflowAutomationTriggerInput");
+
 export const WorkflowSchema = z
   .object({
     id: ResourceIdSchema,
@@ -333,6 +387,8 @@ export const WorkflowSchema = z
     steps: z.array(WorkflowStepSchema).max(20),
     status: WorkflowStatusSchema,
     trigger: WorkflowTriggerSchema,
+    triggers: z.array(WorkflowAutomationTriggerSchema).max(20).optional(),
+    createdByWorkosId: ResourceIdSchema.nullable().optional(),
     version: z.number().int().min(1),
     archivedAt: TimestampSchema.nullable(),
     createdAt: TimestampSchema,
@@ -2740,6 +2796,7 @@ export const UpdateWorkflowBodySchema = z
     steps: z.array(WorkflowStepSchema).min(1).max(20),
     status: WorkflowStatusSchema,
     trigger: WorkflowTriggerInputSchema,
+    triggers: z.array(WorkflowAutomationTriggerInputSchema).max(20).optional(),
   })
   .strict()
   .openapi("UpdateWorkflowBody");
