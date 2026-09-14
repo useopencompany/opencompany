@@ -8069,6 +8069,9 @@
           "hasUnseen": {
             "type": "boolean"
           },
+          "awaitingInput": {
+            "type": "boolean"
+          },
           "pinnedAt": {
             "type": "string",
             "nullable": true,
@@ -8091,6 +8094,7 @@
           "runtime",
           "activityState",
           "hasUnseen",
+          "awaitingInput",
           "createdAt",
           "updatedAt"
         ],
