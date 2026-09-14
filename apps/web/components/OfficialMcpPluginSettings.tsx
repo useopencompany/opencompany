@@ -888,7 +888,11 @@ function OfficialMcpPluginDetailView({
       <PluginConnectionFeedback />
       <SettingsContent
         title={config.label}
-        description={plugin?.manifest.description || config.description}
+        description={
+          config.name === "dash0"
+            ? config.description
+            : plugin?.manifest.description || config.description
+        }
         backLink={{ href: "/settings/plugins", label: "Plugins" }}
         icon={
           <span

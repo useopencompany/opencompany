@@ -1693,7 +1693,7 @@ describe("Linear plugin settings", () => {
       ...plugin,
       id: "plugin_dash0",
       name: "dash0",
-      manifest: { name: "dash0", description: "Investigate Dash0 telemetry." },
+      manifest: { name: "dash0", description: "AWS Ireland only" },
       source: { ...plugin.source, path: "dash0" },
     } satisfies PluginInstallationDto;
     const html = renderToString(
@@ -1704,8 +1704,9 @@ describe("Linear plugin settings", () => {
       />,
     );
 
-    expect(html).toContain("AWS Ireland");
-    expect(html).toContain("Other regions are not supported");
+    expect(html).toContain("region is detected automatically");
+    expect(html).not.toContain("AWS Ireland only");
+    expect(html).toContain("GCP Netherlands");
     expect(html).toContain("Read Agent0 investigations");
     expect(html).toContain("Inspect observability data");
     expect(html).toContain("Run paid Agent0 investigations");
