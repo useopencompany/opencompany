@@ -29,7 +29,13 @@ export type OfficialMcpPluginName =
   | "stripe"
   | "x";
 export type OfficialSkillPluginName = "yc-advise" | "doppler";
-export type OfficialPluginName = OfficialMcpPluginName | OfficialSkillPluginName;
+// A managed plugin has no connection and no MCP server: opencompany runs its tools server-side and
+// bills the workspace per action at the price the installed package declares.
+export type OfficialManagedPluginName = "lead-research";
+export type OfficialPluginName =
+  | OfficialMcpPluginName
+  | OfficialSkillPluginName
+  | OfficialManagedPluginName;
 export type OfficialPluginCategory = "communication" | "productivity" | "engineering" | "business";
 
 export const OFFICIAL_PLUGIN_CATEGORIES = {
@@ -97,7 +103,18 @@ export type OfficialSkillPluginMetadata = OfficialPluginMetadataBase & {
   connectionProvider?: "doppler";
 };
 
-export type OfficialPluginMetadata = OfficialMcpPluginMetadata | OfficialSkillPluginMetadata;
+export type OfficialManagedPluginMetadata = OfficialPluginMetadataBase & {
+  name: OfficialManagedPluginName;
+  kind: "managed";
+  // What the workspace is buying, in the user's words. Prices themselves come from the installed
+  // package, never from this file.
+  billingSummary: string;
+};
+
+export type OfficialPluginMetadata =
+  | OfficialMcpPluginMetadata
+  | OfficialSkillPluginMetadata
+  | OfficialManagedPluginMetadata;
 
 const OFFICIAL_PLUGIN_SOURCE_PATTERN =
   /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/([0-9a-f]{40})(?:\/|$)/u;
@@ -473,6 +490,27 @@ export const OFFICIAL_SKILL_PLUGIN_METADATA = {
     source: OFFICIAL_PLUGIN_SOURCES["yc-advise"],
   },
 } as const satisfies Record<OfficialSkillPluginName, OfficialSkillPluginMetadata>;
+
+export const OFFICIAL_MANAGED_PLUGIN_METADATA = {
+  "lead-research": {
+    name: "lead-research",
+    kind: "managed",
+    label: "Lead research",
+    description:
+      "Find companies and people that match your ICP, and get the work emails needed to reach them.",
+    category: "business",
+    featured: true,
+    source: OFFICIAL_PLUGIN_SOURCES["lead-research"],
+    billingSummary:
+      "Billed per result from your workspace credits. No account to connect and no separate subscription.",
+  },
+} as const satisfies Record<OfficialManagedPluginName, OfficialManagedPluginMetadata>;
+
+export function isOfficialManagedPluginName(value: string): value is OfficialManagedPluginName {
+  return (
+    value === value.toLocaleLowerCase() && Object.hasOwn(OFFICIAL_MANAGED_PLUGIN_METADATA, value)
+  );
+}
 
 export function isOfficialMcpPluginName(value: string): value is OfficialMcpPluginName {
   return value === value.toLocaleLowerCase() && Object.hasOwn(OFFICIAL_MCP_PLUGIN_METADATA, value);

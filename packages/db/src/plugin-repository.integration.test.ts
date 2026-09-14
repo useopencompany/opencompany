@@ -839,6 +839,7 @@ async function resolvedPlugin(
     remoteMcp?: boolean;
     capabilities?: boolean;
     events?: boolean;
+    pricing?: boolean;
   } = {},
 ): Promise<ResolvedPluginPackage> {
   const skill = await resolvedSkill(skillName, description, `skills/${skillName}`);
@@ -847,7 +848,7 @@ async function resolvedPlugin(
       $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
       name: pluginName,
       description: `${pluginName} plugin.`,
-      ...(options.capabilities || options.events
+      ...(options.capabilities || options.events || options.pricing
         ? {
             extensions: {
               ...(options.capabilities
@@ -859,6 +860,7 @@ async function resolvedPlugin(
                   }
                 : {}),
               ...(options.events ? { "so.opencompany.events": [pluginEventDeclaration()] } : {}),
+              ...(options.pricing ? { "so.opencompany.pricing": pluginPricingDeclaration() } : {}),
             },
           }
         : {}),
@@ -904,7 +906,7 @@ async function resolvedPlugin(
     manifest: {
       name: pluginName,
       description: `${pluginName} plugin.`,
-      ...(options.capabilities || options.events
+      ...(options.capabilities || options.events || options.pricing
         ? {
             extensions: {
               ...(options.capabilities
@@ -916,6 +918,7 @@ async function resolvedPlugin(
                   }
                 : {}),
               ...(options.events ? { "so.opencompany.events": [pluginEventDeclaration()] } : {}),
+              ...(options.pricing ? { "so.opencompany.pricing": pluginPricingDeclaration() } : {}),
             },
           }
         : {}),
@@ -962,6 +965,19 @@ async function resolvedPlugin(
         ]
       : [],
     events: options.events ? [pluginEventDeclaration()] : [],
+    pricing: options.pricing
+      ? {
+          currency: "USD" as const,
+          actions: [
+            {
+              action: "find_lead",
+              label: "Lead found",
+              unit: "per_result" as const,
+              amountUsdMicros: 80_000,
+            },
+          ],
+        }
+      : null,
     report: {
       ignoredManifestFields: [],
       skills: [
@@ -1006,6 +1022,18 @@ async function resolvedPlugin(
       events: options.events
         ? { present: true, status: "parsed", issues: [] }
         : { status: "absent" },
+      pricing: options.pricing
+        ? { present: true, status: "parsed", issues: [] }
+        : { status: "absent" },
+    },
+  };
+}
+
+function pluginPricingDeclaration() {
+  return {
+    currency: "USD",
+    actions: {
+      find_lead: { label: "Lead found", unit: "per_result", amountUsdMicros: 80_000 },
     },
   };
 }

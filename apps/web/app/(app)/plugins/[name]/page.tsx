@@ -1,5 +1,6 @@
 import { CustomMcpPluginDetail } from "@/components/CustomMcpPluginSettings";
 import { DopplerPluginDetail } from "@/components/DopplerPluginSettings";
+import { ManagedPluginDetail, type ManagedPluginState } from "@/components/ManagedPluginSettings";
 import {
   AttioPluginDetail,
   BetterStackPluginDetail,
@@ -36,15 +37,22 @@ import { currentUser } from "@/lib/auth";
 import { loadCurrentDopplerAuthSettings } from "@/lib/doppler-auth";
 import { getHeadlessCustomMcp, getHeadlessPlugin } from "@/lib/headless-knowledge-server";
 import {
+  isOfficialManagedPluginName,
   isOfficialMcpPluginName,
   isOfficialSkillPluginName,
   OFFICIAL_MCP_PLUGIN_METADATA,
   OFFICIAL_SKILL_PLUGIN_METADATA,
+  type OfficialManagedPluginName,
 } from "@/lib/official-plugins";
+import { getPluginBillingAction } from "@/lib/plugins/billing-actions";
 
 export default async function PluginDetailPage({ params }: { params: Promise<{ name: string }> }) {
   const { name } = await params;
   const normalizedName = name.toLocaleLowerCase();
+  if (isOfficialManagedPluginName(normalizedName)) {
+    const [, state] = await Promise.all([currentUser(), loadManagedPlugin(normalizedName)]);
+    return <ManagedPluginDetail name={normalizedName} state={state} canEdit={true} />;
+  }
   if (isOfficialMcpPluginName(normalizedName)) {
     const [, pluginState] = await Promise.all([currentUser(), loadOfficialPlugin(normalizedName)]);
     const Detail = {
@@ -123,6 +131,12 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
     );
   }
   return <PluginDetail plugin={plugin} canEdit={true} />;
+}
+
+async function loadManagedPlugin(name: OfficialManagedPluginName): Promise<ManagedPluginState> {
+  const plugin = await getHeadlessPlugin(name);
+  if (!plugin) return { status: "not_installed" };
+  return { status: "installed", plugin, billing: await getPluginBillingAction(name) };
 }
 
 async function loadOfficialPlugin(

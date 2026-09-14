@@ -1,6 +1,7 @@
 "use client";
 
 import { Switch } from "@opencompany/ui/components/switch";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { PageContent } from "@/components/PageContent";
@@ -11,7 +12,15 @@ import {
   type WorkspaceCapabilityState,
 } from "@/lib/capabilities/actions";
 
-const CAPABILITY_COPY: Record<ManagedCapabilitySource, { label: string; description: string }> = {
+// Prospecting moved behind the paid Lead research plugin, which owns its own prices and daily
+// spending limit. It stays a managed capability source for the runtime, but it is not a toggle
+// here: installing or removing the plugin is the switch.
+const PLUGIN_MANAGED_SOURCES = new Set<ManagedCapabilitySource>(["lead"]);
+
+const CAPABILITY_COPY: Record<
+  Exclude<ManagedCapabilitySource, "lead">,
+  { label: string; description: string }
+> = {
   x: {
     label: "X",
     description: "Search public posts, profiles, threads, and replies.",
@@ -31,10 +40,6 @@ const CAPABILITY_COPY: Record<ManagedCapabilitySource, { label: string; descript
   tiktok: {
     label: "TikTok",
     description: "Search public creators, videos, comments, hashtags, and trends.",
-  },
-  lead: {
-    label: "Prospecting",
-    description: "Look up work emails for known prospects or find new targeted professionals.",
   },
   seo: {
     label: "SEO",
@@ -63,6 +68,10 @@ export function CapabilitiesPanel({
   const [budgetPending, setBudgetPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [, startTransition] = useTransition();
+  const visibleRows = rows.filter(
+    (row): row is WorkspaceCapabilityState & { source: Exclude<ManagedCapabilitySource, "lead"> } =>
+      !PLUGIN_MANAGED_SOURCES.has(row.source),
+  );
 
   const setEnabled = (source: ManagedCapabilitySource, enabled: boolean) => {
     setError(null);
@@ -159,7 +168,7 @@ export function CapabilitiesPanel({
       </section>
 
       <section className="overflow-hidden rounded-lg border border-ink/10">
-        {rows.map((row, index) => {
+        {visibleRows.map((row, index) => {
           const copy = CAPABILITY_COPY[row.source];
           return (
             <div
@@ -191,6 +200,14 @@ export function CapabilitiesPanel({
         <p>
           These are managed capabilities, not connected integrations. Results are saved to Brain
           only when someone explicitly asks.
+        </p>
+        <p>
+          Lead research is a paid plugin with its own prices and daily spending limit. Manage it on
+          its{" "}
+          <Link href="/settings/plugins/lead-research" className="underline underline-offset-2">
+            plugin page
+          </Link>
+          .
         </p>
         {!isAdmin ? <p>Only workspace admins can change these settings.</p> : null}
         {error ? (

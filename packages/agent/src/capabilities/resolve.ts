@@ -1,4 +1,7 @@
-import type { ManagedCapabilitiesResolution } from "@opencompany/agent/actions/catalog";
+import type {
+  ManagedCapabilitiesResolution,
+  ManagedCapabilitiesResolverInput,
+} from "@opencompany/agent/actions/catalog";
 import type {
   ActionExecuteContext,
   ActionSourceDescriptor,
@@ -18,13 +21,15 @@ import {
   isManagedCapabilityActionKilled,
 } from "./execute";
 import { executeImageGenerationCapability, IMAGE_GENERATION_TIMEOUT_MS } from "./image-generation";
+import { loadManagedCapabilityPrices, requiresPaidPlugin } from "./pricing";
 
 // Managed (Monid) capabilities share the same catalog and execution service in
 // every backend composition root. Workspace enablement and pricing authority
 // are always loaded server-side; callers cannot opt into a capability by request.
 export async function resolveManagedCapabilities(
-  workspaceId: string,
+  input: ManagedCapabilitiesResolverInput,
 ): Promise<ManagedCapabilitiesResolution> {
+  const { workspaceId } = input;
   const managedCapabilityStates =
     (process.env.MONID_API_KEY?.trim() || process.env.VERCEL_AI_GATEWAY_API_KEY?.trim()) &&
     !isManagedCapabilitiesKilled()
@@ -33,10 +38,19 @@ export async function resolveManagedCapabilities(
   const enabledManagedSources = new Set(
     managedCapabilityStates.filter((entry) => entry.enabled).map((entry) => entry.source),
   );
+  // Actions sold through a paid plugin exist only while that plugin is installed. A price is what
+  // makes one sellable, so an uninstalled plugin leaves its actions out of the catalog entirely
+  // rather than exposing them unpriced.
+  const pricedActionIds = new Set(
+    (await loadManagedCapabilityPrices(input).catch(() => new Map())).keys(),
+  );
   const actions: ResolvedAction[] = MANAGED_CAPABILITY_ACTIONS.filter(
     (spec) =>
       enabledManagedSources.has(spec.source) &&
       !isManagedCapabilityActionKilled(spec.id) &&
+      (isImageGenerationActionSpec(spec) ||
+        !requiresPaidPlugin(spec) ||
+        pricedActionIds.has(spec.id)) &&
       (isImageGenerationActionSpec(spec)
         ? Boolean(process.env.VERCEL_AI_GATEWAY_API_KEY?.trim())
         : Boolean(process.env.MONID_API_KEY?.trim())),
