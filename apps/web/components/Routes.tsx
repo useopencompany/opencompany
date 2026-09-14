@@ -10,8 +10,6 @@ import type {
   SkillSourceDto,
 } from "@opencompany/protocol";
 import { Button } from "@opencompany/ui/components/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@opencompany/ui/components/tooltip";
-import { cn } from "@opencompany/ui/lib/utils";
 import { useLiveQuery } from "@tanstack/react-db";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -26,7 +24,6 @@ import {
   Link2,
   ListTodo,
   Loader2,
-  LockKeyhole,
   Mail,
   Monitor,
   Moon,
@@ -57,6 +54,13 @@ import { InferenceSettingsPanel } from "@/components/InferenceSettingsPanel";
 import { IntentPrefetchLink } from "@/components/IntentPrefetchLink";
 import { McpSetupGuide } from "@/components/McpSetupGuide";
 import { RepositorySettings } from "@/components/RepositorySettings";
+import {
+  ScopeBadge,
+  ScopeField,
+  type ScopeFilter,
+  ScopeFilterTabs,
+  type Scope as SkillScope,
+} from "@/components/ScopeControls";
 import { SettingsContent } from "@/components/SettingsChrome";
 import { Surface } from "@/components/Surface";
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
@@ -707,6 +711,7 @@ export function WorkflowsRoute({
 }) {
   const router = useRouter();
   const [creating, setCreating] = useState(false);
+  const [scopeFilter, setScopeFilter] = useState<ScopeFilter>("all");
   const hydrated = useHydrated();
   const workflowCollection = useMemo(
     () => (hydrated ? getHeadlessWorkflows(workspaceId) : null),
@@ -719,9 +724,12 @@ export function WorkflowsRoute({
   const visibleWorkflows = useMemo(
     () =>
       ((!hydrated || workflowsLoading ? workflows : (workflowRows ?? [])) as WorkflowListItem[])
-        .filter((workflow) => !workflow.archivedAt)
+        .filter(
+          (workflow) =>
+            !workflow.archivedAt && (scopeFilter === "all" || workflow.scope === scopeFilter),
+        )
         .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
-    [hydrated, workflowRows, workflows, workflowsLoading],
+    [hydrated, scopeFilter, workflowRows, workflows, workflowsLoading],
   );
 
   return (
@@ -735,7 +743,7 @@ export function WorkflowsRoute({
               </h1>
               <p className="text-[13px] leading-5 text-ink-subtle">
                 Automations you fire with <span className="font-medium text-ink">#</span> in chat;
-                each run becomes a Task.
+                each run becomes a Task. Keep one to yourself or share it with the company.
               </p>
             </div>
             {canEdit ? (
@@ -750,10 +758,12 @@ export function WorkflowsRoute({
             ) : null}
           </header>
 
+          <ScopeFilterTabs label="Workflow scope" value={scopeFilter} onChange={setScopeFilter} />
+
           {visibleWorkflows.length === 0 ? (
             <EmptyState
               icon={Workflow}
-              title="No workflows yet"
+              title={scopeFilter === "all" ? "No workflows yet" : `No ${scopeFilter} workflows yet`}
               description={
                 canEdit
                   ? "Create a workflow to automate a recurring job. Fire it with # in chat, and each run shows up as a Task."
@@ -778,6 +788,12 @@ export function WorkflowsRoute({
           namePlaceholder="Weekly investor update"
           descriptionPlaceholder="What this workflow does"
           submitLabel="Create workflow"
+          initialScope={scopeFilter === "personal" ? "personal" : "company"}
+          scopeHint={(scope) =>
+            scope === "personal"
+              ? "Only you can see and run it"
+              : "Everyone in the workspace can run and edit it"
+          }
           create={async (input) => {
             const workflow = await createHeadlessWorkflow(input);
             return { ok: true, slug: workflow.slug };
@@ -801,6 +817,7 @@ function WorkflowListRow({ workflow }: { workflow: WorkflowListItem }) {
           <span className="truncate text-[14px] font-medium leading-tight text-ink">
             {workflow.name}
           </span>
+          <ScopeBadge>{workflow.scope === "personal" ? "Personal" : "Company"}</ScopeBadge>
           <ItemStatusBadge status={workflow.status} />
         </span>
         {workflow.description.trim() ? (
@@ -836,13 +853,6 @@ function WorkflowListRow({ workflow }: { workflow: WorkflowListItem }) {
 
 // --- Skills (settings) -------------------------------------------------------
 
-type SkillScope = "personal" | "company";
-const SKILL_SCOPE_FILTERS = [
-  { value: "all", label: "All" },
-  { value: "company", label: "Company" },
-  { value: "personal", label: "Personal" },
-] as const;
-
 export function SkillsSettingsRoute({
   skills,
   canEdit,
@@ -853,7 +863,7 @@ export function SkillsSettingsRoute({
   const router = useRouter();
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
-  const [scopeFilter, setScopeFilter] = useState<"all" | SkillScope>("all");
+  const [scopeFilter, setScopeFilter] = useState<ScopeFilter>("all");
   const creationScope = scopeFilter === "company" ? "company" : "personal";
   const visibleSkills = skills.filter(
     (skill) => scopeFilter === "all" || skill.scope === scopeFilter,
@@ -862,23 +872,7 @@ export function SkillsSettingsRoute({
   return (
     <SettingsContent title="Skills">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div role="group" aria-label="Skill scope" className="flex flex-wrap items-center gap-2">
-          {SKILL_SCOPE_FILTERS.map((filter) => (
-            <Button
-              key={filter.value}
-              variant={scopeFilter === filter.value ? "default" : "secondary"}
-              size="sm"
-              aria-pressed={scopeFilter === filter.value}
-              onClick={() => setScopeFilter(filter.value)}
-              className={cn(
-                "h-8 rounded-full px-3 text-[13px] font-normal shadow-none",
-                scopeFilter !== filter.value && "text-ink-muted hover:text-ink",
-              )}
-            >
-              {filter.label}
-            </Button>
-          ))}
-        </div>
+        <ScopeFilterTabs label="Skill scope" value={scopeFilter} onChange={setScopeFilter} />
         {canEdit ? (
           <div className="ml-auto flex items-center gap-2">
             <Button
@@ -1388,6 +1382,8 @@ function NewItemDialog({
   namePlaceholder,
   descriptionPlaceholder,
   submitLabel,
+  initialScope,
+  scopeHint,
   create,
   onClose,
   onCreated,
@@ -1396,15 +1392,19 @@ function NewItemDialog({
   namePlaceholder: string;
   descriptionPlaceholder: string;
   submitLabel: string;
+  initialScope: SkillScope;
+  scopeHint: (scope: SkillScope) => string;
   create: (input: {
     name: string;
     description?: string;
+    scope: SkillScope;
   }) => Promise<{ ok: true; slug: string } | { ok: false; message: string }>;
   onClose: () => void;
   onCreated: (slug: string) => void;
 }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [scope, setScope] = useState<SkillScope>(initialScope);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -1427,6 +1427,7 @@ function NewItemDialog({
       try {
         const result = await create({
           name: trimmed,
+          scope,
           ...(description.trim() ? { description: description.trim() } : {}),
         });
         if (result.ok) {
@@ -1493,6 +1494,13 @@ function NewItemDialog({
               className="h-9 rounded-md border border-border bg-canvas px-2.5 text-[13px] text-ink outline-none transition-colors placeholder:text-ink-faint focus-visible:ring-1 focus-visible:ring-ink/20"
             />
           </label>
+          <ScopeField
+            scope={scope}
+            onChange={setScope}
+            disabled={isPending}
+            hint={scopeHint}
+            managedTooltip="Only the creator or an admin can change visibility."
+          />
           {error ? <div className="text-[12px] leading-4 text-warning">{error}</div> : null}
         </div>
         <div className="mt-5 flex justify-end gap-2">
@@ -1974,54 +1982,25 @@ export function formatRelativeTime(value: Date | string) {
   return new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(timestamp);
 }
 
-function SkillScopeBadge({ scope }: { scope: "personal" | "company" | null }) {
+function SkillScopeBadge({ scope }: { scope: SkillScope | null }) {
   return (
-    <span className="rounded bg-surface-muted px-1.5 py-0.5 text-[11px] text-ink-subtle">
+    <ScopeBadge>
       {scope === "personal" ? "Personal" : scope === "company" ? "Company" : "Plugin"}
-    </span>
+    </ScopeBadge>
   );
 }
 
-function SkillScopeField({
-  scope,
-  onChange,
-  disabled,
-  canManage = true,
-}: {
+function SkillScopeField(props: {
   scope: SkillScope;
   onChange: (scope: SkillScope) => void;
   disabled?: boolean;
   canManage?: boolean;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-      <span className="text-[12px] font-medium text-ink-subtle">Visibility</span>
-      {canManage ? (
-        <select
-          aria-label="Visibility"
-          value={scope}
-          disabled={disabled}
-          onChange={(event) => onChange(event.target.value as SkillScope)}
-          className={cn(EDITOR_INPUT_CLASS, "w-auto")}
-        >
-          <option value="personal">Personal</option>
-          <option value="company">Company</option>
-        </select>
-      ) : (
-        <Tooltip>
-          <TooltipTrigger
-            aria-label="Visibility managed by the creator or an admin"
-            className="inline-flex h-9 items-center gap-2 rounded-md bg-surface-muted px-2.5 text-[13px] text-ink-subtle"
-          >
-            {scope === "company" ? "Company" : "Personal"}
-            <LockKeyhole size={12} aria-hidden="true" />
-          </TooltipTrigger>
-          <TooltipContent>Only the creator or an admin can change visibility.</TooltipContent>
-        </Tooltip>
-      )}
-      <span className="text-[12px] leading-5 text-ink-subtle">
-        {scope === "personal" ? "Only you" : "Everyone can use and edit"}
-      </span>
-    </div>
+    <ScopeField
+      {...props}
+      hint={(scope) => (scope === "personal" ? "Only you" : "Everyone can use and edit")}
+      managedTooltip="Only the creator or an admin can change visibility."
+    />
   );
 }

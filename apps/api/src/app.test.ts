@@ -6268,6 +6268,8 @@ function populatedAutomationServices() {
       },
     ],
     status: "active",
+    scope: "company",
+    createdByUserId: "user_1",
     trigger: { type: "manual" },
     version: 1,
     archivedAt: null,

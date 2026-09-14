@@ -40,6 +40,8 @@ describe("WorkflowApplicationService", () => {
       idempotencyKey: "create-workflow-1",
       name: "Weekly research",
       description: "Market changes",
+      // A workflow is company-wide unless its author asks for a personal one.
+      scope: "company",
       initialStep: {
         id: "step_new",
         title: "",
@@ -607,6 +609,8 @@ function workflow(overrides: Partial<Workflow> = {}): Workflow {
       },
     ],
     status: "active",
+    scope: "company",
+    createdByUserId: "user_1",
     trigger: { type: "manual" },
     version: 1,
     archivedAt: null,

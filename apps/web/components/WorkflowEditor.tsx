@@ -28,6 +28,7 @@ import { useRouter } from "next/navigation";
 import { type ReactNode, useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { Markdown } from "@/components/Markdown";
 import { MarkdownBrainEditor } from "@/components/MarkdownBrainEditor";
+import { ScopeField } from "@/components/ScopeControls";
 import {
   StepCloudRuntimeControls,
   StepRuntimePicker,
@@ -82,7 +83,7 @@ type WorkflowTriggerDraft =
     }
   | { type: "schedule"; cron: string; timezone: string; prompt: string };
 type WorkflowEventTriggerDraft = Extract<WorkflowTriggerDraft, { type: "event" }>;
-type WorkflowDraft = Pick<WorkflowDetail, "name" | "description" | "status" | "steps"> & {
+type WorkflowDraft = Pick<WorkflowDetail, "name" | "description" | "status" | "steps" | "scope"> & {
   trigger: WorkflowTriggerDraft;
 };
 type SaveState = "saved" | "saving" | "error";
@@ -91,12 +92,14 @@ export function WorkflowEditor({
   workflow,
   workspaceId,
   canEdit,
+  canManageScope,
   skillCatalog,
   eventProviders = NO_EVENT_PROVIDERS,
 }: {
   workflow: WorkflowDetail;
   workspaceId: string;
   canEdit: boolean;
+  canManageScope: boolean;
   skillCatalog: SkillCatalogItem[];
   eventProviders?: WorkflowEventProviderOption[];
 }) {
@@ -151,6 +154,7 @@ export function WorkflowEditor({
           description: snapshot.description,
           steps: snapshot.steps,
           status: snapshot.status,
+          scope: snapshot.scope,
           trigger: snapshot.trigger,
         });
         versionRef.current = saved.version;
@@ -354,6 +358,19 @@ export function WorkflowEditor({
               />
             </div>
           </header>
+
+          <ScopeField
+            scope={draft.scope}
+            onChange={(scope) => patch({ scope })}
+            disabled={!canEdit}
+            canManage={canEdit && canManageScope}
+            hint={(scope) =>
+              scope === "personal"
+                ? "Only you can see and run this workflow"
+                : "Everyone in the workspace can run and edit this workflow"
+            }
+            managedTooltip="Only the creator or a workspace admin can change this workflow's visibility."
+          />
 
           {draft.status === "draft" ? (
             <p className="text-[12.5px] leading-5 text-ink-subtle" role="status">
@@ -1472,6 +1489,7 @@ function workflowDraft(workflow: WorkflowDetail): WorkflowDraft {
     name: workflow.name,
     description: workflow.description,
     status: workflow.status,
+    scope: workflow.scope,
     steps: workflow.steps,
     trigger:
       workflow.trigger.type === "schedule"

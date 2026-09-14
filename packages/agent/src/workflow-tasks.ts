@@ -181,6 +181,7 @@ export async function createTaskFromWorkflow(
 ): Promise<Task> {
   const workflow = await (dependencies.resolveWorkflow ?? resolveWorkflowMention)({
     workspaceId: input.workspaceId,
+    userId: input.userWorkosId,
     mention: input.mention,
   });
   // resolveWorkflowMention throws when workspaceId is null, so it is set here.

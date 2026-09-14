@@ -206,6 +206,7 @@ export type ChatHostToolServiceDependencies = {
   }) => Promise<TaskResult>;
   listWorkflowCatalog: (
     workspaceId: string,
+    userId: string,
   ) => Promise<Array<{ id: string; name: string; description: string }>>;
   executeBrowserTool: (input: {
     context: ChatHostContext;
@@ -575,7 +576,7 @@ async function bootstrap(
         context.taskConversation ? "company" : undefined,
       ),
       automationToolsEnabled
-        ? dependencies.listWorkflowCatalog(context.workspaceId)
+        ? dependencies.listWorkflowCatalog(context.workspaceId, context.actorId)
         : Promise.resolve([]),
       automationToolsEnabled ? dependencies.listSchedules(context.actorId) : Promise.resolve([]),
       dependencies.browserProfilesAvailable()

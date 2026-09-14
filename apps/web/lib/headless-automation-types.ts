@@ -1,4 +1,4 @@
-import type { TaskScheduleReadModel, WorkflowDto } from "@opencompany/protocol";
+import type { TaskScheduleReadModel, WorkflowDto, WorkflowScope } from "@opencompany/protocol";
 
 export type WorkflowStep = {
   id: string;
@@ -39,6 +39,8 @@ export type WorkflowDetail = {
   description: string;
   steps: WorkflowStep[];
   status: "draft" | "active";
+  scope: WorkflowScope;
+  createdByUserId: string | null;
   trigger: WorkflowTrigger;
   version: number;
   archivedAt: string | null;
@@ -47,6 +49,19 @@ export type WorkflowDetail = {
 };
 
 export type WorkflowListItem = WorkflowDetail;
+
+// The API only returns workflows the viewer may edit, so editability needs no client rule. Changing
+// the visibility itself is narrower: the creator, or an admin claiming one that predates scopes.
+export function canManageWorkflowScope(
+  workflow: Pick<WorkflowDetail, "createdByUserId">,
+  viewer: { userId: string; role: "admin" | "member" },
+) {
+  return (
+    workflow.createdByUserId === viewer.userId ||
+    (workflow.createdByUserId === null && viewer.role === "admin")
+  );
+}
+
 export type TaskScheduleView = TaskScheduleReadModel;
 
 export type WorkflowCatalogItem = {
