@@ -1059,13 +1059,15 @@ export function Surface({
   }, [adoptResolvedAutoModel, isAutoChatModel, messages]);
   // A coding message sent while a turn is running becomes its own queued Run. It renders above the
   // composer with steer/remove actions until it starts, so the transcript keeps showing only work
-  // that actually happened.
+  // that actually happened. The card offers mutations and so follows the composer's read-only
+  // rule; the transcript filter does not, because a Run that never executed has nothing to show a
+  // read-only viewer either.
   const queuedMessages = useMemo(
     () =>
-      isEngineChat && !activeTaskConversation
+      isEngineChat && !activeTaskConversation && !readOnly
         ? queuedChatMessages({ runs: liveChat.runsById, messages: chatMessages })
         : [],
-    [activeTaskConversation, chatMessages, isEngineChat, liveChat.runsById],
+    [activeTaskConversation, chatMessages, isEngineChat, liveChat.runsById, readOnly],
   );
   const pendingRunMessages = useMemo(
     () =>

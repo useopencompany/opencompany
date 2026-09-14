@@ -1590,10 +1590,12 @@ export class PostgresChatRepository implements ChatRepository {
     const now = this.options.now?.() ?? new Date();
     const [row] = await this.rows<{ targetRunId: string | null }>(sql`
       WITH authorized AS MATERIALIZED (
-        SELECT run.id, run.chat_session_id, run.status, run.attempts
+        SELECT run.id, run.chat_session_id, run.status, run.attempts,
+               COALESCE(jsonb_array_length(trigger_message.attachments), 0) AS attachment_count
         FROM goat.codex_chat_turns AS run
         JOIN goat.codex_chat_sessions AS runtime ON runtime.id = run.codex_chat_session_id
         JOIN goat.chat_sessions AS chat ON chat.id = run.chat_session_id
+        JOIN goat.chat_messages AS trigger_message ON trigger_message.id = run.user_message_id
         WHERE run.id = ${input.runId}
           AND runtime.workspace_id = ${input.actor.workspaceId}
           AND chat.kind = 'chat'
@@ -1625,6 +1627,9 @@ export class PostgresChatRepository implements ChatRepository {
           -- has never executed can still be folded into the turn ahead of it.
           AND run.status = 'queued'
           AND run.attempts = 0
+          -- Steering injects text prompt blocks only. Refusing a Message with attachments keeps
+          -- that a visible conflict instead of a file the engine silently never sees.
+          AND authorized.attachment_count = 0
           AND EXISTS (SELECT 1 FROM target)
         RETURNING run.steer_into_run_id AS "targetRunId"
       )

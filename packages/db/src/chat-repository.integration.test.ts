@@ -2288,6 +2288,44 @@ describe("Postgres Chat repositories", () => {
     });
   });
 
+  it("refuses to steer a Message carrying attachments the injection would drop", async () => {
+    const running = await service.createMessage(actor(), {
+      idempotencyKey: "send-steer-attachment-active",
+      content: "Start the migration.",
+      engine: "codex",
+      model: "provider/model",
+    });
+    await database.query(
+      `UPDATE goat.codex_chat_turns
+       SET status = 'running', attempts = 1, lease_id = 'lease_a', lease_owner = 'worker_a'
+       WHERE id = $1`,
+      [running.runId],
+    );
+    const queued = await service.createMessage(actor(), {
+      idempotencyKey: "send-steer-attachment-queued",
+      content: "Use this screenshot.",
+      engine: "codex",
+      model: "provider/model",
+      conversationId: running.conversationId,
+    });
+    await database.query(
+      `UPDATE goat.chat_messages SET attachments = $2 WHERE id = (
+         SELECT user_message_id FROM goat.codex_chat_turns WHERE id = $1
+       )`,
+      [
+        queued.runId,
+        JSON.stringify([
+          { id: "attachment_1", filename: "shot.png", mediaType: "image/png", sizeBytes: 10 },
+        ]),
+      ],
+    );
+
+    // Steering sends text prompt blocks only, so promoting this Message would drop the file.
+    await expect(service.steerRun(actor(), queued.runId)).rejects.toMatchObject({
+      code: "conflict",
+    });
+  });
+
   it("refuses to steer a Run in another member's conversation", async () => {
     const created = await service.createMessage(actor(), {
       idempotencyKey: "send-steer-foreign",
