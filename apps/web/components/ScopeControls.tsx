@@ -74,7 +74,7 @@ const SCOPE_OPTIONS = [
   },
 ] as const;
 
-export function ScopeIcon({ scope, className }: { scope: Scope; className?: string }) {
+function ScopeIcon({ scope, className }: { scope: Scope; className?: string }) {
   const Icon = scope === "company" ? Building2 : LockKeyhole;
   return (
     <Icon

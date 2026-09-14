@@ -417,7 +417,7 @@ describe("WorkflowsRoute", () => {
     );
 
     const row = screen.getByRole("link", { name: /Weekly research/ });
-    expect(row).toHaveTextContent("Active");
+    expect(within(row).getByRole("img", { name: "Active" })).toBeInTheDocument();
     expect(row).not.toHaveTextContent("Company");
   });
 
@@ -440,6 +440,25 @@ describe("WorkflowsRoute", () => {
 
     expect(screen.getByRole("cell", { name: "Former member" })).toBeInTheDocument();
     expect(screen.getByRole("cell", { name: "Workspace" })).toBeInTheDocument();
+  });
+
+  it("blanks the owner column when the member list could not be loaded", () => {
+    workflowLiveQueryMock.hydrated = false;
+    workflowLiveQueryMock.isLoading = false;
+    Object.assign(appDataMock.value, { tasks: [] });
+
+    render(
+      <WorkflowsRoute
+        workflows={[workflowListItem()]}
+        workspaceId="workspace_1"
+        canEdit
+        ownerNames={null}
+      />,
+    );
+
+    expect(screen.getByText("Weekly research")).toBeInTheDocument();
+    expect(screen.queryByRole("cell", { name: "Former member" })).not.toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "—" })).toBeInTheDocument();
   });
 
   it("offers edit and delete actions for each workflow", async () => {

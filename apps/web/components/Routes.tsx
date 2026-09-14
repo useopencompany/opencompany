@@ -741,8 +741,11 @@ export function WorkflowsRoute({
   workflows: WorkflowListItem[];
   workspaceId: string;
   canEdit: boolean;
-  /** Creator WorkOS id to display name, so each row can name its owner without a client fetch. */
-  ownerNames: Record<string, string>;
+  /**
+   * Creator WorkOS id to display name, so each row can name its owner without a client fetch.
+   * `null` when the member list could not be loaded, which blanks the column instead of guessing.
+   */
+  ownerNames: Record<string, string> | null;
 }) {
   const router = useRouter();
   const data = useAppData();
@@ -978,9 +981,13 @@ function WorkflowTableRow({
           href={`/workflows/${encodeURIComponent(workflow.slug)}`}
           className="flex min-w-0 items-center gap-2 rounded-sm font-medium focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
         >
-          <span className="inline-flex shrink-0 items-center" title={statusLabel}>
+          <span
+            role="img"
+            aria-label={statusLabel}
+            title={statusLabel}
+            className="inline-flex shrink-0 items-center"
+          >
             <StatusDot status={workflow.status} />
-            <span className="sr-only">{statusLabel}</span>
           </span>
           <span className="truncate" title={workflow.name}>
             {workflow.name}
@@ -1057,8 +1064,9 @@ function WorkflowRowMenu({
 
 // Workflows created before scopes carry no creator, and a creator who left the workspace is no
 // longer in the member list. Both still need a readable owner cell.
-function workflowOwnerName(workflow: WorkflowListItem, ownerNames: Record<string, string>) {
+function workflowOwnerName(workflow: WorkflowListItem, ownerNames: Record<string, string> | null) {
   if (!workflow.createdByUserId) return "Workspace";
+  if (!ownerNames) return "—";
   return ownerNames[workflow.createdByUserId] ?? "Former member";
 }
 
