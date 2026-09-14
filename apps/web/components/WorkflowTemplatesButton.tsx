@@ -95,15 +95,9 @@ export function WorkflowTemplatesButton({
         Workflow templates
       </Button>
 
-      <Dialog
-        open={open}
-        onOpenChange={(next) => {
-          // A clone is two API calls; closing mid-flight would hide the spinner on a draft that is
-          // still being created and then navigate out from under the list.
-          if (!next && pendingTemplateId) return;
-          setOpen(next);
-        }}
-      >
+      {/* Closing mid-clone is allowed: the draft is already committed server-side and the push to it
+          still runs, so blocking dismissal would only risk trapping the user behind the modal. */}
+      <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-h-[calc(100vh-4rem)] max-w-[560px] gap-5 overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-[15px]">Workflow templates</DialogTitle>

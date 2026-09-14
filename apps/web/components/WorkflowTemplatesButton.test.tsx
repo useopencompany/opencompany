@@ -143,6 +143,17 @@ describe("WorkflowTemplatesButton", () => {
     );
   });
 
+  it("stays dismissable while a clone is in flight, so a slow navigation cannot trap the user", async () => {
+    // The create call never settles, so the card keeps its spinner for the whole test.
+    commandsMock.createHeadlessWorkflow.mockReturnValue(new Promise(() => {}));
+    render(<WorkflowTemplatesButton missingPlugins={{}} scope="company" />);
+
+    await useTemplate(template.name);
+    await userEvent.keyboard("{Escape}");
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
   it("archives the empty draft when filling it in fails, so a failed clone leaves no debris", async () => {
     commandsMock.updateHeadlessWorkflow.mockRejectedValue(new Error("Workflow update failed"));
     render(<WorkflowTemplatesButton missingPlugins={{}} scope="company" />);
