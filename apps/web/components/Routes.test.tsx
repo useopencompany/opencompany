@@ -402,6 +402,39 @@ describe("WorkflowsRoute", () => {
     expect(screen.getByRole("cell", { name: "1" })).toBeInTheDocument();
   });
 
+  it("marks each workflow's model with its provider icon, and collapses mixed steps to a count", () => {
+    workflowLiveQueryMock.hydrated = false;
+    workflowLiveQueryMock.isLoading = false;
+    Object.assign(appDataMock.value, { tasks: [] });
+
+    render(
+      <WorkflowsRoute
+        workflows={[
+          workflowListItem({ model: "claude-code" }),
+          workflowListItem({
+            id: "workflow_2",
+            slug: "mixed-models",
+            name: "Mixed models",
+            steps: [
+              { id: "step_1", title: "Draft", model: "codex", instructions: "Draft it" },
+              { id: "step_2", title: "Review", model: "claude-code", instructions: "Review it" },
+            ],
+          }),
+        ]}
+        workspaceId="workspace_1"
+        canEdit
+        ownerNames={WORKFLOW_OWNER_NAMES}
+      />,
+    );
+
+    const claudeCell = screen.getByRole("cell", { name: "Claude Code" });
+    expect(claudeCell.querySelector("svg")).toBeInTheDocument();
+
+    // Two different models cannot be represented by one provider mark, so the cell counts them.
+    const mixedCell = screen.getByRole("cell", { name: "2 models" });
+    expect(mixedCell.querySelector("svg")).toBeInTheDocument();
+  });
+
   it("carries scope in the tabs only, and status as a dot beside the name", () => {
     workflowLiveQueryMock.hydrated = false;
     workflowLiveQueryMock.isLoading = false;
