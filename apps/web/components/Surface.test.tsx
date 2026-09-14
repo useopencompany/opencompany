@@ -2318,7 +2318,10 @@ describe("Surface chat streaming UI", () => {
     const { unmount } = render(<Surface {...sharedProps} initialChat={null} />);
 
     await user.click(screen.getByRole("button", { name: "Model" }));
-    await user.click(screen.getByText("Cloud Codex sandbox"));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
     act(() => window.dispatchEvent(new Event(HOME_NAVIGATION_EVENT)));
 
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Codex");
@@ -2331,19 +2334,91 @@ describe("Surface chat streaming UI", () => {
     );
   });
 
-  it("shows the Codex engine only when Codex is connected", async () => {
+  it("shows a Connect Codex prompt until Codex is connected, then the Codex option", async () => {
     const user = userEvent.setup();
 
     const { unmount } = render(
       <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />,
     );
     await user.click(screen.getByRole("button", { name: "Model" }));
-    expect(screen.queryByText("Cloud Codex sandbox")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    expect(screen.getByRole("button", { name: "Connect Codex" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    ).not.toBeInTheDocument();
     unmount();
 
     render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} codexConnected />);
     await user.click(screen.getByRole("button", { name: "Model" }));
-    expect(screen.getByText("Cloud Codex sandbox")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    expect(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Connect Codex" })).not.toBeInTheDocument();
+  });
+
+  it("shows a Connect Claude Code prompt until Claude Code is connected, then the option", async () => {
+    const user = userEvent.setup();
+
+    const { unmount } = render(
+      <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />,
+    );
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    expect(screen.getByRole("button", { name: "Connect Claude Code" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Claude Code: included with your Claude subscription" }),
+    ).not.toBeInTheDocument();
+    unmount();
+
+    render(
+      <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} claudeCodeConnected />,
+    );
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    expect(
+      screen.getByRole("button", { name: "Claude Code: included with your Claude subscription" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Connect Claude Code" })).not.toBeInTheDocument();
+  });
+
+  it("sends a disconnected coding agent's Connect button to the Inference settings page", async () => {
+    const user = userEvent.setup();
+
+    render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(screen.getByRole("button", { name: "Connect Codex" }));
+
+    expect(routerMock.push).toHaveBeenCalledWith("/settings/workspace/inference");
+    expect(screen.queryByRole("button", { name: "Connect Codex" })).not.toBeInTheDocument();
+  });
+
+  it("reopens the model picker on the tab matching the current selection", async () => {
+    const user = userEvent.setup();
+
+    render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} codexConnected />);
+
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
+
+    // Reopening after picking Codex should land back on the Coding agents tab.
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    expect(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    ).toBeInTheDocument();
+
+    // Switching to Chat and picking a plain model, then reopening, lands on Chat.
+    await user.click(screen.getByRole("button", { name: "Chat" }));
+    await user.click(screen.getByRole("option", { name: /Claude Sonnet 5/ }));
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    expect(screen.getByPlaceholderText("Search models...")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows Codex controls only for Codex engine chats", async () => {
@@ -2356,7 +2431,10 @@ describe("Surface chat streaming UI", () => {
     expect(screen.queryByRole("button", { name: "Goal mode" })).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Model" }));
-    await user.click(screen.getByText("Cloud Codex sandbox"));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
 
     expect(
       screen.getByRole("button", { name: "Codex reasoning effort: XHigh (click to cycle)" }),
@@ -2401,7 +2479,10 @@ describe("Surface chat streaming UI", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Model" }));
-    await user.click(screen.getByText("Cloud Codex sandbox"));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
     const codexModelPicker = screen.getByRole("button", { name: "Codex model: GPT 6 Astra" });
     expect(codexModelPicker).toBeInTheDocument();
     await user.click(codexModelPicker);
@@ -2484,7 +2565,10 @@ describe("Surface chat streaming UI", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Model" }));
-    await user.click(screen.getByText("Cloud Claude Code sandbox"));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Claude Code: included with your Claude subscription" }),
+    );
 
     expect(
       screen.getByRole("button", { name: "Claude model: Claude Sonnet 5" }),
@@ -2545,7 +2629,10 @@ describe("Surface chat streaming UI", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Model" }));
-    await user.click(screen.getByText("Cloud Claude Code sandbox"));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Claude Code: included with your Claude subscription" }),
+    );
     await user.click(screen.getByRole("button", { name: "Claude model: Claude Sonnet 5" }));
     await user.click(screen.getByRole("option", { name: /Claude Fable 5\.1/ }));
 
@@ -2605,7 +2692,10 @@ describe("Surface chat streaming UI", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Model" }));
-    await user.click(screen.getByText("Cloud Codex sandbox"));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
     const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
     await user.type(textarea, "/coding");
     await user.click(await screen.findByRole("option", { name: /coding-work/i }));
@@ -2647,7 +2737,10 @@ describe("Surface chat streaming UI", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Model" }));
-    await user.click(screen.getByText("Cloud Codex sandbox"));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
 
     const fileInput = document.querySelector<HTMLInputElement>('input[type="file"]');
     expect(fileInput).not.toBeNull();
@@ -2684,7 +2777,10 @@ describe("Surface chat streaming UI", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Model" }));
-    await user.click(screen.getByText("Cloud Codex sandbox"));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
     const fileInput = document.querySelector<HTMLInputElement>('input[type="file"]');
     fireEvent.change(fileInput!, {
       target: {
@@ -2716,7 +2812,10 @@ describe("Surface chat streaming UI", () => {
     render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} codexConnected />);
 
     await user.click(screen.getByRole("button", { name: "Model" }));
-    await user.click(screen.getByText("Cloud Codex sandbox"));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
     const reasoningControl = screen.getByRole("button", {
       name: "Codex reasoning effort: XHigh (click to cycle)",
     });
@@ -3643,7 +3742,10 @@ describe("Surface chat streaming UI", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Model" }));
-    await user.click(screen.getByText("Cloud Codex sandbox"));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
 
     const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "#");
@@ -4211,7 +4313,10 @@ describe("Surface chat streaming UI", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Model" }));
-    await user.click(screen.getByText("Cloud Codex sandbox"));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
     await user.keyboard("{Meta>}k{/Meta}");
     const dialog = screen.getByRole("dialog");
     await user.click(within(dialog).getByRole("option", { name: "Start new chat" }));
@@ -4255,7 +4360,10 @@ describe("Surface chat streaming UI", () => {
     await user.click(within(dialog).getByRole("option", { name: "Start new chat" }));
     await user.click(within(dialog).getByRole("button", { name: "Model" }));
     // The model picker's popover content portals outside the dialog's DOM subtree.
-    await user.click(screen.getByText("Cloud Codex sandbox"));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
     await user.type(
       within(dialog).getByPlaceholderText("Ask opencompany anything, or describe a task..."),
       "Clone my repo",
@@ -4329,7 +4437,10 @@ describe("Surface chat streaming UI", () => {
     const dialog = screen.getByRole("dialog");
     await user.click(within(dialog).getByRole("option", { name: "Start new chat" }));
     await user.click(within(dialog).getByRole("button", { name: "Model" }));
-    await user.click(screen.getByText("Cloud Codex sandbox"));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
 
     const quickComposerInput = within(dialog).getByPlaceholderText(
       "Ask opencompany anything, or describe a task...",
@@ -4367,7 +4478,10 @@ describe("Surface chat streaming UI", () => {
     await user.click(within(dialog).getByRole("option", { name: "Start new chat" }));
     await user.click(within(dialog).getByRole("button", { name: "Model" }));
     // Popover content (model list, goal mode fields) portals outside the dialog's DOM subtree.
-    await user.click(screen.getByText("Cloud Codex sandbox"));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
     await user.click(within(dialog).getByRole("button", { name: "Goal mode" }));
     await user.click(screen.getByRole("checkbox", { name: "Goal mode" }));
     await user.type(screen.getByPlaceholderText("Objective"), "Fix the flaky tests");
@@ -4404,7 +4518,10 @@ describe("Surface chat streaming UI", () => {
     await user.click(within(dialog).getByRole("option", { name: "Start new chat" }));
     await user.click(within(dialog).getByRole("button", { name: "Model" }));
     // The model picker's popover content portals outside the dialog's DOM subtree.
-    await user.click(screen.getByText("Cloud Codex sandbox"));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
 
     expect(window.localStorage.getItem("opencompany-goat-main-chat-selection:user_1")).toBeNull();
   });

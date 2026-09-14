@@ -6066,6 +6066,7 @@ function ModelPicker({
   claudeCodeConnected?: boolean;
   autoModelRoutingEnabled?: boolean;
 }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const isAutoSelected = value === AUTO_MODEL_SELECTION;
   const isCodexSelected = value === CODEX_PICKER_VALUE;
@@ -6073,6 +6074,20 @@ function ModelPicker({
   const isEngineSelected = isCodexSelected || isClaudeSelected;
   const selectedModel =
     !isAutoSelected && !isEngineSelected ? (findModel(value) ?? findModel(DEFAULT_MODEL)) : null;
+  const [tab, setTab] = useState<"chat" | "coding">(isEngineSelected ? "coding" : "chat");
+  // Reopening should land on the tab matching what's currently selected, but the user
+  // stays free to switch tabs while the popover is open without being reset mid-browse.
+  // Adjusting state during render (rather than in an effect) avoids an extra commit.
+  const [tabSyncedOpen, setTabSyncedOpen] = useState(open);
+  if (open !== tabSyncedOpen) {
+    setTabSyncedOpen(open);
+    if (open) setTab(isEngineSelected ? "coding" : "chat");
+  }
+
+  const goToCodingSubscriptions = () => {
+    setOpen(false);
+    router.push("/settings/workspace/inference");
+  };
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -6112,51 +6127,47 @@ function ModelPicker({
         sideOffset={10}
         className="w-[360px] max-w-[calc(100vw-1.5rem)] bg-surface p-0 text-ink"
       >
-        <Command className="bg-surface text-ink">
-          <CommandInput placeholder="Search models..." />
-          <CommandList className="max-h-[min(320px,calc(100vh-9rem))]">
-            <CommandEmpty>No models found.</CommandEmpty>
-            {autoModelRoutingEnabled ? (
-              <CommandGroup heading="Routing">
-                <CommandItem
-                  value={AUTO_MODEL_SELECTION}
-                  keywords={["Auto", "automatic", "routing", "recommended"]}
-                  onSelect={() => {
-                    onChange(AUTO_MODEL_SELECTION);
-                    setOpen(false);
-                  }}
-                  title="Choose a model from the first message and keep it for the chat."
-                  className="gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink data-[selected=true]:bg-surface-hover data-[selected=true]:text-ink"
-                >
-                  <Check
-                    size={13}
-                    strokeWidth={2}
-                    className={cn(
-                      "shrink-0 text-ink",
-                      isAutoSelected ? "opacity-100" : "opacity-0",
-                    )}
-                  />
-                  <Sparkles size={14} strokeWidth={1.85} className="shrink-0 text-ink-muted" />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate font-medium leading-4">Auto</div>
-                    <div className="truncate text-[11.5px] leading-4 text-ink-subtle">
-                      Picks once from your first message
-                    </div>
-                  </div>
-                </CommandItem>
-              </CommandGroup>
-            ) : null}
-            {codexConnected || claudeCodeConnected ? (
-              <CommandGroup heading="Engines">
-                {codexConnected ? (
+        <div className="flex gap-1 border-b border-border p-2 pb-1.5">
+          <button
+            type="button"
+            aria-pressed={tab === "chat"}
+            onClick={() => setTab("chat")}
+            className={cn(
+              "flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-[12.5px] font-medium transition-colors duration-150",
+              tab === "chat" ? "bg-surface-active text-ink" : "text-ink-subtle hover:text-ink",
+            )}
+          >
+            <MessageSquare size={12} strokeWidth={2} />
+            Chat
+          </button>
+          <button
+            type="button"
+            aria-pressed={tab === "coding"}
+            onClick={() => setTab("coding")}
+            className={cn(
+              "flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-[12.5px] font-medium transition-colors duration-150",
+              tab === "coding" ? "bg-surface-active text-ink" : "text-ink-subtle hover:text-ink",
+            )}
+          >
+            <Code2 size={12} strokeWidth={2} />
+            Coding agents
+          </button>
+        </div>
+        {tab === "chat" ? (
+          <Command className="bg-surface text-ink">
+            <CommandInput placeholder="Search models..." />
+            <CommandList className="max-h-[min(320px,calc(100vh-9rem))]">
+              <CommandEmpty>No models found.</CommandEmpty>
+              {autoModelRoutingEnabled ? (
+                <CommandGroup heading="Routing">
                   <CommandItem
-                    value={CODEX_PICKER_VALUE}
-                    keywords={["Codex", "cloud", "sandbox", "engine"]}
+                    value={AUTO_MODEL_SELECTION}
+                    keywords={["Auto", "automatic", "routing", "recommended"]}
                     onSelect={() => {
-                      onChange(CODEX_PICKER_VALUE);
+                      onChange(AUTO_MODEL_SELECTION);
                       setOpen(false);
                     }}
-                    title="Chat with Codex in a persistent cloud sandbox."
+                    title="Choose a model from the first message and keep it for the chat."
                     className="gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink data-[selected=true]:bg-surface-hover data-[selected=true]:text-ink"
                   >
                     <Check
@@ -6164,94 +6175,164 @@ function ModelPicker({
                       strokeWidth={2}
                       className={cn(
                         "shrink-0 text-ink",
-                        isCodexSelected ? "opacity-100" : "opacity-0",
+                        isAutoSelected ? "opacity-100" : "opacity-0",
                       )}
                     />
-                    <OpenAIIcon size={14} strokeWidth={1.85} className="shrink-0 text-ink-muted" />
+                    <Sparkles size={14} strokeWidth={1.85} className="shrink-0 text-ink-muted" />
                     <div className="min-w-0 flex-1">
-                      <div className="truncate font-medium leading-4">Codex</div>
+                      <div className="truncate font-medium leading-4">Auto</div>
                       <div className="truncate text-[11.5px] leading-4 text-ink-subtle">
-                        Cloud Codex sandbox
+                        Picks once from your first message
                       </div>
                     </div>
                   </CommandItem>
-                ) : null}
-                {claudeCodeConnected ? (
-                  <CommandItem
-                    value={CLAUDE_PICKER_VALUE}
-                    keywords={["Claude", "Claude Code", "cloud", "sandbox", "engine"]}
-                    onSelect={() => {
-                      onChange(CLAUDE_PICKER_VALUE);
-                      setOpen(false);
-                    }}
-                    title="Chat with Claude Code in a persistent cloud sandbox."
-                    className="gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink data-[selected=true]:bg-surface-hover data-[selected=true]:text-ink"
-                  >
-                    <Check
-                      size={13}
-                      strokeWidth={2}
-                      className={cn(
-                        "shrink-0 text-ink",
-                        isClaudeSelected ? "opacity-100" : "opacity-0",
-                      )}
-                    />
-                    <AnthropicIcon
-                      size={14}
-                      strokeWidth={1.85}
-                      className="shrink-0 text-ink-muted"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate font-medium leading-4">Claude Code</div>
-                      <div className="truncate text-[11.5px] leading-4 text-ink-subtle">
-                        Cloud Claude Code sandbox
+                </CommandGroup>
+              ) : null}
+              <CommandGroup heading="Models">
+                {MODELS.map((model) => {
+                  if (model.id === "anthropic/claude-opus-4.8") return null;
+                  const isSelected =
+                    !isAutoSelected && !isEngineSelected && model.id === selectedModel?.id;
+                  return (
+                    <CommandItem
+                      key={model.id}
+                      value={model.id}
+                      keywords={[model.label, modelProviderLabel(model.id)]}
+                      onSelect={() => {
+                        onChange(model.id);
+                        setOpen(false);
+                      }}
+                      title={model.description}
+                      className="gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink data-[selected=true]:bg-surface-hover data-[selected=true]:text-ink"
+                    >
+                      <Check
+                        size={13}
+                        strokeWidth={2}
+                        className={cn(
+                          "shrink-0 text-ink",
+                          isSelected ? "opacity-100" : "opacity-0",
+                        )}
+                      />
+                      <ModelProviderIcon
+                        modelId={model.id}
+                        size={14}
+                        strokeWidth={1.85}
+                        className="shrink-0 text-ink-muted"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-medium leading-4">{model.label}</div>
+                        <div className="truncate text-[11.5px] leading-4 text-ink-subtle">
+                          {modelProviderLabel(model.id)}
+                        </div>
                       </div>
-                    </div>
-                  </CommandItem>
-                ) : null}
+                    </CommandItem>
+                  );
+                })}
               </CommandGroup>
-            ) : null}
-            <CommandGroup heading="Models">
-              {MODELS.map((model) => {
-                if (model.id === "anthropic/claude-opus-4.8") return null;
-                const isSelected =
-                  !isAutoSelected && !isEngineSelected && model.id === selectedModel?.id;
-                return (
-                  <CommandItem
-                    key={model.id}
-                    value={model.id}
-                    keywords={[model.label, modelProviderLabel(model.id)]}
-                    onSelect={() => {
-                      onChange(model.id);
-                      setOpen(false);
-                    }}
-                    title={model.description}
-                    className="gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink data-[selected=true]:bg-surface-hover data-[selected=true]:text-ink"
-                  >
-                    <Check
-                      size={13}
-                      strokeWidth={2}
-                      className={cn("shrink-0 text-ink", isSelected ? "opacity-100" : "opacity-0")}
-                    />
-                    <ModelProviderIcon
-                      modelId={model.id}
-                      size={14}
-                      strokeWidth={1.85}
-                      className="shrink-0 text-ink-muted"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate font-medium leading-4">{model.label}</div>
-                      <div className="truncate text-[11.5px] leading-4 text-ink-subtle">
-                        {modelProviderLabel(model.id)}
-                      </div>
-                    </div>
-                  </CommandItem>
-                );
-              })}
-            </CommandGroup>
-          </CommandList>
-        </Command>
+            </CommandList>
+          </Command>
+        ) : (
+          <div className="flex flex-col gap-1 p-2 pt-1.5">
+            <CodingAgentOption
+              engine="codex"
+              connected={codexConnected}
+              selected={isCodexSelected}
+              onSelect={() => {
+                onChange(CODEX_PICKER_VALUE);
+                setOpen(false);
+              }}
+              onConnect={goToCodingSubscriptions}
+            />
+            <CodingAgentOption
+              engine="claude_code"
+              connected={claudeCodeConnected}
+              selected={isClaudeSelected}
+              onSelect={() => {
+                onChange(CLAUDE_PICKER_VALUE);
+                setOpen(false);
+              }}
+              onConnect={goToCodingSubscriptions}
+            />
+          </div>
+        )}
       </PopoverContent>
     </Popover>
+  );
+}
+
+// Always shown, connected or not: a disconnected agent still needs a way to be
+// discovered and connected, rather than silently disappearing from the picker.
+function CodingAgentOption({
+  engine,
+  connected,
+  selected,
+  onSelect,
+  onConnect,
+}: {
+  engine: "codex" | "claude_code";
+  connected: boolean;
+  selected: boolean;
+  onSelect: () => void;
+  onConnect: () => void;
+}) {
+  const label = engine === "codex" ? "Codex" : "Claude Code";
+  const subscriptionLabel = engine === "codex" ? "ChatGPT" : "Claude";
+  const icon =
+    engine === "codex" ? (
+      <OpenAIIcon size={14} strokeWidth={1.85} className="shrink-0 text-ink-muted" />
+    ) : (
+      <AnthropicIcon size={14} strokeWidth={1.85} className="shrink-0 text-ink-muted" />
+    );
+  const header = (
+    <>
+      <Check
+        size={13}
+        strokeWidth={2}
+        className={cn("shrink-0 text-ink", selected ? "opacity-100" : "opacity-0")}
+      />
+      {icon}
+      <div className="min-w-0 flex-1">
+        <div
+          className={cn(
+            "truncate font-medium leading-4",
+            connected ? "text-ink" : "text-ink-muted",
+          )}
+        >
+          {label}
+        </div>
+        <div className="truncate text-[11.5px] leading-4 text-ink-subtle">
+          {connected
+            ? `Included with your ${subscriptionLabel} subscription`
+            : `Connect your ${subscriptionLabel} account to use this`}
+        </div>
+      </div>
+    </>
+  );
+
+  if (!connected) {
+    return (
+      <div className="flex flex-col gap-2 rounded-md px-2 py-1.5">
+        <div className="flex items-center gap-2">{header}</div>
+        <button
+          type="button"
+          onClick={onConnect}
+          className="ml-[21px] self-start rounded-full border border-border-strong bg-surface px-3 py-1 text-[11.5px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover"
+        >
+          Connect {label}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      aria-label={`${label}: included with your ${subscriptionLabel} subscription`}
+      onClick={onSelect}
+      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors duration-150 hover:bg-surface-hover"
+    >
+      {header}
+    </button>
   );
 }
 
