@@ -3607,6 +3607,11 @@ function conversationDto(conversation: {
   title: string;
   engine: "opencompany" | "codex" | "claude_code";
   model: string;
+  composerSettings: {
+    reasoningEffort: "low" | "medium" | "high" | "xhigh";
+    planModeEnabled?: boolean;
+    goalMode?: { objective: string; tokenBudget?: number | null } | null;
+  } | null;
   messageShapeEpoch: number;
   runtime: {
     status: "queued" | "starting" | "idle" | "running" | "failed" | "interrupted" | "closed";

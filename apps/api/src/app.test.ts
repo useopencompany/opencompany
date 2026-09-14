@@ -6562,6 +6562,7 @@ function fakeRepository(): FakeRepository {
           title: "Chat",
           engine: "opencompany",
           model: "provider/default",
+          composerSettings: null,
           messageShapeEpoch: 4,
           runtime: {
             status: "running",
@@ -6584,6 +6585,7 @@ function fakeRepository(): FakeRepository {
       title: "Chat",
       engine: "opencompany",
       model: "provider/default",
+      composerSettings: null,
       messageShapeEpoch: 4,
       runtime: {
         status: "running",

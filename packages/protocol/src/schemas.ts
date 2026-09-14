@@ -48,6 +48,14 @@ export const CodexGoalModeSchema = z
   })
   .strict()
   .openapi("CodexGoalModeV1");
+export const ConversationComposerSettingsSchema = z
+  .object({
+    reasoningEffort: EngineReasoningEffortSchema,
+    planModeEnabled: z.boolean().optional(),
+    goalMode: CodexGoalModeSchema.nullable().optional(),
+  })
+  .strict()
+  .openapi("ConversationComposerSettingsV1");
 export const MessageEngineSchema = z
   .discriminatedUnion("type", [
     z
@@ -132,6 +140,7 @@ export const ConversationSchema = z
     title: z.string(),
     engine: ChatEngineSchema,
     model: z.string(),
+    composerSettings: ConversationComposerSettingsSchema.nullable(),
     runtime: ConversationRuntimeSchema.nullable(),
     activityState: ConversationActivityStateSchema,
     hasUnseen: z.boolean(),
