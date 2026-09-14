@@ -773,11 +773,11 @@ describe("Surface chat streaming UI", () => {
   });
 
   it.each([
-    { decision: "Always allow", save: "success", expectedIds: [0, 1] },
+    { decision: "Always allow this tool", save: "success", expectedIds: [0, 1] },
     { decision: "Allow once", save: "success", expectedIds: [0] },
     { decision: "Deny", save: "success", expectedIds: [0] },
-    { decision: "Always allow", save: "failure", expectedIds: [0] },
-    { decision: "Always allow", save: "rejected", expectedIds: [0] },
+    { decision: "Always allow this tool", save: "failure", expectedIds: [0] },
+    { decision: "Always allow this tool", save: "rejected", expectedIds: [0] },
   ])(
     "resolves pending action approvals for $decision with permission save $save",
     async ({ decision, save, expectedIds }) => {
@@ -856,7 +856,7 @@ describe("Surface chat streaming UI", () => {
           approved: decision !== "Deny",
         });
       }
-      if (decision === "Always allow") {
+      if (decision === "Always allow this tool") {
         expect(savePermission).toHaveBeenCalledExactlyOnceWith(action);
         expect(savePermission.mock.invocationCallOrder[0]).toBeLessThan(
           resolveApproval.mock.invocationCallOrder[0]!,

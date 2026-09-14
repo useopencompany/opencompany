@@ -111,6 +111,7 @@ import {
   IntegrationAccountUsageEnvelopeSchema,
   IntegrationApiKeyBodySchema,
   IntegrationCapabilityModeEnvelopeSchema,
+  IntegrationToolModeEnvelopeSchema,
   InviteWorkspaceMemberBodySchema,
   InvokeWorkflowBodySchema,
   JamieEventsAccountStateEnvelopeSchema,
@@ -159,6 +160,7 @@ import {
   SetBrainSourceBodySchema,
   SetCapabilitySessionBudgetBodySchema,
   SetIntegrationCapabilityModeBodySchema,
+  SetIntegrationToolModeBodySchema,
   SetPluginEventEnabledBodySchema,
   SetRepoConfigEnvBodySchema,
   SetRepoConfigSetupBodySchema,
@@ -3655,6 +3657,31 @@ export const setIntegrationCapabilityModeRoute = createRoute({
   },
 });
 
+export const setIntegrationToolModeRoute = createRoute({
+  method: "put",
+  path: "/v1/integration-accounts/{integrationId}/tool-modes/{toolId}",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: {
+    params: z.object({
+      integrationId: IntegrationAccountIdSchema,
+      toolId: z.string().min(1).max(128),
+    }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: SetIntegrationToolModeBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description:
+        'Per-tool permission override saved for the connection, or cleared with mode "inherit" so the tool follows its capability group again. Owner only.',
+      content: { "application/json": { schema: IntegrationToolModeEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const alwaysAllowActionRoute = createRoute({
   method: "post",
   path: "/v1/actions/{actionId}/permissions/always-allow",
@@ -4301,6 +4328,7 @@ export type V1RouteHandlers = {
   listSlackBotChannels: RouteHandler<typeof listSlackBotChannelsRoute>;
   getIntegrationAccountUsage: RouteHandler<typeof getIntegrationAccountUsageRoute>;
   setIntegrationCapabilityMode: RouteHandler<typeof setIntegrationCapabilityModeRoute>;
+  setIntegrationToolMode: RouteHandler<typeof setIntegrationToolModeRoute>;
   alwaysAllowAction: RouteHandler<typeof alwaysAllowActionRoute>;
   deleteIntegrationAccount: RouteHandler<typeof deleteIntegrationAccountRoute>;
   getClaudeCodeAuth: RouteHandler<typeof getClaudeCodeAuthRoute>;
@@ -4519,6 +4547,7 @@ export function createV1Router(
       .openapi(listSlackBotChannelsRoute, handlers.listSlackBotChannels)
       .openapi(getIntegrationAccountUsageRoute, handlers.getIntegrationAccountUsage)
       .openapi(setIntegrationCapabilityModeRoute, handlers.setIntegrationCapabilityMode)
+      .openapi(setIntegrationToolModeRoute, handlers.setIntegrationToolMode)
       .openapi(alwaysAllowActionRoute, handlers.alwaysAllowAction)
       .openapi(deleteIntegrationAccountRoute, handlers.deleteIntegrationAccount)
       .openapi(getClaudeCodeAuthRoute, handlers.getClaudeCodeAuth)
@@ -6068,6 +6097,18 @@ const contractDocumentHandlers: V1RouteHandlers = {
           integrationId: "gint_contract",
           capabilityId: "write",
           mode: "on" as const,
+        },
+        meta,
+      },
+      200,
+    ),
+  setIntegrationToolMode: (c) =>
+    c.json(
+      {
+        data: {
+          integrationId: "gint_contract",
+          toolId: "trash_thread",
+          mode: "ask" as const,
         },
         meta,
       },

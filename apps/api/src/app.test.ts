@@ -5610,6 +5610,10 @@ function fakeIntegrationAccounts(): Parameters<typeof createApiApp>[0]["integrat
     alwaysAllowAction: async () => {
       throw new Error("Unexpected standing permission mutation.");
     },
+
+    setToolMode: async () => {
+      throw new Error("Unexpected integration tool mode update.");
+    },
     connectAttio: async () => {
       throw new Error("Unexpected Attio connect.");
     },
