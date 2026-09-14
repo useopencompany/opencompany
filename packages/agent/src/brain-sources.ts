@@ -84,6 +84,7 @@ import {
 import { listGranolaFolders } from "./integrations/granola";
 import { GRANOLA_MCP_EXTERNAL_ID } from "./integrations/granola-mcp";
 import { isLinearAuthenticationError, linearGraphqlRequest } from "./integrations/linear-api";
+import { getLinearIngestAccessToken, LinearIngestAuthError } from "./integrations/linear-ingest";
 
 type DbLike = any;
 
@@ -640,17 +641,7 @@ export class BrainSourceApplicationService {
     if (!integration || integration.status !== "connected") {
       throw new CoreError("conflict", "Connect Linear in your settings first.");
     }
-    const credential = await loadIntegrationCredential({
-      userWorkosId: actor.userId,
-      integrationId,
-      provider: "linear",
-      kind: "oauth_token",
-      db: this.db,
-    }).catch(() => null);
-    const token = credential?.payload.access_token;
-    if (typeof token !== "string" || !token) {
-      throw new CoreError("conflict", "Connect Linear in your settings first.");
-    }
+    const token = await this.linearAccessToken(actor, integrationId);
     const teams: LinearTeamRef[] = [];
     let cursor: string | undefined;
     let partial = false;
@@ -744,6 +735,14 @@ export class BrainSourceApplicationService {
       return await linearGraphqlRequest<T>(request);
     } catch (error) {
       if (!isLinearAuthenticationError(error)) throw error;
+      const refreshedToken = await this.linearAccessToken(actor, integrationId, {
+        refreshIfAccessToken: request.token,
+      });
+      try {
+        return await linearGraphqlRequest<T>({ ...request, token: refreshedToken });
+      } catch (retryError) {
+        if (!isLinearAuthenticationError(retryError)) throw retryError;
+      }
       await markIntegrationStatus({
         userWorkosId: actor.userId,
         integrationId,
@@ -753,6 +752,22 @@ export class BrainSourceApplicationService {
         db: this.db,
       });
       throw new CoreError("conflict", "Reconnect Linear in Settings first.");
+    }
+  }
+
+  private async linearAccessToken(
+    actor: Actor,
+    integrationId: string,
+    options: { refreshIfAccessToken?: string } = {},
+  ) {
+    try {
+      return await getLinearIngestAccessToken(
+        { userWorkosId: actor.userId, integrationId },
+        { ...options, db: this.db },
+      );
+    } catch (error) {
+      if (!(error instanceof LinearIngestAuthError)) throw error;
+      throw new CoreError("conflict", error.message);
     }
   }
 
