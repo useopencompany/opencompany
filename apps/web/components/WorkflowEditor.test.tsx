@@ -279,7 +279,7 @@ function linearEventProvider() {
   return {
     provider: "linear",
     label: "Linear",
-    accountHref: "/settings/plugins/linear",
+    accountHref: "/plugins/linear",
     accountLabel: "Connect Linear",
     accounts: [{ integrationId: "gint_1", label: "Acme Linear" }],
     events: [

@@ -1,7 +1,7 @@
 # Plugin events and workflows
 
 A workflow keeps its manual, schedule, or event trigger and its existing step editor. To use an
-event, install the official plugin, connect its event account in Settings → Plugins, and switch
+event, install the official plugin, connect its event account in Plugins, and switch
 on the event. In Workflows, choose **On an event → Plugin → Event**, select an account and any
 filters, write the step instructions, and activate the workflow.
 

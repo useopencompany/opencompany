@@ -170,7 +170,7 @@ export function RepositorySettings({
         </p>
         {canEdit ? (
           <Link
-            href="/settings/plugins/github"
+            href="/plugins/github"
             className="mt-4 inline-flex h-8 items-center rounded-md border border-border bg-surface px-3 text-[13px] font-medium text-ink transition-colors hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
           >
             Open GitHub plugin

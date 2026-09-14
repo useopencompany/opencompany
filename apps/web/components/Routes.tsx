@@ -71,6 +71,7 @@ import {
 import { IntentPrefetchLink } from "@/components/IntentPrefetchLink";
 import { McpSetupGuide } from "@/components/McpSetupGuide";
 import { ModelProviderIcon } from "@/components/ModelProviderIcon";
+import { PageContent } from "@/components/PageContent";
 import { RepositorySettings } from "@/components/RepositorySettings";
 import {
   SCOPE_FILTERS,
@@ -80,7 +81,6 @@ import {
   ScopeFilterTabs,
   type Scope as SkillScope,
 } from "@/components/ScopeControls";
-import { SettingsContent } from "@/components/SettingsChrome";
 import { StatusDot } from "@/components/StatusDot";
 import { Surface } from "@/components/Surface";
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
@@ -192,7 +192,7 @@ export function SettingsRoute({
   const initials = getInitials(user.firstName, user.lastName, user.email);
 
   return (
-    <SettingsContent title="Account" description="Your personal profile for this workspace.">
+    <PageContent title="Account" description="Your personal profile for this workspace.">
       <section className="flex items-center gap-3">
         {user.avatarUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -233,7 +233,7 @@ export function SettingsRoute({
       </section>
 
       {browserProfilesEnabled ? <BrowserProfilesSettings /> : null}
-    </SettingsContent>
+    </PageContent>
   );
 }
 
@@ -247,7 +247,7 @@ export function InferenceSettingsRoute({
   const { integrations, workspace } = useAppData();
 
   return (
-    <SettingsContent
+    <PageContent
       title="Inference"
       description="Connect model subscriptions and choose how your workspace runs AI."
     >
@@ -258,7 +258,7 @@ export function InferenceSettingsRoute({
         sandboxSize={sandboxSize}
         sandboxSizeOptions={sandboxSizeOptions}
       />
-    </SettingsContent>
+    </PageContent>
   );
 }
 
@@ -268,7 +268,7 @@ export function McpSettingsRoute() {
     [user.firstName, user.lastName].filter(Boolean).join(" ").trim() || "Teammate";
 
   return (
-    <SettingsContent
+    <PageContent
       title="MCP"
       description="Connect Claude, ChatGPT, or Cursor to everything you can access in opencompany."
     >
@@ -279,7 +279,7 @@ export function McpSettingsRoute() {
         initialCompletedAt={mcpSetup.completedAt}
         hideHeader
       />
-    </SettingsContent>
+    </PageContent>
   );
 }
 
@@ -287,7 +287,7 @@ export function PreferencesSettingsRoute() {
   const { featureFlags } = useAppData();
 
   return (
-    <SettingsContent title="Preferences" description="Experimental features and app behavior.">
+    <PageContent title="Preferences" description="Experimental features and app behavior.">
       <section className="flex flex-col gap-2">
         <h2 className="mb-1 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
           Appearance
@@ -342,7 +342,7 @@ export function PreferencesSettingsRoute() {
           update={updateSubagentsAction}
         />
       </section>
-    </SettingsContent>
+    </PageContent>
   );
 }
 
@@ -356,7 +356,7 @@ export function RepositoriesSettingsRoute({
   canEdit: boolean;
 }) {
   return (
-    <SettingsContent
+    <PageContent
       title="Repositories"
       description="Give coding agents the environment and setup steps they need for each repository."
     >
@@ -365,7 +365,7 @@ export function RepositoriesSettingsRoute({
         initialConfigs={configs}
         canEdit={canEdit}
       />
-    </SettingsContent>
+    </PageContent>
   );
 }
 
@@ -438,7 +438,7 @@ function AppearanceSection() {
   );
 }
 
-export function FathomSettingsRoute() {
+export function FathomIngestionRoute() {
   const { activeBrain, featureFlags, integrations } = useAppData();
   const brainSourcesHref =
     featureFlags.legacyBrain && activeBrain
@@ -446,16 +446,16 @@ export function FathomSettingsRoute() {
       : null;
 
   return (
-    <SettingsContent
+    <PageContent
       title="Fathom ingestion"
       description="Legacy API-key ingestion for Brain"
-      backLink={{ href: "/settings/plugins/fathom", label: "Fathom plugin" }}
+      backLink={{ href: "/plugins/fathom", label: "Fathom plugin" }}
     >
       <FathomIntegrationSetup
         initialState={integrations.fathom}
         brainSourcesHref={brainSourcesHref}
       />
-    </SettingsContent>
+    </PageContent>
   );
 }
 
@@ -1119,13 +1119,7 @@ function workflowRunStats(
 
 // --- Skills (settings) -------------------------------------------------------
 
-export function SkillsSettingsRoute({
-  skills,
-  canEdit,
-}: {
-  skills: SkillListItemDto[];
-  canEdit: boolean;
-}) {
+export function SkillsRoute({ skills, canEdit }: { skills: SkillListItemDto[]; canEdit: boolean }) {
   const router = useRouter();
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -1136,7 +1130,7 @@ export function SkillsSettingsRoute({
   );
 
   return (
-    <SettingsContent title="Skills">
+    <PageContent title="Skills">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <ScopeFilterTabs label="Skill scope" value={scopeFilter} onChange={setScopeFilter} />
         {canEdit ? (
@@ -1181,24 +1175,24 @@ export function SkillsSettingsRoute({
         <ImportSkillDialog
           initialScope={creationScope}
           onClose={() => setImporting(false)}
-          onInstalled={(name) => router.push(`/settings/skills/${encodeURIComponent(name)}`)}
+          onInstalled={(name) => router.push(`/skills/${encodeURIComponent(name)}`)}
         />
       ) : null}
       {creating ? (
         <WorkspaceSkillDialog
           initialScope={creationScope}
           onClose={() => setCreating(false)}
-          onSaved={(name) => router.push(`/settings/skills/${encodeURIComponent(name)}`)}
+          onSaved={(name) => router.push(`/skills/${encodeURIComponent(name)}`)}
         />
       ) : null}
-    </SettingsContent>
+    </PageContent>
   );
 }
 
 function SkillListRow({ skill }: { skill: SkillListItemDto }) {
   return (
     <IntentPrefetchLink
-      href={`/settings/skills/${encodeURIComponent(skill.id)}`}
+      href={`/skills/${encodeURIComponent(skill.id)}`}
       className="group flex items-center gap-3 rounded-lg border border-border bg-surface px-3.5 py-3 transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
     >
       <span className="min-w-0 flex-1">
@@ -1254,7 +1248,7 @@ export function SkillBundleRoute({
     startMutation(async () => {
       try {
         await archiveHeadlessSkill(installation.id);
-        router.push("/settings/skills");
+        router.push("/skills");
       } catch (cause) {
         setError(errorMessage(cause));
       }
@@ -1262,10 +1256,10 @@ export function SkillBundleRoute({
   };
 
   return (
-    <SettingsContent
+    <PageContent
       title={bundle.name}
       description={`Use /${installation.name} in chat.`}
-      backLink={{ href: "/settings/skills", label: "Skills" }}
+      backLink={{ href: "/skills", label: "Skills" }}
     >
       {bundle.source.type !== "workspace" ? <SkillSourceNotice source={bundle.source} /> : null}
       {installation.scope ? (
@@ -1281,7 +1275,7 @@ export function SkillBundleRoute({
                   scope,
                   expectedScope: installation.scope!,
                 });
-                if (!updated.canEdit) router.push("/settings/skills");
+                if (!updated.canEdit) router.push("/skills");
                 else router.refresh();
               } catch (cause) {
                 setError(errorMessage(cause));
@@ -1388,7 +1382,7 @@ export function SkillBundleRoute({
           }}
         />
       ) : null}
-    </SettingsContent>
+    </PageContent>
   );
 }
 

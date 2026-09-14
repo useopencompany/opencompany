@@ -61,8 +61,8 @@ import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useAppData } from "@/components/AppDataProvider";
 import { IntentPrefetchLink } from "@/components/IntentPrefetchLink";
+import { PageContent } from "@/components/PageContent";
 import { PluginConnectionFeedback } from "@/components/PluginConnectionSettings";
-import { SettingsContent } from "@/components/SettingsChrome";
 import {
   approveHeadlessPluginMcp,
   archiveHeadlessPlugin,
@@ -447,7 +447,7 @@ function pluginCatalogFilterLabel(filter: Exclude<PluginCatalogFilter, "all">) {
   return filter === "featured" ? "Featured" : OFFICIAL_PLUGIN_CATEGORIES[filter];
 }
 
-export function PluginsSettings({
+export function PluginsRoute({
   plugins,
   canEdit,
   workspaceId,
@@ -521,7 +521,7 @@ export function PluginsSettings({
       try {
         await installOfficialPlugin(config);
         toast.success(`${config.label} ${updating ? "updated" : "installed"}.`);
-        router.push(`/settings/plugins/${config.name}`);
+        router.push(`/plugins/${config.name}`);
         // API mutations do not invalidate the catalog cached for back navigation.
         router.refresh();
       } catch (cause) {
@@ -580,12 +580,12 @@ export function PluginsSettings({
   };
 
   return (
-    <SettingsContent title="Plugins" contentClassName="max-w-[960px]">
+    <PageContent title="Plugins" contentClassName="max-w-[960px]">
       <PluginConnectionFeedback />
       {canEdit ? (
         <div className="mb-5 flex justify-end">
           <Link
-            href="/settings/plugins/add-mcp"
+            href="/plugins/add-mcp"
             className={buttonVariants({ variant: "outline", size: "sm" })}
           >
             <ServerCog className="mr-2 size-4" />
@@ -665,7 +665,7 @@ export function PluginsSettings({
                 {visibleCustomPlugins.map((plugin) => (
                   <IntentPrefetchLink
                     key={plugin.id}
-                    href={`/settings/plugins/${plugin.name}`}
+                    href={`/plugins/${plugin.name}`}
                     className="flex items-center gap-3 p-4 hover:bg-surface-hover"
                   >
                     <ServerCog className="size-5 shrink-0 text-ink-subtle" />
@@ -714,7 +714,7 @@ export function PluginsSettings({
           )}
         </div>
       </div>
-    </SettingsContent>
+    </PageContent>
   );
 }
 
@@ -774,7 +774,7 @@ function PluginCatalogSection({
               className="group flex min-w-0 items-center gap-2.5 rounded-lg px-2 py-2.5 transition-colors duration-150 hover:bg-surface-hover"
             >
               <IntentPrefetchLink
-                href={`/settings/plugins/${config.name}`}
+                href={`/plugins/${config.name}`}
                 className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
               >
                 <span
@@ -816,7 +816,7 @@ function PluginCatalogSection({
                 </Button>
               ) : plugin ? (
                 <IntentPrefetchLink
-                  href={`/settings/plugins/${config.name}`}
+                  href={`/plugins/${config.name}`}
                   className={cn(
                     buttonVariants({ variant: "outline", size: "sm" }),
                     "h-8 rounded-full px-3 text-[12px] text-ink shadow-none",
@@ -910,10 +910,10 @@ export function OfficialSkillPluginDetail({
   };
 
   return (
-    <SettingsContent
+    <PageContent
       title={config.label}
       description={config.description}
-      backLink={{ href: "/settings/plugins", label: "Plugins" }}
+      backLink={{ href: "/plugins", label: "Plugins" }}
     >
       <section className="flex flex-wrap items-start gap-3 rounded-lg border border-border bg-surface p-4">
         <span
@@ -995,7 +995,7 @@ export function OfficialSkillPluginDetail({
       </section>
 
       {installError ? <p className="text-[12.5px] text-danger">{installError}</p> : null}
-    </SettingsContent>
+    </PageContent>
   );
 }
 
@@ -1036,7 +1036,7 @@ export function PluginDetail({
   };
 
   return (
-    <SettingsContent
+    <PageContent
       title={title ?? plugin.manifest.name}
       description={
         description ??
@@ -1044,7 +1044,7 @@ export function PluginDetail({
           ? "An immutable Agent Plugin package with passive Skills and separately approved MCP servers."
           : "An immutable Agent Plugin package with passive Skills and no executable MCP servers.")
       }
-      backLink={{ href: "/settings/plugins", label: "Plugins" }}
+      backLink={{ href: "/plugins", label: "Plugins" }}
     >
       {!canEdit ? (
         <p className="text-[13px] leading-5 text-ink-subtle">
@@ -1269,7 +1269,7 @@ export function PluginDetail({
               onClick={() =>
                 mutate(
                   () => archiveHeadlessPlugin(plugin.name),
-                  () => router.push("/settings/plugins"),
+                  () => router.push("/plugins"),
                 )
               }
               className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[13px] font-medium text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink disabled:opacity-60"
@@ -1329,7 +1329,7 @@ export function PluginDetail({
           </div>
         </div>
       ) : null}
-    </SettingsContent>
+    </PageContent>
   );
 }
 

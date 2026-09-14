@@ -3,14 +3,14 @@
 import { Alert, AlertDescription, AlertTitle } from "@opencompany/ui/components/alert";
 import { Button } from "@opencompany/ui/components/button";
 import { AlertCircle } from "lucide-react";
-import { SettingsContent } from "@/components/SettingsChrome";
+import { PageContent } from "@/components/PageContent";
 
 export default function PluginDetailError({ reset }: { reset: () => void }) {
   return (
-    <SettingsContent
+    <PageContent
       title="Plugin"
       description="Plugin settings could not be loaded."
-      backLink={{ href: "/settings/plugins", label: "Plugins" }}
+      backLink={{ href: "/plugins", label: "Plugins" }}
     >
       <Alert variant="destructive">
         <AlertCircle />
@@ -22,6 +22,6 @@ export default function PluginDetailError({ reset }: { reset: () => void }) {
           </Button>
         </AlertDescription>
       </Alert>
-    </SettingsContent>
+    </PageContent>
   );
 }

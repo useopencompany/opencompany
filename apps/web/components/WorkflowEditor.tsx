@@ -846,7 +846,7 @@ function EventTriggerZeroState({ providers }: { providers: WorkflowEventProvider
       ) : (
         <>
           Turn on an event in{" "}
-          <Link href="/settings/plugins" className="underline underline-offset-2 hover:text-ink">
+          <Link href="/plugins" className="underline underline-offset-2 hover:text-ink">
             plugin settings
           </Link>{" "}
           to trigger workflows from your connected tools.
@@ -892,10 +892,7 @@ function EventTriggerEditor({
       {accounts.length === 0 ? (
         <p className="text-[12px] text-warning">
           This {provider?.label ?? trigger.provider} account is disconnected.{" "}
-          <Link
-            href={provider?.accountHref ?? "/settings/plugins"}
-            className="underline underline-offset-2"
-          >
+          <Link href={provider?.accountHref ?? "/plugins"} className="underline underline-offset-2">
             {provider?.accountLabel ?? "Connect an account"}
           </Link>
           .
@@ -1110,7 +1107,7 @@ function EventFilterPicker({
         <span className="text-[11.5px] text-warning">
           {result.error}{" "}
           <Link
-            href={providerOption?.accountHref ?? "/settings/plugins"}
+            href={providerOption?.accountHref ?? "/plugins"}
             className="underline underline-offset-2"
           >
             {providerOption ? `Open ${providerOption.label} settings` : "Open plugin settings"}

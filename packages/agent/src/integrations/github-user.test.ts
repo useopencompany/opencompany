@@ -80,12 +80,12 @@ describe("GitHub user integration", () => {
     expect(isGitHubUserIntegrationConfigured()).toBe(true);
     const state = createGitHubUserIntegrationState({
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/github",
+      returnTo: "/plugins/github",
     });
     expect(verifyGitHubUserIntegrationState(state)).toMatchObject({
       provider: "github_user",
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/github",
+      returnTo: "/plugins/github",
     });
     const install = new URL(buildGitHubUserInstallUrl(state));
     expect(install.href).toContain("github.com/apps/opencompany-user/installations/new");

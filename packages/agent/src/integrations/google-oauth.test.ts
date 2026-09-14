@@ -40,13 +40,13 @@ describe("opencompany Google OAuth", () => {
       provider: "gmail",
       access: "gmail_mcp",
       userWorkosId: "user_123",
-      returnTo: "/settings/plugins/gmail",
+      returnTo: "/plugins/gmail",
     });
 
     expect(verifyGoogleIntegrationState(state)).toMatchObject({
       provider: "gmail",
       access: "gmail_mcp",
-      returnTo: "/settings/plugins/gmail",
+      returnTo: "/plugins/gmail",
     });
   });
 
@@ -93,22 +93,30 @@ describe("opencompany Google OAuth", () => {
     expect(driveUrl.searchParams.get("scope")).not.toContain("calendar.readonly");
   });
 
-  it("requests the Drive, Docs, and Sheets scopes required by the plugin surface", () => {
-    const config = googleAuthorizationConfigForReturnTo(
-      GOOGLE_PROVIDER_CONFIG.google_drive,
-      "/settings/plugins/google-drive?integration=google_drive",
-    );
+  // A returnTo captured before the plugin page moved out of /settings still has to reach the
+  // plugin scope set; the route redirect cannot rewrite a query value.
+  it.each([
+    "/plugins/google-drive?integration=google_drive",
+    "/settings/plugins/google-drive?integration=google_drive",
+  ])(
+    "requests the Drive, Docs, and Sheets scopes required by the plugin surface (%s)",
+    (returnTo) => {
+      const config = googleAuthorizationConfigForReturnTo(
+        GOOGLE_PROVIDER_CONFIG.google_drive,
+        returnTo,
+      );
 
-    expect(config.scopes).toEqual([
-      "https://www.googleapis.com/auth/drive.readonly",
-      "https://www.googleapis.com/auth/drive.file",
-      "https://www.googleapis.com/auth/documents",
-      "https://www.googleapis.com/auth/spreadsheets",
-      "openid",
-      "email",
-      "profile",
-    ]);
-  });
+      expect(config.scopes).toEqual([
+        "https://www.googleapis.com/auth/drive.readonly",
+        "https://www.googleapis.com/auth/drive.file",
+        "https://www.googleapis.com/auth/documents",
+        "https://www.googleapis.com/auth/spreadsheets",
+        "openid",
+        "email",
+        "profile",
+      ]);
+    },
+  );
 
   it("uses direct opencompany callbacks", () => {
     vi.stubEnv("OPENCOMPANY_NEXT_PUBLIC_APP_URL", "https://opencompany.chat");

@@ -18,7 +18,7 @@ workspaces.
 
 ## Coding sandboxes and the Infisical plugin
 
-Workspace admins install and connect Infisical under **Settings → Plugins → Infisical**. opencompany
+Workspace admins install and connect Infisical under **Plugins → Infisical**. opencompany
 restores that CLI session into coding sandboxes, where agents should inject secrets directly into a
 child process:
 
