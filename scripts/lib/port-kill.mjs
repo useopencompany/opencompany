@@ -17,21 +17,40 @@ export function normalizePort(port) {
   return normalized;
 }
 
-export function findPortListeners(port) {
+export function findPortListeners(port, { runCommand = spawnSync } = {}) {
   const normalized = normalizePort(port);
-  const lsof = spawnSync("lsof", [`-tiTCP:${normalized}`, "-sTCP:LISTEN"], {
+  const options = {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
-  });
+  };
+  const lsof = runCommand("lsof", [`-tiTCP:${normalized}`, "-sTCP:LISTEN"], options);
 
-  if (lsof.error) {
+  if (lsof.error && lsof.error.code !== "ENOENT") {
     throw lsof.error;
   }
-  if (lsof.status && lsof.status !== 1) {
-    throw new Error(lsof.stderr.trim() || `lsof failed for port ${normalized}.`);
+  if (!lsof.error) {
+    if (lsof.status && lsof.status !== 1) {
+      throw new Error(lsof.stderr.trim() || `lsof failed for port ${normalized}.`);
+    }
+    return uniquePids(lsof.stdout);
   }
 
-  return uniquePids(lsof.stdout);
+  const ss = runCommand("ss", ["-H", "-ltnp", `sport = :${normalized}`], options);
+  if (ss.error) {
+    if (ss.error.code === "ENOENT") {
+      throw new Error("Port inspection requires either lsof or ss on PATH.");
+    }
+    throw ss.error;
+  }
+  if (ss.status) {
+    throw new Error(ss.stderr.trim() || `ss failed for port ${normalized}.`);
+  }
+
+  const pids = uniqueSsPids(ss.stdout);
+  if (ss.stdout.trim() && pids.length === 0) {
+    throw new Error(`ss found a listener on port ${normalized} but could not resolve its PID.`);
+  }
+  return pids;
 }
 
 export async function killPortListeners(
@@ -97,4 +116,8 @@ function uniquePids(stdout) {
         .filter(Boolean),
     ),
   ];
+}
+
+function uniqueSsPids(stdout) {
+  return [...new Set([...stdout.matchAll(/\bpid=(\d+)\b/g)].map((match) => match[1]))];
 }
