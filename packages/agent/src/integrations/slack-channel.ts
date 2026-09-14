@@ -123,8 +123,12 @@ export async function postWorkflowSlackMessage(
     const channelId = await resolvePublicChannel(token, post.channel.trim());
     const result = subscriptionRows<{ id: string; status: string }>(
       await execute(sql`
-      INSERT INTO goat.channel_deliveries (id, workspace_id, session_id, integration_id, channel_id, text)
-      SELECT ${id}, ${target.workspaceId}, ${target.sessionId}, ${target.id}, ${channelId}, ${text}
+      WITH connected AS MATERIALIZED (
+        SELECT id FROM goat.integrations WHERE id = ${target.id} AND status = 'connected' AND external_id = ${target.teamId} FOR SHARE
+      )
+      INSERT INTO goat.channel_deliveries (id, workspace_id, session_id, integration_id, team_id, channel_id, text)
+      SELECT ${id}, ${target.workspaceId}, ${target.sessionId}, ${target.id}, ${target.teamId}, ${channelId}, ${text}
+      FROM connected
       WHERE EXISTS (SELECT 1 FROM goat.codex_chat_turns WHERE id = ${input.runId} AND status = 'running' AND lease_id = ${target.leaseId} AND lease_expires_at > now())
       ON CONFLICT (id) DO UPDATE SET id = EXCLUDED.id
       WHERE channel_deliveries.text = EXCLUDED.text AND channel_deliveries.channel_id = EXCLUDED.channel_id
@@ -203,7 +207,7 @@ export async function resolvePublicChannel(token: string, requested: string): Pr
     form: { channel: id },
     signal: AbortSignal.timeout(10_000),
   });
-  if (!response.channel || !isSupportedSlackChannel(response.channel))
+  if (response.channel?.id !== id || !isSupportedSlackChannel(response.channel))
     throw new Error("Use a public, unshared channel that @opencompany has joined.");
   return id;
 }

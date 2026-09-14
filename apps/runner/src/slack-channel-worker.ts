@@ -72,6 +72,7 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
       JOIN goat.tasks task ON task.session_id = subscription.session_id AND task.workspace_id = subscription.workspace_id
       JOIN goat.chat_sessions conversation ON conversation.id = task.session_id
       JOIN goat.integrations integration ON integration.id = subscription.integration_id AND integration.workspace_id = subscription.workspace_id
+        AND integration.external_id = subscription.source_key->>'teamId'
       LEFT JOIN goat.codex_chat_turns run ON run.id = event.run_id
       LEFT JOIN goat.chat_messages message ON message.id = run.assistant_message_id
       WHERE event.status IN ('pending', 'running', 'delivering') AND event.next_attempt_at <= now() AND integration.status = 'connected'
@@ -81,7 +82,7 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
           WHERE earlier_subscription.session_id = subscription.session_id AND earlier.id < event.id
             AND earlier.status NOT IN ('done', 'ignored')
         )
-        AND ((event.status = 'delivering' AND EXISTS (SELECT 1 FROM goat.channel_deliveries delivery WHERE delivery.id = 'subscription_reply_' || event.id::text AND delivery.status = 'sent')) OR (
+        AND ((event.status = 'delivering' AND EXISTS (SELECT 1 FROM goat.channel_deliveries delivery WHERE delivery.id = 'subscription_reply_' || event.id::text AND delivery.status IN ('sent', 'canceled'))) OR (
           task.status IN ('waiting', 'succeeded', 'failed', 'canceled') AND NOT EXISTS (
             SELECT 1 FROM goat.codex_chat_turns active WHERE active.chat_session_id = subscription.session_id
               AND active.status IN ('queued', 'running', 'paused')
@@ -96,7 +97,7 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
       if (event.status === "delivering") {
         const sent = subscriptionRows(
           await tx.execute(
-            sql`SELECT id FROM goat.channel_deliveries WHERE id = ${deliveryId} AND status = 'sent'`,
+            sql`SELECT id FROM goat.channel_deliveries WHERE id = ${deliveryId} AND status IN ('sent', 'canceled')`,
           ),
         ).length;
         if (sent)
@@ -211,8 +212,8 @@ async function queueReply(execute: SubscriptionExecute, event: Event, id: string
     text.length > 3500
       ? `${text.slice(0, 3450)}\n\nFull result is available in the opencompany task.`
       : text;
-  await execute(sql`INSERT INTO goat.channel_deliveries (id, workspace_id, session_id, integration_id, channel_id, thread_ts, text)
-    VALUES (${id}, ${event.workspaceId}, ${event.sessionId}, ${event.installation.id}, ${event.payload.channelId}, ${event.payload.threadTs}, ${concise}) ON CONFLICT DO NOTHING`);
+  await execute(sql`INSERT INTO goat.channel_deliveries (id, workspace_id, session_id, integration_id, team_id, channel_id, thread_ts, text)
+    VALUES (${id}, ${event.workspaceId}, ${event.sessionId}, ${event.installation.id}, ${event.payload.teamId}, ${event.payload.channelId}, ${event.payload.threadTs}, ${concise}) ON CONFLICT DO NOTHING`);
   await execute(
     sql`UPDATE goat.subscription_events SET status = 'delivering' WHERE id = ${event.id}`,
   );
@@ -231,16 +232,23 @@ type Delivery = {
 export async function processNextChannelDelivery(deps = defaults()): Promise<boolean> {
   const leaseId = randomUUID();
   const delivery = await deps.db.transaction(async (tx) => {
+    await tx.execute(sql`UPDATE goat.channel_deliveries delivery SET status = 'canceled', error = NULL
+      WHERE delivery.status = 'pending' AND (
+        NOT EXISTS (SELECT 1 FROM goat.integrations integration WHERE integration.id = delivery.integration_id AND integration.external_id = delivery.team_id)
+        OR (delivery.thread_ts IS NULL AND (delivery.created_at <= now() - interval '30 days'
+          OR EXISTS (SELECT 1 FROM goat.tasks task WHERE task.session_id = delivery.session_id AND task.archived_at IS NOT NULL)
+          OR EXISTS (SELECT 1 FROM goat.chat_sessions conversation WHERE conversation.id = delivery.session_id AND conversation.closed_at IS NOT NULL)))
+      )`);
     const row = subscriptionRows<Delivery>(
       await tx.execute(sql`
       SELECT delivery.id, delivery.channel_id AS "channelId", delivery.thread_ts AS "threadTs", delivery.text,
         delivery.status, delivery.created_at AS "createdAt",
         jsonb_build_object('id', integration.id, 'workspaceId', integration.workspace_id,
           'userWorkosId', integration.user_workos_id, 'teamId', integration.external_id, 'scopes', integration.scopes) AS installation
-      FROM goat.channel_deliveries delivery JOIN goat.integrations integration ON integration.id = delivery.integration_id
+      FROM goat.channel_deliveries delivery JOIN goat.integrations integration ON integration.id = delivery.integration_id AND integration.external_id = delivery.team_id
       WHERE integration.status = 'connected' AND ((delivery.status = 'pending' AND (delivery.lease_expires_at IS NULL OR delivery.lease_expires_at < now())) OR (
         delivery.status IN ('sending', 'uncertain') AND delivery.lease_expires_at < now()))
-      ORDER BY delivery.created_at FOR UPDATE OF delivery SKIP LOCKED LIMIT 1
+      ORDER BY delivery.created_at FOR UPDATE OF delivery, integration SKIP LOCKED LIMIT 1
     `),
     )[0];
     if (!row) return null;

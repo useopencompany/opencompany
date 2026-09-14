@@ -152,16 +152,21 @@ export function createSlackBotSettingsService(input: {
       if (!integration) {
         throw new ApiError(404, "not_found", "The Slack bot is not connected.");
       }
-      await db.execute(
-        sql`UPDATE goat.session_subscriptions SET status = 'closed' WHERE integration_id = ${integration.id}`,
-      );
-      await markIntegrationStatus({
-        userWorkosId: integration.userWorkosId,
-        integrationId: integration.id,
-        provider: "slack_bot",
-        status: "disconnected",
-        statusReason: "Disconnected by a workspace admin.",
-        db,
+      await db.transaction(async (tx: DbLike) => {
+        await markIntegrationStatus({
+          userWorkosId: integration.userWorkosId,
+          integrationId: integration.id,
+          provider: "slack_bot",
+          status: "disconnected",
+          statusReason: "Disconnected by a workspace admin.",
+          db: tx,
+        });
+        await tx.execute(
+          sql`UPDATE goat.session_subscriptions SET status = 'closed' WHERE integration_id = ${integration.id}`,
+        );
+        await tx.execute(
+          sql`UPDATE goat.channel_deliveries SET status = 'canceled', error = NULL WHERE integration_id = ${integration.id} AND status = 'pending'`,
+        );
       });
     },
 

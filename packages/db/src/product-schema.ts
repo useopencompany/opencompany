@@ -7360,6 +7360,7 @@ export const channelDeliveries = productSchema.table(
     integrationId: text("integration_id")
       .notNull()
       .references(() => integrations.id, { onDelete: "cascade" }),
+    teamId: text("team_id").notNull(),
     channelId: text("channel_id").notNull(),
     threadTs: text("thread_ts"),
     text: text("text").notNull(),
@@ -7374,7 +7375,7 @@ export const channelDeliveries = productSchema.table(
     index("channel_deliveries_pending_idx").on(table.status, table.createdAt),
     check(
       "channel_deliveries_status_check",
-      sql`${table.status} IN ('pending', 'sending', 'sent', 'uncertain', 'failed')`,
+      sql`${table.status} IN ('pending', 'sending', 'sent', 'uncertain', 'failed', 'canceled')`,
     ),
   ],
 );

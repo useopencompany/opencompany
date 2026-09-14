@@ -49,7 +49,7 @@ export async function enqueueSlackThreadReply(
 }
 
 // A successful post and its subscription commit together. The ID is also the Slack metadata
-// key, allowing a verified echo or history reconciliation to repair an ambiguous HTTP result.
+// key, allowing history reconciliation to repair an ambiguous HTTP result.
 export async function completeChannelDelivery(
   execute: SubscriptionExecute,
   input: {
@@ -61,22 +61,28 @@ export async function completeChannelDelivery(
   },
 ) {
   await execute(sql`
-    WITH delivered AS (
+    WITH installation AS MATERIALIZED (
+      SELECT id, status FROM goat.integrations WHERE external_id = ${input.teamId} AND provider = 'slack_bot'
+      FOR SHARE
+    ), delivered AS (
       UPDATE goat.channel_deliveries delivery SET status = 'sent', message_ts = ${input.messageTs},
         lease_id = NULL, lease_expires_at = NULL, error = NULL
-      FROM goat.integrations integration
+      FROM installation integration
       WHERE delivery.id = ${input.id} AND delivery.integration_id = integration.id
-        AND integration.external_id = ${input.teamId} AND integration.provider = 'slack_bot'
+        AND delivery.team_id = ${input.teamId}
         AND delivery.channel_id = ${input.channelId}
         AND delivery.thread_ts IS NOT DISTINCT FROM ${input.threadTs}::text
         AND delivery.status IN ('sending', 'uncertain', 'sent')
-      RETURNING delivery.*
+      RETURNING delivery.*, integration.status AS installation_status
     )
     INSERT INTO goat.session_subscriptions
-      (id, workspace_id, session_id, integration_id, source, source_key, expires_at)
+      (id, workspace_id, session_id, integration_id, source, source_key, expires_at, status)
     SELECT id, workspace_id, session_id, integration_id, 'slack_thread',
       jsonb_build_object('teamId', ${input.teamId}::text, 'channelId', channel_id, 'threadTs', message_ts),
-      created_at + interval '30 days'
+      created_at + interval '30 days', CASE WHEN installation_status = 'connected' AND created_at > now() - interval '30 days'
+        AND NOT EXISTS (SELECT 1 FROM goat.tasks task WHERE task.session_id = delivered.session_id AND task.archived_at IS NOT NULL)
+        AND NOT EXISTS (SELECT 1 FROM goat.chat_sessions conversation WHERE conversation.id = delivered.session_id AND conversation.closed_at IS NOT NULL)
+        THEN 'waiting' ELSE 'closed' END
     FROM delivered WHERE thread_ts IS NULL
     ON CONFLICT DO NOTHING
   `);

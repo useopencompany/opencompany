@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
+import { postWorkflowSlackMessage } from "@opencompany/agent/integrations/slack-channel";
 import {
   completeChannelDelivery,
   enqueueSlackThreadReply,
@@ -15,6 +16,16 @@ import {
   processNextSubscriptionEvent,
   type SlackChannelWorkerDependencies,
 } from "./slack-channel-worker";
+
+vi.mock("@opencompany/db/integrations", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  loadIntegrationCredential: vi.fn(async () => ({
+    payload: { access_token: "fixture", bot_user_id: "BOT" },
+  })),
+}));
+vi.mock("@opencompany/agent/integrations/slack", () => ({
+  slackApiRequest: vi.fn(async () => ({ channel: { id: "C1", is_member: true } })),
+}));
 
 let restore: () => Promise<PGlite>;
 let pg: PGlite;
@@ -85,7 +96,7 @@ beforeEach(async () => {
     INSERT INTO goat.codex_chat_sessions (id, user_workos_id, chat_session_id, workspace_id, engine, model, status) VALUES ('runtime', 'owner', 'session', 'workspace', 'codex', 'test/model', 'idle');
     INSERT INTO goat.tasks (id, user_workos_id, workspace_id, prompt, model, session_id, source, workflow_id, status, harness_spec, sandbox_id) VALUES ('task', 'owner', 'workspace', 'Investigate the bug', 'test/model', 'session', 'workflow', 'workflow', 'succeeded', '{"engine":"codex","model":"test/model","systemPrompt":"Original workflow instructions","workflow":{"stepIndex":0,"steps":[{"instructions":"Investigate"}]}}', 'saved-sandbox');
     INSERT INTO goat.integrations VALUES ('install', 'workspace', 'owner', 'slack_bot', 'T1', 'connected', '[]');
-    INSERT INTO goat.channel_deliveries (id, workspace_id, session_id, integration_id, channel_id, text, status) VALUES ('root', 'workspace', 'session', 'install', 'C1', 'Investigation result', 'sending');
+    INSERT INTO goat.channel_deliveries (id, workspace_id, session_id, integration_id, team_id, channel_id, text, status) VALUES ('root', 'workspace', 'session', 'install', 'T1', 'C1', 'Investigation result', 'sending');
   `);
   await completeChannelDelivery(execute, {
     id: "root",
@@ -100,6 +111,32 @@ afterEach(async () => {
 });
 
 describe("durable Slack subscriptions", () => {
+  it("persists workflow root intents with a stable key and rejects foreign callers", async () => {
+    await pg.exec(`
+      UPDATE goat.integrations SET scopes = '["chat:write","channels:read","channels:history","users:read","users:read.email"]';
+      INSERT INTO goat.chat_messages (id, session_id, role, content, task_id) VALUES ('initial_user','session','user','Investigate','task'), ('initial_assistant','session','assistant','','task');
+      INSERT INTO goat.codex_chat_turns (id,user_workos_id,codex_chat_session_id,chat_session_id,user_message_id,assistant_message_id,status,prompt,lease_id,lease_expires_at)
+        VALUES ('initial_run','owner','runtime','session','initial_user','initial_assistant','running','Investigate','lease',now() + interval '1 minute');
+    `);
+    const input = {
+      runId: "initial_run",
+      actorId: "owner",
+      post: { channel: "C1", text: "Investigation summary", messageKey: "summary" },
+    };
+    const first = await postWorkflowSlackMessage(input, execute);
+    const replay = await postWorkflowSlackMessage(input, execute);
+    expect(first.deliveryId).toBe(replay.deliveryId);
+    expect((await pg.query("SELECT id FROM goat.channel_deliveries")).rows).toHaveLength(2);
+    await expect(
+      postWorkflowSlackMessage({ ...input, actorId: "member" }, execute),
+    ).rejects.toThrow("active workflow session");
+    await expect(
+      postWorkflowSlackMessage(
+        { ...input, post: { ...input.post, text: "Different content" } },
+        execute,
+      ),
+    ).rejects.toThrow("messageKey");
+  });
   it("creates exactly one subscription and deduplicates retries without accepting untracked threads", async () => {
     await completeChannelDelivery(execute, {
       id: "root",
@@ -197,6 +234,28 @@ describe("durable Slack subscriptions", () => {
       { status: "sent" },
     ]);
     expect((await pg.query("SELECT id FROM goat.session_subscriptions")).rows).toHaveLength(1);
+  });
+  it("never redirects an old delivery into a reconnected Slack team", async () => {
+    await pg.exec(
+      "UPDATE goat.channel_deliveries SET status = 'pending'; UPDATE goat.integrations SET external_id = 'T_OTHER'",
+    );
+    expect(await processNextChannelDelivery(deps)).toBe(false);
+    expect(deps.request).not.toHaveBeenCalled();
+  });
+  it("closes a late root confirmation after disconnect", async () => {
+    await pg.exec(
+      "DELETE FROM goat.session_subscriptions; UPDATE goat.integrations SET status = 'disconnected'",
+    );
+    await completeChannelDelivery(execute, {
+      id: "root",
+      teamId: "T1",
+      channelId: "C1",
+      threadTs: null,
+      messageTs: "100.001",
+    });
+    expect((await pg.query("SELECT status FROM goat.session_subscriptions")).rows).toEqual([
+      { status: "closed" },
+    ]);
   });
   it("keeps an unconfirmed delivery uncertain instead of blindly repeating the external write", async () => {
     await pg.exec(
