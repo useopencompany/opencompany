@@ -334,6 +334,7 @@ function AppLiveDataSubscriptions({
         runtime: row.runtime,
         activityState: row.activityState,
         hasUnseen: row.hasUnseen,
+        awaitingInput: row.awaitingInput,
         preview: initial?.preview ?? "No messages yet.",
         updatedAt: row.updatedAt,
         lastSeenAt: row.lastSeenAt,
@@ -398,6 +399,7 @@ function AppLiveDataSubscriptions({
         runtime: row.runtime,
         activityState: row.activityState,
         hasUnseen: row.hasUnseen,
+        awaitingInput: row.awaitingInput,
         preview: "Archived",
         updatedAt: row.updatedAt,
         lastSeenAt: row.lastSeenAt,
@@ -569,6 +571,7 @@ function sidebarTaskViewFrom(row: HeadlessTaskReadModel): SidebarTaskView {
     name: row.name,
     status: row.status,
     hasUnseen: row.hasUnseen,
+    awaitingInput: row.awaitingInput,
     updatedAt: row.updatedAt,
   };
 }

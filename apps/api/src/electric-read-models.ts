@@ -72,6 +72,7 @@ const PREDECODED_READ_MODEL_FIELDS = new Set([
   "scopes",
   "capabilityModes",
   "hasUnseen",
+  "awaitingInput",
   "enabled",
   "metadata",
   "planPaused",
@@ -253,6 +254,7 @@ function readModelShape(input: {
         "last_seen_at",
         "activity_state",
         "has_unseen",
+        "awaiting_input",
         "runtime_status",
         "active_run_id",
         "runtime_has_error",
@@ -359,6 +361,7 @@ function readModelShape(input: {
           "reported_status",
           "outcome_comment",
           "has_unseen",
+          "awaiting_input",
           "archived_at",
           "created_at",
           "updated_at",
@@ -867,7 +870,12 @@ function readModelFieldValue(readModel: ReadModel, name: string, value: unknown)
   if (name.endsWith("At") || name === "at" || name === "scheduledFor") {
     return timestampValue(value);
   }
-  if (name === "hasUnseen" || name === "enabled" || name === "planPaused") {
+  if (
+    name === "hasUnseen" ||
+    name === "awaitingInput" ||
+    name === "enabled" ||
+    name === "planPaused"
+  ) {
     return booleanValue(value);
   }
   if (
@@ -1143,6 +1151,7 @@ const READ_MODEL_COLUMN_NAMES = {
     last_seen_at: "lastSeenAt",
     activity_state: "activityState",
     has_unseen: "hasUnseen",
+    awaiting_input: "awaitingInput",
     runtime_status: "",
     active_run_id: "",
     runtime_has_error: "",
@@ -1213,6 +1222,7 @@ const READ_MODEL_COLUMN_NAMES = {
     reported_status: "",
     outcome_comment: "",
     has_unseen: "hasUnseen",
+    awaiting_input: "awaitingInput",
     archived_at: "archivedAt",
     created_at: "createdAt",
     updated_at: "updatedAt",

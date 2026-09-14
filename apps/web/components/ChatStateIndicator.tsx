@@ -9,12 +9,33 @@ type ChatStateIndicatorProps = {
   className?: string;
 };
 
+export const AWAITING_INPUT_LABEL = "Waiting for you";
+
 export function ChatStateIndicator({
   state,
   surface,
   showSeen = false,
   className,
 }: ChatStateIndicatorProps) {
+  if (state === "awaiting_input") {
+    // The only indicator with an accessible name: every other state describes what the agent is
+    // doing, this one is a request aimed at the reader, and it is the difference between a run
+    // that is progressing and one that is stuck on them.
+    return (
+      <span
+        role="img"
+        aria-label={AWAITING_INPUT_LABEL}
+        title={AWAITING_INPUT_LABEL}
+        data-testid={`${surface}-chat-awaiting-input`}
+        className={cn(
+          surface === "home" ? "h-2 w-2" : "h-1.5 w-1.5",
+          "shrink-0 rounded-full bg-warning",
+          className,
+        )}
+      />
+    );
+  }
+
   if (state === "working") {
     return (
       <LoaderCircle

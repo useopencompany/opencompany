@@ -36,6 +36,29 @@ describe("chatSummaryState", () => {
     ).toBe("done_unseen");
   });
 
+  it("shows a parked run as awaiting input, ahead of working", () => {
+    // A foreground approval holds the engine open while it polls, so the projection reports both.
+    // Rendering it as working would show a spinner that cannot finish without the reader.
+    expect(
+      chatSummaryState({
+        activityState: "working",
+        hasUnseen: false,
+        awaitingInput: true,
+      }),
+    ).toBe("awaiting_input");
+  });
+
+  it("keeps a parked run awaiting input after it has been read", () => {
+    // Reading the chat clears hasUnseen but does not answer the request.
+    expect(
+      chatSummaryState({
+        activityState: "idle",
+        hasUnseen: false,
+        awaitingInput: true,
+      }),
+    ).toBe("awaiting_input");
+  });
+
   it("uses an explicit local state only when the API projection is unavailable", () => {
     expect(
       chatSummaryState({
