@@ -105,6 +105,9 @@ export type AppInitialData = {
   featureFlags: FeatureFlags;
   codexConnected: boolean;
   claudeCodeConnected: boolean;
+  // True when the workspace routes its shared GPT models through an admin's ChatGPT
+  // subscription, which makes those models free of workspace credits.
+  sharedModelAccessEnabled: boolean;
   mcpSetup: {
     preferredClient: McpClient | null;
     completedAt: string | null;

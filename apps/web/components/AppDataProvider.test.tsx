@@ -857,6 +857,7 @@ function initialData(): AppInitialData {
     },
     codexConnected: false,
     claudeCodeConnected: false,
+    sharedModelAccessEnabled: false,
     mcpSetup: { preferredClient: null, completedAt: null },
   };
 }

@@ -191,7 +191,14 @@ export function ReviewInboxRoute() {
  * queue stays where it was, and the finished conversation comes back to it.
  */
 function ReviewStartComposer() {
-  const { claudeCodeConnected, codexConnected, featureFlags, user, workspace } = useAppData();
+  const {
+    claudeCodeConnected,
+    codexConnected,
+    featureFlags,
+    sharedModelAccessEnabled,
+    user,
+    workspace,
+  } = useAppData();
   const { balance: creditBalance } = useCreditBalance();
 
   return (
@@ -206,6 +213,7 @@ function ReviewStartComposer() {
           claudeCodeConnected={claudeCodeConnected}
           taskSpawningEnabled={featureFlags.taskSpawning}
           autoModelRoutingEnabled={featureFlags.autoModelRouting}
+          sharedModelAccessEnabled={sharedModelAccessEnabled}
           creditBalance={creditBalance}
           workspaceId={workspace.id}
         />
