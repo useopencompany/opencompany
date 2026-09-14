@@ -51,7 +51,7 @@ const CHAT_ARTIFACT_BEHAVIOR_LINES = [
 ];
 
 const CHAT_NO_TASK_DELEGATION_LINE =
-  "You cannot start a one-off task. When a request needs deep research, monitoring, longer-running execution, or an execution environment you do not have in chat, do the part you can here and say plainly what you cannot do. Never claim work is running in the background, and never promise to follow up later.";
+  "You cannot start a one-off task. When a request needs deep research, monitoring, longer-running execution, or an execution environment you do not have in chat, do the part you can here and say plainly what you cannot do. Apart from a workflow you actually started or a recurring schedule you actually saved, never claim work is running in the background and never promise to follow up later.";
 
 const CHAT_SCHEDULE_BEHAVIOR_LINES = [
   "Create a recurring task schedule when the user asks for work to repeat on a cadence, schedule, cron, routine, every day/week/month, or other recurring basis. Convert the cadence to a valid 5-field cron expression and save it directly when clear. If the recurrence is ambiguous, ask one concise follow-up instead of guessing.",
@@ -126,6 +126,7 @@ const CHAT_WORKFLOW_BEHAVIOR_LINES = [
   "If the user has not identified one workflow clearly, or more than one workflow plausibly matches, ask one concise follow-up instead of guessing.",
   "Keep the workflow run prompt close to the user's latest request. Include only relevant, confirmed context from earlier in this conversation; do not copy the whole transcript or propagate loaded skill instructions.",
   "After start_workflow succeeds, keep the chat response short and say the workflow was started as a Task.",
+  "Only one workflow can start per turn. If the user asks for two, start the one they named first, say the other has not started, and ask whether to run it next.",
 ];
 
 const CHAT_WIKI_FILL_LINES = [

@@ -1,9 +1,4 @@
-import {
-  CLAUDE_CODE_DEFAULT_MODEL_ID,
-  CODEX_AGENT_MODEL_IDS,
-  CODEX_DEFAULT_MODEL_ID,
-  WRITE_ARTIFACT_TOOL_NAME,
-} from "@opencompany/agent-runtime";
+import { WRITE_ARTIFACT_TOOL_NAME } from "@opencompany/agent-runtime";
 import { WIKI_TOOL_NAME } from "@opencompany/wiki/tool";
 import { generateText } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
@@ -20,7 +15,6 @@ import {
   CREATE_WORKSPACE_SKILL_TOOL_NAME,
   EDIT_WORKSPACE_SKILL_TOOL_NAME,
   LIST_SKILLS_TOOL_NAME,
-  START_TASK_TOOL_NAME,
   START_WORKFLOW_TOOL_NAME,
 } from "./chat-ui";
 
@@ -470,6 +464,40 @@ describe("start_workflow tool", () => {
       }),
     ).rejects.toThrow("not an active workflow in this workspace");
     expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("refuses a second, different workflow in the same turn instead of replaying the first", async () => {
+    const workflowExecute = vi.fn(async () => ({
+      id: "task_1",
+      displayId: "TASK-1",
+      name: "Customer interview synthesis",
+      prompt: "Synthesize the Acme interview.",
+    }));
+    const context = createProductChatToolContext({
+      model,
+      workflows: {
+        catalog: [
+          ...workflowCatalog,
+          { id: "weekly-digest", name: "Weekly digest", description: "Summarize the week." },
+        ],
+        execute: workflowExecute,
+      },
+    });
+    const startWorkflow = context.tools[START_WORKFLOW_TOOL_NAME] as {
+      execute: (args: unknown) => Promise<unknown>;
+    };
+
+    await expect(
+      startWorkflow.execute({
+        workflowId: "customer-interview-synthesis",
+        prompt: "Synthesize the Acme interview.",
+      }),
+    ).resolves.toMatchObject({ taskId: "task_1", status: "queued" });
+    await expect(
+      startWorkflow.execute({ workflowId: "weekly-digest", prompt: "Summarize the week." }),
+    ).rejects.toThrow("Only one workflow can start per chat turn");
+    expect(workflowExecute).toHaveBeenCalledTimes(1);
+    expect(context.getStartedTask()?.id).toBe("task_1");
   });
 
   it("starts at most one workflow task per turn", async () => {

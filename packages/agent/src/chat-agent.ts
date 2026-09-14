@@ -639,6 +639,7 @@ export function createProductChatToolContext(input: {
   let actionCallsExhausted = false;
   let startedTask: StartedTask | null = null;
   let startedTaskInFlight: Promise<StartedTask> | null = null;
+  let startedWorkflowId: string | null = null;
   let scheduledTask: ScheduleTaskToolOutput | null = null;
   let scheduleTaskInFlight: Promise<ScheduleTaskToolOutput> | null = null;
   let visibleToolActivity = false;
@@ -683,15 +684,25 @@ export function createProductChatToolContext(input: {
     });
   }
 
-  const startTrackedTask = async (
+  // One Task per turn: the assistant message carries a single Task card, and the workflow Task's
+  // idempotency key is the turn id. Re-requesting the same workflow replays that Task; asking for a
+  // different one has to fail loudly, or the model would report a workflow as started when the
+  // first one's Task came back instead.
+  const startWorkflowTask = async (
+    workflowId: string,
     create: () => Promise<StartedTask>,
-  ): Promise<StartTaskToolOutput> => {
-    if (startedTask) return toStartTaskToolOutput(startedTask, "already_started");
-    if (startedTaskInFlight) {
-      startedTask = await startedTaskInFlight;
+  ): Promise<StartWorkflowToolOutput> => {
+    if (startedTaskInFlight) startedTask ??= await startedTaskInFlight;
+    if (startedTask) {
+      if (startedWorkflowId !== workflowId) {
+        throw new Error(
+          `Only one workflow can start per chat turn, and "${startedWorkflowId}" already started. Tell the user that "${workflowId}" has not started and ask whether to run it next.`,
+        );
+      }
       return toStartTaskToolOutput(startedTask, "already_started");
     }
 
+    startedWorkflowId = workflowId;
     try {
       startedTaskInFlight = create();
       startedTask = await startedTaskInFlight;
@@ -738,7 +749,7 @@ export function createProductChatToolContext(input: {
         if (!prompt) {
           throw new Error("start_workflow prompt is required.");
         }
-        return startTrackedTask(() => workflows.execute({ workflowId, prompt }));
+        return startWorkflowTask(workflowId, () => workflows.execute({ workflowId, prompt }));
       },
     });
   }

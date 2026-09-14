@@ -91,7 +91,9 @@ describe("createProductChatSystemPrompt integrations", () => {
       expect(prompt).not.toContain("start_task");
       expect(prompt).not.toContain("still call the task tool instead of refusing");
       expect(prompt).toContain("You cannot start a one-off task");
-      expect(prompt).toContain("Never claim work is running in the background");
+      expect(prompt).toContain(
+        "never claim work is running in the background and never promise to follow up later",
+      );
     }
     expect(withoutWorkflows).toContain(
       "Handle the user's request directly in this chat when possible.",
