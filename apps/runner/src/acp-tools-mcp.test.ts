@@ -9,6 +9,7 @@ import {
 import {
   ACTION_HOST_TOOL_CONTRACT_VERSION,
   ACTION_HOST_TOOL_CONTRACT_VERSION_V2,
+  ACTION_MAX_CALLS_PER_TURN,
   createExternalEngineGatewayTicket,
 } from "@opencompany/agent-runtime";
 import { CODEX_BRAIN_TOOL_CONTRACT_VERSION } from "@opencompany/brain";
@@ -324,7 +325,11 @@ describe("runner ACP tools MCP", () => {
       ok: true,
       action: "gmail.search",
       result: { messages: [] },
-      budget: { limit: 16, used: 1, remaining: 15 },
+      budget: {
+        limit: ACTION_MAX_CALLS_PER_TURN,
+        used: 1,
+        remaining: ACTION_MAX_CALLS_PER_TURN - 1,
+      },
     });
     expect(executeAction).toHaveBeenCalledWith({ request, signal });
     expect(providerExecuteAction).toHaveBeenCalledOnce();

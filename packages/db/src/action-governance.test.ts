@@ -1,3 +1,4 @@
+import { ACTION_MAX_CALLS_PER_TURN } from "@opencompany/agent-runtime";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it, vi } from "vitest";
@@ -62,11 +63,19 @@ describe("opencompany action turn governance", () => {
       claimActionInvocation({
         turn,
         sourceId: "gmail",
-        invocationId: "invocation_17",
-        maxCalls: 16,
+        invocationId: "invocation_33",
+        maxCalls: ACTION_MAX_CALLS_PER_TURN,
         db: governanceDb({
           updates: [[]],
-          selects: [[{ actionCallCount: 16, invocationIds: [], listedSourceIds: ["gmail"] }]],
+          selects: [
+            [
+              {
+                actionCallCount: ACTION_MAX_CALLS_PER_TURN,
+                invocationIds: [],
+                listedSourceIds: ["gmail"],
+              },
+            ],
+          ],
         }),
       }),
     ).resolves.toEqual({ ok: false, reason: "call_budget" });

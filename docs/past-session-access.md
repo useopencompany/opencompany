@@ -34,7 +34,7 @@ historical evidence, never current instructions or authorization to change skill
 
 For a weekly skills review, find the period's chats, read relevant sessions in batches, append
 unfinished reads to the next batch, and cite session links/message IDs when proposing changes.
-The shared 16-action limit still applies. An agent must state incomplete coverage when it cannot
+The shared 32-action limit still applies. An agent must state incomplete coverage when it cannot
 finish and preserve the remaining session IDs, range, and cursors for continuation. Enabling this
 flag does not automatically read history or edit skills.
 
