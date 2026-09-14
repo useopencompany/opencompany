@@ -8,7 +8,8 @@ storage model.
 The opt-in Workspace Wiki is a separate, simpler knowledge surface built on `packages/wiki`.
 It uses an Obsidian-style tree: folders are pure containers, pages are leaf Markdown documents,
 and a page's full path is its identity. Wiki links therefore use `[[path/to/page]]` and are
-rewritten when their target moves.
+rewritten when their target moves. Wiki pointers into other tools are documented in
+[Wiki source refs](../wiki/source-refs.md).
 
 ## Runtime ownership
 
@@ -37,6 +38,7 @@ not host MCP tools, authorize Brain access, verify provider payloads, or persist
 | [Ingestion](./ingestion.md) | durable source-item/job admission and runner curation paths |
 | [Tools and CLI](./tools-and-cli.md) | browser-independent Brain reads, captures, MCP, and ingestion-agent CLI use |
 | [Pointer/copy contract](./pointer-copy-contract.md) | provenance and evidence rules for Brain writers |
+| [Wiki source refs](../wiki/source-refs.md) | the provider registry behind Workspace Wiki `[[source:...]]` pointers |
 
 ## Code map
 
@@ -51,6 +53,7 @@ not host MCP tools, authorize Brain access, verify provider payloads, or persist
 | Runner ingestion | `apps/runner/src/brain-ingest-worker.ts` and `brain-agent-ingest.ts` |
 | Tables, materialization, and read plane | `packages/db/src/product-schema.ts`, `brain-files.ts`, and `brain-read.ts` |
 | Workspace Wiki | `packages/wiki/src/*`, `packages/db/src/wiki.ts`, and `apps/web/components/WikiView.tsx` |
+| Wiki source pointer registry | `packages/wiki/src/sources.ts` and `apps/web/lib/brain-source-links.ts` |
 
 ## Invariants
 

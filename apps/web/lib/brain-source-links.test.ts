@@ -52,14 +52,46 @@ describe("sourceHrefForRef", () => {
     expect(sourceHrefForRef("google-drive:file:short")).toBeNull();
   });
 
-  it("labels linear chips with the issue identifier", () => {
+  it("resolves pointer-only and internal refs", () => {
+    expect(sourceHrefForRef("granola:note:note_1")).toBe("https://app.granola.ai/notes/note_1");
+    // Jamie and Attio have no stable per-artifact URL, so the chip stays inert.
+    expect(sourceHrefForRef("jamie:meeting:calendar_event_123")).toBeNull();
+    expect(sourceHrefForRef("attio:ws_1:deal:rec_9876")).toBeNull();
+  });
+
+  it("names the artifact when the author wrote no label of their own", () => {
     expect(sourceChipDisplay("linear:issue:ENG-42", "linear:issue:ENG-42")).toEqual({
       icon: "link",
       label: "ENG-42",
     });
+    expect(
+      sourceChipDisplay("gmail:thread:18c2a4b9d0e1f234", "gmail:thread:18c2a4b9d0e1f234"),
+    ).toEqual({
+      icon: "link",
+      label: "Gmail thread",
+    });
+    expect(sourceChipDisplay("github:acme/api:pull:123", "github:acme/api:pull:123")).toEqual({
+      icon: "github",
+      label: "#123",
+    });
+    expect(sourceChipDisplay("jamie:meeting:evt_1", "jamie:meeting:evt_1")).toEqual({
+      icon: "link",
+      label: "Jamie meeting",
+    });
+  });
+
+  it("keeps an author-written label, and the raw ref when nothing can place it", () => {
     expect(sourceChipDisplay("linear:issue:ENG-42", "Custom label")).toEqual({
       icon: "link",
       label: "Custom label",
+    });
+    expect(sourceChipDisplay("github:acme/api:pull:123", "Rollout PR")).toEqual({
+      icon: "github",
+      label: "Rollout PR",
+    });
+    expect(sourceChipDisplay("notion:page-1", "notion:page-1")).toEqual({
+      icon: "link",
+      label: "notion:page-1",
     });
   });
 
