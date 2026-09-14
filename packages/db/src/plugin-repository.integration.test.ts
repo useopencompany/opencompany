@@ -54,6 +54,7 @@ describe("Postgres immutable Plugin repository", () => {
     await database.exec(`
       ALTER TABLE goat.plugins ADD COLUMN events jsonb NOT NULL DEFAULT '[]'::jsonb;
       ALTER TABLE goat.plugins ADD COLUMN event_modes jsonb NOT NULL DEFAULT '{}'::jsonb;
+      ALTER TABLE goat.plugins ADD COLUMN pricing jsonb;
     `);
     await database.exec(`
       ALTER TABLE goat.plugins ADD COLUMN owner_user_id text;
