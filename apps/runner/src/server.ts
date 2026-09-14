@@ -172,12 +172,10 @@ export function createServer(
 
   app.post("/internal/goat/slack-bot/events", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
-    return reply
-      .code(410)
-      .send({
-        error:
-          "Legacy Slack bot dispatch has been retired. Thread replies use the durable subscription inbox.",
-      });
+    return reply.code(410).send({
+      error:
+        "Legacy Slack bot dispatch has been retired. Thread replies use the durable subscription inbox.",
+    });
   });
 
   app.post("/internal/goat/actions/always-allow", async (request, reply) => {
