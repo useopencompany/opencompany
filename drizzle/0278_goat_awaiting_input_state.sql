@@ -30,10 +30,6 @@ AS $$
   )
 $$;--> statement-breakpoint
 
-CREATE INDEX IF NOT EXISTS "goat_run_approvals_pending_run_idx"
-ON "goat"."run_approvals" ("run_id")
-WHERE "status" = 'pending';--> statement-breakpoint
-
 CREATE OR REPLACE FUNCTION "goat"."refresh_conversation_read_model_v1"(target_id text)
 RETURNS void
 LANGUAGE plpgsql
