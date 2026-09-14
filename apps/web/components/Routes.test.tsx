@@ -453,12 +453,7 @@ describe("SettingsRoute", () => {
   });
 
   it("renders the workspace inference settings", () => {
-    render(
-      <InferenceSettingsRoute
-        sandboxSize={{ ok: true, sandboxSize: "standard" }}
-        sandboxSizeOptions={[]}
-      />,
-    );
+    render(<InferenceSettingsRoute />);
 
     expect(screen.getByRole("heading", { name: "Inference" })).toBeInTheDocument();
     expect(

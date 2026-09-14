@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import { CODEX_DEFAULT_MODEL_ID } from "@opencompany/agent-runtime";
-import type { SandboxSize } from "@opencompany/core/sandbox-sizes";
 import { loadEncryptionKey } from "@opencompany/crypto";
 import { DEFAULT_CODING_AGENT_TURN_TIMEOUT_MS } from "./coding-sandbox-lifecycle";
 
@@ -42,10 +41,7 @@ export type RunnerEnv = {
   // token endpoint before snapshot enrichment.
   hubspotOAuthClientId?: string | undefined;
   hubspotOAuthClientSecret?: string | undefined;
-  // One E2B template alias per user-selectable sandbox size. E2B fixes vCPU and RAM
-  // at template build time, so the size a workspace picks is which template the
-  // runner spawns from. Unset entries fall back to E2B's stock `codex` template.
-  codexE2bTemplates: Record<SandboxSize, string | undefined>;
+  codexE2bTemplate: string | undefined;
   // Ownership boundary for managed E2B sandbox reconciliation. Every creator and reconciler in
   // one runner deployment must use the same value; local setup generates a workspace-specific
   // namespace so a local runner sharing the E2B project cannot select production sandboxes.
@@ -101,11 +97,7 @@ export function loadEnv(): RunnerEnv {
     googleOAuthClientSecret: optionalEnv("GOOGLE_OAUTH_CLIENT_SECRET"),
     hubspotOAuthClientId: optionalEnv("OPENCOMPANY_HUBSPOT_CLIENT_ID"),
     hubspotOAuthClientSecret: optionalEnv("OPENCOMPANY_HUBSPOT_CLIENT_SECRET"),
-    codexE2bTemplates: {
-      small: optionalEnv("OPENCOMPANY_CODEX_E2B_TEMPLATE_SMALL"),
-      standard: optionalEnv("OPENCOMPANY_CODEX_E2B_TEMPLATE_STANDARD"),
-      large: optionalEnv("OPENCOMPANY_CODEX_E2B_TEMPLATE_LARGE"),
-    },
+    codexE2bTemplate: optionalEnv("OPENCOMPANY_CODEX_E2B_TEMPLATE"),
     sandboxNamespace: requiredEnv("RUNNER_SANDBOX_NAMESPACE"),
     blobReadWriteToken: optionalEnv("BLOB_READ_WRITE_TOKEN"),
     codexTimeoutMs: optionalPositiveIntegerEnv(

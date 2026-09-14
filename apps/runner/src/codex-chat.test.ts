@@ -686,23 +686,6 @@ describe("runCodexChatTurn over ACP", () => {
     );
   });
 
-  it("spawns the session's machine size from its own template alias", async () => {
-    await runCodexChatTurn({
-      turn: codexTurn(),
-      session: codexSession({ sandboxSize: "small" }),
-      env: env({
-        codexE2bTemplates: {
-          small: "toolbox-small",
-          standard: "toolbox-standard",
-          large: "toolbox-large",
-        },
-      }),
-    });
-    expect(sandboxMocks.createOrConnectSandbox).toHaveBeenCalledWith(
-      expect.objectContaining({ template: "toolbox-small" }),
-    );
-  });
-
   it("explicitly invokes the Skill bundle activated by the current Codex message", async () => {
     const turn = codexTurn({ prompt: "/release-review Review v1.2.0." });
     const bundle = {
@@ -1657,7 +1640,6 @@ function codexSession(overrides: Partial<CodexChatSession> = {}): CodexChatSessi
     brainRef: null,
     workspaceId: "workspace_1",
     hostToolContractVersion: null,
-    sandboxSize: "standard",
     sandboxId: "sbx_existing",
     codexThreadId: "thread_existing",
     activeTurnId: "goat_codex_turn_1",
@@ -1711,7 +1693,7 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     openaiCodexApiKey: "codex_api_secret",
     exaApiKey: "exa",
     browserEnabled: false,
-    codexE2bTemplates: { small: undefined, standard: undefined, large: undefined },
+    codexE2bTemplate: undefined,
     sandboxNamespace: "test",
     codexTimeoutMs: 1_200_000,
     codexModel: "gpt-5.5",

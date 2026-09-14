@@ -52,7 +52,6 @@ const migrationPaths = [
   "0261_persistent_bots.sql",
   "0263_personal_company_skills.sql",
   "0270_opencompany_sidebar_projects.sql",
-  "0276_sandbox_size_tiers.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -633,48 +632,6 @@ describe("Postgres Chat repositories", () => {
       row.presentation_summary.uiMessageParts.filter((part) => part.type === "dynamic-tool"),
     ).toHaveLength(200);
     expect(row.summary_bytes * 10).toBeLessThan(row.presentation_bytes);
-  });
-
-  it("pins a new coding session to the workspace sandbox size and never resizes it later", async () => {
-    await database.query(
-      `UPDATE goat.workspaces SET sandbox_size = 'small' WHERE id = 'workspace_1'`,
-    );
-
-    const created = await service.createMessage(actor(), {
-      idempotencyKey: "sandbox-size-pin",
-      content: "Start a coding session.",
-      engine: "codex",
-      model: "provider/model",
-    });
-
-    const sizeOf = async () =>
-      (
-        await database.query<{ sandbox_size: string }>(
-          "SELECT sandbox_size FROM goat.codex_chat_sessions WHERE chat_session_id = $1",
-          [created.conversationId],
-        )
-      ).rows[0]?.sandbox_size;
-
-    expect(await sizeOf()).toBe("small");
-
-    // A later workspace change must not reach a session that already exists: its
-    // sandbox is already running on the size it was created with.
-    await database.query(
-      `UPDATE goat.workspaces SET sandbox_size = 'large' WHERE id = 'workspace_1'`,
-    );
-    await service.createMessage(actor(), {
-      idempotencyKey: "sandbox-size-pin-second-turn",
-      conversationId: created.conversationId,
-      content: "Keep going.",
-      engine: "codex",
-      model: "provider/model",
-    });
-
-    expect(await sizeOf()).toBe("small");
-
-    await database.query(
-      `UPDATE goat.workspaces SET sandbox_size = 'standard' WHERE id = 'workspace_1'`,
-    );
   });
 
   it.each(["opencompany", "codex", "claude_code"] as const)(

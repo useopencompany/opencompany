@@ -30,8 +30,8 @@ const allowedStandaloneFiles = new Set([
 // merge. Comparing with origin/main plus a PR-specific delta makes the check
 // self-invalidating once origin/main advances to that merged tree.
 const protectedCompatibilityTokens = [
-  // 1161 = 1162 - the id in the home activity-list test fixture deleted with those lists.
-  ["physical and stored quoted goat_* identifiers", /["'`]goat_[a-z0-9_]*["'`]/gu, 1161],
+  // 1159 = 1162 - the home activity-list fixture id and two reverted sandbox-size constraints.
+  ["physical and stored quoted goat_* identifiers", /["'`]goat_[a-z0-9_]*["'`]/gu, 1159],
   ["quoted sandbox runtime roots", /["'`]opencompany-goat[a-z0-9_./${}:*-]*["'`]/gu, 26],
   ["chat source-provider values", /["']goat-chat["']/gu, 28],
   ["import source-provider values", /["']goat-import["']/gu, 13],
@@ -201,10 +201,8 @@ const addedEnvKeys = [
   "MARKETING_VERCEL_PROJECT_ID",
   "OPENCOMPANY_AGENT_USER_EMAIL",
   "OPENCOMPANY_AGENT_USER_PASSWORD",
+  "OPENCOMPANY_CODEX_E2B_TEMPLATE",
   "OPENCOMPANY_DESKTOP_AUTH_SECRET",
-  "OPENCOMPANY_CODEX_E2B_TEMPLATE_LARGE",
-  "OPENCOMPANY_CODEX_E2B_TEMPLATE_SMALL",
-  "OPENCOMPANY_CODEX_E2B_TEMPLATE_STANDARD",
   "OPENCOMPANY_HUBSPOT_MCP_CLIENT_ID",
   "OPENCOMPANY_HUBSPOT_MCP_CLIENT_SECRET",
   "RUNNER_CODEX_CHAT_SELF_HEAL_ENABLED",
@@ -214,8 +212,10 @@ const addedEnvKeys = [
 const retiredEnvKeys = new Set([
   // Replaced by the per-member users.subagents_enabled preference before it was ever enabled.
   "RUNNER_OPENCOMPANY_SUBAGENTS_ENABLED",
-  // Split into one template alias per user-selectable sandbox size (PRO-197).
-  "OPENCOMPANY_CODEX_E2B_TEMPLATE",
+  // Rolled back until all three production template aliases have passed their soak test.
+  "OPENCOMPANY_CODEX_E2B_TEMPLATE_LARGE",
+  "OPENCOMPANY_CODEX_E2B_TEMPLATE_SMALL",
+  "OPENCOMPANY_CODEX_E2B_TEMPLATE_STANDARD",
   "GITHUB_INTEGRATION_APP_CLIENT_ID",
   "GITHUB_INTEGRATION_APP_CLIENT_SECRET",
   "GITHUB_INTEGRATION_APP_ID",

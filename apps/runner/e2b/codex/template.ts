@@ -1,4 +1,3 @@
-import { SANDBOX_SIZE_SPEC_LIST, type SandboxSize } from "@opencompany/core/sandbox-sizes";
 import { Template } from "e2b";
 import {
   CLAUDE_CODE_ACP_ADAPTER_PACKAGE,
@@ -34,20 +33,9 @@ export {
   INFISICAL_CLI_VERSION,
 } from "../../src/infisical-version";
 
-// E2B fixes vCPU and RAM at template build time, so each user-selectable sandbox
-// size needs its own alias built from this one image definition.
-const CODEX_TOOLBOX_TEMPLATE_ALIAS_PREFIX = "opencompany-codex-toolbox";
-
-export function codexToolboxTemplateAlias(size: SandboxSize) {
-  return `${CODEX_TOOLBOX_TEMPLATE_ALIAS_PREFIX}-${size}`;
-}
-
-export const CODEX_TOOLBOX_TEMPLATE_BUILDS = SANDBOX_SIZE_SPEC_LIST.map((spec) => ({
-  size: spec.size,
-  alias: codexToolboxTemplateAlias(spec.size),
-  cpuCount: spec.cpuCount,
-  memoryMB: spec.memoryMB,
-}));
+export const CODEX_TOOLBOX_TEMPLATE_ALIAS = "opencompany-codex-toolbox";
+export const CODEX_TOOLBOX_CPU_COUNT = 8;
+export const CODEX_TOOLBOX_MEMORY_MB = 16384;
 export const PLAYWRIGHT_PACKAGE = "playwright@1.60.0";
 export const BUN_VERSION = "1.4.2";
 // SHA256 of bun-linux-x64.zip from the bun-v1.4.2 GitHub release (SHASUMS256.txt). The x64

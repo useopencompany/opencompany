@@ -58,13 +58,6 @@ Sandboxes do not receive application database credentials or raw platform secret
 validates short-lived tokens, applies provider/model scope, records usage, and forwards only to
 configured upstreams. See [LLM token broker](./llm-token-broker.md).
 
-Sandbox machine size is a workspace setting (Settings → Inference, admin only). E2B fixes vCPU
-and RAM per template, so each size is a separate prebuilt alias configured through
-`OPENCOMPANY_CODEX_E2B_TEMPLATE_{SMALL,STANDARD,LARGE}`. A coding session records the size it was
-created with and keeps it for its whole life, so changing the workspace default never resizes work
-that is already running. Building the aliases and the pause/resume soak that gates each size are
-documented in `apps/runner/e2b/codex/README.md`.
-
 See [Sandbox usage billing](./sandbox-usage-billing.md) for the E2B compute meter and its
 workspace credit settlement boundary.
 

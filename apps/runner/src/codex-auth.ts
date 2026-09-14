@@ -1,12 +1,10 @@
 import { shellQuote } from "@opencompany/agent-runtime";
-import { DEFAULT_SANDBOX_SIZE } from "@opencompany/core/sandbox-sizes";
 import { newCodexDeviceAuthFlowId, saveCodexCredential } from "@opencompany/db/codex-auth";
 import { codexDeviceAuthFlows } from "@opencompany/db/product-schema";
 import { createLogger } from "@opencompany/observability";
 import { and, eq, inArray } from "drizzle-orm";
 import { Sandbox } from "e2b";
 import { ensureCodexInstalled } from "./codex-cli";
-import { codingSandboxTemplate } from "./coding-sandbox-lifecycle";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { killSandbox, managedSandboxMetadata, type SandboxHandle } from "./sandbox";
@@ -45,9 +43,7 @@ export async function startCodexDeviceAuthFlow(input: {
       ownerId: id,
       metadata: { user_id: input.userWorkosId },
     }),
-    // Ephemeral login sandbox: killed on timeout, never paused, and it only runs the
-    // Codex CLI, so it uses the default size rather than a user-selected one.
-    template: codingSandboxTemplate(input.env.codexE2bTemplates, DEFAULT_SANDBOX_SIZE),
+    template: input.env.codexE2bTemplate ?? "codex",
   });
 
   try {

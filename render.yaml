@@ -417,12 +417,7 @@ services:
       # Optional opencompany rendered-browser task tools.
       - key: RUNNER_OPENCOMPANY_BROWSER_ENABLED
         sync: false
-      # One built E2B template alias per user-selectable cloud sandbox size.
-      - key: OPENCOMPANY_CODEX_E2B_TEMPLATE_SMALL
-        sync: false
-      - key: OPENCOMPANY_CODEX_E2B_TEMPLATE_STANDARD
-        sync: false
-      - key: OPENCOMPANY_CODEX_E2B_TEMPLATE_LARGE
+      - key: OPENCOMPANY_CODEX_E2B_TEMPLATE
         sync: false
       - key: RUNNER_CODEX_MODEL
         sync: false

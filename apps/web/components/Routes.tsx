@@ -65,10 +65,7 @@ import { BrainSettings } from "@/components/BrainSettings";
 import { BrainView } from "@/components/BrainView";
 import { BrowserProfilesSettings } from "@/components/BrowserProfilesSettings";
 import { FathomIntegrationSetup } from "@/components/FathomIntegrationSetup";
-import {
-  InferenceSettingsPanel,
-  type SandboxSizeOptionView,
-} from "@/components/InferenceSettingsPanel";
+import { InferenceSettingsPanel } from "@/components/InferenceSettingsPanel";
 import { IntentPrefetchLink } from "@/components/IntentPrefetchLink";
 import { McpSetupGuide } from "@/components/McpSetupGuide";
 import { RepositorySettings } from "@/components/RepositorySettings";
@@ -107,7 +104,6 @@ import {
 import type { BrainOverviewStats, BrainSnapshot } from "@/lib/headless-knowledge-types";
 import { DEFAULT_MODEL } from "@/lib/model-options";
 import type { RepoConfigView, WorkspaceRepository } from "@/lib/repo-config-actions";
-import type { WorkspaceSandboxSizeResult } from "@/lib/sandbox-size";
 import {
   updateAutoModelRoutingAction,
   updateBotsAction,
@@ -234,13 +230,7 @@ export function SettingsRoute({
   );
 }
 
-export function InferenceSettingsRoute({
-  sandboxSize,
-  sandboxSizeOptions,
-}: {
-  sandboxSize: WorkspaceSandboxSizeResult;
-  sandboxSizeOptions: SandboxSizeOptionView[];
-}) {
+export function InferenceSettingsRoute() {
   const { integrations, workspace } = useAppData();
 
   return (
@@ -252,8 +242,6 @@ export function InferenceSettingsRoute({
         codex={integrations.codex}
         claudeCode={integrations.claude_code}
         canManage={workspace.role === "admin"}
-        sandboxSize={sandboxSize}
-        sandboxSizeOptions={sandboxSizeOptions}
       />
     </SettingsContent>
   );

@@ -31,10 +31,6 @@
     "./wiki-commands": {
       "types": "./src/wiki-commands.ts",
       "default": "./src/wiki-commands.ts"
-    },
-    "./sandbox-sizes": {
-      "types": "./src/sandbox-sizes.ts",
-      "default": "./src/sandbox-sizes.ts"
     }
   },
   "scripts": {

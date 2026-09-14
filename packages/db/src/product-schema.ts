@@ -19,8 +19,6 @@ import {
   type RunAttemptStatus,
   type RunEventType,
   type RunStatus,
-  SANDBOX_SIZES,
-  type SandboxSize,
   TASK_SOURCES,
   type TaskSource,
 } from "@opencompany/core";
@@ -815,9 +813,6 @@ export const workspaces = productSchema.table(
     // Reversible cutover switch for the retired Brain UI and agent tools.
     // Wiki is the default knowledge system for every workspace.
     legacyBrainEnabled: boolean("legacy_brain_enabled").notNull().default(false),
-    // Machine size new cloud coding sandboxes start on. Workspace admins own it;
-    // a session pins the value it was created with (codexChatSessions.sandboxSize).
-    sandboxSize: text("sandbox_size").$type<SandboxSize>().notNull().default("standard"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -826,13 +821,6 @@ export const workspaces = productSchema.table(
       table.workosOrganizationId,
     ),
     slugIdx: uniqueIndex("goat_workspaces_slug_idx").on(table.slug),
-    sandboxSizeCheck: check(
-      "goat_workspaces_sandbox_size_check",
-      sql`${table.sandboxSize} IN (${sql.join(
-        SANDBOX_SIZES.map((size) => sql`${size}`),
-        sql`, `,
-      )})`,
-    ),
   }),
 );
 
@@ -4998,10 +4986,6 @@ export const codexChatSessions = productSchema.table(
     }),
     hostToolContractVersion: text("host_tool_contract_version"),
     sandboxId: text("sandbox_id"),
-    // Machine size resolved from the workspace default when the session was created.
-    // Pinned for the session's whole life so a later workspace change never resizes
-    // work that is already running.
-    sandboxSize: text("sandbox_size").$type<SandboxSize>().notNull().default("standard"),
     codexThreadId: text("codex_thread_id"),
     activeTurnId: text("active_turn_id"),
     status: text("status").$type<CodexChatSessionStatus>().notNull().default("queued"),
@@ -5035,13 +5019,6 @@ export const codexChatSessions = productSchema.table(
     engineCheck: check(
       "goat_codex_chat_sessions_engine_check",
       sql`${table.engine} IN ('opencompany', 'codex', 'claude_code')`,
-    ),
-    sandboxSizeCheck: check(
-      "goat_codex_chat_sessions_sandbox_size_check",
-      sql`${table.sandboxSize} IN (${sql.join(
-        SANDBOX_SIZES.map((size) => sql`${size}`),
-        sql`, `,
-      )})`,
     ),
   }),
 );

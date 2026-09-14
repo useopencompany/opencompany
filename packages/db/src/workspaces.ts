@@ -1,6 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
 import { newResourceId } from "@opencompany/core/resource-ids";
-import { DEFAULT_SANDBOX_SIZE, type SandboxSize } from "@opencompany/core/sandbox-sizes";
 import { and, asc, eq, isNull, or, sql } from "drizzle-orm";
 import { normalizeBrainId } from "../../brain/src/index";
 import { calendarMonthWindow, PRO_STRIPE_PRODUCT_KEY } from "./billing-constants";
@@ -766,35 +765,6 @@ export async function updateWorkspaceName(
     .update(workspaces)
     .set({ name: input.name, updatedAt: new Date() })
     .where(eq(workspaces.id, input.workspaceId));
-}
-
-// The machine size new cloud coding sandboxes start on. Running sessions keep the
-// size they were created with, so changing this only affects sessions created after.
-export async function getWorkspaceSandboxSize(
-  workspaceId: string,
-  options: { db?: DbClient } = {},
-): Promise<SandboxSize> {
-  const db = options.db ?? getDb();
-  const [workspace] = await db
-    .select({ sandboxSize: workspaces.sandboxSize })
-    .from(workspaces)
-    .where(eq(workspaces.id, workspaceId))
-    .limit(1);
-  return workspace?.sandboxSize ?? DEFAULT_SANDBOX_SIZE;
-}
-
-export async function updateWorkspaceSandboxSize(
-  input: { workspaceId: string; sandboxSize: SandboxSize },
-  options: { db?: DbClient } = {},
-): Promise<SandboxSize> {
-  const db = options.db ?? getDb();
-  const [workspace] = await db
-    .update(workspaces)
-    .set({ sandboxSize: input.sandboxSize, updatedAt: new Date() })
-    .where(eq(workspaces.id, input.workspaceId))
-    .returning({ sandboxSize: workspaces.sandboxSize });
-  if (!workspace) throw new Error("Workspace not found.");
-  return workspace.sandboxSize;
 }
 
 export async function updateWorkspaceNameAndSlug(

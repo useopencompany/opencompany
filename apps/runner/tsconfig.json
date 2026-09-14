@@ -2,9 +2,9 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "incremental": true,
-    "rootDir": ".",
+    "rootDir": "src",
     "tsBuildInfoFile": "tsconfig.tsbuildinfo",
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "e2b/**/*.ts"]
+  "include": ["src/**/*.ts"]
 }

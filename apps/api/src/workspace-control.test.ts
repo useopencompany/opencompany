@@ -4,14 +4,12 @@ import { syncStripeSeatQuantityForWorkspace } from "@opencompany/billing/seats";
 import type { Actor } from "@opencompany/core";
 import { getWorkspacePlan } from "@opencompany/db/billing";
 import {
-  getWorkspaceSandboxSize,
   hasOwnedHobbyWorkspace,
   listAccessibleBrains,
   listWorkspaceMembers,
   listWorkspacesForUser,
   removeWorkspaceMember,
   updateWorkspaceName,
-  updateWorkspaceSandboxSize,
 } from "@opencompany/db/workspaces";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createWorkspaceControlService } from "./workspace-control";
@@ -27,8 +25,6 @@ vi.mock("@opencompany/db/billing", () => ({
 
 vi.mock("@opencompany/db/workspaces", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  getWorkspaceSandboxSize: vi.fn(async () => "standard"),
-  updateWorkspaceSandboxSize: vi.fn(async () => "small"),
   hasOwnedHobbyWorkspace: vi.fn(async () => false),
   listAccessibleBrains: vi.fn(async () => [{ id: "brain_general", slug: "general" }]),
   listWorkspaceMembers: vi.fn(),
@@ -149,34 +145,6 @@ describe("workspace control service", () => {
     await expect(service.rename(member, "Renamed")).rejects.toMatchObject({ status: 403 });
     expect(workos.userManagement.sendInvitation).not.toHaveBeenCalled();
     expect(updateWorkspaceName).not.toHaveBeenCalled();
-  });
-
-  it("lets only admins change the workspace sandbox size", async () => {
-    const service = createWorkspaceControlService({
-      db: dbWithWorkspace(),
-      workos: workos as never,
-    });
-
-    await expect(service.getSandboxSize(member)).resolves.toBe("standard");
-    await expect(service.setSandboxSize(member, "small")).rejects.toMatchObject({ status: 403 });
-    expect(updateWorkspaceSandboxSize).not.toHaveBeenCalled();
-
-    await expect(service.setSandboxSize(admin, "small")).resolves.toBe("small");
-    expect(updateWorkspaceSandboxSize).toHaveBeenCalledWith(
-      { workspaceId: admin.workspaceId, sandboxSize: "small" },
-      expect.anything(),
-    );
-    expect(getWorkspaceSandboxSize).toHaveBeenCalledWith(admin.workspaceId, expect.anything());
-  });
-
-  it("rejects a sandbox size that is not offered", async () => {
-    const service = createWorkspaceControlService({
-      db: dbWithWorkspace(),
-      workos: workos as never,
-    });
-
-    await expect(service.setSandboxSize(admin, "xlarge")).rejects.toMatchObject({ status: 400 });
-    expect(updateWorkspaceSandboxSize).not.toHaveBeenCalled();
   });
 
   it("verifies invitation and member ownership before destructive WorkOS calls", async () => {
