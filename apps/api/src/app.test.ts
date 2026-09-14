@@ -5352,6 +5352,12 @@ function fakeWorkspaceControl(): Parameters<typeof createApiApp>[0]["workspaceCo
     getSettings: async () => {
       throw new Error("Unexpected workspace settings read.");
     },
+    getSandboxSize: async () => {
+      throw new Error("Unexpected workspace sandbox size read.");
+    },
+    setSandboxSize: async () => {
+      throw new Error("Unexpected workspace sandbox size write.");
+    },
     invite: async () => {
       throw new Error("Unexpected workspace invitation.");
     },

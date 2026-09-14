@@ -26,6 +26,7 @@ import {
   type RunStatus,
 } from "@opencompany/core";
 import { newResourceId } from "@opencompany/core/resource-ids";
+import { DEFAULT_SANDBOX_SIZE } from "@opencompany/core/sandbox-sizes";
 import { type SQL, sql } from "drizzle-orm";
 import { stringifyPostgresJson } from "./postgres-json";
 import type { ChatMessageAttachment } from "./product-schema";
@@ -1077,12 +1078,21 @@ export class PostgresChatRepository implements ChatRepository {
       upserted_runtime AS MATERIALIZED (
         INSERT INTO goat.codex_chat_sessions (
           id, user_workos_id, chat_session_id, engine, model, workspace_id,
-          host_tool_contract_version, active_turn_id, status, created_at, updated_at
+          host_tool_contract_version, sandbox_size, active_turn_id, status,
+          created_at, updated_at
         )
         SELECT
           ${runtimeId}, target_chat.owner_user_workos_id, target_chat.id, ${input.command.engine},
           ${runtimeModel}, ${input.actor.workspaceId},
           ${hostToolContractVersionForEngine(input.command.engine)},
+          -- A session pins the workspace default it started with. The conflict branch
+          -- below never touches sandbox_size, so resizing a workspace cannot resize a
+          -- session that already exists.
+          COALESCE(
+            (SELECT workspace.sandbox_size FROM goat.workspaces AS workspace
+             WHERE workspace.id = ${input.actor.workspaceId}),
+            ${DEFAULT_SANDBOX_SIZE}
+          ),
           ${runId}, 'queued', ${now}, ${now}
         FROM target_chat
         ON CONFLICT (chat_session_id) DO UPDATE

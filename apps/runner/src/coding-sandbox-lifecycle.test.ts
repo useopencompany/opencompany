@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ACTIVE_CODING_SANDBOX_TIMEOUT_MS,
   CODING_SANDBOX_TURN_GRACE_MS,
+  codingSandboxTemplate,
   DEFAULT_CODING_AGENT_TURN_TIMEOUT_MS,
   FINISHED_TASK_SANDBOX_IDLE_TIMEOUT_MS,
   settledCodingSandboxIdleTimeoutMs,
@@ -42,5 +43,23 @@ describe("settledCodingSandboxIdleTimeoutMs", () => {
         taskSession: true,
       }),
     ).toBe(60_000);
+  });
+});
+
+describe("codingSandboxTemplate", () => {
+  const templates = {
+    small: "toolbox-small",
+    standard: "toolbox-standard",
+    large: "toolbox-large",
+  };
+
+  it("spawns each machine size from its own template alias", () => {
+    expect(codingSandboxTemplate(templates, "small")).toBe("toolbox-small");
+    expect(codingSandboxTemplate(templates, "standard")).toBe("toolbox-standard");
+    expect(codingSandboxTemplate(templates, "large")).toBe("toolbox-large");
+  });
+
+  it("falls back to E2B's stock template when a size is not configured", () => {
+    expect(codingSandboxTemplate({ ...templates, large: undefined }, "large")).toBe("codex");
   });
 });
