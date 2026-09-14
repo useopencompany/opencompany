@@ -133,8 +133,9 @@ export function useChatAttachments(opts: {
         return next;
       });
 
-      // React may replay state updater functions. Start uploads only after the
-      // pending batch is in our queue so a fast completion cannot overtake its card.
+      // Uploads are started outside the queue update because React may replay a state
+      // updater, which would upload the same file twice. Deferring by a microtask also
+      // routes a synchronous `upload` throw into the rejection handler below.
       for (const pendingUpload of pendingUploads) {
         void Promise.resolve()
           .then(() => upload(pendingUpload))
