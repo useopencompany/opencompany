@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { shellQuote } from "@opencompany/agent-runtime";
 import { DEFAULT_SANDBOX_SIZE } from "@opencompany/core/sandbox-sizes";
 import {
   disconnectDopplerConnection,
@@ -90,10 +91,13 @@ export function parseDopplerLogin(output: string) {
 
 export async function readDopplerFile(sandbox: SandboxHandle, path: string) {
   // The command always returns success for an absent file. Transport errors still propagate.
-  const result = await sandbox.commands.run(`if test -f '${path}'; then cat '${path}'; fi`, {
-    user: "user",
-    timeoutMs: 15_000,
-  });
+  const result = await sandbox.commands.run(
+    `if test -f ${shellQuote(path)}; then cat ${shellQuote(path)}; fi`,
+    {
+      user: "user",
+      timeoutMs: 15_000,
+    },
+  );
   return result.stdout;
 }
 

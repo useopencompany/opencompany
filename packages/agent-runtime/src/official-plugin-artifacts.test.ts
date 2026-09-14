@@ -40,8 +40,9 @@ describe("official plugin release artifacts", () => {
       );
       expect(plugin.report.skills.every((skill) => skill.status === "valid")).toBe(true);
       expect(new Set(plugin.files.map((file) => file.path)).size).toBe(plugin.files.length);
-      if (name === "yc-advise") {
+      if (name === "yc-advise" || name === "doppler") {
         expect(plugin.skills.length).toBeGreaterThan(0);
+        expect(plugin.remoteServers).toHaveLength(0);
       } else {
         expect(plugin.remoteServers.length).toBeGreaterThan(0);
         expect(plugin.capabilities.length).toBeGreaterThan(0);

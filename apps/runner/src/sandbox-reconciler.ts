@@ -97,7 +97,8 @@ export async function findLiveOwnedSandboxIds(
           AND flow.sandbox_id = candidate."sandboxId"
           AND flow.status IN ('pending', 'link_ready')
           AND flow.expires_at > ${now}
-      )    ) OR (
+      )
+    ) OR (
       candidate."ownerKind" = 'doppler_auth_flow'
       AND EXISTS (
         SELECT 1

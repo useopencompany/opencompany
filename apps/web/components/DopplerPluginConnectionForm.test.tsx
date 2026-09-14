@@ -59,3 +59,16 @@ it("requires an enabled plugin", () => {
   render(<DopplerPluginConnectionForm settings={settings} enabled={false} />);
   expect(screen.queryByRole("button", { name: "Connect Doppler" })).not.toBeInTheDocument();
 });
+
+it("offers reconnect and disconnect after credential rejection", async () => {
+  render(
+    <DopplerPluginConnectionForm
+      settings={{ ...settings, status: "needs_reauth", statusReason: "Saved login was revoked." }}
+      enabled
+    />,
+  );
+  expect(screen.getByRole("button", { name: "Reconnect", exact: true })).toBeEnabled();
+  expect(screen.getByRole("alert")).toHaveTextContent("revoked");
+  await userEvent.setup().click(screen.getByRole("button", { name: "Disconnect", exact: true }));
+  await waitFor(() => expect(mocks.cancel).toHaveBeenCalledWith(true));
+});

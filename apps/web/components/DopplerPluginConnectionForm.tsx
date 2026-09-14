@@ -163,7 +163,7 @@ export function DopplerPluginConnectionForm({
         <div className="flex items-center gap-2">
           <Button size="sm" disabled={pending} onClick={connect}>
             {pending ? <Loader2 className="animate-spin" /> : null}
-            {connected ? "Reconnect" : "Connect Doppler"}
+            {connected || settings.status === "needs_reauth" ? "Reconnect" : "Connect Doppler"}
           </Button>
           {connected || settings.status === "needs_reauth" ? (
             <Button variant="ghost" size="sm" disabled={pending} onClick={() => cancel(true)}>
