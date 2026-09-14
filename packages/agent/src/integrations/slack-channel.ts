@@ -117,7 +117,7 @@ export async function postWorkflowSlackMessage(
   const id = createHash("sha256")
     .update(`${target.sessionId}:${post.messageKey.trim()}`)
     .digest("hex");
-  const text = `${post.text.trim()}\n\nReply in this thread to continue the work. Available for 30 days.`;
+  const text = post.text.trim();
   const { token } = await channelBotCredential(target);
   try {
     const channelId = await resolvePublicChannel(token, post.channel.trim());

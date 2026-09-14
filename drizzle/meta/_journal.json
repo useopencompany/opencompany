@@ -1989,6 +1989,13 @@
       "when": 1790100400004,
       "tag": "0283_tasks_workflows_general_availability",
       "breakpoints": true
+    },
+    {
+      "idx": 284,
+      "version": "7",
+      "when": 1790100400005,
+      "tag": "0284_slack_thread_participants",
+      "breakpoints": true
     }
   ]
 }
