@@ -74,6 +74,13 @@ Repeated requests for the same action and inputs reuse the result within that Ru
 require a new approval. If a worker dies after claiming an external write but before recording its
 result, recovery reports an uncertain outcome for inspection and does not repeat the write.
 
+Workflows carry the same visibility model as Skills. A company workflow belongs to the workspace:
+every member sees it, runs it with `#`, and can edit it. A personal workflow is visible only to its
+creator, who is also the only one who can run or edit it. Workflows created before visibility
+existed are company workflows. Only the creator — or an admin, for a workflow with no recorded
+creator — can change a workflow's visibility. A workflow can be fired by anyone who can see it, so
+it still draws Skills from the company scope only, whatever its own visibility.
+
 Workflows start as Draft and can save steps without instructions. Activation requires instructions
 in every step for manual, scheduled, and event triggers. In the editor, adding an empty step or
 clearing instructions returns the workflow to Draft; completing the steps does not reactivate it.

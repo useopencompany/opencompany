@@ -5,16 +5,19 @@ import {
 } from "@opencompany/agent/workspaces/provisioning";
 import { syncStripeSeatQuantityForWorkspace } from "@opencompany/billing/seats";
 import type { Actor } from "@opencompany/core";
+import { isSandboxSize, type SandboxSize } from "@opencompany/core/sandbox-sizes";
 import { getWorkspacePlan, workspaceMemberCap } from "@opencompany/db/billing";
 import { users, workspaces } from "@opencompany/db/product-schema";
 import {
   DEFAULT_BRAIN_SLUG,
+  getWorkspaceSandboxSize,
   hasOwnedHobbyWorkspace,
   listAccessibleBrains,
   listWorkspaceMembers,
   listWorkspacesForUser,
   removeWorkspaceMember,
   updateWorkspaceName,
+  updateWorkspaceSandboxSize,
 } from "@opencompany/db/workspaces";
 import { createLogger } from "@opencompany/observability";
 import type { WorkOS } from "@workos-inc/node";
@@ -61,6 +64,8 @@ export type WorkspaceActivationView = {
 
 export type WorkspaceControlService = {
   getSettings(actor: Actor): Promise<WorkspaceSettingsView>;
+  getSandboxSize(actor: Actor): Promise<SandboxSize>;
+  setSandboxSize(actor: Actor, sandboxSize: unknown): Promise<SandboxSize>;
   invite(actor: Actor, email: string): Promise<void>;
   revokeInvitation(actor: Actor, invitationId: string): Promise<void>;
   removeMember(actor: Actor, userId: string): Promise<void>;
@@ -131,6 +136,18 @@ export function createWorkspaceControlService(input: {
         members: members.map(workspaceMemberView),
         invitations,
       };
+    },
+
+    async getSandboxSize(actor) {
+      return getWorkspaceSandboxSize(actor.workspaceId, { db });
+    },
+
+    async setSandboxSize(actor, sandboxSize) {
+      requireAdmin(actor, "Only workspace admins can change the sandbox size.");
+      if (!isSandboxSize(sandboxSize)) {
+        throw new ApiError(400, "invalid_request", "Unknown sandbox size.");
+      }
+      return updateWorkspaceSandboxSize({ workspaceId: actor.workspaceId, sandboxSize }, { db });
     },
 
     async invite(actor, rawEmail) {

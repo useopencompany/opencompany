@@ -96,6 +96,58 @@ describe("personal workflow event authorization", () => {
       expect.objectContaining({ workflowId: "workflow_1", userWorkosId: "user_1" }),
     ]);
   });
+
+  it("returns every matching event trigger on the same workflow", async () => {
+    const automationTriggers = ["issue.created", "issue.updated"].map((event, index) => ({
+      id: `trigger_${index + 1}`,
+      type: "event",
+      provider: "linear",
+      event,
+      integrationId: "personal",
+      filters: {},
+      prompt: `Handle ${event}.`,
+      userWorkosId: "user_1",
+      activatedAt: "2026-09-12T19:00:00.000Z",
+      harnessSpec: {},
+    }));
+    const workflow = {
+      workflowId: "workflow_1",
+      workspaceId: "workspace_1",
+      userWorkosId: null,
+      workflowSlug: "issue-events",
+      workflowName: "Issue events",
+      automationTriggers,
+      config: null,
+      harnessSpec: null,
+    };
+    const plugin = {
+      workspaceId: "workspace_1",
+      ownerUserId: "user_1",
+      name: "linear",
+      events: automationTriggers.map(({ event }) => ({ id: event, filters: [] })),
+      eventModes: { "issue.created": true, "issue.updated": true },
+    };
+    const db = { select: vi.fn() };
+    const result = (rows: unknown[]) => ({ from: () => ({ where: async () => rows }) });
+    db.select.mockReturnValueOnce(result([workflow])).mockReturnValueOnce(result([plugin]));
+
+    const routes = await listWorkflowEventTriggerRoutes(
+      {
+        provider: "linear",
+        integrations: [
+          {
+            id: "personal",
+            workspaceId: null,
+            userWorkosId: "user_1",
+            status: "connected",
+          },
+        ],
+      },
+      db as never,
+    );
+
+    expect(routes.map((route) => route.triggerId)).toEqual(["trigger_1", "trigger_2"]);
+  });
 });
 
 describe("workflow event goal composition", () => {

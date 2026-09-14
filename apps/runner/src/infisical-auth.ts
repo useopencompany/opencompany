@@ -1,4 +1,5 @@
 import { shellQuote } from "@opencompany/agent-runtime";
+import { DEFAULT_SANDBOX_SIZE } from "@opencompany/core/sandbox-sizes";
 import {
   INFISICAL_AUTH_BUNDLE_FORMAT_VERSION,
   type InfisicalAuthBundle,
@@ -13,6 +14,7 @@ import { getWorkspaceRole } from "@opencompany/db/workspaces";
 import { createLogger } from "@opencompany/observability";
 import { and, eq, inArray } from "drizzle-orm";
 import { Sandbox } from "e2b";
+import { codingSandboxTemplate } from "./coding-sandbox-lifecycle";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { INFISICAL_CLI_LINUX_AMD64_SHA256, INFISICAL_CLI_VERSION } from "./infisical-version";
@@ -70,21 +72,25 @@ export async function startInfisicalAuthFlow(input: {
     await supersedeActiveFlows(input.workspaceId, input.requestedByWorkosId);
 
     failureStage = "create_sandbox";
-    const createdSandbox = await Sandbox.create(input.env.codexE2bTemplate ?? "codex", {
-      envs: {},
-      metadata: managedSandboxMetadata({
-        namespace: input.env.sandboxNamespace,
-        ownerKind: "infisical_auth_flow",
-        ownerId: id,
-        metadata: {
-          user_id: input.requestedByWorkosId,
-          workspace_id: input.workspaceId,
-          purpose: "infisical-auth",
-        },
-      }),
-      timeoutMs: INFISICAL_AUTH_SANDBOX_TIMEOUT_MS,
-      lifecycle: { onTimeout: "kill" },
-    });
+    // Ephemeral login sandbox (see codex-auth.ts): default size, killed on timeout.
+    const createdSandbox = await Sandbox.create(
+      codingSandboxTemplate(input.env.codexE2bTemplates, DEFAULT_SANDBOX_SIZE),
+      {
+        envs: {},
+        metadata: managedSandboxMetadata({
+          namespace: input.env.sandboxNamespace,
+          ownerKind: "infisical_auth_flow",
+          ownerId: id,
+          metadata: {
+            user_id: input.requestedByWorkosId,
+            workspace_id: input.workspaceId,
+            purpose: "infisical-auth",
+          },
+        }),
+        timeoutMs: INFISICAL_AUTH_SANDBOX_TIMEOUT_MS,
+        lifecycle: { onTimeout: "kill" },
+      },
+    );
     sandbox = createdSandbox;
 
     failureStage = "set_sandbox_timeout";

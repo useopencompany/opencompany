@@ -56,7 +56,7 @@ export function DesktopTitleBar({
   const segments = pathname.split("/").filter(Boolean);
 
   let title = workspace.name;
-  let section = "Home";
+  let section = "New Chat";
   let SectionIcon = CircleDashed;
 
   if (segments[0] === "chat") {

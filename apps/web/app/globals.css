@@ -27,6 +27,18 @@
   --color-spend-capabilities: #2e8968;
   --color-spend-sandbox: #8665ac;
   --color-spend-other: #b6b6b0;
+  /* Code syntax — used by the workspace file editor's CodeMirror theme. */
+  --color-code-comment: #6e7781;
+  --color-code-keyword: #b1332c;
+  --color-code-string: #0a3069;
+  --color-code-number: #0550ae;
+  --color-code-function: #7c3fbd;
+  --color-code-type: #8a3a00;
+  --color-code-tag: #116329;
+  --color-code-attribute: #0550ae;
+  --color-code-meta: #57606a;
+  --color-code-selection: #d5e2f0;
+  --color-code-active-line: #f0f0ed;
 }
 
 :root[data-theme="dark"] {
@@ -54,6 +66,17 @@
   --color-spend-capabilities: #3fa07f;
   --color-spend-sandbox: #b294d6;
   --color-spend-other: #5f635a;
+  --color-code-comment: #8b949e;
+  --color-code-keyword: #ff8a80;
+  --color-code-string: #a5d6ff;
+  --color-code-number: #79c0ff;
+  --color-code-function: #d2a8ff;
+  --color-code-type: #ffab70;
+  --color-code-tag: #7ee787;
+  --color-code-attribute: #79c0ff;
+  --color-code-meta: #9aa4ae;
+  --color-code-selection: #2f4a63;
+  --color-code-active-line: #22251f;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -82,6 +105,17 @@
     --color-spend-capabilities: #3fa07f;
     --color-spend-sandbox: #b294d6;
     --color-spend-other: #5f635a;
+    --color-code-comment: #8b949e;
+    --color-code-keyword: #ff8a80;
+    --color-code-string: #a5d6ff;
+    --color-code-number: #79c0ff;
+    --color-code-function: #d2a8ff;
+    --color-code-type: #ffab70;
+    --color-code-tag: #7ee787;
+    --color-code-attribute: #79c0ff;
+    --color-code-meta: #9aa4ae;
+    --color-code-selection: #2f4a63;
+    --color-code-active-line: #22251f;
   }
 }
 

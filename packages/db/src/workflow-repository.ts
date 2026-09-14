@@ -8,9 +8,11 @@ import {
   type TaskScheduleRepository,
   type VersionedRepositoryResult,
   type Workflow,
+  type WorkflowAutomationTrigger,
   type WorkflowMutationResult,
   type WorkflowPage,
   type WorkflowRepository,
+  type WorkflowScope,
   type WorkflowStep,
   type WorkflowTrigger,
 } from "@opencompany/core";
@@ -41,6 +43,8 @@ type WorkflowRow = {
   model: string;
   steps: unknown;
   status: "draft" | "active";
+  scope: "personal" | "company";
+  createdByUserId: string | null;
   trigger: "manual" | "slack" | "linear" | "schedule" | "event";
   scheduleCron: string | null;
   scheduleTimezone: string;
@@ -49,6 +53,7 @@ type WorkflowRow = {
   scheduleLastRunAt: Date | string | null;
   scheduleNextRunAt: Date | string | null;
   eventConfig: unknown;
+  automationTriggers: unknown;
   version: number | string;
   archivedAt: Date | string | null;
   createdAt: Date | string;
@@ -105,6 +110,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
       WHERE workflow.workspace_id = ${input.actor.workspaceId}
         AND workflow.archived_at IS NULL
         AND ${workspaceMembership(input.actor)}
+        AND ${workflowVisibility(input.actor)}
         AND (
           ${input.cursor ?? null}::text IS NULL
           OR EXISTS (
@@ -134,6 +140,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         AND (workflow.id = ${input.workflowId} OR workflow.slug = ${input.workflowId})
         AND workflow.archived_at IS NULL
         AND ${workspaceMembership(input.actor)}
+        AND ${workflowVisibility(input.actor)}
       LIMIT 1
     `);
     return row ? mapWorkflow(row) : null;
@@ -144,6 +151,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     idempotencyKey: string;
     name: string;
     description: string;
+    scope: WorkflowScope;
     initialStep: WorkflowStep;
   }): Promise<WorkflowMutationResult> {
     const ids = this.options.ids ?? defaultIds;
@@ -213,13 +221,13 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
           id, workspace_id, slug, name, description, instructions, model, steps,
           trigger, schedule_cron, schedule_timezone, schedule_prompt,
           schedule_user_workos_id, schedule_harness_spec, schedule_enabled,
-          schedule_next_run_at, status, created_by_workos_id, version,
+          schedule_next_run_at, status, scope, created_by_workos_id, version,
           created_at, updated_at
         )
         SELECT
           winner.resource_id, ${input.actor.workspaceId}, candidate.slug, ${input.name},
           ${input.description}, '', '', ${stringifyPostgresJson([input.initialStep])}::jsonb,
-          'manual', NULL, 'UTC', '', NULL, NULL, false, NULL, 'draft',
+          'manual', NULL, 'UTC', '', NULL, NULL, false, NULL, 'draft', ${input.scope},
           ${input.actor.userId}, 1, ${now}, ${now}
         FROM winner
         CROSS JOIN candidate
@@ -250,6 +258,8 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         workflow.model,
         workflow.steps,
         workflow.status,
+        workflow.scope,
+        workflow.created_by_workos_id AS "createdByUserId",
         workflow.trigger,
         workflow.schedule_cron AS "scheduleCron",
         workflow.schedule_timezone AS "scheduleTimezone",
@@ -258,6 +268,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         workflow.schedule_last_run_at AS "scheduleLastRunAt",
         workflow.schedule_next_run_at AS "scheduleNextRunAt",
         workflow.event_config AS "eventConfig",
+        workflow.automation_triggers AS "automationTriggers",
         workflow.version,
         workflow.archived_at AS "archivedAt",
         workflow.created_at AS "createdAt",
@@ -279,6 +290,9 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
 
   async updateWorkflow(input: Parameters<WorkflowRepository["updateWorkflow"]>[0]) {
     const now = this.options.now?.() ?? new Date();
+    const automationTriggers = input.automationTriggers
+      ? storedAutomationTriggers(input.automationTriggers)
+      : null;
     const scheduled = input.trigger.type === "schedule";
     const eventDriven = input.trigger.type === "event";
     const scheduleEnabled = input.trigger.type === "schedule" && input.trigger.enabled !== false;
@@ -289,6 +303,56 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
       SET name = ${input.name},
           description = ${input.description},
           steps = ${stringifyPostgresJson(input.steps)}::jsonb,
+          scope = ${input.scope},
+          -- A legacy company workflow has no recorded creator. Whoever takes it personal owns it.
+          created_by_workos_id = CASE
+            WHEN ${input.scope} = 'personal'
+              THEN COALESCE(workflow.created_by_workos_id, ${input.actor.userId})
+            ELSE workflow.created_by_workos_id
+          END,
+          automation_triggers = CASE
+            WHEN ${automationTriggers ? stringifyPostgresJson(automationTriggers) : null}::jsonb IS NULL
+              THEN workflow.automation_triggers
+            ELSE (
+              SELECT COALESCE(
+                jsonb_agg(
+                  CASE
+                    WHEN workflow.status = 'active'
+                      AND ${input.status} = 'active'
+                      AND next_trigger.value->>'type' = 'event'
+                      AND previous_trigger.value IS NOT NULL
+                      AND (
+                        next_trigger.value
+                          - 'prompt' - 'userWorkosId' - 'activatedAt' - 'harnessSpec'
+                      ) = (
+                        previous_trigger.value
+                          - 'prompt' - 'userWorkosId' - 'activatedAt' - 'harnessSpec'
+                      )
+                    THEN jsonb_set(
+                      next_trigger.value,
+                      '{activatedAt}',
+                      COALESCE(
+                        previous_trigger.value->'activatedAt',
+                        next_trigger.value->'activatedAt'
+                      )
+                    )
+                    ELSE next_trigger.value
+                  END
+                  ORDER BY next_trigger.ordinality
+                ),
+                '[]'::jsonb
+              )
+              FROM jsonb_array_elements(
+                ${automationTriggers ? stringifyPostgresJson(automationTriggers) : null}::jsonb
+              ) WITH ORDINALITY AS next_trigger(value, ordinality)
+              LEFT JOIN LATERAL (
+                SELECT previous.value
+                FROM jsonb_array_elements(workflow.automation_triggers) AS previous(value)
+                WHERE previous.value->>'id' = next_trigger.value->>'id'
+                LIMIT 1
+              ) AS previous_trigger ON true
+            )
+          END,
           trigger = ${scheduled ? "schedule" : eventDriven ? "event" : "manual"},
           schedule_cron = ${scheduled ? (input.schedule?.definition.cron ?? null) : null},
           schedule_timezone = ${scheduled ? (input.schedule?.definition.timezone ?? "UTC") : "UTC"},
@@ -326,6 +390,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         AND workflow.archived_at IS NULL
         AND workflow.version = ${input.expectedVersion}
         AND ${workspaceMembership(input.actor)}
+        AND ${workflowVisibility(input.actor)}
       RETURNING
         workflow.id,
         workflow.slug,
@@ -335,6 +400,8 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         workflow.model,
         workflow.steps,
         workflow.status,
+        workflow.scope,
+        workflow.created_by_workos_id AS "createdByUserId",
         workflow.trigger,
         workflow.schedule_cron AS "scheduleCron",
         workflow.schedule_timezone AS "scheduleTimezone",
@@ -343,6 +410,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         workflow.schedule_last_run_at AS "scheduleLastRunAt",
         workflow.schedule_next_run_at AS "scheduleNextRunAt",
         workflow.event_config AS "eventConfig",
+        workflow.automation_triggers AS "automationTriggers",
         workflow.version,
         workflow.archived_at AS "archivedAt",
         workflow.created_at AS "createdAt",
@@ -377,6 +445,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         AND workflow.archived_at IS NULL
         AND workflow.version = ${input.expectedVersion}
         AND ${workspaceMembership(input.actor)}
+        AND ${workflowVisibility(input.actor)}
       RETURNING
         workflow.id,
         workflow.version,
@@ -401,11 +470,11 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     const ids = this.options.ids ?? defaultIds;
     await this.execute(sql`
       INSERT INTO goat.workflow_schedule_runs (
-        id, workflow_id, workspace_id, user_workos_id, scheduled_for,
+        id, workflow_id, trigger_id, workspace_id, user_workos_id, scheduled_for,
         task_id, status, created_at, updated_at
       )
       SELECT
-        ${ids.scheduleRun("workflow")}, workflow.id, workflow.workspace_id,
+        ${ids.scheduleRun("workflow")}, workflow.id, 'manual-test', workflow.workspace_id,
         ${input.actor.userId}, ${input.occurredAt}, ${input.taskId}, 'created',
         ${input.occurredAt}, ${input.occurredAt}
       FROM goat.workflows AS workflow
@@ -413,7 +482,8 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         AND workflow.workspace_id = ${input.actor.workspaceId}
         AND workflow.archived_at IS NULL
         AND ${workspaceMembership(input.actor)}
-      ON CONFLICT (workflow_id, scheduled_for) DO UPDATE
+        AND ${workflowVisibility(input.actor)}
+      ON CONFLICT (workflow_id, trigger_id, scheduled_for) DO UPDATE
       SET task_id = EXCLUDED.task_id,
           status = 'created',
           updated_at = EXCLUDED.updated_at
@@ -838,6 +908,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         AND workflow.workspace_id = ${actor.workspaceId}
         AND workflow.archived_at IS NULL
         AND ${workspaceMembership(actor)}
+        AND ${workflowVisibility(actor)}
       LIMIT 1
     `);
     return row ? { status: "conflict" } : { status: "not_found" };
@@ -928,6 +999,8 @@ function workflowSelect() {
       workflow.model,
       workflow.steps,
       workflow.status,
+      workflow.scope,
+      workflow.created_by_workos_id AS "createdByUserId",
       workflow.trigger,
       workflow.schedule_cron AS "scheduleCron",
       workflow.schedule_timezone AS "scheduleTimezone",
@@ -936,6 +1009,7 @@ function workflowSelect() {
       workflow.schedule_last_run_at AS "scheduleLastRunAt",
       workflow.schedule_next_run_at AS "scheduleNextRunAt",
       workflow.event_config AS "eventConfig",
+      workflow.automation_triggers AS "automationTriggers",
       workflow.version,
       workflow.archived_at AS "archivedAt",
       workflow.created_at AS "createdAt",
@@ -972,6 +1046,15 @@ function workspaceMembership(actor: Actor) {
   )`;
 }
 
+// A company workflow belongs to the workspace; a personal one only to its creator. A personal row
+// whose creator was removed matches nobody, which keeps it out of every list and mutation.
+function workflowVisibility(actor: Actor) {
+  return sql`(
+    workflow.scope = 'company'
+    OR workflow.created_by_workos_id = ${actor.userId}
+  )`;
+}
+
 function enabledWorkspaceMember(actor: Actor) {
   return sql`EXISTS (
     SELECT 1
@@ -993,12 +1076,62 @@ function mapWorkflow(row: WorkflowRow): Workflow {
     description: row.description,
     steps,
     status: row.status,
+    scope: row.scope,
+    createdByUserId: row.createdByUserId,
     trigger: workflowTrigger(row),
+    triggers: workflowAutomationTriggers(row.automationTriggers),
     version: Number(row.version),
     archivedAt: nullableDate(row.archivedAt),
     createdAt: asDate(row.createdAt),
     updatedAt: asDate(row.updatedAt),
   };
+}
+
+function storedAutomationTriggers(
+  triggers: NonNullable<Parameters<WorkflowRepository["updateWorkflow"]>[0]["automationTriggers"]>,
+) {
+  return triggers.map(({ trigger, userWorkosId, activatedAt, execution }) => ({
+    ...trigger,
+    lastRunAt: trigger.type === "schedule" ? (trigger.lastRunAt?.toISOString() ?? null) : undefined,
+    nextRunAt: trigger.type === "schedule" ? (trigger.nextRunAt?.toISOString() ?? null) : undefined,
+    userWorkosId,
+    activatedAt: activatedAt.toISOString(),
+    harnessSpec: execution?.payload ?? null,
+  }));
+}
+
+function workflowAutomationTriggers(value: unknown): WorkflowAutomationTrigger[] {
+  if (!Array.isArray(value)) return [];
+  const triggers: WorkflowAutomationTrigger[] = [];
+  for (const candidate of value) {
+    if (!isRecord(candidate)) continue;
+    const id = stringValue(candidate.id);
+    if (!id) continue;
+    if (candidate.type === "event") {
+      try {
+        triggers.push({ ...workflowEventTrigger(candidate), id });
+      } catch {
+        continue;
+      }
+      continue;
+    }
+    if (candidate.type !== "schedule") continue;
+    const cron = stringValue(candidate.cron);
+    const timezone = stringValue(candidate.timezone);
+    const prompt = stringValue(candidate.prompt);
+    if (!cron || !timezone || !prompt) continue;
+    triggers.push({
+      id,
+      type: "schedule",
+      cron,
+      timezone,
+      prompt,
+      enabled: candidate.enabled === true,
+      lastRunAt: nullableDate(candidate.lastRunAt as Date | string | null),
+      nextRunAt: nullableDate(candidate.nextRunAt as Date | string | null),
+    });
+  }
+  return triggers;
 }
 
 function workflowSteps(row: Pick<WorkflowRow, "slug" | "steps" | "instructions" | "model">) {

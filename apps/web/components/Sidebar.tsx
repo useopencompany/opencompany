@@ -9,11 +9,11 @@ import {
   BookOpen,
   Check,
   ChevronsUpDown,
-  House,
   Inbox,
   ListTodo,
   Loader2,
   LogOut,
+  Navigation,
   PanelLeft,
   Pin,
   PlugZap,
@@ -48,6 +48,7 @@ import {
   SidebarProjects,
   type SidebarRowDragProps,
   useSidebarProjects,
+  useSidebarRowPadding,
 } from "@/components/SidebarProjects";
 import { SidebarSectionHeader, useCollapsedSidebarSection } from "@/components/SidebarSection";
 import { SidebarWikis, useSidebarWikis } from "@/components/SidebarWikis";
@@ -102,6 +103,7 @@ function Icon({ className }: { className?: string }) {
 function SidebarNavRow({
   href,
   icon: Icon,
+  iconClassName,
   label,
   active,
   // A row highlights for its whole subtree, but only one element on a page can be the current
@@ -113,6 +115,7 @@ function SidebarNavRow({
 }: {
   href: string;
   icon: LucideIcon;
+  iconClassName?: string;
   label: string;
   active: boolean;
   current?: boolean;
@@ -132,7 +135,9 @@ function SidebarNavRow({
       <Icon
         size={14}
         strokeWidth={1.75}
-        className={`shrink-0 ${active ? "text-ink" : "text-ink/60 group-hover:text-ink/80"}`}
+        className={`shrink-0 ${active ? "text-ink" : "text-ink/60 group-hover:text-ink/80"}${
+          iconClassName ? ` ${iconClassName}` : ""
+        }`}
       />
       <span className="truncate tracking-[-0.005em]">{label}</span>
       {count ? (
@@ -207,8 +212,11 @@ export function Sidebar({
         <nav aria-label="opencompany primary" className="flex flex-col gap-px px-2 pt-2">
           <SidebarNavRow
             href="/"
-            icon={House}
-            label="Home"
+            icon={Navigation}
+            // The only clean paper-plane outline in the set; turned so it points down at the
+            // composer this row opens.
+            iconClassName="rotate-[25deg]"
+            label="New Chat"
             active={homeActive}
             onClick={(event) => {
               if (
@@ -755,6 +763,7 @@ function SidebarChatRow({
   onArchive: () => void;
 }) {
   const state = resolveSidebarChatState({ chat, localState });
+  const contentPadding = useSidebarRowPadding();
   const content = (
     <>
       <SidebarChatStateIndicator state={state} />
@@ -772,7 +781,7 @@ function SidebarChatRow({
         <button
           type="button"
           onClick={onRequestComposerFocus}
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-md py-[5px] pl-2 pr-1 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          className={`flex min-w-0 flex-1 items-center gap-2 rounded-md py-[5px] pr-1 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${contentPadding}`}
         >
           {content}
         </button>
@@ -793,7 +802,7 @@ function SidebarChatRow({
             onRequestComposerFocus();
           }}
           aria-current={active ? "page" : undefined}
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-l-md py-[5px] pl-2 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          className={`flex min-w-0 flex-1 items-center gap-2 rounded-l-md py-[5px] text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${contentPadding}`}
         >
           {content}
         </IntentPrefetchLink>
@@ -868,6 +877,7 @@ function SidebarTaskRow({
   onArchive: () => void;
 }) {
   const archivable = isSettledTaskStatus(task.status);
+  const contentPadding = useSidebarRowPadding();
   return (
     <div
       {...dragProps}
@@ -879,7 +889,7 @@ function SidebarTaskRow({
         href={href}
         prefetch
         aria-current={active ? "page" : undefined}
-        className="flex min-w-0 flex-1 items-center gap-2 rounded-l-md py-[5px] pl-2 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        className={`flex min-w-0 flex-1 items-center gap-2 rounded-l-md py-[5px] text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${contentPadding}`}
       >
         <ChatStateIndicator state={state} surface="sidebar" className="mt-[7px] self-start" />
         <span className="flex min-w-0 flex-1 flex-col">

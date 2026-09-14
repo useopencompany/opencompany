@@ -11,7 +11,6 @@ services:
     numInstances: 1
     image:
       url: docker.io/electricsql/electric@sha256:c9c666a59e12d7d10e0ff6c3619a3a39569ae15236b1023655c422d844da5fa7
-    healthCheckPath: /v1/health
     disk:
       name: opencompany-electric-data
       mountPath: /var/electric
@@ -417,7 +416,12 @@ services:
       # Optional opencompany rendered-browser task tools.
       - key: RUNNER_OPENCOMPANY_BROWSER_ENABLED
         sync: false
-      - key: OPENCOMPANY_CODEX_E2B_TEMPLATE
+      # One built E2B template alias per user-selectable cloud sandbox size.
+      - key: OPENCOMPANY_CODEX_E2B_TEMPLATE_SMALL
+        sync: false
+      - key: OPENCOMPANY_CODEX_E2B_TEMPLATE_STANDARD
+        sync: false
+      - key: OPENCOMPANY_CODEX_E2B_TEMPLATE_LARGE
         sync: false
       - key: RUNNER_CODEX_MODEL
         sync: false
