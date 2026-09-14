@@ -67,8 +67,8 @@ it("offers reconnect and disconnect after credential rejection", async () => {
       enabled
     />,
   );
-  expect(screen.getByRole("button", { name: "Reconnect", exact: true })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Reconnect" })).toBeEnabled();
   expect(screen.getByRole("alert")).toHaveTextContent("revoked");
-  await userEvent.setup().click(screen.getByRole("button", { name: "Disconnect", exact: true }));
+  await userEvent.setup().click(screen.getByRole("button", { name: "Disconnect" }));
   await waitFor(() => expect(mocks.cancel).toHaveBeenCalledWith(true));
 });
