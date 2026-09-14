@@ -124,6 +124,19 @@ test("production preflight follows the deployed runtime boundaries", async () =>
   );
 });
 
+test("Render health checks are limited to web services", async () => {
+  const services = readRenderServices(await readFile(renderUrl, "utf8"));
+
+  for (const service of services) {
+    if (!service.hasHealthCheckPath) continue;
+    assert.equal(
+      service.type,
+      "web",
+      `${service.name} is a ${service.type}; Render only accepts healthCheckPath on web services`,
+    );
+  }
+});
+
 function readGroups(source) {
   const startMarker = "const groups = ";
   const start = source.indexOf(startMarker);
@@ -161,6 +174,17 @@ function readRenderShutdownDelay(render, serviceName) {
   const match = service.match(/^\s+maxShutdownDelaySeconds:\s+(\d+)$/mu);
   assert.ok(match, `${serviceName} is missing maxShutdownDelaySeconds`);
   return Number(match[1]);
+}
+
+function readRenderServices(render) {
+  return render
+    .split(/(?=^  - type:)/gmu)
+    .slice(1)
+    .map((service) => ({
+      type: service.match(/^  - type:\s+(\S+)$/mu)?.[1],
+      name: service.match(/^    name:\s+(\S+)$/mu)?.[1],
+      hasHealthCheckPath: /^    healthCheckPath:/mu.test(service),
+    }));
 }
 
 function groupKeys(group) {
