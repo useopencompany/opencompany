@@ -7356,3 +7356,101 @@ export type PluginFile = typeof pluginFiles.$inferSelect;
 export type PluginSkill = typeof pluginSkills.$inferSelect;
 export type WorkspacePluginData = typeof workspacePluginData.$inferSelect;
 export type RepoConfig = typeof repoConfigs.$inferSelect;
+
+// External sources wake a stable Conversation; Runs remain the existing fenced execution unit.
+export const sessionSubscriptions = productSchema.table(
+  "session_subscriptions",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => chatSessions.id, { onDelete: "cascade" }),
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => integrations.id, { onDelete: "cascade" }),
+    source: text("source").notNull(),
+    sourceKey: jsonb("source_key").$type<Record<string, string>>().notNull(),
+    policy: jsonb("policy")
+      .notNull()
+      .default({
+        acceptedEvents: ["human_text_reply"],
+        authorization: "workspace_member",
+        queue: "serial",
+      }),
+    status: text("status").notNull().default("waiting"),
+    nextSequence: bigint("next_sequence", { mode: "number" }).notNull().default(0),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("session_subscriptions_source_idx").on(
+      table.workspaceId,
+      table.source,
+      table.sourceKey,
+    ),
+    index("session_subscriptions_session_idx").on(table.sessionId),
+    check("session_subscriptions_status_check", sql`${table.status} IN ('waiting', 'closed')`),
+  ],
+);
+
+export const subscriptionEvents = productSchema.table(
+  "subscription_events",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    subscriptionId: text("subscription_id")
+      .notNull()
+      .references(() => sessionSubscriptions.id, { onDelete: "cascade" }),
+    eventId: text("event_id").notNull(),
+    sequence: bigint("sequence", { mode: "number" }).notNull(),
+    payload: jsonb("payload").notNull(),
+    status: text("status").notNull().default("pending"),
+    runId: text("run_id").references(() => codexChatTurns.id),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("subscription_events_event_idx").on(table.subscriptionId, table.eventId),
+    uniqueIndex("subscription_events_sequence_idx").on(table.subscriptionId, table.sequence),
+    index("subscription_events_pending_idx").on(table.status, table.id),
+    check(
+      "subscription_events_status_check",
+      sql`${table.status} IN ('pending', 'running', 'delivering', 'done', 'ignored')`,
+    ),
+  ],
+);
+
+export const channelDeliveries = productSchema.table(
+  "channel_deliveries",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => chatSessions.id, { onDelete: "cascade" }),
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => integrations.id, { onDelete: "cascade" }),
+    teamId: text("team_id").notNull(),
+    channelId: text("channel_id").notNull(),
+    threadTs: text("thread_ts"),
+    text: text("text").notNull(),
+    status: text("status").notNull().default("pending"),
+    messageTs: text("message_ts"),
+    leaseId: text("lease_id"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("channel_deliveries_pending_idx").on(table.status, table.createdAt),
+    check(
+      "channel_deliveries_status_check",
+      sql`${table.status} IN ('pending', 'sending', 'sent', 'uncertain', 'failed', 'canceled')`,
+    ),
+  ],
+);
