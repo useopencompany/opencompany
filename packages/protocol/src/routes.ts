@@ -126,6 +126,7 @@ import {
   OnboardingWorkspaceEnvelopeSchema,
   OnboardingWorkspaceSlugEnvelopeSchema,
   PluginArchiveEnvelopeSchema,
+  PluginBillingEnvelopeSchema,
   PluginDataDeleteEnvelopeSchema,
   PluginImportEnvelopeSchema,
   PluginImportPreviewBodySchema,
@@ -161,6 +162,7 @@ import {
   SetCapabilitySessionBudgetBodySchema,
   SetIntegrationCapabilityModeBodySchema,
   SetIntegrationToolModeBodySchema,
+  SetPluginDailySpendLimitBodySchema,
   SetPluginEventEnabledBodySchema,
   SetRepoConfigEnvBodySchema,
   SetRepoConfigSetupBodySchema,
@@ -1906,6 +1908,42 @@ export const deletePluginDataRoute = createRoute({
     200: {
       description: "Persistent data metadata deleted as an explicit destructive action.",
       content: { "application/json": { schema: PluginDataDeleteEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getPluginBillingRoute = createRoute({
+  method: "get",
+  path: "/v1/plugins/{name}/billing",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: { params: z.object({ name: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Action prices, daily spending limit, and spend so far today for a paid plugin.",
+      content: { "application/json": { schema: PluginBillingEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const setPluginDailySpendLimitRoute = createRoute({
+  method: "put",
+  path: "/v1/plugins/{name}/billing/daily-limit",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ name: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: SetPluginDailySpendLimitBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Daily spending limit for a paid plugin updated. Admin only.",
+      content: { "application/json": { schema: PluginBillingEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -4265,6 +4303,8 @@ export type V1RouteHandlers = {
   refreshPluginMcp: RouteHandler<typeof refreshPluginMcpRoute>;
   deletePluginData: RouteHandler<typeof deletePluginDataRoute>;
   setPluginEventEnabled: RouteHandler<typeof setPluginEventEnabledRoute>;
+  getPluginBilling: RouteHandler<typeof getPluginBillingRoute>;
+  setPluginDailySpendLimit: RouteHandler<typeof setPluginDailySpendLimitRoute>;
   listBots: RouteHandler<typeof listBotsRoute>;
   createBot: RouteHandler<typeof createBotRoute>;
   getBot: RouteHandler<typeof getBotRoute>;
@@ -4597,6 +4637,8 @@ export function createV1Router(
       .openapi(refreshPluginMcpRoute, handlers.refreshPluginMcp)
       .openapi(deletePluginDataRoute, handlers.deletePluginData)
       .openapi(setPluginEventEnabledRoute, handlers.setPluginEventEnabled)
+      .openapi(getPluginBillingRoute, handlers.getPluginBilling)
+      .openapi(setPluginDailySpendLimitRoute, handlers.setPluginDailySpendLimit)
   );
 }
 
@@ -4900,6 +4942,23 @@ const placeholderPlugin = {
   createdAt: placeholderTime,
   updatedAt: placeholderTime,
   archivedAt: null,
+};
+
+const placeholderPluginBilling = {
+  pluginName: "contract-plugin",
+  pricing: {
+    currency: "USD" as const,
+    actions: [
+      {
+        action: "contract_action",
+        label: "Result",
+        unit: "per_result" as const,
+        amountUsdMicros: 80_000,
+      },
+    ],
+  },
+  dailyLimitUsdMicros: 5_000_000,
+  spentTodayUsdMicros: 0,
 };
 
 function placeholderAutomationTaskEnvelope() {
@@ -5649,6 +5708,8 @@ const contractDocumentHandlers: V1RouteHandlers = {
   deletePluginData: (c) =>
     c.json({ data: { name: placeholderPlugin.name, deleted: true }, meta }, 200),
   setPluginEventEnabled: (c) => c.json({ data: placeholderPlugin, meta }, 200),
+  getPluginBilling: (c) => c.json({ data: placeholderPluginBilling, meta }, 200),
+  setPluginDailySpendLimit: (c) => c.json({ data: placeholderPluginBilling, meta }, 200),
   listBots: (c) => c.json({ data: [], meta }, 200),
   createBot: (c) =>
     c.json({ data: { id: "bot_example", name: "Assistant", description: "" }, meta }, 200),

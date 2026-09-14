@@ -60,6 +60,7 @@ export async function resolvePluginImport(input: {
       remoteServers: plugin.remoteServers,
       capabilities: plugin.capabilities,
       events: plugin.events,
+      pricing: plugin.pricing,
       report: plugin.report,
     };
   } catch (error) {

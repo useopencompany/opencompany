@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { PluginPriceUnit } from "@opencompany/core";
 import { and, asc, desc, eq, inArray, isNull, lt, notInArray, or, sql } from "drizzle-orm";
 import { getDb } from "./client";
 import {
@@ -190,6 +191,14 @@ export type CreateCapabilityRunInput = {
   quoteProviderCostUsdMicros: number;
   quotePlatformFeeUsdMicros: number;
   quoteTotalCostUsdMicros: number;
+  // Snapshot of the paid plugin's list price, so settlement bills what was quoted even if the
+  // plugin is updated or uninstalled while the run is in flight.
+  price?: {
+    pluginName: string;
+    unit: PluginPriceUnit;
+    amountUsdMicros: number;
+    maxUnits: number;
+  } | null;
   approvalExpiresAt?: Date | null;
   now?: Date;
   db?: DbLike;
@@ -215,6 +224,10 @@ export async function createCapabilityRun(input: CreateCapabilityRunInput) {
       quoteProviderCostUsdMicros: input.quoteProviderCostUsdMicros,
       quotePlatformFeeUsdMicros: input.quotePlatformFeeUsdMicros,
       quoteTotalCostUsdMicros: input.quoteTotalCostUsdMicros,
+      pluginName: input.price?.pluginName ?? null,
+      priceUnit: input.price?.unit ?? null,
+      priceAmountUsdMicros: input.price?.amountUsdMicros ?? null,
+      priceMaxUnits: input.price?.maxUnits ?? null,
       approvalExpiresAt: input.approvalExpiresAt ?? null,
       createdAt: now,
       updatedAt: now,

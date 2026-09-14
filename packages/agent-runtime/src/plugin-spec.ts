@@ -46,6 +46,7 @@ export type PluginManifestResult = {
 
 export const OPENCOMPANY_CAPABILITIES_EXTENSION = "so.opencompany.capabilities";
 export const OPENCOMPANY_EVENTS_EXTENSION = "so.opencompany.events";
+export const OPENCOMPANY_PRICING_EXTENSION = "so.opencompany.pricing";
 
 export type PluginCapabilityId = "read" | "query" | "draft" | "write";
 export type PluginCapabilityMode = "on" | "ask" | "off";
@@ -68,6 +69,34 @@ export type PluginCapabilitiesResult = {
   // gateway registration record.
   definitions: PluginCapabilityDefinition[];
   report: PluginCapabilitiesReport;
+};
+
+// A paid action's list price. `per_call` bills one unit per invocation; `per_result` bills one
+// unit per returned record. Amounts are USD micros so no float reaches the ledger.
+export type PluginPriceUnit = "per_call" | "per_result";
+
+export type PluginActionPrice = {
+  action: string;
+  label: string;
+  unit: PluginPriceUnit;
+  amountUsdMicros: number;
+};
+
+export type PluginPricingDefinition = {
+  currency: "USD";
+  actions: PluginActionPrice[];
+};
+
+export type PluginPricingReport =
+  | { status: "absent" }
+  | { present: true; status: "ignored"; reason: string }
+  | { present: true; status: "parsed"; issues: string[] };
+
+export type PluginPricingResult = {
+  // Null unless every declared action parsed from a trusted source. Pricing is charged, not just
+  // displayed, so a partially valid table is never usable: it would silently under- or over-bill.
+  definition: PluginPricingDefinition | null;
+  report: PluginPricingReport;
 };
 
 export type PluginEventFilterDefinition = {
@@ -109,6 +138,13 @@ export type PluginEventsResult = {
 // separately for a clearer error and to keep the pattern readable.
 const PLUGIN_NAME_RE = /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/;
 const PLUGIN_NAME_MAX = 64;
+
+// Priced action keys are bare tool names, matching the `so.opencompany.capabilities` convention.
+const PLUGIN_PRICED_ACTION_RE = /^[a-z0-9](?:[a-z0-9_]*[a-z0-9])?$/;
+const PLUGIN_PRICED_ACTIONS_MAX = 50;
+// A ceiling no reviewed action should approach. It exists so a mistaken extra zero in a manifest
+// fails review instead of billing a workspace $100 for one record.
+const PLUGIN_PRICE_AMOUNT_MAX_USD_MICROS = 10_000_000;
 
 const PERMITTED_MANIFEST_FIELDS = new Set([
   "$schema",
@@ -313,6 +349,93 @@ export function parsePluginCapabilities(
       ...definition,
       tools: definition.tools.filter((tool) => !ambiguousTools.has(tool)),
     })),
+    report: { present: true, status: "parsed", issues },
+  };
+}
+
+// Pricing is the one extension whose value is charged rather than displayed, so it is stricter than
+// the others: it is honored only from the reviewed source gate, and any issue voids the whole table
+// instead of degrading to a partial one. A package that cannot state its prices unambiguously is
+// treated as having none, which leaves its actions unsellable rather than mispriced.
+export function parsePluginPricing(
+  extensions: Record<string, unknown> | undefined,
+  options: { trusted: boolean },
+): PluginPricingResult {
+  const value = extensions?.[OPENCOMPANY_PRICING_EXTENSION];
+  if (value === undefined) return { definition: null, report: { status: "absent" } };
+  if (!options.trusted) {
+    return {
+      definition: null,
+      report: {
+        present: true,
+        status: "ignored",
+        reason: "Action prices are honored only from a reviewed official package source.",
+      },
+    };
+  }
+
+  const issues: string[] = [];
+  const invalid = (issue: string): PluginPricingResult => ({
+    definition: null,
+    report: { present: true, status: "parsed", issues: [...issues, issue] },
+  });
+  if (!isRecord(value)) {
+    return invalid(`Extension \`${OPENCOMPANY_PRICING_EXTENSION}\` must be an object.`);
+  }
+  for (const field of Object.keys(value).filter((key) => key !== "currency" && key !== "actions")) {
+    issues.push(`Unknown pricing field \`${field}\` was ignored.`);
+  }
+  if (value.currency !== "USD") {
+    return invalid("Pricing field `currency` must be `USD`.");
+  }
+  if (!isRecord(value.actions)) {
+    return invalid("Pricing field `actions` must be an object keyed by action name.");
+  }
+  const entries = Object.entries(value.actions);
+  if (entries.length === 0 || entries.length > PLUGIN_PRICED_ACTIONS_MAX) {
+    return invalid(
+      `Pricing must declare between 1 and ${PLUGIN_PRICED_ACTIONS_MAX} priced actions.`,
+    );
+  }
+
+  const actions: PluginActionPrice[] = [];
+  for (const [action, price] of entries) {
+    if (!PLUGIN_PRICED_ACTION_RE.test(action)) {
+      return invalid(`Priced action \`${action}\` is not a valid action name.`);
+    }
+    if (!isRecord(price)) {
+      return invalid(`Priced action \`${action}\` must be an object.`);
+    }
+    for (const field of Object.keys(price).filter(
+      (key) => key !== "label" && key !== "unit" && key !== "amountUsdMicros",
+    )) {
+      issues.push(`Unknown field \`${action}.${field}\` was ignored.`);
+    }
+    const { label, unit, amountUsdMicros } = price;
+    if (typeof label !== "string" || label.trim().length === 0 || label.length > 120) {
+      return invalid(
+        `Priced action \`${action}.label\` must be a non-empty string up to 120 characters.`,
+      );
+    }
+    if (unit !== "per_call" && unit !== "per_result") {
+      return invalid(`Priced action \`${action}.unit\` must be \`per_call\` or \`per_result\`.`);
+    }
+    if (
+      typeof amountUsdMicros !== "number" ||
+      !Number.isSafeInteger(amountUsdMicros) ||
+      amountUsdMicros <= 0 ||
+      amountUsdMicros > PLUGIN_PRICE_AMOUNT_MAX_USD_MICROS
+    ) {
+      return invalid(
+        `Priced action \`${action}.amountUsdMicros\` must be a whole number of USD micros between 1 and ${PLUGIN_PRICE_AMOUNT_MAX_USD_MICROS}.`,
+      );
+    }
+    actions.push({ action, label: label.trim(), unit, amountUsdMicros });
+  }
+
+  actions.sort((left, right) => (left.action < right.action ? -1 : 1));
+  return {
+    definition: { currency: "USD", actions },
     report: { present: true, status: "parsed", issues },
   };
 }

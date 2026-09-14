@@ -504,7 +504,11 @@ describe("Plugin settings", () => {
     expect(
       within(linearCard as HTMLElement).getByRole("button", { name: "Install" }),
     ).toBeEnabled();
-    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(5);
+    // Six featured packages are installable, including the paid Lead research plugin.
+    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(6);
+    const leadResearchCard = screen.getByText("Lead research").closest("li") as HTMLElement | null;
+    expect(leadResearchCard).not.toBeNull();
+    expect(within(leadResearchCard as HTMLElement).getByText("Paid")).toBeVisible();
     expect(previewHeadlessPluginImport).not.toHaveBeenCalled();
     expect(importHeadlessPlugin).not.toHaveBeenCalled();
   });
