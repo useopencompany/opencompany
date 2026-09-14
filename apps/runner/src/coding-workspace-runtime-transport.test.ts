@@ -430,3 +430,133 @@ describe("opencompany coding workspace runtime tools install command", () => {
     expect(result.status).toBe(0);
   });
 });
+
+describe("opencompany coding workspace file transport", () => {
+  function attachFileConnection(sandboxOverrides: Record<string, unknown>) {
+    const sandbox = {
+      sandboxId: "sandbox_1",
+      commands: {
+        run: vi.fn(async (command: string) => ({
+          stdout: command.startsWith("realpath")
+            ? `${command.replace(/^realpath -e -- '/, "").replace(/'$/, "")}\n`
+            : "",
+          exitCode: 0,
+        })),
+      },
+      files: { getInfo: vi.fn(), list: vi.fn(), read: vi.fn(), write: vi.fn() },
+      pty: { create: vi.fn(), sendInput: vi.fn(), resize: vi.fn() },
+      setTimeout: vi.fn(async () => undefined),
+      ...sandboxOverrides,
+    } as unknown as SandboxHandle;
+
+    const webSocket = new EventEmitter() as WebSocket & EventEmitter;
+    Object.defineProperty(webSocket, "readyState", { value: WebSocket.OPEN });
+    const sent: Record<string, unknown>[] = [];
+    webSocket.send = vi.fn((payload: unknown) => {
+      if (typeof payload === "string") sent.push(JSON.parse(payload));
+    }) as unknown as WebSocket["send"];
+    webSocket.ping = vi.fn();
+    webSocket.close = vi.fn();
+    webSocket.terminate = vi.fn();
+
+    attachRuntimeConnection(
+      webSocket,
+      sandbox,
+      {
+        id: "goat_codex_chat_123e4567-e89b-12d3-a456-426614174000",
+        chatSessionId: "chat_1",
+        userWorkosId: "user_1",
+        sandboxId: "sandbox_1",
+        status: "idle",
+        engine: "codex",
+      } satisfies CodingWorkspaceSession,
+      { codexChatIdleTimeoutMs: 300_000 } as RunnerEnv,
+      vi.fn(async () => undefined),
+    );
+    return { webSocket, sandbox, sent };
+  }
+
+  it("lists a directory relative to the engine working directory", async () => {
+    const list = vi.fn(async () => [{ name: "apps", type: "dir", size: 0 }]);
+    const { webSocket, sent } = attachFileConnection({
+      files: {
+        getInfo: vi.fn(async () => ({ type: "dir" })),
+        list,
+        read: vi.fn(),
+        write: vi.fn(),
+      },
+    });
+
+    webSocket.emit("message", JSON.stringify({ type: "files.list", path: "" }), false);
+
+    await vi.waitFor(
+      () => expect(sent.find((message) => message.type === "files.listing")).toBeDefined(),
+      { timeout: 5_000 },
+    );
+    expect(list).toHaveBeenCalledWith("/home/user/opencompany-goat/codex-chat", { user: "user" });
+    expect(sent.at(-1)).toMatchObject({
+      type: "files.listing",
+      path: "",
+      entries: [{ name: "apps", path: "apps", type: "directory" }],
+    });
+    webSocket.emit("close");
+  });
+
+  it("reports a rejected path on the files channel with its scope", async () => {
+    const { webSocket, sent } = attachFileConnection({});
+
+    webSocket.emit(
+      "message",
+      JSON.stringify({ type: "files.open", path: "../../etc/passwd" }),
+      false,
+    );
+
+    await vi.waitFor(
+      () => expect(sent.find((message) => message.type === "files.error")).toBeDefined(),
+      { timeout: 5_000 },
+    );
+    expect(sent.at(-1)).toMatchObject({
+      type: "files.error",
+      scope: "open",
+      code: "invalid_path",
+    });
+    // A file failure must not surface on the shared error channel the preview banner reads.
+    expect(sent.some((message) => message.type === "error")).toBe(false);
+    webSocket.emit("close");
+  });
+
+  it("saves an edited file and answers with its new revision", async () => {
+    const write = vi.fn(async () => undefined);
+    const { webSocket, sent } = attachFileConnection({
+      files: {
+        getInfo: vi.fn(async () => ({ type: "file", size: 5 })),
+        list: vi.fn(),
+        read: vi.fn(async () => new TextEncoder().encode("hello")),
+        write,
+      },
+    });
+
+    webSocket.emit(
+      "message",
+      JSON.stringify({
+        type: "files.save",
+        path: "notes.txt",
+        content: "hello world",
+        baseRevision: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      }),
+      false,
+    );
+
+    await vi.waitFor(
+      () => expect(sent.find((message) => message.type === "files.saved")).toBeDefined(),
+      { timeout: 5_000 },
+    );
+    expect(write).toHaveBeenCalledWith(
+      "/home/user/opencompany-goat/codex-chat/notes.txt",
+      "hello world",
+      { user: "user" },
+    );
+    expect(sent.at(-1)).toMatchObject({ type: "files.saved", path: "notes.txt", size: 11 });
+    webSocket.emit("close");
+  });
+});

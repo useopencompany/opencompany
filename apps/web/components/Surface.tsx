@@ -15,7 +15,6 @@ import {
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import { captureProductEvent } from "@opencompany/analytics/product/client";
 import type { ChatEngine } from "@opencompany/core";
-import { isSettledTaskStatus } from "@opencompany/core/tasks";
 import type { EngineRuntimeStatus, InvokeWorkflowBody, MessageEngine } from "@opencompany/protocol";
 import {
   Command,
@@ -47,42 +46,31 @@ import {
 import { cn } from "@opencompany/ui/lib/utils";
 import { useLiveQuery } from "@tanstack/react-db";
 import {
-  AlertCircle,
   Archive,
   ArrowLeft,
   ArrowUp,
-  CalendarClock,
   Check,
-  CheckCircle2,
   ChevronDown,
-  CircleDotDashed,
-  Clock,
   Code2,
   CornerDownLeft,
-  FileText,
   LoaderCircle,
   MessageSquare,
   Mic,
   PanelRightClose,
   PanelRightOpen,
-  Pause,
   Play,
   Plus,
   RotateCcw,
-  Settings,
   Sparkles,
   Square,
   SquarePen,
   Target,
-  Trash2,
   Workflow as WorkflowIcon,
   X,
 } from "lucide-react";
-import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   type Dispatch,
-  type FormEvent,
   type RefObject,
   type SetStateAction,
   useCallback,
@@ -95,7 +83,6 @@ import {
   useTransition,
 } from "react";
 import { BotSettingsButton } from "@/components/Bots";
-import { ChatStateIndicator } from "@/components/ChatStateIndicator";
 import {
   CodingWorkspacePanel,
   type CodingWorkspacePanelHandle,
@@ -129,7 +116,6 @@ import {
   descriptionFromAdHocTaskPrompt,
   hasAdHocTaskToken,
 } from "@/lib/ad-hoc-task";
-import { isRecentChatActivity } from "@/lib/chat-activity";
 import { CHAT_ATTACHMENT_ACCEPT } from "@/lib/chat-attachment-formats";
 import { AUTO_MODEL_ATTACHMENT_CAPABILITIES, AUTO_MODEL_SELECTION } from "@/lib/chat-auto-model";
 import {
@@ -150,11 +136,7 @@ import {
   HOME_NAVIGATION_EVENT,
   newOptimisticChatSessionId,
 } from "@/lib/chat-navigation";
-import {
-  clearLocalChatState,
-  setLocalChatState,
-  useLocalChatStates,
-} from "@/lib/chat-session-state";
+import { clearLocalChatState, setLocalChatState } from "@/lib/chat-session-state";
 import { composeChatTranscript } from "@/lib/chat-transcript";
 import {
   type ActiveChatTurn,
@@ -170,7 +152,6 @@ import {
   type ChatUiAttachment,
   type ChatUiMessage,
   type ConversationRuntimeView,
-  chatSummaryState,
   isChatRuntimeActive,
   textFromChatUiMessage,
   USE_ACTION_TOOL_PART_TYPE,
@@ -196,13 +177,10 @@ import {
   statusPresenter,
 } from "@/lib/engine-registry";
 import {
-  archiveHeadlessTaskSchedule,
   invokeHeadlessWorkflow,
   listHeadlessWorkflowCatalog,
-  runHeadlessTaskScheduleNow,
-  updateHeadlessTaskSchedule,
 } from "@/lib/headless-automation-commands";
-import type { TaskScheduleView, WorkflowCatalogItem } from "@/lib/headless-automation-types";
+import type { WorkflowCatalogItem } from "@/lib/headless-automation-types";
 import { uploadHeadlessChatAttachment } from "@/lib/headless-chat-attachment-upload";
 import { retryHeadlessChatMessages } from "@/lib/headless-chat-collections";
 import {
@@ -218,7 +196,6 @@ import {
 import { listHeadlessSkillCatalog } from "@/lib/headless-knowledge-commands";
 import { getHeadlessTasks, taskReadModelToRow } from "@/lib/headless-task-collections";
 import {
-  archiveHeadlessTask,
   cancelHeadlessTaskRun,
   createHeadlessTask,
   createHeadlessTaskComment,
@@ -241,7 +218,6 @@ import {
 import { forgetLocalProjectAssignment, noteLocalProjectAssignment } from "@/lib/projects";
 import type { SkillCatalogItem } from "@/lib/skills";
 import type { TaskRow } from "@/lib/task-collections";
-import { STAGE_COPY, STATUS_COPY } from "@/lib/task-display";
 import { deriveTaskWorkflowSteps, type TaskWorkflowStepView } from "@/lib/task-workflow-activity";
 import { updateTimezoneAction } from "@/lib/user-preferences";
 
@@ -419,7 +395,6 @@ function selectCommandPaletteItems(
 export function Surface({
   tasks,
   allTasks = tasks,
-  schedules = [],
   defaultModel,
   initialChat,
   newChatProjectId = null,
@@ -431,7 +406,6 @@ export function Surface({
   taskSpawningEnabled = false,
   autoModelRoutingEnabled = false,
   workspaceId = "",
-  userName = "there",
   userWorkosId = "",
   taskConversation = null,
   readOnlyNotice = null,
@@ -443,14 +417,13 @@ export function Surface({
 }: {
   tasks: readonly TaskView[];
   allTasks?: readonly TaskView[];
-  schedules?: readonly TaskScheduleView[];
   defaultModel: string;
   initialChat: ChatSessionView | null;
   // A sidebar Project the next new chat should be filed under, set when the reader started it from
   // that project's row.
   newChatProjectId?: string | null;
-  // Name of that project. Present only alongside `newChatProjectId`, and swaps the home screen's
-  // activity lists for the project's own prompt.
+  // Name of that project. Present only alongside `newChatProjectId`, and names the project in the
+  // new-chat prompt.
   newChatProjectName?: string | null;
   recentChats?: readonly ChatSummaryView[];
   archivedChats?: readonly ChatSummaryView[];
@@ -459,7 +432,6 @@ export function Surface({
   taskSpawningEnabled?: boolean;
   autoModelRoutingEnabled?: boolean;
   workspaceId?: string;
-  userName?: string;
   // Scopes chat attachment uploads; attachments are disabled when absent.
   userWorkosId?: string;
   // Task details reuse the canonical Conversation surface with additional Task metadata.
@@ -633,12 +605,6 @@ export function Surface({
   const [locallyStoppedAssistantMessageIds, setLocallyStoppedAssistantMessageIds] = useState<
     ReadonlySet<string>
   >(() => new Set());
-  const [optimisticallyArchivedIds, setOptimisticallyArchivedIds] = useState<ReadonlySet<string>>(
-    () => new Set(),
-  );
-  const [optimisticallyArchivedChatIds, setOptimisticallyArchivedChatIds] = useState<
-    ReadonlySet<string>
-  >(() => new Set());
   const [liveChatTasks, setLiveChatTasks] = useState<readonly TaskView[] | null>(null);
   const [activeTurn, setActiveTurn] = useState<ActiveChatTurn | null>(null);
   const [surfaceMountedAtMs] = useState(() => Date.now());
@@ -646,27 +612,8 @@ export function Surface({
     ReadonlyMap<string, number>
   >(() => new Map());
   const [, startArchiveTransition] = useTransition();
-  const localChatStates = useLocalChatStates();
-  const homeChats = useMemo(
-    () => visibleHomeChats(recentChats, optimisticallyArchivedChatIds, localChatStates),
-    [localChatStates, optimisticallyArchivedChatIds, recentChats],
-  );
-  const homeSchedules = useMemo(
-    () => (taskSpawningEnabled ? visibleHomeSchedules(schedules) : []),
-    [schedules, taskSpawningEnabled],
-  );
-  const homeTasks = useMemo(
-    () =>
-      visibleHomeTasks({
-        tasks: taskSpawningEnabled ? tasks : [],
-        optimisticallyArchivedTaskIds: optimisticallyArchivedIds,
-      }),
-    [optimisticallyArchivedIds, taskSpawningEnabled, tasks],
-  );
-  const hasHomeActivity = homeTasks.length > 0 || homeChats.length > 0 || homeSchedules.length > 0;
-  const homeGreetingName = userName.trim() || "there";
-  // A chat started from a project row opens on that project's prompt instead of the home activity
-  // lists, so the reader starts on an empty page scoped to the project they clicked.
+  // A chat started from a project row names that project in the prompt, so the reader can see the
+  // first message will be filed there.
   const newChatProjectPrompt = newChatProjectId ? newChatProjectName?.trim() || null : null;
   const activeTaskConversation =
     taskConversation && initialChat?.id === chatSessionId ? taskConversation : null;
@@ -1236,10 +1183,6 @@ export function Surface({
     latestActiveTurnStartedAtMs ??
     activeTaskConversation?.startedAtMs ??
     (isForegroundTurnWorking ? surfaceMountedAtMs : null);
-  const paletteRecentChats = useMemo(
-    () => recentChats.filter((chat) => !optimisticallyArchivedChatIds.has(chat.id)),
-    [optimisticallyArchivedChatIds, recentChats],
-  );
   const commandPaletteItems = useMemo<CommandPaletteItem[]>(
     () =>
       [
@@ -1251,7 +1194,7 @@ export function Surface({
               searchValue: `task ${task.archivedAt ? "archived " : ""}${task.name} ${task.prompt} ${task.displayId} ${task.id}`,
             }))
           : []),
-        ...paletteRecentChats.map((chat) => ({
+        ...recentChats.map((chat) => ({
           kind: "chat" as const,
           chat,
           archived: false,
@@ -1268,7 +1211,7 @@ export function Surface({
           new Date(b.kind === "task" ? b.task.updatedAt : b.chat.updatedAt).getTime() -
           new Date(a.kind === "task" ? a.task.updatedAt : a.chat.updatedAt).getTime(),
       ),
-    [allTasks, archivedChats, paletteRecentChats, taskSpawningEnabled],
+    [allTasks, archivedChats, recentChats, taskSpawningEnabled],
   );
   const commandPaletteResults = useMemo(
     () => selectCommandPaletteItems(commandPaletteItems, chatSearchQuery),
@@ -1743,48 +1686,6 @@ export function Surface({
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isActivePane]);
-
-  const archiveTask = (task: TaskView) => {
-    setOptimisticallyArchivedIds((current) => new Set(current).add(task.id));
-    startArchiveTransition(async () => {
-      try {
-        await archiveHeadlessTask(task.id, { scopeKey: workspaceId });
-        return;
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Could not archive task.");
-      }
-
-      setOptimisticallyArchivedIds((current) => {
-        const next = new Set(current);
-        next.delete(task.id);
-        return next;
-      });
-    });
-  };
-
-  const archiveChat = (chat: ChatSummaryView) => {
-    setOptimisticallyArchivedChatIds((current) => new Set(current).add(chat.id));
-    startArchiveTransition(async () => {
-      try {
-        const result = await updateHeadlessChatConversation(chat.id, { archived: true }).then(
-          () => ({ ok: true, error: null }),
-        );
-        if (result.ok) {
-          router.refresh();
-          return;
-        }
-        toast.error(result.error ?? "Could not archive chat.");
-      } catch {
-        toast.error("Could not archive chat.");
-      }
-
-      setOptimisticallyArchivedChatIds((current) => {
-        const next = new Set(current);
-        next.delete(chat.id);
-        return next;
-      });
-    });
-  };
 
   const closeCommandPalette = useCallback(() => {
     setNewChatCommandOpen(false);
@@ -3058,55 +2959,13 @@ export function Surface({
 
       <div className="relative flex min-h-0 w-full flex-1">
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col items-center overflow-hidden">
-          {mode === "home" && newChatProjectPrompt ? (
+          {mode === "home" ? (
             <div className="flex min-h-0 w-full flex-1 items-center justify-center overflow-y-auto px-6 pb-40">
               <h1 className="max-w-[720px] text-balance text-center text-[26px] font-semibold leading-tight tracking-tight text-ink">
-                What should we build in {newChatProjectPrompt}?
+                {newChatProjectPrompt
+                  ? `What should we build in ${newChatProjectPrompt}?`
+                  : "What should we build next?"}
               </h1>
-            </div>
-          ) : mode === "home" ? (
-            <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
-              <div className="flex w-full max-w-[720px] flex-col gap-8 pb-40 pt-16 sm:pt-24">
-                {hasHomeActivity ? (
-                  <>
-                    {homeTasks.length > 0 ? (
-                      <section className="flex flex-col gap-1">
-                        <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-                          Tasks
-                        </h2>
-                        <HomeTaskRows items={homeTasks} onArchiveTask={archiveTask} />
-                      </section>
-                    ) : null}
-
-                    {homeChats.length > 0 ? (
-                      <section className="flex flex-col gap-1">
-                        <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-                          Chats
-                        </h2>
-                        <ChatHistoryList
-                          chats={homeChats}
-                          localChatStates={localChatStates}
-                          onSelect={openChat}
-                          onArchive={archiveChat}
-                        />
-                      </section>
-                    ) : null}
-
-                    {homeSchedules.length > 0 ? (
-                      <section className="flex flex-col gap-1">
-                        <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-                          Routines
-                        </h2>
-                        <ScheduleRows schedules={homeSchedules} workspaceId={workspaceId} />
-                      </section>
-                    ) : null}
-                  </>
-                ) : (
-                  <p className="px-2 text-[15px] leading-6 text-ink-muted">
-                    welcome back, {homeGreetingName}
-                  </p>
-                )}
-              </div>
             </div>
           ) : (
             <div className="flex min-h-0 w-full flex-1 flex-col items-center">
@@ -5037,59 +4896,6 @@ function chatHref(sessionId: string) {
   return `/chat/${encodeURIComponent(sessionId)}`;
 }
 
-function visibleHomeChats(
-  chats: readonly ChatSummaryView[],
-  optimisticallyArchivedChatIds: ReadonlySet<string>,
-  localChatStates: ReadonlyMap<string, ReturnType<typeof chatSummaryState>>,
-) {
-  return chats
-    .filter((chat) => !optimisticallyArchivedChatIds.has(chat.id))
-    .filter(
-      (chat) =>
-        Boolean(chat.pinnedAt) ||
-        isHomeChatStateVisible(chat, localChatStates.get(chat.id) ?? null) ||
-        isRecentChatActivity(chat.updatedAt),
-    )
-    .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-}
-
-function isHomeChatStateVisible(
-  chat: ChatSummaryView,
-  localState: ReturnType<typeof chatSummaryState> | null,
-) {
-  const state = localState ?? chatSummaryState(chat);
-  return state === "working" || state === "done_unseen";
-}
-
-function visibleHomeSchedules(schedules: readonly TaskScheduleView[]) {
-  return schedules
-    .filter((schedule) => schedule.id)
-    .toSorted((a, b) => new Date(a.nextRunAt).getTime() - new Date(b.nextRunAt).getTime());
-}
-
-function visibleHomeTasks(input: {
-  tasks: readonly TaskView[];
-  optimisticallyArchivedTaskIds: ReadonlySet<string>;
-}): TaskView[] {
-  return input.tasks
-    .filter((task) => !input.optimisticallyArchivedTaskIds.has(task.id) && !task.archivedAt)
-    .toSorted((left, right) => {
-      const activeDifference =
-        Number(isBackgroundTaskActive(right)) - Number(isBackgroundTaskActive(left));
-      if (activeDifference !== 0) return activeDifference;
-      return taskUpdatedAtMs(right) - taskUpdatedAtMs(left);
-    });
-}
-
-function isBackgroundTaskActive(task: TaskView) {
-  return task.status === "queued" || task.status === "running";
-}
-
-function taskUpdatedAtMs(task: TaskView) {
-  const timestamp = new Date(task.updatedAt).getTime();
-  return Number.isFinite(timestamp) ? timestamp : 0;
-}
-
 function titleFromChatMessages(messages: readonly ChatUiMessage[]) {
   const firstUserMessage = messages.find((message) => message.role === "user");
   const text = firstUserMessage ? textFromChatUiMessage(firstUserMessage) : "";
@@ -5694,10 +5500,6 @@ async function startWorkflowTask(input: {
   };
 }
 
-function automationCommandError(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : fallback;
-}
-
 async function uploadCanonicalAttachment({ file, pendingId }: { file: File; pendingId: string }) {
   return { ...(await uploadHeadlessChatAttachment({ file, pendingId })), canonical: true };
 }
@@ -6221,327 +6023,6 @@ function LiveChatTaskSubscriber({
   return null;
 }
 
-function ChatHistoryList({
-  chats,
-  localChatStates,
-  onSelect,
-  onArchive,
-}: {
-  chats: readonly ChatSummaryView[];
-  localChatStates: ReadonlyMap<string, ReturnType<typeof chatSummaryState>>;
-  onSelect: (chat: ChatSummaryView) => void;
-  onArchive: (chat: ChatSummaryView) => void;
-}) {
-  const router = useRouter();
-
-  return (
-    <div className="flex flex-col">
-      {chats.map((chat) => {
-        const href = chatHref(chat.id);
-        const prefetchChat = () => router.prefetch(href);
-        return (
-          <div
-            key={chat.id}
-            className="group/chat relative flex items-center rounded-lg px-2 py-1 transition-colors duration-150 hover:bg-surface-hover focus-within:bg-surface-hover"
-          >
-            <Link
-              href={href}
-              prefetch
-              onMouseEnter={prefetchChat}
-              onFocus={prefetchChat}
-              onTouchStart={prefetchChat}
-              onClick={() => onSelect(chat)}
-              className="flex min-h-10 min-w-0 flex-1 items-center gap-3 rounded-md py-1 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-            >
-              <HomeChatStateIndicator
-                chat={chat}
-                localState={localChatStates.get(chat.id) ?? null}
-              />
-              <div className="min-w-0 flex-1">
-                <div className="flex min-w-0 items-baseline gap-2">
-                  <span className="truncate text-[14px] font-medium leading-tight text-ink">
-                    {chat.title}
-                  </span>
-                  <span className="shrink-0 text-[12px] leading-tight text-ink-faint transition-opacity duration-150 group-hover/chat:opacity-0 group-focus-within/chat:opacity-0">
-                    {formatRelativeTime(chat.updatedAt)}
-                  </span>
-                </div>
-                <p className="truncate text-[12.5px] leading-4 text-ink-subtle">{chat.preview}</p>
-              </div>
-            </Link>
-            <button
-              type="button"
-              aria-label={`Archive ${chat.title}`}
-              title="Archive"
-              onClick={() => onArchive(chat)}
-              className="absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md bg-surface-hover text-ink-subtle opacity-0 transition-[background-color,color,opacity] duration-150 hover:bg-surface-muted hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover/chat:opacity-100 group-focus-within/chat:opacity-100"
-            >
-              <Archive size={14} strokeWidth={2} />
-            </button>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function HomeChatStateIndicator({
-  chat,
-  localState,
-}: {
-  chat: ChatSummaryView;
-  localState: ReturnType<typeof chatSummaryState> | null;
-}) {
-  const state = localState ?? chatSummaryState(chat);
-  return <ChatStateIndicator state={state} surface="home" showSeen />;
-}
-
-function ScheduleRows({
-  schedules,
-  workspaceId,
-}: {
-  schedules: readonly TaskScheduleView[];
-  workspaceId: string;
-}) {
-  return schedules.map((schedule) => (
-    <ScheduleRow key={schedule.id} schedule={schedule} workspaceId={workspaceId} />
-  ));
-}
-
-function ScheduleRow({
-  schedule,
-  workspaceId,
-}: {
-  schedule: TaskScheduleView;
-  workspaceId: string;
-}) {
-  const router = useRouter();
-  const [isPending, startTransition] = useTransition();
-  const [isEditing, setIsEditing] = useState(false);
-  const [editName, setEditName] = useState(schedule.name);
-  const [editCron, setEditCron] = useState(schedule.cron);
-  const [editTimezone, setEditTimezone] = useState(schedule.timezone);
-  const [editPrompt, setEditPrompt] = useState(schedule.prompt);
-
-  const openEdit = () => {
-    setEditName(schedule.name);
-    setEditCron(schedule.cron);
-    setEditTimezone(schedule.timezone);
-    setEditPrompt(schedule.prompt);
-    setIsEditing(true);
-  };
-
-  const saveEdit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    startTransition(async () => {
-      try {
-        await updateHeadlessTaskSchedule(
-          schedule.id,
-          {
-            expectedVersion: schedule.version,
-            name: editName,
-            sourceDescription: `${editCron.trim()} - ${editTimezone.trim()}`,
-            cron: editCron,
-            timezone: editTimezone,
-            prompt: editPrompt,
-          },
-          { scopeKey: workspaceId },
-        );
-        setIsEditing(false);
-      } catch (error) {
-        toast.error(automationCommandError(error, "Recurring Task update failed."));
-      }
-    });
-  };
-
-  return (
-    <div className="group/routine rounded-lg transition-colors duration-150 hover:bg-surface-hover focus-within:bg-surface-hover">
-      <div className="flex min-h-12 items-center gap-3 px-2 py-1.5">
-        <CalendarClock
-          size={16}
-          strokeWidth={2}
-          className={schedule.enabled ? "shrink-0 text-emerald-600" : "shrink-0 text-ink-subtle"}
-        />
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-baseline gap-2">
-            <span className="truncate text-[14px] font-medium leading-tight text-ink">
-              {schedule.name}
-            </span>
-            <span className="shrink-0 text-[12px] leading-tight text-ink-subtle">
-              {schedule.enabled ? formatScheduleNextRun(schedule.nextRunAt) : "Paused"}
-            </span>
-          </div>
-          <p className="truncate text-[12.5px] leading-4 text-ink-subtle">
-            {schedule.sourceDescription || `${schedule.cron} - ${schedule.timezone}`}
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity duration-150 group-hover/routine:opacity-100 group-focus-within/routine:opacity-100">
-          <button
-            type="button"
-            aria-label={`Run ${schedule.name} now`}
-            title="Run now"
-            disabled={isPending}
-            onClick={() => {
-              startTransition(async () => {
-                try {
-                  const result = await runHeadlessTaskScheduleNow(schedule.id, {
-                    scopeKey: workspaceId,
-                  });
-                  router.push(`/tasks/${encodeURIComponent(result.task.displayId)}`);
-                } catch (error) {
-                  toast.error(automationCommandError(error, "Recurring Task run failed."));
-                }
-              });
-            }}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-surface-muted hover:text-ink disabled:opacity-60"
-          >
-            <Play size={13} strokeWidth={2} />
-          </button>
-          <button
-            type="button"
-            aria-label={`Edit ${schedule.name}`}
-            title="Edit"
-            disabled={isPending}
-            onClick={() => {
-              if (isEditing) {
-                setIsEditing(false);
-              } else {
-                openEdit();
-              }
-            }}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-surface-muted hover:text-ink disabled:opacity-60"
-          >
-            <Settings size={13} strokeWidth={2} />
-          </button>
-          <button
-            type="button"
-            aria-label={schedule.enabled ? `Pause ${schedule.name}` : `Resume ${schedule.name}`}
-            title={schedule.enabled ? "Pause" : "Resume"}
-            disabled={isPending}
-            onClick={() => {
-              startTransition(async () => {
-                try {
-                  await updateHeadlessTaskSchedule(
-                    schedule.id,
-                    { expectedVersion: schedule.version, enabled: !schedule.enabled },
-                    { scopeKey: workspaceId },
-                  );
-                } catch (error) {
-                  toast.error(automationCommandError(error, "Recurring Task update failed."));
-                }
-              });
-            }}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-surface-muted hover:text-ink disabled:opacity-60"
-          >
-            {schedule.enabled ? (
-              <Pause size={13} strokeWidth={2} />
-            ) : (
-              <Play size={13} strokeWidth={2} />
-            )}
-          </button>
-          <button
-            type="button"
-            aria-label={`Delete ${schedule.name}`}
-            title="Delete"
-            disabled={isPending}
-            onClick={() => {
-              startTransition(async () => {
-                try {
-                  await archiveHeadlessTaskSchedule(
-                    schedule.id,
-                    { expectedVersion: schedule.version },
-                    { scopeKey: workspaceId },
-                  );
-                } catch (error) {
-                  toast.error(automationCommandError(error, "Recurring Task archive failed."));
-                }
-              });
-            }}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-danger transition-colors hover:bg-danger-bg disabled:opacity-60"
-          >
-            <Trash2 size={13} strokeWidth={2} />
-          </button>
-        </div>
-      </div>
-      {isEditing ? (
-        <form className="flex flex-col gap-2 px-2 pb-2" onSubmit={saveEdit}>
-          <div className="grid grid-cols-2 gap-2">
-            <input
-              value={editName}
-              onChange={(event) => setEditName(event.target.value)}
-              placeholder="Name"
-              disabled={isPending}
-              className="min-w-0 rounded-md border border-border bg-surface px-2 py-1.5 text-[13px] text-ink outline-none placeholder:text-ink-subtle focus:border-border-strong"
-              required
-            />
-            <input
-              value={editCron}
-              onChange={(event) => setEditCron(event.target.value)}
-              placeholder="0 9 * * 1"
-              disabled={isPending}
-              className="min-w-0 rounded-md border border-border bg-surface px-2 py-1.5 font-mono text-[12px] text-ink outline-none placeholder:text-ink-subtle focus:border-border-strong"
-              required
-            />
-          </div>
-          <input
-            value={editTimezone}
-            onChange={(event) => setEditTimezone(event.target.value)}
-            placeholder="Europe/Berlin"
-            disabled={isPending}
-            className="rounded-md border border-border bg-surface px-2 py-1.5 text-[13px] text-ink outline-none placeholder:text-ink-subtle focus:border-border-strong"
-            required
-          />
-          <textarea
-            value={editPrompt}
-            onChange={(event) => setEditPrompt(event.target.value)}
-            disabled={isPending}
-            className="min-h-20 resize-y rounded-md border border-border bg-surface px-2 py-1.5 text-[13px] leading-5 text-ink outline-none placeholder:text-ink-subtle focus:border-border-strong"
-            required
-          />
-          <div className="flex items-center justify-end gap-2">
-            <button
-              type="button"
-              disabled={isPending}
-              onClick={() => setIsEditing(false)}
-              className="rounded-md px-2 py-1 text-[12px] text-ink-subtle transition-colors hover:bg-surface-muted hover:text-ink disabled:opacity-60"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={isPending}
-              className="rounded-md bg-ink px-2 py-1 text-[12px] font-medium text-canvas transition-opacity disabled:opacity-60"
-            >
-              Save
-            </button>
-          </div>
-        </form>
-      ) : null}
-    </div>
-  );
-}
-
-function formatScheduleNextRun(value: string) {
-  const timestamp = new Date(value).getTime();
-  if (!Number.isFinite(timestamp)) return "Next run unknown";
-  const minutes = Math.max(1, Math.ceil((timestamp - Date.now()) / 60_000));
-  if (minutes < 60) return `Next in ${minutes}m`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 36) return `Next in ${hours}h`;
-  const days = Math.round(minutes / 1440);
-  return `Next in ${days}d`;
-}
-
-function HomeTaskRows({
-  items,
-  onArchiveTask,
-}: {
-  items: readonly TaskView[];
-  onArchiveTask: (task: TaskView) => void;
-}) {
-  return items.map((task) => <ResultRow key={task.id} task={task} onArchive={onArchiveTask} />);
-}
-
 function taskRowToView(row: TaskRow): TaskView {
   return {
     id: row.id,
@@ -6568,60 +6049,6 @@ function taskRowToView(row: TaskRow): TaskView {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
-}
-
-function ResultRow({ task, onArchive }: { task: TaskView; onArchive: (task: TaskView) => void }) {
-  const router = useRouter();
-  const meta = getTaskMeta(task);
-  const Icon = meta.icon;
-  const title = task.name;
-  const href = `/tasks/${encodeURIComponent(task.displayId)}`;
-  const prefetchTask = () => router.prefetch(href);
-  const canArchive = Boolean(task.sessionId) && isSettledTaskStatus(task.status);
-  return (
-    <div className="group/result relative flex items-center rounded-lg px-2 py-1 transition-colors duration-150 hover:bg-surface-hover focus-within:bg-surface-hover">
-      <Link
-        href={href}
-        prefetch
-        onMouseEnter={prefetchTask}
-        onFocus={prefetchTask}
-        onTouchStart={prefetchTask}
-        className="flex min-w-0 flex-1 items-center gap-3 rounded-md py-1 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-      >
-        <Icon
-          size={16}
-          strokeWidth={2}
-          className={`${meta.className} shrink-0 ${meta.spin ? "animate-[spin_3s_linear_infinite]" : ""}`}
-        />
-
-        <div className="flex min-w-0 flex-1 items-baseline gap-2">
-          <span className="truncate text-[14px] font-medium leading-tight text-ink">{title}</span>
-          <span className="hidden truncate text-[12.5px] leading-tight text-ink-subtle sm:inline">
-            {task.displayId} · {meta.detail}
-          </span>
-        </div>
-
-        <span
-          className={`shrink-0 text-[12px] text-ink-subtle transition-opacity duration-150 ${
-            canArchive ? "group-hover/result:opacity-0 group-focus-within/result:opacity-0" : ""
-          }`}
-        >
-          {formatRelativeTime(task.createdAt)}
-        </span>
-      </Link>
-      {canArchive ? (
-        <button
-          type="button"
-          aria-label={`Archive ${title}`}
-          title="Archive"
-          onClick={() => onArchive(task)}
-          className="absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md bg-surface-hover text-ink-subtle opacity-0 transition-[background-color,color,opacity] duration-150 hover:bg-surface-muted hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover/result:opacity-100 group-focus-within/result:opacity-100"
-        >
-          <Archive size={14} strokeWidth={2} />
-        </button>
-      ) : null}
-    </div>
-  );
 }
 
 function ModelPicker({
@@ -6984,85 +6411,4 @@ function newBackgroundChatMessageId() {
       ? globalThis.crypto.randomUUID()
       : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
   return `ui_background_${randomId}`;
-}
-
-function getTaskMeta(task: TaskView): {
-  icon: typeof FileText;
-  className: string;
-  detail: string;
-  spin: boolean;
-} {
-  const recurringPrefix = task.scheduleId ? "Recurring - " : "";
-  if (task.status === "failed") {
-    return {
-      icon: AlertCircle,
-      className: "text-danger",
-      detail: `${recurringPrefix}${task.error ?? STATUS_COPY.failed}`,
-      spin: false,
-    };
-  }
-  if (task.status === "canceled") {
-    return {
-      icon: X,
-      className: "text-ink-subtle",
-      detail: `${recurringPrefix}${task.error ?? STATUS_COPY.canceled}`,
-      spin: false,
-    };
-  }
-  if (task.status === "waiting") {
-    return {
-      icon: AlertCircle,
-      className: "text-warning",
-      detail: `${recurringPrefix}${task.outcomeComment ?? STATUS_COPY.waiting}`,
-      spin: false,
-    };
-  }
-  if (task.status === "succeeded") {
-    return {
-      icon: CheckCircle2,
-      className: "text-emerald-600",
-      detail: `${recurringPrefix}${firstLine(task.result) ?? STATUS_COPY.succeeded}`,
-      spin: false,
-    };
-  }
-  if (task.status === "queued") {
-    return {
-      icon: Clock,
-      className: "text-ink-subtle",
-      detail: `${recurringPrefix}${STAGE_COPY[task.stage]}`,
-      spin: false,
-    };
-  }
-  return {
-    icon: CircleDotDashed,
-    className: "text-amber-500",
-    detail: `${recurringPrefix}${STAGE_COPY[task.stage]}`,
-    spin: true,
-  };
-}
-
-function firstLine(value: string | null) {
-  const line = value?.trim().split(/\r?\n/, 1)[0]?.trim();
-  if (!line) return null;
-  return line.length > 72 ? `${line.slice(0, 72).trimEnd()}...` : line;
-}
-
-function formatRelativeTime(value: string) {
-  const timestamp = new Date(value).getTime();
-  const elapsedMs = Date.now() - timestamp;
-  if (!Number.isFinite(timestamp) || elapsedMs < 30_000) return "just now";
-
-  const elapsedMinutes = Math.floor(elapsedMs / 60_000);
-  if (elapsedMinutes < 60) return `${elapsedMinutes}m ago`;
-
-  const elapsedHours = Math.floor(elapsedMinutes / 60);
-  if (elapsedHours < 24) return `${elapsedHours}h ago`;
-
-  const elapsedDays = Math.floor(elapsedHours / 24);
-  if (elapsedDays < 7) return `${elapsedDays}d ago`;
-
-  return new Intl.DateTimeFormat("en", {
-    month: "short",
-    day: "numeric",
-  }).format(timestamp);
 }

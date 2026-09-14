@@ -303,7 +303,7 @@ export async function runTrial(input: TrialInput): Promise<Trial> {
       },
       messages: [{ role: "user", content: scenario.prompt }],
       currentDate: BENCH_DATE,
-      taskToolsEnabled: false,
+      automationToolsEnabled: false,
       connectedIntegrations: catalog.sources,
       abortSignal: signal,
       generateTextImpl: generateAdapter,

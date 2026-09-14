@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
   CHAT_HOST_TOOL_CONTRACT_VERSIONS,
   type ChatHostToolGatewayRequest,
@@ -14,7 +13,6 @@ import {
   workspaceMembers,
   workspaces,
 } from "@opencompany/db/product-schema";
-import { DEFAULT_BRAIN_SLUG, listAccessibleBrains } from "@opencompany/db/workspaces";
 import { createLogger } from "@opencompany/observability";
 import { and, eq, inArray } from "drizzle-orm";
 import {
@@ -83,9 +81,6 @@ export function executePersistedChatHostTool(input: {
   };
   const dependencies: ChatHostToolServiceDependencies = {
     loadContext: loadHostContext,
-    listBrains: ({ actorId, workspaceId }) =>
-      listAccessibleBrains({ userWorkosId: actorId, workspaceId }),
-    defaultBrainSlug: DEFAULT_BRAIN_SLUG,
     browserProfilesAvailable,
     createAgentSession: ({ actorId, conversationId, messageId, ...session }) =>
       createAgentSession({
@@ -123,15 +118,6 @@ export function executePersistedChatHostTool(input: {
     createWorkspaceSkill: createWorkspaceSkillForActor,
     manageWorkspaceSkills: manageWorkspaceSkillsForActor,
     updateWorkspaceSkill: updateWorkspaceSkillForActor,
-    createTask: (task) =>
-      createTaskForActor(
-        {
-          ...task,
-          source: "agent",
-          idempotencyKey: taskSpawnIdempotencyKey(input.request.turnId, input.request.toolCallId),
-        },
-        taskDependencies,
-      ),
     listSchedules: listTaskSchedulesForUser,
     createSchedule: ({ actorId, workspaceId, ...schedule }) =>
       createTaskScheduleForUser(
@@ -246,12 +232,6 @@ export function executePersistedChatHostTool(input: {
   });
 }
 
-export function taskSpawnIdempotencyKey(turnId: string, toolCallId?: string) {
-  if (!toolCallId) return `agent:${turnId}`;
-  const invocationHash = createHash("sha256").update(toolCallId).digest("hex");
-  return `agent:${turnId}:tool:${invocationHash}`;
-}
-
 async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostContext | null> {
   // Cleanup is deliberately allowed after terminal projection; every model-visible
   // operation remains fenced to a running turn and the same persisted principal.
@@ -263,7 +243,6 @@ async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostCo
       userWorkosId: codexChatSessions.userWorkosId,
       workspaceId: codexChatSessions.workspaceId,
       chatSessionId: codexChatSessions.chatSessionId,
-      brainRef: codexChatSessions.brainRef,
       userMessageId: codexChatTurns.userMessageId,
       email: users.email,
       firstName: users.firstName,
@@ -271,7 +250,6 @@ async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostCo
       timezone: users.timezone,
       taskSpawningEnabled: users.taskSpawningEnabled,
       subagentsEnabled: users.subagentsEnabled,
-      legacyBrainEnabled: workspaces.legacyBrainEnabled,
       workspaceName: workspaces.name,
       workspaceRole: workspaceMembers.role,
     })
@@ -311,16 +289,14 @@ async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostCo
     workspaceName: row.workspaceName,
     conversationId: row.chatSessionId,
     messageId: row.userMessageId,
-    brainRef: row.legacyBrainEnabled ? row.brainRef : null,
     email: row.email,
     firstName: row.firstName,
     lastName: row.lastName,
     timezone: row.timezone,
-    taskToolsEnabled: row.taskSpawningEnabled && row.workspaceRole === "admin",
-    // Read-only and personal, so unlike task spawning this needs no admin role.
+    automationToolsEnabled: row.taskSpawningEnabled && row.workspaceRole === "admin",
+    // Read-only and personal, so unlike the automation tools this needs no admin role.
     subagentsEnabled: row.subagentsEnabled,
     skillToolsEnabled: true,
-    legacyBrainEnabled: row.legacyBrainEnabled,
   };
 }
 

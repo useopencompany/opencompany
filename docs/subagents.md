@@ -15,6 +15,9 @@ Interactive chat only. Background task turns do not get the tool: a task is alre
 layer inside one multiplies cost where nobody is watching it happen. Revisit once interactive usage
 shows what delegation actually costs.
 
+Since main chat can no longer spawn a one-off task, a subagent is the only way a chat turn widens
+its own research. It still reports back into the same turn rather than producing durable work.
+
 ## What the model sees
 
 One tool, `run_subagent`, taking a short `description` for the UI and a self-contained `task`. The

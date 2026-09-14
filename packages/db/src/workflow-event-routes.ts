@@ -7,7 +7,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { PluginEventDefinition } from "@opencompany/core";
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { getDb } from "./client";
 import {
   type HarnessSpec,
@@ -35,6 +35,7 @@ export type WorkflowEventContext = { tag: string; lines: readonly (string | null
 
 export type WorkflowEventTriggerRoute = {
   workflowId: string;
+  triggerId?: string;
   workspaceId: string;
   userWorkosId: string;
   workflowSlug: string;
@@ -75,6 +76,7 @@ export async function listWorkflowEventTriggerRoutes(
       userWorkosId: workflows.eventUserWorkosId,
       workflowSlug: workflows.slug,
       workflowName: workflows.name,
+      automationTriggers: workflows.automationTriggers,
       config: workflows.eventConfig,
       activatedAt: workflows.eventActivatedAt,
       harnessSpec: workflows.eventHarnessSpec,
@@ -82,10 +84,21 @@ export async function listWorkflowEventTriggerRoutes(
     .from(workflows)
     .where(
       and(
-        eq(workflows.trigger, "event"),
         eq(workflows.status, "active"),
         isNull(workflows.archivedAt),
-        inArray(workflows.eventUserWorkosId, [...new Set(connected.values())]),
+        or(
+          and(
+            eq(workflows.trigger, "event"),
+            inArray(workflows.eventUserWorkosId, [...new Set(connected.values())]),
+          ),
+          sql`EXISTS (
+            SELECT 1
+            FROM jsonb_array_elements(${workflows.automationTriggers}) AS trigger(value)
+            WHERE trigger.value->>'type' = 'event'
+              AND trigger.value->>'provider' = ${input.provider}
+              AND ${inArray(sql`trigger.value->>'userWorkosId'`, [...new Set(connected.values())])}
+          )`,
+        ),
       ),
     );
   if (rows.length === 0) return [];
@@ -132,43 +145,60 @@ export async function listWorkflowEventTriggerRoutes(
       userWorkosId: string | null;
       workflowSlug: string;
       workflowName: string;
+      automationTriggers: unknown;
       config: unknown;
       activatedAt?: Date | null;
       harnessSpec: HarnessSpec | null;
     }) => {
-      const config = parseWorkflowEventConfig(row.config);
-      if (
-        !config ||
-        config.provider !== input.provider ||
-        !row.userWorkosId ||
-        !row.harnessSpec ||
-        connected.get(config.integrationId) !== row.userWorkosId ||
-        !enabledEvents.has(`${row.workspaceId}:${row.userWorkosId}:${config.event}`)
-      ) {
-        return [];
-      }
-      const declaration = enabledEvents.get(
-        `${row.workspaceId}:${row.userWorkosId}:${config.event}`,
-      )!;
-      if (workflowEventFilterValidationError(declaration, config.filters)) return [];
-      return [
-        {
-          ...(row.activatedAt ? { activatedAt: row.activatedAt } : {}),
-          workflowId: row.workflowId,
-          workspaceId: row.workspaceId,
-          userWorkosId: row.userWorkosId,
-          workflowSlug: row.workflowSlug,
-          workflowName: row.workflowName,
-          prompt: config.prompt,
-          harnessSpec: row.harnessSpec,
-          provider: config.provider,
-          event: config.event,
-          filters: config.filters,
-          ...(config.legacyTriageStateId
-            ? { legacyTriageStateId: config.legacyTriageStateId }
-            : {}),
-        },
-      ];
+      const automation = parseAutomationEventTriggers(row.automationTriggers);
+      const candidates =
+        automation.length > 0
+          ? automation
+          : [
+              {
+                triggerId: "legacy",
+                userWorkosId: row.userWorkosId,
+                activatedAt: row.activatedAt ?? undefined,
+                harnessSpec: row.harnessSpec,
+                config: parseWorkflowEventConfig(row.config),
+              },
+            ];
+      return candidates.flatMap((candidate) => {
+        const { config, userWorkosId, harnessSpec } = candidate;
+        if (
+          !config ||
+          config.provider !== input.provider ||
+          !userWorkosId ||
+          !harnessSpec ||
+          connected.get(config.integrationId) !== userWorkosId ||
+          !enabledEvents.has(`${row.workspaceId}:${userWorkosId}:${config.event}`)
+        ) {
+          return [];
+        }
+        const declaration = enabledEvents.get(
+          `${row.workspaceId}:${userWorkosId}:${config.event}`,
+        )!;
+        if (workflowEventFilterValidationError(declaration, config.filters)) return [];
+        return [
+          {
+            ...(candidate.activatedAt ? { activatedAt: candidate.activatedAt } : {}),
+            workflowId: row.workflowId,
+            triggerId: candidate.triggerId,
+            workspaceId: row.workspaceId,
+            userWorkosId,
+            workflowSlug: row.workflowSlug,
+            workflowName: row.workflowName,
+            prompt: config.prompt,
+            harnessSpec,
+            provider: config.provider,
+            event: config.event,
+            filters: config.filters,
+            ...(config.legacyTriageStateId
+              ? { legacyTriageStateId: config.legacyTriageStateId }
+              : {}),
+          },
+        ];
+      });
     },
   );
 }
@@ -195,6 +225,7 @@ export async function enqueueWorkflowEventRuns(
       routes.map((route) => ({
         id: `workflow_event_run_${randomUUID()}`,
         workflowId: route.workflowId,
+        triggerId: route.triggerId ?? "legacy",
         workspaceId: route.workspaceId,
         userWorkosId: route.userWorkosId,
         workflowSlug: route.workflowSlug,
@@ -210,6 +241,31 @@ export async function enqueueWorkflowEventRuns(
     .onConflictDoNothing()
     .returning({ id: workflowEventRuns.id });
   return rows.length;
+}
+
+function parseAutomationEventTriggers(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((candidate) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return [];
+    const record = candidate as Record<string, unknown>;
+    if (record.type !== "event") return [];
+    const triggerId = asNonEmptyString(record.id);
+    const userWorkosId = asNonEmptyString(record.userWorkosId);
+    const config = parseWorkflowEventConfig(record);
+    const harnessSpec = asRecord(record.harnessSpec) as HarnessSpec | null;
+    if (!triggerId || !userWorkosId || !config || !harnessSpec) return [];
+    const activatedAtValue = asNonEmptyString(record.activatedAt);
+    const activatedAt = activatedAtValue ? new Date(activatedAtValue) : undefined;
+    return [
+      {
+        triggerId,
+        userWorkosId,
+        config,
+        harnessSpec,
+        ...(activatedAt && !Number.isNaN(activatedAt.getTime()) ? { activatedAt } : {}),
+      },
+    ];
+  });
 }
 
 // Declared filters are equality matches on an integration resource id. A filter the author left

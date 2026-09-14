@@ -249,6 +249,8 @@ export const TaskSchema = z
   .openapi("Task");
 
 export const WorkflowStatusSchema = z.enum(["draft", "active"]);
+// Mirrors Skills: a company workflow belongs to the workspace, a personal one only to its creator.
+export const WorkflowScopeSchema = z.enum(["personal", "company"]).openapi("WorkflowScope");
 export const WorkflowStepSchema = z
   .object({
     id: ResourceIdSchema,
@@ -322,6 +324,60 @@ export const WorkflowTriggerInputSchema = z
   ])
   .openapi("WorkflowTriggerInput");
 
+export const WorkflowAutomationTriggerSchema = z
+  .discriminatedUnion("type", [
+    z
+      .object({
+        id: ResourceIdSchema,
+        type: z.literal("event"),
+        provider: z.string().min(1).max(64),
+        event: z.string().min(1).max(128),
+        integrationId: ResourceIdSchema,
+        filters: z.record(z.string().max(64), WorkflowEventFilterValueSchema),
+        prompt: z.string().min(1).max(10_000),
+      })
+      .strict(),
+    z
+      .object({
+        id: ResourceIdSchema,
+        type: z.literal("schedule"),
+        cron: z.string().min(1).max(128),
+        timezone: z.string().min(1).max(128),
+        prompt: z.string().min(1).max(10_000),
+        enabled: z.boolean(),
+        lastRunAt: TimestampSchema.nullable(),
+        nextRunAt: TimestampSchema.nullable(),
+      })
+      .strict(),
+  ])
+  .openapi("WorkflowAutomationTrigger");
+
+export const WorkflowAutomationTriggerInputSchema = z
+  .discriminatedUnion("type", [
+    z
+      .object({
+        id: ResourceIdSchema,
+        type: z.literal("event"),
+        provider: z.string().min(1).max(64),
+        event: z.string().min(1).max(128),
+        integrationId: ResourceIdSchema,
+        filters: z.record(z.string().max(64), WorkflowEventFilterValueSchema),
+        prompt: z.string().max(10_000).optional(),
+      })
+      .strict(),
+    z
+      .object({
+        id: ResourceIdSchema,
+        type: z.literal("schedule"),
+        cron: z.string().min(1).max(128),
+        timezone: z.string().min(1).max(128).optional(),
+        prompt: z.string().max(10_000).optional(),
+        enabled: z.boolean().optional(),
+      })
+      .strict(),
+  ])
+  .openapi("WorkflowAutomationTriggerInput");
+
 export const WorkflowSchema = z
   .object({
     id: ResourceIdSchema,
@@ -332,7 +388,11 @@ export const WorkflowSchema = z
     // refuses to invoke an incomplete definition.
     steps: z.array(WorkflowStepSchema).max(20),
     status: WorkflowStatusSchema,
+    scope: WorkflowScopeSchema,
+    // Null for company workflows created before scopes existed; only an admin can take one personal.
+    createdByUserId: z.string().max(256).nullable(),
     trigger: WorkflowTriggerSchema,
+    triggers: z.array(WorkflowAutomationTriggerSchema).max(20).optional(),
     version: z.number().int().min(1),
     archivedAt: TimestampSchema.nullable(),
     createdAt: TimestampSchema,
@@ -2728,6 +2788,8 @@ export const CreateWorkflowBodySchema = z
   .object({
     name: z.string().min(1).max(64),
     description: z.string().max(1_024).optional(),
+    // Company keeps the pre-scope behavior for clients that do not send a scope yet.
+    scope: WorkflowScopeSchema.optional(),
   })
   .strict()
   .openapi("CreateWorkflowBody");
@@ -2739,7 +2801,10 @@ export const UpdateWorkflowBodySchema = z
     description: z.string().max(1_024),
     steps: z.array(WorkflowStepSchema).min(1).max(20),
     status: WorkflowStatusSchema,
+    // Omitted leaves the current visibility untouched.
+    scope: WorkflowScopeSchema.optional(),
     trigger: WorkflowTriggerInputSchema,
+    triggers: z.array(WorkflowAutomationTriggerInputSchema).max(20).optional(),
   })
   .strict()
   .openapi("UpdateWorkflowBody");
@@ -3613,6 +3678,25 @@ export const WorkspaceRenameEnvelopeSchema = z
   })
   .strict()
   .openapi("WorkspaceRenameEnvelope");
+
+// Machine size for the workspace's cloud coding sandboxes. Mirrors
+// `SANDBOX_SIZES` in @opencompany/core; the wire contract keeps its own literal
+// list so the protocol package stays dependency-free, like
+// ManagedCapabilitySourceSchema above.
+export const SandboxSizeSchema = z.enum(["small", "standard", "large"]);
+
+export const WorkspaceSandboxSizeEnvelopeSchema = z
+  .object({
+    data: z.object({ sandboxSize: SandboxSizeSchema }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("WorkspaceSandboxSizeEnvelope");
+
+export const SetWorkspaceSandboxSizeBodySchema = z
+  .object({ sandboxSize: SandboxSizeSchema })
+  .strict()
+  .openapi("SetWorkspaceSandboxSizeBody");
 
 export const WorkspaceCommandEnvelopeSchema = z
   .object({
@@ -4569,6 +4653,7 @@ export type LegacyTaskHistoryDto = z.infer<typeof LegacyTaskHistoryEnvelopeSchem
 export type TaskReadModel = z.infer<typeof TaskReadModelSchema>;
 export type TaskActivityReadModel = z.infer<typeof TaskActivityReadModelSchema>;
 export type WorkflowDto = z.infer<typeof WorkflowSchema>;
+export type WorkflowScope = z.infer<typeof WorkflowScopeSchema>;
 export type WorkflowReadModel = z.infer<typeof WorkflowReadModelSchema>;
 export type WorkflowScheduleReadModel = z.infer<typeof WorkflowScheduleReadModelSchema>;
 export type TaskScheduleDto = z.infer<typeof TaskScheduleSchema>;

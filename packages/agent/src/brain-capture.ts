@@ -96,7 +96,7 @@ export async function captureToBrainInbox(
   if (text && Buffer.byteLength(text, "utf8") > CAPTURE_TEXT_MAX_BYTES) {
     return {
       ok: false,
-      error: "Capture content is too large. Start a task for large documents.",
+      error: "Capture content is too large. Split it into smaller captures.",
     };
   }
   if (fallbackText && Buffer.byteLength(fallbackText, "utf8") > POINTER_FALLBACK_MAX_BYTES) {

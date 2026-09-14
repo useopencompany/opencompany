@@ -11,6 +11,28 @@ test("normalizePort rejects invalid ports", () => {
   assert.equal(normalizePort("3002"), "3002");
 });
 
+test("findPortListeners falls back to ss when lsof is unavailable", () => {
+  const calls = [];
+  const runCommand = (command, args) => {
+    calls.push([command, args]);
+    if (command === "lsof") {
+      return { error: Object.assign(new Error("spawnSync lsof ENOENT"), { code: "ENOENT" }) };
+    }
+    return {
+      status: 0,
+      stdout:
+        'LISTEN 0 511 127.0.0.1:3002 0.0.0.0:* users:(("node",pid=42,fd=20),("node",pid=42,fd=21))\n',
+      stderr: "",
+    };
+  };
+
+  assert.deepEqual(findPortListeners("3002", { runCommand }), ["42"]);
+  assert.deepEqual(calls, [
+    ["lsof", ["-tiTCP:3002", "-sTCP:LISTEN"]],
+    ["ss", ["-H", "-ltnp", "sport = :3002"]],
+  ]);
+});
+
 test("killPortListeners stops a process listening on a port", async (t) => {
   const child = spawn(
     process.execPath,

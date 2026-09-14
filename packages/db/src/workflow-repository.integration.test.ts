@@ -24,6 +24,8 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 const migrationPaths = [
   "drizzle/0207_goat_headless_workflow_foundation.sql",
   "drizzle/0222_goat_workflow_event_triggers.sql",
+  "drizzle/0275_workflow_personal_company_scope.sql",
+  "drizzle/0277_workflow_multiple_triggers.sql",
 ].map((migration) => path.join(repositoryRoot, migration));
 const dialect = new PgDialect();
 const now = new Date("2026-08-12T08:00:00.000Z");
@@ -37,6 +39,9 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
     workflowVersion: number;
     workflowStepInstructions: string;
     workflowTriggerPrompt: string;
+    workflowTriggerCount: number;
+    workflowScope: string;
+    workflowScopeProjected: boolean;
     workflowProjected: boolean;
     workflowScheduleProjected: boolean;
     taskScheduleVersion: number;
@@ -81,6 +86,9 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
           workflow_version: number;
           workflow_step_instructions: string;
           workflow_trigger_prompt: string;
+          workflow_trigger_count: number;
+          workflow_scope: string;
+          workflow_scope_projected: boolean;
           workflow_projected: boolean;
           workflow_schedule_projected: boolean;
           task_schedule_version: number;
@@ -98,6 +106,12 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
             FROM goat.workflow_read_model_v1 AS projection
             WHERE projection.id = workflow.id
           ) AS workflow_trigger_prompt,
+          jsonb_array_length(workflow.automation_triggers) AS workflow_trigger_count,
+          workflow.scope AS workflow_scope,
+          EXISTS (
+            SELECT 1 FROM goat.workflow_read_model_v1
+            WHERE id = workflow.id AND scope = workflow.scope
+          ) AS workflow_scope_projected,
           EXISTS (
             SELECT 1 FROM goat.workflow_read_model_v1
             WHERE id = workflow.id AND steps->0->>'instructions' = workflow.instructions
@@ -121,6 +135,9 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
         workflowVersion: migrationRow?.workflow_version ?? 0,
         workflowStepInstructions: migrationRow?.workflow_step_instructions ?? "",
         workflowTriggerPrompt: migrationRow?.workflow_trigger_prompt ?? "",
+        workflowTriggerCount: migrationRow?.workflow_trigger_count ?? 0,
+        workflowScope: migrationRow?.workflow_scope ?? "",
+        workflowScopeProjected: migrationRow?.workflow_scope_projected ?? false,
         workflowProjected: migrationRow?.workflow_projected ?? false,
         workflowScheduleProjected: migrationRow?.workflow_schedule_projected ?? false,
         taskScheduleVersion: migrationRow?.task_schedule_version ?? 0,
@@ -137,12 +154,13 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
       DELETE FROM goat.users;
       DELETE FROM goat.workspaces;
       INSERT INTO goat.users (workos_user_id, task_spawning_enabled)
-      VALUES ('user_1', true), ('user_2', true), ('user_disabled', false);
+      VALUES ('user_1', true), ('user_2', true), ('user_teammate', true), ('user_disabled', false);
       INSERT INTO goat.workspaces (id) VALUES ('workspace_1'), ('workspace_2');
       INSERT INTO goat.workspace_members (id, workspace_id, user_workos_id, role)
       VALUES
         ('member_1', 'workspace_1', 'user_1', 'admin'),
         ('member_2', 'workspace_2', 'user_2', 'admin'),
+        ('member_teammate', 'workspace_1', 'user_teammate', 'member'),
         ('member_disabled', 'workspace_1', 'user_disabled', 'member');
     `);
     });
@@ -188,6 +206,10 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
       workflowVersion: 1,
       workflowStepInstructions: "Preserve these instructions.",
       workflowTriggerPrompt: "Run the legacy workflow.",
+      workflowTriggerCount: 1,
+      // Workflows that predate scopes belong to the whole workspace.
+      workflowScope: "company",
+      workflowScopeProjected: true,
       workflowProjected: true,
       workflowScheduleProjected: true,
       taskScheduleVersion: 1,
@@ -236,6 +258,133 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
         [first.workflow.id],
       ),
     ).resolves.toMatchObject({ rows: [{ count: 1 }] });
+  });
+
+  it("keeps personal Workflows out of every teammate read and mutation", async () => {
+    const teammate = actor({ userId: "user_teammate", role: "member" });
+    const personal = await workflows.createWorkflow(actor(), {
+      idempotencyKey: "workflow-personal-1",
+      name: "Morning digest",
+      scope: "personal",
+    });
+    const company = await workflows.createWorkflow(actor(), {
+      idempotencyKey: "workflow-company-1",
+      name: "Weekly research",
+      scope: "company",
+    });
+
+    expect(personal.workflow).toMatchObject({ scope: "personal", createdByUserId: "user_1" });
+    expect(company.workflow).toMatchObject({ scope: "company", createdByUserId: "user_1" });
+    await expect(workflows.listWorkflows(teammate, { limit: 10 })).resolves.toMatchObject({
+      workflows: [{ id: company.workflow.id }],
+    });
+    await expect(workflows.getWorkflow(teammate, personal.workflow.id)).rejects.toMatchObject({
+      code: "not_found",
+    });
+    await expect(
+      workflows.archiveWorkflow(teammate, personal.workflow.id, 1),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      workflows.updateWorkflow(teammate, personal.workflow.id, {
+        expectedVersion: 1,
+        name: "Stolen",
+        description: "",
+        steps: personal.workflow.steps,
+        status: "draft",
+        trigger: { type: "manual" },
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    // Electric filters the shape on the projected columns, so they have to carry the owner too.
+    await expect(
+      database.query<{ scope: string; created_by_workos_id: string }>(
+        `SELECT scope, created_by_workos_id FROM goat.workflow_read_model_v1 WHERE id = $1`,
+        [personal.workflow.id],
+      ),
+    ).resolves.toMatchObject({
+      rows: [{ scope: "personal", created_by_workos_id: "user_1" }],
+    });
+  });
+
+  it("lets the creator share a personal Workflow and refuses a teammate the same change", async () => {
+    const created = await workflows.createWorkflow(actor(), {
+      idempotencyKey: "workflow-share-1",
+      name: "Morning digest",
+      scope: "personal",
+    });
+    const definition = {
+      name: "Morning digest",
+      description: "",
+      steps: created.workflow.steps,
+      status: "draft" as const,
+      trigger: { type: "manual" as const },
+    };
+
+    const shared = await workflows.updateWorkflow(actor(), created.workflow.id, {
+      ...definition,
+      expectedVersion: 1,
+      scope: "company",
+    });
+    expect(shared.workflow).toMatchObject({ scope: "company", createdByUserId: "user_1" });
+
+    // A member can edit a company workflow, but taking someone else's back to personal is not theirs.
+    await expect(
+      workflows.updateWorkflow(
+        actor({ userId: "user_teammate", role: "member" }),
+        shared.workflow.id,
+        {
+          ...definition,
+          expectedVersion: 2,
+          scope: "personal",
+        },
+      ),
+    ).rejects.toMatchObject({ code: "forbidden" });
+  });
+
+  it("refuses an admin someone else's workflow but lets one claim a workflow with no creator", async () => {
+    const admin = actor({ role: "admin" });
+    const teammate = actor({ userId: "user_teammate", role: "member" });
+    const owned = await workflows.createWorkflow(teammate, {
+      idempotencyKey: "workflow-admin-1",
+      name: "Teammate digest",
+      scope: "company",
+    });
+    const definition = {
+      description: "",
+      steps: owned.workflow.steps,
+      status: "draft" as const,
+      trigger: { type: "manual" as const },
+    };
+
+    // A scheduled workflow fires as a specific user, so an admin must not be able to hand a
+    // teammate's workflow to a private library it would keep running out of.
+    await expect(
+      workflows.updateWorkflow(admin, owned.workflow.id, {
+        ...definition,
+        name: "Teammate digest",
+        expectedVersion: 1,
+        scope: "personal",
+      }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+
+    await database.query(
+      `INSERT INTO goat.workflows (
+         id, workspace_id, slug, name, description, instructions, model, steps,
+         trigger, schedule_timezone, schedule_prompt, schedule_enabled, status,
+         created_by_workos_id, version, created_at, updated_at
+       ) VALUES (
+         'workflow_legacy', 'workspace_1', 'legacy-digest', 'Legacy digest', '', '', '',
+         '[]'::jsonb, 'manual', 'UTC', '', false, 'draft', NULL, 1, $1, $1
+       )`,
+      [now],
+    );
+    const claimed = await workflows.updateWorkflow(admin, "workflow_legacy", {
+      ...definition,
+      name: "Legacy digest",
+      steps: [{ id: "step_1", title: "", model: "", instructions: "" }],
+      expectedVersion: 1,
+      scope: "personal",
+    });
+    expect(claimed.workflow).toMatchObject({ scope: "personal", createdByUserId: "user_1" });
   });
 
   it("paginates Workflow and Recurring Task resources with actor-scoped opaque cursors", async () => {
@@ -470,6 +619,64 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
         },
       ],
     });
+  });
+
+  it("persists multiple independently executable triggers", async () => {
+    const created = await workflows.createWorkflow(actor(), {
+      idempotencyKey: "multi-trigger-workflow",
+      name: "Issue digest",
+    });
+    const eventTrigger = {
+      id: "trigger_event",
+      type: "event" as const,
+      provider: "linear",
+      event: "issue.created",
+      integrationId: "connection_1",
+      filters: {},
+      prompt: "Review the issue.",
+    };
+    const scheduleTrigger = {
+      id: "trigger_schedule",
+      type: "schedule" as const,
+      cron: "0 9 * * 1",
+      timezone: "UTC",
+      prompt: "Write the weekly digest.",
+      enabled: true,
+    };
+
+    const updated = await workflows.updateWorkflow(actor(), created.workflow.id, {
+      expectedVersion: 1,
+      name: "Issue digest",
+      description: "",
+      steps: [
+        {
+          id: "step_1",
+          title: "Digest",
+          model: "provider/model",
+          instructions: "Review issues and write a digest.",
+        },
+      ],
+      status: "active",
+      trigger: eventTrigger,
+      triggers: [eventTrigger, scheduleTrigger],
+    });
+
+    expect(updated.workflow.triggers).toEqual([
+      expect.objectContaining({ id: "trigger_event", type: "event" }),
+      expect.objectContaining({ id: "trigger_schedule", type: "schedule" }),
+    ]);
+    await expect(
+      database.query<{ trigger_ids: string[] }>(
+        `SELECT ARRAY(
+           SELECT trigger.value->>'id'
+           FROM goat.workflows workflow,
+             jsonb_array_elements(workflow.automation_triggers) trigger(value)
+           WHERE workflow.id = $1
+           ORDER BY trigger.value->>'id'
+         ) AS trigger_ids`,
+        [created.workflow.id],
+      ),
+    ).resolves.toMatchObject({ rows: [{ trigger_ids: ["trigger_event", "trigger_schedule"] }] });
   });
 
   it("preserves activation for instruction edits and resets it for routing changes and reactivation", async () => {

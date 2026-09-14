@@ -50,14 +50,20 @@ controls and a 1M-token context window. Claude Sonnet 5 remains the default.
 Manual, Workflow, schedule, and agent producers call shared application services. Creation writes a
 Task, its Conversation, initial Message, and Run atomically. Follow-ups use the Message command and
 cancellation targets the active Run. The runner applies per-Conversation FIFO, fenced leases, retries,
-and terminal settlement. An opencompany Task turn uses the same host-tool contract and runtime tool
-composition as an interactive opencompany turn, with task delegation and schedule tools restricted
-to main Chat conversations. The persisted host service checks the conversation kind on every call,
-so a Task cannot create another Task, start a Workflow, or manage schedules even through a direct
-tool request. Task bootstraps omit these tools and their routing instructions. The Task context adds
-autonomous-run instructions, larger call budgets, and the headless action catalog. All Task engines
-support one-time approval of connected actions set to Ask; headless callers without a durable Task
-still deny these requests.
+and terminal settlement.
+
+Main Chat cannot create a one-off Task. The agent's delegation move is `start_workflow`, which runs
+an active workspace Workflow as a tracked Task, plus the recurring-schedule tools. There is no
+`start_task` operation in the host-tool contract, so the capability cannot be reached from any chat
+surface; `POST /v1/tasks` remains the producer for manual Task creation outside the agent loop.
+
+An opencompany Task turn uses the same host-tool contract and runtime tool composition as an
+interactive opencompany turn, with Workflow and schedule tools restricted to main Chat
+conversations. The persisted host service checks the conversation kind on every call, so a Task
+cannot start a Workflow or manage schedules even through a direct tool request. Task bootstraps omit
+these tools and their routing instructions. The Task context adds autonomous-run instructions,
+larger call budgets, and the headless action catalog. All Task engines support one-time approval of
+connected actions set to Ask; headless callers without a durable Task still deny these requests.
 The opencompany engine uses its existing AI SDK approval continuation: the Run and Task pause for
 the user's decision, then the same tool call resumes with the recorded approval or denial.
 For Codex and Claude Code Tasks, the runner
@@ -67,6 +73,13 @@ The runner claims and executes the saved invocation before resuming the engine w
 Repeated requests for the same action and inputs reuse the result within that Run; changed inputs
 require a new approval. If a worker dies after claiming an external write but before recording its
 result, recovery reports an uncertain outcome for inspection and does not repeat the write.
+
+Workflows carry the same visibility model as Skills. A company workflow belongs to the workspace:
+every member sees it, runs it with `#`, and can edit it. A personal workflow is visible only to its
+creator, who is also the only one who can run or edit it. Workflows created before visibility
+existed are company workflows. Only the creator — or an admin, for a workflow with no recorded
+creator — can change a workflow's visibility. A workflow can be fired by anyone who can see it, so
+it still draws Skills from the company scope only, whatever its own visibility.
 
 Workflows start as Draft and can save steps without instructions. Activation requires instructions
 in every step for manual, scheduled, and event triggers. In the editor, adding an empty step or

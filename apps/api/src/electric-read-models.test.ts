@@ -1363,6 +1363,8 @@ describe("Electric read models", () => {
           },
         ]),
         status: "active",
+        scope: "company",
+        created_by_workos_id: "user_1",
         trigger: JSON.stringify({
           type: "schedule",
           cron: "0 9 * * 1",
@@ -1450,7 +1452,10 @@ describe("Electric read models", () => {
       "goat.workflow_schedule_read_model_v1",
       "goat.task_schedule_read_model_v1",
     ]);
-    expect(requestedUrls[0]?.searchParams.get("where")).toBe('"workspace_id" = $1');
+    // Personal workflows belong to their creator, so the shape itself withholds a teammate's.
+    expect(requestedUrls[0]?.searchParams.get("where")).toBe(
+      '"workspace_id" = $1 AND ("scope" = \'company\' OR "created_by_workos_id" = $2)',
+    );
     expect(requestedUrls[2]?.searchParams.get("where")).toContain('"actor_id" = $1');
     expect(requestedUrls[2]?.searchParams.get("where")).toContain('"workspace_id" IS NULL');
     expect((await workflowResponse.json())[0]?.value).toEqual({
@@ -1467,6 +1472,8 @@ describe("Electric read models", () => {
         },
       ],
       status: "active",
+      scope: "company",
+      createdByUserId: "user_1",
       trigger: {
         type: "schedule",
         cron: "0 9 * * 1",

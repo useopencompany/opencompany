@@ -103,7 +103,10 @@ import {
   loadCodingChatHistory,
 } from "./coding-chat-history";
 import { codingChatSkillPromptLines } from "./coding-chat-skills";
-import { settledCodingSandboxIdleTimeoutMs } from "./coding-sandbox-lifecycle";
+import {
+  codingSandboxTemplate,
+  settledCodingSandboxIdleTimeoutMs,
+} from "./coding-sandbox-lifecycle";
 import { CODING_WORKSPACE_SANDBOX_NETWORK } from "./coding-workspace-runtime";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
@@ -414,7 +417,7 @@ export async function runClaudeCodeChatTurn(input: {
         userWorkosId: turn.userWorkosId,
         namespace: env.sandboxNamespace,
       },
-      template: env.codexE2bTemplate ?? "codex",
+      template: codingSandboxTemplate(env.codexE2bTemplates, session.sandboxSize),
       envs: {},
       metadata: managedSandboxMetadata({
         namespace: env.sandboxNamespace,

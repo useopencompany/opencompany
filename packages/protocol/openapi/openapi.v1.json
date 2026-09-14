@@ -998,8 +998,23 @@
               "active"
             ]
           },
+          "scope": {
+            "$ref": "#/components/schemas/WorkflowScope"
+          },
+          "createdByUserId": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 256
+          },
           "trigger": {
             "$ref": "#/components/schemas/WorkflowTrigger"
+          },
+          "triggers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkflowAutomationTrigger"
+            },
+            "maxItems": 20
           },
           "version": {
             "type": "integer",
@@ -1026,6 +1041,8 @@
           "description",
           "steps",
           "status",
+          "scope",
+          "createdByUserId",
           "trigger",
           "version",
           "archivedAt",
@@ -1073,6 +1090,13 @@
           "instructions"
         ],
         "additionalProperties": false
+      },
+      "WorkflowScope": {
+        "type": "string",
+        "enum": [
+          "personal",
+          "company"
+        ]
       },
       "WorkflowTrigger": {
         "oneOf": [
@@ -1218,6 +1242,149 @@
           }
         ]
       },
+      "WorkflowAutomationTrigger": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "event"
+                ]
+              },
+              "provider": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "event": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "integrationId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "filters": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "key": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "metadata": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string",
+                        "maxLength": 256
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "prompt": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 10000
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "provider",
+              "event",
+              "integrationId",
+              "filters",
+              "prompt"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "schedule"
+                ]
+              },
+              "cron": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "timezone": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "prompt": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 10000
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "lastRunAt": {
+                "type": "string",
+                "nullable": true,
+                "format": "date-time"
+              },
+              "nextRunAt": {
+                "type": "string",
+                "nullable": true,
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "cron",
+              "timezone",
+              "prompt",
+              "enabled",
+              "lastRunAt",
+              "nextRunAt"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
       "WorkflowMutationEnvelope": {
         "type": "object",
         "properties": {
@@ -1263,6 +1430,9 @@
           "description": {
             "type": "string",
             "maxLength": 1024
+          },
+          "scope": {
+            "$ref": "#/components/schemas/WorkflowScope"
           }
         },
         "required": [
@@ -1347,8 +1517,18 @@
               "active"
             ]
           },
+          "scope": {
+            "$ref": "#/components/schemas/WorkflowScope"
+          },
           "trigger": {
             "$ref": "#/components/schemas/WorkflowTriggerInput"
+          },
+          "triggers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkflowAutomationTriggerInput"
+            },
+            "maxItems": 20
           }
         },
         "required": [
@@ -1480,6 +1660,131 @@
               }
             },
             "required": [
+              "type",
+              "cron"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "WorkflowAutomationTriggerInput": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "event"
+                ]
+              },
+              "provider": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "event": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "integrationId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "filters": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "key": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "metadata": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string",
+                        "maxLength": 256
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "prompt": {
+                "type": "string",
+                "maxLength": 10000
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "provider",
+              "event",
+              "integrationId",
+              "filters"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "schedule"
+                ]
+              },
+              "cron": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "timezone": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "prompt": {
+                "type": "string",
+                "maxLength": 10000
+              },
+              "enabled": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
               "type",
               "cron"
             ],
@@ -4745,6 +5050,53 @@
         },
         "required": [
           "name"
+        ],
+        "additionalProperties": false
+      },
+      "WorkspaceSandboxSizeEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "sandboxSize": {
+                "type": "string",
+                "enum": [
+                  "small",
+                  "standard",
+                  "large"
+                ]
+              }
+            },
+            "required": [
+              "sandboxSize"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SetWorkspaceSandboxSizeBody": {
+        "type": "object",
+        "properties": {
+          "sandboxSize": {
+            "type": "string",
+            "enum": [
+              "small",
+              "standard",
+              "large"
+            ]
+          }
+        },
+        "required": [
+          "sandboxSize"
         ],
         "additionalProperties": false
       },
@@ -17294,6 +17646,88 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/WorkspaceRenameEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/workspace/sandbox-size": {
+      "get": {
+        "tags": [
+          "Workspaces"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Machine size new cloud coding sandboxes start on in the active workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceSandboxSizeEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Workspaces"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetWorkspaceSandboxSizeBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Workspace sandbox size updated. Admin only. Existing sessions keep the size they started with.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceSandboxSizeEnvelope"
                 }
               }
             }

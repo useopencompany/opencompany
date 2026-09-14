@@ -12,7 +12,7 @@ const bootstrap: ChatHostBootstrap = {
     timezone: "Europe/London",
   },
   workspaceName: "Analytical Engines",
-  taskToolsEnabled: true,
+  automationToolsEnabled: true,
   skillToolsEnabled: true,
   subagentsEnabled: false,
   browserToolsEnabled: true,
@@ -31,11 +31,16 @@ const bootstrap: ChatHostBootstrap = {
 };
 
 describe("loadHostTools", () => {
-  it("keeps task execution tools but removes delegation tools and routing instructions", async () => {
+  it("keeps task execution tools but removes automation tools and routing instructions", async () => {
     const hostTools = await loadHostTools(context(), {
       execute: async () => ({
         ok: true,
-        result: { ...bootstrap, taskToolsEnabled: false, workflows: [], recurringSchedules: [] },
+        result: {
+          ...bootstrap,
+          automationToolsEnabled: false,
+          workflows: [],
+          recurringSchedules: [],
+        },
       }),
     });
     assert(hostTools);
@@ -45,7 +50,6 @@ describe("loadHostTools", () => {
       runWiki: hostTools.runWiki as never,
     });
     for (const name of [
-      "start_task",
       "start_workflow",
       "schedule_task",
       "edit_task_schedule",
@@ -58,13 +62,41 @@ describe("loadHostTools", () => {
     expect(tools).toHaveProperty("list_skills");
 
     const prompt = createProductChatSystemPrompt({
-      taskToolsEnabled: hostTools.bootstrap.taskToolsEnabled,
-      scheduleToolsEnabled: hostTools.bootstrap.taskToolsEnabled,
+      automationToolsEnabled: hostTools.bootstrap.automationToolsEnabled,
+      scheduleToolsEnabled: hostTools.bootstrap.automationToolsEnabled,
       workflows: hostTools.bootstrap.workflows,
     });
-    expect(prompt).not.toContain("still call the task tool instead of refusing");
-    expect(prompt).not.toContain("start_task");
     expect(prompt).not.toContain("start_workflow");
+  });
+
+  it("never composes a one-off task tool for a main chat with automation enabled", async () => {
+    const hostTools = await loadHostTools(context(), {
+      execute: async () => ({ ok: true, result: bootstrap }),
+    });
+    assert(hostTools);
+    const { tools } = createProductChatToolContext({
+      model: "moonshotai/kimi-k2.6" as never,
+      ...hostTools,
+      runWiki: hostTools.runWiki as never,
+    });
+
+    expect(tools).not.toHaveProperty("start_task");
+    for (const name of [
+      "start_workflow",
+      "schedule_task",
+      "edit_task_schedule",
+      "delete_task_schedule",
+    ]) {
+      expect(tools).toHaveProperty(name);
+    }
+
+    const prompt = createProductChatSystemPrompt({
+      automationToolsEnabled: hostTools.bootstrap.automationToolsEnabled,
+      scheduleToolsEnabled: hostTools.bootstrap.automationToolsEnabled,
+      workflows: hostTools.bootstrap.workflows,
+    });
+    expect(prompt).not.toContain("start_task");
+    expect(prompt).toContain("You cannot start a one-off task");
   });
 
   it("composes shared tools and authenticated browser profiles through one persisted service", async () => {
@@ -98,15 +130,6 @@ describe("loadHostTools", () => {
     await expect(
       tools?.browserTools?.({ name: "browser_open", args: { url: "https://github.com" } }),
     ).resolves.toMatchObject({ ok: true, output: "opened" });
-    await tools?.startTask?.(
-      {
-        name: "Review code",
-        prompt: "Review the code.",
-        model: "openai/gpt-5.6-sol",
-        engine: "codex",
-      },
-      { toolCallId: "call_task_1" },
-    );
     await tools?.createWorkspaceSkill?.(
       {
         name: "customer-health-review",
@@ -133,36 +156,27 @@ describe("loadHostTools", () => {
       "bootstrap",
       "browser_use_profile",
       "browser",
-      "start_task",
       "create_workspace_skill",
       "edit_workspace_skill",
       "write_artifact",
       "browser_end_profile",
     ]);
     expect(requests[3]).toMatchObject({
-      operation: "start_task",
-      toolCallId: "call_task_1",
-      input: {
-        model: "openai/gpt-5.6-sol",
-        engine: "codex",
-      },
-    });
-    expect(requests[4]).toMatchObject({
       operation: "create_workspace_skill",
       toolCallId: "call_skill_1",
       input: { name: "customer-health-review" },
     });
-    expect(requests[5]).toMatchObject({
+    expect(requests[4]).toMatchObject({
       operation: "edit_workspace_skill",
       toolCallId: "call_skill_edit_1",
       input: { name: "add-mcp-provider-plugin" },
     });
-    expect(requests[6]).toMatchObject({
+    expect(requests[5]).toMatchObject({
       operation: "write_artifact",
       toolCallId: "call_artifact_1",
       input: { filename: "report.md", title: "Report", content: "# Report" },
     });
-    expect(execute).toHaveBeenCalledTimes(8);
+    expect(execute).toHaveBeenCalledTimes(7);
   });
 
   it("does not call the web origin", async () => {

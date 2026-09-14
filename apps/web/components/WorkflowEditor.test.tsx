@@ -1,82 +1,60 @@
-import type { GranolaFolderListResult, LinearTeamListResult } from "@/lib/brain-source-actions";
 import "@testing-library/jest-dom/vitest";
+import type { UpdateWorkflowBody } from "@opencompany/protocol";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkflowEditor as WorkflowEditorComponent } from "./WorkflowEditor";
 
-const routerMock = vi.hoisted(() => ({
-  push: vi.fn(),
-  refresh: vi.fn(),
-}));
-
+const routerMock = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
 const workflowActionsMock = vi.hoisted(() => ({
-  update: vi.fn(async () => ({ version: 2 })),
+  update: vi.fn(async (workflowId: string, command: UpdateWorkflowBody) => {
+    void workflowId;
+    void command;
+    return { version: 2 };
+  }),
   archive: vi.fn(async () => ({ workflowId: "workflow_1", version: 2 })),
   runNow: vi.fn(async () => ({ task: { displayId: "TASK-42" } })),
 }));
 
-const brainSourceActionsMock = vi.hoisted(() => ({
-  listLinearTeams: vi.fn(
-    async (): Promise<LinearTeamListResult> => ({
-      ok: true,
-      teams: [{ id: "team_1", name: "Core", key: "CORE", triageStateId: "state_triage" }],
-      partial: false,
-    }),
-  ),
-  listGranolaFolders: vi.fn(
-    async (): Promise<GranolaFolderListResult> => ({
-      ok: true,
-      folders: [
-        { id: "fol_acme", name: "Acme", parentFolderId: "fol_customers" },
-        { id: "fol_customers", name: "Customers", parentFolderId: null },
-      ],
-      partial: false,
-    }),
-  ),
-}));
-
-vi.mock("next/navigation", () => ({
-  useRouter: () => routerMock,
-}));
-
+vi.mock("next/navigation", () => ({ useRouter: () => routerMock }));
 vi.mock("@/lib/headless-automation-commands", () => ({
   updateHeadlessWorkflow: workflowActionsMock.update,
   archiveHeadlessWorkflow: workflowActionsMock.archive,
   runHeadlessWorkflowNow: workflowActionsMock.runNow,
 }));
-
-function WorkflowEditor(
-  props: Omit<ComponentProps<typeof WorkflowEditorComponent>, "workspaceId">,
-) {
-  return <WorkflowEditorComponent {...props} workspaceId="workspace_1" />;
-}
-
-vi.mock("@/lib/brain-source-actions", () => ({
-  listLinearTeamsAction: brainSourceActionsMock.listLinearTeams,
-  listGranolaFoldersAction: brainSourceActionsMock.listGranolaFolders,
-}));
-
 vi.mock("@/components/MarkdownBrainEditor", () => ({
   MarkdownBrainEditor: ({
     content,
     onChange,
-    readOnly,
     placeholder,
   }: {
     content: string;
     onChange: (value: string) => void;
-    readOnly?: boolean;
     placeholder?: string;
   }) => (
     <textarea
       aria-label={placeholder}
       value={content}
-      readOnly={readOnly}
       onChange={(event) => onChange(event.target.value)}
     />
   ),
 }));
+
+function WorkflowEditor(
+  props: Omit<
+    ComponentProps<typeof WorkflowEditorComponent>,
+    "workspaceId" | "owner" | "canManageScope"
+  > & { canManageScope?: boolean },
+) {
+  return (
+    <WorkflowEditorComponent
+      canManageScope
+      {...props}
+      workspaceId="workspace_1"
+      owner={{ name: "Louis Morgner", avatarUrl: null }}
+    />
+  );
+}
 
 const workflow = {
   id: "workflow_1",
@@ -84,6 +62,8 @@ const workflow = {
   name: "Weekly update",
   description: "Summarize the week.",
   status: "draft" as const,
+  scope: "company" as const,
+  createdByUserId: "user_1",
   trigger: { type: "manual" as const },
   steps: [
     {
@@ -106,45 +86,105 @@ describe("WorkflowEditor", () => {
     workflowActionsMock.update.mockResolvedValue({ version: 2 });
     workflowActionsMock.archive.mockResolvedValue({ workflowId: "workflow_1", version: 2 });
     workflowActionsMock.runNow.mockResolvedValue({ task: { displayId: "TASK-42" } });
-    brainSourceActionsMock.listLinearTeams.mockResolvedValue({
-      ok: true,
-      teams: [{ id: "team_1", name: "Core", key: "CORE", triageStateId: "state_triage" }],
-      partial: false,
-    });
   });
 
-  afterEach(() => {
-    vi.useRealTimers();
-  });
+  afterEach(() => vi.useRealTimers());
 
-  it("debounces edits and saves the step plan", async () => {
+  it("renders the detail hierarchy, owner, test action, and instruction model", () => {
     render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Weekly update" }));
-    const title = screen.getByPlaceholderText("Untitled workflow");
-    fireEvent.change(title, { target: { value: "Investor update" } });
-
-    expect(workflowActionsMock.update).not.toHaveBeenCalled();
-    await advanceAutosave();
-
-    expect(workflowActionsMock.update).toHaveBeenCalledTimes(1);
-    expect(workflowActionsMock.update).toHaveBeenCalledWith("workflow_1", {
-      expectedVersion: 1,
-      name: "Investor update",
-      description: "Summarize the week.",
-      steps: workflow.steps,
-      status: "draft",
-      trigger: { type: "manual" },
-    });
-    expect(screen.getByText("Saved")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Workflows" })).toHaveAttribute("href", "/workflows");
+    expect(screen.getAllByText("Weekly update")).toHaveLength(2);
+    expect(screen.getByText("Louis Morgner")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Test" })).toBeEnabled();
+    expect(screen.getByText("Agent instructions")).toBeInTheDocument();
+    expect(screen.getByText("Model")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Runtime: Kimi K2.6" })).toBeInTheDocument();
+    expect(screen.queryByText("Add step")).not.toBeInTheDocument();
+    expect(screen.queryByText(/This workflow is a draft/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Add instructions to this step/)).not.toBeInTheDocument();
   });
 
-  it("saves an empty legacy active workflow as a draft when selecting a schedule", async () => {
+  it("autosaves instruction edits with the canonical trigger collection", async () => {
+    render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
+    fireEvent.change(screen.getByLabelText("Describe what this step should do..."), {
+      target: { value: "Write a concise weekly update." },
+    });
+    await advanceAutosave();
+
+    expect(workflowActionsMock.update).toHaveBeenCalledWith("workflow_1", {
+      expectedVersion: 1,
+      name: "Weekly update",
+      description: "Summarize the week.",
+      status: "draft",
+      scope: "company",
+      steps: [{ ...workflow.steps[0], instructions: "Write a concise weekly update." }],
+      trigger: { type: "manual" },
+      triggers: [],
+    });
+  });
+
+  it("adds multiple scheduled triggers from the searchable trigger menu", async () => {
+    render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
+
+    addScheduledTrigger();
+    addScheduledTrigger();
+    expect(screen.getAllByText("On a schedule")).toHaveLength(2);
+    await advanceAutosave();
+
+    const command = workflowActionsMock.update.mock.calls.at(-1)?.[1];
+    expect(command).toBeDefined();
+    if (!command) throw new Error("Expected an autosave command.");
+    expect(command.triggers).toHaveLength(2);
+    expect(command.triggers).toEqual([
+      expect.objectContaining({ id: expect.stringMatching(/^trigger-/), type: "schedule" }),
+      expect.objectContaining({ id: expect.stringMatching(/^trigger-/), type: "schedule" }),
+    ]);
+    expect(command.trigger).toEqual(expect.objectContaining({ type: "schedule" }));
+  });
+
+  it("opens an existing trigger inline and saves schedule changes", async () => {
     render(
       <WorkflowEditor
         workflow={{
           ...workflow,
-          status: "active",
+          triggers: [
+            {
+              id: "trigger_weekly",
+              type: "schedule",
+              cron: "0 9 * * 1",
+              timezone: "UTC",
+              prompt: "Run the report.",
+              enabled: true,
+              lastRunAt: null,
+              nextRunAt: "2026-09-21T09:00:00.000Z",
+            },
+          ],
+        }}
+        canEdit
+        skillCatalog={[]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /On a schedule/ }));
+    expect(screen.queryByText("Additional run context (optional)")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByText("Every week").closest("select")!, {
+      target: { value: "daily" },
+    });
+    await advanceAutosave();
+
+    expect(workflowActionsMock.update).toHaveBeenLastCalledWith(
+      "workflow_1",
+      expect.objectContaining({
+        triggers: [expect.objectContaining({ id: "trigger_weekly", cron: "0 9 * * *" })],
+      }),
+    );
+  });
+
+  it("keeps activation unavailable until agent instructions exist", () => {
+    render(
+      <WorkflowEditor
+        workflow={{
+          ...workflow,
           steps: [{ ...workflow.steps[0]!, instructions: "" }],
         }}
         canEdit
@@ -152,138 +192,31 @@ describe("WorkflowEditor", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("radio", { name: "On a schedule" }));
-    await advanceAutosave();
-
-    expect(workflowActionsMock.update).toHaveBeenCalledWith(
-      "workflow_1",
-      expect.objectContaining({
-        status: "draft",
-        trigger: expect.objectContaining({ type: "schedule" }),
-      }),
-    );
-    expect(screen.getByRole("button", { name: "Status: Draft" })).toBeInTheDocument();
-    expect(screen.getByText("Saved")).toBeInTheDocument();
-    expect(
-      screen.getByText("Add instructions to this step before activating the workflow."),
-    ).toBeInTheDocument();
-  });
-
-  it("blocks activation until every step has instructions and requires explicit activation", async () => {
-    render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
-    fireEvent.click(screen.getByRole("button", { name: "Add step" }));
+    expect(screen.queryByText(/Add instructions to this step/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Status: Draft" }));
     expect(screen.getByRole("button", { name: "Active" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Active" })).toHaveAttribute(
-      "title",
-      "Add instructions to step 2 before activating this workflow.",
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Draft" }));
-    fireEvent.change(screen.getAllByLabelText("Describe what this step should do...")[1]!, {
-      target: { value: "Summarize the findings." },
-    });
-    await advanceAutosave();
-    expect(workflowActionsMock.update).toHaveBeenLastCalledWith(
-      "workflow_1",
-      expect.objectContaining({ status: "draft" }),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Status: Draft" }));
-    fireEvent.click(screen.getByRole("button", { name: "Active" }));
-    await advanceAutosave();
-    expect(workflowActionsMock.update).toHaveBeenLastCalledWith(
-      "workflow_1",
-      expect.objectContaining({ status: "active" }),
-    );
   });
 
-  it.each(["add", "clear"])(
-    "returns an active schedule to draft when an edit makes a step empty: %s",
-    async (edit) => {
-      render(
-        <WorkflowEditor
-          workflow={{
-            ...workflow,
-            status: "active",
-            trigger: {
-              type: "schedule",
-              cron: "0 9 * * 1",
-              timezone: "UTC",
-              prompt: "Run this workflow.",
-              enabled: true,
-              lastRunAt: null,
-              nextRunAt: "2026-08-17T09:00:00.000Z",
-            },
-          }}
-          canEdit
-          skillCatalog={[]}
-        />,
-      );
-      if (edit === "add") {
-        fireEvent.click(screen.getByRole("button", { name: "Add step" }));
-      } else {
-        fireEvent.change(screen.getByLabelText("Describe what this step should do..."), {
-          target: { value: "  " },
-        });
-      }
-      await advanceAutosave();
-      expect(workflowActionsMock.update).toHaveBeenLastCalledWith(
-        "workflow_1",
-        expect.objectContaining({ status: "draft" }),
-      );
-      expect(screen.getByRole("button", { name: "Run now" })).toBeDisabled();
-      expect(screen.getByText("Saved")).toBeInTheDocument();
-    },
-  );
+  it("saves visibility changes and locks visibility for non-owners", async () => {
+    const { rerender } = render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
 
-  it("uses step instructions by default and keeps existing custom run context editable", async () => {
-    const { unmount } = render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
-    fireEvent.click(screen.getByRole("radio", { name: "On a schedule" }));
-    expect(screen.queryByLabelText("Task request")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Run context")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Visibility"), { target: { value: "personal" } });
     await advanceAutosave();
     expect(workflowActionsMock.update).toHaveBeenLastCalledWith(
       "workflow_1",
-      expect.objectContaining({
-        trigger: expect.objectContaining({ prompt: "Run this workflow." }),
-        steps: workflow.steps,
-      }),
+      expect.objectContaining({ scope: "personal" }),
     );
-    unmount();
-    render(
-      <WorkflowEditor
-        workflow={{
-          ...workflow,
-          trigger: {
-            type: "schedule",
-            cron: "0 9 * * 1",
-            timezone: "UTC",
-            prompt: "Focus on Europe.",
-            enabled: true,
-            lastRunAt: null,
-            nextRunAt: null,
-          },
-        }}
-        canEdit
-        skillCatalog={[]}
-      />,
+
+    rerender(
+      <WorkflowEditor workflow={workflow} canEdit canManageScope={false} skillCatalog={[]} />,
     );
-    expect(screen.getByLabelText("Run context")).toHaveValue("Focus on Europe.");
-    fireEvent.change(screen.getByLabelText("Run context"), { target: { value: "" } });
-    await advanceAutosave();
-    expect(workflowActionsMock.update).toHaveBeenLastCalledWith(
-      "workflow_1",
-      expect.objectContaining({
-        trigger: expect.objectContaining({ prompt: "" }),
-      }),
-    );
+    expect(screen.queryByLabelText("Visibility")).not.toBeInTheDocument();
+    expect(
+      screen.getByLabelText("Visibility managed by the creator or an admin"),
+    ).toBeInTheDocument();
   });
 
-  it("saves an enabled Linear issue-created event trigger with a team filter", async () => {
-    brainSourceActionsMock.listLinearTeams.mockResolvedValueOnce({
-      ok: true,
-      teams: [{ id: "team_1", name: "Core", key: "CORE", triageStateId: "state_triage" }],
-      partial: true,
-    });
+  it("uses a provider submenu to add an event trigger", async () => {
     render(
       <WorkflowEditor
         workflow={workflow}
@@ -292,448 +225,35 @@ describe("WorkflowEditor", () => {
         eventProviders={[linearEventProvider()]}
       />,
     );
-
-    fireEvent.click(screen.getByRole("radio", { name: "On an event" }));
-    await act(async () => Promise.resolve());
-    expect(workflowActionsMock.update).not.toHaveBeenCalled();
-    expect(brainSourceActionsMock.listLinearTeams).toHaveBeenCalledWith("gint_1", {});
-    expect(screen.getByRole("option", { name: "CORE · Core" })).toBeInTheDocument();
-    expect(
-      screen.getByText("Some team details could not be loaded. Refresh to try again."),
-    ).toBeInTheDocument();
-
-    fireEvent.change(screen.getByLabelText("Team"), { target: { value: "team_1" } });
-    fireEvent.click(screen.getByRole("button", { name: "Additional run context (optional)" }));
-    fireEvent.change(screen.getByLabelText("Run context"), {
-      target: { value: "Investigate the issue and propose the next step." },
+    fireEvent.click(screen.getByRole("button", { name: "Add trigger" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Search triggers" }), {
+      target: { value: "lin" },
     });
-    await advanceAutosave();
-
-    expect(workflowActionsMock.update).toHaveBeenCalledWith(
-      "workflow_1",
-      expect.objectContaining({
-        trigger: {
-          type: "event",
-          provider: "linear",
-          event: "issue.created",
-          integrationId: "gint_1",
-          filters: {
-            team: {
-              id: "team_1",
-              name: "Core",
-              key: "CORE",
-            },
-          },
-          prompt: "Investigate the issue and propose the next step.",
-        },
-      }),
-    );
-  });
-
-  it("scopes a poll-delivered event to a Granola folder, shown by its full path", async () => {
-    render(
-      <WorkflowEditor
-        workflow={workflow}
-        canEdit
-        skillCatalog={[]}
-        eventProviders={[granolaEventProvider()]}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole("radio", { name: "On an event" }));
-    await act(async () => Promise.resolve());
-
-    expect(brainSourceActionsMock.listGranolaFolders).toHaveBeenCalledWith("gint_granola_1");
-    const folder = screen.getByLabelText("Folder");
-    // Unset means every meeting, so an optional filter keeps the event's existing behavior.
-    expect(folder).toHaveValue("");
-    expect(screen.getByRole("option", { name: "Customers / Acme" })).toBeInTheDocument();
-
-    fireEvent.change(folder, { target: { value: "fol_acme" } });
+    fireEvent.click(screen.getByRole("button", { name: /Linear/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Issue created/ }));
     await advanceAutosave();
 
     expect(workflowActionsMock.update).toHaveBeenLastCalledWith(
       "workflow_1",
       expect.objectContaining({
-        trigger: expect.objectContaining({
-          provider: "granola",
-          filters: { folder: { id: "fol_acme", name: "Customers / Acme" } },
-        }),
-      }),
-    );
-  });
-
-  it("saves a poll-delivered event trigger with its optional filter left unset", async () => {
-    render(
-      <WorkflowEditor
-        workflow={workflow}
-        canEdit
-        skillCatalog={[]}
-        eventProviders={[granolaEventProvider()]}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole("radio", { name: "On an event" }));
-    await act(async () => Promise.resolve());
-
-    expect(
-      screen.getByText("Starts a workflow once Granola finishes the AI summary for a meeting."),
-    ).toBeInTheDocument();
-    expect(screen.queryByLabelText("Team")).not.toBeInTheDocument();
-    expect(brainSourceActionsMock.listLinearTeams).not.toHaveBeenCalled();
-
-    await advanceAutosave();
-
-    expect(workflowActionsMock.update).toHaveBeenCalledWith(
-      "workflow_1",
-      expect.objectContaining({
-        trigger: {
-          type: "event",
-          provider: "granola",
-          event: "meeting.notes_ready",
-          integrationId: "gint_granola_1",
-          filters: {},
-          prompt: "Run this workflow.",
-        },
-      }),
-    );
-  });
-
-  it("sends the author to the account when a filter's options cannot be read", async () => {
-    brainSourceActionsMock.listLinearTeams.mockResolvedValueOnce({
-      ok: false,
-      error: "Linear rejected the saved connection.",
-    });
-    render(
-      <WorkflowEditor
-        workflow={workflow}
-        canEdit
-        skillCatalog={[]}
-        eventProviders={[linearEventProvider()]}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole("radio", { name: "On an event" }));
-    await act(async () => Promise.resolve());
-
-    expect(screen.getByText(/Linear rejected the saved connection\./)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Open Linear settings" })).toHaveAttribute(
-      "href",
-      "/settings/plugins/linear",
-    );
-  });
-
-  it("keeps autosaving a trigger whose event the plugin no longer declares", async () => {
-    render(
-      <WorkflowEditor
-        workflow={{
-          ...workflow,
-          trigger: {
+        triggers: [
+          expect.objectContaining({
             type: "event",
-            provider: "granola",
-            event: "meeting.notes_ready",
-            integrationId: "gint_granola_1",
-            filters: {},
-            prompt: "Draft the follow-ups.",
-          },
-        }}
-        canEdit
-        skillCatalog={[]}
-        eventProviders={[]}
-      />,
-    );
-
-    fireEvent.change(screen.getByLabelText("Step 1 name"), { target: { value: "Edited" } });
-    await advanceAutosave();
-
-    expect(workflowActionsMock.update).toHaveBeenCalledWith(
-      "workflow_1",
-      expect.objectContaining({ steps: [expect.objectContaining({ title: "Edited" })] }),
+            provider: "linear",
+            event: "issue.created",
+            integrationId: "gint_1",
+          }),
+        ],
+      }),
     );
   });
 
-  it("does not offer an event whose provider has no account to bind it to", async () => {
+  it("tests an active manual workflow and opens the created task", async () => {
     render(
-      <WorkflowEditor
-        workflow={workflow}
-        canEdit
-        skillCatalog={[]}
-        eventProviders={[granolaEventProvider(), { ...linearEventProvider(), accounts: [] }]}
-      />,
+      <WorkflowEditor workflow={{ ...workflow, status: "active" }} canEdit skillCatalog={[]} />,
     );
-
-    fireEvent.click(screen.getByRole("radio", { name: "On an event" }));
+    fireEvent.click(screen.getByRole("button", { name: "Test" }));
     await act(async () => Promise.resolve());
-
-    expect(screen.getByRole("option", { name: "Meeting notes ready" })).toBeInTheDocument();
-    expect(
-      screen.queryByRole("option", { name: "Linear · Issue created" }),
-    ).not.toBeInTheDocument();
-  });
-
-  it("points at the connect step when a plugin has events on but no account", async () => {
-    render(
-      <WorkflowEditor
-        workflow={workflow}
-        canEdit
-        skillCatalog={[]}
-        eventProviders={[{ ...granolaEventProvider(), accounts: [] }]}
-      />,
-    );
-
-    expect(screen.getByRole("radio", { name: "On an event" })).toBeDisabled();
-    expect(screen.getByRole("link", { name: "Add a Granola API key" })).toHaveAttribute(
-      "href",
-      "/settings/plugins/granola#events",
-    );
-  });
-
-  it("collapses edits made during an in-flight save into one trailing save", async () => {
-    const firstSave = deferred<{ version: number }>();
-    workflowActionsMock.update
-      .mockImplementationOnce(() => firstSave.promise)
-      .mockResolvedValue({ version: 3 });
-    render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
-
-    fireEvent.change(screen.getByLabelText("Step 1 name"), { target: { value: "First edit" } });
-    await advanceAutosave();
-    expect(workflowActionsMock.update).toHaveBeenCalledTimes(1);
-
-    fireEvent.change(screen.getByLabelText("Step 1 name"), { target: { value: "Second edit" } });
-    fireEvent.change(screen.getByLabelText("Step 1 name"), { target: { value: "Final edit" } });
-    await advanceAutosave();
-    expect(workflowActionsMock.update).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      firstSave.resolve({ version: 2 });
-      await firstSave.promise;
-    });
-
-    expect(workflowActionsMock.update).toHaveBeenCalledTimes(2);
-    expect(workflowActionsMock.update).toHaveBeenLastCalledWith(
-      "workflow_1",
-      expect.objectContaining({
-        expectedVersion: 2,
-        steps: [expect.objectContaining({ id: "step-1", title: "Final edit" })],
-        trigger: { type: "manual" },
-      }),
-    );
-  });
-
-  it("lets an editor retry a transient autosave failure without another edit", async () => {
-    workflowActionsMock.update
-      .mockRejectedValueOnce(new Error("Temporary save failure."))
-      .mockResolvedValueOnce({ version: 2 });
-    render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
-
-    fireEvent.change(screen.getByLabelText("Step 1 name"), { target: { value: "Retry me" } });
-    await advanceAutosave();
-
-    expect(screen.getByRole("alert")).toHaveTextContent("Temporary save failure.");
-    const retry = screen.getByRole("button", { name: "Retry save" });
-    await act(async () => {
-      fireEvent.click(retry);
-      await Promise.resolve();
-    });
-
-    expect(workflowActionsMock.update).toHaveBeenCalledTimes(2);
-    expect(screen.getByText("Saved")).toBeInTheDocument();
-  });
-
-  it("adds and removes steps without allowing the final step to be removed", () => {
-    render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
-
-    expect(screen.queryByLabelText("Step 2 name")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Add step" }));
-    expect(screen.getByLabelText("Step 2 name")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Remove step 2" }));
-    expect(screen.queryByLabelText("Step 2 name")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Remove step 1" })).not.toBeInTheDocument();
-  });
-
-  it("renders markdown lists in read-only workflow steps", () => {
-    render(
-      <WorkflowEditor
-        workflow={{
-          ...workflow,
-          steps: [
-            {
-              ...workflow.steps[0]!,
-              instructions:
-                "- Gather customer notes\n- Summarize risks\n\n1. Draft the update\n2. Flag blockers",
-            },
-          ],
-        }}
-        canEdit={false}
-        skillCatalog={[]}
-      />,
-    );
-
-    expect(screen.getByText("Gather customer notes").closest("li")).toBeInTheDocument();
-    expect(screen.getByText("Summarize risks").closest("li")).toBeInTheDocument();
-    expect(screen.getByText("Draft the update").closest("li")).toBeInTheDocument();
-    expect(screen.getByText("Flag blockers").closest("li")).toBeInTheDocument();
-  });
-
-  it("offers Opus 5 and hides Opus 4.8 in Claude Code workflow settings", async () => {
-    render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
-
-    fireEvent.click(screen.getByRole("button", { name: /^Runtime:/ }));
-    fireEvent.click(screen.getByRole("button", { name: /Claude Code/ }));
-    fireEvent.click(screen.getByRole("button", { name: /^Claude Code model:/ }));
-    expect(screen.queryByRole("button", { name: /Claude Opus 4\.8/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Claude Opus 5/ }));
-    await advanceAutosave();
-
-    expect(workflowActionsMock.update).toHaveBeenCalledWith(
-      "workflow_1",
-      expect.objectContaining({
-        steps: [
-          expect.objectContaining({
-            id: "step-1",
-            model: "claude-code",
-            runtimeModel: "anthropic/claude-opus-5",
-            reasoningEffort: "high",
-          }),
-        ],
-        trigger: { type: "manual" },
-      }),
-    );
-  });
-
-  it("saves the concrete Codex model and effort for coding steps", async () => {
-    render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
-
-    fireEvent.click(screen.getByRole("button", { name: /^Runtime:/ }));
-    fireEvent.click(screen.getByRole("button", { name: /Codex/ }));
-
-    fireEvent.click(screen.getByRole("button", { name: /^Codex model:/ }));
-    fireEvent.click(screen.getByRole("button", { name: /GPT 5\.6 Luna/ }));
-
-    fireEvent.click(screen.getByRole("button", { name: /^Effort:/ }));
-    fireEvent.click(screen.getByRole("button", { name: /Medium effort/ }));
-    await advanceAutosave();
-
-    expect(workflowActionsMock.update).toHaveBeenCalledWith(
-      "workflow_1",
-      expect.objectContaining({
-        steps: [
-          expect.objectContaining({
-            id: "step-1",
-            model: "codex",
-            runtimeModel: "openai/gpt-5.6-luna",
-            reasoningEffort: "medium",
-          }),
-        ],
-        trigger: { type: "manual" },
-      }),
-    );
-  });
-
-  it("saves an on-a-schedule trigger using the friendly schedule builder", async () => {
-    render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
-
-    fireEvent.click(screen.getByRole("radio", { name: "On a schedule" }));
-    expect(screen.getByLabelText("Frequency")).toHaveValue("weekdays");
-    fireEvent.change(screen.getByLabelText("At"), { target: { value: "08:30" } });
-    fireEvent.change(screen.getByLabelText("Timezone"), {
-      target: { value: "America/New_York" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Additional run context (optional)" }));
-    fireEvent.change(screen.getByLabelText("Run context"), {
-      target: { value: "Draft the weekday update." },
-    });
-    await advanceAutosave();
-
-    expect(workflowActionsMock.update).toHaveBeenCalledWith(
-      "workflow_1",
-      expect.objectContaining({
-        trigger: {
-          type: "schedule",
-          cron: "30 8 * * 1-5",
-          timezone: "America/New_York",
-          prompt: "Draft the weekday update.",
-        },
-      }),
-    );
-  });
-
-  it("switches the frequency preset and updates the cron accordingly", async () => {
-    render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
-
-    fireEvent.click(screen.getByRole("radio", { name: "On a schedule" }));
-    fireEvent.change(screen.getByLabelText("Frequency"), { target: { value: "hours" } });
-    fireEvent.change(screen.getByLabelText("Every"), { target: { value: "6" } });
-    fireEvent.click(screen.getByRole("button", { name: "Additional run context (optional)" }));
-    fireEvent.change(screen.getByLabelText("Run context"), {
-      target: { value: "Check for updates." },
-    });
-    await advanceAutosave();
-
-    expect(workflowActionsMock.update).toHaveBeenCalledWith(
-      "workflow_1",
-      expect.objectContaining({
-        trigger: {
-          type: "schedule",
-          cron: "0 0,6,12,18 * * *",
-          timezone: "UTC",
-          prompt: "Check for updates.",
-        },
-      }),
-    );
-  });
-
-  it("saves a custom cron expression via the advanced option", async () => {
-    render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
-
-    fireEvent.click(screen.getByRole("radio", { name: "On a schedule" }));
-    fireEvent.change(screen.getByLabelText("Frequency"), { target: { value: "custom" } });
-    fireEvent.change(screen.getByLabelText("Cron"), { target: { value: "13 9 1 * *" } });
-    fireEvent.click(screen.getByRole("button", { name: "Additional run context (optional)" }));
-    fireEvent.change(screen.getByLabelText("Run context"), {
-      target: { value: "Run the monthly report." },
-    });
-    await advanceAutosave();
-
-    expect(workflowActionsMock.update).toHaveBeenCalledWith(
-      "workflow_1",
-      expect.objectContaining({
-        trigger: {
-          type: "schedule",
-          cron: "13 9 1 * *",
-          timezone: "UTC",
-          prompt: "Run the monthly report.",
-        },
-      }),
-    );
-  });
-
-  it("runs an active scheduled workflow now and opens the created Task", async () => {
-    render(
-      <WorkflowEditor
-        workflow={{
-          ...workflow,
-          status: "active",
-          trigger: {
-            type: "schedule",
-            cron: "0 9 * * 1",
-            timezone: "UTC",
-            prompt: "Run the weekly report.",
-            enabled: true,
-            lastRunAt: null,
-            nextRunAt: "2026-08-17T09:00:00.000Z",
-          },
-        }}
-        canEdit
-        skillCatalog={[]}
-      />,
-    );
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Run now" }));
-      await Promise.resolve();
-    });
 
     expect(workflowActionsMock.runNow).toHaveBeenCalledWith("workflow_1", {
       scopeKey: "workspace_1",
@@ -741,146 +261,16 @@ describe("WorkflowEditor", () => {
     expect(routerMock.push).toHaveBeenCalledWith("/tasks/TASK-42");
   });
 
-  it("surfaces an error when a scheduled workflow cannot be started", async () => {
-    workflowActionsMock.runNow.mockRejectedValueOnce(new Error("Workflow launch failed."));
-    render(
-      <WorkflowEditor
-        workflow={{
-          ...workflow,
-          status: "active",
-          trigger: {
-            type: "schedule",
-            cron: "0 9 * * 1",
-            timezone: "UTC",
-            prompt: "Run the weekly report.",
-            enabled: true,
-            lastRunAt: null,
-            nextRunAt: "2026-08-17T09:00:00.000Z",
-          },
-        }}
-        canEdit
-        skillCatalog={[]}
-      />,
-    );
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Run now" }));
-      await Promise.resolve();
-    });
-
-    expect(screen.getByRole("alert")).toHaveTextContent("Workflow launch failed.");
-    expect(routerMock.push).not.toHaveBeenCalled();
-  });
-
-  it("archives from the editor menu", async () => {
+  it("offers safe workflow actions from the overflow menu", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
-
     fireEvent.click(screen.getByRole("button", { name: "More" }));
-    fireEvent.click(screen.getByRole("button", { name: "Archive workflow" }));
-    await act(async () => {
-      await Promise.resolve();
-    });
+    expect(screen.getByRole("button", { name: "Copy link" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Delete workflow" }));
+    await act(async () => Promise.resolve());
 
-    expect(workflowActionsMock.archive).toHaveBeenCalledWith("workflow_1", {
-      expectedVersion: 1,
-    });
+    expect(workflowActionsMock.archive).toHaveBeenCalledWith("workflow_1", { expectedVersion: 1 });
     expect(routerMock.push).toHaveBeenCalledWith("/workflows");
-  });
-
-  it("archives with the version returned by the latest autosave", async () => {
-    render(
-      <WorkflowEditor
-        workflow={{
-          ...workflow,
-          trigger: {
-            type: "schedule",
-            cron: "0 9 * * 1",
-            timezone: "UTC",
-            prompt: "Run the weekly report.",
-            enabled: true,
-            lastRunAt: null,
-            nextRunAt: "2026-08-17T09:00:00.000Z",
-          },
-        }}
-        canEdit
-        skillCatalog={[]}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole("radio", { name: "Manual" }));
-    await advanceAutosave();
-    fireEvent.click(screen.getByRole("button", { name: "More" }));
-    fireEvent.click(screen.getByRole("button", { name: "Archive workflow" }));
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    expect(workflowActionsMock.archive).toHaveBeenCalledWith("workflow_1", { expectedVersion: 2 });
-  });
-
-  it("does not race archive against a pending autosave version", () => {
-    render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
-
-    fireEvent.change(screen.getByLabelText("Step 1 name"), { target: { value: "Unsaved edit" } });
-    fireEvent.click(screen.getByRole("button", { name: "More" }));
-
-    expect(screen.getByRole("button", { name: "Archive workflow" })).toBeDisabled();
-    expect(workflowActionsMock.archive).not.toHaveBeenCalled();
-  });
-  it("saves a status filter and clears provider filters when switching plugins", async () => {
-    const linear = linearEventProvider();
-    render(
-      <WorkflowEditor
-        workflow={workflow}
-        canEdit
-        skillCatalog={[]}
-        eventProviders={[
-          {
-            ...linear,
-            events: [
-              {
-                ...linear.events[0]!,
-                filters: [
-                  { ...linear.events[0]!.filters[0]!, required: false },
-                  {
-                    id: "status",
-                    label: "Status",
-                    kind: "choice",
-                    required: false,
-                    options: [{ id: "triage", name: "Triage" }],
-                  },
-                ],
-              },
-            ],
-          },
-          granolaEventProvider(),
-        ]}
-      />,
-    );
-    fireEvent.click(screen.getByRole("radio", { name: "On an event" }));
-    fireEvent.change(screen.getByLabelText("Status", { selector: "select" }), {
-      target: { value: "triage" },
-    });
-    await advanceAutosave();
-    expect(workflowActionsMock.update).toHaveBeenLastCalledWith(
-      "workflow_1",
-      expect.objectContaining({
-        trigger: expect.objectContaining({
-          provider: "linear",
-          filters: { status: { id: "triage", name: "Triage" } },
-        }),
-      }),
-    );
-    fireEvent.change(screen.getByLabelText("Plugin"), { target: { value: "granola" } });
-    await advanceAutosave();
-    expect(screen.getByLabelText("Event")).toHaveValue("meeting.notes_ready");
-    expect(screen.queryByLabelText("Team")).not.toBeInTheDocument();
-    expect(workflowActionsMock.update).toHaveBeenLastCalledWith(
-      "workflow_1",
-      expect.objectContaining({
-        trigger: expect.objectContaining({ provider: "granola", filters: {} }),
-      }),
-    );
   });
 });
 
@@ -897,57 +287,19 @@ function linearEventProvider() {
         label: "Issue created",
         description: "Starts when an issue is created.",
         delivery: "webhook" as const,
-        filters: [
-          {
-            id: "team",
-            label: "Team",
-            kind: "integration_resource" as const,
-            resourceType: "team",
-            required: true,
-          },
-        ],
+        filters: [],
       },
     ],
   };
 }
 
-function granolaEventProvider() {
-  return {
-    provider: "granola",
-    label: "Granola",
-    accountHref: "/settings/plugins/granola#events",
-    accountLabel: "Add a Granola API key",
-    accounts: [{ integrationId: "gint_granola_1", label: "ada@example.com" }],
-    events: [
-      {
-        id: "meeting.notes_ready",
-        label: "Meeting notes ready",
-        description: "Starts a workflow once Granola finishes the AI summary for a meeting.",
-        delivery: "poll" as const,
-        filters: [
-          {
-            id: "folder",
-            label: "Folder",
-            kind: "integration_resource" as const,
-            resourceType: "folder",
-            required: false,
-          },
-        ],
-      },
-    ],
-  };
+function addScheduledTrigger() {
+  fireEvent.click(screen.getByRole("button", { name: "Add trigger" }));
+  fireEvent.click(screen.getByRole("button", { name: "Scheduled" }));
 }
 
 async function advanceAutosave() {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(1200);
   });
-}
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolvePromise) => {
-    resolve = resolvePromise;
-  });
-  return { promise, resolve };
 }

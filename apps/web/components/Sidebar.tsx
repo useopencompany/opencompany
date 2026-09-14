@@ -9,11 +9,11 @@ import {
   BookOpen,
   Check,
   ChevronsUpDown,
-  House,
   Inbox,
   ListTodo,
   Loader2,
   LogOut,
+  Navigation,
   PanelLeft,
   Pin,
   PlugZap,
@@ -21,6 +21,7 @@ import {
   Puzzle,
   ScrollText,
   Settings,
+  Sparkles,
   Workflow,
 } from "lucide-react";
 import Link from "next/link";
@@ -101,6 +102,7 @@ function Icon({ className }: { className?: string }) {
 function SidebarNavRow({
   href,
   icon: Icon,
+  iconClassName,
   label,
   active,
   // A row highlights for its whole subtree, but only one element on a page can be the current
@@ -112,6 +114,7 @@ function SidebarNavRow({
 }: {
   href: string;
   icon: LucideIcon;
+  iconClassName?: string;
   label: string;
   active: boolean;
   current?: boolean;
@@ -131,7 +134,9 @@ function SidebarNavRow({
       <Icon
         size={14}
         strokeWidth={1.75}
-        className={`shrink-0 ${active ? "text-ink" : "text-ink/60 group-hover:text-ink/80"}`}
+        className={`shrink-0 ${active ? "text-ink" : "text-ink/60 group-hover:text-ink/80"}${
+          iconClassName ? ` ${iconClassName}` : ""
+        }`}
       />
       <span className="truncate tracking-[-0.005em]">{label}</span>
       {count ? (
@@ -174,6 +179,7 @@ export function Sidebar({
   const activeWikiSlug = activeWikiSlugFromPathname(pathname);
   const pluginsActive =
     pathname === "/settings/plugins" || pathname.startsWith("/settings/plugins/");
+  const skillsActive = pathname === "/settings/skills" || pathname.startsWith("/settings/skills/");
 
   return (
     <aside
@@ -205,8 +211,11 @@ export function Sidebar({
         <nav aria-label="opencompany primary" className="flex flex-col gap-px px-2 pt-2">
           <SidebarNavRow
             href="/"
-            icon={House}
-            label="Home"
+            icon={Navigation}
+            // The only clean paper-plane outline in the set; turned so it points down at the
+            // composer this row opens.
+            iconClassName="rotate-[25deg]"
+            label="New Chat"
             active={homeActive}
             onClick={(event) => {
               if (
@@ -286,6 +295,12 @@ export function Sidebar({
             icon={Puzzle}
             label="Plugins"
             active={pluginsActive}
+          />
+          <SidebarNavRow
+            href="/settings/skills"
+            icon={Sparkles}
+            label="Skills"
+            active={skillsActive}
           />
           <SidebarFeedback />
           <SidebarAccountMenu />

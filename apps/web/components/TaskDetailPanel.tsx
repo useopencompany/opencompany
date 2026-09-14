@@ -100,7 +100,6 @@ function CanonicalTaskDetailView({
   activeRun: HeadlessChatRunReadModel | null;
 } & TaskDetailPaneProps) {
   const data = useAppData();
-  const userName = data.user.firstName?.trim() || data.user.email.split("@")[0] || "there";
   const liveTask = data.tasks?.find((task) => task.id === run.task.id);
   const initialChat: ChatSessionView = useMemo(
     () => ({
@@ -118,7 +117,6 @@ function CanonicalTaskDetailView({
       key={data.activeBrain?.id ?? "no-brain"}
       tasks={data.tasks}
       allTasks={data.allTasks}
-      schedules={data.schedules}
       defaultModel={initialChat.model}
       initialChat={initialChat}
       recentChats={data.recentChats}
@@ -127,7 +125,6 @@ function CanonicalTaskDetailView({
       claudeCodeConnected={data.claudeCodeConnected}
       taskSpawningEnabled={data.featureFlags.taskSpawning}
       workspaceId={data.workspace.id}
-      userName={userName}
       userWorkosId={data.user.workosUserId}
       {...pane}
       taskConversation={{
@@ -151,7 +148,6 @@ function LegacyTaskDetailPanel({
   ...pane
 }: { initialRun: HarnessRunViewModel } & TaskDetailPaneProps) {
   const data = useAppData();
-  const userName = data.user.firstName?.trim() || data.user.email.split("@")[0] || "there";
   const title = taskDetailTitle(initialRun);
   const initialChat: ChatSessionView = {
     id: initialRun.task.id,
@@ -166,7 +162,6 @@ function LegacyTaskDetailPanel({
       key={data.activeBrain?.id ?? "no-brain"}
       tasks={data.tasks}
       allTasks={data.allTasks}
-      schedules={data.schedules}
       defaultModel={initialChat.model}
       initialChat={initialChat}
       recentChats={data.recentChats}
@@ -175,7 +170,6 @@ function LegacyTaskDetailPanel({
       claudeCodeConnected={data.claudeCodeConnected}
       taskSpawningEnabled={data.featureFlags.taskSpawning}
       workspaceId={data.workspace.id}
-      userName={userName}
       userWorkosId={data.user.workosUserId}
       {...pane}
       taskConversation={{

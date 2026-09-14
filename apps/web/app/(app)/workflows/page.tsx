@@ -8,6 +8,8 @@ export default async function WorkflowsPage() {
     return <TasksWorkflowsDisabledRoute />;
   }
 
+  // The API only returns company workflows plus this user's personal ones, so every row here is
+  // one they can open and edit.
   const workflows = await listHeadlessWorkflows();
   return <WorkflowsRoute workflows={workflows} workspaceId={context.workspace.id} canEdit />;
 }
