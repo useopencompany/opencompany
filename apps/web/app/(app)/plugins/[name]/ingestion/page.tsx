@@ -1,4 +1,3 @@
-import { notFound } from "next/navigation";
 import { AttioIntegrationSetup } from "@/components/AttioIntegrationSetup";
 import { PageContent } from "@/components/PageContent";
 import { FathomIngestionRoute } from "@/components/Routes";
@@ -14,14 +13,21 @@ export default async function PluginIngestionPage({
   params: Promise<{ name: string }>;
 }) {
   const { name } = await params;
-  switch (name.toLocaleLowerCase()) {
-    case "attio":
-      return <AttioIngestion />;
-    case "fathom":
-      return <FathomIngestionRoute />;
-    default:
-      notFound();
-  }
+  const normalizedName = name.toLocaleLowerCase();
+  if (normalizedName === "attio") return <AttioIngestion />;
+  if (normalizedName === "fathom") return <FathomIngestionRoute />;
+
+  // Matches the plugin detail page: an unknown plugin surface keeps the reader in the app with a
+  // way back, rather than dropping them on the global 404.
+  return (
+    <PageContent
+      title="Ingestion not available"
+      description="This plugin does not offer an API-key ingestion connection."
+      backLink={{ href: `/plugins/${encodeURIComponent(name)}`, label: "Plugin" }}
+    >
+      <div />
+    </PageContent>
+  );
 }
 
 async function AttioIngestion() {
