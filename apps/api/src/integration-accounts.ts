@@ -6,6 +6,7 @@ import {
 } from "@opencompany/agent/actions/capabilities";
 import type {
   AttioProviderState,
+  ConvexEventsProviderState,
   FathomProviderState,
   GranolaProviderState,
   JamieEventsProviderState,
@@ -24,6 +25,12 @@ import {
   isValidAttioApiKey,
   validateAttioApiKey,
 } from "@opencompany/agent/integrations/attio";
+import {
+  ConvexLogStreamError,
+  disableConvexErrorEvents,
+  enableConvexErrorEvents,
+  getConvexEventsIntegrationState,
+} from "@opencompany/agent/integrations/convex-log-stream";
 import {
   type ConvexProviderState,
   connectConvexMcpIntegration,
@@ -105,6 +112,8 @@ export type IntegrationAccountService = {
   createJamieEventsEndpoint(actor: Actor): Promise<JamieEventsProviderState>;
   connectJamieEvents(actor: Actor, webhookKey: string): Promise<JamieEventsProviderState>;
   connectConvex(actor: Actor, apiKey: string): Promise<ConvexProviderState>;
+  enableConvexEvents(actor: Actor): Promise<ConvexEventsProviderState>;
+  disableConvexEvents(actor: Actor): Promise<void>;
   connectRender(actor: Actor, apiKey: string): Promise<RenderProviderState>;
   connectStripe(actor: Actor, apiKey: string): Promise<StripeProviderState>;
   disconnectStripe(actor: Actor): Promise<void>;
@@ -427,6 +436,41 @@ export function createIntegrationAccountService(input: {
         return await getConvexIntegrationState(actor.userId, db);
       } catch (error) {
         throw commandFailure(error, "Could not save the Convex API key.", "convex_connect");
+      }
+    },
+
+    // Provisioning the log stream is one call because the deploy key stored for the Convex plugin
+    // is also what the Convex deployment API accepts. Convex's own refusals — a missing
+    // deployment:integrations:write permission, a team below Pro — are specific enough to show as
+    // written, so they surface as invalid_request rather than a generic failure.
+    async enableConvexEvents(actor) {
+      try {
+        await enableConvexErrorEvents({ userWorkosId: actor.userId, db });
+        return await getConvexEventsIntegrationState(actor.userId, db);
+      } catch (error) {
+        if (error instanceof ConvexLogStreamError) {
+          throw new ApiError(400, "invalid_request", error.message);
+        }
+        throw commandFailure(
+          error,
+          "Could not turn on Convex error events.",
+          "convex_events_enable",
+        );
+      }
+    },
+
+    async disableConvexEvents(actor) {
+      try {
+        await disableConvexErrorEvents({ userWorkosId: actor.userId, db });
+      } catch (error) {
+        if (error instanceof ConvexLogStreamError) {
+          throw new ApiError(400, "invalid_request", error.message);
+        }
+        throw commandFailure(
+          error,
+          "Could not turn off Convex error events.",
+          "convex_events_disable",
+        );
       }
     },
 

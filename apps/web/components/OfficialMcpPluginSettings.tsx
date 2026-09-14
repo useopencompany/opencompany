@@ -41,6 +41,7 @@ import { useEffect, useMemo, useOptimistic, useState, useTransition } from "reac
 import { useAppData } from "@/components/AppDataProvider";
 import { CapabilityModeToggle } from "@/components/CapabilityModeToggle";
 import { ConvexDeployKeyConnectionForm } from "@/components/ConvexDeployKeyConnectionForm";
+import { ConvexErrorEventsSetup } from "@/components/ConvexErrorEventsSetup";
 import { GitHubRepositoryAccessSection } from "@/components/GitHubRepositoryAccess";
 import { GranolaIntegrationSetup } from "@/components/GranolaIntegrationSetup";
 import { InfisicalPluginConnectionForm } from "@/components/InfisicalPluginConnectionForm";
@@ -1008,6 +1009,12 @@ function EventsSection({ plugin, canEdit }: { plugin: PluginInstallationDto; can
       ) : null}
       {plugin.name === "jamie" && canEdit ? (
         <JamieEventsSetup initialState={integrations.jamie_events} />
+      ) : null}
+      {plugin.name === "convex" && canEdit ? (
+        <ConvexErrorEventsSetup
+          initialState={integrations.convex_events}
+          deployKeyConnected={integrations.convex.connected}
+        />
       ) : null}
       <ul className="overflow-hidden rounded-lg border border-border bg-surface">
         {plugin.events.map((event: PluginEventDefinitionDto) => {

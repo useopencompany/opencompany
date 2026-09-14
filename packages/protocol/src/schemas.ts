@@ -4453,6 +4453,32 @@ export const JamieEventsAccountStateEnvelopeSchema = z
   .strict()
   .openapi("JamieEventsAccountStateEnvelope");
 
+// Convex's event connection is a webhook log stream opencompany provisions in Convex with the
+// deploy key the plugin already holds, so nothing is pasted in either direction. The state names
+// the deployment the stream belongs to and the last signature-verified delivery, which is the only
+// confirmation that the stream reaches opencompany rather than only that Convex accepted it.
+export const ConvexEventsAccountStateSchema = z
+  .object({
+    provider: z.literal("convex"),
+    connected: z.boolean(),
+    status: IntegrationAccountStatusSchema,
+    integrationId: IntegrationAccountIdSchema.nullable(),
+    statusReason: z.string().nullable(),
+    deployment: z.string().nullable(),
+    webhookUrl: z.string().url().nullable(),
+    lastDeliveryAt: z.string().datetime().nullable(),
+  })
+  .strict()
+  .openapi("ConvexEventsAccountState");
+
+export const ConvexEventsAccountStateEnvelopeSchema = z
+  .object({
+    data: z.object({ state: ConvexEventsAccountStateSchema }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("ConvexEventsAccountStateEnvelope");
+
 export const StripeAccountStateSchema = z
   .object({
     provider: z.literal("stripe"),

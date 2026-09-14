@@ -319,6 +319,7 @@ describe("v1 protocol contract", () => {
       "/v1/integration-accounts/jamie-events/endpoint",
       "/v1/integration-accounts/jamie-events",
       "/v1/integration-accounts/convex",
+      "/v1/integration-accounts/convex-events",
       "/v1/integration-accounts/render",
       "/v1/integration-accounts/stripe",
       "/v1/integration-accounts",

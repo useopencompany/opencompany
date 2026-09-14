@@ -60,6 +60,7 @@ import {
   ConversationPageSchema,
   ConversationShareEnvelopeSchema,
   ConvexAccountStateEnvelopeSchema,
+  ConvexEventsAccountStateEnvelopeSchema,
   CreateBillingTopUpBodySchema,
   CreateBrainBodySchema,
   CreateBrainDocumentBodySchema,
@@ -3447,6 +3448,37 @@ export const createJamieEventsEndpointRoute = createRoute({
   },
 });
 
+export const enableConvexEventsRoute = createRoute({
+  method: "post",
+  path: "/v1/integration-accounts/convex-events",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: { headers: z.object({ "idempotency-key": z.string().min(1).max(200) }) },
+  responses: {
+    200: {
+      description:
+        "Convex webhook log stream provisioned for the connected deployment with the deploy key already stored for the Convex plugin.",
+      content: { "application/json": { schema: ConvexEventsAccountStateEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const disableConvexEventsRoute = createRoute({
+  method: "delete",
+  path: "/v1/integration-accounts/convex-events",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description:
+        "Convex webhook log stream deleted in Convex and the event connection removed. The stream is deleted first so Convex stops billing its owner for deliveries opencompany can no longer accept.",
+      content: { "application/json": { schema: IntegrationAccountDeleteEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const connectConvexAccountRoute = createRoute({
   method: "put",
   path: "/v1/integration-accounts/convex",
@@ -4317,6 +4349,8 @@ export type V1RouteHandlers = {
   createJamieEventsEndpoint: RouteHandler<typeof createJamieEventsEndpointRoute>;
   connectJamieEventsAccount: RouteHandler<typeof connectJamieEventsAccountRoute>;
   connectConvexAccount: RouteHandler<typeof connectConvexAccountRoute>;
+  enableConvexEvents: RouteHandler<typeof enableConvexEventsRoute>;
+  disableConvexEvents: RouteHandler<typeof disableConvexEventsRoute>;
   connectRenderAccount: RouteHandler<typeof connectRenderAccountRoute>;
   connectStripeAccount: RouteHandler<typeof connectStripeAccountRoute>;
   disconnectStripeAccount: RouteHandler<typeof disconnectStripeAccountRoute>;
@@ -4536,6 +4570,8 @@ export function createV1Router(
       .openapi(createJamieEventsEndpointRoute, handlers.createJamieEventsEndpoint)
       .openapi(connectJamieEventsAccountRoute, handlers.connectJamieEventsAccount)
       .openapi(connectConvexAccountRoute, handlers.connectConvexAccount)
+      .openapi(enableConvexEventsRoute, handlers.enableConvexEvents)
+      .openapi(disableConvexEventsRoute, handlers.disableConvexEvents)
       .openapi(connectRenderAccountRoute, handlers.connectRenderAccount)
       .openapi(connectStripeAccountRoute, handlers.connectStripeAccount)
       .openapi(disconnectStripeAccountRoute, handlers.disconnectStripeAccount)
@@ -6016,6 +6052,26 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       200,
     ),
+  enableConvexEvents: (c) =>
+    c.json(
+      {
+        data: {
+          state: {
+            provider: "convex" as const,
+            connected: true,
+            status: "connected" as const,
+            integrationId: "gint_contract",
+            statusReason: null,
+            deployment: "contract-deployment-123",
+            webhookUrl: "https://app.example.com/api/webhooks/convex/gint_contract",
+            lastDeliveryAt: null,
+          },
+        },
+        meta,
+      },
+      200,
+    ),
+  disableConvexEvents: (c) => c.json({ data: { deleted: true as const }, meta }, 200),
   connectRenderAccount: (c) =>
     c.json(
       {

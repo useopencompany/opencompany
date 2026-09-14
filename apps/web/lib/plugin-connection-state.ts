@@ -14,6 +14,7 @@ export type PluginConnectionProvider = PersonalAccountProvider | "posthog" | "st
 
 const PLUGIN_TOOL_ACCESS_LABEL = {
   attio: "Attio",
+  convex: "Convex",
   hubspot: "HubSpot",
   jamie: "Jamie",
   posthog: "PostHog",
@@ -113,6 +114,7 @@ export function pluginAccountsFromState(
     // so the tool connection comes from the provider state instead.
     if (
       config.connectionProvider === "attio" ||
+      config.connectionProvider === "convex" ||
       config.connectionProvider === "posthog" ||
       config.connectionProvider === "hubspot" ||
       config.connectionProvider === "jamie"

@@ -18,6 +18,8 @@ import {
   integrationStateFromRows,
 } from "@/lib/integration-state";
 import { getAttioMcpIntegrationState } from "@/lib/integrations/attio-mcp";
+import { getConvexEventsIntegrationState } from "@/lib/integrations/convex-events";
+import { getConvexIntegrationState } from "@/lib/integrations/convex-mcp";
 import { getFathomIntegrationState } from "@/lib/integrations/fathom";
 import { getGoogleIntegrationState } from "@/lib/integrations/google-data";
 import { getGranolaIntegrationState } from "@/lib/integrations/granola";
@@ -48,6 +50,8 @@ export async function AppShell({ children }: { children: ReactNode }) {
     posthog,
     jamie,
     jamieEvents,
+    convex,
+    convexEvents,
     slack,
     granola,
     granolaMcp,
@@ -91,6 +95,16 @@ export async function AppShell({ children }: { children: ReactNode }) {
       "jamie_events_integration",
       () => getJamieEventsIntegrationState(user.workosUserId),
       emptyIntegrations.jamie_events,
+    ),
+    loadOptionalAppShellData(
+      "convex_integration",
+      () => getConvexIntegrationState(user.workosUserId),
+      emptyIntegrations.convex,
+    ),
+    loadOptionalAppShellData(
+      "convex_events_integration",
+      () => getConvexEventsIntegrationState(user.workosUserId),
+      emptyIntegrations.convex_events,
     ),
     loadOptionalAppShellData(
       "slack_integration",
@@ -190,6 +204,8 @@ export async function AppShell({ children }: { children: ReactNode }) {
       posthog,
       jamie,
       jamieEvents,
+      convex,
+      convexEvents,
       slack,
       granola,
       granolaMcp,
@@ -273,6 +289,8 @@ function buildIntegrationState(input: {
   posthog: IntegrationState["posthog"];
   jamie: IntegrationState["jamie"];
   jamieEvents: IntegrationState["jamie_events"];
+  convex: IntegrationState["convex"];
+  convexEvents: IntegrationState["convex_events"];
   slack: IntegrationState["slack"];
   granola: IntegrationState["granola"];
   granolaMcp: IntegrationState["granola_mcp"];
@@ -294,6 +312,8 @@ function buildIntegrationState(input: {
     posthog: input.posthog,
     jamie: input.jamie,
     jamie_events: input.jamieEvents,
+    convex: input.convex,
+    convex_events: input.convexEvents,
     slack: input.slack,
     granola: input.granola,
     granola_mcp: input.granolaMcp,
