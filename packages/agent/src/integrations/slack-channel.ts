@@ -7,7 +7,7 @@ import { slackApiRequest } from "./slack";
 import { slackBotScopesSatisfied } from "./slack-bot";
 
 export const SLACK_CHANNEL_TOOL_DESCRIPTION =
-  "Post a concise root message as the workspace Slack Channel bot, only when workflow instructions ask you to share work in Slack. Public channels the bot has joined only. Every post subscribes its thread to this same workflow session for 30 days. Use a stable messageKey for retries of the same intended post. Follow-up answers are delivered automatically into their original thread; do not post another root for a Slack reply.";
+  "Send a message to a public Slack channel as the opencompany Slack bot: the shared workspace bot, not any member's personal Slack plugin. This is the tool for instructions that ask to post, send, or share something in Slack with the opencompany Slack bot, and it should only be used when they ask. Public channels the bot has joined only. Every post subscribes its thread to this same workflow session for 30 days. Use a stable messageKey for retries of the same intended post. Follow-up answers are delivered automatically into their original thread; do not post another root for a Slack reply.";
 export const SLACK_CHANNEL_INPUT_SCHEMA = {
   type: "object" as const,
   additionalProperties: false,

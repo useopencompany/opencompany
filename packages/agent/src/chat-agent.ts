@@ -101,6 +101,7 @@ import {
   SCHEDULE_TASK_TOOL_NAME,
   type ScheduleTaskToolInput,
   type ScheduleTaskToolOutput,
+  SLACK_BOT_TOOL_NAME,
   START_WORKFLOW_TOOL_NAME,
   type StartTaskToolOutput,
   type StartWorkflowToolInput,
@@ -791,7 +792,7 @@ export function createProductChatToolContext(input: {
   }
 
   if (input.postSlackMessage) {
-    tools.post_slack_message = tool({
+    tools[SLACK_BOT_TOOL_NAME] = tool({
       description: SLACK_CHANNEL_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<SlackChannelPost>(SLACK_CHANNEL_INPUT_SCHEMA),
       execute: input.postSlackMessage,
