@@ -59,6 +59,12 @@ export const EDIT_TASK_SCHEDULE_TOOL_PART_TYPE = `tool-${EDIT_TASK_SCHEDULE_TOOL
 export const DELETE_TASK_SCHEDULE_TOOL_NAME = "delete_task_schedule";
 export const DELETE_TASK_SCHEDULE_TOOL_PART_TYPE =
   `tool-${DELETE_TASK_SCHEDULE_TOOL_NAME}` as const;
+// Named for how people ask for it: workflow instructions say "send this with the
+// opencompany Slack bot", and the model has to pick this over a member's personal
+// Slack plugin action, which can also post messages.
+export const SLACK_BOT_TOOL_NAME = "opencompany_slack_bot_send_message";
+/** Model-facing name before the tool was renamed; kept so old transcripts still label correctly. */
+export const LEGACY_SLACK_BOT_TOOL_NAME = "post_slack_message";
 export const BRAIN_TOOL_NAME = "goat_brain";
 export const BRAIN_TOOL_PART_TYPE = `tool-${BRAIN_TOOL_NAME}` as const;
 export const SAVE_TO_BRAIN_TOOL_NAME = "save_to_brain";

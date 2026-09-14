@@ -7,20 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- start a workflow the moment jamie finishes a meeting, with the summary, attendees, and action items as context. create an endpoint in the jamie plugin's events section, point a jamie webhook at it, save the key jamie gives you, turn on meeting completed, then choose it as your workflow's event. filter to meetings with guests from outside your company, or to internal ones only — @louis.
-- choose claude fable 5.1 for a cloud claude code sandbox, in the composer or in a workflow step. sonnet 5 stays the default, and whether fable is included or needs usage credits depends on your claude plan (#1767, #1780) — @louis.
-- ask for something visual and opencompany can now build it as a page instead of describing it: a pricing calculator, a dashboard, a timeline, a mockup. it opens in the artifact panel beside the chat, and can be revised, shared, or downloaded like any other artifact. pages run fully sandboxed, so they cannot reach the network or your account, and everything a page needs has to sit inside the file (#1775) — @louis.
-- turn on the subagents beta in preferences to let opencompany hand wide research to helpers that work in their own context and report back, so one answer can cover several sources at once. expand a subagent row in the chat to watch what it is doing. uses more credits per message (#1749, #1756) — @louis.
-- turn on the projects beta in preferences to group chats and tasks into named folders above recents. drag a row onto a folder to file it, drag it back onto the recents header to take it out, collapse each folder on its own, and start a new chat straight into a project from the folder's new-chat button (#1755) — @louis.
+## [1.27.0] - 2026-09-14
 
-### Fixed
-- choosing claude fable 5.1 for a cloud claude code sandbox now works instead of failing the turn with a bare "internal error". a chat that cannot start on the model you picked now says so by name, and a reasoning effort the model does not support steps down instead of ending the turn (#1780) — @louis.
+### Added
+- start with a workflow template for a weekly shipping digest, daily inbox triage, or weekly revenue pulse. open workflow templates on the workflows page, review the saved draft, connect the tools it needs, and activate it when ready (#1845, #1850) — @louis.
+- continue a workflow from slack. connect the workspace bot in settings → channels → slack and ask your workflow to post in a public channel. anyone in that thread can reply to continue the same task, with its files and context, for up to 30 days. follow-ups use the workflow owner's connected tools and permissions (#1840, #1849) — @louis.
+- keep separate wikis for your company, a project, or a small group. give each its own instructions and share it with everyone or selected teammates. your existing pages stay in the company wiki, and old links still work (#1745, #1805) — @louis.
+- read, update, and add rows to google sheets through the google drive plugin. use enable sheets tools in the plugin's account settings to grant access, then refresh its tools (#1807) — @louis.
+- send email from chat through the gmail plugin. sending asks for approval by default; you can set its permission separately from labeling and other mail actions (#1826, #1839) — @louis.
+- connect doppler to use your project's secrets in cloud coding sessions. connect dash0 to investigate your application's logs, metrics, and traces from chat (#1834, #1843, #1830, #1832) — @louis.
+- start a workflow when jamie finishes a meeting, with its summary, attendees, and action items as context. set up the webhook in the jamie plugin's events section, then choose meeting completed as a workflow trigger. filter to internal meetings or meetings with outside guests (#1806) — @louis.
+- ask for a calculator, dashboard, timeline, or mockup as an interactive page beside your chat. revise, share, or download it like any other artifact. pages are self-contained and cannot access the network or your account (#1775) — @louis.
+- browse and edit your cloud sandbox files in the new files tab beside preview and terminal. save changes directly; if the agent changed the same file, review the conflict before overwriting it (#1821) — @louis.
+- choose a smaller or larger cloud sandbox for new coding sessions in settings → inference. workspace admins can compare sizes and running costs; existing sessions keep their current size (#1818) — @louis.
+- turn on the projects beta in preferences to group chats and tasks into folders in the sidebar. drag work into a project, collapse its folder, or start a new chat inside it (#1755, #1761, #1765, #1766, #1825) — @louis.
+- turn on the subagents beta in preferences to let opencompany split research among helpers and bring their findings back into one answer. expand a helper's row to follow its work. this uses more credits per message (#1749, #1756, #1764) — @louis.
+- turn on past session access in preferences to ask about your earlier private chats in this workspace, including archived ones. use it to review recent work or find an earlier decision (#1771) — @louis.
+- choose claude fable 5.1 for cloud claude code chats and workflow steps. availability through your subscription depends on your claude plan. see your remaining claude subscription allowance and reset times in settings → inference (#1767, #1780, #1750) — @louis.
 
 ### Changed
-- chat no longer invents a background task for you. when work belongs in tasks, run one of your workflows — ask opencompany to start it by name, and it shows up in tasks like before. recurring routines are unchanged. if nothing you have covers the request, opencompany now says so instead of quietly queueing a one-off task you never reviewed — @louis.
-- the preview pane in cloud coding sandboxes now has a browser-style address bar. type a real url or path — localhost:3000/pricing, :8080, or just /pricing — and press enter to open it. the port picker only appears when more than one server is running, a single refresh button replaces the two identical ones, and the preview opens on its own as soon as your dev server starts listening (#1809) — @louis.
-- the sidebar list of chats and tasks is now called recents, and you can collapse it. the chevron beside the label points down when the list is open and right when it is closed, and your choice is remembered (#1751) — @louis.
+- tasks and workflows are now available to everyone, with no beta switch. ask chat to run a saved workflow by name when you want background work; chat no longer creates one-off tasks on its own. existing recurring routines still run (#1847, #1812) — @louis.
+- keep workflows personal or share them with your company. add several schedules or plugin events to the same workflow, and filter the list to find your own or shared work (#1817, #1822) — @louis.
+- choose which meetings or issues start a workflow. granola events can follow one folder and its subfolders; linear events can filter by team and status. event connections now live in each plugin's events section (#1793, #1772, #1803) — @louis.
+- set on, ask, or off for an individual plugin tool. allow routine labeling while keeping email sending or deletion behind approval. always allow in chat now applies only to the tool you approved (#1839) — @louis.
+- approval cards now show the action, affected files or command, and any quoted cost in one place. chats and tasks waiting for you keep a distinct sidebar indicator until you answer (#1774, #1827) — @louis.
+- find chat models and coding agents in separate tabs in the model picker. auto comes first, models covered by your shared subscription show included, and a sandbox indicator appears when you select a coding agent (#1828, #1835, #1837, #1842) — @louis.
+- open new chat from the sidebar to start work. manage recurring routines on the tasks page, open skills from the sidebar footer, and collapse recents when you want more space (#1819, #1813, #1751) — @louis.
+- type a url or path into the sandbox preview's address bar to open another page. the preview opens when your dev server starts, and the port picker appears when several servers are running (#1809) — @louis.
+- feedback sent from a chat or task now includes a link to that work, so you do not have to find and paste it yourself (#1808) — @louis.
+
+### Fixed
+- scheduled workflows run again after a bug stopped due schedules from being picked up (#1852) — @louis.
+- draft your next reply while a task is working. refreshing an active chat now keeps its timer and stop control visible, and a resumed turn counts its own running time (#1802, #1815, #1795) — @louis.
+- file uploads no longer leave tasks hanging, and publishing a revised artifact no longer fails because an earlier revision is empty (#1748, #1798) — @louis.
+- gemini image generation works again instead of failing before producing an image (#1754) — @louis.
+- coding sessions recover more reliably from an unresponsive sandbox and retain recovered output. claude code tasks can resume after reaching a turn limit, and choosing fable 5.1 now starts the selected model correctly (#1777, #1779, #1782, #1742, #1780) — @louis.
+- recent chats and tasks no longer disappear from the sidebar because of a list limit, and beta preference changes appear immediately (#1763, #1762) — @louis.
+- wiki source references now have readable labels, and granola references link to the original note (#1844) — @louis.
+- long granola meetings can now start their workflows even when the full transcript is too large to fetch (#1803) — @louis.
+
+### Removed
+- automatic imports from connected providers into wiki have been retired. existing pages remain; use workflows with plugin events for new updates. the workspace slack bot now continues workflow threads instead of answering standalone mentions or direct messages (#1772, #1840) — @louis.
 
 ## [1.26.0] - 2026-09-11
 

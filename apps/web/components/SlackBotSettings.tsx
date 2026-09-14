@@ -164,8 +164,8 @@ function SlackBotPanel({ data }: { data: SlackBotSettingsData }) {
           <ol className="flex list-decimal flex-col gap-1 pl-5 text-[13px] leading-5 text-ink-subtle">
             <li>Invite @opencompany to a public Slack channel.</li>
             <li>
-              Add an instruction to a workflow, such as “Post the investigation summary in
-              #product.” Each post opens a thread for follow-up questions.
+              Add an instruction to a workflow, such as “Post the investigation summary in #product
+              with the opencompany Slack bot.” Each post opens a thread for follow-up questions.
             </li>
           </ol>
           <p className="text-[13px] leading-5 text-ink-subtle">
