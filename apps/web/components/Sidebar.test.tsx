@@ -350,7 +350,7 @@ describe("Sidebar", () => {
       render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
       const section = await screen.findByRole("region", { name: "Wiki" });
-      const links = within(section).getAllByRole("link");
+      const links = await within(section).findAllByRole("link");
       expect(links.map((link) => link.textContent)).toEqual(["Company", "Handbook"]);
       expect(links[0]).toHaveAttribute("href", "/wiki/company");
       expect(links[1]).toHaveAttribute("href", "/wiki/handbook");
