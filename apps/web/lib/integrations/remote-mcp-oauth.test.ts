@@ -11,6 +11,7 @@ import {
   startBetterStackMcpOAuth,
   verifyBetterStackMcpState,
 } from "@/lib/integrations/betterstack-mcp";
+import { startDash0McpOAuth, verifyDash0McpState } from "@/lib/integrations/dash0-mcp";
 import { startFathomMcpOAuth, verifyFathomMcpState } from "@/lib/integrations/fathom-mcp";
 import {
   completeHubSpotMcpOAuth,
@@ -457,6 +458,27 @@ describe("opencompany remote MCP OAuth", () => {
       provider: "signoz",
       userWorkosId: "user_1",
       returnTo: "/settings/plugins/signoz",
+    });
+  });
+
+  it("connects Dash0 only to the reviewed AWS Ireland MCP endpoint", async () => {
+    await startDash0McpOAuth({
+      userWorkosId: "user_1",
+      returnTo: "/settings/plugins/dash0",
+    });
+
+    expect(auth).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ serverUrl: "https://api.eu-west-1.aws.dash0.com/mcp" }),
+    );
+    expect(observed.clientMetadata).toHaveProperty("scope", "*");
+    expect(observed.callbackUrl).toBe(
+      "https://opencompany.example/api/integrations/dash0/callback",
+    );
+    expect(verifyDash0McpState(observed.state)).toMatchObject({
+      provider: "dash0",
+      userWorkosId: "user_1",
+      returnTo: "/settings/plugins/dash0",
     });
   });
 

@@ -414,3 +414,37 @@ export const GoogleAdminIcon = brandIcon(
   ),
   "0 0 96 96",
 );
+
+// Vendor source and verification notes: service-icons.md.
+export const Dash0Icon = brandIcon(
+  "Dash0Icon",
+  (id) => (
+    <>
+      <path
+        fill="#ff8a67"
+        fillRule="evenodd"
+        stroke="none"
+        d="M 7 10 C 7 13.3137 3.86599 16 0 16 L 0 4 C 3.86599 4 7 6.68629 7 10 Z M 7 10 C 7 6.68629 9.6863 4 13 4 C 16.3137 4 19 6.68629 19 10 C 19 13.3137 16.3137 16 13 16 C 9.6863 16 7 13.3137 7 10 Z"
+      />
+      <radialGradient
+        id={`${id}-dash0-gradient`}
+        cx="10.5419"
+        cy="23.8"
+        r="37.876986"
+        fx="10.5419"
+        fy="23.8"
+        gradientUnits="userSpaceOnUse"
+      >
+        <stop offset="1e-05" stopColor="#fa4a4d" stopOpacity="1" />
+        <stop offset="1" stopColor="#fa4a4d" stopOpacity="0" />
+      </radialGradient>
+      <path
+        fill={`url(#${id}-dash0-gradient)`}
+        fillRule="evenodd"
+        stroke="none"
+        d="M 7 10 C 7 13.3137 3.86599 16 0 16 L 0 4 C 3.86599 4 7 6.68629 7 10 Z M 7 10 C 7 6.68629 9.6863 4 13 4 C 16.3137 4 19 6.68629 19 10 C 19 13.3137 16.3137 16 13 16 C 9.6863 16 7 13.3137 7 10 Z"
+      />
+    </>
+  ),
+  "0 0 19 19",
+);

@@ -106,3 +106,19 @@ opencompany encrypts the key and keeps it server-side. Its hosted bridge runs th
 Convex CLI MCP server. Requests have a 30-second execution limit and a bounded response size;
 use smaller pages or narrower queries for large datasets. Uninstalling the plugin disables tools;
 disconnect the account separately to revoke opencompany's saved connection.
+
+
+## Dash0
+
+Install Dash0 from **Settings → Plugins**, then select **Connect** and authorize your Dash0
+account. This release supports organizations in **AWS Ireland (`eu-west-1`)** only. Check your
+region under **Settings → Endpoints** in Dash0 before connecting.
+
+Telemetry queries and Agent0 investigation reads start **Ask** because they can expose private
+operational data. **Run paid Agent0 investigations** starts **Off**. Enabling it permits requests
+that spend Dash0 credits and may use outbound network access; review each request and Dash0's
+Agent0 settings first. Other discovered tools require confirmation, including management tools.
+
+OAuth credentials are encrypted and remain server-side, bound to the reviewed Ireland endpoint.
+Uninstalling removes tool availability; disconnect the account separately to remove the saved
+connection. You can also revoke access in Dash0's **User Settings → Applications**.

@@ -24,6 +24,7 @@ export type OfficialMcpPluginName =
   | "render"
   | "vercel"
   | "signoz"
+  | "dash0"
   | "slack"
   | "stripe"
   | "x";
@@ -74,6 +75,7 @@ export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
     | "render"
     | "vercel"
     | "signoz"
+    | "dash0"
     | "slack"
     | "stripe"
     | "x_account";
@@ -388,6 +390,18 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectionUnavailableReason:
       "Vercel requires MCP clients and their production callback URLs to be approved before they can connect. opencompany is awaiting that approval.",
     accountDescription: "The account opencompany uses when you run Vercel tools.",
+  },
+  dash0: {
+    name: "dash0",
+    kind: "mcp",
+    label: "Dash0",
+    description: "Investigate telemetry and Agent0 findings in Dash0 AWS Ireland.",
+    category: "engineering",
+    source: OFFICIAL_PLUGIN_SOURCES.dash0,
+    connectionProvider: "dash0",
+    connectHref: "/api/integrations/dash0/start?returnTo=/settings/plugins/dash0",
+    accountDescription:
+      "Connect a Dash0 organization in AWS Ireland (eu-west-1). Other regions are not supported. Telemetry reads ask for approval; paid Agent0 investigations start off.",
   },
   signoz: {
     name: "signoz",

@@ -8,6 +8,10 @@ import {
   startBetterStackMcpOAuth,
 } from "@opencompany/agent/integrations/betterstack-mcp";
 import {
+  completeDash0McpOAuth,
+  startDash0McpOAuth,
+} from "@opencompany/agent/integrations/dash0-mcp";
+import {
   completeFathomMcpOAuth,
   startFathomMcpOAuth,
 } from "@opencompany/agent/integrations/fathom-mcp";
@@ -114,6 +118,11 @@ vi.mock("@opencompany/agent/integrations/signoz-mcp", async (importOriginal) => 
   startSigNozMcpOAuth: vi.fn(),
   completeSigNozMcpOAuth: vi.fn(),
 }));
+vi.mock("@opencompany/agent/integrations/dash0-mcp", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  startDash0McpOAuth: vi.fn(),
+  completeDash0McpOAuth: vi.fn(),
+}));
 vi.mock("@opencompany/agent/integrations/vercel-mcp", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   startVercelMcpOAuth: vi.fn(),
@@ -168,6 +177,7 @@ const PROVIDERS: McpOAuthProvider[] = [
   "betterstack",
   "fathom",
   "signoz",
+  "dash0",
   "jamie",
   "vercel",
 ];
@@ -188,6 +198,7 @@ const flowMocks = {
   betterstack: { start: startBetterStackMcpOAuth, complete: completeBetterStackMcpOAuth },
   fathom: { start: startFathomMcpOAuth, complete: completeFathomMcpOAuth },
   signoz: { start: startSigNozMcpOAuth, complete: completeSigNozMcpOAuth },
+  dash0: { start: startDash0McpOAuth, complete: completeDash0McpOAuth },
   jamie: { start: startJamieMcpOAuth, complete: completeJamieMcpOAuth },
   vercel: { start: startVercelMcpOAuth, complete: completeVercelMcpOAuth },
 } as const;

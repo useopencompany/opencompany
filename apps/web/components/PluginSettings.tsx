@@ -13,6 +13,7 @@ import {
   AttioIcon,
   BetterStackIcon,
   ConvexIcon,
+  Dash0Icon,
   FathomIcon,
   GitHubIcon,
   GmailIcon,
@@ -254,6 +255,11 @@ export const OFFICIAL_MCP_PLUGINS = {
     ...OFFICIAL_MCP_PLUGIN_METADATA.resend,
     Icon: ResendIcon,
     iconClassName: "bg-black text-white",
+  },
+  dash0: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.dash0,
+    Icon: Dash0Icon,
+    iconClassName: "bg-background",
   },
   signoz: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.signoz,

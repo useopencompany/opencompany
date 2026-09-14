@@ -32,6 +32,11 @@ import {
   loadConvexMcpWorkerConnection,
 } from "./integrations/convex-mcp";
 import {
+  DASH0_MCP_ENDPOINT_URL,
+  getDash0IntegrationState,
+  loadDash0McpWorkerConnection,
+} from "./integrations/dash0-mcp";
+import {
   FATHOM_MCP_ENDPOINT_URL,
   getFathomMcpIntegrationState,
   loadFathomMcpWorkerConnection,
@@ -298,6 +303,12 @@ const providerBindings = {
     endpointUrl: SIGNOZ_MCP_ENDPOINT_URL,
     getState: getSigNozIntegrationState,
     loadConnection: loadSigNozMcpWorkerConnection,
+  },
+  dash0: {
+    provider: "dash0",
+    endpointUrl: DASH0_MCP_ENDPOINT_URL,
+    getState: getDash0IntegrationState,
+    loadConnection: loadDash0McpWorkerConnection,
   },
   stripe: {
     provider: "stripe",

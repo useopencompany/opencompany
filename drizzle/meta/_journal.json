@@ -1947,6 +1947,13 @@
       "when": 1789927600000,
       "tag": "0277_workflow_multiple_triggers",
       "breakpoints": true
+    },
+    {
+      "idx": 278,
+      "version": "7",
+      "when": 1789927600001,
+      "tag": "0278_dash0_plugin",
+      "breakpoints": true
     }
   ]
 }

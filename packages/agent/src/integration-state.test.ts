@@ -191,6 +191,26 @@ describe("SigNoz integration state", () => {
       }),
     ]);
   });
+  it("surfaces the personal MCP account for official plugin settings", () => {
+    const state = integrationStateFromRows([
+      {
+        id: "gint_dash0",
+        provider: "dash0",
+        externalId: "dash0_mcp_eu_west_1",
+        accountName: "Dash0",
+        status: "connected",
+        scopes: [],
+      },
+    ]);
+
+    expect(state.personalAccounts.dash0).toEqual([
+      expect.objectContaining({
+        integrationId: "gint_dash0",
+        provider: "dash0",
+        connected: true,
+      }),
+    ]);
+  });
 });
 
 describe("Fathom integration state", () => {
