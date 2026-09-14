@@ -5464,6 +5464,10 @@ export const conversationReadModelV1 = productSchema.table(
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
     activityState: text("activity_state").$type<ChatActivityState>().notNull().default("idle"),
     hasUnseen: boolean("has_unseen").notNull().default(false),
+    // A run of this Conversation is blocked on a pending approval or question. Orthogonal to
+    // activityState: a foreground approval holds the engine open, so the Conversation is still
+    // 'working' while it is the reader who has to act.
+    awaitingInput: boolean("awaiting_input").notNull().default(false),
     runtimeStatus: text("runtime_status").$type<ConversationRuntimeStatus>(),
     activeRunId: text("active_run_id"),
     runtimeHasError: boolean("runtime_has_error"),
@@ -5583,6 +5587,10 @@ export const taskReadModelV1 = productSchema.table(
     outcomeComment: text("outcome_comment"),
     // Mirrors the unread flag on the Task's conversation, which is where settlement sets it.
     hasUnseen: boolean("has_unseen").notNull().default(false),
+    // A run of this Task is blocked on a pending approval or question. `waiting` already covers
+    // the Task the runner parked for one; this also catches the coding engine that holds its run
+    // open while it polls for a permission decision, which leaves the Task `running`.
+    awaitingInput: boolean("awaiting_input").notNull().default(false),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),

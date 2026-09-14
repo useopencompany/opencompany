@@ -38,7 +38,7 @@ beforeEach(async () => {
     `CREATE SCHEMA goat; CREATE TABLE goat.workspaces(id text primary key); CREATE TABLE goat.users(workos_user_id text primary key); CREATE TABLE goat.workspace_members(workspace_id text, user_workos_id text, role text); CREATE TABLE goat.plugin_ownership_rollout(id text primary key, personal_enabled boolean); CREATE TABLE goat.plugins(id text, name text, owner_user_id text, workspace_id text, status text, source_url text, source_path text, source_ref text); INSERT INTO goat.workspaces VALUES ('w1'),('w2'); INSERT INTO goat.users VALUES ('alice'),('bob'); INSERT INTO goat.workspace_members VALUES ('w1','alice','admin'),('w1','bob','member'); INSERT INTO goat.plugin_ownership_rollout VALUES ('personal_plugins',true); INSERT INTO goat.plugins VALUES ('p1','doppler','alice','w1','enabled','https://github.com/useopencompany/plugins','doppler','891c084c347ff69288635b651e545c9bfd47b212');`,
   );
   await pg.exec(
-    await readFile(new URL("../../../drizzle/0279_doppler_cli_auth.sql", import.meta.url), "utf8"),
+    await readFile(new URL("../../../drizzle/0281_doppler_cli_auth.sql", import.meta.url), "utf8"),
   );
 });
 afterEach(async () => {

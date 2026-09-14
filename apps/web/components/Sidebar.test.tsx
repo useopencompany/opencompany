@@ -58,7 +58,8 @@ const recentChatsMock = vi.hoisted(() => ({
     } | null;
     activityState?: "working" | "idle";
     hasUnseen?: boolean;
-    state?: "working" | "done_unseen" | "done_seen";
+    awaitingInput?: boolean;
+    state?: "awaiting_input" | "working" | "done_unseen" | "done_seen";
     preview: string;
     updatedAt: string;
     lastSeenAt?: string | null;
@@ -73,6 +74,7 @@ const sidebarTasksMock = vi.hoisted(() => ({
     name: string;
     status: "queued" | "running" | "waiting" | "succeeded" | "failed" | "canceled";
     hasUnseen: boolean;
+    awaitingInput?: boolean;
     updatedAt: string;
   }>,
 }));
@@ -1048,6 +1050,83 @@ describe("Sidebar", () => {
     expect(screen.getByTestId("sidebar-chat-working")).toBeInTheDocument();
     expect(screen.getByTestId("sidebar-chat-unseen")).toBeInTheDocument();
     expect(screen.getAllByTestId(/sidebar-chat-/)).toHaveLength(2);
+  });
+
+  it("shows a parked run over a retained local working state", () => {
+    pathnameMock.value = "/";
+    // This tab started the run and is still holding its optimistic spinner when the approval lands.
+    setLocalChatState("goat_chat_parked", "working");
+    recentChatsMock.value = [
+      {
+        id: "goat_chat_parked",
+        title: "Parked on approval",
+        model: "claude-sonnet-5",
+        engine: "opencompany",
+        codexComposerSettings: null,
+        activityState: "working",
+        hasUnseen: false,
+        awaitingInput: true,
+        preview: "Approve send_email?",
+        updatedAt: "2026-07-14T09:01:00.000Z",
+        pinnedAt: null,
+      },
+    ];
+
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.getByTestId("sidebar-chat-awaiting-input")).toBeInTheDocument();
+    expect(screen.queryByTestId("sidebar-chat-working")).not.toBeInTheDocument();
+  });
+
+  it("marks a task blocked on an approval as waiting for the reader, not as an unread result", () => {
+    featureFlagsMock.taskSpawning = true;
+    sidebarTasksMock.value = [
+      taskRow("task_waiting", {
+        displayId: "T-1",
+        name: "Waiting task",
+        status: "waiting",
+        // Already opened once. The request is still unanswered, so the row must still say so.
+        hasUnseen: false,
+        updatedAt: "2026-07-14T09:05:00.000Z",
+      }),
+    ];
+
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.getByTestId("sidebar-chat-awaiting-input")).toBeInTheDocument();
+    expect(screen.queryByTestId("sidebar-chat-unseen")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Waiting for you")).toBeInTheDocument();
+  });
+
+  it("marks a chat blocked on a foreground approval as waiting, not as still working", () => {
+    pathnameMock.value = "/";
+    recentChatsMock.value = [
+      {
+        id: "goat_chat_blocked",
+        title: "Blocked on approval",
+        model: "claude-sonnet-5",
+        engine: "opencompany",
+        codexComposerSettings: null,
+        runtime: {
+          status: "running",
+          activeRunId: "goat_codex_chat_turn_1",
+          hasError: false,
+          updatedAt: "2026-07-14T09:01:00.000Z",
+        },
+        // The MCP call polls while it waits, so the runtime is genuinely running.
+        activityState: "working",
+        hasUnseen: false,
+        awaitingInput: true,
+        preview: "Approve send_email?",
+        updatedAt: "2026-07-14T09:01:00.000Z",
+        pinnedAt: null,
+      },
+    ];
+
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.getByTestId("sidebar-chat-awaiting-input")).toBeInTheDocument();
+    expect(screen.queryByTestId("sidebar-chat-working")).not.toBeInTheDocument();
   });
 
   it("archives a settled task from its row and offers no archive on a running one", async () => {
@@ -2039,6 +2118,7 @@ function taskRow(
     name: `${id} name`,
     status: "succeeded",
     hasUnseen: false,
+    awaitingInput: false,
     updatedAt: "2026-07-14T09:00:00.000Z",
     ...overrides,
   };

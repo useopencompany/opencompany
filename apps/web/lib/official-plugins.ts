@@ -396,13 +396,13 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     name: "dash0",
     kind: "mcp",
     label: "Dash0",
-    description: "Investigate telemetry and Agent0 findings in Dash0 AWS Ireland.",
+    description: "Investigate telemetry and Agent0 findings in your Dash0 organization.",
     category: "engineering",
     source: OFFICIAL_PLUGIN_SOURCES.dash0,
     connectionProvider: "dash0",
     connectHref: "/api/integrations/dash0/start?returnTo=/settings/plugins/dash0",
     accountDescription:
-      "Connect a Dash0 organization in AWS Ireland (eu-west-1). Other regions are not supported. Telemetry reads ask for approval; paid Agent0 investigations start off.",
+      "Connect your Dash0 organization. Its region is detected automatically across AWS Ireland, AWS Germany, AWS Oregon, and GCP Netherlands. Telemetry reads ask for approval; paid Agent0 investigations start off.",
   },
   signoz: {
     name: "signoz",

@@ -480,7 +480,12 @@ function SidebarWorkList() {
 
   useEffect(() => {
     for (const chat of recentChats) {
-      if (localChatStates.get(chat.id) === "working" && chatSummaryState(chat) === "working") {
+      // The optimistic state only bridges the gap until the durable projection reports a live run.
+      // `awaiting_input` is one of those reports, so it hands off the same way `working` does —
+      // otherwise a chat that parks on an approval mid-stream never drops its local spinner.
+      if (localChatStates.get(chat.id) !== "working") continue;
+      const state = chatSummaryState(chat);
+      if (state === "working" || state === "awaiting_input") {
         clearLocalChatState(chat.id, "working");
       }
     }
@@ -845,8 +850,13 @@ function resolveSidebarChatState(input: {
   chat: ChatSummaryView;
   localState: ReturnType<typeof chatSummaryState> | null;
 }) {
+  const state = chatSummaryState(input.chat);
+  // A parked run outranks the optimistic spinner, on the render before the handoff effect below
+  // clears it as well as after. The local state is this tab guessing that a run it just started is
+  // live; `awaiting_input` is the server saying that run is stuck on the reader.
+  if (state === "awaiting_input") return state;
   if (input.localState === "working") return "working";
-  return input.localState ?? chatSummaryState(input.chat);
+  return input.localState ?? state;
 }
 
 function SidebarChatStateIndicator({ state }: { state: ReturnType<typeof chatSummaryState> }) {
