@@ -333,6 +333,60 @@ describe("WorkflowApplicationService", () => {
     );
   });
 
+  it("preserves additional triggers when a legacy client omits the trigger collection", async () => {
+    const triggers = [
+      {
+        id: "trigger_schedule",
+        type: "schedule" as const,
+        cron: "0 9 * * 1",
+        timezone: "UTC",
+        prompt: "Run weekly.",
+        enabled: true,
+        lastRunAt: null,
+        nextRunAt,
+      },
+      {
+        id: "trigger_event",
+        type: "event" as const,
+        provider: "linear",
+        event: "issue.created",
+        integrationId: "gint_linear_1",
+        filters: {},
+        prompt: "Review the issue.",
+      },
+    ];
+    const repository = fakeWorkflowRepository({
+      workflow: workflow({ trigger: triggers[0]!, triggers }),
+    });
+    const planner = fakePlanner();
+    const service = workflowService(repository, { planner });
+
+    await service.updateWorkflow(actor(), "workflow_1", {
+      expectedVersion: 1,
+      name: "Renamed workflow",
+      description: "",
+      steps: [workflow().steps[0]!],
+      status: "active",
+      trigger: {
+        type: "schedule",
+        cron: "0 9 * * 1",
+        timezone: "UTC",
+        prompt: "Run weekly.",
+        enabled: true,
+      },
+    });
+
+    expect(planner.prepareWorkflow).toHaveBeenCalledTimes(2);
+    expect(repository.updateWorkflow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        automationTriggers: [
+          expect.objectContaining({ trigger: expect.objectContaining({ id: "trigger_schedule" }) }),
+          expect.objectContaining({ trigger: expect.objectContaining({ id: "trigger_event" }) }),
+        ],
+      }),
+    );
+  });
+
   it("routes invoke and run-now through canonical Task creation", async () => {
     const scheduled = workflow({
       trigger: {

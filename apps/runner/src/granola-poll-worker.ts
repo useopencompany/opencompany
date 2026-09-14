@@ -110,14 +110,23 @@ export async function listGranolaPollCandidates(
             AND member.user_workos_id = i.user_workos_id
           WHERE w.status = 'active'
             AND w.archived_at IS NULL
-            AND EXISTS (
-              SELECT 1
-              FROM jsonb_array_elements(w.automation_triggers) trigger(value)
-              WHERE trigger.value->>'type' = 'event'
-                AND trigger.value->>'userWorkosId' = i.user_workos_id
-                AND trigger.value->>'provider' = 'granola'
-                AND trigger.value->>'event' = 'meeting.notes_ready'
-                AND trigger.value->>'integrationId' = i.id
+            AND (
+              (
+                w.trigger = 'event'
+                AND w.event_user_workos_id = i.user_workos_id
+                AND w.event_config->>'provider' = 'granola'
+                AND w.event_config->>'event' = 'meeting.notes_ready'
+                AND w.event_config->>'integrationId' = i.id
+              )
+              OR EXISTS (
+                SELECT 1
+                FROM jsonb_array_elements(w.automation_triggers) trigger(value)
+                WHERE trigger.value->>'type' = 'event'
+                  AND trigger.value->>'userWorkosId' = i.user_workos_id
+                  AND trigger.value->>'provider' = 'granola'
+                  AND trigger.value->>'event' = 'meeting.notes_ready'
+                  AND trigger.value->>'integrationId' = i.id
+              )
             )
         )
       )

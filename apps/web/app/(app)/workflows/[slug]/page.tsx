@@ -52,14 +52,21 @@ export default async function WorkflowEditorPage({ params }: WorkflowEditorPageP
   }
 
   const eventProviders = workflowEventProviderOptions({ plugins, personalAccounts });
-  const owner = members.find(
-    (member: WorkspaceMemberView) => member.userWorkosId === workflow.createdByUserId,
-  ) ?? {
-    name:
-      [context.user.firstName, context.user.lastName].filter(Boolean).join(" ") ||
-      context.user.email,
-    avatarUrl: context.user.avatarUrl,
-  };
+  const owner =
+    members.find(
+      (member: WorkspaceMemberView) => member.userWorkosId === workflow.createdByUserId,
+    ) ??
+    (workflow.createdByUserId === context.user.workosUserId
+      ? {
+          name:
+            [context.user.firstName, context.user.lastName].filter(Boolean).join(" ") ||
+            context.user.email,
+          avatarUrl: context.user.avatarUrl,
+        }
+      : {
+          name: workflow.createdByUserId ? "Former member" : "Workspace",
+          avatarUrl: null,
+        });
   return (
     <WorkflowEditor
       workflow={workflow}

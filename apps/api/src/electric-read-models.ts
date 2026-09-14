@@ -399,7 +399,6 @@ function readModelShape(input: {
           "created_by_workos_id",
           "trigger",
           "triggers",
-          "created_by_workos_id",
           "version",
           "archived_at",
           "created_at",

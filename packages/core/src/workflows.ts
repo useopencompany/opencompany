@@ -482,7 +482,13 @@ export class WorkflowApplicationService {
         "Only the creator or a workspace admin can change this workflow's visibility.",
       );
     }
-    const normalized = normalizeWorkflowDefinition(input, this.options.validateDefinition);
+    const normalized = normalizeWorkflowDefinition(
+      {
+        ...input,
+        triggers: input.triggers ?? automationTriggersFromLegacyUpdate(current, input.trigger),
+      },
+      this.options.validateDefinition,
+    );
     const { triggers: normalizedTriggers, ...normalizedDefinition } = normalized;
     const activationError = workflowActivationDisabledReason(normalized.steps);
     if (normalized.status === "active" && activationError) {
@@ -514,7 +520,7 @@ export class WorkflowApplicationService {
                         ...current,
                         ...normalizedDefinition,
                         scope,
-                        trigger: publicTrigger,
+                        trigger: workflowTriggerWithoutId(publicTrigger),
                       },
                       prompt: publicTrigger.prompt,
                     }),
@@ -554,7 +560,7 @@ export class WorkflowApplicationService {
                       ...current,
                       ...normalizedDefinition,
                       scope,
-                      trigger: publicTrigger,
+                      trigger: workflowTriggerWithoutId(publicTrigger),
                     },
                     prompt: publicTrigger.prompt,
                   }),
@@ -1068,6 +1074,55 @@ function legacyTriggerFromAutomation(
     integrationId: trigger.integrationId,
     filters: trigger.filters,
     prompt: trigger.prompt,
+  };
+}
+
+function workflowTriggerWithoutId(trigger: WorkflowAutomationTrigger): WorkflowTrigger {
+  if (trigger.type === "event") {
+    return {
+      type: "event",
+      provider: trigger.provider,
+      event: trigger.event,
+      integrationId: trigger.integrationId,
+      filters: trigger.filters,
+      prompt: trigger.prompt,
+    };
+  }
+  return {
+    type: "schedule",
+    cron: trigger.cron,
+    timezone: trigger.timezone,
+    prompt: trigger.prompt,
+    enabled: trigger.enabled,
+    lastRunAt: trigger.lastRunAt,
+    nextRunAt: trigger.nextRunAt,
+  };
+}
+
+function automationTriggersFromLegacyUpdate(
+  current: Workflow,
+  trigger: WorkflowTriggerInput,
+): WorkflowAutomationTriggerInput[] {
+  if (trigger.type === "manual") return [];
+  const currentTriggers = current.triggers ?? [];
+  const firstId = currentTriggers[0]?.id ?? `trigger-${current.id}`;
+  return [
+    { id: firstId, ...trigger },
+    ...currentTriggers.slice(1).map(workflowAutomationTriggerInput),
+  ];
+}
+
+function workflowAutomationTriggerInput(
+  trigger: WorkflowAutomationTrigger,
+): WorkflowAutomationTriggerInput {
+  if (trigger.type === "event") return { ...trigger };
+  return {
+    id: trigger.id,
+    type: "schedule",
+    cron: trigger.cron,
+    timezone: trigger.timezone,
+    prompt: trigger.prompt,
+    enabled: trigger.enabled,
   };
 }
 
