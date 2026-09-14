@@ -214,6 +214,50 @@ describe("TaskDetailPanel", () => {
     expect(mocks.surfaceProps?.taskConversation).toMatchObject({ status: "waiting" });
   });
 
+  it("times a resumed task from the live task, then its active run", () => {
+    const initialTask = {
+      ...task(),
+      status: "running" as const,
+      stage: "running" as const,
+      updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+    };
+    mocks.tasks = [
+      {
+        ...initialTask,
+        updatedAt: "2026-01-01T02:26:59.000Z",
+      },
+    ];
+
+    const view = render(
+      <TaskDetailPanel
+        initialRun={buildHarnessRun({ task: initialTask, messages: [], events: [] })}
+      />,
+    );
+
+    expect(mocks.surfaceProps?.taskConversation).toMatchObject({
+      activeRunId: null,
+      startedAtMs: Date.parse("2026-01-01T02:26:59.000Z"),
+    });
+
+    mocks.runRows = [
+      {
+        id: "run_resumed",
+        status: "running",
+        createdAt: "2026-01-01T02:27:00.000Z",
+      },
+    ];
+    view.rerender(
+      <TaskDetailPanel
+        initialRun={buildHarnessRun({ task: initialTask, messages: [], events: [] })}
+      />,
+    );
+
+    expect(mocks.surfaceProps?.taskConversation).toMatchObject({
+      activeRunId: "run_resumed",
+      startedAtMs: Date.parse("2026-01-01T02:27:00.000Z"),
+    });
+  });
+
   it("adopts the live canonical Task status after its active Run completes", () => {
     const initialTask = { ...task(), status: "running" as const, stage: "running" as const };
     mocks.tasks = [
