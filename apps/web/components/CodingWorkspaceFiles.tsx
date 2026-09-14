@@ -120,7 +120,13 @@ export default function CodingWorkspaceFiles({
 
   const requestListing = useCallback(
     (path: string) => {
-      setDirectories((current) => new Map(current).set(path, { status: "loading" }));
+      // Entries already on screen stay put while the listing is refetched. Blanking them
+      // would collapse the whole tree for a frame on every refresh.
+      setDirectories((current) =>
+        current.get(path)?.status === "ready"
+          ? current
+          : new Map(current).set(path, { status: "loading" }),
+      );
       send({ type: "files.list", path });
     },
     [send],
@@ -176,9 +182,11 @@ export default function CodingWorkspaceFiles({
         else next.delete(path);
         return next;
       });
-      if (expand && directories.get(path)?.status !== "ready") requestListing(path);
+      // Always refetch: a cached listing renders instantly and is corrected in place if
+      // the agent has since changed the folder.
+      if (expand) requestListing(path);
     },
-    [directories, requestListing],
+    [requestListing],
   );
 
   // Load the tree the remembered layout describes. Re-runs when the socket is replaced,
@@ -309,9 +317,20 @@ export default function CodingWorkspaceFiles({
     [buffers, send],
   );
 
-  const refreshTree = () => {
-    for (const path of ["", ...expandedPaths]) requestListing(path);
-  };
+  const refreshTree = useCallback(() => {
+    for (const path of ["", ...expandedPathsRef.current]) requestListing(path);
+  }, [requestListing]);
+
+  // Coming back from Terminal or Preview re-reads the tree, because the agent has very
+  // likely changed it in the meantime. The open buffer is deliberately left alone: a
+  // silent reload would discard an unsaved edit, and a stale save is caught by the
+  // revision check instead.
+  const wasActiveRef = useRef(active);
+  useEffect(() => {
+    const becameActive = active && !wasActiveRef.current;
+    wasActiveRef.current = active;
+    if (becameActive) refreshTree();
+  }, [active, refreshTree]);
 
   const onContentChange = useCallback((path: string, content: string) => {
     setBuffers((current) => {

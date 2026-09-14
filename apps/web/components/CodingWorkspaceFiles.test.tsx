@@ -58,13 +58,13 @@ const ROOT_LISTING = {
   ],
 };
 
-function renderFiles(socket: FakeSocket) {
+function renderFiles(socket: FakeSocket, active = true) {
   return render(
     <CodingWorkspaceFiles
       socket={socket as unknown as WebSocket}
       sessionKey="session_1"
       rootLabel="Claude Code"
-      active
+      active={active}
     />,
   );
 }
@@ -317,6 +317,38 @@ describe("CodingWorkspaceFiles", () => {
 
     await user.keyboard("{ArrowDown}{Enter}");
     expect(socket.sentMessages()).toContainEqual({ type: "files.open", path: "README.md" });
+  });
+
+  it("re-reads the tree when the tab is opened again, without blanking it", async () => {
+    const user = userEvent.setup();
+    const socket = new FakeSocket();
+    const { rerender } = renderFiles(socket);
+    socket.receive(ROOT_LISTING);
+    await user.click(await screen.findByRole("treeitem", { name: /apps/ }));
+    socket.receive({
+      type: "files.listing",
+      path: "apps",
+      truncated: false,
+      entries: [{ name: "web", path: "apps/web", type: "directory", size: 0, symlink: false }],
+    });
+    await screen.findByRole("treeitem", { name: /web/ });
+
+    const before = socket.sentMessages().length;
+    const props = {
+      socket: socket as unknown as WebSocket,
+      sessionKey: "session_1",
+      rootLabel: "Claude Code",
+    };
+    rerender(<CodingWorkspaceFiles {...props} active={false} />);
+    rerender(<CodingWorkspaceFiles {...props} active />);
+
+    // Both the root and the expanded folder are refetched, and the rows stay on screen
+    // while that happens.
+    expect(socket.sentMessages().slice(before)).toEqual([
+      { type: "files.list", path: "" },
+      { type: "files.list", path: "apps" },
+    ]);
+    expect(screen.getByRole("treeitem", { name: /web/ })).toBeInTheDocument();
   });
 
   it("restores the remembered folders and file for the session", async () => {
