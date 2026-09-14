@@ -83,7 +83,7 @@ test("serializes only the production mutation stage", async () => {
   assert.doesNotMatch(beforeRelease, /group: production-release/u);
   assert.match(
     release,
-    /concurrency:\n {6}group: production-release\n {6}cancel-in-progress: false/u,
+    /concurrency:\n {6}group: production-release\n {6}queue: max\n {6}cancel-in-progress: false/u,
   );
 });
 

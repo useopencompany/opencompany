@@ -121,6 +121,7 @@ jobs:
     # an older release finishes or discovers that it has been superseded.
     concurrency:
       group: production-release
+      queue: max
       cancel-in-progress: false
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 45
