@@ -82,6 +82,10 @@ export type Conversation = {
   runtime: ConversationRuntime | null;
   activityState: "working" | "idle";
   hasUnseen: boolean;
+  // A run of this Conversation is blocked on a pending approval or question. Independent of
+  // activityState and of hasUnseen: a foreground approval keeps the engine working, and reading
+  // the Conversation does not unblock it.
+  awaitingInput: boolean;
   pinnedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;

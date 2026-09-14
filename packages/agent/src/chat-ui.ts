@@ -714,6 +714,7 @@ export type ChatSessionView = {
   runtime?: ConversationRuntimeView | null;
   activityState?: "working" | "idle";
   hasUnseen?: boolean;
+  awaitingInput?: boolean;
   updatedAt?: string;
   messages: ChatUiMessage[];
 };
@@ -725,7 +726,15 @@ export type ConversationRuntimeView = {
   updatedAt: string;
 };
 
-export type ChatState = "working" | "done_unseen" | "done_seen";
+/**
+ * What a Conversation row means to the reader, in priority order.
+ *
+ * `awaiting_input` leads because it is the only state the reader can clear by acting: the run is
+ * parked on an approval or a question and will not move until they answer. It deliberately
+ * outranks `working` — a foreground approval holds the engine open while it polls, so a
+ * blocked Conversation would otherwise render as a spinner that never resolves.
+ */
+export type ChatState = "awaiting_input" | "working" | "done_unseen" | "done_seen";
 
 export type ChatSummaryView = {
   id: string;
@@ -736,8 +745,9 @@ export type ChatSummaryView = {
   runtime?: ConversationRuntimeView | null;
   activityState?: "working" | "idle";
   hasUnseen?: boolean;
+  awaitingInput?: boolean;
   // Compatibility fallback for optimistic and rolling-deploy snapshots. Live API rows own
-  // activityState/hasUnseen and always take precedence.
+  // activityState/hasUnseen/awaitingInput and always take precedence.
   state?: ChatState;
   preview: string;
   updatedAt: string;
@@ -749,8 +759,9 @@ export type ChatSummaryView = {
 export const PINNED_CHAT_LIMIT = 20;
 
 export function chatSummaryState(
-  chat: Pick<ChatSummaryView, "activityState" | "hasUnseen" | "state">,
+  chat: Pick<ChatSummaryView, "activityState" | "hasUnseen" | "awaitingInput" | "state">,
 ): ChatState {
+  if (chat.awaitingInput) return "awaiting_input";
   if (chat.activityState === "working") return "working";
   if (chat.activityState === "idle") return chat.hasUnseen ? "done_unseen" : "done_seen";
   return chat.state ?? "done_seen";

@@ -45,6 +45,7 @@ function toChatSessionView(conversation: ConversationDto): ChatSessionView {
     runtime: conversation.runtime,
     activityState: conversation.activityState,
     hasUnseen: conversation.hasUnseen,
+    awaitingInput: conversation.awaitingInput,
     updatedAt: conversation.updatedAt,
     // The API-owned Electric read model hydrates the transcript in Surface.
     messages: [],
@@ -61,6 +62,7 @@ function toChatSummaryView(conversation: ConversationDto): ChatSummaryView {
     runtime: conversation.runtime,
     activityState: conversation.activityState,
     hasUnseen: conversation.hasUnseen,
+    awaitingInput: conversation.awaitingInput,
     preview: "No messages yet.",
     updatedAt: conversation.updatedAt,
     lastSeenAt: null,
