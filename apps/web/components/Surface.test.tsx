@@ -1032,6 +1032,44 @@ describe("Surface chat streaming UI", () => {
     expect(textarea).toHaveValue("Keep this new draft");
   });
 
+  it("marks the composer as sandboxed only while a cloud coding agent is selected", async () => {
+    const { unmount } = render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={null}
+        userWorkosId="user_1"
+        workspaceId="workspace_1"
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "Runs in an isolated cloud sandbox" }),
+    ).not.toBeInTheDocument();
+    unmount();
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "conversation_codex_sandbox",
+          title: "Codex",
+          model: CODEX_CHAT_DEFAULT_MODEL_ID,
+          engine: "codex",
+          messages: [],
+        }}
+        codexConnected
+        userWorkosId="user_1"
+        workspaceId="workspace_1"
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Runs in an isolated cloud sandbox" }),
+    ).toBeInTheDocument();
+  });
+
   it("starts a bare ampersand message from Home defaults instead of the active Codex runtime", async () => {
     const user = userEvent.setup();
     persistLastChatSelection("user_1", DEFAULT_MODEL);

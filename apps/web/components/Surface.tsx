@@ -50,6 +50,7 @@ import {
   Archive,
   ArrowLeft,
   ArrowUp,
+  Box,
   Check,
   ChevronDown,
   Code2,
@@ -3538,6 +3539,9 @@ export function Surface({
                           onGoalTokenBudgetChange={setCodexGoalTokenBudget}
                         />
                       ) : null}
+                      {showEngineComposerControls && !selectedWorkflow ? (
+                        <SandboxIndicator />
+                      ) : null}
                     </>
                   )}
                 </div>
@@ -4517,6 +4521,7 @@ export function QuickChatComposer({
                 onGoalTokenBudgetChange={setCodexGoalTokenBudget}
               />
             ) : null}
+            {showEngineComposerControls && !selectedWorkflow ? <SandboxIndicator /> : null}
           </div>
         </div>
       </form>
@@ -5687,6 +5692,28 @@ function renderEngineModelPicker(model: EngineModelPickerModel | null, disabled:
         <ClaudeModelPicker value={model.value} disabled={disabled} onChange={model.onChange} />
       );
   }
+}
+
+// The composer already says which coding agent will answer; it does not say where that agent
+// runs. Cloud coding engines execute on an isolated sandbox VM — never the user's machine — and
+// that is worth knowing before sending, not after. Sits at the end of the composer footer so it
+// reads as a property of the run rather than another control to press.
+function SandboxIndicator() {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        type="button"
+        aria-label="Runs in an isolated cloud sandbox"
+        className="ml-auto flex shrink-0 cursor-default items-center gap-1.5 rounded-md px-1.5 py-1 text-[11.5px] font-medium leading-none text-ink-subtle outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+      >
+        <Box size={12} strokeWidth={1.9} className="shrink-0" aria-hidden="true" />
+        Sandbox
+      </TooltipTrigger>
+      <TooltipContent>
+        Runs in an isolated cloud sandbox. Your machine and local files are never touched.
+      </TooltipContent>
+    </Tooltip>
+  );
 }
 
 function EngineComposerControls({
