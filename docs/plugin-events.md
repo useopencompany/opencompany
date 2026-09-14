@@ -67,8 +67,8 @@ provider retries idempotent. Provider context is bounded and separated from auth
 
 The workflow stores its activation time in `workflows.event_activated_at`. Re-activation, switching
 accounts, or changing routing filters starts a new activation interval; editing step instructions
-or run context keeps the interval. Events older than activation do not start runs. Granola initializes
-its cursor on connection, retains pagination progress, and limits stale-note replay to 24 hours.
+keeps the interval. Events older than activation do not start runs. Granola initializes its cursor
+on connection, retains pagination progress, and limits stale-note replay to 24 hours.
 
 A Granola folder filter covers the chosen folder and its subfolders, the scope Granola's own note
 query uses. A poll pass reads the account's folder list once, and only when a route filters on a
