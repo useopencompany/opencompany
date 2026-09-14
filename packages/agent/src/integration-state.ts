@@ -18,6 +18,7 @@ export type GoogleProviderState = {
   accountName: string | null;
   scopes: string[];
   capabilityModes: Record<string, unknown>;
+  toolModes: Record<string, unknown>;
 };
 
 export type GoogleDriveSourceProviderState = {
@@ -48,6 +49,7 @@ export type LinearProviderState = {
   accountName: string | null;
   statusReason: string | null;
   capabilityModes: Record<string, unknown>;
+  toolModes: Record<string, unknown>;
 };
 
 export type PostHogProviderState = {
@@ -58,6 +60,7 @@ export type PostHogProviderState = {
   accountName: string | null;
   statusReason: string | null;
   capabilityModes: Record<string, unknown>;
+  toolModes: Record<string, unknown>;
 };
 
 export type HubSpotProviderState = {
@@ -68,6 +71,7 @@ export type HubSpotProviderState = {
   accountName: string | null;
   statusReason: string | null;
   capabilityModes: Record<string, unknown>;
+  toolModes: Record<string, unknown>;
 };
 
 // The Linear brain-source connection (a Linear OAuth app with webhooks), as
@@ -104,6 +108,7 @@ export type JamieProviderState = {
   statusReason: string | null;
   integrationId: string | null;
   capabilityModes: Record<string, unknown>;
+  toolModes: Record<string, unknown>;
 };
 
 // Jamie's event connection is a webhook the user creates in Jamie pointing at opencompany's fixed
@@ -143,6 +148,7 @@ export type GranolaMcpProviderState = {
   accountName: string | null;
   statusReason: string | null;
   capabilityModes: Record<string, unknown>;
+  toolModes: Record<string, unknown>;
 };
 // Fathom connects with a personal API key minted in Fathom's user settings;
 // the integration id is what the brain-source picker and save action key
@@ -178,6 +184,7 @@ export type AttioMcpProviderState = {
   accountName: string | null;
   statusReason: string | null;
   capabilityModes: Record<string, unknown>;
+  toolModes: Record<string, unknown>;
 };
 
 export type StripeProviderState = {
@@ -265,6 +272,9 @@ export type IntegrationAccountView<Provider extends string = PersonalAccountProv
   scopes: string[];
   // Sparse per-connection capability overrides; registry defaults fill gaps.
   capabilityModes: Record<string, unknown>;
+  // Sparse per-tool overrides layered over capabilityModes; an absent key means the tool
+  // follows its capability group.
+  toolModes: Record<string, unknown>;
 };
 
 export type PersonalAccountProvider =
@@ -591,6 +601,7 @@ function accountViewFromRow(
           : (row.statusReason ?? row.status_reason ?? null),
     scopes,
     capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
+    toolModes: row.toolModes ?? row.tool_modes ?? {},
   };
 }
 
@@ -610,6 +621,7 @@ function googleProviderState(
       accountName: null,
       scopes: [],
       capabilityModes: {},
+      toolModes: {},
     };
   }
 
@@ -626,6 +638,7 @@ function googleProviderState(
     accountName: row.accountName ?? row.account_name ?? null,
     scopes,
     capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
+    toolModes: row.toolModes ?? row.tool_modes ?? {},
   };
 }
 
@@ -639,6 +652,7 @@ function linearProviderState(row: IntegrationStateRow | undefined): LinearProvid
       accountName: null,
       statusReason: null,
       capabilityModes: {},
+      toolModes: {},
     };
   }
 
@@ -650,6 +664,7 @@ function linearProviderState(row: IntegrationStateRow | undefined): LinearProvid
     accountName: row.accountName ?? row.account_name ?? null,
     statusReason: row.statusReason ?? row.status_reason ?? null,
     capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
+    toolModes: row.toolModes ?? row.tool_modes ?? {},
   };
 }
 
@@ -663,6 +678,7 @@ function posthogProviderState(row: IntegrationStateRow | undefined): PostHogProv
       accountName: null,
       statusReason: null,
       capabilityModes: {},
+      toolModes: {},
     };
   }
 
@@ -674,6 +690,7 @@ function posthogProviderState(row: IntegrationStateRow | undefined): PostHogProv
     accountName: row.accountName ?? row.account_name ?? null,
     statusReason: row.statusReason ?? row.status_reason ?? null,
     capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
+    toolModes: row.toolModes ?? row.tool_modes ?? {},
   };
 }
 
@@ -687,6 +704,7 @@ function hubspotProviderState(row: IntegrationStateRow | undefined): HubSpotProv
       accountName: null,
       statusReason: null,
       capabilityModes: {},
+      toolModes: {},
     };
   }
 
@@ -698,6 +716,7 @@ function hubspotProviderState(row: IntegrationStateRow | undefined): HubSpotProv
     accountName: row.accountName ?? row.account_name ?? null,
     statusReason: row.statusReason ?? row.status_reason ?? null,
     capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
+    toolModes: row.toolModes ?? row.tool_modes ?? {},
   };
 }
 
@@ -814,6 +833,7 @@ function granolaMcpProviderState(row: IntegrationStateRow | undefined): GranolaM
       accountName: null,
       statusReason: null,
       capabilityModes: {},
+      toolModes: {},
     };
   }
 
@@ -825,6 +845,7 @@ function granolaMcpProviderState(row: IntegrationStateRow | undefined): GranolaM
     accountName: row.accountName ?? row.account_name ?? null,
     statusReason: row.statusReason ?? row.status_reason ?? null,
     capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
+    toolModes: row.toolModes ?? row.tool_modes ?? {},
   };
 }
 function fathomProviderState(row: IntegrationStateRow | undefined): FathomProviderState {
@@ -861,6 +882,7 @@ function attioMcpProviderState(row: IntegrationStateRow | undefined): AttioMcpPr
       accountName: null,
       statusReason: null,
       capabilityModes: {},
+      toolModes: {},
     };
   }
 
@@ -872,6 +894,7 @@ function attioMcpProviderState(row: IntegrationStateRow | undefined): AttioMcpPr
     accountName: row.accountName ?? row.account_name ?? null,
     statusReason: row.statusReason ?? row.status_reason ?? null,
     capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
+    toolModes: row.toolModes ?? row.tool_modes ?? {},
   };
 }
 
@@ -919,6 +942,7 @@ function jamieProviderState(row: IntegrationStateRow | undefined): JamieProvider
       statusReason: null,
       integrationId: null,
       capabilityModes: {},
+      toolModes: {},
     };
   }
 
@@ -930,5 +954,6 @@ function jamieProviderState(row: IntegrationStateRow | undefined): JamieProvider
     statusReason: row.statusReason ?? row.status_reason ?? null,
     integrationId: row.id ?? null,
     capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
+    toolModes: row.toolModes ?? row.tool_modes ?? {},
   };
 }

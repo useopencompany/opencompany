@@ -1,6 +1,7 @@
 import {
   isCapabilityId,
   isCapabilityMode,
+  isToolMode,
   providerCapability,
 } from "@opencompany/agent/actions/capabilities";
 import type {
@@ -65,6 +66,7 @@ import {
 } from "@opencompany/db/attio";
 import {
   applyIntegrationCapabilityMode,
+  applyIntegrationToolMode,
   disconnectPersonalIntegration,
   loadIntegrationCredential,
 } from "@opencompany/db/integrations";
@@ -94,6 +96,7 @@ export type IntegrationAccountService = {
     capabilityId: string,
     mode: string,
   ): Promise<void>;
+  setToolMode(actor: Actor, integrationId: string, toolId: string, mode: string): Promise<void>;
   alwaysAllowAction(actor: Actor, actionId: string): Promise<void>;
   connectAttio(actor: Actor, apiKey: string): Promise<AttioProviderState>;
   disconnectAttio(actor: Actor, integrationId: string): Promise<void>;
@@ -106,6 +109,8 @@ export type IntegrationAccountService = {
   connectStripe(actor: Actor, apiKey: string): Promise<StripeProviderState>;
   disconnectStripe(actor: Actor): Promise<void>;
 };
+
+const VALID_TOOL_ID = /^[A-Za-z0-9_.:-]+$/u;
 
 export function createIntegrationAccountService(input: {
   db: DbLike;
@@ -137,6 +142,7 @@ export function createIntegrationAccountService(input: {
           status: integrations.status,
           scopes: integrations.scopes,
           capabilityModes: integrations.capabilityModes,
+          toolModes: integrations.toolModes,
         })
         .from(integrations)
         .where(
@@ -194,6 +200,30 @@ export function createIntegrationAccountService(input: {
         });
       } catch (error) {
         throw commandFailure(error, "Could not update the permission.", "capability_mode");
+      }
+    },
+
+    async setToolMode(actor, integrationId, toolId, mode) {
+      // "inherit" is the only way to clear a tool back to its capability group, so it is a valid
+      // input here even though it is never a stored value.
+      if (!isToolMode(mode)) {
+        throw new ApiError(400, "invalid_request", "Unknown permission mode.");
+      }
+      const trimmedTool = toolId.trim();
+      if (!trimmedTool || trimmedTool.length > 128 || !VALID_TOOL_ID.test(trimmedTool)) {
+        throw new ApiError(400, "invalid_request", "A valid tool is required.");
+      }
+      await requireManageableCapabilityIntegration(db, actor, integrationId);
+      try {
+        await applyIntegrationToolMode({
+          integrationIds: [integrationId],
+          toolId: trimmedTool,
+          mode: mode === "inherit" ? null : mode,
+          db,
+          now: now(),
+        });
+      } catch (error) {
+        throw commandFailure(error, "Could not update the permission.", "tool_mode");
       }
     },
 
