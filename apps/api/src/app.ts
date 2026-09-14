@@ -3607,6 +3607,19 @@ function taskCreationDto(result: {
 function workflowDto(workflow: Workflow) {
   return {
     ...workflow,
+    ...(workflow.triggers
+      ? {
+          triggers: workflow.triggers.map((trigger) =>
+            trigger.type === "schedule"
+              ? {
+                  ...trigger,
+                  lastRunAt: trigger.lastRunAt?.toISOString() ?? null,
+                  nextRunAt: trigger.nextRunAt?.toISOString() ?? null,
+                }
+              : trigger,
+          ),
+        }
+      : {}),
     trigger:
       workflow.trigger.type === "schedule"
         ? {

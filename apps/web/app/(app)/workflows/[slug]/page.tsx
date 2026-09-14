@@ -8,6 +8,7 @@ import { canManageWorkflowScope } from "@/lib/headless-automation-types";
 import { listHeadlessPlugins, listHeadlessSkillCatalog } from "@/lib/headless-knowledge-server";
 import { getPersonalAccounts } from "@/lib/integrations/personal-accounts";
 import { workflowEventProviderOptions } from "@/lib/workflow-event-triggers";
+import { listWorkspaceMembersAction, type WorkspaceMemberView } from "@/lib/workspace-actions";
 
 type WorkflowEditorPageProps = {
   params: Promise<{ slug: string }>;
@@ -20,11 +21,12 @@ export default async function WorkflowEditorPage({ params }: WorkflowEditorPageP
     return <TasksWorkflowsDisabledRoute />;
   }
 
-  const [workflow, skillCatalog, personalAccounts, plugins] = await Promise.all([
+  const [workflow, skillCatalog, personalAccounts, plugins, members] = await Promise.all([
     getHeadlessWorkflow(slug),
     listHeadlessSkillCatalog(),
     getPersonalAccounts(),
     listHeadlessPlugins(),
+    listWorkspaceMembersAction(),
   ]);
 
   if (!workflow) {
@@ -50,6 +52,21 @@ export default async function WorkflowEditorPage({ params }: WorkflowEditorPageP
   }
 
   const eventProviders = workflowEventProviderOptions({ plugins, personalAccounts });
+  const owner =
+    members.find(
+      (member: WorkspaceMemberView) => member.userWorkosId === workflow.createdByUserId,
+    ) ??
+    (workflow.createdByUserId === context.user.workosUserId
+      ? {
+          name:
+            [context.user.firstName, context.user.lastName].filter(Boolean).join(" ") ||
+            context.user.email,
+          avatarUrl: context.user.avatarUrl,
+        }
+      : {
+          name: workflow.createdByUserId ? "Former member" : "Workspace",
+          avatarUrl: null,
+        });
   return (
     <WorkflowEditor
       workflow={workflow}
@@ -62,6 +79,7 @@ export default async function WorkflowEditorPage({ params }: WorkflowEditorPageP
       // A workflow can be run by anyone who can see it, so it never carries a personal Skill.
       skillCatalog={skillCatalog.filter((skill: SkillCatalogItemDto) => skill.scope !== "personal")}
       eventProviders={eventProviders}
+      owner={{ name: owner.name, avatarUrl: owner.avatarUrl }}
     />
   );
 }

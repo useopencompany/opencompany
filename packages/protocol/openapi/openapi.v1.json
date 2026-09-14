@@ -1009,6 +1009,13 @@
           "trigger": {
             "$ref": "#/components/schemas/WorkflowTrigger"
           },
+          "triggers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkflowAutomationTrigger"
+            },
+            "maxItems": 20
+          },
           "version": {
             "type": "integer",
             "minimum": 1
@@ -1235,6 +1242,149 @@
           }
         ]
       },
+      "WorkflowAutomationTrigger": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "event"
+                ]
+              },
+              "provider": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "event": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "integrationId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "filters": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "key": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "metadata": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string",
+                        "maxLength": 256
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "prompt": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 10000
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "provider",
+              "event",
+              "integrationId",
+              "filters",
+              "prompt"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "schedule"
+                ]
+              },
+              "cron": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "timezone": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "prompt": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 10000
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "lastRunAt": {
+                "type": "string",
+                "nullable": true,
+                "format": "date-time"
+              },
+              "nextRunAt": {
+                "type": "string",
+                "nullable": true,
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "cron",
+              "timezone",
+              "prompt",
+              "enabled",
+              "lastRunAt",
+              "nextRunAt"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
       "WorkflowMutationEnvelope": {
         "type": "object",
         "properties": {
@@ -1372,6 +1522,13 @@
           },
           "trigger": {
             "$ref": "#/components/schemas/WorkflowTriggerInput"
+          },
+          "triggers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkflowAutomationTriggerInput"
+            },
+            "maxItems": 20
           }
         },
         "required": [
@@ -1503,6 +1660,131 @@
               }
             },
             "required": [
+              "type",
+              "cron"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "WorkflowAutomationTriggerInput": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "event"
+                ]
+              },
+              "provider": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "event": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "integrationId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "filters": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "key": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "metadata": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string",
+                        "maxLength": 256
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "prompt": {
+                "type": "string",
+                "maxLength": 10000
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "provider",
+              "event",
+              "integrationId",
+              "filters"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "schedule"
+                ]
+              },
+              "cron": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "timezone": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "prompt": {
+                "type": "string",
+                "maxLength": 10000
+              },
+              "enabled": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
               "type",
               "cron"
             ],

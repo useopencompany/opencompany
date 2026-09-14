@@ -288,6 +288,105 @@ describe("WorkflowApplicationService", () => {
     expect(repository.updateWorkflow).not.toHaveBeenCalled();
   });
 
+  it("plans and persists every trigger in a multi-trigger workflow", async () => {
+    const repository = fakeWorkflowRepository();
+    const planner = fakePlanner();
+    const service = workflowService(repository, { planner });
+    const triggers = [
+      {
+        id: "trigger_schedule",
+        type: "schedule" as const,
+        cron: "0 9 * * 1",
+        timezone: "UTC",
+        prompt: "Run weekly.",
+        enabled: true,
+      },
+      {
+        id: "trigger_event",
+        type: "event" as const,
+        provider: "linear",
+        event: "issue.created",
+        integrationId: "gint_linear_1",
+        filters: {},
+        prompt: "Review the issue.",
+      },
+    ];
+
+    await service.updateWorkflow(actor(), "workflow_1", {
+      expectedVersion: 1,
+      name: "Multi-trigger workflow",
+      description: "",
+      steps: [workflow().steps[0]!],
+      status: "active",
+      trigger: triggers[0]!,
+      triggers,
+    });
+
+    expect(planner.prepareWorkflow).toHaveBeenCalledTimes(2);
+    expect(repository.updateWorkflow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        automationTriggers: [
+          expect.objectContaining({ trigger: expect.objectContaining({ id: "trigger_schedule" }) }),
+          expect.objectContaining({ trigger: expect.objectContaining({ id: "trigger_event" }) }),
+        ],
+      }),
+    );
+  });
+
+  it("preserves additional triggers when a legacy client omits the trigger collection", async () => {
+    const triggers = [
+      {
+        id: "trigger_schedule",
+        type: "schedule" as const,
+        cron: "0 9 * * 1",
+        timezone: "UTC",
+        prompt: "Run weekly.",
+        enabled: true,
+        lastRunAt: null,
+        nextRunAt,
+      },
+      {
+        id: "trigger_event",
+        type: "event" as const,
+        provider: "linear",
+        event: "issue.created",
+        integrationId: "gint_linear_1",
+        filters: {},
+        prompt: "Review the issue.",
+      },
+    ];
+    const repository = fakeWorkflowRepository({
+      workflow: workflow({ trigger: triggers[0]!, triggers }),
+    });
+    const planner = fakePlanner();
+    const service = workflowService(repository, { planner });
+
+    await service.updateWorkflow(actor(), "workflow_1", {
+      expectedVersion: 1,
+      name: "Renamed workflow",
+      description: "",
+      steps: [workflow().steps[0]!],
+      status: "active",
+      trigger: {
+        type: "schedule",
+        cron: "0 9 * * 1",
+        timezone: "UTC",
+        prompt: "Run weekly.",
+        enabled: true,
+      },
+    });
+
+    expect(planner.prepareWorkflow).toHaveBeenCalledTimes(2);
+    expect(repository.updateWorkflow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        automationTriggers: [
+          expect.objectContaining({ trigger: expect.objectContaining({ id: "trigger_schedule" }) }),
+          expect.objectContaining({ trigger: expect.objectContaining({ id: "trigger_event" }) }),
+        ],
+      }),
+    );
+  });
+
   it("routes invoke and run-now through canonical Task creation", async () => {
     const scheduled = workflow({
       trigger: {
@@ -335,15 +434,28 @@ describe("WorkflowApplicationService", () => {
       name: "Weekly research",
       goal: "Review the market.",
       execution: executionPlan(),
-      source: "schedule",
+      source: "workflow",
       workflowId: "weekly-research",
     });
-    expect(repository.recordRunNow).toHaveBeenCalledWith({
-      actor: actor(),
-      workflowId: "workflow_1",
-      taskId: "task_1",
-      occurredAt: now,
-    });
+    expect(repository.recordRunNow).not.toHaveBeenCalled();
+  });
+
+  it("tests a complete draft without activating its triggers", async () => {
+    const draft = workflow({ status: "draft", trigger: { type: "manual" } });
+    const repository = fakeWorkflowRepository({ workflow: draft });
+    const taskCreator = fakeTaskCreator();
+    const service = workflowService(repository, { taskCreator });
+
+    await service.runWorkflowNow(actor(), draft.id, "test-draft-1");
+
+    expect(taskCreator.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idempotencyKey: "test-draft-1",
+        source: "workflow",
+        workflowId: draft.slug,
+      }),
+    );
+    expect(repository.updateWorkflow).not.toHaveBeenCalled();
   });
 
   it("applies model overrides to the invocation snapshot without editing saved steps", async () => {

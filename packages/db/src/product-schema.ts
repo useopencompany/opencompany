@@ -3293,6 +3293,10 @@ export const workflows = productSchema.table(
     model: text("model").notNull().default(""),
     steps: jsonb("steps").$type<WorkflowStep[]>().notNull().default(sql`'[]'::jsonb`),
     trigger: text("trigger").$type<WorkflowTrigger>().notNull().default("manual"),
+    automationTriggers: jsonb("automation_triggers")
+      .$type<Record<string, unknown>[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     scheduleCron: text("schedule_cron"),
     scheduleTimezone: text("schedule_timezone").notNull().default("UTC"),
     schedulePrompt: text("schedule_prompt").notNull().default(""),
@@ -3999,6 +4003,7 @@ export const workflowScheduleRuns = productSchema.table(
     workflowId: text("workflow_id")
       .notNull()
       .references(() => workflows.id, { onDelete: "cascade" }),
+    triggerId: text("trigger_id").notNull().default("legacy"),
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
@@ -4017,6 +4022,7 @@ export const workflowScheduleRuns = productSchema.table(
   (table) => ({
     workflowForIdx: uniqueIndex("goat_workflow_schedule_runs_workflow_for_idx").on(
       table.workflowId,
+      table.triggerId,
       table.scheduledFor,
     ),
     workspaceCreatedIdx: index("goat_workflow_schedule_runs_workspace_created_idx").on(
@@ -4045,6 +4051,7 @@ export const workflowEventRuns = productSchema.table(
     workflowId: text("workflow_id")
       .notNull()
       .references(() => workflows.id, { onDelete: "cascade" }),
+    triggerId: text("trigger_id").notNull().default("legacy"),
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
@@ -4070,6 +4077,7 @@ export const workflowEventRuns = productSchema.table(
   (table) => ({
     workflowDeliveryIdx: uniqueIndex("opencompany_workflow_event_runs_workflow_delivery_idx").on(
       table.workflowId,
+      table.triggerId,
       table.provider,
       table.deliveryId,
     ),
@@ -5608,6 +5616,10 @@ export const workflowReadModelV1 = productSchema.table(
     scope: text("scope").$type<WorkflowScope>().notNull(),
     createdByWorkosId: text("created_by_workos_id"),
     trigger: jsonb("trigger").$type<Record<string, unknown>>().notNull(),
+    triggers: jsonb("triggers")
+      .$type<Record<string, unknown>[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     scheduleCron: text("schedule_cron"),
     scheduleTimezone: text("schedule_timezone").notNull(),
     schedulePrompt: text("schedule_prompt").notNull(),

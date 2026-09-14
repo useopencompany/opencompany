@@ -104,6 +104,7 @@ describe("sweepDueTaskSchedules", () => {
           schedule_prompt text NOT NULL DEFAULT '',
           schedule_harness_spec jsonb,
           schedule_next_run_at timestamptz,
+          automation_triggers jsonb NOT NULL DEFAULT '[]'::jsonb,
           trigger text NOT NULL DEFAULT 'manual',
           schedule_enabled boolean NOT NULL DEFAULT false,
           status text NOT NULL DEFAULT 'active',
@@ -323,6 +324,7 @@ describe("sweepDueTaskSchedules", () => {
       .mockResolvedValueOnce([
         {
           id: "goat_workflow_1",
+          triggerId: "trigger_weekday",
           workspaceId: "workspace_1",
           slug: "weekly-update",
           userWorkosId: "user_1",
@@ -373,6 +375,8 @@ describe("sweepDueTaskSchedules", () => {
       }),
     );
     expect(sqlTextFromExecuteCall(execute, 1)).toContain("FROM goat.workflows");
+    expect(sqlTextFromExecuteCall(execute, 1)).toContain("jsonb_array_elements");
+    expect(sqlTextFromExecuteCall(execute, 2)).toContain("trigger_id");
     expect(sqlTextFromExecuteCall(execute, 4)).toContain("INSERT INTO goat.chat_sessions");
     expect(sqlTextFromExecuteCall(execute, 4)).toContain("workflow_id");
     expect(sqlTextFromExecuteCall(execute, 5)).toContain("UPDATE goat.workflow_schedule_runs");
