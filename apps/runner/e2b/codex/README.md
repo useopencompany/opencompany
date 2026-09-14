@@ -49,11 +49,13 @@ before pointing the runner env at the new aliases:
 E2B_API_KEY=e2b_... bun apps/runner/e2b/codex/soak.pause-resume.ts
 ```
 
-It loads each size with ~85% resident memory plus a headless Chromium, then pause/resumes it
-five times, checking after each resume that the guest answers the same probe the runner uses
-and that the memory holder survived the restore. `SOAK_CYCLES` and `SOAK_MEMORY_OCCUPANCY`
-override the defaults, and passing size names limits the run to those sizes. A failing size
-must not be configured in the runner environment.
+It starts a headless Chromium, then pins 85% of whatever memory is still free — taken from
+`MemAvailable`, so every size ends up under the same pressure — and pause/resumes the sandbox
+five times. After each resume it checks that the guest answers the same probe `connectSandbox`
+uses and that both loads survived the restore, since a guest that answers after the kernel
+reaped its workload proves nothing. `SOAK_CYCLES` and `SOAK_MEMORY_OCCUPANCY` override the
+defaults, and passing size names limits the run to those sizes. A failing size must not be
+configured in the runner environment.
 
 ## Smoke Test
 
