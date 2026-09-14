@@ -251,7 +251,7 @@ export function InferenceSettingsRoute() {
         claudeCode={integrations.claude_code}
         canManage={workspace.role === "admin"}
       />
-    </SettingsContent>
+    </PageContent>
   );
 }
 
@@ -265,7 +265,7 @@ export function SandboxSettingsRoute({
   const { workspace } = useAppData();
 
   return (
-    <SettingsContent
+    <PageContent
       title="Sandboxes"
       description="Control the machines your cloud coding sessions run on."
     >
