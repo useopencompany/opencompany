@@ -72,6 +72,7 @@ export function pluginAccountsFromState(
           statusReason: connection.statusReason,
           scopes: [],
           capabilityModes: connection.capabilityModes,
+          toolModes: connection.toolModes,
         }
       : null;
     return {
@@ -132,6 +133,7 @@ export function pluginAccountsFromState(
               statusReason: connection.statusReason,
               scopes: [],
               capabilityModes: connection.capabilityModes,
+              toolModes: connection.toolModes,
             }
           : null;
       return {
@@ -185,6 +187,7 @@ export function pluginAccountsFromState(
         statusReason: state.linear.statusReason,
         scopes: [],
         capabilityModes: state.linear.capabilityModes,
+        toolModes: state.linear.toolModes,
       }
     : null;
   return {

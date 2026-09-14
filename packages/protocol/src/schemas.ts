@@ -4155,6 +4155,7 @@ export const IntegrationAccountSchema = z
     statusReason: z.string().max(2_000).nullable(),
     scopes: z.array(z.string().max(512)).max(1_000),
     capabilityModes: z.record(z.string(), z.unknown()),
+    toolModes: z.record(z.string(), z.unknown()),
   })
   .strict()
   .openapi("IntegrationAccount");
@@ -4264,6 +4265,25 @@ export const SetIntegrationCapabilityModeBodySchema = z
   .object({ mode: z.string().min(1).max(16) })
   .strict()
   .openapi("SetIntegrationCapabilityModeBody");
+
+export const SetIntegrationToolModeBodySchema = z
+  .object({ mode: z.string().min(1).max(16) })
+  .strict()
+  .openapi("SetIntegrationToolModeBody");
+
+export const IntegrationToolModeEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        integrationId: IntegrationAccountIdSchema,
+        toolId: z.string().min(1).max(128),
+        mode: z.enum(["on", "ask", "off", "inherit"]),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("IntegrationToolModeEnvelope");
 
 export const IntegrationCapabilityModeEnvelopeSchema = z
   .object({

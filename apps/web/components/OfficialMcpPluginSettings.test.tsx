@@ -5,7 +5,7 @@ import type {
 } from "@opencompany/protocol";
 import type { IntegrationAccountView } from "@/lib/integration-state";
 import "@testing-library/jest-dom/vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -101,6 +101,7 @@ const accountActions = vi.hoisted(() => ({
     affectedBrainSourceCount: 0,
   })),
   setIntegrationCapabilityModeAction: vi.fn(async () => ({ ok: true as const })),
+  setIntegrationToolModeAction: vi.fn(async () => ({ ok: true as const })),
 }));
 const infisicalAuth = vi.hoisted(() => ({
   completeInfisicalAuth: vi.fn(),
@@ -294,6 +295,7 @@ const appData = vi.hoisted(() => ({
             "https://www.googleapis.com/auth/calendar.events",
           ],
           capabilityModes: {},
+          toolModes: {},
         },
       ],
       google_drive: [
@@ -308,6 +310,7 @@ const appData = vi.hoisted(() => ({
           statusReason: null,
           scopes: [],
           capabilityModes: {},
+          toolModes: {},
         },
         {
           integrationId: "gint_google_drive_latest",
@@ -422,6 +425,7 @@ const appData = vi.hoisted(() => ({
           statusReason: null,
           scopes: ["channels:history"],
           capabilityModes: {},
+          toolModes: {},
         },
       ],
       x_account: [
@@ -436,6 +440,7 @@ const appData = vi.hoisted(() => ({
           statusReason: null,
           scopes: ["tweet.read", "tweet.write", "users.read", "offline.access"],
           capabilityModes: {},
+          toolModes: {},
         },
         {
           integrationId: "gint_x_latest",
@@ -696,6 +701,7 @@ const toolsState: PluginToolsState = {
       tools: [
         {
           id: "linear_search_issues",
+          toolName: "linear_search_issues",
           name: "Search issues",
           description: "Find issues in the connected workspace.",
           readOnly: true,
@@ -712,6 +718,7 @@ const toolsState: PluginToolsState = {
       tools: [
         {
           id: "linear_create_issue",
+          toolName: "linear_create_issue",
           name: "Create issue",
           description: null,
           readOnly: false,
@@ -1416,6 +1423,8 @@ describe("Linear plugin settings", () => {
     accountActions.getIntegrationAccountUsageAction.mockClear();
     accountActions.setIntegrationCapabilityModeAction.mockReset();
     accountActions.setIntegrationCapabilityModeAction.mockResolvedValue({ ok: true });
+    accountActions.setIntegrationToolModeAction.mockReset();
+    accountActions.setIntegrationToolModeAction.mockResolvedValue({ ok: true });
     for (const action of Object.values(infisicalAuth)) action.mockReset();
     useLiveQuery.mockClear();
     window.history.replaceState({}, "", "/settings/plugins/linear");
@@ -1423,6 +1432,116 @@ describe("Linear plugin settings", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("shows each tool's effective mode and pins one without touching its group", async () => {
+    render(
+      <LinearPluginDetailView
+        pluginState={{ status: "ready", plugin }}
+        accountsState={accountsState}
+        toolsState={toolsState}
+        canEdit
+      />,
+    );
+
+    for (const disclosure of screen.getAllByRole("button", { name: /^1 tool/ })) {
+      await userEvent.click(disclosure);
+    }
+    // "Read Linear" is On, so its inherited tool reads On without anyone configuring it.
+    const searchIssues = screen.getByRole("combobox", { name: "Permission for Search issues" });
+    expect(searchIssues).toHaveTextContent("On");
+
+    await userEvent.click(searchIssues);
+    await userEvent.click(await screen.findByRole("option", { name: "Ask" }));
+    expect(accountActions.setIntegrationToolModeAction).toHaveBeenCalledWith(
+      "gint_linear_tools",
+      "linear_search_issues",
+      "ask",
+    );
+    // Pinning one tool must never write the capability the rest of the group still follows.
+    expect(accountActions.setIntegrationCapabilityModeAction).not.toHaveBeenCalled();
+  });
+
+  it("marks a pinned tool, counts it on the group, and releases it back with Use group", async () => {
+    const pinned = account(
+      "gint_linear_tools",
+      "Linear tool access",
+      { read: "on", write: "ask" },
+      "linear",
+      { linear_search_issues: "off" },
+    );
+    render(
+      <LinearPluginDetailView
+        pluginState={{ status: "ready", plugin }}
+        accountsState={{
+          status: "ready",
+          accounts: [{ account: pinned }],
+          permissionConnection: pinned,
+        }}
+        toolsState={toolsState}
+        canEdit
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "1 custom" })).toBeInTheDocument();
+    expect(screen.getByText("1 tool keeps its own setting")).toBeInTheDocument();
+
+    for (const disclosure of screen.getAllByRole("button", { name: /^1 tool/ })) {
+      await userEvent.click(disclosure);
+    }
+    const searchIssues = screen.getByRole("combobox", { name: "Permission for Search issues" });
+    expect(searchIssues).toHaveTextContent("Off");
+
+    await userEvent.click(searchIssues);
+    // The inherit option names the mode the tool returns to, so releasing it is never a guess.
+    await userEvent.click(await screen.findByRole("option", { name: "Use group (On)" }));
+    expect(accountActions.setIntegrationToolModeAction).toHaveBeenCalledWith(
+      "gint_linear_tools",
+      "linear_search_issues",
+      "inherit",
+    );
+  });
+
+  it("resolves an unset group from the package default the group toggle shows", async () => {
+    // "query" is not in Linear's capability registry, so a tool row that fell back to the registry
+    // would read On while its own group header read Ask.
+    const packageDefaultState: PluginToolsState = {
+      ...toolsState,
+      groups: [
+        {
+          id: "query",
+          label: "Read Linear",
+          description: "Look up Linear work.",
+          modeKey: "query",
+          defaultMode: "ask",
+          curated: true,
+          tools: toolsState.groups[0]!.tools,
+        },
+      ],
+    };
+    const unsetAccount = account("gint_linear_tools", "Linear tool access", {}, "linear");
+    render(
+      <LinearPluginDetailView
+        pluginState={{ status: "ready", plugin }}
+        accountsState={{
+          status: "ready",
+          accounts: [{ account: unsetAccount }],
+          permissionConnection: unsetAccount,
+        }}
+        toolsState={packageDefaultState}
+        canEdit
+      />,
+    );
+
+    expect(
+      within(screen.getByRole("group", { name: "Read Linear permission" })).getByRole("button", {
+        name: "Ask",
+      }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(screen.getByRole("button", { name: /^1 tool/ }));
+    expect(
+      screen.getByRole("combobox", { name: "Permission for Search issues" }),
+    ).toHaveTextContent("Ask");
   });
 
   it("uses the shared Google Admin account, OAuth, permission, and uninstall controls", async () => {
@@ -1440,6 +1559,7 @@ describe("Linear plugin settings", () => {
         "https://www.googleapis.com/auth/admin.directory.group",
       ],
       capabilityModes: {},
+      toolModes: {},
     };
     appData.integrations.personalAccounts.google_admin = [adminAccount];
     const adminPlugin: PluginInstallationDto = {
@@ -1516,6 +1636,7 @@ describe("Linear plugin settings", () => {
       screen.queryByText("Give workspace coding agents access to the real Infisical CLI."),
     ).not.toBeInTheDocument();
     expect(screen.getByText("infisical-sandbox-secrets")).toBeInTheDocument();
+    expandToolGroups();
     expect(screen.getByText("Search infisical")).toBeInTheDocument();
     expect(screen.getByText("Submit feedback")).toBeInTheDocument();
     expect(
@@ -1954,6 +2075,7 @@ describe("Linear plugin settings", () => {
           statusReason: status === "needs_reauth" ? "Reconnect Stripe" : null,
           scopes: [],
           capabilityModes: {},
+          toolModes: {},
         },
       ];
       render(
@@ -2034,6 +2156,12 @@ describe("Linear plugin settings", () => {
     expect(screen.queryByText("gint_linear_tools")).not.toBeInTheDocument();
     expect(screen.getByText("Linear tool access")).toBeInTheDocument();
     expect(screen.queryByText("Acme")).not.toBeInTheDocument();
+    // Tool rows stay collapsed, and unmounted, until the user opens the group.
+    for (const disclosure of screen.getAllByRole("button", { name: /^1 tool$/ })) {
+      expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    }
+    expect(screen.queryByText("Search issues")).not.toBeInTheDocument();
+    expandToolGroups();
     expect(screen.getByText("Search issues")).toBeInTheDocument();
     expect(screen.getByText("linear-triage")).toBeInTheDocument();
     expect(screen.getByText("a".repeat(40))).toBeInTheDocument();
@@ -2049,11 +2177,6 @@ describe("Linear plugin settings", () => {
       `https://github.com/useopencompany/plugins/tree/${"a".repeat(40)}/linear`,
     );
     expect(advancedDetails).not.toHaveAttribute("open");
-    for (const toolDetails of screen
-      .getAllByText("1 tool")
-      .map((item) => item.closest("details"))) {
-      expect(toolDetails).not.toHaveAttribute("open");
-    }
 
     const readModes = screen.getByRole("group", { name: "Read Linear permission" });
     await userEvent.click(within(readModes).getByRole("button", { name: "Ask" }));
@@ -2238,6 +2361,7 @@ describe("Linear plugin settings", () => {
     statusReason: null,
     scopes: [],
     capabilityModes: { read: "on", write: "ask" },
+    toolModes: {},
   };
 
   it("makes connecting the account the primary action while setup is incomplete", () => {
@@ -2661,6 +2785,7 @@ describe("Linear plugin settings", () => {
     );
 
     expect(screen.getByRole("heading", { level: 1, name: "Neon" })).toBeInTheDocument();
+    expandToolGroups();
     expect(screen.getByText("List projects")).toBeInTheDocument();
     expect(screen.getByText("Run sql")).toBeInTheDocument();
     expect(screen.getByText("This version of the plugin contains no skills.")).toBeInTheDocument();
@@ -2706,6 +2831,7 @@ describe("Linear plugin settings", () => {
     );
 
     expect(screen.getByRole("heading", { level: 1, name: "Better Stack" })).toBeInTheDocument();
+    expandToolGroups();
     expect(screen.getByText("Documentation")).toBeInTheDocument();
     expect(screen.getByText("Query")).toBeInTheDocument();
     expect(screen.getByText("Create monitor")).toBeInTheDocument();
@@ -3039,8 +3165,8 @@ describe("Linear plugin settings", () => {
 
   it("builds the two-bucket advanced fallback with ask defaults", () => {
     const groups = uncuratedPluginToolGroups([
-      { id: "search", name: "Search", description: null, readOnly: true },
-      { id: "mutate", name: "Mutate", description: null, readOnly: false },
+      { id: "search", toolName: "search", name: "Search", description: null, readOnly: true },
+      { id: "mutate", toolName: "mutate", name: "Mutate", description: null, readOnly: false },
     ]);
 
     expect(groups).toMatchObject([
@@ -3147,11 +3273,20 @@ describe("Linear plugin settings", () => {
   });
 });
 
+// Each capability group keeps its tool rows unmounted until the disclosure is opened, so tests
+// that assert on tool names have to open them the way a user does.
+function expandToolGroups() {
+  for (const button of screen.queryAllByRole("button", { name: /^\d+ tools?( ·.*)?$/ })) {
+    fireEvent.click(button);
+  }
+}
+
 function account(
   integrationId: string,
   connectionLabel: string,
   capabilityModes: Record<string, unknown>,
   provider: IntegrationAccountView["provider"] = "linear",
+  toolModes: Record<string, unknown> = {},
 ): IntegrationAccountView {
   return {
     integrationId,
@@ -3164,5 +3299,6 @@ function account(
     statusReason: null,
     scopes: [],
     capabilityModes,
+    toolModes,
   };
 }

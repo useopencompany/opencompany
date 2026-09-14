@@ -94,6 +94,37 @@ export async function setIntegrationCapabilityModeAction(
   }
 }
 
+export async function setIntegrationToolModeAction(
+  integrationId: string,
+  toolId: string,
+  mode: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!integrationId || !toolId || !mode) {
+    return { ok: false, error: "Unknown permission mode." };
+  }
+  try {
+    const response = await (await serverApiClient()).v1["integration-accounts"][":integrationId"][
+      "tool-modes"
+    ][":toolId"].$put({
+      param: { integrationId, toolId },
+      json: { mode },
+    });
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: await serverApiErrorMessage(response, "Could not update the permission."),
+      };
+    }
+    revalidatePath("/", "layout");
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not update the permission.",
+    };
+  }
+}
+
 // Chat "Always allow": the execution owner re-resolves the action catalog and
 // flips every ask-mode connection behind the action to "on". The browser only
 // sends the opaque action id from the approval card.
