@@ -98,6 +98,8 @@ import { ChatShareButton } from "@/components/chat/ChatShareButton";
 import { ChatTranscriptSyncError } from "@/components/chat/ChatTranscriptSyncError";
 import { MessageBubble } from "@/components/chat/MessageBubble";
 import { PendingApprovalBanner } from "@/components/chat/PendingApprovalBanner";
+import { QueuedMessageCard } from "@/components/chat/QueuedMessageCard";
+import { pendingRunMessageIds, queuedChatMessages } from "@/components/chat/queued-messages";
 import { PendingActivityIndicator, ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import type { ActionApprovalRequest, CodexToolAction } from "@/components/chat/ToolCallItem";
 import { useChatAttachments } from "@/components/chat/useChatAttachments";
@@ -183,6 +185,7 @@ import { retryHeadlessChatMessages } from "@/lib/headless-chat-collections";
 import {
   cancelHeadlessChatRun,
   resolveEngineQuestions,
+  steerHeadlessChatRun,
   updateHeadlessChatConversation,
 } from "@/lib/headless-chat-commands";
 import {
@@ -892,6 +895,11 @@ export function Surface({
   const backgroundChatDirective = backgroundInputDirective;
   const backgroundDirectiveTargetEngine = backgroundLaunchSelection?.engine ?? null;
   const composerEngine = backgroundChatDirective ? backgroundDirectiveTargetEngine : activeEngine;
+  // A running coding turn gates nothing: the message becomes a queued turn the user can steer into
+  // the live one. Tasks and background sends keep their own dispatch rules.
+  const canQueueWhileWorking = Boolean(
+    isEngineChat && !activeTaskConversation && !backgroundChatDirective && !readOnly,
+  );
   const lowCreditBalance = Boolean(
     creditBalance &&
       creditBalance.balanceUsdMicros > 0 &&
@@ -1049,6 +1057,30 @@ export function Surface({
       break;
     }
   }, [adoptResolvedAutoModel, isAutoChatModel, messages]);
+  // A coding message sent while a turn is running becomes its own queued Run. It renders above the
+  // composer with steer/remove actions until it starts, so the transcript keeps showing only work
+  // that actually happened.
+  const queuedMessages = useMemo(
+    () =>
+      isEngineChat && !activeTaskConversation
+        ? queuedChatMessages({ runs: liveChat.runsById, messages: chatMessages })
+        : [],
+    [activeTaskConversation, chatMessages, isEngineChat, liveChat.runsById],
+  );
+  const pendingRunMessages = useMemo(
+    () =>
+      isEngineChat && !activeTaskConversation
+        ? pendingRunMessageIds({ runs: liveChat.runsById, messages: chatMessages })
+        : new Set<string>(),
+    [activeTaskConversation, chatMessages, isEngineChat, liveChat.runsById],
+  );
+  const transcriptMessages = useMemo(
+    () =>
+      pendingRunMessages.size === 0
+        ? chatMessages
+        : chatMessages.filter((message) => !pendingRunMessages.has(message.id)),
+    [chatMessages, pendingRunMessages],
+  );
   const latestAssistantMessageId = useMemo(() => {
     for (let index = chatMessages.length - 1; index >= 0; index -= 1) {
       if (chatMessages[index]?.role === "assistant") return chatMessages[index]?.id ?? null;
@@ -1839,7 +1871,11 @@ export function Surface({
       : null;
     const backgroundEngine = backgroundLaunch?.engine ?? null;
     const backgroundModel = backgroundLaunch?.model ?? chatModel;
-    if ((isInteractionPending && !isBackgroundSubmit) || backgroundTaskSubmitting) return;
+    if (
+      (isInteractionPending && !isBackgroundSubmit && !canQueueWhileWorking) ||
+      backgroundTaskSubmitting
+    )
+      return;
     if (chatSendBlocked) {
       toast.error(CHAT_OUT_OF_CREDITS_MESSAGE, {
         action: {
@@ -2506,6 +2542,28 @@ export function Surface({
     stop,
   ]);
 
+  const steerQueuedMessage = useCallback(async (runId: string) => {
+    try {
+      await steerHeadlessChatRun(runId);
+    } catch (error) {
+      // The common failure is losing the race: the turn ended and the queued message is already
+      // running on its own. Say so rather than implying the message was lost.
+      toast.error(
+        error instanceof Error ? error.message : "Could not steer that message into the turn.",
+      );
+      throw error;
+    }
+  }, []);
+
+  const removeQueuedMessage = useCallback(async (runId: string) => {
+    try {
+      await cancelHeadlessChatRun(runId);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not remove that queued message.");
+      throw error;
+    }
+  }, []);
+
   const stopGeneration = useCallback(() => {
     cancelChatFirstOutputMeasurement();
     if (activeTaskConversation) {
@@ -3059,7 +3117,7 @@ export function Surface({
                   className="mx-auto flex w-full max-w-[720px] flex-col gap-3 pt-2"
                   style={{ paddingBottom: chatThreadBottomPaddingPx }}
                 >
-                  {chatMessages.map((message) => (
+                  {transcriptMessages.map((message) => (
                     <MessageBubble
                       key={message.id}
                       message={message}
@@ -3280,6 +3338,19 @@ export function Surface({
               ) : backgroundChatDirective ? (
                 <BackgroundChatDirectiveHint engine={backgroundDirectiveTargetEngine} />
               ) : null}
+              {queuedMessages.length > 0 && activeEngine ? (
+                <div className="flex flex-col gap-1.5">
+                  {queuedMessages.map((queued) => (
+                    <QueuedMessageCard
+                      key={queued.runId}
+                      message={queued}
+                      engineLabel={ENGINE_REGISTRY[activeEngine].label}
+                      onSteer={() => steerQueuedMessage(queued.runId)}
+                      onRemove={() => removeQueuedMessage(queued.runId)}
+                    />
+                  ))}
+                </div>
+              ) : null}
               <div
                 {...composerAttachments.dragHandlers}
                 className="relative flex flex-col rounded-2xl border border-border bg-surface shadow-[0_8px_24px_rgba(15,15,15,0.08)] transition-colors duration-150 focus-within:border-border-strong"
@@ -3371,7 +3442,7 @@ export function Surface({
                           (attachment) => attachment.status === "ready",
                         )) ||
                       composerAttachments.isUploading ||
-                      (!isBackgroundSubmit && isForegroundTurnWorking) ||
+                      (!isBackgroundSubmit && isForegroundTurnWorking && !canQueueWhileWorking) ||
                       isTaskConversationWorking ||
                       taskCommentSubmitting ||
                       backgroundTaskSubmitting ||

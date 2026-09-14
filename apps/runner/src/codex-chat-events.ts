@@ -1163,6 +1163,7 @@ const ITEM_LIFECYCLE_EVENT_TYPES = new Set<HarnessNormalizedEvent["type"]>([
   "dynamic_tool.completed",
   "web_search.started",
   "web_search.completed",
+  "steering.delivered",
 ]);
 
 function databaseErrorCode(error: unknown): string | undefined {

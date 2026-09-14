@@ -91,6 +91,7 @@ type ClaimedTurnRow = {
   settings: CodexChatTurnSettings;
   error: string | null;
   interrupt_requested_at: Date | string | null;
+  steer_into_run_id: string | null;
   attempts: number;
   recovery_attempts: number;
   engine_recovery_required: boolean;
@@ -1159,6 +1160,7 @@ function turnFromRow(row: ClaimedTurnRow): CodexChatTurn {
     settings: row.settings ?? {},
     error: row.error,
     interruptRequestedAt: dateFromRow(row.interrupt_requested_at),
+    steerIntoRunId: row.steer_into_run_id,
     attempts: row.attempts,
     recoveryAttempts: row.recovery_attempts,
     engineRecoveryRequired: row.engine_recovery_required,

@@ -79,8 +79,19 @@ export type AcpEngineAdapter = {
       values: Record<"default" | "plan", string>;
     };
   };
-  steeringControlMethod?: string;
 };
+
+// One user message to inject into the turn that is already running.
+export type AcpSteeringMessage = {
+  id: string;
+  prompt: AcpPromptBlock[];
+};
+
+// "injected" is the only outcome that joins the message to the live turn. The extension also
+// reports "startedNewTurn" (it found no turn to join and opened its own, whose output this prompt
+// never sees) and adapter-specific refusals; the caller owns what happens to a message the
+// adapter would not inject.
+export type AcpSteeringOutcome = "injected" | "rejected";
 
 export type AcpExtensionRequest = {
   method: string;
@@ -119,7 +130,11 @@ export type AcpHarnessTurnInput = {
   permissionMode?: "default" | "bypassPermissions";
   collaborationMode?: "default" | "plan";
   goal?: { objective: string; tokenBudget?: number | null } | null;
-  steering?: AsyncIterable<AcpPromptBlock[]>;
+  steering?: AsyncIterable<AcpSteeringMessage>;
+  onSteeringOutcome?: (input: {
+    message: AcpSteeringMessage;
+    outcome: AcpSteeringOutcome;
+  }) => Promise<void>;
   emptyResultRepair?: {
     shouldRepair: () => boolean;
     prompt?: string;
@@ -194,6 +209,7 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
       const initializedRecord = readRecord(initialized);
       const capabilities = readRecord(initializedRecord?.agentCapabilities) ?? {};
       const goalControlMethod = readGoalControlMethod(initializedRecord);
+      const steeringControlMethod = readSteeringControlMethod(initializedRecord);
       for (const request of input.extensionRequests ?? []) {
         await client.requestBeforeExecution(request.method, request.params);
       }
@@ -277,6 +293,7 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
         sessionId,
         prompt,
         deadline: executionDeadline,
+        steeringControlMethod,
       });
       await client.flush();
       await input.onRuntimeEvents([promptResultEvent(sessionId, promptResponse)]);
@@ -291,6 +308,7 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
           sessionId,
           prompt: textPrompt(input.emptyResultRepair.prompt ?? ACP_EMPTY_RESULT_REPAIR_PROMPT),
           deadline: executionDeadline,
+          steeringControlMethod,
         });
         await client.flush();
         await input.onRuntimeEvents([promptResultEvent(sessionId, promptResponse)]);
@@ -507,6 +525,7 @@ async function requestPromptWithAbort(input: {
   sessionId: string;
   prompt: AcpPromptBlock[];
   deadline: number;
+  steeringControlMethod: string | null;
 }) {
   const requestTimeoutMs = Math.max(1, input.deadline - Date.now()) + ACP_CANCEL_GRACE_MS;
   const outcome = input.client
@@ -544,19 +563,21 @@ async function requestPromptWithAbort(input: {
         nextSteering = undefined;
         continue;
       }
-      const steeringMethod = input.input.adapter.steeringControlMethod;
-      if (!steeringMethod) {
-        throw new Error(`${input.input.adapter.displayName} does not advertise ACP steering.`);
-      }
-      const response = readRecord(
-        await input.client.request(steeringMethod, {
-          sessionId: input.sessionId,
-          prompt: settled.value.value,
-        }),
-      );
-      if (response?.outcome === "failed") {
-        throw new Error(`${input.input.adapter.displayName} could not steer the active ACP turn.`);
-      }
+      const message = settled.value.value;
+      // An agent that does not advertise the extension cannot be steered at all. Report the
+      // refusal rather than failing the turn: the caller still owns an undelivered message.
+      const response = input.steeringControlMethod
+        ? readRecord(
+            await input.client.request(input.steeringControlMethod, {
+              sessionId: input.sessionId,
+              prompt: message.prompt,
+            }),
+          )
+        : null;
+      await input.input.onSteeringOutcome?.({
+        message,
+        outcome: readString(response?.outcome) === "injected" ? "injected" : "rejected",
+      });
       nextSteering = steeringIterator
         ?.next()
         .then((value) => ({ type: "steering" as const, value }));
@@ -639,6 +660,17 @@ async function requestGoalWithAbort(input: {
     await input.client.flush().catch(() => {});
     throw abortError;
   }
+}
+
+// Steering is an ACP extension, not part of protocol version 1: an agent that supports it
+// advertises `_meta.steering.supported` on the initialize response and then accepts
+// `_session/steering` requests. Negotiate rather than assume, so an adapter that drops the
+// extension makes steering unavailable instead of failing turns with an unknown method.
+const ACP_STEERING_CONTROL_METHOD = "_session/steering";
+
+function readSteeringControlMethod(initialized: Record<string, unknown> | null) {
+  const steering = readRecord(readRecord(initialized?._meta)?.steering);
+  return steering?.supported === true ? ACP_STEERING_CONTROL_METHOD : null;
 }
 
 function readGoalControlMethod(initialized: Record<string, unknown> | null) {

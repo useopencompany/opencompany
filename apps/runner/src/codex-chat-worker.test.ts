@@ -1005,6 +1005,7 @@ function turn(overrides: Partial<CodexChatTurn> = {}): CodexChatTurn {
     settings: {},
     error: null,
     interruptRequestedAt: null,
+    steerIntoRunId: null,
     attempts: 1,
     recoveryAttempts: 0,
     engineRecoveryRequired: false,

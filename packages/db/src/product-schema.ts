@@ -29,6 +29,7 @@ import {
 import type { EncryptedPayload } from "@opencompany/crypto";
 import { relations, type SQL, sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   bigint,
   bigserial,
   boolean,
@@ -677,6 +678,7 @@ export const CODING_HARNESS_EVENT_TYPES = [
   "turn.started",
   "turn.completed",
   "usage.updated",
+  "steering.delivered",
   "error",
   "unknown",
 ] as const;
@@ -5127,6 +5129,13 @@ export const codexChatTurns = productSchema.table(
     error: text("error"),
     interruptRequestedAt: timestamp("interrupt_requested_at", {
       withTimezone: true,
+    }),
+    // Set when the user promotes this queued turn into the sibling turn that was already running
+    // (ACP steering): its prompt is injected into that live turn instead of starting its own.
+    // The promotion is intent, not a transfer -- this row stays a claimable queued turn until the
+    // running worker actually injects it, so a turn that ends first simply runs it next.
+    steerIntoRunId: text("steer_into_run_id").references((): AnyPgColumn => codexChatTurns.id, {
+      onDelete: "set null",
     }),
     attempts: integer("attempts").notNull().default(0),
     recoveryAttempts: integer("recovery_attempts").notNull().default(0),

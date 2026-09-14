@@ -1582,6 +1582,62 @@ export class PostgresChatRepository implements ChatRepository {
       : null;
   }
 
+  // Promotes a queued Run into the Run the Conversation is already executing: its prompt gets
+  // injected into that live turn instead of starting a turn of its own. This records intent only.
+  // The queued Run stays queued and claimable, so if the running turn ends before the runner
+  // injects it, it simply runs next -- the message can be redirected, never lost.
+  async steerRun(input: { actor: Actor; runId: string }) {
+    const now = this.options.now?.() ?? new Date();
+    const [row] = await this.rows<{ targetRunId: string | null }>(sql`
+      WITH authorized AS MATERIALIZED (
+        SELECT run.id, run.chat_session_id, run.status, run.attempts
+        FROM goat.codex_chat_turns AS run
+        JOIN goat.codex_chat_sessions AS runtime ON runtime.id = run.codex_chat_session_id
+        JOIN goat.chat_sessions AS chat ON chat.id = run.chat_session_id
+        WHERE run.id = ${input.runId}
+          AND runtime.workspace_id = ${input.actor.workspaceId}
+          AND chat.kind = 'chat'
+          AND run.user_workos_id = ${input.actor.userId}
+          AND EXISTS (
+            SELECT 1 FROM goat.workspace_members AS member
+            WHERE member.workspace_id = ${input.actor.workspaceId}
+              AND member.user_workos_id = ${input.actor.userId}
+          )
+      ),
+      target AS (
+        SELECT active.id
+        FROM authorized
+        JOIN goat.codex_chat_turns AS active
+          ON active.chat_session_id = authorized.chat_session_id
+        WHERE active.id <> authorized.id
+          AND active.status = 'running'
+          AND active.interrupt_requested_at IS NULL
+        ORDER BY active.created_at DESC
+        LIMIT 1
+      ),
+      steered AS (
+        UPDATE goat.codex_chat_turns AS run
+        SET steer_into_run_id = (SELECT id FROM target),
+            updated_at = ${now}
+        FROM authorized
+        WHERE run.id = authorized.id
+          -- A Run the worker has already claimed is being answered, not waiting: only a Run that
+          -- has never executed can still be folded into the turn ahead of it.
+          AND run.status = 'queued'
+          AND run.attempts = 0
+          AND EXISTS (SELECT 1 FROM target)
+        RETURNING run.steer_into_run_id AS "targetRunId"
+      )
+      SELECT (SELECT "targetRunId" FROM steered) AS "targetRunId"
+      FROM authorized
+    `);
+    if (!row) return { result: null, found: false };
+    return {
+      result: row.targetRunId ? { runId: input.runId, targetRunId: row.targetRunId } : null,
+      found: true,
+    };
+  }
+
   async resolveApproval(input: {
     actor: Actor;
     command: {

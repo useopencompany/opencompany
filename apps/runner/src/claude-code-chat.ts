@@ -103,6 +103,7 @@ import {
   loadCodingChatHistory,
 } from "./coding-chat-history";
 import { codingChatSkillPromptLines } from "./coding-chat-skills";
+import { createSteeringChannel } from "./coding-chat-steering";
 import {
   codingSandboxTemplate,
   settledCodingSandboxIdleTimeoutMs,
@@ -963,6 +964,13 @@ export async function runClaudeCodeChatTurn(input: {
         // arrives (for example from a permissions.ask rule) to preserve Claude's
         // bypass-permissions behavior without surfacing an approval prompt.
         onPermissionRequest: async (request) => approveAcpPermission(request),
+        ...createSteeringChannel({
+          engine: "claude_code",
+          runId: turn.id,
+          leaseId,
+          leaseOwner,
+          onRuntimeEvents: (events) => projector.push(events),
+        }),
       });
       if (actionGatewayTicket && !coreMcpInitObserved) {
         logger.warn("Claude Code did not report opencompany tool initialization", {

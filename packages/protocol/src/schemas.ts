@@ -3357,6 +3357,18 @@ export const CancelRunEnvelopeSchema = z
   .strict()
   .openapi("CancelRunEnvelope");
 
+export const SteerRunEnvelopeSchema = z
+  .object({
+    data: z.object({
+      // The queued Run whose message was promoted, and the running Run it was promoted into.
+      runId: ResourceIdSchema,
+      targetRunId: ResourceIdSchema,
+    }),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("SteerRunEnvelope");
+
 export const ResolveApprovalBodySchema = z
   .object({
     resolution: z.enum(["approved", "denied", "answered", "canceled"]),
@@ -4902,6 +4914,7 @@ export type ConversationReadModelV1 = z.infer<typeof ConversationReadModelV1Sche
 export type MessageReadModel = z.infer<typeof MessageReadModelSchema>;
 export type MessageSummaryReadModel = z.infer<typeof MessageSummaryReadModelSchema>;
 export type MessagePresentation = z.infer<typeof MessagePresentationSchema>;
+export type SteerRunResult = z.infer<typeof SteerRunEnvelopeSchema>["data"];
 export type RunReadModel = z.infer<typeof RunReadModelSchema>;
 export type EngineSessionReadModel = z.infer<typeof EngineSessionReadModelSchema>;
 export type EngineRuntimeStatus = z.infer<typeof EngineRuntimeStatusSchema>;

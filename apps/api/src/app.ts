@@ -2268,6 +2268,12 @@ export function createApiApp(input: CreateApiAppInput) {
         202,
       );
     },
+    steerRun: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "message", 30);
+      const result = await input.chat.steerRun(actor, c.req.valid("param").runId);
+      return c.json({ data: result, meta }, 200);
+    },
     resolveApproval: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "message", 30);

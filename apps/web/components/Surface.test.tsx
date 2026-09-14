@@ -142,6 +142,7 @@ const headlessChatMocks = vi.hoisted(() => ({
 
 const headlessChatCommandMocks = vi.hoisted(() => ({
   cancel: vi.fn(async () => ({})),
+  steer: vi.fn(async () => ({ runId: "run_queued", targetRunId: "run_active" })),
   getRuntimeStatus: vi.fn(async () => null),
   resolveQuestions: vi.fn(async () => ({})),
   updateConversation: vi.fn(async () => ({ transactionId: "1" })),
@@ -167,6 +168,7 @@ vi.mock("@/lib/chat-actions", () => ({
 
 vi.mock("@/lib/headless-chat-commands", () => ({
   cancelHeadlessChatRun: headlessChatCommandMocks.cancel,
+  steerHeadlessChatRun: headlessChatCommandMocks.steer,
   getEngineRuntimeStatus: headlessChatCommandMocks.getRuntimeStatus,
   resolveEngineQuestions: headlessChatCommandMocks.resolveQuestions,
   updateHeadlessChatConversation: headlessChatCommandMocks.updateConversation,
@@ -450,6 +452,7 @@ describe("Surface chat streaming UI", () => {
     vi.spyOn(window.history, "replaceState").mockImplementation(historyMock.replaceState);
     vi.spyOn(HeadlessChatTransport.prototype, "setEventHandlers");
     headlessChatCommandMocks.cancel.mockClear();
+    headlessChatCommandMocks.steer.mockClear();
     headlessChatCommandMocks.getRuntimeStatus.mockClear();
     headlessChatCommandMocks.resolveQuestions.mockClear();
     headlessChatCommandMocks.updateConversation.mockClear();
@@ -672,6 +675,41 @@ describe("Surface chat streaming UI", () => {
 
     expect(screen.getByLabelText("Claude Code status: Working")).toHaveTextContent("Working");
     expect(screen.getByRole("button", { name: "Interrupt Claude Code" })).toBeInTheDocument();
+  });
+
+  it("lets a coding message be queued while the engine is still working", async () => {
+    const user = userEvent.setup();
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "goat_chat_codex_queueing",
+          title: "Active coding",
+          model: DEFAULT_MODEL,
+          engine: "codex",
+          runtime: {
+            status: "running",
+            activeRunId: "run_codex_active",
+            hasError: false,
+            updatedAt: currentTimestamp(),
+          },
+          activityState: "working",
+          hasUnseen: false,
+          messages: [],
+        }}
+        codexConnected
+      />,
+    );
+
+    // Interrupting stays a separate, explicit action; typing no longer has to wait for the turn.
+    expect(screen.getByRole("button", { name: "Interrupt Codex" })).toBeInTheDocument();
+    const send = screen.getByRole("button", { name: "Send message" });
+    expect(send).toBeDisabled();
+
+    await user.type(screen.getByRole("textbox", { name: "" }), "Also update the changelog.");
+
+    expect(send).toBeEnabled();
   });
 
   it("keeps a reloaded engine Conversation active while its Run id is still syncing", async () => {

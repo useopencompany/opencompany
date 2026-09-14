@@ -4,6 +4,7 @@ import {
   type ActionGatewayResponse,
   type ActionSummary,
   CHAT_ARTIFACT_DATA_PART_TYPE,
+  CHAT_STEERING_DATA_PART_TYPE,
   type CodexCommandToolInput,
   type CodexCommandToolOutput,
   type DescribeActionsInput,
@@ -649,6 +650,8 @@ export type ChatTools = {
 
 export type ChatDataTypes = {
   "artifact-file": PublishedChatArtifact;
+  // A user message injected into a coding turn that was already running (ACP steering).
+  steering: { text: string; itemId?: string };
 };
 
 export type ChatUiMessage = UIMessage<ChatMessageMetadata, ChatDataTypes, ChatTools>;
@@ -1038,6 +1041,16 @@ function parseDebugTraceUiMessageParts(
     if (part.type === CHAT_ARTIFACT_DATA_PART_TYPE) {
       const artifact = parsePublishedChatArtifact({ ok: true, artifact: part.data });
       if (artifact) parts.push({ type: CHAT_ARTIFACT_DATA_PART_TYPE, data: artifact });
+      continue;
+    }
+    if (part.type === CHAT_STEERING_DATA_PART_TYPE && isRecord(part.data)) {
+      const { text, itemId } = part.data;
+      if (typeof text === "string" && text.trim()) {
+        parts.push({
+          type: CHAT_STEERING_DATA_PART_TYPE,
+          data: { text, ...(typeof itemId === "string" ? { itemId } : {}) },
+        });
+      }
       continue;
     }
     if (isPersistedToolPart(part)) {
