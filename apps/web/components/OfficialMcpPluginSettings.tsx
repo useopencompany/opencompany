@@ -2250,7 +2250,7 @@ function officialCapabilityDescription(
   capabilityId: CapabilityId,
 ): string | null {
   if (provider === "gmail" && capabilityId === "write") {
-    return "Add or remove labels, create labels, move mail to trash, and mark or unmark spam.";
+    return "Send email, add or remove labels, create labels, move mail to trash, and mark or unmark spam. Sending cannot be undone.";
   }
   return null;
 }

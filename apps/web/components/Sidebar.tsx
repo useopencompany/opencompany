@@ -48,6 +48,7 @@ import {
   SidebarProjects,
   type SidebarRowDragProps,
   useSidebarProjects,
+  useSidebarRowPadding,
 } from "@/components/SidebarProjects";
 import { SidebarSectionHeader, useCollapsedSidebarSection } from "@/components/SidebarSection";
 import { SidebarWikis, useSidebarWikis } from "@/components/SidebarWikis";
@@ -767,6 +768,7 @@ function SidebarChatRow({
   onArchive: () => void;
 }) {
   const state = resolveSidebarChatState({ chat, localState });
+  const contentPadding = useSidebarRowPadding();
   const content = (
     <>
       <SidebarChatStateIndicator state={state} />
@@ -784,7 +786,7 @@ function SidebarChatRow({
         <button
           type="button"
           onClick={onRequestComposerFocus}
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-md py-[5px] pl-2 pr-1 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          className={`flex min-w-0 flex-1 items-center gap-2 rounded-md py-[5px] pr-1 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${contentPadding}`}
         >
           {content}
         </button>
@@ -805,7 +807,7 @@ function SidebarChatRow({
             onRequestComposerFocus();
           }}
           aria-current={active ? "page" : undefined}
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-l-md py-[5px] pl-2 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          className={`flex min-w-0 flex-1 items-center gap-2 rounded-l-md py-[5px] text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${contentPadding}`}
         >
           {content}
         </IntentPrefetchLink>
@@ -885,6 +887,7 @@ function SidebarTaskRow({
   onArchive: () => void;
 }) {
   const archivable = isSettledTaskStatus(task.status);
+  const contentPadding = useSidebarRowPadding();
   return (
     <div
       {...dragProps}
@@ -896,7 +899,7 @@ function SidebarTaskRow({
         href={href}
         prefetch
         aria-current={active ? "page" : undefined}
-        className="flex min-w-0 flex-1 items-center gap-2 rounded-l-md py-[5px] pl-2 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        className={`flex min-w-0 flex-1 items-center gap-2 rounded-l-md py-[5px] text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${contentPadding}`}
       >
         <ChatStateIndicator state={state} surface="sidebar" className="mt-[7px] self-start" />
         <span className="flex min-w-0 flex-1 flex-col">

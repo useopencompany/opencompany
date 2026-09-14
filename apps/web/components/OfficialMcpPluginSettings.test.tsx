@@ -1318,12 +1318,12 @@ const gmailPlugin = {
   name: "gmail",
   manifest: {
     name: "gmail",
-    description: "Search and read Gmail, create drafts, and organize messages.",
+    description: "Search and read Gmail, create drafts, send email, and organize messages.",
   },
   source: {
     ...plugin.source,
     path: "gmail",
-    resolvedCommit: "ff6f34b42796129c2a125a32b3a78e8cae353df6",
+    resolvedCommit: "e78fb74bd31f16e9e03b68799e3bcafaa052e88b",
   },
   skills: [],
   remoteMcpServers: [
@@ -1334,7 +1334,12 @@ const gmailPlugin = {
       capabilities: [
         { id: "query", label: "Read Gmail", defaultMode: "ask", tools: ["get_message"] },
         { id: "draft", label: "Create drafts", defaultMode: "ask", tools: ["create_draft"] },
-        { id: "write", label: "Organize Gmail", defaultMode: "ask", tools: ["trash_message"] },
+        {
+          id: "write",
+          label: "Send & organize Gmail",
+          defaultMode: "ask",
+          tools: ["send_email", "trash_message"],
+        },
       ],
       tools: [
         {
@@ -1360,11 +1365,22 @@ const gmailPlugin = {
           },
         },
         {
+          name: "send_email",
+          description: "Send an email from the connected Gmail account.",
+          classification: {
+            capabilityId: "write",
+            capabilityLabel: "Send & organize Gmail",
+            defaultMode: "ask",
+            bucket: "write",
+            curated: true,
+          },
+        },
+        {
           name: "trash_message",
           description: "Move a Gmail message to trash.",
           classification: {
             capabilityId: "write",
-            capabilityLabel: "Organize Gmail",
+            capabilityLabel: "Send & organize Gmail",
             defaultMode: "ask",
             bucket: "write",
             curated: true,
@@ -2882,7 +2898,7 @@ describe("Linear plugin settings", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Gmail" })).toBeInTheDocument();
     expect(screen.getByText("ada@example.com")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Connect Gmail account" })).toBeNull();
-    for (const label of ["Read Gmail", "Create drafts", "Organize Gmail"]) {
+    for (const label of ["Read Gmail", "Create drafts", "Send & organize Gmail"]) {
       expect(
         within(screen.getByRole("group", { name: `${label} permission` })).getByRole("button", {
           name: "Ask",
@@ -2893,10 +2909,14 @@ describe("Linear plugin settings", () => {
       groups: [
         { id: "query", defaultMode: "ask", tools: [{ readOnly: true }] },
         { id: "draft", defaultMode: "ask", tools: [{ readOnly: false }] },
-        { id: "write", defaultMode: "ask", tools: [{ readOnly: false }] },
+        {
+          id: "write",
+          defaultMode: "ask",
+          tools: [{ name: "Send email", readOnly: false }, { readOnly: false }],
+        },
       ],
     });
-    expect(GMAIL_PLUGIN_SOURCE).toContain("/tree/ff6f34b42796129c2a125a32b3a78e8cae353df6/gmail");
+    expect(GMAIL_PLUGIN_SOURCE).toContain("/tree/e78fb74bd31f16e9e03b68799e3bcafaa052e88b/gmail");
   });
 
   it("edits the same Gmail account selected by the MCP gateway", async () => {

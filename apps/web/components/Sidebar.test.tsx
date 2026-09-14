@@ -15,6 +15,7 @@ import {
   removeOptimisticChatSummary,
 } from "@/lib/optimistic-chat-summaries";
 import { Sidebar } from "./Sidebar";
+import { SIDEBAR_NESTED_ROW_PADDING_CLASSNAME } from "./SidebarProjects";
 
 const pathnameMock = vi.hoisted(() => ({ value: "/" }));
 const routerMock = vi.hoisted(() => ({
@@ -1754,6 +1755,34 @@ describe("Sidebar", () => {
       expect(within(recents).getByRole("link", { name: "chat_loose title" })).toBeInTheDocument();
       expect(within(recents).queryByRole("link", { name: "chat_filed title" })).toBeNull();
       expect(within(recents).queryByRole("link", { name: /task_filed name/ })).toBeNull();
+    });
+
+    it("indents a folder's rows and leaves loose Recents rows flush", async () => {
+      featureFlagsMock.sidebarProjects = true;
+      featureFlagsMock.taskSpawning = true;
+      recentChatsMock.value = [chatRow("chat_filed"), chatRow("chat_loose")];
+      sidebarTasksMock.value = [taskRow("task_filed")];
+      projectsApiMock.listProjects.mockResolvedValue([
+        project("project_1", "Launch", ["chat_filed", "conversation_task_filed"]),
+        project("project_2", "Empty"),
+      ]);
+
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+      const projects = await findLoadedProjects();
+      for (const name of ["chat_filed title", /task_filed name/]) {
+        expect(within(projects).getByRole("link", { name })).toHaveClass(
+          SIDEBAR_NESTED_ROW_PADDING_CLASSNAME,
+        );
+      }
+      expect(within(projects).getByText("No chats")).toHaveClass(
+        SIDEBAR_NESTED_ROW_PADDING_CLASSNAME,
+      );
+
+      const recents = screen.getByRole("navigation", { name: "Recents" });
+      expect(within(recents).getByRole("link", { name: "chat_loose title" })).not.toHaveClass(
+        SIDEBAR_NESTED_ROW_PADDING_CLASSNAME,
+      );
     });
 
     it("files a chat dropped on a project and keeps the row out of Recents", async () => {
