@@ -115,7 +115,6 @@ export function HomeRoute({
   initialChat?: ChatSessionView | null;
 }) {
   const data = useAppData();
-  const userName = data.user.firstName?.trim() || data.user.email.split("@")[0] || "there";
   const initialChat = useMemo(() => {
     if (!chatId) return null;
     if (routeInitialChat?.id === chatId) return routeInitialChat;
@@ -143,7 +142,6 @@ export function HomeRoute({
         key={data.activeBrain?.id ?? "no-brain"}
         tasks={data.tasks}
         allTasks={data.allTasks}
-        schedules={data.schedules}
         defaultModel={DEFAULT_MODEL}
         initialChat={initialChat}
         newChatProjectId={projectId}
@@ -155,7 +153,6 @@ export function HomeRoute({
         taskSpawningEnabled={data.featureFlags.taskSpawning}
         autoModelRoutingEnabled={data.featureFlags.autoModelRouting}
         workspaceId={data.workspace.id}
-        userName={userName}
         userWorkosId={data.user.workosUserId}
       />
     </main>

@@ -307,7 +307,7 @@ describe("Sidebar", () => {
     expect(container.querySelector('svg[viewBox="0 0 100 100"]')).toBeInTheDocument();
 
     const nav = screen.getByRole("navigation", { name: "opencompany primary" });
-    const home = within(nav).getByRole("link", { name: "Home" });
+    const home = within(nav).getByRole("link", { name: "New Chat" });
     expect(home).toHaveAttribute("href", "/");
     expect(home).toHaveAttribute("aria-current", "page");
     expect(within(nav).queryByRole("link", { name: "Tasks" })).not.toBeInTheDocument();
@@ -788,7 +788,7 @@ describe("Sidebar", () => {
     window.addEventListener(HOME_NAVIGATION_EVENT, homeNavigation);
     render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
-    await user.click(screen.getByRole("link", { name: "Home" }));
+    await user.click(screen.getByRole("link", { name: "New Chat" }));
 
     expect(homeNavigation).toHaveBeenCalledOnce();
     window.removeEventListener(HOME_NAVIGATION_EVENT, homeNavigation);
@@ -799,7 +799,7 @@ describe("Sidebar", () => {
     render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
     const nav = screen.getByRole("navigation", { name: "opencompany primary" });
-    expect(within(nav).getByRole("link", { name: "Home" })).not.toHaveAttribute("aria-current");
+    expect(within(nav).getByRole("link", { name: "New Chat" })).not.toHaveAttribute("aria-current");
     expect(screen.getByRole("link", { name: "General" })).toHaveAttribute("aria-current", "page");
   });
 
@@ -828,7 +828,7 @@ describe("Sidebar", () => {
     render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
     const nav = screen.getByRole("navigation", { name: "opencompany primary" });
-    expect(within(nav).getByRole("link", { name: "Home" })).not.toHaveAttribute("aria-current");
+    expect(within(nav).getByRole("link", { name: "New Chat" })).not.toHaveAttribute("aria-current");
   });
 
   it("shows the Tasks and Workflows nav when the beta feature is enabled", () => {
@@ -882,7 +882,7 @@ describe("Sidebar", () => {
     render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
     const primaryNav = screen.getByRole("navigation", { name: "opencompany primary" });
-    const home = within(primaryNav).getByRole("link", { name: "Home" });
+    const home = within(primaryNav).getByRole("link", { name: "New Chat" });
     const tasks = within(primaryNav).getByRole("link", { name: "Tasks" });
     const workflows = within(primaryNav).getByRole("link", { name: "Workflows" });
     expect(tasks).toHaveAttribute("href", "/tasks");
@@ -1598,7 +1598,7 @@ describe("Sidebar", () => {
 
     const nav = screen.getByRole("navigation", { name: "opencompany primary" });
     const links = within(nav).getAllByRole("link");
-    expect(links[0]).toHaveTextContent("Home");
+    expect(links[0]).toHaveTextContent("New Chat");
     expect(links[1]).toHaveTextContent("For review");
     expect(links[1]).toHaveTextContent("3");
     expect(links[1]).toHaveAttribute("href", "/review");
