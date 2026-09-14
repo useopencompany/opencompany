@@ -49,8 +49,9 @@ prompt before you approve, because the send can't be undone.
 Coding sessions receive only tools set to **On**. Newly discovered or unclassified tools require
 confirmation. See [Permissions](/docs/core-concepts/integrations) before using Gmail in a Workflow.
 
-To keep sending separate from mailbox cleanup, set the **Send & organize Gmail** group to **Ask**
-and override just `send_email` to **Off**. Per-tool settings win over the group.
+Sending and mailbox organization share one permission group, so there is no way to allow automatic
+labeling while still being asked before each send. Leave **Send & organize Gmail** on **Ask** (the
+default) unless you want the agent to send email without confirming.
 
 Google's `gmail.modify` scope covers a broader set of operations than the Plugin exposes. Granting
 that scope doesn't add permanent deletion or spam tools to opencompany.
