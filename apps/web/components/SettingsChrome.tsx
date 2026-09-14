@@ -4,6 +4,7 @@ import { cn } from "@opencompany/ui/lib/utils";
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowLeft,
+  ArrowUpRight,
   BrainCircuit,
   CircleDollarSign,
   CreditCard,
@@ -30,7 +31,12 @@ type SettingsNavItem = {
   label: string;
   badge?: string;
   adminOnly?: boolean;
-  isActive: (pathname: string) => boolean;
+  /**
+   * Rows that lead out of /settings. This rail unmounts on arrival, so they are never current and
+   * carry an outbound arrow instead — the reader should expect the left rail to change.
+   */
+  leavesSettings?: boolean;
+  isActive?: (pathname: string) => boolean;
 };
 
 type SettingsNavGroup = {
@@ -81,13 +87,13 @@ const NAV_GROUPS: SettingsNavGroup[] = [
         href: "/skills",
         icon: Sparkles,
         label: "Skills",
-        isActive: (pathname) => pathname === "/skills" || pathname.startsWith("/skills/"),
+        leavesSettings: true,
       },
       {
         href: "/plugins",
         icon: PackageOpen,
         label: "Plugins",
-        isActive: (pathname) => pathname === "/plugins" || pathname.startsWith("/plugins/"),
+        leavesSettings: true,
       },
       {
         href: "/settings/repositories",
@@ -150,6 +156,14 @@ function SettingsNavRow({ item, active }: { item: SettingsNavItem; active: boole
         <span className="ml-auto shrink-0 rounded-full bg-surface-muted px-1.5 py-px text-[10px] font-medium leading-4 text-ink-subtle">
           {item.badge}
         </span>
+      ) : null}
+      {item.leavesSettings ? (
+        <ArrowUpRight
+          size={13}
+          strokeWidth={1.75}
+          aria-hidden
+          className="ml-auto shrink-0 text-ink-subtle/70 group-hover:text-ink/60"
+        />
       ) : null}
     </IntentPrefetchLink>
   );
@@ -220,7 +234,11 @@ export function SettingsSidebar({
               {group.items
                 .filter((item) => !item.adminOnly || isAdmin)
                 .map((item) => (
-                  <SettingsNavRow key={item.href} item={item} active={item.isActive(pathname)} />
+                  <SettingsNavRow
+                    key={item.href}
+                    item={item}
+                    active={item.isActive?.(pathname) ?? false}
+                  />
                 ))}
             </div>
           ))}
