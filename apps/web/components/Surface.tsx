@@ -6316,6 +6316,7 @@ function CodingAgentOption({
         <button
           type="button"
           onClick={onConnect}
+          // Lines up with the label text above: the check icon (13px) plus its gap-2 (8px).
           className="ml-[21px] self-start rounded-full border border-border-strong bg-surface px-3 py-1 text-[11.5px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover"
         >
           Connect {label}
