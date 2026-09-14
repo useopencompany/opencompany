@@ -7,16 +7,10 @@ import {
   isSlackBotConfigured,
   verifySlackBotState,
 } from "@opencompany/agent/integrations/slack-bot";
-import { SLACK_BOT_EVENT_COMMAND_SCHEMA_VERSION } from "@opencompany/agent/integrations/slack-bot-events";
-import { mentionsOtherHuman } from "@opencompany/agent/integrations/slack-bot-format";
 import { verifySlackEventSignature } from "@opencompany/agent/integrations/slack-signature";
 import { connectSlackBotIntegration } from "@opencompany/db/integrations";
-import {
-  claimSlackBotEvent,
-  getSlackBotThreadParticipation,
-  markSlackBotIntegrationStatusForTeam,
-  releaseSlackBotEvent,
-} from "@opencompany/db/slack-bot";
+import { enqueueSlackThreadReply } from "@opencompany/db/session-subscriptions";
+import { markSlackBotIntegrationStatusForTeam } from "@opencompany/db/slack-bot";
 import { createLogger } from "@opencompany/observability";
 import type { ApiIdentityVerifier } from "./auth";
 import { type IngressSession, resolveIngressSession, sessionRedirect } from "./ingress-session";
@@ -164,10 +158,7 @@ async function handleWebhook(input: IngressInput, request: Request): Promise<Res
     return Response.json({ challenge: envelope.challenge ?? "" });
   }
 
-  // Slack disables event delivery after repeated failures, so every verified
-  // event path is acknowledged. A failed runner dispatch releases the claim
-  // so a later duplicate delivery can be claimed without exposing the backend
-  // failure to Slack.
+  // Acknowledge only after durable inbox persistence.
   try {
     if (envelope.type === "event_callback" && envelope.event && envelope.team_id) {
       const retryNum = request.headers.get("x-slack-retry-num");
@@ -189,6 +180,7 @@ async function handleWebhook(input: IngressInput, request: Request): Promise<Res
       event_type: envelope.event?.type,
       error_message: error instanceof Error ? error.message : String(error),
     });
+    return Response.json({ error: "Event persistence failed." }, { status: 503 });
   }
 
   return Response.json({ ok: true });
@@ -215,73 +207,37 @@ async function handleEventCallback(
     return { ok: true };
   }
 
-  if (event.type !== "app_mention" && event.type !== "message") {
+  if (event.type !== "message" || event.bot_id || event.subtype || event.hidden || event.files) {
     return { ok: true, ignored: true };
   }
-
-  const channelId = typeof event.channel === "string" ? event.channel : null;
-  const messageTs = typeof event.ts === "string" ? event.ts : null;
-  const slackUserId = typeof event.user === "string" ? event.user : null;
-  const text = typeof event.text === "string" ? event.text : "";
-  const threadTs = typeof event.thread_ts === "string" ? event.thread_ts : null;
-  if (event.bot_id || event.subtype || !slackUserId || !channelId || !messageTs) {
-    return { ok: true, dropped: true };
+  const channelId = typeof event.channel === "string" ? event.channel : "";
+  const threadTs = typeof event.thread_ts === "string" ? event.thread_ts : "";
+  const messageTs = typeof event.ts === "string" ? event.ts : "";
+  const slackUserId = typeof event.user === "string" ? event.user : "";
+  const text = typeof event.text === "string" ? event.text.trim() : "";
+  if (
+    !eventId ||
+    !channelId.startsWith("C") ||
+    event.channel_type !== "channel" ||
+    !threadTs ||
+    threadTs === messageTs ||
+    !messageTs ||
+    !slackUserId ||
+    !text ||
+    text.length > 12000
+  ) {
+    return { ok: true, ignored: true };
   }
-
-  let kind: "mention" | "follow_up" | "dm";
-  if (event.type === "app_mention") {
-    kind = "mention";
-  } else if (event.channel_type === "im" || channelId.startsWith("D")) {
-    kind = "dm";
-  } else {
-    // A bot mention arrives separately as app_mention, while a human mention
-    // addresses somebody else. Neither should be answered by this delivery.
-    if (!threadTs) return { ok: true, ignored: true };
-    if (mentionsOtherHuman(text, null)) return { ok: true, ignored: true };
-    const participation = await getSlackBotThreadParticipation(
-      { teamId, channelId, threadTs },
-      input.db,
-    );
-    if (!participation) return { ok: true, ignored: true };
-    kind = "follow_up";
-  }
-
-  if (!eventId) {
-    logger.warn("Dropping Slack answer-bot event without event_id", {
-      event: "goat.slack_bot_event_missing_id",
-      team_id: teamId,
-      channel_id: channelId,
-      kind,
-    });
-    return { ok: true, dropped: true };
-  }
-
-  const claim = await claimSlackBotEvent({ eventId, teamId }, input.db);
-  if (!claim) return { ok: true, skipped: "duplicate" };
-
-  try {
-    await input.runner.postJson(
-      "/internal/goat/slack-bot/events",
-      {
-        schemaVersion: SLACK_BOT_EVENT_COMMAND_SCHEMA_VERSION,
-        eventId: claim.eventId,
-        claimId: claim.claimId,
-        kind,
-        input: { teamId, channelId, messageTs, threadTs, text, slackUserId },
-      },
-      { errorFormat: "error-message" },
-    );
-  } catch (error) {
-    await releaseSlackBotEvent(claim, input.db).catch((releaseError) => {
-      logger.error("Failed to release undispatched Slack bot event", {
-        event: "goat.slack_bot_event_dispatch_release_failed",
-        event_id: eventId,
-        error_message: releaseError instanceof Error ? releaseError.message : String(releaseError),
-      });
-    });
-    throw error;
-  }
-  return { ok: true };
+  const accepted = await enqueueSlackThreadReply((query) => input.db.execute(query), {
+    teamId,
+    eventId,
+    channelId,
+    threadTs,
+    messageTs,
+    slackUserId,
+    text,
+  });
+  return { ok: true, accepted };
 }
 
 function statusRedirect(

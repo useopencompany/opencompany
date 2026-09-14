@@ -9,7 +9,6 @@ import { BrainImport } from "@/components/BrainImport";
 import { BrainOverviewFlow } from "@/components/BrainOverviewFlow";
 import { BrainSourcesSection } from "@/components/BrainSourceCards";
 import { VisibilityOption } from "@/components/BrainSwitcher";
-import { SlackBotDestinationCard } from "@/components/SlackBotDestinationCard";
 import {
   getBrainAccessDetailsAction,
   getBrainEnrichmentEnabledAction,
@@ -78,10 +77,6 @@ export function BrainSettings({
 
           <SettingsSection title="Sources">
             <BrainSourcesSection brainRef={brain.id} />
-          </SettingsSection>
-
-          <SettingsSection title="Destinations">
-            <SlackBotDestinationCard brainRef={brain.id} />
           </SettingsSection>
 
           <SettingsSection title="Company context">

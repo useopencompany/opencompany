@@ -12,9 +12,6 @@ export type SlackBotSettingsData = {
   configured: boolean;
   installed: boolean;
   status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
-  // Installed before the current scope set: mentions keep working, but the
-  // newer features (DMs, mention-free follow-ups, status reactions) need a
-  // reconnect to grant the added scopes.
   needsScopeUpgrade: boolean;
   teamName: string | null;
   statusReason: string | null;
@@ -36,9 +33,12 @@ const SETUP_ERROR_COPY: Record<string, string> = {
 export function SlackBotSettings({ data }: { data: SlackBotSettingsData }) {
   return (
     <SettingsContent
-      title="Slack bot"
-      description="Answer questions from your workspace Wiki directly in Slack. Beta."
+      title="Slack"
+      description="Share workflow results in Slack and continue the same work in a thread."
     >
+      <p className="mb-5 text-[13px] leading-5 text-ink-subtle">
+        This workspace connection is separate from your personal Slack plugin.
+      </p>
       {data.setup === "error" ? (
         <Banner tone="error">
           {SETUP_ERROR_COPY[data.setupReason ?? ""] ?? "Connecting the Slack bot failed."}
@@ -54,8 +54,8 @@ export function SlackBotSettings({ data }: { data: SlackBotSettingsData }) {
         </p>
       ) : !data.configured ? (
         <p className="text-[13px] leading-5 text-ink-subtle">
-          The Slack bot isn&apos;t configured on this deployment. Set the Slack bot and
-          credential-encryption environment variables to enable it.
+          Slack Channels aren&apos;t available on this workspace yet. Contact your workspace
+          administrator for help.
         </p>
       ) : (
         <SlackBotPanel data={data} />
@@ -96,8 +96,8 @@ function SlackBotPanel({ data }: { data: SlackBotSettingsData }) {
               Add opencompany to your Slack workspace
             </span>
             <p className="text-[13px] leading-5 text-ink-subtle">
-              Once installed, mention @opencompany in a channel to get answers from your Wiki — for
-              example “@opencompany what did we learn from customers this week?”.
+              Let workflows post as @opencompany. Replies from workspace members continue the same
+              work, with its context and files, for 30 days.
             </p>
           </div>
         </div>
@@ -127,7 +127,13 @@ function SlackBotPanel({ data }: { data: SlackBotSettingsData }) {
             ) : null}
           </div>
           <span className="ml-auto shrink-0 rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle">
-            {data.status === "connected" ? "Connected" : "Needs attention"}
+            {data.needsScopeUpgrade
+              ? "Missing scopes"
+              : data.status === "connected"
+                ? "Healthy"
+                : data.status === "needs_reauth"
+                  ? "Reconnect required"
+                  : "Needs attention"}
           </span>
         </div>
       </div>
@@ -142,8 +148,7 @@ function SlackBotPanel({ data }: { data: SlackBotSettingsData }) {
       ) : data.needsScopeUpgrade ? (
         <div className="flex flex-col gap-3">
           <Banner tone="success">
-            Reconnect Slack to enable the newest bot features: answers in DMs, thread replies
-            without re-mentioning, and live status reactions.
+            Reconnect Slack to grant the access needed for workflow posts and thread replies.
           </Banner>
           <a
             href={connectHref}
@@ -157,15 +162,22 @@ function SlackBotPanel({ data }: { data: SlackBotSettingsData }) {
         <div className="flex flex-col gap-2">
           <span className="text-[13px] font-medium text-ink">Next steps</span>
           <ol className="flex list-decimal flex-col gap-1 pl-5 text-[13px] leading-5 text-ink-subtle">
-            <li>Invite @opencompany to the Slack channels where you want answers.</li>
+            <li>Invite @opencompany to a public Slack channel.</li>
             <li>
-              Mention @opencompany in that channel and ask a question — replies use the workspace
-              Wiki, the thread continues without another mention, and team members can DM the bot
-              directly.
+              Add an instruction to a workflow, such as “Post the investigation summary in
+              #product.” Each post opens a thread for follow-up questions.
             </li>
           </ol>
-          <Link href="/wiki" prefetch className="text-[12px] text-ink underline underline-offset-2">
-            Open the workspace Wiki
+          <p className="text-[13px] leading-5 text-ink-subtle">
+            Replies continue the original workflow session for 30 days. Members must use the same
+            email in Slack and opencompany. Disconnecting closes existing threads.
+          </p>
+          <Link
+            href="/workflows"
+            prefetch
+            className="text-[12px] text-ink underline underline-offset-2"
+          >
+            Open workflows
           </Link>
         </div>
       ) : null}

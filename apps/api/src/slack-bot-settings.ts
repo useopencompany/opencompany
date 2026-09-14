@@ -14,7 +14,7 @@ import {
   type SlackConversationRef,
 } from "@opencompany/db/slack-bot";
 import { getBrainAccess } from "@opencompany/db/workspaces";
-import { and, count, eq } from "drizzle-orm";
+import { and, count, eq, sql } from "drizzle-orm";
 import { ApiError } from "./errors";
 
 type DbLike = any;
@@ -113,13 +113,22 @@ export function createSlackBotSettingsService(input: {
           );
         destinationCount = Number(row?.value ?? 0);
       }
+      const deliveries = integration
+        ? await db.execute(
+            sql`SELECT id FROM goat.channel_deliveries WHERE integration_id = ${integration.id} AND status IN ('uncertain', 'failed') LIMIT 1`,
+          )
+        : [];
+      const deliveryNeedsAttention =
+        (Array.isArray(deliveries) ? deliveries : (deliveries.rows ?? [])).length > 0;
       return {
         isAdmin: actor.role === "admin",
         configured: isSlackBotConfigured(),
         installed,
         status:
           integration && integration.status !== "disconnected"
-            ? integration.status
+            ? deliveryNeedsAttention && integration.status === "connected"
+              ? "sync_failed"
+              : integration.status
             : "not_connected",
         needsScopeUpgrade: Boolean(
           integration &&
@@ -128,7 +137,9 @@ export function createSlackBotSettingsService(input: {
             !slackBotScopesSatisfied(integration.scopes),
         ),
         teamName: integration?.connectionLabel ?? null,
-        statusReason: integration?.statusReason ?? null,
+        statusReason: deliveryNeedsAttention
+          ? "A Slack delivery could not be confirmed. It has not been reposted to avoid duplicates."
+          : (integration?.statusReason ?? null),
         destinationCount,
       };
     },
@@ -141,6 +152,9 @@ export function createSlackBotSettingsService(input: {
       if (!integration) {
         throw new ApiError(404, "not_found", "The Slack bot is not connected.");
       }
+      await db.execute(
+        sql`UPDATE goat.session_subscriptions SET status = 'closed' WHERE integration_id = ${integration.id}`,
+      );
       await markIntegrationStatus({
         userWorkosId: integration.userWorkosId,
         integrationId: integration.id,

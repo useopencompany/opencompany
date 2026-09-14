@@ -13,7 +13,8 @@ export type ChatHostToolOperation =
   | "browser_end_profile"
   | "browser"
   | "wiki"
-  | "write_artifact";
+  | "write_artifact"
+  | "post_slack_message";
 
 export type ChatHostToolGatewayRequest = {
   operation: ChatHostToolOperation;

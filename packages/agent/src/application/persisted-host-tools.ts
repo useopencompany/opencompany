@@ -23,6 +23,7 @@ import {
   resolveActiveAgentSession,
 } from "../browser-profiles/index";
 import { createChatBrowserToolSession } from "../browser-tools-runtime";
+import { postWorkflowSlackMessage } from "../integrations/slack-channel";
 import {
   activateAndListChatSessionSkills,
   createWorkspaceSkillForActor,
@@ -193,6 +194,7 @@ export function executePersistedChatHostTool(input: {
         idempotencyKey,
       });
     },
+    postSlackMessage: postWorkflowSlackMessage,
     writeArtifact: () => {
       throw new Error("Artifact publishing is not configured for this runtime.");
     },
