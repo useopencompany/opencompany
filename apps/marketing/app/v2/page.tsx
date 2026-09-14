@@ -10,9 +10,9 @@ import { V2Solutions } from "@/components/marketing/v2/V2Solutions";
 import { V2Teams } from "@/components/marketing/v2/V2Teams";
 import { DEFAULT_SOCIAL_IMAGE } from "@/lib/social-image";
 
-const title = "opencompany — The workspace where agents run your company";
+const title = "opencompany — Run agentic workflows in your company";
 const description =
-  "A landing page variant: opencompany keeps a living model of how your company works, so agents can run real work across your tools, files, and codebase.";
+  "A landing page variant: run sandbox-backed agentic workflows based on events to automate work across your tools, codebase, and files.";
 
 export const metadata: Metadata = {
   title,
