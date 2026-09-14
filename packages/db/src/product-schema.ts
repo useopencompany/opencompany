@@ -6233,6 +6233,81 @@ export const infisicalAuthFlows = productSchema.table(
   }),
 );
 
+export type DopplerConnectionStatus = "connected" | "needs_reauth" | "disconnected";
+export type DopplerAuthFlowStatus = "pending" | "link_ready" | "completed" | "failed" | "expired";
+
+export const dopplerConnections = productSchema.table(
+  "doppler_connections",
+  {
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    ownerUserId: text("owner_user_id").notNull(),
+    encryptedAuthBundle:
+      jsonb("encrypted_auth_bundle").$type<IntegrationCredentialEncryptedPayload>(),
+    encryptionKeyVersion: integer("encryption_key_version"),
+    credentialGeneration: uuid("credential_generation").notNull().defaultRandom(),
+    status: text("status").$type<DopplerConnectionStatus>().notNull().default("disconnected"),
+    statusReason: text("status_reason"),
+    accountName: text("account_name"),
+    cliVersion: text("cli_version"),
+    bundleFormatVersion: integer("bundle_format_version"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    connectedByWorkosId: text("connected_by_workos_id").references(() => users.workosUserId, {
+      onDelete: "set null",
+    }),
+    lastValidatedAt: timestamp("last_validated_at", { withTimezone: true }),
+    lastRotatedAt: timestamp("last_rotated_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.workspaceId, table.ownerUserId] }),
+    statusIdx: index("doppler_connections_status_idx").on(table.status),
+    connectedByIdx: index("doppler_connections_connected_by_idx").on(table.connectedByWorkosId),
+    statusCheck: check(
+      "doppler_connections_status_check",
+      sql`${table.status} IN ('connected', 'needs_reauth', 'disconnected')`,
+    ),
+    credentialCheck: check(
+      "doppler_connections_credential_check",
+      sql`(${table.status} = 'disconnected' AND ${table.encryptedAuthBundle} IS NULL AND ${table.encryptionKeyVersion} IS NULL) OR (${table.status} IN ('connected', 'needs_reauth') AND ${table.encryptedAuthBundle} IS NOT NULL AND ${table.encryptionKeyVersion} IS NOT NULL)`,
+    ),
+  }),
+);
+
+export const dopplerAuthFlows = productSchema.table(
+  "doppler_auth_flows",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    requestedByWorkosId: text("requested_by_workos_id").references(() => users.workosUserId, {
+      onDelete: "set null",
+    }),
+    sandboxId: text("sandbox_id").notNull(),
+    loginUrl: text("login_url"),
+    userCode: text("user_code"),
+    status: text("status").$type<DopplerAuthFlowStatus>().notNull().default("pending"),
+    statusReason: text("status_reason"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceStatusIdx: index("doppler_auth_flows_workspace_status_idx").on(
+      table.workspaceId,
+      table.status,
+    ),
+    expiresAtIdx: index("doppler_auth_flows_expires_at_idx").on(table.expiresAt),
+    statusCheck: check(
+      "doppler_auth_flows_status_check",
+      sql`${table.status} IN ('pending', 'link_ready', 'completed', 'failed', 'expired')`,
+    ),
+  }),
+);
+
 // Claude Code subscription auth: one long-lived setup-token per user, pasted in
 // settings (no device flow exists for Claude Code). Strictly per-user — sharing a
 // subscription credential across users is prohibited by Anthropic's terms.

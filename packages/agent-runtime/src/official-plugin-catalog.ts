@@ -54,4 +54,6 @@ export const OFFICIAL_PLUGIN_SOURCES = {
   x: "https://github.com/useopencompany/plugins/tree/21060c09d1bbe70df85519cc3ad74cd5d097fbb6/x",
   "yc-advise":
     "https://github.com/useopencompany/plugins/tree/2e092c3bc518622f1dc4ac1a6777d87ae3695ec6/yc-advise",
+  doppler:
+    "https://github.com/useopencompany/plugins/tree/891c084c347ff69288635b651e545c9bfd47b212/doppler",
 } as const;

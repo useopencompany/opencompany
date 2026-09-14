@@ -1,4 +1,5 @@
 import { CustomMcpPluginDetail } from "@/components/CustomMcpPluginSettings";
+import { DopplerPluginConnectionForm } from "@/components/DopplerPluginConnectionForm";
 import {
   AttioPluginDetail,
   BetterStackPluginDetail,
@@ -32,6 +33,7 @@ import {
 import { OfficialSkillPluginDetail, PluginDetail } from "@/components/PluginSettings";
 import { SettingsContent } from "@/components/SettingsChrome";
 import { currentUser } from "@/lib/auth";
+import { loadCurrentDopplerAuthSettings } from "@/lib/doppler-auth";
 import { getHeadlessCustomMcp, getHeadlessPlugin } from "@/lib/headless-knowledge-server";
 import {
   isOfficialMcpPluginName,
@@ -86,6 +88,16 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
         title={metadata.label}
         description={metadata.description}
         officialPluginName={normalizedName}
+        {...(normalizedName === "doppler"
+          ? {
+              connection: (
+                <DopplerPluginConnectionForm
+                  settings={await loadCurrentDopplerAuthSettings()}
+                  enabled={plugin.status === "enabled"}
+                />
+              ),
+            }
+          : {})}
       />
     ) : (
       <OfficialSkillPluginDetail name={normalizedName} canEdit={true} />

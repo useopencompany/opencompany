@@ -1954,6 +1954,13 @@
       "when": 1789927600001,
       "tag": "0278_dash0_plugin",
       "breakpoints": true
+    },
+    {
+      "idx": 279,
+      "version": "7",
+      "when": 1789927600002,
+      "tag": "0279_doppler_cli_auth",
+      "breakpoints": true
     }
   ]
 }

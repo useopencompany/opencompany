@@ -4,6 +4,7 @@ import artifact1 from "./attio.json";
 import artifact2 from "./betterstack.json";
 import artifact0 from "./convex.json";
 import artifact21 from "./dash0.json";
+import artifact28 from "./doppler.json";
 import artifact3 from "./fathom.json";
 import artifact4 from "./github.json";
 import artifact5 from "./gmail.json";
@@ -58,4 +59,5 @@ export const OFFICIAL_PLUGIN_ARTIFACTS = {
   stripe: artifact25,
   x: artifact26,
   "yc-advise": artifact27,
+  doppler: artifact28,
 };

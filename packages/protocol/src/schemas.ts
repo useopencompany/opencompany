@@ -4634,6 +4634,41 @@ export const InfisicalAuthFlowEnvelopeSchema = z
   .strict()
   .openapi("InfisicalAuthFlowEnvelope");
 
+export const DopplerAuthStatusSchema = z
+  .object({
+    status: z.enum(["connected", "needs_reauth", "disconnected"]).nullable(),
+    statusReason: z.string().nullable(),
+    accountName: z.string().nullable(),
+    lastValidatedAt: TimestampSchema.nullable(),
+  })
+  .strict()
+  .openapi("DopplerAuthStatus");
+
+export const DopplerAuthStatusEnvelopeSchema = z
+  .object({ data: DopplerAuthStatusSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("DopplerAuthStatusEnvelope");
+
+export const DopplerAuthFlowSchema = z
+  .object({
+    id: EngineAuthFlowIdSchema,
+    status: z.enum(["pending", "link_ready", "completed", "failed", "expired"]),
+    loginUrl: z.string().nullable(),
+    userCode: z.string().nullable(),
+    statusReason: z.string().nullable(),
+    expiresAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("DopplerAuthFlow");
+
+export const DopplerAuthFlowEnvelopeSchema = z
+  .object({
+    data: z.object({ flow: DopplerAuthFlowSchema }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("DopplerAuthFlowEnvelope");
+
 export type ConversationDto = z.infer<typeof ConversationSchema>;
 export type ConversationRuntimeDto = z.infer<typeof ConversationRuntimeSchema>;
 export type ConversationShareDto = z.infer<typeof ConversationShareSchema>;
