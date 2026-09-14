@@ -87,6 +87,8 @@ import {
   CustomMcpStatusEnvelopeSchema,
   DeleteBrainFolderBodySchema,
   DeleteWikiPageBodySchema,
+  DopplerAuthFlowEnvelopeSchema,
+  DopplerAuthStatusEnvelopeSchema,
   EngineAuthDisconnectEnvelopeSchema,
   EngineAuthFlowIdSchema,
   EngineRuntimeAccessEnvelopeSchema,
@@ -3916,6 +3918,81 @@ export const deleteInfisicalAuthRoute = createRoute({
   },
 });
 
+export const getDopplerAuthRoute = createRoute({
+  method: "get",
+  path: "/v1/engine-auth/doppler",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Current user’s Doppler connection status; never includes credentials.",
+      content: { "application/json": { schema: DopplerAuthStatusEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const startDopplerAuthRoute = createRoute({
+  method: "post",
+  path: "/v1/engine-auth/doppler/start",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  responses: {
+    201: {
+      description:
+        "Doppler browser-login flow started via the runner control plane. Personal connection.",
+      content: { "application/json": { schema: DopplerAuthFlowEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const pollDopplerAuthRoute = createRoute({
+  method: "post",
+  path: "/v1/engine-auth/doppler/{flowId}/poll",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ flowId: EngineAuthFlowIdSchema }),
+  },
+  responses: {
+    200: {
+      description:
+        "Poll the current user’s Doppler authorization flow; credentials are never returned.",
+      content: { "application/json": { schema: DopplerAuthFlowEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const deleteDopplerAuthRoute = createRoute({
+  method: "delete",
+  path: "/v1/engine-auth/doppler",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Workspace Doppler connection disconnected. Personal connection.",
+      content: { "application/json": { schema: EngineAuthDisconnectEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const cancelDopplerAuthRoute = createRoute({
+  method: "post",
+  path: "/v1/engine-auth/doppler/cancel",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Cancel pending personal Doppler sign-in.",
+      content: { "application/json": { schema: EngineAuthDisconnectEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const getBillingOverviewRoute = createRoute({
   method: "get",
   path: "/v1/billing",
@@ -4237,6 +4314,11 @@ export type V1RouteHandlers = {
   pollCodexDeviceAuth: RouteHandler<typeof pollCodexDeviceAuthRoute>;
   deleteCodexAuth: RouteHandler<typeof deleteCodexAuthRoute>;
   getInfisicalAuth: RouteHandler<typeof getInfisicalAuthRoute>;
+  getDopplerAuth: RouteHandler<typeof getDopplerAuthRoute>;
+  startDopplerAuth: RouteHandler<typeof startDopplerAuthRoute>;
+  pollDopplerAuth: RouteHandler<typeof pollDopplerAuthRoute>;
+  deleteDopplerAuth: RouteHandler<typeof deleteDopplerAuthRoute>;
+  cancelDopplerAuth: RouteHandler<typeof cancelDopplerAuthRoute>;
   startInfisicalAuth: RouteHandler<typeof startInfisicalAuthRoute>;
   completeInfisicalAuth: RouteHandler<typeof completeInfisicalAuthRoute>;
   deleteInfisicalAuth: RouteHandler<typeof deleteInfisicalAuthRoute>;
@@ -4452,6 +4534,11 @@ export function createV1Router(
       .openapi(pollCodexDeviceAuthRoute, handlers.pollCodexDeviceAuth)
       .openapi(deleteCodexAuthRoute, handlers.deleteCodexAuth)
       .openapi(getInfisicalAuthRoute, handlers.getInfisicalAuth)
+      .openapi(getDopplerAuthRoute, handlers.getDopplerAuth)
+      .openapi(startDopplerAuthRoute, handlers.startDopplerAuth)
+      .openapi(pollDopplerAuthRoute, handlers.pollDopplerAuth)
+      .openapi(deleteDopplerAuthRoute, handlers.deleteDopplerAuth)
+      .openapi(cancelDopplerAuthRoute, handlers.cancelDopplerAuth)
       .openapi(startInfisicalAuthRoute, handlers.startInfisicalAuth)
       .openapi(completeInfisicalAuthRoute, handlers.completeInfisicalAuth)
       .openapi(deleteInfisicalAuthRoute, handlers.deleteInfisicalAuth)
@@ -6099,6 +6186,50 @@ const contractDocumentHandlers: V1RouteHandlers = {
       200,
     ),
   deleteCodexAuth: (c) => c.json({ data: { deleted: true as const }, meta }, 200),
+  getDopplerAuth: (c) =>
+    c.json(
+      {
+        data: { status: null, statusReason: null, accountName: null, lastValidatedAt: null },
+        meta,
+      },
+      200,
+    ),
+  startDopplerAuth: (c) =>
+    c.json(
+      {
+        data: {
+          flow: {
+            id: "gdopf_contract",
+            status: "link_ready",
+            loginUrl: "https://dashboard.doppler.com/workplace/auth/cli",
+            userCode: "test_code",
+            statusReason: null,
+            expiresAt: "2030-01-01T00:00:00.000Z",
+          },
+        },
+        meta,
+      },
+      201,
+    ),
+  pollDopplerAuth: (c) =>
+    c.json(
+      {
+        data: {
+          flow: {
+            id: "gdopf_contract",
+            status: "completed",
+            loginUrl: null,
+            userCode: null,
+            statusReason: null,
+            expiresAt: "2030-01-01T00:00:00.000Z",
+          },
+        },
+        meta,
+      },
+      200,
+    ),
+  deleteDopplerAuth: (c) => c.json({ data: { deleted: true as const }, meta }, 200),
+  cancelDopplerAuth: (c) => c.json({ data: { deleted: true as const }, meta }, 200),
   getInfisicalAuth: (c) =>
     c.json(
       {

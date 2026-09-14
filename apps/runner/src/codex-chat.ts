@@ -97,6 +97,7 @@ import {
 } from "./coding-sandbox-lifecycle";
 import { CODING_WORKSPACE_SANDBOX_NETWORK } from "./coding-workspace-runtime";
 import { getDb } from "./db";
+import { reconcileDopplerSandboxAuth } from "./doppler-sandbox-auth";
 import type { RunnerEnv } from "./env";
 import {
   combineSandboxPromptFragments,
@@ -433,6 +434,11 @@ export async function runCodexChatTurn(input: {
       workspaceId: session.workspaceId,
       userWorkosId: turn.userWorkosId,
     });
+    const dopplerAuth = await reconcileDopplerSandboxAuth({
+      sandbox,
+      workspaceId: session.workspaceId,
+      userWorkosId: turn.userWorkosId,
+    });
     checkExternalAbort();
     executionStage = "load_github_auth";
     let github: GitHubCommandAuth | null = null;
@@ -493,6 +499,7 @@ export async function runCodexChatTurn(input: {
       toolGatewayTicket,
       ...repositoryBootstrap.secretValues,
       ...infisicalAuth.redactionValues,
+      ...dopplerAuth.redactionValues,
     ]);
     const acpNormalizer = createAcpEventNormalizer({ engineName: "Codex" });
     const turnProjector = createExternalEngineProjector({
@@ -685,6 +692,7 @@ export async function runCodexChatTurn(input: {
               botPrompt,
               repositoryBootstrap.promptFragment,
               infisicalAuth.promptFragment,
+              dopplerAuth.promptFragment,
             ),
             previousProgress: summarizeCodexChatRecoveryProgress(initialParts),
             attachmentPaths: materializedAttachments.paths,
@@ -708,6 +716,7 @@ export async function runCodexChatTurn(input: {
               botPrompt,
               repositoryBootstrap.promptFragment,
               infisicalAuth.promptFragment,
+              dopplerAuth.promptFragment,
             ),
             attachmentPaths: materializedAttachments.paths,
             skillPaths: invokedSkillPaths,

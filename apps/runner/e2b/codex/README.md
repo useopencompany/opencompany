@@ -6,7 +6,7 @@ runner's repo workflow toolbox:
 Bun `1.4.2`,
 `@agentclientprotocol/codex-acp@1.10.0`, `@openai/codex@0.153.4`,
 `@anthropic-ai/claude-code@2.1.220`, Playwright `1.60.0`,
-Infisical CLI `0.43.118`, Playwright-managed Chromium, and Docker Engine (with the Compose
+Doppler CLI `3.76.5`, Infisical CLI `0.43.118`, Playwright-managed Chromium, and Docker Engine (with the Compose
 plugin) for containers inside the sandbox — the sandbox itself is a Linux microVM, so this is a
 real `dockerd`, not something like OrbStack (a macOS Docker Desktop replacement) that couldn't
 run inside it. The `user` account is added to the `docker` group, so `docker` works without
@@ -111,3 +111,12 @@ once the new runner is live and you no longer intend to roll back.
 When the runner already uses these aliases, rebuilding them updates newly created sandboxes without
 a runner redeploy. Existing persistent sandboxes retain their filesystem and installed tools when
 resumed; template updates do not retrofit them.
+
+## Doppler verification
+
+Run `bun apps/runner/e2b/codex/smoke.doppler.ts /path/to/doppler` against the pinned binary.
+It exercises native headless login, token restoration, two directory configs, and two worktrees
+using a local provider fixture with synthetic values. It does not authorize a real account.
+
+The product connection additionally needs a browser check of sign-in, cancellation, and reconnect.
+Build candidates with a separate template tag and verify each size before promoting the default tag.

@@ -28,7 +28,7 @@ export type OfficialMcpPluginName =
   | "slack"
   | "stripe"
   | "x";
-export type OfficialSkillPluginName = "yc-advise";
+export type OfficialSkillPluginName = "yc-advise" | "doppler";
 export type OfficialPluginName = OfficialMcpPluginName | OfficialSkillPluginName;
 export type OfficialPluginCategory = "communication" | "productivity" | "engineering" | "business";
 
@@ -94,6 +94,7 @@ export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
 export type OfficialSkillPluginMetadata = OfficialPluginMetadataBase & {
   name: OfficialSkillPluginName;
   kind: "skills";
+  connectionProvider?: "doppler";
 };
 
 export type OfficialPluginMetadata = OfficialMcpPluginMetadata | OfficialSkillPluginMetadata;
@@ -454,6 +455,15 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
 } as const satisfies Record<OfficialMcpPluginName, OfficialMcpPluginMetadata>;
 
 export const OFFICIAL_SKILL_PLUGIN_METADATA = {
+  doppler: {
+    name: "doppler",
+    kind: "skills",
+    label: "Doppler",
+    description: "Run your existing development scripts with Doppler in your coding sandbox.",
+    category: "engineering",
+    source: OFFICIAL_PLUGIN_SOURCES.doppler,
+    connectionProvider: "doppler",
+  },
   "yc-advise": {
     name: "yc-advise",
     kind: "skills",

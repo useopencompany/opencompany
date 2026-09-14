@@ -224,6 +224,14 @@ vi.mock("./task-turn", () => ({
   markTaskTurnRunning: taskMocks.markTaskTurnRunning,
 }));
 
+vi.mock("./doppler-sandbox-auth", () => ({
+  reconcileDopplerSandboxAuth: vi.fn(async () => ({
+    available: false,
+    redactionValues: [],
+    promptFragment: "",
+  })),
+}));
+
 vi.mock("./infisical-sandbox-auth", async (importOriginal) => {
   const original = await importOriginal<typeof import("./infisical-sandbox-auth")>();
   return {

@@ -15,6 +15,7 @@ import {
   loadWorkspaceCodexEngineAccount,
   setWorkspaceCodexEngineAccount,
 } from "@opencompany/db/codex-auth";
+import { loadDopplerConnectionMetadata } from "@opencompany/db/doppler-auth";
 import {
   disconnectInfisicalConnection,
   isInfisicalHost,
@@ -77,7 +78,15 @@ export type InfisicalAuthFlow = {
 
 type RunnerFlowResponse<TFlow> = { ok: boolean; flow: TFlow };
 
+export type DopplerAuthFlow = InfisicalAuthFlow & { userCode: string | null };
+export type DopplerAuthStatus = Omit<InfisicalAuthStatus, "host" | "accountEmail"> & {
+  accountName: string | null;
+};
 export type EngineAuthService = {
+  getDopplerStatus(actor: Actor): Promise<DopplerAuthStatus>;
+  startDopplerAuth(actor: Actor): Promise<DopplerAuthFlow>;
+  pollDopplerAuth(actor: Actor, flowId: string): Promise<DopplerAuthFlow>;
+  cancelDopplerAuth(actor: Actor, disconnect: boolean): Promise<void>;
   getClaudeCodeStatus(actor: Actor): Promise<EngineAuthConnectionStatus>;
   saveClaudeCodeToken(actor: Actor, token: string): Promise<EngineAuthConnectionStatus>;
   disconnectClaudeCode(actor: Actor): Promise<void>;
@@ -266,6 +275,55 @@ export function createEngineAuthService(input: {
         await deleteCodexCredential({ db, userWorkosId: actor.userId });
       } catch (error) {
         throw commandFailure(error, "Could not disconnect Codex.", "codex_disconnect");
+      }
+    },
+
+    async getDopplerStatus(actor) {
+      const connection = await loadDopplerConnectionMetadata({
+        db,
+        workspaceId: actor.workspaceId,
+        userId: actor.userId,
+      });
+      return {
+        status: connection?.status ?? null,
+        statusReason: connection?.statusReason ?? null,
+        accountName: connection?.accountName ?? null,
+        lastValidatedAt: connection?.lastValidatedAt?.toISOString() ?? null,
+      };
+    },
+    async startDopplerAuth(actor) {
+      try {
+        const result = await runner.postJson<RunnerFlowResponse<DopplerAuthFlow>>(
+          "/internal/goat/doppler-auth/start",
+          { workspaceId: actor.workspaceId, requestedByWorkosId: actor.userId },
+          { errorFormat: "error-message" },
+        );
+        return result.flow;
+      } catch (error) {
+        throw runnerFailure(error, "Could not start Doppler authentication.", "doppler_start");
+      }
+    },
+    async pollDopplerAuth(actor, flowId) {
+      try {
+        const result = await runner.postJson<RunnerFlowResponse<DopplerAuthFlow>>(
+          `/internal/goat/doppler-auth/${encodeURIComponent(flowId)}/poll`,
+          { workspaceId: actor.workspaceId, requestedByWorkosId: actor.userId },
+          { errorFormat: "error-message" },
+        );
+        return result.flow;
+      } catch (error) {
+        throw runnerFailure(error, "Could not check Doppler authentication.", "doppler_poll");
+      }
+    },
+    async cancelDopplerAuth(actor, disconnect) {
+      try {
+        await runner.postJson(
+          "/internal/goat/doppler-auth/cancel",
+          { workspaceId: actor.workspaceId, requestedByWorkosId: actor.userId, disconnect },
+          { errorFormat: "error-message" },
+        );
+      } catch (error) {
+        throw runnerFailure(error, "Could not disconnect Doppler.", "doppler_disconnect");
       }
     },
 
