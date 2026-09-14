@@ -294,6 +294,39 @@ describe("WorkflowsRoute", () => {
     expect(screen.getByText("No workflows yet")).toBeInTheDocument();
   });
 
+  it("filters the list by visibility and creates in the filtered scope", async () => {
+    workflowLiveQueryMock.data = [
+      workflowListItem(),
+      workflowListItem({
+        id: "workflow_2",
+        slug: "morning-digest",
+        name: "Morning digest",
+        scope: "personal",
+      }),
+    ];
+    workflowLiveQueryMock.isLoading = false;
+    const user = userEvent.setup();
+    render(<WorkflowsRoute workflows={[]} workspaceId="workspace_1" canEdit />);
+
+    expect(screen.getByText("Weekly research")).toBeInTheDocument();
+    expect(screen.getByText("Morning digest")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Personal" }));
+    expect(screen.queryByText("Weekly research")).not.toBeInTheDocument();
+    expect(screen.getByText("Morning digest")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "New workflow" }));
+    await user.type(screen.getByPlaceholderText("Weekly investor update"), "Evening digest");
+    await user.click(screen.getByRole("button", { name: "Create workflow" }));
+
+    await waitFor(() =>
+      expect(workflowActionsMock.createHeadlessWorkflow).toHaveBeenCalledWith({
+        name: "Evening digest",
+        scope: "personal",
+      }),
+    );
+  });
+
   it("creates through the typed Workflow command", async () => {
     workflowLiveQueryMock.data = [];
     workflowLiveQueryMock.isLoading = false;
@@ -309,6 +342,7 @@ describe("WorkflowsRoute", () => {
       expect(workflowActionsMock.createHeadlessWorkflow).toHaveBeenCalledWith({
         name: "Test workflow",
         description: "Run the test",
+        scope: "company",
       }),
     );
     expect(routerMock.push).toHaveBeenCalledWith("/workflows/test-workflow");
@@ -1012,7 +1046,7 @@ const brainSnapshot = {
   ],
 };
 
-function workflowListItem() {
+function workflowListItem(overrides: Record<string, unknown> = {}) {
   return {
     id: "workflow_1",
     slug: "weekly-research",
@@ -1020,10 +1054,13 @@ function workflowListItem() {
     description: "Track changes",
     steps: [],
     status: "draft" as const,
+    scope: "company" as const,
+    createdByUserId: "user_1",
     trigger: { type: "manual" as const },
     version: 1,
     archivedAt: null,
     createdAt: "2026-08-11T09:00:00.000Z",
     updatedAt: "2026-08-11T09:00:00.000Z",
+    ...overrides,
   };
 }

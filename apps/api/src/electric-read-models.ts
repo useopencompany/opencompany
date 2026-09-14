@@ -394,14 +394,17 @@ function readModelShape(input: {
           "description",
           "steps",
           "status",
+          "scope",
+          "created_by_workos_id",
           "trigger",
           "version",
           "archived_at",
           "created_at",
           "updated_at",
         ],
-        where: `"workspace_id" = $1`,
-        params: [input.actor.workspaceId],
+        // Personal workflows stay out of the shape for everyone but their creator.
+        where: `"workspace_id" = $1 AND ("scope" = 'company' OR "created_by_workos_id" = $2)`,
+        params: [input.actor.workspaceId, input.actor.userId],
       };
     case "workflow-schedules-v1":
       return {
@@ -1228,6 +1231,8 @@ const READ_MODEL_COLUMN_NAMES = {
     description: "description",
     steps: "steps",
     status: "status",
+    scope: "scope",
+    created_by_workos_id: "createdByUserId",
     trigger: "trigger",
     version: "version",
     archived_at: "archivedAt",

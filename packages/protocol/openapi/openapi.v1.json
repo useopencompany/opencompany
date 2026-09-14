@@ -998,6 +998,14 @@
               "active"
             ]
           },
+          "scope": {
+            "$ref": "#/components/schemas/WorkflowScope"
+          },
+          "createdByUserId": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 256
+          },
           "trigger": {
             "$ref": "#/components/schemas/WorkflowTrigger"
           },
@@ -1026,6 +1034,8 @@
           "description",
           "steps",
           "status",
+          "scope",
+          "createdByUserId",
           "trigger",
           "version",
           "archivedAt",
@@ -1073,6 +1083,13 @@
           "instructions"
         ],
         "additionalProperties": false
+      },
+      "WorkflowScope": {
+        "type": "string",
+        "enum": [
+          "personal",
+          "company"
+        ]
       },
       "WorkflowTrigger": {
         "oneOf": [
@@ -1263,6 +1280,9 @@
           "description": {
             "type": "string",
             "maxLength": 1024
+          },
+          "scope": {
+            "$ref": "#/components/schemas/WorkflowScope"
           }
         },
         "required": [
@@ -1346,6 +1366,9 @@
               "draft",
               "active"
             ]
+          },
+          "scope": {
+            "$ref": "#/components/schemas/WorkflowScope"
           },
           "trigger": {
             "$ref": "#/components/schemas/WorkflowTriggerInput"

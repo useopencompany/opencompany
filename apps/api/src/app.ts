@@ -444,6 +444,7 @@ export function createApiApp(input: CreateApiAppInput) {
         idempotencyKey: c.req.valid("header")["idempotency-key"],
         name: body.name,
         ...(body.description !== undefined ? { description: body.description } : {}),
+        ...(body.scope !== undefined ? { scope: body.scope } : {}),
       });
       return c.json(
         {

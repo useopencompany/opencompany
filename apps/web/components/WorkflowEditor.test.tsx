@@ -47,9 +47,11 @@ vi.mock("@/lib/headless-automation-commands", () => ({
 }));
 
 function WorkflowEditor(
-  props: Omit<ComponentProps<typeof WorkflowEditorComponent>, "workspaceId">,
+  props: Omit<ComponentProps<typeof WorkflowEditorComponent>, "workspaceId" | "canManageScope"> & {
+    canManageScope?: boolean;
+  },
 ) {
-  return <WorkflowEditorComponent {...props} workspaceId="workspace_1" />;
+  return <WorkflowEditorComponent canManageScope {...props} workspaceId="workspace_1" />;
 }
 
 vi.mock("@/lib/brain-source-actions", () => ({
@@ -84,6 +86,8 @@ const workflow = {
   name: "Weekly update",
   description: "Summarize the week.",
   status: "draft" as const,
+  scope: "company" as const,
+  createdByUserId: "user_1",
   trigger: { type: "manual" as const },
   steps: [
     {
@@ -134,6 +138,7 @@ describe("WorkflowEditor", () => {
       description: "Summarize the week.",
       steps: workflow.steps,
       status: "draft",
+      scope: "company",
       trigger: { type: "manual" },
     });
     expect(screen.getByText("Saved")).toBeInTheDocument();
@@ -550,6 +555,27 @@ describe("WorkflowEditor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove step 2" }));
     expect(screen.queryByLabelText("Step 2 name")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Remove step 1" })).not.toBeInTheDocument();
+  });
+
+  it("saves a visibility change and locks the control for a member who does not own it", async () => {
+    const { rerender } = render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
+
+    fireEvent.change(screen.getByLabelText("Visibility"), { target: { value: "personal" } });
+    expect(screen.getByText("Only you can see and run this workflow")).toBeInTheDocument();
+    await advanceAutosave();
+
+    expect(workflowActionsMock.update).toHaveBeenCalledWith(
+      "workflow_1",
+      expect.objectContaining({ scope: "personal" }),
+    );
+
+    rerender(
+      <WorkflowEditor workflow={workflow} canEdit canManageScope={false} skillCatalog={[]} />,
+    );
+    expect(screen.queryByLabelText("Visibility")).not.toBeInTheDocument();
+    expect(
+      screen.getByLabelText("Visibility managed by the creator or an admin"),
+    ).toBeInTheDocument();
   });
 
   it("renders markdown lists in read-only workflow steps", () => {
