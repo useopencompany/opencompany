@@ -64,3 +64,8 @@ Migration `0282_durable_session_subscriptions` is additive. Deploy it before the
 runner. Application rollback can retain these tables and their queued data. Rolling back the
 API also restores legacy bot ingress behavior, so disable Slack event delivery during rollback
 if that behavior is unwanted. Do not drop the tables while subscriptions or deliveries are active.
+
+Migration `0284_slack_thread_participants` updates the subscription policy default and existing
+Slack thread policy labels. It preserves subscriptions and queued events. Rollback can restore
+`workspace_member` policy labels alongside the previous worker. Previously ignored replies stay
+ignored; a new reply is needed to resume those threads.

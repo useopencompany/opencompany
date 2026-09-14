@@ -72,6 +72,12 @@ beforeAll(async () => {
         "utf8",
       ),
     );
+    await db.exec(
+      await readFile(
+        new URL("../../../drizzle/0284_slack_thread_participants.sql", import.meta.url),
+        "utf8",
+      ),
+    );
   });
 }, 60_000);
 beforeEach(async () => {
@@ -111,9 +117,29 @@ afterEach(async () => {
 });
 
 describe("durable Slack subscriptions", () => {
+  it("upgrades existing thread policies without losing the subscription or other settings", async () => {
+    await pg.exec(
+      `UPDATE goat.session_subscriptions SET policy = '{"authorization":"workspace_member","queue":"serial","custom":true}'`,
+    );
+    await pg.exec(
+      await readFile(
+        new URL("../../../drizzle/0284_slack_thread_participants.sql", import.meta.url),
+        "utf8",
+      ),
+    );
+    expect(
+      (await pg.query("SELECT id, status, policy FROM goat.session_subscriptions")).rows,
+    ).toEqual([
+      {
+        id: "root",
+        status: "waiting",
+        policy: { authorization: "slack_thread_participant", queue: "serial", custom: true },
+      },
+    ]);
+  });
   it("persists workflow root intents with a stable key and rejects foreign callers", async () => {
     await pg.exec(`
-      UPDATE goat.integrations SET scopes = '["chat:write","channels:read","channels:history","users:read","users:read.email"]';
+      UPDATE goat.integrations SET scopes = '["chat:write","channels:read","channels:history","users:read"]';
       INSERT INTO goat.chat_messages (id, session_id, role, content, task_id) VALUES ('initial_user','session','user','Investigate','task'), ('initial_assistant','session','assistant','','task');
       INSERT INTO goat.codex_chat_turns (id,user_workos_id,codex_chat_session_id,chat_session_id,user_message_id,assistant_message_id,status,prompt,lease_id,lease_expires_at)
         VALUES ('initial_run','owner','runtime','session','initial_user','initial_assistant','running','Investigate','lease',now() + interval '1 minute');
@@ -148,7 +174,13 @@ describe("durable Slack subscriptions", () => {
       threadTs: null,
       messageTs: "100.001",
     });
-    expect((await pg.query("SELECT id FROM goat.session_subscriptions")).rows).toHaveLength(1);
+    expect(
+      (
+        await pg.query(
+          "SELECT policy->>'authorization' AS authorization FROM goat.session_subscriptions",
+        )
+      ).rows,
+    ).toEqual([{ authorization: "slack_thread_participant" }]);
     expect(await enqueueSlackThreadReply(execute, reply)).toBe(1);
     expect(await enqueueSlackThreadReply(execute, reply)).toBe(0);
     expect(
