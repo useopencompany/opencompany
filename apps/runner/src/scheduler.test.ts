@@ -103,6 +103,7 @@ describe("sweepDueTaskSchedules", () => {
           schedule_prompt text NOT NULL DEFAULT '',
           schedule_harness_spec jsonb,
           schedule_next_run_at timestamptz,
+          steps jsonb NOT NULL DEFAULT '[]'::jsonb,
           automation_triggers jsonb NOT NULL DEFAULT '[]'::jsonb,
           trigger text NOT NULL DEFAULT 'manual',
           schedule_enabled boolean NOT NULL DEFAULT false,
@@ -302,9 +303,12 @@ describe("sweepDueTaskSchedules", () => {
   });
 
   it("creates a workflow task for a due workflow schedule", async () => {
+    const firstStepInstructions = "Draft the weekday update.";
     const workflowHarnessSpec: HarnessSpec = {
       ...harnessSpec,
-      initialUserMessage: "Task: Weekly update\n\nDraft the weekday update.",
+      // Existing trigger snapshots can still contain the legacy pseudo-prompt. The scheduler
+      // replaces it from the current workflow definition when materializing the task.
+      initialUserMessage: "Task: Weekly update\n\nRun this workflow.",
       workflow: {
         id: "weekly-update",
         workspaceId: "workspace_1",
@@ -329,23 +333,27 @@ describe("sweepDueTaskSchedules", () => {
           name: "Weekly update",
           cron: "0 9 * * *",
           timezone: "UTC",
-          prompt: "Draft the weekday update.",
+          prompt: "Run this workflow.",
+          firstStepInstructions,
           scheduleHarnessSpec: workflowHarnessSpec,
           nextRunAt: new Date("2026-06-01T09:00:00.000Z"),
         },
       ])
       .mockResolvedValueOnce([{ id: "goat_workflow_schedule_run_1" }])
       .mockResolvedValueOnce([{ authorized: true, featureEnabled: true, commandId: null }])
-      .mockImplementationOnce((query) =>
-        canonicalTaskCreateRow(query, {
+      .mockImplementationOnce((query) => {
+        const compiled = new PgDialect().sqlToQuery(query);
+        expect(compiled.params).toContain(firstStepInstructions);
+        expect(compiled.params).not.toContain("Task: Weekly update\n\nRun this workflow.");
+        return canonicalTaskCreateRow(query, {
           name: "Weekly update",
-          goal: "Draft the weekday update.",
+          goal: firstStepInstructions,
           model: workflowHarnessSpec.model,
           scheduleId: null,
           workflowId: "weekly-update",
           scheduledFor: new Date("2026-06-03T09:00:00.000Z"),
-        }),
-      )
+        });
+      })
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
     mocks.transaction.mockImplementation(async (callback) => callback({ execute }));

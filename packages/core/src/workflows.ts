@@ -756,8 +756,11 @@ export class WorkflowApplicationService {
       throw new CoreError("invalid_argument", "Workflow is unavailable or incomplete.");
     }
     const trigger = workflow.triggers?.[0] ?? workflow.trigger;
+    const triggerPrompt = trigger.type === "manual" ? "" : trigger.prompt.trim();
     const goal = prompt(
-      trigger.type === "manual" ? workflow.description || workflow.name : trigger.prompt,
+      !triggerPrompt || triggerPrompt === "Run this workflow."
+        ? workflow.steps[0]!.instructions
+        : triggerPrompt,
       "A Workflow prompt is required.",
     );
     const execution = validatedExecution(
