@@ -148,7 +148,7 @@ export function GitHubRepositoryAccessSection() {
 
       <div className="flex flex-wrap items-center gap-2">
         <a
-          href={githubInstallStartHref(undefined, "/settings/plugins/github")}
+          href={githubInstallStartHref(undefined, "/plugins/github")}
           target="_blank"
           rel="noreferrer"
           onClick={approval.begin}

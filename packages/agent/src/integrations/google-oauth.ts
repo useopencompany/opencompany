@@ -85,7 +85,7 @@ export function googleAuthorizationConfigForReturnTo(
   returnTo: string,
 ): GoogleProviderConfig {
   const returnPath = new URL(sanitizeReturnTo(returnTo), "https://opencompany.invalid").pathname;
-  if (config.provider !== "google_drive" || returnPath !== "/settings/plugins/google-drive") {
+  if (config.provider !== "google_drive" || returnPath !== "/plugins/google-drive") {
     return config;
   }
   return {

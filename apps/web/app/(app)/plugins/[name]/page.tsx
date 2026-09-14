@@ -30,8 +30,8 @@ import {
   VercelPluginDetail,
   XPluginDetail,
 } from "@/components/OfficialMcpPluginSettings";
+import { PageContent } from "@/components/PageContent";
 import { OfficialSkillPluginDetail, PluginDetail } from "@/components/PluginSettings";
-import { SettingsContent } from "@/components/SettingsChrome";
 import { currentUser } from "@/lib/auth";
 import { loadCurrentDopplerAuthSettings } from "@/lib/doppler-auth";
 import { getHeadlessCustomMcp, getHeadlessPlugin } from "@/lib/headless-knowledge-server";
@@ -104,13 +104,13 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
   const [, plugin] = await Promise.all([currentUser(), getHeadlessPlugin(name)]);
   if (!plugin) {
     return (
-      <SettingsContent
+      <PageContent
         title="Plugin not found"
         description="This plugin may have been archived or never installed."
-        backLink={{ href: "/settings/plugins", label: "Plugins" }}
+        backLink={{ href: "/plugins", label: "Plugins" }}
       >
         <div />
-      </SettingsContent>
+      </PageContent>
     );
   }
   if (plugin.source.type === "custom_mcp") {

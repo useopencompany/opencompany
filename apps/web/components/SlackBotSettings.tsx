@@ -4,7 +4,7 @@ import { MessageSquare } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { SettingsContent } from "@/components/SettingsChrome";
+import { PageContent } from "@/components/PageContent";
 import { disconnectSlackBotAction } from "@/lib/slack-bot-actions";
 
 export type SlackBotSettingsData = {
@@ -32,7 +32,7 @@ const SETUP_ERROR_COPY: Record<string, string> = {
 
 export function SlackBotSettings({ data }: { data: SlackBotSettingsData }) {
   return (
-    <SettingsContent
+    <PageContent
       title="Slack"
       description="Share workflow results in Slack and continue the same work in a thread."
     >
@@ -60,7 +60,7 @@ export function SlackBotSettings({ data }: { data: SlackBotSettingsData }) {
       ) : (
         <SlackBotPanel data={data} />
       )}
-    </SettingsContent>
+    </PageContent>
   );
 }
 

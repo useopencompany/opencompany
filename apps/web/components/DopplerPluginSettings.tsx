@@ -9,8 +9,8 @@ import {
   type PluginPreviewState,
   SkillsSection,
 } from "@/components/OfficialMcpPluginSettings";
+import { PageContent } from "@/components/PageContent";
 import { OFFICIAL_SKILL_PLUGINS } from "@/components/PluginSettings";
-import { SettingsContent } from "@/components/SettingsChrome";
 import type { DopplerAuthSettings } from "@/lib/doppler-auth";
 import { previewHeadlessPluginImport } from "@/lib/headless-knowledge-commands";
 import { officialPluginUpdateAvailable } from "@/lib/official-plugins";
@@ -51,10 +51,10 @@ export function DopplerPluginDetail({
   const enabled = plugin?.status === "enabled";
   const Icon = config.Icon;
   return (
-    <SettingsContent
+    <PageContent
       title={config.label}
       description={config.description}
-      backLink={{ href: "/settings/plugins", label: "Plugins" }}
+      backLink={{ href: "/plugins", label: "Plugins" }}
       icon={
         <span
           aria-hidden="true"
@@ -98,6 +98,6 @@ export function DopplerPluginDetail({
         previewState={previewState}
         description="Guidance for using Doppler in your coding sandbox."
       />
-    </SettingsContent>
+    </PageContent>
   );
 }

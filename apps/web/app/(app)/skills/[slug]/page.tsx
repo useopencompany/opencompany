@@ -1,5 +1,5 @@
+import { PageContent } from "@/components/PageContent";
 import { SkillBundleRoute } from "@/components/Routes";
-import { SettingsContent } from "@/components/SettingsChrome";
 import { getHeadlessSkill } from "@/lib/headless-knowledge-server";
 
 type SkillBundlePageProps = {
@@ -12,13 +12,13 @@ export default async function SkillBundlePage({ params }: SkillBundlePageProps) 
 
   if (!skill) {
     return (
-      <SettingsContent
+      <PageContent
         title="Skill not found"
         description="This skill may have been archived or never existed."
-        backLink={{ href: "/settings/skills", label: "Skills" }}
+        backLink={{ href: "/skills", label: "Skills" }}
       >
         <div />
-      </SettingsContent>
+      </PageContent>
     );
   }
 

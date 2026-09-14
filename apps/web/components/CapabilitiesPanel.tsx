@@ -3,7 +3,7 @@
 import { Switch } from "@opencompany/ui/components/switch";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { SettingsContent } from "@/components/SettingsChrome";
+import { PageContent } from "@/components/PageContent";
 import {
   type ManagedCapabilitySource,
   setWorkspaceCapabilityAction,
@@ -116,7 +116,7 @@ export function CapabilitiesPanel({
   };
 
   return (
-    <SettingsContent
+    <PageContent
       title="Capabilities"
       description="Choose which managed capabilities are available in the main chat."
     >
@@ -199,7 +199,7 @@ export function CapabilitiesPanel({
           </p>
         ) : null}
       </div>
-    </SettingsContent>
+    </PageContent>
   );
 }
 

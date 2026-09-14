@@ -1,5 +1,5 @@
 import { AttioIntegrationSetup } from "@/components/AttioIntegrationSetup";
-import { SettingsContent } from "@/components/SettingsChrome";
+import { PageContent } from "@/components/PageContent";
 import { currentUser } from "@/lib/auth";
 import { getAttioIntegrationState } from "@/lib/integrations/attio";
 
@@ -10,12 +10,12 @@ export default async function AttioSettingsPage() {
   const state = await getAttioIntegrationState(user.workosUserId);
 
   return (
-    <SettingsContent
+    <PageContent
       title="Attio ingestion"
       description="API-key ingestion for Brain"
-      backLink={{ href: "/settings/plugins/attio", label: "Attio plugin" }}
+      backLink={{ href: "/plugins/attio", label: "Attio plugin" }}
     >
       <AttioIntegrationSetup initialState={state} />
-    </SettingsContent>
+    </PageContent>
   );
 }

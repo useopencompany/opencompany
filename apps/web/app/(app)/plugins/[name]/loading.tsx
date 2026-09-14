@@ -1,12 +1,12 @@
 import { Skeleton } from "@opencompany/ui/components/skeleton";
-import { SettingsContent } from "@/components/SettingsChrome";
+import { PageContent } from "@/components/PageContent";
 
 export default function PluginDetailLoading() {
   return (
-    <SettingsContent
+    <PageContent
       title="Plugin"
       description="Loading plugin settings."
-      backLink={{ href: "/settings/plugins", label: "Plugins" }}
+      backLink={{ href: "/plugins", label: "Plugins" }}
     >
       {["Plugin", "Accounts", "Tools", "Skills"].map((section) => (
         <section key={section} aria-label={`Loading ${section.toLocaleLowerCase()}`}>
@@ -17,6 +17,6 @@ export default function PluginDetailLoading() {
           </div>
         </section>
       ))}
-    </SettingsContent>
+    </PageContent>
   );
 }

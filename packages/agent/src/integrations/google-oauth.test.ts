@@ -40,13 +40,13 @@ describe("opencompany Google OAuth", () => {
       provider: "gmail",
       access: "gmail_mcp",
       userWorkosId: "user_123",
-      returnTo: "/settings/plugins/gmail",
+      returnTo: "/plugins/gmail",
     });
 
     expect(verifyGoogleIntegrationState(state)).toMatchObject({
       provider: "gmail",
       access: "gmail_mcp",
-      returnTo: "/settings/plugins/gmail",
+      returnTo: "/plugins/gmail",
     });
   });
 
@@ -96,7 +96,7 @@ describe("opencompany Google OAuth", () => {
   it("requests the Drive, Docs, and Sheets scopes required by the plugin surface", () => {
     const config = googleAuthorizationConfigForReturnTo(
       GOOGLE_PROVIDER_CONFIG.google_drive,
-      "/settings/plugins/google-drive?integration=google_drive",
+      "/plugins/google-drive?integration=google_drive",
     );
 
     expect(config.scopes).toEqual([
