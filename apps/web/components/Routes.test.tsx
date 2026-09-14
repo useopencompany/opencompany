@@ -284,6 +284,7 @@ describe("WorkflowsRoute", () => {
       workflows: [workflowListItem()],
       workspaceId: "workspace_1",
       canEdit: true,
+      ownerNames: WORKFLOW_OWNER_NAMES,
     };
     const view = render(<WorkflowsRoute {...props} />);
 
@@ -295,10 +296,10 @@ describe("WorkflowsRoute", () => {
     view.rerender(<WorkflowsRoute {...props} />);
 
     expect(screen.queryByText("Weekly research")).not.toBeInTheDocument();
-    expect(screen.getByText("No company workflows yet")).toBeInTheDocument();
+    expect(screen.getByText("No workflows yet")).toBeInTheDocument();
   });
 
-  it("filters the list by visibility and creates in the filtered scope", async () => {
+  it("lists every scope by default, filters on demand, and creates in the filtered scope", async () => {
     workflowLiveQueryMock.data = [
       workflowListItem(),
       workflowListItem({
@@ -310,12 +311,23 @@ describe("WorkflowsRoute", () => {
     ];
     workflowLiveQueryMock.isLoading = false;
     const user = userEvent.setup();
-    render(<WorkflowsRoute workflows={[]} workspaceId="workspace_1" canEdit />);
+    render(
+      <WorkflowsRoute
+        workflows={[]}
+        workspaceId="workspace_1"
+        canEdit
+        ownerNames={WORKFLOW_OWNER_NAMES}
+      />,
+    );
 
+    expect(screen.getByText("Weekly research")).toBeInTheDocument();
+    expect(screen.getByText("Morning digest")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^Company/ }));
     expect(screen.getByText("Weekly research")).toBeInTheDocument();
     expect(screen.queryByText("Morning digest")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /Personal/ }));
+    await user.click(screen.getByRole("button", { name: /^Personal/ }));
     expect(screen.queryByText("Weekly research")).not.toBeInTheDocument();
     expect(screen.getByText("Morning digest")).toBeInTheDocument();
 
@@ -335,7 +347,14 @@ describe("WorkflowsRoute", () => {
     workflowLiveQueryMock.data = [];
     workflowLiveQueryMock.isLoading = false;
     const user = userEvent.setup();
-    render(<WorkflowsRoute workflows={[]} workspaceId="workspace_1" canEdit />);
+    render(
+      <WorkflowsRoute
+        workflows={[]}
+        workspaceId="workspace_1"
+        canEdit
+        ownerNames={WORKFLOW_OWNER_NAMES}
+      />,
+    );
 
     await user.click(screen.getByRole("button", { name: "New workflow" }));
     await user.type(screen.getByPlaceholderText("Weekly investor update"), "Test workflow");
@@ -369,15 +388,58 @@ describe("WorkflowsRoute", () => {
         workflows={[workflowListItem({ model: "codex" })]}
         workspaceId="workspace_1"
         canEdit
+        ownerNames={WORKFLOW_OWNER_NAMES}
       />,
     );
 
+    expect(screen.getByRole("columnheader", { name: "Owner" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Model" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Trigger" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Runs (30d)" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Last executed" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "Louis Morgner" })).toBeInTheDocument();
     expect(screen.getByText("Codex")).toBeInTheDocument();
     expect(screen.getByRole("cell", { name: "1" })).toBeInTheDocument();
+  });
+
+  it("carries scope in the tabs only, and status as a dot beside the name", () => {
+    workflowLiveQueryMock.hydrated = false;
+    workflowLiveQueryMock.isLoading = false;
+    Object.assign(appDataMock.value, { tasks: [] });
+
+    render(
+      <WorkflowsRoute
+        workflows={[workflowListItem({ status: "active" })]}
+        workspaceId="workspace_1"
+        canEdit
+        ownerNames={WORKFLOW_OWNER_NAMES}
+      />,
+    );
+
+    const row = screen.getByRole("link", { name: /Weekly research/ });
+    expect(row).toHaveTextContent("Active");
+    expect(row).not.toHaveTextContent("Company");
+  });
+
+  it("names an owner who is no longer a workspace member", () => {
+    workflowLiveQueryMock.hydrated = false;
+    workflowLiveQueryMock.isLoading = false;
+    Object.assign(appDataMock.value, { tasks: [] });
+
+    render(
+      <WorkflowsRoute
+        workflows={[
+          workflowListItem({ createdByUserId: "user_gone" }),
+          workflowListItem({ id: "workflow_2", slug: "legacy", createdByUserId: null }),
+        ]}
+        workspaceId="workspace_1"
+        canEdit
+        ownerNames={WORKFLOW_OWNER_NAMES}
+      />,
+    );
+
+    expect(screen.getByRole("cell", { name: "Former member" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "Workspace" })).toBeInTheDocument();
   });
 
   it("offers edit and delete actions for each workflow", async () => {
@@ -386,7 +448,14 @@ describe("WorkflowsRoute", () => {
     Object.assign(appDataMock.value, { tasks: [] });
     const user = userEvent.setup();
 
-    render(<WorkflowsRoute workflows={[workflowListItem()]} workspaceId="workspace_1" canEdit />);
+    render(
+      <WorkflowsRoute
+        workflows={[workflowListItem()]}
+        workspaceId="workspace_1"
+        canEdit
+        ownerNames={WORKFLOW_OWNER_NAMES}
+      />,
+    );
 
     await user.click(screen.getByRole("button", { name: "Actions for Weekly research" }));
     expect(screen.getByRole("link", { name: "Edit details" })).toHaveAttribute(
@@ -1106,6 +1175,8 @@ const brainSnapshot = {
     },
   ],
 };
+
+const WORKFLOW_OWNER_NAMES = { user_1: "Louis Morgner" };
 
 function workflowListItem(overrides: Record<string, unknown> & { model?: string } = {}) {
   const { model = "", ...workflowOverrides } = overrides;
