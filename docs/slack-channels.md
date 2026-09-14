@@ -2,10 +2,12 @@
 
 Workspace admins install the workspace bot in **Settings → Channels → Slack**. This is separate
 from every member's personal Slack plugin. Invite the bot to a public, unshared channel, then put
-the destination in normal workflow instructions: “Post the investigation summary in #product.”
-There is no destination picker in the workflow editor.
+the destination in normal workflow instructions: “Post the investigation summary in #product with
+the opencompany Slack bot.” There is no destination picker in the workflow editor.
 
-`post_slack_message` is available to workflow runtimes. It queues a root post with a stable
+`opencompany_slack_bot_send_message` is available to workflow runtimes. It is named after the
+phrase people write in instructions so the model picks it over a member's personal Slack plugin
+action, which can also post messages. It queues a root post with a stable
 `messageKey`; each successful root creates a 30-day subscription to the workflow's existing
 Conversation. Slack replies become Task follow-up Messages and Runs through the existing Task
 repository. The original Task, Conversation, harness, artifacts, and runtime references remain;
