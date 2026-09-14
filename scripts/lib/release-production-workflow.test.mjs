@@ -29,6 +29,7 @@ test("builds Vercel outputs before migrations and rechecks main before deploys",
   const workflow = await readFile(workflowUrl, "utf8");
 
   assertStepOrder(workflow, [
+    "Confirm release is current before preparation",
     "Prepare web deployment",
     "Prepare marketing deployment",
     "Prepare docs deployment",
@@ -49,6 +50,14 @@ test("builds Vercel outputs before migrations and rechecks main before deploys",
   assert.match(workflow, /VERCEL_DEPLOY_TIMEOUT_MS: "600000"/u);
   assert.match(workflow, /run: bun scripts\/backfill-wiki-path-links\.ts/u);
   assert.match(workflow, /run: node scripts\/activate-personal-skills\.mjs/u);
+  const preparationGate = workflow.slice(
+    workflow.indexOf("- name: Confirm release is current before preparation"),
+    workflow.indexOf("- name: Confirm release is current before production changes"),
+  );
+  assert.match(
+    preparationGate,
+    /steps\.current-before-prepare\.outputs\.should_release == 'true'/u,
+  );
   const activation = workflow.slice(
     workflow.indexOf("- name: Activate Personal Skills and plugins"),
     workflow.indexOf("- name: Finalize database deployment"),
@@ -62,6 +71,19 @@ test("builds Vercel outputs before migrations and rechecks main before deploys",
   assert.match(
     workflow,
     /steps\.migrate\.outcome == 'success' && steps\.backfill-wiki-path-links\.outcome == 'success'/u,
+  );
+});
+
+test("serializes only the production mutation stage", async () => {
+  const workflow = await readFile(workflowUrl, "utf8");
+  const releaseStart = workflow.indexOf("  release:\n");
+  const beforeRelease = workflow.slice(0, releaseStart);
+  const release = workflow.slice(releaseStart);
+
+  assert.doesNotMatch(beforeRelease, /group: production-release/u);
+  assert.match(
+    release,
+    /concurrency:\n {6}group: production-release\n {6}cancel-in-progress: false/u,
   );
 });
 

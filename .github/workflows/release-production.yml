@@ -14,10 +14,6 @@ on:
         type: boolean
         default: true
 
-concurrency:
-  group: production-release
-  cancel-in-progress: false
-
 permissions:
   contents: read
 
@@ -120,6 +116,12 @@ jobs:
     name: Deploy production surfaces
     needs: plan
     if: ${{ needs.plan.outputs.any == 'true' }}
+    # Verification and planning are safe to run concurrently. Serialize only the
+    # production mutation stage so the newest verified commit is ready as soon as
+    # an older release finishes or discovers that it has been superseded.
+    concurrency:
+      group: production-release
+      cancel-in-progress: false
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 45
     environment: production
@@ -144,15 +146,22 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Confirm release is current before preparation
+        id: current-before-prepare
+        run: node scripts/check-release-current.mjs
+
       - name: Setup Bun
+        if: ${{ steps.current-before-prepare.outputs.should_release == 'true' }}
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.2
 
       - name: Install dependencies from the lockfile
+        if: ${{ steps.current-before-prepare.outputs.should_release == 'true' }}
         run: bun install --frozen-lockfile
 
       - name: Fetch release secrets from Infisical
+        if: ${{ steps.current-before-prepare.outputs.should_release == 'true' }}
         uses: Infisical/secrets-action@6cd3f7c0e4cc0d2395ee4ef414eb6eeb5d3e73db # v1.0.17
         with:
           method: oidc
@@ -163,10 +172,11 @@ jobs:
           secret-path: /release
 
       - name: Check release automation env
+        if: ${{ steps.current-before-prepare.outputs.should_release == 'true' }}
         run: bun run release:preflight -- --release
 
       - name: Fetch API secrets from Infisical
-        if: ${{ needs.plan.outputs.api == 'true' }}
+        if: ${{ steps.current-before-prepare.outputs.should_release == 'true' && needs.plan.outputs.api == 'true' }}
         uses: Infisical/secrets-action@6cd3f7c0e4cc0d2395ee4ef414eb6eeb5d3e73db # v1.0.17
         with:
           method: oidc
@@ -177,11 +187,11 @@ jobs:
           secret-path: /api
 
       - name: Check API env
-        if: ${{ needs.plan.outputs.api == 'true' }}
+        if: ${{ steps.current-before-prepare.outputs.should_release == 'true' && needs.plan.outputs.api == 'true' }}
         run: bun run release:preflight -- --api
 
       - name: Fetch runner secrets from Infisical
-        if: ${{ needs.plan.outputs.runner == 'true' }}
+        if: ${{ steps.current-before-prepare.outputs.should_release == 'true' && needs.plan.outputs.runner == 'true' }}
         uses: Infisical/secrets-action@6cd3f7c0e4cc0d2395ee4ef414eb6eeb5d3e73db # v1.0.17
         with:
           method: oidc
@@ -192,14 +202,15 @@ jobs:
           secret-path: /runner
 
       - name: Check runner env
-        if: ${{ needs.plan.outputs.runner == 'true' }}
+        if: ${{ steps.current-before-prepare.outputs.should_release == 'true' && needs.plan.outputs.runner == 'true' }}
         run: bun run release:preflight -- --runner
 
       - name: Verify managed capability contracts
-        if: ${{ needs.plan.outputs.api == 'true' || needs.plan.outputs.runner == 'true' }}
+        if: ${{ steps.current-before-prepare.outputs.should_release == 'true' && (needs.plan.outputs.api == 'true' || needs.plan.outputs.runner == 'true') }}
         run: bun run web:capabilities:contract
 
       - name: Map production database and web env
+        if: ${{ steps.current-before-prepare.outputs.should_release == 'true' }}
         run: |
           if [[ "${{ needs.plan.outputs.database }}" == "true" ]]; then
             echo "DATABASE_URL=$PRODUCTION_DATABASE_URL" >> "$GITHUB_ENV"
@@ -218,21 +229,22 @@ jobs:
       # application build failures cannot follow a production schema change.
       - name: Prepare web deployment
         id: prepare-web
-        if: ${{ needs.plan.outputs.web == 'true' }}
+        if: ${{ steps.current-before-prepare.outputs.should_release == 'true' && needs.plan.outputs.web == 'true' }}
         run: node scripts/release-vercel-prepare.mjs --surface web
 
       - name: Prepare marketing deployment
         id: prepare-marketing
-        if: ${{ needs.plan.outputs.marketing == 'true' }}
+        if: ${{ steps.current-before-prepare.outputs.should_release == 'true' && needs.plan.outputs.marketing == 'true' }}
         run: node scripts/release-vercel-prepare.mjs --surface marketing
 
       - name: Prepare docs deployment
         id: prepare-docs
-        if: ${{ needs.plan.outputs.docs == 'true' }}
+        if: ${{ steps.current-before-prepare.outputs.should_release == 'true' && needs.plan.outputs.docs == 'true' }}
         run: node scripts/release-vercel-prepare.mjs --surface docs
 
       - name: Confirm release is current before production changes
         id: current-before-migration
+        if: ${{ steps.current-before-prepare.outputs.should_release == 'true' }}
         run: node scripts/check-release-current.mjs
 
       - name: Create database deployment
