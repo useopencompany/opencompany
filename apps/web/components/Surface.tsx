@@ -6250,7 +6250,7 @@ function ModelPicker({
                       </div>
                       {isSubscriptionCovered ? (
                         <span
-                          title="Runs on your workspace's ChatGPT subscription, not workspace credits."
+                          title="Covered by your workspace's ChatGPT subscription, so it uses no credits."
                           className="inline-flex shrink-0 items-center rounded-full bg-surface-muted px-1.5 py-px text-[10.5px] font-medium leading-4 text-ink-subtle"
                         >
                           Included
