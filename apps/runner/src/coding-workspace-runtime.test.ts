@@ -3,9 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CODING_WORKSPACE_SANDBOX_NETWORK,
   discoverCodingWorkspacePreviewPorts,
+  inspectCodingWorkspacePreviewPorts,
   isAllowedPreviewPort,
   mintCodingWorkspaceAccess,
   parseListeningPorts,
+  parseSiblingWorkspaceListeningPorts,
   parseWorkspaceListeningPorts,
 } from "./coding-workspace-runtime";
 import { verifyCodingWorkspaceTicket } from "./coding-workspace-runtime-auth";
@@ -69,6 +71,12 @@ describe("opencompany coding workspace preview port discovery", () => {
         "/home/user/opencompany-goat/codex-chat",
       ),
     ).toEqual([5_173, 3_000]);
+    expect(
+      parseSiblingWorkspaceListeningPorts(
+        "3002\t234\t/home/user/opencompany-goat/opencompany",
+        "/home/user/opencompany-goat/codex-chat",
+      ),
+    ).toEqual([3_002]);
   });
 
   it("rejects privileged, internal, non-integer, and out-of-range ports", () => {
@@ -81,7 +89,7 @@ describe("opencompany coding workspace preview port discovery", () => {
     expect(isAllowedPreviewPort(3_000)).toBe(true);
   });
 
-  it("probes only workspace-owned listening ports", async () => {
+  it("separates workspace preview ports from HTTP servers started in sibling directories", async () => {
     const run = vi.fn(async (command: string) => {
       if (command.startsWith("ss -H -ltnp")) {
         return {
@@ -90,20 +98,23 @@ describe("opencompany coding workspace preview port discovery", () => {
             "2019\t456\t/home/user/opencompany-goat/codex-chat/repo",
             "46095\t789\t/opt/e2b",
             "3000\t234\t/home/user/opencompany-goat/codex-chat",
+            "3002\t345\t/home/user/opencompany-goat/opencompany",
           ].join("\n"),
         };
       }
       if (command.includes("127.0.0.1:5173/")) return { stdout: "200" };
       if (command.includes("127.0.0.1:3000/")) return { stdout: "404" };
+      if (command.includes("127.0.0.1:3002/")) return { stdout: "200" };
       throw new Error(`Unexpected command: ${command}`);
     });
     const sandbox = { commands: { run } } as unknown as SandboxHandle;
 
-    const ports = await discoverCodingWorkspacePreviewPorts(sandbox, {
+    const discovery = await inspectCodingWorkspacePreviewPorts(sandbox, {
       workDirectory: "/home/user/opencompany-goat/codex-chat",
     });
 
-    expect(ports.map((port) => port.port)).toEqual([3_000, 5_173]);
+    expect(discovery.ports.map((port) => port.port)).toEqual([3_000, 5_173]);
+    expect(discovery.outsideWorkspacePorts).toEqual([{ port: 3_002, isHttp: true, score: 1_000 }]);
     expect(run).not.toHaveBeenCalledWith(
       expect.stringContaining("127.0.0.1:2019/"),
       expect.anything(),
