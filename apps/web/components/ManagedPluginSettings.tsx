@@ -14,13 +14,13 @@ import { cn } from "@opencompany/ui/lib/utils";
 import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
+import { PageContent } from "@/components/PageContent";
 import {
   installOfficialPlugin,
   OFFICIAL_MANAGED_PLUGINS,
   PaidBadge,
   PluginDetail,
 } from "@/components/PluginSettings";
-import { SettingsContent } from "@/components/SettingsChrome";
 import { previewHeadlessPluginImport } from "@/lib/headless-knowledge-commands";
 import type { OfficialManagedPluginName } from "@/lib/official-plugins";
 import { PLUGIN_DAILY_LIMIT_MAX_USD } from "@/lib/plugins/billing";
@@ -115,10 +115,10 @@ function ManagedPluginInstall({
   };
 
   return (
-    <SettingsContent
+    <PageContent
       title={config.label}
       description={config.description}
-      backLink={{ href: "/settings/plugins", label: "Plugins" }}
+      backLink={{ href: "/plugins", label: "Plugins" }}
     >
       <section className="flex flex-wrap items-start gap-3 rounded-lg border border-border bg-surface p-4">
         <span
@@ -181,7 +181,7 @@ function ManagedPluginInstall({
       )}
 
       {installError ? <p className="text-[12.5px] text-danger">{installError}</p> : null}
-    </SettingsContent>
+    </PageContent>
   );
 }
 

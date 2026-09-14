@@ -54,7 +54,7 @@ describe("CapabilitiesPanel", () => {
     expect(screen.queryByText("Prospecting")).toBeNull();
     expect(screen.getByRole("link", { name: /plugin page/i })).toHaveAttribute(
       "href",
-      "/settings/plugins/lead-research",
+      "/plugins/lead-research",
     );
     expect(screen.getByText("AI image generation")).toBeVisible();
   });

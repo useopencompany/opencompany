@@ -204,7 +204,7 @@ export function CapabilitiesPanel({
         <p>
           Lead research is a paid plugin with its own prices and daily spending limit. Manage it on
           its{" "}
-          <Link href="/settings/plugins/lead-research" className="underline underline-offset-2">
+          <Link href="/plugins/lead-research" className="underline underline-offset-2">
             plugin page
           </Link>
           .

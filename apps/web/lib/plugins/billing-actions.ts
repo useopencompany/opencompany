@@ -44,7 +44,7 @@ export async function setPluginDailySpendLimitAction(input: {
       };
     }
     const data = (await response.json()).data;
-    revalidatePath(`/settings/plugins/${input.pluginName}`);
+    revalidatePath(`/plugins/${input.pluginName}`);
     return { ok: true as const, billing: data };
   } catch (error) {
     return {
