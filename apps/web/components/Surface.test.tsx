@@ -674,6 +674,46 @@ describe("Surface chat streaming UI", () => {
     expect(screen.getByRole("button", { name: "Interrupt Claude Code" })).toBeInTheDocument();
   });
 
+  it("keeps a reloaded engine Conversation active while its Run id is still syncing", async () => {
+    const user = userEvent.setup();
+    const transportCancel = vi
+      .spyOn(HeadlessChatTransport.prototype, "cancel")
+      .mockResolvedValue(true);
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "conversation_claude_syncing",
+          title: "Active coding",
+          model: DEFAULT_MODEL,
+          engine: "claude_code",
+          runtime: {
+            status: "running",
+            activeRunId: null,
+            hasError: false,
+            updatedAt: currentTimestamp(),
+          },
+          activityState: "working",
+          hasUnseen: false,
+          messages: [],
+        }}
+        claudeCodeConnected
+      />,
+    );
+
+    expect(screen.getByLabelText("Claude Code status: Working")).toHaveTextContent("Working");
+    expect(screen.getByRole("status", { name: "Claude Code is working" })).toBeInTheDocument();
+    const stop = screen.getByRole("button", { name: "Interrupt Claude Code" });
+
+    await user.click(stop);
+
+    expect(transportCancel).toHaveBeenCalledOnce();
+    expect(headlessChatCommandMocks.cancel).not.toHaveBeenCalled();
+    expect(chatMock.stop).toHaveBeenCalledOnce();
+  });
+
   it("resolves action approvals as durable Run commands before resuming the stream", async () => {
     const user = userEvent.setup();
     const resolveApproval = vi
