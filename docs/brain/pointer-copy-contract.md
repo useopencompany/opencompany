@@ -44,6 +44,10 @@ A source ref is `provider:id`:
 Validation and parsing live in `packages/brain/src/schema.ts`
 (`isValidBrainSourceRef`, `parseBrainSourceRef`).
 
+The Workspace Wiki uses the same grammar and additionally keeps a registry of per-provider id
+shapes, chip labels, and URLs in `packages/wiki/src/sources.ts`. See
+[Wiki source refs](../wiki/source-refs.md) for the table of known providers.
+
 ## Enforcement
 
 - `[[source:...]]` inline links are shape-validated by
