@@ -161,7 +161,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     kind: "mcp",
     label: "Gmail",
     description:
-      "Search and read Gmail, download attachments, create drafts, and organize messages with approval.",
+      "Search and read Gmail, download attachments, create drafts, send email, and organize messages with approval.",
     category: "communication",
     featured: true,
     source: OFFICIAL_PLUGIN_SOURCES["gmail"],

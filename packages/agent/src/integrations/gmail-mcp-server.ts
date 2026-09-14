@@ -41,6 +41,7 @@ const TOOL_CAPABILITIES = {
   search_threads: "query",
   list_labels: "query",
   create_draft: "draft",
+  send_email: "write",
   label_thread: "write",
   unlabel_thread: "write",
   trash_thread: "write",
@@ -123,6 +124,10 @@ const createDraftSchema = {
   replyToMessageId: resourceIdSchema.optional(),
 };
 
+// Sending takes the same composition input as drafting so a body reviewed as a draft can be sent
+// unchanged, and the two paths cannot drift apart.
+const sendEmailSchema = createDraftSchema;
+
 const labelThreadSchema = { threadId: resourceIdSchema, labelIds: labelIdsSchema };
 const labelMessageSchema = { messageId: resourceIdSchema, labelIds: labelIdsSchema };
 const threadIdSchema = { threadId: resourceIdSchema };
@@ -145,6 +150,15 @@ const DRAFT_ANNOTATIONS = {
   destructiveHint: false,
   idempotentHint: false,
   openWorldHint: false,
+} as const;
+
+// Sending leaves opencompany for an arbitrary recipient and cannot be recalled, so it is annotated
+// as destructive and open-world even though it only adds a message to the mailbox.
+const SEND_ANNOTATIONS = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  idempotentHint: false,
+  openWorldHint: true,
 } as const;
 
 const WRITE_ANNOTATIONS = {
@@ -278,6 +292,17 @@ export function createGmailMcpService(input: {
             async (args) => runTool(() => createDraft(gmailApiCall, payload, args, request.signal)),
           );
           server.registerTool(
+            "send_email",
+            {
+              title: "Send email",
+              description:
+                "Send an email immediately from the connected Gmail account. Sending cannot be undone, so use this only when the user explicitly asked to send. Pass replyToMessageId to send the reply inside the original thread. To let the user review before it goes out, use create_draft instead.",
+              inputSchema: sendEmailSchema,
+              annotations: SEND_ANNOTATIONS,
+            },
+            async (args) => runTool(() => sendEmail(gmailApiCall, payload, args, request.signal)),
+          );
+          server.registerTool(
             "label_thread",
             {
               title: "Label thread",
@@ -381,7 +406,7 @@ export function createGmailMcpService(input: {
         {
           serverInfo: { name: "opencompany-gmail", version: "0.1.0" },
           instructions:
-            "Use search_threads before get_thread or get_message, create drafts only when requested, and use label or trash tools only for explicit mailbox changes. No tool sends email or permanently deletes mail.",
+            "Use search_threads before get_thread or get_message, and use label or trash tools only for explicit mailbox changes. Create drafts or send email only when the user asked for it; prefer create_draft when the user has not clearly asked to send, because send_email delivers immediately and cannot be undone. No tool permanently deletes mail.",
         },
         {
           streamableHttpEndpoint: "/mcp/plugins/gmail",
@@ -798,7 +823,9 @@ async function listLabels(
   };
 }
 
-async function createDraft(
+// Builds the RFC 822 payload shared by create_draft and send_email. Both tools accept the same
+// composition input, so the validation, reply threading, and MIME encoding live in one place.
+async function composeMessage(
   apiCall: GmailApiCall,
   payload: GmailMcpTicketPayload,
   args: z.infer<z.ZodObject<typeof createDraftSchema>>,
@@ -821,18 +848,37 @@ async function createDraft(
     ...(args.htmlBody !== undefined ? { htmlBody: args.htmlBody } : {}),
     reply,
   });
+  return { raw, ...(reply?.threadId ? { threadId: reply.threadId } : {}) };
+}
+
+async function createDraft(
+  apiCall: GmailApiCall,
+  payload: GmailMcpTicketPayload,
+  args: z.infer<z.ZodObject<typeof createDraftSchema>>,
+  signal: AbortSignal,
+) {
+  const message = await composeMessage(apiCall, payload, args, signal);
   const response = asRecord(
-    await callGmail(apiCall, payload, "POST", gmailUrl("/drafts"), signal, {
-      message: {
-        raw,
-        ...(reply?.threadId ? { threadId: reply.threadId } : {}),
-      },
-    }),
+    await callGmail(apiCall, payload, "POST", gmailUrl("/drafts"), signal, { message }),
   );
   return {
     id: boundedString(response.id, MAX_ID_CHARS),
     message: compactMessageSummary(response.message),
   };
+}
+
+async function sendEmail(
+  apiCall: GmailApiCall,
+  payload: GmailMcpTicketPayload,
+  args: z.infer<z.ZodObject<typeof sendEmailSchema>>,
+  signal: AbortSignal,
+) {
+  const message = await composeMessage(apiCall, payload, args, signal);
+  // messages.send takes the Message resource directly, unlike drafts.create which nests it.
+  const response = asRecord(
+    await callGmail(apiCall, payload, "POST", gmailUrl("/messages/send"), signal, message),
+  );
+  return compactMessageSummary(response);
 }
 
 async function loadReplyHeaders(
