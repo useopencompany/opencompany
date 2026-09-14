@@ -49,6 +49,8 @@ type WorkflowRow = {
   scheduleLastRunAt: Date | string | null;
   scheduleNextRunAt: Date | string | null;
   eventConfig: unknown;
+  runCount: number | string;
+  lastExecutedAt: Date | string | null;
   version: number | string;
   archivedAt: Date | string | null;
   createdAt: Date | string;
@@ -258,6 +260,8 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         workflow.schedule_last_run_at AS "scheduleLastRunAt",
         workflow.schedule_next_run_at AS "scheduleNextRunAt",
         workflow.event_config AS "eventConfig",
+        workflow.run_count AS "runCount",
+        workflow.last_executed_at AS "lastExecutedAt",
         workflow.version,
         workflow.archived_at AS "archivedAt",
         workflow.created_at AS "createdAt",
@@ -343,6 +347,8 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         workflow.schedule_last_run_at AS "scheduleLastRunAt",
         workflow.schedule_next_run_at AS "scheduleNextRunAt",
         workflow.event_config AS "eventConfig",
+        workflow.run_count AS "runCount",
+        workflow.last_executed_at AS "lastExecutedAt",
         workflow.version,
         workflow.archived_at AS "archivedAt",
         workflow.created_at AS "createdAt",
@@ -936,6 +942,8 @@ function workflowSelect() {
       workflow.schedule_last_run_at AS "scheduleLastRunAt",
       workflow.schedule_next_run_at AS "scheduleNextRunAt",
       workflow.event_config AS "eventConfig",
+      workflow.run_count AS "runCount",
+      workflow.last_executed_at AS "lastExecutedAt",
       workflow.version,
       workflow.archived_at AS "archivedAt",
       workflow.created_at AS "createdAt",
@@ -994,6 +1002,8 @@ function mapWorkflow(row: WorkflowRow): Workflow {
     steps,
     status: row.status,
     trigger: workflowTrigger(row),
+    runCount: Number(row.runCount),
+    lastExecutedAt: nullableDate(row.lastExecutedAt),
     version: Number(row.version),
     archivedAt: nullableDate(row.archivedAt),
     createdAt: asDate(row.createdAt),

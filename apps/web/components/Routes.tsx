@@ -91,6 +91,7 @@ import {
   updateSubagentsAction,
   updateTaskSpawningAction,
 } from "@/lib/user-preferences";
+import { WORKFLOW_MODEL_OPTIONS } from "@/lib/workflow-model-options";
 
 export function HomeRoute({
   chatId,
@@ -727,7 +728,7 @@ export function WorkflowsRoute({
   return (
     <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
       <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
-        <div className="flex w-full max-w-[760px] flex-col gap-8 pb-24 pt-16 sm:pt-24">
+        <div className="flex w-full max-w-[1040px] flex-col gap-8 pb-24 pt-16 sm:pt-24">
           <header className="flex items-start justify-between gap-4">
             <div className="flex flex-col gap-1.5">
               <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-ink">
@@ -761,13 +762,32 @@ export function WorkflowsRoute({
               }
             />
           ) : (
-            <ul className="flex flex-col gap-2">
+            <div role="table" aria-label="Workflows" className="flex flex-col">
+              <div
+                role="row"
+                className={cn(
+                  WORKFLOW_ROW_GRID,
+                  "border-b border-border px-3 pb-2 text-[11.5px] font-medium leading-4 text-ink-subtle",
+                )}
+              >
+                <span role="columnheader">Name</span>
+                <span role="columnheader" className="hidden sm:block">
+                  Trigger
+                </span>
+                <span role="columnheader" className="hidden md:block">
+                  Model
+                </span>
+                <span role="columnheader" className="hidden sm:block text-right">
+                  Runs
+                </span>
+                <span role="columnheader" className="hidden lg:block">
+                  Last executed
+                </span>
+              </div>
               {visibleWorkflows.map((workflow) => (
-                <li key={workflow.slug}>
-                  <WorkflowListRow workflow={workflow} />
-                </li>
+                <WorkflowListRow key={workflow.slug} workflow={workflow} />
               ))}
-            </ul>
+            </div>
           )}
         </div>
       </div>
@@ -790,15 +810,31 @@ export function WorkflowsRoute({
   );
 }
 
+// Shared by the header and the rows so columns stay aligned. Narrow screens drop
+// the metadata columns rather than letting the name column collapse.
+const WORKFLOW_ROW_GRID =
+  "grid grid-cols-[minmax(0,1fr)] items-center gap-x-8 sm:grid-cols-[minmax(0,1fr)_96px_56px] md:grid-cols-[minmax(0,1fr)_96px_128px_56px] lg:grid-cols-[minmax(0,1fr)_96px_128px_56px_104px]";
+
+const WORKFLOW_TRIGGER_LABELS: Record<WorkflowListItem["trigger"]["type"], string> = {
+  manual: "Manual",
+  schedule: "Schedule",
+  event: "Event",
+};
+
 function WorkflowListRow({ workflow }: { workflow: WorkflowListItem }) {
+  const model = workflowModelSummary(workflow.steps);
   return (
     <IntentPrefetchLink
+      role="row"
       href={`/workflows/${encodeURIComponent(workflow.slug)}`}
-      className="group flex items-center gap-3 rounded-lg border border-border bg-surface px-3.5 py-3 transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+      className={cn(
+        WORKFLOW_ROW_GRID,
+        "group -mx-3 rounded-lg border-b border-border px-3 py-2.5 transition-colors duration-150 last:border-b-0 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20",
+      )}
     >
-      <span className="min-w-0 flex-1">
+      <span role="cell" className="min-w-0">
         <span className="flex items-center gap-2">
-          <span className="truncate text-[14px] font-medium leading-tight text-ink">
+          <span className="truncate text-[13.5px] font-medium leading-tight text-ink">
             {workflow.name}
           </span>
           <ItemStatusBadge status={workflow.status} />
@@ -808,30 +844,66 @@ function WorkflowListRow({ workflow }: { workflow: WorkflowListItem }) {
             {workflow.description}
           </span>
         ) : null}
-        {workflow.trigger.type === "schedule" ? (
-          <span className="mt-1 inline-flex max-w-full items-center gap-1.5 truncate text-[11.5px] leading-4 text-ink-subtle">
-            <CalendarClock size={12} strokeWidth={1.8} className="shrink-0" />
-            <span className="truncate">
-              {workflow.trigger.cron} · {workflow.trigger.timezone}
-            </span>
-          </span>
-        ) : null}
-        {workflow.trigger.type === "event" ? (
-          <span className="mt-1 inline-flex max-w-full items-center gap-1.5 truncate text-[11.5px] leading-4 text-ink-subtle">
-            <span className="truncate">
-              {workflow.trigger.provider} · {workflow.trigger.event}
-              {workflow.trigger.filters.team
-                ? ` · ${workflow.trigger.filters.team.key ?? workflow.trigger.filters.team.name}`
-                : ""}
-            </span>
-          </span>
-        ) : null}
       </span>
-      <span className="shrink-0 text-[11.5px] leading-4 text-ink-subtle">
-        {formatRelativeTime(workflow.updatedAt)}
+      <span
+        role="cell"
+        title={workflowTriggerDetail(workflow.trigger) ?? undefined}
+        className="hidden truncate text-[12.5px] leading-5 text-ink-subtle sm:block"
+      >
+        {WORKFLOW_TRIGGER_LABELS[workflow.trigger.type]}
+      </span>
+      <span
+        role="cell"
+        title={model?.full}
+        className="hidden truncate text-[12.5px] leading-5 text-ink-subtle md:block"
+      >
+        {model ? (
+          <>
+            {model.label}
+            {model.extra > 0 ? <span className="text-ink-muted"> +{model.extra}</span> : null}
+          </>
+        ) : (
+          "—"
+        )}
+      </span>
+      <span
+        role="cell"
+        className="hidden text-right text-[12.5px] tabular-nums leading-5 text-ink-subtle sm:block"
+      >
+        {workflow.runCount > 0 ? workflow.runCount : "—"}
+      </span>
+      <span role="cell" className="hidden text-[12.5px] leading-5 text-ink-subtle lg:block">
+        {workflow.lastExecutedAt ? formatRelativeTime(workflow.lastExecutedAt) : "Never"}
       </span>
     </IntentPrefetchLink>
   );
+}
+
+// The cron expression and the event source matter when comparing two workflows,
+// but not enough to spend a column on. They ride along as the cell's tooltip.
+function workflowTriggerDetail(trigger: WorkflowListItem["trigger"]) {
+  if (trigger.type === "schedule") return `${trigger.cron} · ${trigger.timezone}`;
+  if (trigger.type === "event") {
+    const team = trigger.filters.team;
+    const scope = team ? ` · ${team.key ?? team.name}` : "";
+    return `${trigger.provider} · ${trigger.event}${scope}`;
+  }
+  return null;
+}
+
+// A workflow's steps can each pick their own model. The column shows the first
+// one and counts the rest so it stays scannable; the full list is the tooltip.
+function workflowModelSummary(steps: WorkflowListItem["steps"]) {
+  const labels = steps.flatMap((step) => {
+    const label =
+      WORKFLOW_MODEL_OPTIONS.find((option) => option.token === step.model)?.label ??
+      step.model.trim();
+    return label ? [label] : [];
+  });
+  const unique = [...new Set(labels)];
+  const [first] = unique;
+  if (!first) return null;
+  return { label: first, extra: unique.length - 1, full: unique.join(", ") };
 }
 
 // --- Skills (settings) -------------------------------------------------------

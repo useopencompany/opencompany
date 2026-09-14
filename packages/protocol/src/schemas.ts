@@ -333,6 +333,9 @@ export const WorkflowSchema = z
     steps: z.array(WorkflowStepSchema).max(20),
     status: WorkflowStatusSchema,
     trigger: WorkflowTriggerSchema,
+    // Run activity: one run per task spawned from this workflow.
+    runCount: z.number().int().min(0),
+    lastExecutedAt: TimestampSchema.nullable(),
     version: z.number().int().min(1),
     archivedAt: TimestampSchema.nullable(),
     createdAt: TimestampSchema,

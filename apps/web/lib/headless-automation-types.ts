@@ -40,6 +40,8 @@ export type WorkflowDetail = {
   steps: WorkflowStep[];
   status: "draft" | "active";
   trigger: WorkflowTrigger;
+  runCount: number;
+  lastExecutedAt: string | null;
   version: number;
   archivedAt: string | null;
   createdAt: string;

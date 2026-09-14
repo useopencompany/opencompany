@@ -87,6 +87,8 @@ export type Workflow = {
   steps: WorkflowStep[];
   status: WorkflowStatus;
   trigger: WorkflowTrigger;
+  runCount: number;
+  lastExecutedAt: Date | null;
   version: number;
   archivedAt: Date | null;
   createdAt: Date;

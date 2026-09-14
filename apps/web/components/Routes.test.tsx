@@ -313,6 +313,55 @@ describe("WorkflowsRoute", () => {
     );
     expect(routerMock.push).toHaveBeenCalledWith("/workflows/test-workflow");
   });
+
+  it("renders trigger, model, and run activity for each workflow", () => {
+    workflowLiveQueryMock.hydrated = false;
+    workflowLiveQueryMock.isLoading = false;
+    render(
+      <WorkflowsRoute
+        workflows={[
+          {
+            ...workflowListItem(),
+            trigger: {
+              type: "schedule" as const,
+              cron: "0 9 * * 1",
+              timezone: "Europe/Berlin",
+              prompt: "Run this workflow.",
+              enabled: true,
+              lastRunAt: null,
+              nextRunAt: "2026-08-18T07:00:00.000Z",
+            },
+            steps: [
+              { id: "step_1", title: "Research", model: "sonnet-5", instructions: "Research." },
+              { id: "step_2", title: "Draft", model: "kimi-k2.6", instructions: "Draft it." },
+            ],
+            runCount: 34,
+            lastExecutedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+          },
+        ]}
+        workspaceId="workspace_1"
+        canEdit
+      />,
+    );
+
+    const row = screen.getByRole("row", { name: /Weekly research/u });
+    expect(within(row).getByText("Schedule")).toBeInTheDocument();
+    expect(within(row).getByText("34")).toBeInTheDocument();
+    expect(within(row).getByText("2h ago")).toBeInTheDocument();
+    // Steps disagree on the model, so the column shows the first and counts the rest.
+    expect(within(row).getByText("Claude Sonnet 5")).toBeInTheDocument();
+    expect(within(row).getByText("+1")).toBeInTheDocument();
+  });
+
+  it("reads a workflow that has never run as empty rather than zero", () => {
+    workflowLiveQueryMock.hydrated = false;
+    workflowLiveQueryMock.isLoading = false;
+    render(<WorkflowsRoute workflows={[workflowListItem()]} workspaceId="workspace_1" canEdit />);
+
+    const row = screen.getByRole("row", { name: /Weekly research/u });
+    expect(within(row).getByText("Never")).toBeInTheDocument();
+    expect(within(row).queryByText("0")).not.toBeInTheDocument();
+  });
 });
 
 describe("SettingsRoute", () => {
@@ -1021,6 +1070,8 @@ function workflowListItem() {
     steps: [],
     status: "draft" as const,
     trigger: { type: "manual" as const },
+    runCount: 0,
+    lastExecutedAt: null,
     version: 1,
     archivedAt: null,
     createdAt: "2026-08-11T09:00:00.000Z",

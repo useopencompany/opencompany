@@ -3297,6 +3297,10 @@ export const workflows = productSchema.table(
     }),
     eventHarnessSpec: jsonb("event_harness_spec").$type<HarnessSpec | null>(),
     status: text("status").$type<WorkflowStatus>().notNull().default("active"),
+    // Run activity, maintained by the insert trigger on `goat.tasks`. One run
+    // per spawned task, counted at insert so retries cannot double count.
+    runCount: integer("run_count").notNull().default(0),
+    lastExecutedAt: timestamp("last_executed_at", { withTimezone: true }),
     createdByWorkosId: text("created_by_workos_id").references(() => users.workosUserId, {
       onDelete: "set null",
     }),
@@ -3906,6 +3910,11 @@ export const tasks = productSchema.table(
     ),
     leaseExpiresAtIdx: index("goat_tasks_lease_expires_at_idx").on(table.leaseExpiresAt),
     scheduleIdx: index("goat_tasks_schedule_idx").on(table.scheduleId, table.scheduledFor),
+    // `workflowId` holds the workflow slug; backs the run-activity trigger and
+    // any per-workflow task lookup.
+    workspaceWorkflowIdx: index("goat_tasks_workspace_workflow_idx")
+      .on(table.workspaceId, table.workflowId)
+      .where(sql`${table.workflowId} IS NOT NULL`),
     sessionIdx: uniqueIndex("goat_tasks_session_idx")
       .on(table.sessionId)
       .where(sql`${table.sessionId} IS NOT NULL`),
@@ -5576,6 +5585,9 @@ export const workflowReadModelV1 = productSchema.table(
     scheduleEnabled: boolean("schedule_enabled").notNull(),
     scheduleLastRunAt: timestamp("schedule_last_run_at", { withTimezone: true }),
     scheduleNextRunAt: timestamp("schedule_next_run_at", { withTimezone: true }),
+    // Maintained by the insert trigger on `goat.tasks`; one run per spawned task.
+    runCount: integer("run_count").notNull().default(0),
+    lastExecutedAt: timestamp("last_executed_at", { withTimezone: true }),
     version: integer("version").notNull(),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),

@@ -93,6 +93,8 @@ const workflow = {
       instructions: "Collect the week's updates.",
     },
   ],
+  runCount: 0,
+  lastExecutedAt: null,
   version: 1,
   archivedAt: null,
   createdAt: "2026-08-12T08:00:00.000Z",

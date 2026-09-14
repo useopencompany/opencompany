@@ -395,6 +395,8 @@ function readModelShape(input: {
           "steps",
           "status",
           "trigger",
+          "run_count",
+          "last_executed_at",
           "version",
           "archived_at",
           "created_at",
@@ -869,6 +871,7 @@ function readModelFieldValue(readModel: ReadModel, name: string, value: unknown)
     name === "attemptCount" ||
     name === "messageShapeEpoch" ||
     name === "version" ||
+    name === "runCount" ||
     name === "attempts" ||
     name === "sizeBytes" ||
     name === "assetSizeBytes" ||
@@ -1229,6 +1232,8 @@ const READ_MODEL_COLUMN_NAMES = {
     steps: "steps",
     status: "status",
     trigger: "trigger",
+    run_count: "runCount",
+    last_executed_at: "lastExecutedAt",
     version: "version",
     archived_at: "archivedAt",
     created_at: "createdAt",

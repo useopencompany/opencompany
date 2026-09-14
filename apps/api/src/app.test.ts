@@ -6269,6 +6269,8 @@ function populatedAutomationServices() {
     ],
     status: "active",
     trigger: { type: "manual" },
+    runCount: 0,
+    lastExecutedAt: null,
     version: 1,
     archivedAt: null,
     createdAt,

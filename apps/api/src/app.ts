@@ -3599,6 +3599,7 @@ function workflowDto(workflow: Workflow) {
             nextRunAt: workflow.trigger.nextRunAt?.toISOString() ?? null,
           }
         : workflow.trigger,
+    lastExecutedAt: workflow.lastExecutedAt?.toISOString() ?? null,
     archivedAt: workflow.archivedAt?.toISOString() ?? null,
     createdAt: workflow.createdAt.toISOString(),
     updatedAt: workflow.updatedAt.toISOString(),
