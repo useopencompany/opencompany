@@ -169,6 +169,7 @@ export function HomeRoute({
         initialChat={initialChat}
         newChatProjectId={projectId}
         newChatProjectName={projectName}
+        userFirstName={data.user.firstName}
         recentChats={data.recentChats}
         archivedChats={data.archivedChats}
         codexConnected={data.codexConnected}
