@@ -15,6 +15,7 @@ import {
   CREATE_WORKSPACE_SKILL_TOOL_NAME,
   EDIT_WORKSPACE_SKILL_TOOL_NAME,
   LIST_SKILLS_TOOL_NAME,
+  SLACK_BOT_TOOL_NAME,
   START_WORKFLOW_TOOL_NAME,
 } from "./chat-ui";
 
@@ -137,6 +138,25 @@ describe("write_artifact tool", () => {
       { filename: "report.md", title: "Report", content: "# Report" },
       { toolCallId: "call_artifact_1" },
     );
+  });
+});
+
+describe("opencompany Slack bot tool", () => {
+  it("is available only when the host injects its publisher", () => {
+    expect(SLACK_BOT_TOOL_NAME in createProductChatToolContext({ model }).tools).toBe(false);
+    expect(
+      SLACK_BOT_TOOL_NAME in
+        createProductChatToolContext({ model, postSlackMessage: vi.fn() }).tools,
+    ).toBe(true);
+  });
+
+  it("names itself after the phrase instructions use, so it is not confused with the personal Slack plugin", () => {
+    expect(SLACK_BOT_TOOL_NAME).toBe("opencompany_slack_bot_send_message");
+    const slackTool = createProductChatToolContext({ model, postSlackMessage: vi.fn() }).tools[
+      SLACK_BOT_TOOL_NAME
+    ] as { description: string };
+    expect(slackTool.description).toContain("opencompany Slack bot");
+    expect(slackTool.description).toContain("personal Slack plugin");
   });
 });
 
