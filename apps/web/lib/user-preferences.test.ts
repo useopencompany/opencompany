@@ -16,7 +16,6 @@ vi.mock("next/headers", () => ({ headers: vi.fn() }));
 const preferences = {
   timezone: "Europe/Berlin",
   botsEnabled: true,
-  taskSpawningEnabled: false,
   wikiEnabled: true,
   taskViewMode: "list",
   taskTimeRange: "24h",

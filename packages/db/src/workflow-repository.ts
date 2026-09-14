@@ -78,7 +78,6 @@ type TaskScheduleRow = {
 
 type CreateReservationRow = {
   authorized: boolean;
-  featureEnabled?: boolean;
   commandId: string | null;
   requestHash: string | null;
   operation: "workflow.create" | "task_schedule.create" | null;
@@ -527,9 +526,11 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     };
   }
 
+  // Recurring Task writes are open to every workspace member, so this fails fast on the one
+  // precondition the individual mutations would otherwise surface as a silent empty result.
   async assertTaskScheduleWriteAllowed(actor: Actor): Promise<void> {
-    const [row] = await this.rows<{ featureEnabled: boolean }>(sql`
-      SELECT actor_user.task_spawning_enabled AS "featureEnabled"
+    const [row] = await this.rows<{ userId: string }>(sql`
+      SELECT actor_user.workos_user_id AS "userId"
       FROM goat.users AS actor_user
       JOIN goat.workspace_members AS member
         ON member.user_workos_id = actor_user.workos_user_id
@@ -538,9 +539,6 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
       LIMIT 1
     `);
     if (!row) throw new CoreError("not_found", "Workspace membership not found.");
-    if (!row.featureEnabled) {
-      throw new CoreError("forbidden", "Tasks & Workflows is disabled for this actor.");
-    }
   }
 
   async replayTaskScheduleCreate(
@@ -549,7 +547,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     const requestHash = taskScheduleCreateHash(input);
     const [row] = await this.rows<CreateReservationRow & TaskScheduleRow>(sql`
       WITH actor_scope AS MATERIALIZED (
-        SELECT actor_user.task_spawning_enabled
+        SELECT actor_user.workos_user_id
         FROM goat.users AS actor_user
         JOIN goat.workspace_members AS member
           ON member.user_workos_id = actor_user.workos_user_id
@@ -558,7 +556,6 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
       )
       SELECT
         EXISTS (SELECT 1 FROM actor_scope) AS authorized,
-        COALESCE((SELECT task_spawning_enabled FROM actor_scope), false) AS "featureEnabled",
         reservation.command_id AS "commandId",
         reservation.request_hash AS "requestHash",
         reservation.operation,
@@ -624,7 +621,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     const requestHash = taskScheduleCreateHash(input);
     const [row] = await this.rows<CreateReservationRow & TaskScheduleRow>(sql`
       WITH actor_scope AS MATERIALIZED (
-        SELECT actor_user.workos_user_id, actor_user.task_spawning_enabled
+        SELECT actor_user.workos_user_id
         FROM goat.users AS actor_user
         JOIN goat.workspace_members AS member
           ON member.user_workos_id = actor_user.workos_user_id
@@ -642,7 +639,6 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
           ${input.idempotencyKey}, ${requestHash}, 'task_schedule.create', ${scheduleId},
           ${now}, ${now}
         FROM actor_scope
-        WHERE actor_scope.task_spawning_enabled = true
         ON CONFLICT (user_workos_id, workspace_id, idempotency_key)
         DO UPDATE SET touched_at = EXCLUDED.touched_at
         RETURNING *
@@ -675,7 +671,6 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
       )
       SELECT
         EXISTS (SELECT 1 FROM actor_scope) AS authorized,
-        COALESCE((SELECT task_spawning_enabled FROM actor_scope), false) AS "featureEnabled",
         reservation.command_id AS "commandId",
         reservation.request_hash AS "requestHash",
         reservation.operation,
@@ -704,9 +699,6 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
       LIMIT 1
     `);
     if (!row?.authorized) throw new CoreError("not_found", "Workspace membership not found.");
-    if (!row.featureEnabled) {
-      throw new CoreError("forbidden", "Tasks & Workflows is disabled for this actor.");
-    }
     assertReservation(row, "task_schedule.create", requestHash);
     if (!row.id) throw new Error("Recurring Task command reservation did not materialize.");
     return {
@@ -735,7 +727,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         AND (schedule.workspace_id = ${input.actor.workspaceId} OR schedule.workspace_id IS NULL)
         AND schedule.deleted_at IS NULL
         AND schedule.version = ${input.expectedVersion}
-        AND ${enabledWorkspaceMember(input.actor)}
+        AND ${workspaceMembership(input.actor)}
       RETURNING
         schedule.id,
         schedule.name,
@@ -777,7 +769,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         AND (schedule.workspace_id = ${input.actor.workspaceId} OR schedule.workspace_id IS NULL)
         AND schedule.deleted_at IS NULL
         AND schedule.version = ${input.expectedVersion}
-        AND ${enabledWorkspaceMember(input.actor)}
+        AND ${workspaceMembership(input.actor)}
       RETURNING
         schedule.id,
         schedule.name,
@@ -821,7 +813,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         AND (schedule.workspace_id = ${input.actor.workspaceId} OR schedule.workspace_id IS NULL)
         AND schedule.deleted_at IS NULL
         AND schedule.version = ${input.expectedVersion}
-        AND ${enabledWorkspaceMember(input.actor)}
+        AND ${workspaceMembership(input.actor)}
       RETURNING
         schedule.id,
         schedule.version,
@@ -861,7 +853,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         AND schedule.user_workos_id = ${input.actor.userId}
         AND (schedule.workspace_id = ${input.actor.workspaceId} OR schedule.workspace_id IS NULL)
         AND schedule.deleted_at IS NULL
-        AND ${enabledWorkspaceMember(input.actor)}
+        AND ${workspaceMembership(input.actor)}
       LIMIT 1
     `);
     if (!row) return null;
@@ -1052,18 +1044,6 @@ function workflowVisibility(actor: Actor) {
   return sql`(
     workflow.scope = 'company'
     OR workflow.created_by_workos_id = ${actor.userId}
-  )`;
-}
-
-function enabledWorkspaceMember(actor: Actor) {
-  return sql`EXISTS (
-    SELECT 1
-    FROM goat.users AS feature_user
-    JOIN goat.workspace_members AS current_member
-      ON current_member.user_workos_id = feature_user.workos_user_id
-     AND current_member.workspace_id = ${actor.workspaceId}
-    WHERE feature_user.workos_user_id = ${actor.userId}
-      AND feature_user.task_spawning_enabled = true
   )`;
 }
 

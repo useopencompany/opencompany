@@ -400,7 +400,6 @@ export function Surface({
   archivedChats = [],
   codexConnected = false,
   claudeCodeConnected = false,
-  taskSpawningEnabled = false,
   autoModelRoutingEnabled = false,
   sharedModelAccessEnabled = false,
   workspaceId = "",
@@ -427,7 +426,6 @@ export function Surface({
   archivedChats?: readonly ChatSummaryView[];
   codexConnected?: boolean;
   claudeCodeConnected?: boolean;
-  taskSpawningEnabled?: boolean;
   autoModelRoutingEnabled?: boolean;
   // Shared GPT models run on the workspace's ChatGPT subscription, so the picker marks them as
   // included rather than metered.
@@ -620,7 +618,7 @@ export function Surface({
     taskConversation && initialChat?.id === chatSessionId ? taskConversation : null;
   const backgroundInputDirective = parseBackgroundChatDirective(input);
   const backgroundDirectiveActive = Boolean(backgroundInputDirective);
-  const workflowMentionsEnabled = taskSpawningEnabled && !activeTaskConversation;
+  const workflowMentionsEnabled = !activeTaskConversation;
   const readOnly = readOnlyNotice !== null;
   const skillMentionsEnabled = !readOnly && !activeTaskConversation;
   const activeSelectedMentions = selectedMentions.filter((mention) => {
@@ -896,11 +894,9 @@ export function Surface({
       creditBalance.balanceUsdMicros > 0 &&
       creditBalance.balanceUsdMicros < creditBalance.lowBalanceWarnUsdMicros,
   );
-  const adHocTaskMentionEnabled = taskSpawningEnabled && !activeEngine && !activeTaskConversation;
+  const adHocTaskMentionEnabled = !activeEngine && !activeTaskConversation;
   const backgroundAdHocTaskSelected = Boolean(
-    backgroundChatDirective &&
-      taskSpawningEnabled &&
-      hasAdHocTaskToken(backgroundChatDirective.prompt),
+    backgroundChatDirective && hasAdHocTaskToken(backgroundChatDirective.prompt),
   );
   const selectedAdHocTask =
     backgroundAdHocTaskSelected ||
@@ -1196,14 +1192,12 @@ export function Surface({
   const commandPaletteItems = useMemo<CommandPaletteItem[]>(
     () =>
       [
-        ...(taskSpawningEnabled
-          ? allTasks.map((task) => ({
-              kind: "task" as const,
-              task,
-              archived: Boolean(task.archivedAt),
-              searchValue: `task ${task.archivedAt ? "archived " : ""}${task.name} ${task.prompt} ${task.displayId} ${task.id}`,
-            }))
-          : []),
+        ...allTasks.map((task) => ({
+          kind: "task" as const,
+          task,
+          archived: Boolean(task.archivedAt),
+          searchValue: `task ${task.archivedAt ? "archived " : ""}${task.name} ${task.prompt} ${task.displayId} ${task.id}`,
+        })),
         ...recentChats.map((chat) => ({
           kind: "chat" as const,
           chat,
@@ -1221,7 +1215,7 @@ export function Surface({
           new Date(b.kind === "task" ? b.task.updatedAt : b.chat.updatedAt).getTime() -
           new Date(a.kind === "task" ? a.task.updatedAt : a.chat.updatedAt).getTime(),
       ),
-    [allTasks, archivedChats, recentChats, taskSpawningEnabled],
+    [allTasks, archivedChats, recentChats],
   );
   const commandPaletteResults = useMemo(
     () => selectCommandPaletteItems(commandPaletteItems, chatSearchQuery),
@@ -1261,15 +1255,8 @@ export function Surface({
   ]);
 
   const chatTaskLookup = useMemo(
-    () =>
-      taskSpawningEnabled
-        ? buildChatTaskLookup({
-            messages: chatMessages,
-            tasks,
-            liveTasks: liveChatTasks,
-          })
-        : new Map(),
-    [chatMessages, liveChatTasks, taskSpawningEnabled, tasks],
+    () => buildChatTaskLookup({ messages: chatMessages, tasks, liveTasks: liveChatTasks }),
+    [chatMessages, liveChatTasks, tasks],
   );
   useEffect(() => {
     const pending = pendingChatFirstOutputRef.current;
@@ -1903,7 +1890,7 @@ export function Surface({
         restoreDraft();
       };
 
-      if (taskSpawningEnabled && hasAdHocTaskToken(messagePrompt)) {
+      if (hasAdHocTaskToken(messagePrompt)) {
         const description = descriptionFromAdHocTaskPrompt(messagePrompt);
         if (!description) {
           toast.error(`Describe the task after ${AD_HOC_TASK_TOKEN}.`);
@@ -2706,9 +2693,11 @@ export function Surface({
       return;
     }
 
+    // Each catalog falls back to what is already loaded, so one failing request still lets the
+    // other resolve its half of the pasted mentions.
     void Promise.all([
-      fetchBrainSkillCatalog(),
-      workflowMentionsEnabled ? fetchBrainWorkflowCatalog() : Promise.resolve([]),
+      fetchBrainSkillCatalog().catch(() => skillCatalog),
+      workflowMentionsEnabled ? fetchBrainWorkflowCatalog().catch(() => workflowCatalog) : [],
     ])
       .then(([skills, workflows]) => {
         if (!mountedRef.current) return;
@@ -2841,7 +2830,6 @@ export function Surface({
                 defaultModel={defaultModel}
                 codexConnected={codexConnected}
                 claudeCodeConnected={claudeCodeConnected}
-                taskSpawningEnabled={taskSpawningEnabled}
                 autoModelRoutingEnabled={autoModelRoutingEnabled}
                 sharedModelAccessEnabled={sharedModelAccessEnabled}
                 creditBalance={creditBalance}
@@ -3121,7 +3109,7 @@ export function Surface({
               pollSandbox={Boolean(activeEngineChat)}
             />
           ) : null}
-          {mode === "chat" && taskSpawningEnabled ? (
+          {mode === "chat" ? (
             <LiveChatTasks workspaceId={workspaceId} setTasks={setLiveChatTasks} />
           ) : null}
 
@@ -3318,9 +3306,7 @@ export function Surface({
                       placeholder={
                         activeTaskConversation || mode === "chat"
                           ? "Reply..."
-                          : taskSpawningEnabled
-                            ? "Ask a question or describe a task..."
-                            : "Ask opencompany anything..."
+                          : "Ask a question or describe a task..."
                       }
                       onChange={onInputChange}
                       onBlur={() => setMentionToken(null)}
@@ -3581,7 +3567,6 @@ export function QuickChatComposer({
   defaultModel,
   codexConnected,
   claudeCodeConnected,
-  taskSpawningEnabled,
   autoModelRoutingEnabled,
   sharedModelAccessEnabled,
   creditBalance,
@@ -3596,7 +3581,6 @@ export function QuickChatComposer({
   defaultModel: string;
   codexConnected: boolean;
   claudeCodeConnected: boolean;
-  taskSpawningEnabled: boolean;
   autoModelRoutingEnabled: boolean;
   sharedModelAccessEnabled: boolean;
   creditBalance: ReturnType<typeof useCreditBalance>["balance"];
@@ -3655,13 +3639,11 @@ export function QuickChatComposer({
   const [codexGoalObjective, setCodexGoalObjective] = useState("");
   const [codexGoalTokenBudget, setCodexGoalTokenBudget] = useState("");
 
-  const workflowMentionsEnabled = taskSpawningEnabled;
   const activeSelectedMentions = selectedMentions.filter((mention) => {
     if (!chatMentionIsVisible(input, mention)) return false;
     if (mention.kind === "engine") {
       return mention.id === "claude" ? claudeCodeConnected : codexConnected;
     }
-    if (mention.kind === "workflow") return workflowMentionsEnabled;
     return true;
   });
   const chatModel =
@@ -3689,11 +3671,9 @@ export function QuickChatComposer({
     ? (backgroundLaunchSelection?.engine ?? null)
     : selectedEngine;
   const isEngineChat = composerEngine !== null;
-  const adHocTaskMentionEnabled = taskSpawningEnabled && !selectedEngine;
+  const adHocTaskMentionEnabled = !selectedEngine;
   const backgroundAdHocTaskSelected = Boolean(
-    parsedBackgroundChatDirective &&
-      taskSpawningEnabled &&
-      hasAdHocTaskToken(parsedBackgroundChatDirective.prompt),
+    parsedBackgroundChatDirective && hasAdHocTaskToken(parsedBackgroundChatDirective.prompt),
   );
   const selectedAdHocTask =
     backgroundAdHocTaskSelected ||
@@ -3710,7 +3690,7 @@ export function QuickChatComposer({
     codexConnected,
     claudeCodeConnected,
     skillsEnabled: true,
-    workflowsEnabled: workflowMentionsEnabled,
+    workflowsEnabled: true,
     adHocTaskEnabled: adHocTaskMentionEnabled || Boolean(parsedBackgroundChatDirective),
   });
   const selectedWorkflowMention = selectedAdHocTask
@@ -3777,9 +3757,7 @@ export function QuickChatComposer({
   // Mirrors the main composer: refetch each catalog whenever its menu opens so
   // recently created Skills and workflows show up.
   const skillCommandMenuOpen = Boolean(userWorkosId && mentionToken?.sigil === "/");
-  const workflowMentionMenuOpen = Boolean(
-    userWorkosId && mentionToken?.sigil === "#" && workflowMentionsEnabled,
-  );
+  const workflowMentionMenuOpen = Boolean(userWorkosId && mentionToken?.sigil === "#");
   useEffect(() => {
     if (
       !skillCommandMenuOpen &&
@@ -3922,9 +3900,7 @@ export function QuickChatComposer({
 
     const pastedText = event.clipboardData.getData("text/plain");
     const pastedSkillIds = skillMentionIdsFromText(pastedText);
-    const pastedWorkflowIds = workflowMentionsEnabled
-      ? workflowMentionIdsFromText(pastedText)
-      : new Set<string>();
+    const pastedWorkflowIds = workflowMentionIdsFromText(pastedText);
     if (pastedSkillIds.size === 0 && pastedWorkflowIds.size === 0) return;
 
     event.preventDefault();
@@ -3973,14 +3949,16 @@ export function QuickChatComposer({
       return;
     }
 
+    // Each catalog falls back to what is already loaded, so one failing request still lets the
+    // other resolve its half of the pasted mentions.
     void Promise.all([
-      fetchBrainSkillCatalog(),
-      workflowMentionsEnabled ? fetchBrainWorkflowCatalog() : Promise.resolve([]),
+      fetchBrainSkillCatalog().catch(() => skillCatalog),
+      fetchBrainWorkflowCatalog().catch(() => workflowCatalog),
     ])
       .then(([skills, workflows]) => {
         if (!mountedRef.current) return;
         setSkillCatalog(skills);
-        if (workflowMentionsEnabled) setWorkflowCatalog(workflows);
+        setWorkflowCatalog(workflows);
         const currentInput = inputRef.current?.value ?? nextInput;
         const resolvedMentions = [
           ...skillMentionsFromPastedText({
@@ -4062,11 +4040,7 @@ export function QuickChatComposer({
       ...(attachment.blobPathname ? { blobPathname: attachment.blobPathname } : {}),
       ...(attachment.previewUrl ? { previewUrl: attachment.previewUrl } : {}),
     }));
-    if (
-      taskSpawningEnabled &&
-      (isBackgroundChatDirective || adHocTaskMentionEnabled) &&
-      hasAdHocTaskToken(prompt)
-    ) {
+    if ((isBackgroundChatDirective || adHocTaskMentionEnabled) && hasAdHocTaskToken(prompt)) {
       const description = descriptionFromAdHocTaskPrompt(prompt);
       if (!description) {
         toast.error(`Describe the task after ${AD_HOC_TASK_TOKEN}.`);

@@ -93,32 +93,7 @@ describe("createTaskScheduleForUser", () => {
     expect(mocks.planTaskHarness).not.toHaveBeenCalled();
   });
 
-  it("rejects schedule creation when Tasks & Workflows is disabled", async () => {
-    mocks.select.mockReset();
-    mocks.select.mockReturnValue({
-      from: vi.fn(() => ({
-        where: vi.fn(() => ({
-          limit: vi.fn(async () => [{ enabled: false }]),
-        })),
-      })),
-    });
-
-    await expect(
-      createTaskScheduleForUser({
-        userWorkosId: "user_1",
-        workspaceId: "workspace_1",
-        name: "Daily briefing",
-        cron: "0 9 * * *",
-        timezone: "UTC",
-        prompt: "Send a daily briefing.",
-      }),
-    ).rejects.toThrow("Tasks & Workflows is disabled");
-    expect(mocks.planTaskHarness).not.toHaveBeenCalled();
-    expect(mocks.execute).not.toHaveBeenCalled();
-    expect(mocks.transaction).not.toHaveBeenCalled();
-  });
-
-  it("re-checks the flag under a row lock in the atomic insert", async () => {
+  it("fails the atomic insert when the actor is not a member of the workspace", async () => {
     mocks.execute.mockResolvedValue([]);
 
     await expect(
@@ -130,11 +105,10 @@ describe("createTaskScheduleForUser", () => {
         timezone: "UTC",
         prompt: "Send a daily briefing.",
       }),
-    ).rejects.toThrow("Tasks & Workflows is disabled");
+    ).rejects.toThrow("Recurring task could not be created for this workspace.");
     expect(mocks.planTaskHarness).toHaveBeenCalledOnce();
     expect(mocks.execute).toHaveBeenCalledOnce();
     expect(mocks.transaction).not.toHaveBeenCalled();
-    expect(sqlTextFromExecuteCall(0)).toContain("task_user.task_spawning_enabled = true");
     expect(sqlTextFromExecuteCall(0)).toContain("member.workspace_id");
     expect(sqlTextFromExecuteCall(0)).toContain("FOR UPDATE OF task_user");
   });

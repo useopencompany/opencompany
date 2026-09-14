@@ -11,7 +11,6 @@ export type TaskTimeRange = "24h" | "2d" | "7d" | "30d" | "90d" | "all";
 type UserPreferences = {
   timezone: string;
   botsEnabled: boolean;
-  taskSpawningEnabled: boolean;
   wikiEnabled: true;
   taskViewMode: TaskViewMode;
   taskTimeRange: TaskTimeRange;
@@ -32,13 +31,6 @@ export async function updateBotsAction(enabled: boolean) {
   revalidatePath("/");
   revalidatePath("/settings/preferences");
   return { ok: true, enabled: preferences.botsEnabled } as const;
-}
-
-export async function updateTaskSpawningAction(enabled: boolean) {
-  const preferences = await patchPreferences({ taskSpawningEnabled: enabled === true });
-  revalidatePath("/");
-  revalidatePath("/settings/preferences");
-  return { ok: true, enabled: preferences.taskSpawningEnabled } as const;
 }
 
 export async function updateTaskViewModeAction(mode: TaskViewMode) {

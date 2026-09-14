@@ -37,7 +37,7 @@ vi.mock("@/components/AppDataProvider", async () => {
         tasks: [],
         allTasks: [],
         schedules: [],
-        featureFlags: { taskSpawning: true, autoModelRouting: false },
+        featureFlags: { autoModelRouting: false },
         activeBrain: null,
         codexConnected: false,
         claudeCodeConnected: false,

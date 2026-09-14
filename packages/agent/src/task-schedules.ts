@@ -7,9 +7,8 @@ import { newResourceId } from "@opencompany/core/resource-ids";
 import { getDb } from "@opencompany/db/client";
 import { stringifyPostgresJson } from "@opencompany/db/postgres-json";
 import type { HarnessSpec } from "@opencompany/db/product-schema";
-import { taskSchedules, users } from "@opencompany/db/product-schema";
+import { taskSchedules } from "@opencompany/db/product-schema";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
-import { TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE } from "./feature-flags";
 
 const TASK_SCHEDULE_PROMPT_MAX_LENGTH = 10_000;
 
@@ -28,7 +27,6 @@ export type TaskScheduleView = {
 };
 
 export async function listTaskSchedulesForUser(userWorkosId: string): Promise<TaskScheduleView[]> {
-  if (!(await taskSpawningEnabledForUser(userWorkosId))) return [];
   const rows = await getDb()
     .select()
     .from(taskSchedules)
@@ -59,9 +57,6 @@ export async function createTaskScheduleForUser(
   if (!parsed.ok) {
     throw new Error(parsed.error);
   }
-  if (!(await taskSpawningEnabledForUser(input.userWorkosId))) {
-    throw new Error(TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE);
-  }
   const now = input.now ?? new Date();
   const plannedHarnessSpec =
     input.plannedHarnessSpec ??
@@ -76,14 +71,13 @@ export async function createTaskScheduleForUser(
 
   const scheduleId = newTaskScheduleId();
   const result = await getDb().execute(sql`
-    WITH enabled_actor AS MATERIALIZED (
+    WITH schedule_actor AS MATERIALIZED (
       SELECT task_user.workos_user_id, member.workspace_id
       FROM goat.users AS task_user
       JOIN goat.workspace_members AS member
         ON member.user_workos_id = task_user.workos_user_id
        AND member.workspace_id = ${input.workspaceId}
       WHERE task_user.workos_user_id = ${input.userWorkosId}
-        AND task_user.task_spawning_enabled = true
       FOR UPDATE OF task_user
     )
     INSERT INTO goat.task_schedules (
@@ -103,8 +97,8 @@ export async function createTaskScheduleForUser(
     )
     SELECT
       ${scheduleId},
-      enabled_actor.workos_user_id,
-      enabled_actor.workspace_id,
+      schedule_actor.workos_user_id,
+      schedule_actor.workspace_id,
       ${parsed.value.name},
       ${parsed.value.sourceDescription},
       ${parsed.value.cron},
@@ -115,13 +109,13 @@ export async function createTaskScheduleForUser(
       ${nextRunAt},
       ${now},
       ${now}
-    FROM enabled_actor
+    FROM schedule_actor
     RETURNING id
   `);
 
   const [schedule] = rowsFromExecute<{ id: string }>(result);
   if (!schedule) {
-    throw new Error(TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE);
+    throw new Error("Recurring task could not be created for this workspace.");
   }
   return {
     id: schedule.id,
@@ -156,9 +150,6 @@ export async function updateTaskScheduleForUser(
     planHarness: (input: { actorId: string; prompt: string }) => Promise<HarnessSpec>;
   },
 ) {
-  if (!(await taskSpawningEnabledForUser(userWorkosId))) {
-    return { ok: false, error: TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE } as const;
-  }
   const parsed = parseTaskScheduleInput(input);
   if (!parsed.ok) return { ok: false, error: parsed.error } as const;
 
@@ -203,7 +194,6 @@ export async function updateTaskScheduleForUser(
         eq(taskSchedules.id, schedule.id),
         eq(taskSchedules.userWorkosId, userWorkosId),
         isNull(taskSchedules.deletedAt),
-        taskSpawningEnabledForUserSql(userWorkosId),
       ),
     )
     .returning({
@@ -219,9 +209,6 @@ export async function updateTaskScheduleForUser(
 }
 
 export async function deleteTaskScheduleForUser(userWorkosId: string, scheduleId: string) {
-  if (!(await taskSpawningEnabledForUser(userWorkosId))) {
-    return { ok: false, error: TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE } as const;
-  }
   const [updated] = await getDb()
     .update(taskSchedules)
     .set({ enabled: false, deletedAt: new Date(), updatedAt: new Date() })
@@ -230,7 +217,6 @@ export async function deleteTaskScheduleForUser(userWorkosId: string, scheduleId
         eq(taskSchedules.id, scheduleId),
         eq(taskSchedules.userWorkosId, userWorkosId),
         isNull(taskSchedules.deletedAt),
-        taskSpawningEnabledForUserSql(userWorkosId),
       ),
     )
     .returning({ id: taskSchedules.id });
@@ -238,24 +224,6 @@ export async function deleteTaskScheduleForUser(userWorkosId: string, scheduleId
   return updated
     ? ({ ok: true } as const)
     : ({ ok: false, error: "Recurring task not found." } as const);
-}
-
-export function taskSpawningEnabledForUserSql(userWorkosId: string) {
-  return sql`EXISTS (
-    SELECT 1
-    FROM ${users} AS task_user
-    WHERE task_user.workos_user_id = ${userWorkosId}
-      AND task_user.task_spawning_enabled = true
-  )`;
-}
-
-async function taskSpawningEnabledForUser(userWorkosId: string) {
-  const [user] = await getDb()
-    .select({ enabled: users.taskSpawningEnabled })
-    .from(users)
-    .where(eq(users.workosUserId, userWorkosId))
-    .limit(1);
-  return user?.enabled === true;
 }
 
 function parseTaskScheduleInput(input: {

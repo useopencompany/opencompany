@@ -1,6 +1,5 @@
 import type { SkillCatalogItemDto } from "@opencompany/protocol";
 import Link from "next/link";
-import { TasksWorkflowsDisabledRoute } from "@/components/Routes";
 import { WorkflowEditor } from "@/components/WorkflowEditor";
 import { currentUser } from "@/lib/auth";
 import { getHeadlessWorkflow } from "@/lib/headless-automation-server";
@@ -17,10 +16,6 @@ type WorkflowEditorPageProps = {
 export default async function WorkflowEditorPage({ params }: WorkflowEditorPageProps) {
   const { slug } = await params;
   const context = await currentUser();
-  if (!context.user.taskSpawningEnabled) {
-    return <TasksWorkflowsDisabledRoute />;
-  }
-
   const [workflow, skillCatalog, personalAccounts, plugins, members] = await Promise.all([
     getHeadlessWorkflow(slug),
     listHeadlessSkillCatalog(),

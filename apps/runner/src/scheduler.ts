@@ -110,6 +110,8 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
           schedule.planned_harness_spec AS "plannedHarnessSpec",
           schedule.next_run_at AS "nextRunAt"
         FROM goat.task_schedules AS schedule
+        -- The owner row stays in the join so the bare FOR UPDATE keeps locking it, which
+        -- serializes concurrent claims for the same user across scheduler replicas.
         INNER JOIN goat.users AS "user"
           ON "user".workos_user_id = schedule.user_workos_id
         INNER JOIN goat.workspace_members AS member
@@ -119,7 +121,6 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
           AND schedule.deleted_at IS NULL
           AND schedule.workspace_id IS NOT NULL
           AND schedule.next_run_at <= ${now}
-          AND "user".task_spawning_enabled = true
         ORDER BY schedule.next_run_at ASC, schedule.created_at ASC
         FOR UPDATE SKIP LOCKED
         LIMIT 1
@@ -157,7 +158,6 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
             AND NULLIF(automation_trigger.value->>'cron', '') IS NOT NULL
             AND automation_trigger.value->'harnessSpec' IS NOT NULL
             AND automation_trigger.value->'harnessSpec' <> 'null'::jsonb
-            AND "user".task_spawning_enabled = true
           ORDER BY (automation_trigger.value->>'nextRunAt')::timestamptz ASC, workflow.updated_at ASC
           FOR UPDATE OF workflow SKIP LOCKED
           LIMIT 1

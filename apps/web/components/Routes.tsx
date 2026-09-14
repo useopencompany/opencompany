@@ -34,7 +34,6 @@ import {
   FolderOpen,
   Inbox,
   Link2,
-  ListTodo,
   Loader2,
   Mail,
   Monitor,
@@ -119,7 +118,6 @@ import {
   updateReviewInboxAction,
   updateSidebarProjectsAction,
   updateSubagentsAction,
-  updateTaskSpawningAction,
 } from "@/lib/user-preferences";
 import { DEFAULT_WORKFLOW_MODEL_TOKEN, WORKFLOW_MODEL_OPTIONS } from "@/lib/workflow-model-options";
 import type { WorkflowTemplateMissingPlugin } from "@/lib/workflow-templates";
@@ -175,7 +173,6 @@ export function HomeRoute({
         codexConnected={data.codexConnected}
         claudeCodeConnected={data.claudeCodeConnected}
         sharedModelAccessEnabled={data.sharedModelAccessEnabled}
-        taskSpawningEnabled={data.featureFlags.taskSpawning}
         autoModelRoutingEnabled={data.featureFlags.autoModelRouting}
         workspaceId={data.workspace.id}
         userWorkosId={data.user.workosUserId}
@@ -315,13 +312,6 @@ export function PreferencesSettingsRoute() {
           description="Create named bots for ongoing work and return to their conversations from the sidebar."
           checked={featureFlags.bots === true}
           update={updateBotsAction}
-        />
-        <BetaFeatureSwitch
-          icon={ListTodo}
-          label="Tasks & Workflows"
-          description="Fire workflows, run tracked background tasks, and schedule recurring routines."
-          checked={featureFlags.taskSpawning}
-          update={updateTaskSpawningAction}
         />
         <BetaFeatureSwitch
           icon={Sparkles}
@@ -538,42 +528,13 @@ function BrainSettingsRoute({ brain }: { brain: BrainSummaryView }) {
 
 export function TaskDetailRoute({ taskId }: { taskId: string }) {
   const run = useTaskRun(taskId);
-  const { featureFlags } = useAppData();
   // The route resolves a display id as well as a canonical id, so the acknowledgment keys off the
-  // run's own identifier rather than the one in the URL. A disabled workspace renders the beta
-  // notice instead of a result, so there is nothing there to acknowledge.
-  useTaskSeenAcknowledgement(featureFlags.taskSpawning ? (run?.task.id ?? null) : null);
-
-  if (!featureFlags.taskSpawning) return <TasksWorkflowsDisabledRoute />;
+  // run's own identifier rather than the one in the URL.
+  useTaskSeenAcknowledgement(run?.task.id ?? null);
 
   return (
     <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
       {run ? <TaskDetailPanel initialRun={run} /> : <TaskRouteSkeleton label="Loading task" />}
-    </main>
-  );
-}
-
-export function TasksWorkflowsDisabledRoute() {
-  return (
-    <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
-      <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
-        <div className="flex w-full max-w-[720px] flex-col gap-4 pb-24 pt-16 sm:pt-24">
-          <BackLink href="/" label="Chat" />
-          <h1 className="text-[24px] font-semibold leading-tight text-ink">
-            Tasks &amp; Workflows is a beta feature
-          </h1>
-          <p className="text-[13px] leading-5 text-ink-subtle">
-            Enable Tasks &amp; Workflows in Preferences to fire workflows, run background tasks, and
-            set up recurring routines.
-          </p>
-          <Link
-            href="/settings/preferences"
-            className="inline-flex w-fit rounded-md border border-border bg-surface px-3 py-2 text-[13px] font-medium text-ink hover:bg-surface-hover"
-          >
-            Open Preferences
-          </Link>
-        </div>
-      </div>
     </main>
   );
 }
