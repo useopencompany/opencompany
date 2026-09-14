@@ -10,6 +10,7 @@ import {
   InferenceSettingsRoute,
   McpSettingsRoute,
   PreferencesSettingsRoute,
+  SandboxSettingsRoute,
   SettingsRoute,
   SkillBundleRoute,
   SkillsRoute,
@@ -171,6 +172,10 @@ vi.mock("@/components/AppDataProvider", () => ({
 
 vi.mock("@/components/InferenceSettingsPanel", () => ({
   InferenceSettingsPanel: () => <div data-testid="inference-settings-panel" />,
+}));
+
+vi.mock("@/components/SandboxSettingsPanel", () => ({
+  SandboxSettingsPanel: () => <div data-testid="sandbox-settings-panel" />,
 }));
 
 vi.mock("@/lib/user-preferences", () => ({
@@ -580,18 +585,29 @@ describe("SettingsRoute", () => {
   });
 
   it("renders the workspace inference settings", () => {
-    render(
-      <InferenceSettingsRoute
-        sandboxSize={{ ok: true, sandboxSize: "standard" }}
-        sandboxSizeOptions={[]}
-      />,
-    );
+    render(<InferenceSettingsRoute />);
 
     expect(screen.getByRole("heading", { name: "Inference" })).toBeInTheDocument();
     expect(
       screen.getByText("Connect model subscriptions and choose how your workspace runs AI."),
     ).toBeInTheDocument();
     expect(screen.getByTestId("inference-settings-panel")).toBeInTheDocument();
+    expect(screen.queryByTestId("sandbox-settings-panel")).not.toBeInTheDocument();
+  });
+
+  it("renders the workspace sandbox settings on their own page", () => {
+    render(
+      <SandboxSettingsRoute
+        sandboxSize={{ ok: true, sandboxSize: "standard" }}
+        sandboxSizeOptions={[]}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Sandboxes" })).toBeInTheDocument();
+    expect(
+      screen.getByText("Control the machines your cloud coding sessions run on."),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("sandbox-settings-panel")).toBeInTheDocument();
   });
 
   it("no longer offers Tasks & Workflows as a beta opt-in", () => {

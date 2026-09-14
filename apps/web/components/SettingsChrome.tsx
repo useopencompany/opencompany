@@ -6,6 +6,7 @@ import {
   ArrowUpRight,
   BrainCircuit,
   CircleDollarSign,
+  Container,
   CreditCard,
   FolderGit2,
   MessageSquare,
@@ -74,6 +75,12 @@ const NAV_GROUPS: SettingsNavGroup[] = [
         icon: BrainCircuit,
         label: "Inference",
         isActive: (pathname) => pathname === "/settings/workspace/inference",
+      },
+      {
+        href: "/settings/workspace/sandboxes",
+        icon: Container,
+        label: "Sandboxes",
+        isActive: (pathname) => pathname === "/settings/workspace/sandboxes",
       },
       {
         href: "/settings/workspace/capabilities",
