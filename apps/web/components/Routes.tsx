@@ -89,6 +89,7 @@ import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
 import { useHydrated } from "@/components/useHydrated";
 import { useTaskRun } from "@/components/useTaskRun";
 import { useTaskSeenAcknowledgement } from "@/components/useTaskSeenAcknowledgement";
+import { WorkflowTemplateGallery } from "@/components/WorkflowTemplateGallery";
 import type { ChatSessionView } from "@/lib/chat-ui";
 import { getHeadlessWorkflows } from "@/lib/headless-automation-collections";
 import {
@@ -121,6 +122,7 @@ import {
   updateTaskSpawningAction,
 } from "@/lib/user-preferences";
 import { DEFAULT_WORKFLOW_MODEL_TOKEN, WORKFLOW_MODEL_OPTIONS } from "@/lib/workflow-model-options";
+import type { WorkflowTemplateMissingPlugin } from "@/lib/workflow-templates";
 
 export function HomeRoute({
   chatId,
@@ -739,6 +741,7 @@ export function WorkflowsRoute({
   workspaceId,
   canEdit,
   ownerNames,
+  templateMissingPlugins,
 }: {
   workflows: WorkflowListItem[];
   workspaceId: string;
@@ -748,6 +751,8 @@ export function WorkflowsRoute({
    * `null` when the member list could not be loaded, which blanks the column instead of guessing.
    */
   ownerNames: Record<string, string> | null;
+  /** Required plugins each template is still missing, keyed by template id; `null` hides the hints. */
+  templateMissingPlugins: Record<string, WorkflowTemplateMissingPlugin[]> | null;
 }) {
   const router = useRouter();
   const data = useAppData();
@@ -816,6 +821,13 @@ export function WorkflowsRoute({
               </Button>
             ) : null}
           </header>
+
+          {canEdit ? (
+            <WorkflowTemplateGallery
+              missingPlugins={templateMissingPlugins}
+              scope={scopeFilter === "all" ? "company" : scopeFilter}
+            />
+          ) : null}
 
           <section aria-labelledby="workflow-list-heading" className="flex min-w-0 flex-col gap-3">
             <h2 id="workflow-list-heading" className="sr-only">

@@ -59,6 +59,7 @@ const userPreferencesMock = vi.hoisted(() => ({
 
 const workflowActionsMock = vi.hoisted(() => ({
   createHeadlessWorkflow: vi.fn(async () => ({ slug: "test-workflow" })),
+  updateHeadlessWorkflow: vi.fn(async () => ({ version: 2 })),
   archiveHeadlessWorkflow: vi.fn(async () => ({ workflowId: "workflow_1", version: 2 })),
 }));
 
@@ -186,6 +187,7 @@ vi.mock("@/lib/user-preferences", () => ({
 
 vi.mock("@/lib/headless-automation-commands", () => ({
   createHeadlessWorkflow: workflowActionsMock.createHeadlessWorkflow,
+  updateHeadlessWorkflow: workflowActionsMock.updateHeadlessWorkflow,
   archiveHeadlessWorkflow: workflowActionsMock.archiveHeadlessWorkflow,
 }));
 
@@ -285,6 +287,7 @@ describe("WorkflowsRoute", () => {
       workspaceId: "workspace_1",
       canEdit: true,
       ownerNames: WORKFLOW_OWNER_NAMES,
+      templateMissingPlugins: null,
     };
     const view = render(<WorkflowsRoute {...props} />);
 
@@ -317,6 +320,7 @@ describe("WorkflowsRoute", () => {
         workspaceId="workspace_1"
         canEdit
         ownerNames={WORKFLOW_OWNER_NAMES}
+        templateMissingPlugins={null}
       />,
     );
 
@@ -353,6 +357,7 @@ describe("WorkflowsRoute", () => {
         workspaceId="workspace_1"
         canEdit
         ownerNames={WORKFLOW_OWNER_NAMES}
+        templateMissingPlugins={null}
       />,
     );
 
@@ -389,6 +394,7 @@ describe("WorkflowsRoute", () => {
         workspaceId="workspace_1"
         canEdit
         ownerNames={WORKFLOW_OWNER_NAMES}
+        templateMissingPlugins={null}
       />,
     );
 
@@ -424,6 +430,7 @@ describe("WorkflowsRoute", () => {
         workspaceId="workspace_1"
         canEdit
         ownerNames={WORKFLOW_OWNER_NAMES}
+        templateMissingPlugins={null}
       />,
     );
 
@@ -446,6 +453,7 @@ describe("WorkflowsRoute", () => {
         workspaceId="workspace_1"
         canEdit
         ownerNames={WORKFLOW_OWNER_NAMES}
+        templateMissingPlugins={null}
       />,
     );
 
@@ -468,6 +476,7 @@ describe("WorkflowsRoute", () => {
         workspaceId="workspace_1"
         canEdit
         ownerNames={WORKFLOW_OWNER_NAMES}
+        templateMissingPlugins={null}
       />,
     );
 
@@ -486,6 +495,7 @@ describe("WorkflowsRoute", () => {
         workspaceId="workspace_1"
         canEdit
         ownerNames={null}
+        templateMissingPlugins={null}
       />,
     );
 
@@ -506,6 +516,7 @@ describe("WorkflowsRoute", () => {
         workspaceId="workspace_1"
         canEdit
         ownerNames={WORKFLOW_OWNER_NAMES}
+        templateMissingPlugins={null}
       />,
     );
 
