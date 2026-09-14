@@ -85,6 +85,20 @@ export function isCodexModelId(value: string): value is AgentModelId {
   return CODEX_MODEL_ID_SET.has(value);
 }
 
+// Chat models a workspace can run through a shared ChatGPT subscription instead of metered
+// gateway credits. Lives here, beside the catalog, so both the server-side model resolver and
+// the client model picker read the same list.
+export const CODEX_SUBSCRIPTION_MODEL_IDS = [
+  "openai/gpt-5.6-sol",
+  "openai/gpt-5.6-terra",
+] as const satisfies readonly AgentModelId[];
+
+const CODEX_SUBSCRIPTION_MODEL_ID_SET = new Set<string>(CODEX_SUBSCRIPTION_MODEL_IDS);
+
+export function isCodexSubscriptionModel(value: string): value is AgentModelId {
+  return CODEX_SUBSCRIPTION_MODEL_ID_SET.has(value);
+}
+
 export function isCodexReasoningEffort(value: string): value is CodexReasoningEffort {
   return CODEX_REASONING_EFFORT_SET.has(value);
 }

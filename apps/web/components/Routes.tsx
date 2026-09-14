@@ -169,6 +169,7 @@ export function HomeRoute({
         archivedChats={data.archivedChats}
         codexConnected={data.codexConnected}
         claudeCodeConnected={data.claudeCodeConnected}
+        sharedModelAccessEnabled={data.sharedModelAccessEnabled}
         taskSpawningEnabled={data.featureFlags.taskSpawning}
         autoModelRoutingEnabled={data.featureFlags.autoModelRouting}
         workspaceId={data.workspace.id}

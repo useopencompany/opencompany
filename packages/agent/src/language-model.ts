@@ -1,4 +1,4 @@
-import { resolveAvailableAgentModelId } from "@opencompany/agent-runtime";
+import { isCodexSubscriptionModel, resolveAvailableAgentModelId } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { getDb } from "@opencompany/db/client";
 import { loadWorkspaceCodexEngineAccount } from "@opencompany/db/codex-auth";
@@ -7,8 +7,6 @@ import {
   codexBackendProviderOptions,
   createCodexBackendLanguageModel,
 } from "./codex-backend-language-model";
-
-export const CODEX_SUBSCRIPTION_MODEL_IDS = ["openai/gpt-5.6-sol", "openai/gpt-5.6-terra"] as const;
 
 export type ProductModelFeature = "chat" | "task" | "slack-bot";
 export type ProductModelBilling = "metered_gateway" | "subscription_covered";
@@ -19,10 +17,6 @@ export type ProductLanguageModelResolution = {
   billing: ProductModelBilling;
   providerOptions?: ReturnType<typeof codexBackendProviderOptions>;
 };
-
-export function isCodexSubscriptionModel(modelId: string) {
-  return (CODEX_SUBSCRIPTION_MODEL_IDS as readonly string[]).includes(modelId);
-}
 
 export async function resolveProductLanguageModel(input: {
   workspaceId: string;
