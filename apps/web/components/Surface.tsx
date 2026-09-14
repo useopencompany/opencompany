@@ -37,13 +37,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import { toast } from "@opencompany/ui/components/sonner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@opencompany/ui/components/tooltip";
-import {
-  AnthropicIcon,
-  DeepSeekIcon,
-  MoonshotIcon,
-  OpenAIIcon,
-  XaiIcon,
-} from "@opencompany/ui/icons";
+import { AnthropicIcon, OpenAIIcon } from "@opencompany/ui/icons";
 import { cn } from "@opencompany/ui/lib/utils";
 import { useLiveQuery } from "@tanstack/react-db";
 import {
@@ -109,6 +103,7 @@ import type { ActionApprovalRequest, CodexToolAction } from "@/components/chat/T
 import { useChatAttachments } from "@/components/chat/useChatAttachments";
 import { useCreditBalance } from "@/components/chat/useCreditBalance";
 import { useWorkflowComposer } from "@/components/chat/useWorkflowComposer";
+import { ModelProviderIcon } from "@/components/ModelProviderIcon";
 import { useHeadlessChatTranscript } from "@/components/useHeadlessChatTranscript";
 import { useHydrated } from "@/components/useHydrated";
 import { WorkflowComposerControls } from "@/components/WorkflowComposerControls";
@@ -6397,36 +6392,6 @@ function CodingAgentOption({
 
 function findModel(id: string) {
   return MODELS.find((model) => model.id === id);
-}
-
-function ModelProviderIcon({
-  modelId,
-  size,
-  strokeWidth,
-  className,
-}: {
-  modelId: string;
-  size: number;
-  strokeWidth: number;
-  className?: string;
-}) {
-  const provider = modelId.split("/")[0] ?? "";
-  if (provider === "anthropic") {
-    return <AnthropicIcon size={size} strokeWidth={strokeWidth} className={className} />;
-  }
-  if (provider === "deepseek") {
-    return <DeepSeekIcon size={size} strokeWidth={strokeWidth} className={className} />;
-  }
-  if (provider === "moonshotai") {
-    return <MoonshotIcon size={size} strokeWidth={strokeWidth} className={className} />;
-  }
-  if (provider === "openai") {
-    return <OpenAIIcon size={size} strokeWidth={strokeWidth} className={className} />;
-  }
-  if (provider === "xai") {
-    return <XaiIcon size={size} strokeWidth={strokeWidth} className={className} />;
-  }
-  return <Sparkles size={size} strokeWidth={strokeWidth} className={className} />;
 }
 
 function modelProviderLabel(id: string) {

@@ -71,6 +71,7 @@ import {
 } from "@/components/InferenceSettingsPanel";
 import { IntentPrefetchLink } from "@/components/IntentPrefetchLink";
 import { McpSetupGuide } from "@/components/McpSetupGuide";
+import { ModelProviderIcon } from "@/components/ModelProviderIcon";
 import { RepositorySettings } from "@/components/RepositorySettings";
 import {
   SCOPE_FILTERS,
@@ -971,7 +972,7 @@ function WorkflowTableRow({
   canEdit: boolean;
   onDelete: () => void;
 }) {
-  const modelLabel = workflowModelLabel(workflow);
+  const model = workflowModelPresentation(workflow);
   const triggerLabel = workflowTriggerLabel(workflow);
   const statusLabel = workflow.status === "active" ? "Active" : "Draft";
 
@@ -998,8 +999,16 @@ function WorkflowTableRow({
       <td className="truncate px-3 py-3.5 text-ink-muted" title={ownerName}>
         {ownerName}
       </td>
-      <td className="truncate px-3 py-3.5 text-ink-muted" title={modelLabel}>
-        {modelLabel}
+      <td className="px-3 py-3.5 text-ink-muted" title={model.label}>
+        <span className="flex min-w-0 items-center gap-1.5">
+          <ModelProviderIcon
+            modelId={model.modelId}
+            size={13}
+            strokeWidth={1.9}
+            className="shrink-0 text-ink-subtle"
+          />
+          <span className="truncate">{model.label}</span>
+        </span>
       </td>
       <td className="truncate px-3 py-3.5 text-ink-muted" title={triggerLabel}>
         {triggerLabel}
@@ -1071,19 +1080,30 @@ function workflowOwnerName(workflow: WorkflowListItem, ownerNames: Record<string
   return ownerNames[workflow.createdByUserId] ?? "Former member";
 }
 
-function workflowModelLabel(workflow: WorkflowListItem) {
-  const defaultLabel =
-    WORKFLOW_MODEL_OPTIONS.find((option) => option.token === DEFAULT_WORKFLOW_MODEL_TOKEN)?.label ??
-    "Default";
-  const labels = new Set(
-    workflow.steps.map((step) => {
-      const option = WORKFLOW_MODEL_OPTIONS.find((candidate) => candidate.token === step.model);
-      return option?.label ?? (step.model.trim() || defaultLabel);
-    }),
+// The Model cell shows one model per workflow: its label plus the provider mark. Steps can each
+// pick their own model, so a workflow that mixes them collapses to a count with no provider, and
+// an empty `modelId` falls back to the generic sparkle so the column stays aligned.
+function workflowModelPresentation(workflow: WorkflowListItem): {
+  label: string;
+  modelId: string;
+} {
+  const defaultOption = WORKFLOW_MODEL_OPTIONS.find(
+    (option) => option.token === DEFAULT_WORKFLOW_MODEL_TOKEN,
   );
-  if (labels.size === 0) return defaultLabel;
-  if (labels.size === 1) return Array.from(labels)[0]!;
-  return `${labels.size} models`;
+  const fallback = { label: defaultOption?.label ?? "Default", modelId: defaultOption?.id ?? "" };
+  const models = new Map<string, string>();
+  for (const step of workflow.steps) {
+    const option = WORKFLOW_MODEL_OPTIONS.find((candidate) => candidate.token === step.model);
+    if (option) models.set(option.label, option.id);
+    else if (step.model.trim()) models.set(step.model.trim(), "");
+    else models.set(fallback.label, fallback.modelId);
+  }
+  if (models.size === 0) return fallback;
+  if (models.size === 1) {
+    const [label, modelId] = Array.from(models)[0]!;
+    return { label, modelId };
+  }
+  return { label: `${models.size} models`, modelId: "" };
 }
 
 function workflowTriggerLabel(workflow: WorkflowListItem) {
