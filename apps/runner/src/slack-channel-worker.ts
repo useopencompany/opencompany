@@ -29,6 +29,7 @@ type Event = {
   workspaceId: string;
   sessionId: string;
   taskId: string;
+  ownerId: string;
   payload: SlackThreadReply;
   status: string;
   runId: string | null;
@@ -61,7 +62,7 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
       const event = subscriptionRows<Event>(
         await tx.execute(sql`
       SELECT event.id, event.subscription_id AS "subscriptionId", subscription.workspace_id AS "workspaceId",
-        subscription.session_id AS "sessionId", task.id AS "taskId", event.payload, event.status, event.run_id AS "runId",
+        subscription.session_id AS "sessionId", task.id AS "taskId", task.user_workos_id AS "ownerId", event.payload, event.status, event.run_id AS "runId",
         (subscription.status = 'closed' OR subscription.expires_at <= now() OR task.archived_at IS NOT NULL
           OR conversation.closed_at IS NOT NULL) AS closed,
         run.status AS "runStatus", message.content AS answer,
@@ -125,12 +126,8 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
       const user = await deps.request<{
         user?: {
           id?: string;
-          team_id?: string;
           is_bot?: boolean;
           deleted?: boolean;
-          is_restricted?: boolean;
-          is_ultra_restricted?: boolean;
-          profile?: { email?: string };
         };
       }>({
         method: "users.info",
@@ -138,33 +135,19 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
         form: { user: event.payload.slackUserId },
         signal: AbortSignal.timeout(10_000),
       });
-      const email = user.user?.profile?.email?.trim();
-      if (
-        !email ||
-        user.user?.id !== event.payload.slackUserId ||
-        user.user.team_id !== event.installation.teamId ||
-        user.user.is_bot ||
-        user.user.deleted ||
-        user.user.is_restricted ||
-        user.user.is_ultra_restricted
-      ) {
+      if (user.user?.id !== event.payload.slackUserId || user.user.is_bot || user.user.deleted) {
         await ignoreEvent(tx.execute.bind(tx), event.id);
         return true;
       }
-      const members = subscriptionRows<{ userId: string; role: "admin" | "member" }>(
+      // Publishing the workflow thread lets its Slack participants continue the owner's work.
+      // The sender is attributed in the prompt; execution keeps the owner's existing authority.
+      const [owner] = subscriptionRows<{ userId: string; role: "admin" | "member" }>(
         await tx.execute(sql`
-      SELECT member.user_workos_id AS "userId", member.role FROM goat.workspace_members member
-      JOIN goat.users actor ON actor.workos_user_id = member.user_workos_id
-      WHERE member.workspace_id = ${event.workspaceId} AND lower(actor.email) = ${email.toLowerCase()}
-      LIMIT 2
+      SELECT user_workos_id AS "userId", role FROM goat.workspace_members
+      WHERE workspace_id = ${event.workspaceId} AND user_workos_id = ${event.ownerId}
     `),
       );
-      const member = members.length === 1 ? members[0] : null;
-      if (!member) {
-        await ignoreEvent(tx.execute.bind(tx), event.id);
-        return true;
-      }
-      if (event.closed) {
+      if (event.closed || !owner) {
         await tx.execute(
           sql`UPDATE goat.session_subscriptions SET status = 'closed' WHERE id = ${event.subscriptionId}`,
         );
@@ -175,9 +158,9 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
       // turn the same event into another Run. The existing runner owns the fenced Run lease.
       const result = await new PostgresTaskRepository(tx.execute.bind(tx)).createTaskCommentAndRun({
         actor: {
-          userId: member.userId,
+          userId: owner.userId,
           workspaceId: event.workspaceId,
-          role: member.role,
+          role: owner.role,
           permissions: [TASK_WRITE_PERMISSION],
           authenticationMethod: "service",
         },

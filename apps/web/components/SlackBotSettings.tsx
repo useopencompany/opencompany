@@ -96,8 +96,8 @@ function SlackBotPanel({ data }: { data: SlackBotSettingsData }) {
               Add opencompany to your Slack workspace
             </span>
             <p className="text-[13px] leading-5 text-ink-subtle">
-              Let workflows post as @opencompany. Replies from workspace members continue the same
-              work, with its context and files, for 30 days.
+              Let workflows post as @opencompany. Anyone who can reply in a workflow thread can
+              continue the same work, with its context and files, for 30 days.
             </p>
           </div>
         </div>
@@ -169,8 +169,9 @@ function SlackBotPanel({ data }: { data: SlackBotSettingsData }) {
             </li>
           </ol>
           <p className="text-[13px] leading-5 text-ink-subtle">
-            Replies continue the original workflow session for 30 days. Members must use the same
-            email in Slack and opencompany. Disconnecting closes existing threads.
+            Anyone who can reply in the Slack thread can continue the workflow for 30 days, using
+            the workflow owner’s connected tools and saved context. Disconnecting closes existing
+            threads.
           </p>
           <Link
             href="/workflows"

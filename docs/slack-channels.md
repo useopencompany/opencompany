@@ -13,11 +13,15 @@ a reply never starts another workflow. While idle, the subscription is `waiting`
 uses its normal durable idle/checkpoint lifecycle. No engine process is kept alive for Slack.
 
 Only plain text replies in the exact subscribed `(workspace, team, channel, root timestamp)`
-are eligible. Before execution the worker rechecks public/unshared channel access, resolves the
-Slack user's email, and requires an unambiguous opencompany workspace membership. Bots, guests,
-DMs, mentions outside a subscribed thread, edits, attachments, and untracked threads are ignored.
+are eligible. Anyone who can post a plain text reply in the subscribed Slack thread can continue the work,
+including guests and people without an opencompany account. The worker rechecks public/unshared
+channel access and filters bots and deleted users. Follow-up Runs use the workflow owner’s
+existing authority, connected tools, context, and artifacts; the prompt attributes the Slack
+sender by ID. The owner must still belong to the opencompany workspace. No sender email match
+is required. DMs, mentions outside a subscribed thread, edits, attachments, and untracked threads
+are ignored.
 A paused Run awaiting approval stays paused; later Slack replies wait. Expired, disconnected,
-archived, or closed work cannot silently restart. Authorized replies to a closed thread receive
+archived, or closed work cannot silently restart. Human replies to a closed thread receive
 an explicit closed-thread response. Disconnecting permanently closes existing subscriptions;
 reconnecting enables new workflow posts.
 
@@ -47,7 +51,7 @@ Use the existing `OPENCOMPANY_SLACK_BOT_*` credentials. OAuth still uses
 `/api/integrations/slack-bot/start` and `/api/integrations/slack-bot/callback`; signed events use
 `/webhooks/slack-bot/events` on the API. Subscribe to `message.channels`, `app_uninstalled`, and
 `tokens_revoked`. Required bot scopes: `chat:write`, `channels:read`, `channels:history`,
-`users:read`, and `users:read.email`. New installs no longer request DM, private-channel, mention,
+and `users:read`. New installs no longer request DM, private-channel, mention,
 or reaction scopes. Old grants may remain until the Slack app is reinstalled; ingress ignores
 those event types. Stop configuring the legacy Wiki answer bot's Brain destinations.
 
