@@ -253,7 +253,7 @@ export function createSubagentBudget(
       if (runsStarted >= maxRuns) {
         return {
           ok: false,
-          error: `This turn already used its budget of ${maxRuns} subagent runs. Finish with what you have, or start a task for work that needs more.`,
+          error: `This turn already used its budget of ${maxRuns} subagent runs. Finish with what you have.`,
         };
       }
       runsStarted += 1;

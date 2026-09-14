@@ -557,6 +557,8 @@ type BrowserChatTools = {
 };
 
 export type ChatTools = {
+  // Main chat can no longer create a one-off task, but stored transcripts still hold
+  // `start_task` parts. Keep the shape so old conversations keep rendering their Task card.
   start_task: {
     input: StartTaskToolInput;
     output: StartTaskToolOutput;

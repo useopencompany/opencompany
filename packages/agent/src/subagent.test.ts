@@ -46,7 +46,6 @@ const model = "moonshotai/kimi-k2.6" as never;
 function fullyLoadedToolContext() {
   return createProductChatToolContext({
     model,
-    startTask: vi.fn(),
     scheduleTask: vi.fn(),
     editTaskSchedule: vi.fn(),
     deleteTaskSchedule: vi.fn(),

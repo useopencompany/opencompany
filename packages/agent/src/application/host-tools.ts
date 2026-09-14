@@ -1,14 +1,10 @@
 import { createHash } from "node:crypto";
-import {
-  type ChatHostBootstrap,
-  type ChatHostSkillFileChunk,
-  type ChatHostToolGatewayResponse,
-  type ChatHostToolOperation,
-  isAvailableAgentModelId,
-  isClaudeCodeModelId,
-  isCodexModelId,
+import type {
+  ChatHostBootstrap,
+  ChatHostSkillFileChunk,
+  ChatHostToolGatewayResponse,
+  ChatHostToolOperation,
 } from "@opencompany/agent-runtime";
-import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { isBrowserToolName } from "@opencompany/browser-tools";
 import { type Actor, SKILL_READ_PERMISSION, SKILL_WRITE_PERMISSION } from "@opencompany/core";
 import type { DeleteTaskScheduleToolOutput, EditTaskScheduleToolOutput } from "../chat-ui";
@@ -20,15 +16,13 @@ export type ChatHostContext = {
   workspaceName: string;
   conversationId: string;
   messageId: string;
-  brainRef: string | null;
   email: string;
   firstName: string | null;
   lastName: string | null;
   timezone: string;
-  taskToolsEnabled: boolean;
+  automationToolsEnabled: boolean;
   subagentsEnabled: boolean;
   skillToolsEnabled: boolean;
-  legacyBrainEnabled: boolean;
 };
 
 export type ChatHostToolCommand = {
@@ -87,11 +81,6 @@ type TaskResult = { id: string; displayId: string; name: string; prompt: string 
 
 export type ChatHostToolServiceDependencies = {
   loadContext: (command: ChatHostToolCommand) => Promise<ChatHostContext | null>;
-  listBrains: (input: {
-    actorId: string;
-    workspaceId: string;
-  }) => Promise<readonly { id: string; slug: string }[]>;
-  defaultBrainSlug: string;
   browserProfilesAvailable: () => boolean;
   createAgentSession: (input: {
     actorId: string;
@@ -165,15 +154,6 @@ export type ChatHostToolServiceDependencies = {
       expectedBundleId?: string;
     };
   }) => Promise<{ updated: true; name: string; command: string; bundleId: string }>;
-  createTask: (input: {
-    actorId: string;
-    workspaceId: string;
-    brainRef: string | null;
-    prompt: string;
-    model: AgentModelId;
-    name?: string;
-    engine?: "opencompany" | "codex" | "claude_code";
-  }) => Promise<TaskResult>;
   listSchedules: (actorId: string) => Promise<ScheduleView[]>;
   createSchedule: (input: {
     actorId: string;
@@ -404,25 +384,8 @@ async function executeOperation(
         },
       });
     }
-    case "start_task": {
-      assertTaskTools(context);
-      const engine = optionalEngine(toolInput.engine);
-      const model = requiredModel(toolInput.model, engine);
-      const name = optionalString(toolInput.name);
-      assertModelSupportsEngine(model, engine);
-      const created = await dependencies.createTask({
-        actorId: context.actorId,
-        workspaceId: context.workspaceId,
-        brainRef: await activeBrainRef(context, dependencies),
-        prompt: requiredString(toolInput.prompt, "prompt"),
-        model,
-        ...(name ? { name } : {}),
-        ...(engine ? { engine } : {}),
-      });
-      return taskResult(created);
-    }
     case "schedule_task": {
-      assertTaskTools(context);
+      assertAutomationTools(context);
       const created = await dependencies.createSchedule({
         actorId: context.actorId,
         workspaceId: context.workspaceId,
@@ -444,7 +407,7 @@ async function executeOperation(
       };
     }
     case "edit_task_schedule": {
-      assertTaskTools(context);
+      assertAutomationTools(context);
       const schedules = await dependencies.listSchedules(context.actorId);
       const target = resolveScheduleTarget(schedules, toolInput);
       if (!target.ok) return target;
@@ -480,7 +443,7 @@ async function executeOperation(
       } satisfies EditTaskScheduleToolOutput;
     }
     case "delete_task_schedule": {
-      assertTaskTools(context);
+      assertAutomationTools(context);
       const schedules = await dependencies.listSchedules(context.actorId);
       const target = resolveScheduleTarget(schedules, toolInput);
       if (!target.ok) return target;
@@ -500,7 +463,7 @@ async function executeOperation(
       } satisfies DeleteTaskScheduleToolOutput;
     }
     case "start_workflow": {
-      assertTaskTools(context);
+      assertAutomationTools(context);
       const created = await dependencies.createWorkflowTask({
         actorId: context.actorId,
         workspaceId: context.workspaceId,
@@ -594,7 +557,7 @@ async function bootstrap(
   input: Record<string, unknown>,
   dependencies: ChatHostToolServiceDependencies,
 ): Promise<ChatHostBootstrap> {
-  const taskToolsEnabled = context.taskToolsEnabled && !context.taskConversation;
+  const automationToolsEnabled = context.automationToolsEnabled && !context.taskConversation;
   const mentionedSkillIds = stringArray(input.mentionedSkillIds);
   const [mentionedSkills, skills, workflows, recurringSchedules, browserProfiles] =
     await Promise.all([
@@ -611,10 +574,10 @@ async function bootstrap(
         context.actorId,
         context.taskConversation ? "company" : undefined,
       ),
-      taskToolsEnabled
+      automationToolsEnabled
         ? dependencies.listWorkflowCatalog(context.workspaceId)
         : Promise.resolve([]),
-      taskToolsEnabled ? dependencies.listSchedules(context.actorId) : Promise.resolve([]),
+      automationToolsEnabled ? dependencies.listSchedules(context.actorId) : Promise.resolve([]),
       dependencies.browserProfilesAvailable()
         ? dependencies.listBrowserProfiles(context.actorId)
         : Promise.resolve([]),
@@ -635,10 +598,11 @@ async function bootstrap(
       timezone: context.timezone,
     },
     workspaceName: context.workspaceName,
-    taskToolsEnabled,
+    automationToolsEnabled,
     skillToolsEnabled: context.skillToolsEnabled,
-    // Chat only, for the same reason task tools are withheld from a task conversation: a task is
-    // already the deeper-work primitive, so a second delegation layer inside one is unobserved cost.
+    // Chat only, for the same reason automation tools are withheld from a task conversation: a task
+    // is already the deeper-work primitive, so a second delegation layer inside one is unobserved
+    // cost.
     subagentsEnabled: context.subagentsEnabled && !context.taskConversation,
     browserToolsEnabled: true,
     browserProfiles: browserProfiles.map(({ id, name, siteHost }) => ({ id, name, siteHost })),
@@ -652,23 +616,6 @@ async function bootstrap(
     workflows,
     recurringSchedules,
   };
-}
-
-async function activeBrainRef(
-  context: ChatHostContext,
-  dependencies: ChatHostToolServiceDependencies,
-) {
-  if (!context.legacyBrainEnabled) return null;
-  if (context.brainRef) return context.brainRef;
-  const brains = await dependencies.listBrains({
-    actorId: context.actorId,
-    workspaceId: context.workspaceId,
-  });
-  return (
-    brains.find((candidate) => candidate.slug === dependencies.defaultBrainSlug)?.id ??
-    brains[0]?.id ??
-    null
-  );
 }
 
 async function endActiveBrowserProfile(
@@ -704,13 +651,15 @@ function browserProfileResult(session: BrowserProfileSession) {
   };
 }
 
-function assertTaskTools(context: ChatHostContext) {
+function assertAutomationTools(context: ChatHostContext) {
   if (context.taskConversation) {
     throw new Error(
-      "Tasks cannot create other tasks or manage task schedules. Use a main chat instead.",
+      "Tasks cannot start workflows or manage task schedules. Use a main chat instead.",
     );
   }
-  if (!context.taskToolsEnabled) throw new Error("Task creation is not enabled for this user.");
+  if (!context.automationToolsEnabled) {
+    throw new Error("Workflows and recurring tasks are not enabled for this user.");
+  }
 }
 
 function assertSkillTools(context: ChatHostContext) {
@@ -724,33 +673,6 @@ export function workspaceSkillIdempotencyKey(turnId: string, toolCallId?: string
     .update(`${turnId}:${toolCallId ?? "create-workspace-skill"}`)
     .digest("hex");
   return `agent-skill:${invocationHash}`;
-}
-
-function requiredModel(value: unknown, engine: ReturnType<typeof optionalEngine>): AgentModelId {
-  const model = requiredString(value, "model");
-  if (engine === "codex" && isCodexModelId(model)) return model;
-  if (!isAvailableAgentModelId(model)) {
-    throw new Error(`Unsupported model "${model}".`);
-  }
-  return model;
-}
-
-function optionalEngine(value: unknown) {
-  return value === "opencompany" || value === "codex" || value === "claude_code"
-    ? value
-    : undefined;
-}
-
-function assertModelSupportsEngine(
-  model: AgentModelId,
-  engine: "opencompany" | "codex" | "claude_code" | undefined,
-) {
-  if (engine === "codex" && !isCodexModelId(model)) {
-    throw new Error(`Model "${model}" is not available for the Codex engine.`);
-  }
-  if (engine === "claude_code" && !isClaudeCodeModelId(model)) {
-    throw new Error(`Model "${model}" is not available for the Claude Code engine.`);
-  }
 }
 
 function browserToolName(value: unknown) {
