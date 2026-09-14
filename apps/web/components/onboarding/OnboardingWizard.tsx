@@ -2,6 +2,7 @@
 
 import { captureProductEvent, identifyProductUser } from "@opencompany/analytics/product/client";
 import type { ProductOnboardingStep } from "@opencompany/analytics/product/events";
+import { Button } from "@opencompany/ui/components/button";
 import { toast } from "@opencompany/ui/components/sonner";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -22,8 +23,9 @@ import {
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { ONBOARDING_STEP_COOKIE } from "@/app/onboarding/step-cookie";
+import { OnboardingPluginsStep } from "@/components/onboarding/OnboardingPluginsStep";
+import { OnboardingSubscriptionsStep } from "@/components/onboarding/OnboardingSubscriptionsStep";
 import {
-  checkWorkspaceSlugAction,
   finishOnboardingAction,
   saveOnboardingProfileAction,
   saveOnboardingWorkspaceAction,
@@ -45,13 +47,19 @@ type OnboardingUser = {
 
 type StepKey = ProductOnboardingStep;
 
-// Keep first-run setup focused on the minimum context needed to enter the app.
-// Sources and company imports remain available from the Wiki after onboarding.
-const OWNER_STEPS: StepKey[] = ["profile", "workspace", "finish"];
+// Owners shape the workspace, then set up the two things that make it useful on
+// day one: the subscription that powers their coding sandboxes, and the plugins
+// their agent can reach. Both are skippable — neither blocks entering the app.
+const OWNER_STEPS: StepKey[] = ["profile", "workspace", "subscriptions", "plugins", "finish"];
 
 // Invited members join a workspace an admin already shaped, so they only need a
-// welcome before entering the product.
-const MEMBER_STEPS: StepKey[] = ["welcome", "finish"];
+// welcome and their own subscription. Plugins are workspace-level and stay with
+// the admin.
+const MEMBER_STEPS: StepKey[] = ["welcome", "subscriptions", "finish"];
+
+// Steps that are complete by definition: the user may continue without doing
+// anything, and the primary button says so.
+const OPTIONAL_STEPS = new Set<StepKey>(["subscriptions", "plugins"]);
 
 type RoleProfile = {
   id: OnboardingRole;
@@ -111,9 +119,6 @@ const ROLE_PROFILES: RoleProfile[] = [
   },
 ];
 
-// ---------------------------------------------------------------------------
-
-type SlugStatus = "idle" | "checking" | "available" | "taken";
 type CompanyUrlStatus = "idle" | "valid" | "invalid";
 
 export function OnboardingWizard({
@@ -124,7 +129,6 @@ export function OnboardingWizard({
   initialStep,
   initialWorkspaceId,
   initialWorkspaceName,
-  initialSlug,
   initialRole,
   initialCompanyUrl,
   initialReferral,
@@ -136,7 +140,6 @@ export function OnboardingWizard({
   initialStep: number;
   initialWorkspaceId: string | null;
   initialWorkspaceName: string;
-  initialSlug: string;
   initialRole: string | null;
   initialCompanyUrl: string;
   initialReferral: string | null;
@@ -149,37 +152,26 @@ export function OnboardingWizard({
   );
 
   const [workspaceName, setWorkspaceName] = useState(initialWorkspaceName);
-  const [slugTouched, setSlugTouched] = useState(Boolean(initialSlug));
-  const [slug, setSlug] = useState(initialSlug);
   const [referral, setReferral] = useState<string | null>(initialReferral);
   const [role, setRole] = useState<OnboardingRole | null>(normalizedInitialRole);
   const [companyUrl, setCompanyUrl] = useState(initialCompanyUrl);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState(initialWorkspaceId);
+  // Drives the optional steps' primary button: "Skip for now" until something is
+  // actually set up, "Continue" once it is.
+  const [connectedSubscriptions, setConnectedSubscriptions] = useState(0);
+  const [installedPlugins, setInstalledPlugins] = useState(0);
   const [isPending, startTransition] = useTransition();
-  const [slugCheck, setSlugCheck] = useState<{
-    slug: string;
-    available: boolean;
-  } | null>(null);
   const analyticsStartedRef = useRef(false);
   const analyticsStepsViewedRef = useRef(new Set<StepKey>());
 
   const step = steps[stepIndex] ?? steps[0]!;
   const isLast = stepIndex === steps.length - 1;
-  const effectiveSlug = slugTouched ? slug : slugify(workspaceName);
   const normalizedCompanyUrl = normalizeOnboardingCompanyUrl(companyUrl);
   const companyUrlStatus: CompanyUrlStatus = !companyUrl.trim()
     ? "idle"
     : normalizedCompanyUrl
       ? "valid"
       : "invalid";
-  const shouldCheckSlug = step === "workspace" && effectiveSlug.length > 0;
-  const slugStatus: SlugStatus = !shouldCheckSlug
-    ? "idle"
-    : slugCheck?.slug === effectiveSlug
-      ? slugCheck.available
-        ? "available"
-        : "taken"
-      : "checking";
 
   useEffect(() => {
     identifyProductUser({ userId: user.workosUserId, email: user.email });
@@ -212,17 +204,6 @@ export function OnboardingWizard({
     document.cookie = `${ONBOARDING_STEP_COOKIE}=${stepIndex}; path=/; max-age=86400; samesite=lax`;
   }, [stepIndex]);
 
-  // Live workspace-URL availability check (debounced).
-  useEffect(() => {
-    if (!shouldCheckSlug) return;
-    const timer = window.setTimeout(() => {
-      void checkWorkspaceSlugAction(effectiveSlug).then((result) => {
-        setSlugCheck({ slug: effectiveSlug, available: result.available });
-      });
-    }, 400);
-    return () => window.clearTimeout(timer);
-  }, [effectiveSlug, shouldCheckSlug]);
-
   // Saves the current step server-side; returns false (and toasts) on rejection.
   const persistCurrentStep = async (): Promise<boolean> => {
     if (step === "profile") {
@@ -230,10 +211,7 @@ export function OnboardingWizard({
       return r.ok || toastFail(r.error);
     }
     if (step === "workspace") {
-      const r = await saveOnboardingWorkspaceAction({
-        name: workspaceName,
-        slug: effectiveSlug,
-      });
+      const r = await saveOnboardingWorkspaceAction({ name: workspaceName });
       if (!r.ok) return toastFail(r.error);
       setActiveWorkspaceId(r.workspaceId);
       return true;
@@ -275,8 +253,19 @@ export function OnboardingWizard({
     step === "profile"
       ? role !== null && companyUrlStatus === "valid"
       : step === "workspace"
-        ? workspaceName.trim().length > 0 && effectiveSlug.length > 0 && slugStatus !== "taken"
+        ? workspaceName.trim().length > 0
         : true;
+
+  const optionalStepIsEmpty =
+    (step === "subscriptions" && connectedSubscriptions === 0) ||
+    (step === "plugins" && installedPlugins === 0);
+  const primaryLabel = isPending
+    ? "Saving…"
+    : isLast
+      ? "Finish onboarding"
+      : OPTIONAL_STEPS.has(step) && optionalStepIsEmpty
+        ? "Skip for now"
+        : "Continue";
 
   return (
     <div className="flex h-dvh w-full flex-col overflow-hidden bg-canvas text-ink">
@@ -291,6 +280,10 @@ export function OnboardingWizard({
       {/* Vertically centered content column with nav attached directly below */}
       <main className="flex-1 overflow-y-auto">
         <div className="mx-auto flex min-h-full w-full max-w-[560px] flex-col justify-center px-6 py-12">
+          <p className="mb-5 text-[11.5px] font-medium uppercase tracking-[0.08em] text-ink-subtle">
+            Step {stepIndex + 1} of {steps.length}
+          </p>
+
           {step === "profile" && (
             <ProfileStep
               user={user}
@@ -306,16 +299,7 @@ export function OnboardingWizard({
               user={user}
               wiki={!legacyBrainEnabled}
               name={workspaceName}
-              onName={(v) => {
-                setWorkspaceName(v);
-                if (!slugTouched) setSlug(slugify(v));
-              }}
-              slug={effectiveSlug}
-              onSlug={(v) => {
-                setSlugTouched(true);
-                setSlug(slugify(v));
-              }}
-              slugStatus={slugStatus}
+              onName={setWorkspaceName}
             />
           )}
           {step === "welcome" && (
@@ -324,6 +308,12 @@ export function OnboardingWizard({
               workspaceName={currentWorkspaceName}
               wiki={!legacyBrainEnabled}
             />
+          )}
+          {step === "subscriptions" && (
+            <OnboardingSubscriptionsStep onConnectedCountChange={setConnectedSubscriptions} />
+          )}
+          {step === "plugins" && (
+            <OnboardingPluginsStep onInstalledCountChange={setInstalledPlugins} />
           )}
           {step === "finish" && (
             <FinishStep
@@ -337,26 +327,24 @@ export function OnboardingWizard({
 
           {/* Nav — sits right under the content */}
           <div className="mt-9 flex items-center justify-between">
-            <button
-              type="button"
+            <Button
+              variant="ghost"
               onClick={goBack}
               disabled={stepIndex === 0 || isPending}
-              className="inline-flex items-center gap-1.5 rounded-lg px-2 py-2 text-[13px] font-medium text-ink-muted transition-colors hover:text-ink disabled:invisible"
+              className="gap-1.5 rounded-full px-3 text-[13px] text-ink-muted hover:text-ink disabled:invisible"
             >
               <ArrowLeft size={15} strokeWidth={2} />
               Back
-            </button>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={goNext}
-                disabled={!canContinue || isPending}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-ink px-4 py-2 text-[13px] font-semibold text-canvas transition-opacity hover:opacity-90 disabled:opacity-40"
-              >
-                {isPending ? "Saving…" : isLast ? "Finish onboarding" : "Continue"}
-                {!isLast && !isPending && <ArrowRight size={15} strokeWidth={2} />}
-              </button>
-            </div>
+            </Button>
+            <Button
+              onClick={goNext}
+              disabled={!canContinue || isPending}
+              aria-busy={isPending}
+              className="gap-1.5 rounded-full px-5 text-[13px] font-semibold"
+            >
+              {primaryLabel}
+              {!isLast && !isPending && <ArrowRight size={15} strokeWidth={2} />}
+            </Button>
           </div>
         </div>
       </main>
@@ -443,11 +431,9 @@ function ProfileStep({
   companyUrlStatus: CompanyUrlStatus;
 }) {
   const companyUrlHint =
-    companyUrlStatus === "valid"
-      ? "URL looks good."
-      : companyUrlStatus === "invalid"
-        ? "Enter a valid company URL."
-        : "This helps identify the company behind your workspace.";
+    companyUrlStatus === "invalid"
+      ? "Enter a valid company URL."
+      : "This helps identify the company behind your workspace.";
 
   return (
     <div>
@@ -526,29 +512,12 @@ function WorkspaceStep({
   wiki,
   name,
   onName,
-  slug,
-  onSlug,
-  slugStatus,
 }: {
   user: OnboardingUser;
   wiki: boolean;
   name: string;
   onName: (v: string) => void;
-  slug: string;
-  onSlug: (v: string) => void;
-  slugStatus: SlugStatus;
 }) {
-  const slugHint =
-    slug.length === 0
-      ? "You can change this later."
-      : slugStatus === "checking"
-        ? "Checking availability…"
-        : slugStatus === "taken"
-          ? "That URL is taken — try another."
-          : slugStatus === "available"
-            ? "Available."
-            : "You can change this later.";
-
   return (
     <div>
       <StepHeader
@@ -558,8 +527,8 @@ function WorkspaceStep({
 
       <IdentityRow user={user} />
 
-      <div className="mt-6 flex flex-col gap-5">
-        <Field label="Company name">
+      <div className="mt-6">
+        <Field label="Company name" hint="You can change this later in workspace settings.">
           <input
             className={inputClass}
             value={name}
@@ -568,42 +537,6 @@ function WorkspaceStep({
             autoFocus
           />
         </Field>
-        <label className="flex flex-col gap-1.5">
-          <span className="text-[12px] font-medium text-ink">Workspace URL</span>
-          <div
-            className={`flex items-stretch overflow-hidden rounded-lg border bg-surface focus-within:ring-2 focus-within:ring-ink/10 ${
-              slugStatus === "taken"
-                ? "border-danger-border focus-within:border-danger"
-                : "border-border focus-within:border-ink/40"
-            }`}
-          >
-            <span className="flex items-center bg-surface-muted px-3 text-[13px] text-ink-subtle">
-              opencompany.chat/
-            </span>
-            <input
-              className="w-full bg-transparent px-2.5 py-2 text-[14px] text-ink outline-none placeholder:text-ink-subtle"
-              value={slug}
-              onChange={(e) => onSlug(e.target.value)}
-              placeholder="acme"
-            />
-            {slugStatus === "available" && slug.length > 0 && (
-              <span className="flex items-center pr-2.5 text-success">
-                <Check size={15} strokeWidth={2.4} />
-              </span>
-            )}
-          </div>
-          <span
-            className={`text-[11.5px] leading-4 ${
-              slugStatus === "taken"
-                ? "text-danger"
-                : slugStatus === "available"
-                  ? "text-success"
-                  : "text-ink-subtle"
-            }`}
-          >
-            {slugHint}
-          </span>
-        </label>
       </div>
     </div>
   );
@@ -720,7 +653,7 @@ function FinishStep({
               ? `${workspaceName} is ready.`
               : `Your ${wiki ? "Wiki" : "brain"} is ready.`}{" "}
             {showReferral
-              ? "You can connect sources or import company context anytime from your Wiki."
+              ? "You can connect more plugins or import company context anytime from Settings."
               : `You can start exploring the company ${wiki ? "Wiki" : "brain"} now.`}
           </p>
         </div>
@@ -755,16 +688,4 @@ function FinishStep({
       )}
     </div>
   );
-}
-
-// ---------------------------------------------------------------------------
-
-function slugify(value: string) {
-  return value
-    .toLowerCase()
-    .trim()
-    .replace(/'s workspace$/, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 40);
 }

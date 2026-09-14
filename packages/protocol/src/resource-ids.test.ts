@@ -18,8 +18,7 @@ describe("public resource IDs", () => {
       workspaceId,
     );
     expect(
-      SaveOnboardingWorkspaceBodySchema.parse({ workspaceId, name: "Example", slug: "example" })
-        .workspaceId,
+      SaveOnboardingWorkspaceBodySchema.parse({ workspaceId, name: "Example" }).workspaceId,
     ).toBe(workspaceId);
   });
 
@@ -39,11 +38,7 @@ describe("public resource IDs", () => {
         false,
       );
       expect(
-        SaveOnboardingWorkspaceBodySchema.safeParse({
-          workspaceId,
-          name: "Example",
-          slug: "example",
-        }).success,
+        SaveOnboardingWorkspaceBodySchema.safeParse({ workspaceId, name: "Example" }).success,
       ).toBe(false);
     },
   );

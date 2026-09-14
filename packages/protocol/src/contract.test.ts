@@ -231,7 +231,6 @@ describe("v1 protocol contract", () => {
       "/v1/workspaces",
       "/v1/workspaces/{workspaceId}/switch",
       "/v1/onboarding",
-      "/v1/onboarding/workspace-slug/check",
       "/v1/onboarding/profile",
       "/v1/onboarding/workspace",
       "/v1/onboarding/complete",
