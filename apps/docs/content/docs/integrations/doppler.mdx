@@ -1,0 +1,54 @@
+---
+title: Doppler
+description: Run your existing Doppler development scripts in coding sandboxes.
+---
+
+Doppler is installed in new coding sandboxes. Connect the Doppler plugin to authenticate the CLI
+with your own account in Codex and Claude Code sessions.
+
+## Install and connect
+
+1. Open **Settings → Plugins → Doppler** and select **Install**.
+2. Select **Connect Doppler**.
+3. Open the Doppler sign-in page and enter the displayed authorization code.
+4. Authorize your account in Doppler. The connection updates automatically when sign-in finishes.
+
+The connection belongs to you within the workspace. Other teammates connect their own accounts.
+Agents receive your account's Doppler permissions, including secret writes where permitted.
+Choose an account with access to the development projects you want agents to use.
+
+## Run your repository
+
+Keep your existing Doppler YAML and package scripts. For each new worktree, follow the repository's
+instructions and run:
+
+```sh
+doppler setup --no-interactive
+pnpm i
+pnpm dev
+```
+
+Doppler's setup records project/config selections for each directory. Existing scripts that use
+`doppler run -- ...` then inject the correct secrets into the application process. A new worktree
+needs its own setup because its directory paths differ.
+
+The plugin includes a skill that guides agents to inject secrets directly into commands and avoid
+printing values or credentials. Secret changes require an explicit request and an exact target.
+There is no secrets MCP server; MCP tool permission switches do not restrict terminal commands.
+
+## Reconnect and disconnect
+
+Use **Reconnect** if your login was revoked or no longer works. A pending sign-in can be cancelled;
+expired codes require a new attempt.
+
+**Disconnect**, disabling, or removing the plugin prevents managed authentication from being
+restored before subsequent agent turns. Sandboxes remove the managed CLI configuration and cached
+fallback secrets when they next reconcile access. Already running applications may retain injected
+environment variables. Use Doppler's own access controls to revoke provider access immediately.
+
+An existing sandbox installs the pinned CLI when it prepares a connected Doppler plugin. New
+sandboxes already contain it. Connecting Doppler supplies secrets access; access to a database or
+other service also depends on that service's credentials and network connectivity.
+
+See [Doppler's CLI guide](https://docs.doppler.com/docs/cli) for commands and
+[directory setup](https://docs.doppler.com/docs/secrets-setup-guide) for configuration precedence.

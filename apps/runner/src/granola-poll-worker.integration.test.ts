@@ -22,7 +22,7 @@ describe("Granola polling through the durable workflow event inbox", () => {
   beforeAll(async () => {
     await database.exec(`
       CREATE SCHEMA goat;
-      CREATE TABLE goat.users (workos_user_id text PRIMARY KEY, task_spawning_enabled boolean, onboarded_at timestamptz);
+      CREATE TABLE goat.users (workos_user_id text PRIMARY KEY, onboarded_at timestamptz);
       CREATE TABLE goat.workspace_members (workspace_id text, user_workos_id text);
       CREATE TABLE goat.integrations (id text PRIMARY KEY, provider text, workspace_id text, user_workos_id text, status text, external_id text);
       CREATE TABLE goat.plugins (workspace_id text, owner_user_id text, name text, status text, archived_at timestamptz, events jsonb, event_modes jsonb);
@@ -54,7 +54,7 @@ describe("Granola polling through the durable workflow event inbox", () => {
     await database.exec(`
       TRUNCATE goat.workflow_event_runs, goat.tasks, goat.workflows, goat.plugins, goat.integrations,
         goat.workspace_members, goat.users, goat.granola_sync_state, goat.brain_sources CASCADE;
-      INSERT INTO goat.users VALUES ('user_1', true, now());
+      INSERT INTO goat.users VALUES ('user_1', now());
       INSERT INTO goat.workspace_members VALUES ('workspace_1', 'user_1');
       INSERT INTO goat.integrations VALUES
         ('connection_1', 'granola', NULL, 'user_1', 'connected', 'granola:user_1'),

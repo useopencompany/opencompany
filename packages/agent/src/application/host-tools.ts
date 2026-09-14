@@ -223,6 +223,11 @@ export type ChatHostToolServiceDependencies = {
     /** Stable per-tool-call key, e.g. `agent-wiki:<turnId>:<toolCallId>`. */
     idempotencyKey: string;
   }) => Promise<unknown>;
+  postSlackMessage?: (input: {
+    runId: string;
+    actorId: string;
+    post: { channel: string; text: string; messageKey: string };
+  }) => Promise<unknown>;
   writeArtifact?: (input: {
     context: ChatHostContext;
     runId: string;
@@ -535,6 +540,15 @@ async function executeOperation(
         // Stable execution identity: same (turn, tool call) → same key on retry;
         // two intentional wiki calls in one turn get different keys.
         idempotencyKey: `agent-wiki:${command.runId}:${command.toolCallId ?? command.sessionId}`,
+      });
+    }
+    case "post_slack_message": {
+      if (!context.taskConversation || !dependencies.postSlackMessage)
+        throw new Error("Slack Channel posting is only available in workflows.");
+      return dependencies.postSlackMessage({
+        runId: command.runId,
+        actorId: context.actorId,
+        post: command.input as { channel: string; text: string; messageKey: string },
       });
     }
     case "write_artifact": {

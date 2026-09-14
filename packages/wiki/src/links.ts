@@ -2,7 +2,8 @@
 // Grammar:
 //   [[path/to/page]]             — link to another wiki page, by path
 //   [[path/to/page|Label]]       — same, with display label
-//   [[source:linear:ENG-123]]    — reference to an artifact in another tool
+//   [[source:linear:issue:ENG-123]] — pointer at an artifact in another tool
+//                                  (grammar per provider lives in ./sources)
 // Links inside markdown code fences, indented code, and inline backtick spans
 // are ignored. The code-range scanner is carried over verbatim from the brain
 // implementation (which this package replaces) — it is the part of the grammar

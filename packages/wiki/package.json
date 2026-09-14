@@ -12,6 +12,10 @@
       "types": "./src/schema.ts",
       "default": "./src/schema.ts"
     },
+    "./sources": {
+      "types": "./src/sources.ts",
+      "default": "./src/sources.ts"
+    },
     "./links": {
       "types": "./src/links.ts",
       "default": "./src/links.ts"

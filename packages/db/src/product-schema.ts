@@ -760,7 +760,6 @@ export const users = productSchema.table(
     avatarUrl: text("avatar_url"),
     timezone: text("timezone").notNull().default("UTC"),
     botsEnabled: boolean("bots_enabled").notNull().default(false),
-    taskSpawningEnabled: boolean("task_spawning_enabled").notNull().default(false),
     autoModelRoutingEnabled: boolean("auto_model_routing_enabled").notNull().default(false),
     chatCapabilitiesBetaEnabled: boolean("chat_capabilities_beta_enabled").notNull().default(false),
     reviewInboxEnabled: boolean("review_inbox_enabled").notNull().default(false),
@@ -6241,6 +6240,81 @@ export const infisicalAuthFlows = productSchema.table(
   }),
 );
 
+export type DopplerConnectionStatus = "connected" | "needs_reauth" | "disconnected";
+export type DopplerAuthFlowStatus = "pending" | "link_ready" | "completed" | "failed" | "expired";
+
+export const dopplerConnections = productSchema.table(
+  "doppler_connections",
+  {
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    ownerUserId: text("owner_user_id").notNull(),
+    encryptedAuthBundle:
+      jsonb("encrypted_auth_bundle").$type<IntegrationCredentialEncryptedPayload>(),
+    encryptionKeyVersion: integer("encryption_key_version"),
+    credentialGeneration: uuid("credential_generation").notNull().defaultRandom(),
+    status: text("status").$type<DopplerConnectionStatus>().notNull().default("disconnected"),
+    statusReason: text("status_reason"),
+    accountName: text("account_name"),
+    cliVersion: text("cli_version"),
+    bundleFormatVersion: integer("bundle_format_version"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    connectedByWorkosId: text("connected_by_workos_id").references(() => users.workosUserId, {
+      onDelete: "set null",
+    }),
+    lastValidatedAt: timestamp("last_validated_at", { withTimezone: true }),
+    lastRotatedAt: timestamp("last_rotated_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.workspaceId, table.ownerUserId] }),
+    statusIdx: index("doppler_connections_status_idx").on(table.status),
+    connectedByIdx: index("doppler_connections_connected_by_idx").on(table.connectedByWorkosId),
+    statusCheck: check(
+      "doppler_connections_status_check",
+      sql`${table.status} IN ('connected', 'needs_reauth', 'disconnected')`,
+    ),
+    credentialCheck: check(
+      "doppler_connections_credential_check",
+      sql`(${table.status} = 'disconnected' AND ${table.encryptedAuthBundle} IS NULL AND ${table.encryptionKeyVersion} IS NULL) OR (${table.status} IN ('connected', 'needs_reauth') AND ${table.encryptedAuthBundle} IS NOT NULL AND ${table.encryptionKeyVersion} IS NOT NULL)`,
+    ),
+  }),
+);
+
+export const dopplerAuthFlows = productSchema.table(
+  "doppler_auth_flows",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    requestedByWorkosId: text("requested_by_workos_id").references(() => users.workosUserId, {
+      onDelete: "set null",
+    }),
+    sandboxId: text("sandbox_id").notNull(),
+    loginUrl: text("login_url"),
+    userCode: text("user_code"),
+    status: text("status").$type<DopplerAuthFlowStatus>().notNull().default("pending"),
+    statusReason: text("status_reason"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceStatusIdx: index("doppler_auth_flows_workspace_status_idx").on(
+      table.workspaceId,
+      table.status,
+    ),
+    expiresAtIdx: index("doppler_auth_flows_expires_at_idx").on(table.expiresAt),
+    statusCheck: check(
+      "doppler_auth_flows_status_check",
+      sql`${table.status} IN ('pending', 'link_ready', 'completed', 'failed', 'expired')`,
+    ),
+  }),
+);
+
 // Claude Code subscription auth: one long-lived setup-token per user, pasted in
 // settings (no device flow exists for Claude Code). Strictly per-user — sharing a
 // subscription credential across users is prohibited by Anthropic's terms.
@@ -7281,3 +7355,101 @@ export type PluginFile = typeof pluginFiles.$inferSelect;
 export type PluginSkill = typeof pluginSkills.$inferSelect;
 export type WorkspacePluginData = typeof workspacePluginData.$inferSelect;
 export type RepoConfig = typeof repoConfigs.$inferSelect;
+
+// External sources wake a stable Conversation; Runs remain the existing fenced execution unit.
+export const sessionSubscriptions = productSchema.table(
+  "session_subscriptions",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => chatSessions.id, { onDelete: "cascade" }),
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => integrations.id, { onDelete: "cascade" }),
+    source: text("source").notNull(),
+    sourceKey: jsonb("source_key").$type<Record<string, string>>().notNull(),
+    policy: jsonb("policy")
+      .notNull()
+      .default({
+        acceptedEvents: ["human_text_reply"],
+        authorization: "slack_thread_participant",
+        queue: "serial",
+      }),
+    status: text("status").notNull().default("waiting"),
+    nextSequence: bigint("next_sequence", { mode: "number" }).notNull().default(0),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("session_subscriptions_source_idx").on(
+      table.workspaceId,
+      table.source,
+      table.sourceKey,
+    ),
+    index("session_subscriptions_session_idx").on(table.sessionId),
+    check("session_subscriptions_status_check", sql`${table.status} IN ('waiting', 'closed')`),
+  ],
+);
+
+export const subscriptionEvents = productSchema.table(
+  "subscription_events",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    subscriptionId: text("subscription_id")
+      .notNull()
+      .references(() => sessionSubscriptions.id, { onDelete: "cascade" }),
+    eventId: text("event_id").notNull(),
+    sequence: bigint("sequence", { mode: "number" }).notNull(),
+    payload: jsonb("payload").notNull(),
+    status: text("status").notNull().default("pending"),
+    runId: text("run_id").references(() => codexChatTurns.id),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("subscription_events_event_idx").on(table.subscriptionId, table.eventId),
+    uniqueIndex("subscription_events_sequence_idx").on(table.subscriptionId, table.sequence),
+    index("subscription_events_pending_idx").on(table.status, table.id),
+    check(
+      "subscription_events_status_check",
+      sql`${table.status} IN ('pending', 'running', 'delivering', 'done', 'ignored')`,
+    ),
+  ],
+);
+
+export const channelDeliveries = productSchema.table(
+  "channel_deliveries",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => chatSessions.id, { onDelete: "cascade" }),
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => integrations.id, { onDelete: "cascade" }),
+    teamId: text("team_id").notNull(),
+    channelId: text("channel_id").notNull(),
+    threadTs: text("thread_ts"),
+    text: text("text").notNull(),
+    status: text("status").notNull().default("pending"),
+    messageTs: text("message_ts"),
+    leaseId: text("lease_id"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("channel_deliveries_pending_idx").on(table.status, table.createdAt),
+    check(
+      "channel_deliveries_status_check",
+      sql`${table.status} IN ('pending', 'sending', 'sent', 'uncertain', 'failed', 'canceled')`,
+    ),
+  ],
+);

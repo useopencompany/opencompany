@@ -13,7 +13,11 @@ export type ChatHostToolOperation =
   | "browser_end_profile"
   | "browser"
   | "wiki"
-  | "write_artifact";
+  | "write_artifact"
+  // Gateway operation names are a runner/web wire contract, so this one keeps its
+  // original value while the model-facing tool is SLACK_BOT_TOOL_NAME. Renaming
+  // it would break every in-flight run across a partial deploy.
+  | "post_slack_message";
 
 export type ChatHostToolGatewayRequest = {
   operation: ChatHostToolOperation;

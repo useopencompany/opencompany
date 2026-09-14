@@ -2,9 +2,7 @@ import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { getAppUrl } from "../app-url";
 import { slackApiRequest } from "./slack";
 
-// The Slack answer bot is a second, separate Slack app from the user-token
-// ingestion app: it has a bot presence, receives app_mention events, and
-// posts answers back into channels. Installed once per workspace by an admin.
+// Workspace-owned Slack Channel installation, separate from personal Slack OAuth.
 
 export type SlackBotStatePayload = {
   userWorkosId: string;
@@ -30,33 +28,21 @@ const SLACK_BOT_ENVS = [
   "OPENCOMPANY_SLACK_BOT_STATE_SECRET",
 ] as const;
 
-// Bot scopes: receive mentions and channel/DM messages, reply, list channels
-// for the picker, read thread context, react for status acks, and resolve the
-// asking Slack user's email for goat-identity mapping.
+// Public workflow posts, delivery reconciliation, and bot-message filtering.
 export const SLACK_BOT_SCOPES = [
-  "app_mentions:read",
   "chat:write",
   "channels:read",
-  "groups:read",
   "channels:history",
-  "groups:history",
-  "im:history",
-  "reactions:write",
   "users:read",
-  "users:read.email",
 ] as const;
 
-// Installs made before a scope was added keep working for mentions; the
-// settings UI surfaces a reconnect banner until the granted set catches up.
+// Settings surfaces missing grants as a reconnect requirement.
 export function slackBotScopesSatisfied(grantedScopes: readonly string[]): boolean {
   const granted = new Set(grantedScopes);
   return SLACK_BOT_SCOPES.every((scope) => granted.has(scope));
 }
 
-export function slackBotHasScope(
-  grantedScopes: readonly string[],
-  scope: (typeof SLACK_BOT_SCOPES)[number],
-): boolean {
+export function slackBotHasScope(grantedScopes: readonly string[], scope: string): boolean {
   return grantedScopes.includes(scope);
 }
 

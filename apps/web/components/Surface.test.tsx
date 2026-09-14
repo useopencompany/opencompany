@@ -492,7 +492,7 @@ describe("Surface chat streaming UI", () => {
 
     render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} codexConnected />);
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "Hello opencompany");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
@@ -773,11 +773,11 @@ describe("Surface chat streaming UI", () => {
   });
 
   it.each([
-    { decision: "Always allow", save: "success", expectedIds: [0, 1] },
+    { decision: "Always allow this tool", save: "success", expectedIds: [0, 1] },
     { decision: "Allow once", save: "success", expectedIds: [0] },
     { decision: "Deny", save: "success", expectedIds: [0] },
-    { decision: "Always allow", save: "failure", expectedIds: [0] },
-    { decision: "Always allow", save: "rejected", expectedIds: [0] },
+    { decision: "Always allow this tool", save: "failure", expectedIds: [0] },
+    { decision: "Always allow this tool", save: "rejected", expectedIds: [0] },
   ])(
     "resolves pending action approvals for $decision with permission save $save",
     async ({ decision, save, expectedIds }) => {
@@ -856,7 +856,7 @@ describe("Surface chat streaming UI", () => {
           approved: decision !== "Deny",
         });
       }
-      if (decision === "Always allow") {
+      if (decision === "Always allow this tool") {
         expect(savePermission).toHaveBeenCalledExactlyOnceWith(action);
         expect(savePermission.mock.invocationCallOrder[0]).toBeLessThan(
           resolveApproval.mock.invocationCallOrder[0]!,
@@ -913,7 +913,7 @@ describe("Surface chat streaming UI", () => {
       </>,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "& Research Q3");
     expect(screen.getByTestId("background-chat-hint")).toHaveTextContent(
       "Sending starts this as a new chat in the background.",
@@ -1016,7 +1016,7 @@ describe("Surface chat streaming UI", () => {
       </>,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "& Research Q3");
     await user.keyboard("{Enter}");
 
@@ -1030,6 +1030,44 @@ describe("Surface chat streaming UI", () => {
       `${body.clientConversationId}:Research Q3`,
     );
     expect(textarea).toHaveValue("Keep this new draft");
+  });
+
+  it("marks the composer as sandboxed only while a cloud coding agent is selected", async () => {
+    const { unmount } = render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={null}
+        userWorkosId="user_1"
+        workspaceId="workspace_1"
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "Runs in an isolated cloud sandbox" }),
+    ).not.toBeInTheDocument();
+    unmount();
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "conversation_codex_sandbox",
+          title: "Codex",
+          model: CODEX_CHAT_DEFAULT_MODEL_ID,
+          engine: "codex",
+          messages: [],
+        }}
+        codexConnected
+        userWorkosId="user_1"
+        workspaceId="workspace_1"
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Runs in an isolated cloud sandbox" }),
+    ).toBeInTheDocument();
   });
 
   it("starts a bare ampersand message from Home defaults instead of the active Codex runtime", async () => {
@@ -1105,7 +1143,6 @@ describe("Surface chat streaming UI", () => {
         }}
         codexConnected
         userWorkosId="user_1"
-        taskSpawningEnabled
       />,
     );
 
@@ -1190,7 +1227,6 @@ describe("Surface chat streaming UI", () => {
         workspaceId="workspace_1"
         codexConnected
         userWorkosId="user_1"
-        taskSpawningEnabled
       />,
     );
 
@@ -1243,7 +1279,6 @@ describe("Surface chat streaming UI", () => {
             },
           ],
         }}
-        taskSpawningEnabled
       />,
     );
 
@@ -1279,7 +1314,7 @@ describe("Surface chat streaming UI", () => {
       <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} userWorkosId="user_1" />,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "Draft before mic");
     await user.click(screen.getByRole("button", { name: "Start voice dictation" }));
 
@@ -1304,7 +1339,7 @@ describe("Surface chat streaming UI", () => {
       <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} userWorkosId="user_1" />,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "Please");
     await user.click(screen.getByRole("button", { name: "Start voice dictation" }));
 
@@ -1622,7 +1657,6 @@ describe("Surface chat streaming UI", () => {
           status: "running",
           startedAtMs: Date.now(),
         }}
-        taskSpawningEnabled
       />,
     );
 
@@ -1796,7 +1830,10 @@ describe("Surface chat streaming UI", () => {
       </>,
     );
 
-    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Start now");
+    await user.type(
+      screen.getByPlaceholderText("Ask a question or describe a task..."),
+      "Start now",
+    );
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() => expect(chatMock.preparedRequestBodies).toHaveLength(1));
@@ -1825,7 +1862,7 @@ describe("Surface chat streaming UI", () => {
     const user = userEvent.setup();
     render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "Start now");
     await user.keyboard("{Shift>}{Enter}{/Shift}");
 
@@ -1851,7 +1888,10 @@ describe("Surface chat streaming UI", () => {
       </>,
     );
 
-    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Try again");
+    await user.type(
+      screen.getByPlaceholderText("Ask a question or describe a task..."),
+      "Try again",
+    );
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() => expect(screen.getByPlaceholderText("Reply...")).toHaveValue("Try again"));
@@ -1903,7 +1943,7 @@ describe("Surface chat streaming UI", () => {
     await user.type(screen.getByPlaceholderText("Reply..."), "Unsent draft");
     act(() => window.dispatchEvent(new Event(HOME_NAVIGATION_EVENT)));
 
-    const composer = screen.getByPlaceholderText("Ask opencompany anything...");
+    const composer = screen.getByPlaceholderText("Ask a question or describe a task...");
     expect(composer).toHaveValue("");
     expect(composer).toHaveFocus();
     expect(screen.getByRole("heading", { name: "What should we build next?" })).toBeInTheDocument();
@@ -1913,7 +1953,7 @@ describe("Surface chat streaming UI", () => {
     "restores the composer after a reload for %j",
     (initialChat) => {
       const props = { tasks: [], defaultModel: DEFAULT_MODEL, initialChat };
-      const placeholder = initialChat ? "Reply..." : "Ask opencompany anything...";
+      const placeholder = initialChat ? "Reply..." : "Ask a question or describe a task...";
       const first = render(
         <StrictMode>
           <Surface {...props} />
@@ -1939,7 +1979,7 @@ describe("Surface chat streaming UI", () => {
     const props = { tasks: [], defaultModel: DEFAULT_MODEL };
     const chat = { id: "chat_1", title: "Chat", model: DEFAULT_MODEL, messages: [] };
     const view = render(<Surface {...props} initialChat={null} />);
-    fireEvent.change(screen.getByPlaceholderText("Ask opencompany anything..."), {
+    fireEvent.change(screen.getByPlaceholderText("Ask a question or describe a task..."), {
       target: { value: "Home draft" },
     });
     view.rerender(<Surface {...props} initialChat={chat} />);
@@ -1949,7 +1989,9 @@ describe("Surface chat streaming UI", () => {
       target: { value: "Session draft" },
     });
     act(() => window.dispatchEvent(new Event(HOME_NAVIGATION_EVENT)));
-    expect(screen.getByPlaceholderText("Ask opencompany anything...")).toHaveValue("Home draft");
+    expect(screen.getByPlaceholderText("Ask a question or describe a task...")).toHaveValue(
+      "Home draft",
+    );
     view.unmount();
     render(<Surface {...props} initialChat={chat} />);
     expect(screen.getByPlaceholderText("Reply...")).toHaveValue("Session draft");
@@ -1977,7 +2019,7 @@ describe("Surface chat streaming UI", () => {
     chatMock.sendError = new Error("Send failed");
     const props = { tasks: [], defaultModel: DEFAULT_MODEL, initialChat: null };
     const view = render(<Surface {...props} />);
-    fireEvent.change(screen.getByPlaceholderText("Ask opencompany anything..."), {
+    fireEvent.change(screen.getByPlaceholderText("Ask a question or describe a task..."), {
       target: { value: "Try this message" },
     });
     await userEvent.setup().click(screen.getByRole("button", { name: "Send message" }));
@@ -1989,13 +2031,15 @@ describe("Surface chat streaming UI", () => {
     });
     view.unmount();
     render(<Surface {...props} />);
-    expect(screen.getByPlaceholderText("Ask opencompany anything...")).toHaveValue("Edited retry");
+    expect(screen.getByPlaceholderText("Ask a question or describe a task...")).toHaveValue(
+      "Edited retry",
+    );
   });
 
   it("moves a follow-up draft to the accepted session without leaving it on Home", async () => {
     const props = { tasks: [], defaultModel: DEFAULT_MODEL };
     const view = render(<Surface {...props} initialChat={null} />);
-    fireEvent.change(screen.getByPlaceholderText("Ask opencompany anything..."), {
+    fireEvent.change(screen.getByPlaceholderText("Ask a question or describe a task..."), {
       target: { value: "Start a chat" },
     });
     await userEvent.setup().click(screen.getByRole("button", { name: "Send message" }));
@@ -2017,21 +2061,23 @@ describe("Surface chat streaming UI", () => {
     expect(screen.getByPlaceholderText("Reply...")).toHaveValue("Follow up");
     chatView.unmount();
     render(<Surface {...props} initialChat={null} />);
-    expect(screen.getByPlaceholderText("Ask opencompany anything...")).toHaveValue("");
+    expect(screen.getByPlaceholderText("Ask a question or describe a task...")).toHaveValue("");
   });
 
   it("isolates drafts by user and workspace", () => {
     const props = { tasks: [], defaultModel: DEFAULT_MODEL, initialChat: null };
     const view = render(<Surface {...props} userWorkosId="user_1" workspaceId="workspace_1" />);
-    fireEvent.change(screen.getByPlaceholderText("Ask opencompany anything..."), {
+    fireEvent.change(screen.getByPlaceholderText("Ask a question or describe a task..."), {
       target: { value: "Private draft" },
     });
     view.rerender(<Surface {...props} userWorkosId="user_2" workspaceId="workspace_1" />);
-    expect(screen.getByPlaceholderText("Ask opencompany anything...")).toHaveValue("");
+    expect(screen.getByPlaceholderText("Ask a question or describe a task...")).toHaveValue("");
     view.rerender(<Surface {...props} userWorkosId="user_1" workspaceId="workspace_2" />);
-    expect(screen.getByPlaceholderText("Ask opencompany anything...")).toHaveValue("");
+    expect(screen.getByPlaceholderText("Ask a question or describe a task...")).toHaveValue("");
     view.rerender(<Surface {...props} userWorkosId="user_1" workspaceId="workspace_1" />);
-    expect(screen.getByPlaceholderText("Ask opencompany anything...")).toHaveValue("Private draft");
+    expect(screen.getByPlaceholderText("Ask a question or describe a task...")).toHaveValue(
+      "Private draft",
+    );
   });
 
   it("restores selected mentions with a saved draft", async () => {
@@ -2160,14 +2206,14 @@ describe("Surface chat streaming UI", () => {
     const user = userEvent.setup();
     render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
-    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Start");
+    await user.type(screen.getByPlaceholderText("Ask a question or describe a task..."), "Start");
     await user.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(chatMock.preparedRequestBodies).toHaveLength(1));
     const request = chatMock.preparedRequestBodies[0] as { newSessionId: string };
     act(() => window.dispatchEvent(new Event(HOME_NAVIGATION_EVENT)));
     acceptHeadlessConversation(request.newSessionId);
 
-    expect(screen.getByPlaceholderText("Ask opencompany anything...")).toHaveFocus();
+    expect(screen.getByPlaceholderText("Ask a question or describe a task...")).toHaveFocus();
     expect(screen.getByRole("heading", { name: "What should we build next?" })).toBeInTheDocument();
     expect(historyMock.replaceState).not.toHaveBeenCalled();
     expect(routerMock.replace).not.toHaveBeenCalled();
@@ -2215,7 +2261,7 @@ describe("Surface chat streaming UI", () => {
     const user = userEvent.setup();
     render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "@codex inspect this long prompt");
     expect(textarea).toHaveClass("text-ink");
     expect(textarea).not.toHaveClass("text-transparent");
@@ -2246,7 +2292,7 @@ describe("Surface chat streaming UI", () => {
     expect(screen.queryByText("Local Codex")).not.toBeInTheDocument();
 
     await user.click(screen.getByText("Qwen 3.8 Max"));
-    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Compare");
+    await user.type(screen.getByPlaceholderText("Ask a question or describe a task..."), "Compare");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(chatMock.preparedRequestBodies[0]).toMatchObject({
@@ -2271,10 +2317,16 @@ describe("Surface chat streaming UI", () => {
         autoModelRoutingEnabled
       />,
     );
+    // Auto leads the single model list rather than sitting in a "Routing" section of its own.
+    expect(screen.queryByText("Routing")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("option")[0]).toHaveTextContent("Auto");
     await user.click(screen.getByText("Picks once from your first message"));
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Auto");
 
-    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "What is 2 + 2?");
+    await user.type(
+      screen.getByPlaceholderText("Ask a question or describe a task..."),
+      "What is 2 + 2?",
+    );
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(chatMock.preparedRequestBodies[0]).toMatchObject({ model: "auto" });
@@ -2285,6 +2337,37 @@ describe("Surface chat streaming UI", () => {
       expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Kimi K2.6"),
     );
     expect(screen.getByRole("button", { name: "Model" })).toBeDisabled();
+  });
+
+  it("marks the GPT models a shared ChatGPT subscription covers as included", async () => {
+    const user = userEvent.setup();
+
+    const { rerender } = render(
+      <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />,
+    );
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    expect(screen.queryByText("Included")).not.toBeInTheDocument();
+
+    rerender(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={null}
+        sharedModelAccessEnabled
+      />,
+    );
+
+    expect(screen.getAllByText("Included")).toHaveLength(2);
+    expect(screen.getByText("GPT 5.6 Sol").closest('[role="option"]')).toHaveTextContent(
+      "Included",
+    );
+    expect(screen.getByText("GPT 5.6 Terra").closest('[role="option"]')).toHaveTextContent(
+      "Included",
+    );
+    // Metered models stay unlabelled, including the other OpenAI entry.
+    expect(screen.getByText("GPT 5.5").closest('[role="option"]')).not.toHaveTextContent(
+      "Included",
+    );
   });
 
   it("remembers the last main chat model when returning Home and remounting", async () => {
@@ -2299,7 +2382,10 @@ describe("Surface chat streaming UI", () => {
 
     await user.click(screen.getByRole("button", { name: "Model" }));
     await user.click(screen.getByText("Claude Sonnet 5"));
-    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Use Sonnet");
+    await user.type(
+      screen.getByPlaceholderText("Ask a question or describe a task..."),
+      "Use Sonnet",
+    );
     await user.click(screen.getByRole("button", { name: "Send message" }));
     act(() => window.dispatchEvent(new Event(HOME_NAVIGATION_EVENT)));
 
@@ -2319,7 +2405,10 @@ describe("Surface chat streaming UI", () => {
       <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} userWorkosId="user_1" />,
     );
 
-    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Start with Kimi");
+    await user.type(
+      screen.getByPlaceholderText("Ask a question or describe a task..."),
+      "Start with Kimi",
+    );
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     const modelPicker = screen.getByRole("button", { name: "Model" });
@@ -2528,7 +2617,10 @@ describe("Surface chat streaming UI", () => {
     await user.click(codexModelPicker);
     await user.click(screen.getByText("GPT 5.6 Terra"));
     expect(screen.getByRole("button", { name: "Codex model: GPT 5.6 Terra" })).toBeInTheDocument();
-    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Clone my repo");
+    await user.type(
+      screen.getByPlaceholderText("Ask a question or describe a task..."),
+      "Clone my repo",
+    );
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(chatMock.sendMessage).toHaveBeenCalledWith({ text: "Clone my repo" });
@@ -2631,7 +2723,7 @@ describe("Surface chat streaming UI", () => {
       screen.getByRole("button", { name: "Claude reasoning effort: High (click to cycle)" }),
     );
     await user.type(
-      screen.getByPlaceholderText("Ask opencompany anything..."),
+      screen.getByPlaceholderText("Ask a question or describe a task..."),
       "Inspect this repository",
     );
     await user.click(screen.getByRole("button", { name: "Send message" }));
@@ -2684,7 +2776,7 @@ describe("Surface chat streaming UI", () => {
     ).toBeInTheDocument();
 
     await user.type(
-      screen.getByPlaceholderText("Ask opencompany anything..."),
+      screen.getByPlaceholderText("Ask a question or describe a task..."),
       "Inspect this repository",
     );
     await user.click(screen.getByRole("button", { name: "Send message" }));
@@ -2736,7 +2828,7 @@ describe("Surface chat streaming UI", () => {
     await user.click(
       screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
     );
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "/coding");
     await user.click(await screen.findByRole("option", { name: /coding-work/i }));
     await user.type(textarea, "implement this");
@@ -2868,7 +2960,7 @@ describe("Surface chat streaming UI", () => {
     await user.type(screen.getByPlaceholderText("Objective"), "Fix the flaky tests");
     await user.type(screen.getByPlaceholderText("Token budget"), "200000");
     await user.type(
-      screen.getByPlaceholderText("Ask opencompany anything..."),
+      screen.getByPlaceholderText("Ask a question or describe a task..."),
       "Run the failing suite",
     );
     await user.click(screen.getByRole("button", { name: "Send message" }));
@@ -3309,7 +3401,7 @@ describe("Surface chat streaming UI", () => {
 
     render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} codexConnected />);
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "First message");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
@@ -3371,7 +3463,7 @@ describe("Surface chat streaming UI", () => {
       </>,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Kimi K3");
     await user.type(textarea, "@");
 
@@ -3442,7 +3534,7 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Kimi K3");
     await user.type(textarea, "@");
 
@@ -3534,7 +3626,6 @@ describe("Surface chat streaming UI", () => {
         }}
         workspaceId="workspace_1"
         userWorkosId="user_1"
-        taskSpawningEnabled
       />,
     );
 
@@ -3605,7 +3696,6 @@ describe("Surface chat streaming UI", () => {
           userWorkosId="user_1"
           workspaceId="workspace_1"
           codexConnected
-          taskSpawningEnabled
         />,
       );
       if (quick) {
@@ -3693,7 +3783,6 @@ describe("Surface chat streaming UI", () => {
         }}
         workspaceId="workspace_1"
         userWorkosId="user_1"
-        taskSpawningEnabled
       />,
     );
 
@@ -3777,7 +3866,6 @@ describe("Surface chat streaming UI", () => {
         workspaceId="workspace_1"
         codexConnected
         userWorkosId="user_1"
-        taskSpawningEnabled
       />,
     );
 
@@ -3834,7 +3922,6 @@ describe("Surface chat streaming UI", () => {
           messages: [],
         }}
         userWorkosId="user_1"
-        taskSpawningEnabled
       />,
     );
 
@@ -3863,44 +3950,12 @@ describe("Surface chat streaming UI", () => {
     expect(routerMock.refresh).toHaveBeenCalledTimes(1);
   });
 
-  it("does not load or offer workflow mentions when Tasks & Workflows is disabled", async () => {
-    const user = userEvent.setup();
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      return Response.json(
-        String(input) === "/api/workflows"
-          ? {
-              workflows: [
-                {
-                  id: "morning-test",
-                  name: "Morning Test",
-                  description: "Run the morning checks.",
-                },
-              ],
-            }
-          : {},
-      );
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    render(
-      <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} userWorkosId="user_1" />,
-    );
-
-    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "#morning");
-    await new Promise((resolve) => setTimeout(resolve, 120));
-
-    expect(knowledgeCommandMocks.listSkillCatalog).not.toHaveBeenCalled();
-    expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/workflows")).toBe(false);
-    expect(screen.queryByRole("option", { name: /Morning Test/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: /#task/i })).not.toBeInTheDocument();
-  });
-
   it("does not show Codex mention options when Codex is not connected", async () => {
     const user = userEvent.setup();
 
     render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "@");
 
     expect(screen.queryByRole("listbox", { name: "Mention menu" })).not.toBeInTheDocument();
@@ -3911,7 +3966,7 @@ describe("Surface chat streaming UI", () => {
 
     render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} codexConnected />);
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "@codex check repo access");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
@@ -3925,7 +3980,7 @@ describe("Surface chat streaming UI", () => {
 
     render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} codexConnected />);
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "@");
     await user.click(screen.getByRole("option", { name: /@codex/i }));
     await user.clear(textarea);
@@ -3956,7 +4011,7 @@ describe("Surface chat streaming UI", () => {
       <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} userWorkosId="user_1" />,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "/verification");
     const codingOption = await screen.findByRole("option", { name: /coding-work/i });
     await user.click(codingOption);
@@ -4003,7 +4058,7 @@ describe("Surface chat streaming UI", () => {
       <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} userWorkosId="user_1" />,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "/coding");
     await screen.findByRole("option", { name: /coding-work/i });
     await user.clear(textarea);
@@ -4031,7 +4086,7 @@ describe("Surface chat streaming UI", () => {
       <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} userWorkosId="user_1" />,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     const pastedText = "/product-feature use /add-integration-to-main-chat to add attio";
     fireEvent.paste(textarea, {
       clipboardData: {
@@ -4077,7 +4132,7 @@ describe("Surface chat streaming UI", () => {
       <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} userWorkosId="user_1" />,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "/coding");
     await waitFor(() => expect(catalogCalls).toBe(1));
     expect(screen.queryByRole("option", { name: /coding-work/i })).not.toBeInTheDocument();
@@ -4094,7 +4149,7 @@ describe("Surface chat streaming UI", () => {
     render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
     await user.type(
-      screen.getByPlaceholderText("Ask opencompany anything..."),
+      screen.getByPlaceholderText("Ask a question or describe a task..."),
       "Hello opencompany",
     );
     await user.click(screen.getByRole("button", { name: "Send message" }));
@@ -4106,7 +4161,6 @@ describe("Surface chat streaming UI", () => {
   it("opens home on the new chat prompt instead of activity lists", () => {
     render(
       <Surface
-        taskSpawningEnabled
         tasks={[taskView({ id: "task_1", name: "Run market report" })]}
         defaultModel={DEFAULT_MODEL}
         initialChat={null}
@@ -4156,7 +4210,7 @@ describe("Surface chat streaming UI", () => {
       screen.getByRole("heading", { name: "What should we build in product?" }),
     ).toBeInTheDocument();
     expect(screen.queryByText("Older chat")).not.toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Ask opencompany anything...")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Ask a question or describe a task...")).toBeInTheDocument();
   });
 
   it("keeps the plain home prompt when a project name is missing", () => {
@@ -4469,7 +4523,6 @@ describe("Surface chat streaming UI", () => {
         workspaceId="workspace_1"
         codexConnected
         userWorkosId="user_1"
-        taskSpawningEnabled
       />,
     );
 
@@ -4655,13 +4708,7 @@ describe("Surface chat streaming UI", () => {
     );
 
     render(
-      <Surface
-        taskSpawningEnabled
-        tasks={[]}
-        allTasks={allTasks}
-        defaultModel={DEFAULT_MODEL}
-        initialChat={null}
-      />,
+      <Surface tasks={[]} allTasks={allTasks} defaultModel={DEFAULT_MODEL} initialChat={null} />,
     );
 
     await user.keyboard("{Meta>}k{/Meta}");
@@ -4740,7 +4787,6 @@ describe("Surface chat streaming UI", () => {
 
     render(
       <Surface
-        taskSpawningEnabled
         tasks={[]}
         allTasks={[
           taskView({
@@ -4857,7 +4903,7 @@ describe("Surface chat streaming UI", () => {
 
     render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
-    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Start");
+    await user.type(screen.getByPlaceholderText("Ask a question or describe a task..."), "Start");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() => expect(chatMock.preparedRequestBodies).toHaveLength(1));
@@ -4879,7 +4925,7 @@ describe("Surface chat streaming UI", () => {
       <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />,
     );
 
-    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Start");
+    await user.type(screen.getByPlaceholderText("Ask a question or describe a task..."), "Start");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     pathnameMock.value = "/brain";
@@ -4995,7 +5041,7 @@ describe("Surface chat streaming UI", () => {
 
     render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     expect(textarea).toBeEnabled();
 
     await user.type(textarea, "My next message");
@@ -5512,7 +5558,6 @@ describe("Surface chat streaming UI", () => {
   it("renders current task status from task state instead of start_task output", () => {
     render(
       <Surface
-        taskSpawningEnabled
         tasks={[
           taskView({
             id: "task_1",
@@ -5564,7 +5609,6 @@ describe("Surface chat streaming UI", () => {
   it("renders a metadata-only task card from the task state lookup", () => {
     render(
       <Surface
-        taskSpawningEnabled
         tasks={[
           taskView({
             id: "task_1",
@@ -6046,7 +6090,9 @@ describe("Surface chat streaming UI", () => {
       await user.keyboard("{Escape}");
 
       await waitFor(() => expect(screen.getAllByPlaceholderText("Reply...")).toHaveLength(1));
-      expect(screen.getByPlaceholderText("Ask opencompany anything...")).toBeInTheDocument();
+      expect(
+        screen.getByPlaceholderText("Ask a question or describe a task..."),
+      ).toBeInTheDocument();
     });
 
     it("only lets the active pane consume a window-level file drop when two panes are mounted", async () => {
@@ -6119,7 +6165,10 @@ describe("Surface chat streaming UI", () => {
         />,
       );
 
-      await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Start now");
+      await user.type(
+        screen.getByPlaceholderText("Ask a question or describe a task..."),
+        "Start now",
+      );
       await user.click(screen.getByRole("button", { name: "Send message" }));
 
       await waitFor(() => expect(chatMock.preparedRequestBodies).toHaveLength(1));

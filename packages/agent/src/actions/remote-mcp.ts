@@ -188,6 +188,7 @@ export async function resolveRemoteMcpActions(
             capabilityId: classification.capability.id,
             label: classification.capability.label,
             integrationIds: [integrationId],
+            toolId: definition.name,
           }
         : undefined;
     return [

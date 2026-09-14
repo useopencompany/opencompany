@@ -440,10 +440,10 @@ describe("MessageBubble historical presentation details", () => {
     expect(screen.getByText("Run search public and private in Slack?")).toBeVisible();
     expect(screen.getByText("launch plan")).toBeVisible();
     expect(screen.getByRole("button", { name: "Allow once" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Always allow" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Always allow this tool" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Deny" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Allow once" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Always allow" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Always allow this tool" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Deny" })).toBeEnabled();
     expect(presentationMocks.load).toHaveBeenCalledOnce();
     expect(onActionApproval).not.toHaveBeenCalled();
@@ -459,7 +459,9 @@ describe("MessageBubble historical presentation details", () => {
     expect(screen.queryByTestId("chat-action-approval")).not.toBeInTheDocument();
     expect(screen.getByTestId("chat-tool-call-use_action")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Allow once" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Always allow" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Always allow this tool" }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Deny" })).not.toBeInTheDocument();
     expect(presentationMocks.load).toHaveBeenCalledOnce();
   });

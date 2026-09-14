@@ -15,6 +15,13 @@ import {
 } from "@opencompany/agent/application/persisted-action-gateway";
 import { executePersistedBrainCapture } from "@opencompany/agent/application/persisted-brain-capture";
 import { authorizePersistedExternalEngineToolCapability } from "@opencompany/agent/application/persisted-external-engine-capability";
+import { SLACK_BOT_TOOL_NAME } from "@opencompany/agent/chat-ui";
+import {
+  postWorkflowSlackMessage,
+  SLACK_CHANNEL_INPUT_SCHEMA,
+  SLACK_CHANNEL_TOOL_DESCRIPTION,
+  type SlackChannelPost,
+} from "@opencompany/agent/integrations/slack-channel";
 import { registerWikiTool } from "@opencompany/agent/mcp-server";
 import { executeWorkspaceSkillToolForActor } from "@opencompany/agent/skills";
 import {
@@ -179,6 +186,29 @@ export function registerAcpToolsMcpRoute(
                 env,
               });
             },
+          },
+        );
+      }
+      if (authorizedContext.taskConversation) {
+        server.registerTool(
+          SLACK_BOT_TOOL_NAME,
+          {
+            description: SLACK_CHANNEL_TOOL_DESCRIPTION,
+            inputSchema: mcpInputSchema(SLACK_CHANNEL_INPUT_SCHEMA),
+          },
+          async (args) => {
+            const current = await authorizeOperation();
+            if (!current?.taskConversation)
+              throw new Error("This workflow turn is no longer active.");
+            const result = await postWorkflowSlackMessage(
+              {
+                runId: capability.codexChatTurnId,
+                actorId: current.actorId,
+                post: args as SlackChannelPost,
+              },
+              (query) => getDb().execute(query),
+            );
+            return { content: [{ type: "text", text: JSON.stringify(result) }] };
           },
         );
       }

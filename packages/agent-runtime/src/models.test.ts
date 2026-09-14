@@ -11,6 +11,7 @@ import {
   getAgentModelRuntimeOptions,
   isClaudeCodeModelId,
   isCodexModelId,
+  isCodexSubscriptionModel,
   resolveAvailableAgentModelId,
 } from "./models";
 
@@ -57,6 +58,14 @@ describe("Codex model catalog", () => {
     expect(codexCliModelNameForModelId("openai/gpt-5.4")).toBe("gpt-5.4");
     expect(codexCliModelNameForModelId("openai/gpt-5.4-mini")).toBe("gpt-5.4-mini");
     expect(codexCliModelNameForModelId("openai/gpt-5.2-codex")).toBe("gpt-5.2-codex");
+  });
+
+  it("recognizes only the subscription-eligible model IDs", () => {
+    expect(isCodexSubscriptionModel("openai/gpt-6-astra")).toBe(false);
+    expect(isCodexSubscriptionModel("openai/gpt-5.6-sol")).toBe(true);
+    expect(isCodexSubscriptionModel("openai/gpt-5.6-terra")).toBe(true);
+    expect(isCodexSubscriptionModel("openai/gpt-5.6-luna")).toBe(false);
+    expect(isCodexSubscriptionModel("gpt-5.6-sol")).toBe(false);
   });
 
   it("has display metadata for every supported Codex model", () => {

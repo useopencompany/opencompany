@@ -200,7 +200,8 @@ describe("WorkflowEditor", () => {
   it("saves visibility changes and locks visibility for non-owners", async () => {
     const { rerender } = render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
 
-    fireEvent.change(screen.getByLabelText("Visibility"), { target: { value: "personal" } });
+    fireEvent.click(screen.getByRole("button", { name: "Visibility: Company" }));
+    fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
     await advanceAutosave();
     expect(workflowActionsMock.update).toHaveBeenLastCalledWith(
       "workflow_1",
@@ -210,9 +211,9 @@ describe("WorkflowEditor", () => {
     rerender(
       <WorkflowEditor workflow={workflow} canEdit canManageScope={false} skillCatalog={[]} />,
     );
-    expect(screen.queryByLabelText("Visibility")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Visibility: Personal" })).not.toBeInTheDocument();
     expect(
-      screen.getByLabelText("Visibility managed by the creator or an admin"),
+      screen.getByLabelText("Visibility: Personal, managed by the creator or an admin"),
     ).toBeInTheDocument();
   });
 

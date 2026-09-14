@@ -45,6 +45,7 @@ import {
   ChevronRight,
   ExternalLink,
   FileArchive,
+  KeyRound,
   Link2,
   Loader2,
   PackageOpen,
@@ -284,6 +285,11 @@ export const OFFICIAL_MCP_PLUGINS = {
 } as const satisfies Record<OfficialMcpPluginName, OfficialMcpPluginConfig>;
 
 export const OFFICIAL_SKILL_PLUGINS = {
+  doppler: {
+    ...OFFICIAL_SKILL_PLUGIN_METADATA.doppler,
+    Icon: KeyRound,
+    iconClassName: "bg-[#FF6100] text-white",
+  },
   "yc-advise": {
     ...OFFICIAL_SKILL_PLUGIN_METADATA["yc-advise"],
     Icon: Sparkles,
@@ -445,10 +451,12 @@ export function PluginsSettings({
   plugins,
   canEdit,
   workspaceId,
+  dopplerConnected = false,
 }: {
   plugins: PluginListItemDto[];
   canEdit: boolean;
   workspaceId: string;
+  dopplerConnected?: boolean;
 }) {
   const router = useRouter();
   const { integrations } = useAppData();
@@ -463,8 +471,7 @@ export function PluginsSettings({
     () => new Map(plugins.map((plugin) => [plugin.name.toLocaleLowerCase(), plugin] as const)),
     [plugins],
   );
-  // An enabled MCP plugin without its account connection cannot run, so the catalog must not
-  // claim it is "Enabled". Skills-only plugins never need a connection.
+  // Connection-backed plugins need an account before they can be used.
   const pluginsMissingConnection = useMemo(() => {
     const names = new Set<string>();
     for (const config of Object.values(OFFICIAL_MCP_PLUGINS)) {
@@ -473,8 +480,11 @@ export function PluginsSettings({
         names.add(config.name);
       }
     }
+    if (installedPlugins.get("doppler")?.status === "enabled" && !dopplerConnected) {
+      names.add("doppler");
+    }
     return names;
-  }, [installedPlugins, integrations]);
+  }, [installedPlugins, integrations, dopplerConnected]);
   const installedConfigs = configs.filter((config) => installedPlugins.has(config.name));
   const pluginsWithUpdates = new Set<OfficialPluginName>();
   for (const config of configs) {
@@ -860,7 +870,7 @@ export function OfficialSkillPluginDetail({
   name,
   canEdit,
 }: {
-  name: OfficialSkillPluginName;
+  name: Exclude<OfficialSkillPluginName, "doppler">;
   canEdit: boolean;
 }) {
   const config = OFFICIAL_SKILL_PLUGINS[name];

@@ -101,6 +101,7 @@ import {
   SCHEDULE_TASK_TOOL_NAME,
   type ScheduleTaskToolInput,
   type ScheduleTaskToolOutput,
+  SLACK_BOT_TOOL_NAME,
   START_WORKFLOW_TOOL_NAME,
   type StartTaskToolOutput,
   type StartWorkflowToolInput,
@@ -119,6 +120,11 @@ import {
   type WebSearchToolOutput,
 } from "./chat-ui";
 import { normalizePublicWebUrl } from "./chat-web-fetch";
+import {
+  SLACK_CHANNEL_INPUT_SCHEMA,
+  SLACK_CHANNEL_TOOL_DESCRIPTION,
+  type SlackChannelPost,
+} from "./integrations/slack-channel";
 import { guardKimiOutput } from "./kimi-output-guard";
 import { type ProductLanguageModelResolution, resolveProductLanguageModel } from "./language-model";
 import {
@@ -389,6 +395,7 @@ export async function runProductChatAgent(input: {
   runBrainCli?: BrainCliRunner;
   saveToBrain?: SaveToBrainRunner;
   runWiki?: WikiToolRunner;
+  postSlackMessage?: (input: SlackChannelPost) => Promise<unknown>;
   writeArtifact?: WriteArtifactRunner;
   webFetch?: WebFetchRunner;
   webSearch?: WebSearchRunner;
@@ -451,6 +458,7 @@ export async function runProductChatAgent(input: {
     ...(input.runWiki
       ? { runWiki: input.runWiki, wikiToolReadOnly: Boolean(input.wikiToolReadOnly) }
       : {}),
+    ...(input.postSlackMessage ? { postSlackMessage: input.postSlackMessage } : {}),
     ...(input.writeArtifact ? { writeArtifact: input.writeArtifact } : {}),
     ...(input.webFetch ? { webFetch: input.webFetch } : {}),
     ...(input.webSearch ? { webSearch: input.webSearch } : {}),
@@ -600,6 +608,7 @@ export function createProductChatToolContext(input: {
   runBrainCli?: BrainCliRunner;
   saveToBrain?: SaveToBrainRunner;
   runWiki?: WikiToolRunner;
+  postSlackMessage?: (input: SlackChannelPost) => Promise<unknown>;
   writeArtifact?: WriteArtifactRunner;
   wikiToolReadOnly?: boolean;
   webFetch?: WebFetchRunner;
@@ -782,6 +791,13 @@ export function createProductChatToolContext(input: {
     });
   }
 
+  if (input.postSlackMessage) {
+    tools[SLACK_BOT_TOOL_NAME] = tool({
+      description: SLACK_CHANNEL_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<SlackChannelPost>(SLACK_CHANNEL_INPUT_SCHEMA),
+      execute: input.postSlackMessage,
+    });
+  }
   const writeArtifact = input.writeArtifact;
   if (writeArtifact) {
     tools[WRITE_ARTIFACT_TOOL_NAME] = tool<

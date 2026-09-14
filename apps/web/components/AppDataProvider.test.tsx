@@ -97,7 +97,7 @@ describe("AppDataProvider", () => {
     );
 
     expect(mocks.useLiveQuery).toHaveBeenCalled();
-    expect(mocks.getHeadlessTaskSchedules).not.toHaveBeenCalled();
+    expect(mocks.getHeadlessTaskSchedules).toHaveBeenCalledWith("workspace_1");
   });
 
   it("preserves the server-selected Gmail account while live accounts hydrate", async () => {
@@ -228,7 +228,6 @@ describe("AppDataProvider", () => {
 
   it("resubscribes Task reads when the active workspace changes", async () => {
     const first = initialData();
-    first.featureFlags.taskSpawning = true;
     const { rerender } = render(
       <AppDataProvider initialData={first}>
         <DataProbe />
@@ -848,7 +847,6 @@ function initialData(): AppInitialData {
     recentChats: [],
     integrations: integrationStateFromRows([]),
     featureFlags: {
-      taskSpawning: false,
       autoModelRouting: false,
       legacyBrain: false,
       reviewInbox: false,
@@ -857,6 +855,7 @@ function initialData(): AppInitialData {
     },
     codexConnected: false,
     claudeCodeConnected: false,
+    sharedModelAccessEnabled: false,
     mcpSetup: { preferredClient: null, completedAt: null },
   };
 }
