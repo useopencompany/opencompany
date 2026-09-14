@@ -143,6 +143,9 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
       viewerName: identity.viewerName,
       viewerEmail: identity.viewerEmail,
       accessToken: oauth.accessToken,
+      refreshToken: oauth.refreshToken,
+      tokenType: oauth.tokenType,
+      accessTokenExpiresAt: oauth.accessTokenExpiresAt,
       scopes: oauth.scopes,
       db: input.db,
     });

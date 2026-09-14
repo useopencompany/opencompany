@@ -1,10 +1,15 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { getDb } from "@opencompany/db/client";
+import type { LinearOAuthCredentialPayload } from "@opencompany/db/integrations";
 import { LINEAR_MCP_EXTERNAL_ID } from "@opencompany/db/linear";
 import { integrations } from "@opencompany/db/product-schema";
 import { and, desc, eq, ne } from "drizzle-orm";
 import { getAppUrl } from "../app-url";
 import type { LinearSourceProviderState } from "../integration-state";
+import {
+  ExpiringOAuthReauthRequired,
+  getExpiringOAuthAccessToken,
+} from "./expiring-oauth-access-token";
 import { linearGraphqlRequest } from "./linear-api";
 
 export type LinearIngestStatePayload = {
@@ -16,7 +21,30 @@ export type LinearIngestStatePayload = {
 
 export type LinearOAuthResult = {
   accessToken: string;
+  refreshToken: string;
+  tokenType: "bearer";
+  accessTokenExpiresAt: Date;
   scopes: string[];
+};
+
+export type LinearIngestConnection = {
+  userWorkosId: string;
+  integrationId: string;
+};
+
+export class LinearIngestAuthError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LinearIngestAuthError";
+  }
+}
+
+type StoredLinearOAuthCredentialPayload = Omit<
+  LinearOAuthCredentialPayload,
+  "refresh_token" | "token_type"
+> & {
+  refresh_token?: string;
+  token_type?: string;
 };
 
 export type LinearIdentity = {
@@ -29,6 +57,7 @@ export type LinearIdentity = {
 };
 
 const LINEAR_PROVIDER = "linear" as const;
+const LINEAR_TOKEN_ENDPOINT = "https://api.linear.app/oauth/token";
 const LINEAR_INGEST_ENVS = [
   "OPENCOMPANY_LINEAR_CLIENT_ID",
   "OPENCOMPANY_LINEAR_CLIENT_SECRET",
@@ -136,10 +165,14 @@ export function buildLinearAuthorizationUrl(state: string) {
   return url.toString();
 }
 
-export async function exchangeLinearCode(code: string): Promise<LinearOAuthResult> {
-  const response = await fetch("https://api.linear.app/oauth/token", {
+export async function exchangeLinearCode(
+  code: string,
+  options: { now?: Date; signal?: AbortSignal } = {},
+): Promise<LinearOAuthResult> {
+  const response = await fetch(LINEAR_TOKEN_ENDPOINT, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    signal: options.signal ?? null,
     body: new URLSearchParams({
       grant_type: "authorization_code",
       code,
@@ -151,15 +184,114 @@ export async function exchangeLinearCode(code: string): Promise<LinearOAuthResul
   if (!response.ok) {
     throw new Error(`Linear token exchange failed with ${response.status}.`);
   }
+  return parseLinearTokenResponse(await tokenResponseJson(response), options.now ?? new Date());
+}
 
-  const result = (await response.json()) as { access_token?: string; scope?: string };
-  const accessToken = result.access_token?.trim();
-  if (!accessToken) {
-    throw new Error("Linear did not return an access token.");
+export async function getLinearIngestAccessToken(
+  connection: LinearIngestConnection,
+  options: {
+    signal?: AbortSignal;
+    forceRefresh?: boolean;
+    refreshIfAccessToken?: string;
+    minimumValidityMs?: number;
+    db?: any;
+    now?: Date;
+  } = {},
+) {
+  return getExpiringOAuthAccessToken({
+    connection: { ...connection, provider: LINEAR_PROVIDER },
+    displayName: "Linear",
+    parseCredential: parseStoredLinearTokens,
+    validateRefresh: (credential) => {
+      if (!credential.refreshToken) {
+        throw new ExpiringOAuthReauthRequired(
+          "The saved Linear connection predates refresh tokens. Reconnect Linear in Settings.",
+          "The Linear connection needs a one-time reconnect to enable token refresh.",
+        );
+      }
+    },
+    refresh: refreshLinearIngestCredential,
+    createAuthError: (message) => new LinearIngestAuthError(message),
+    missingCredential: {
+      message: "No saved Linear credentials were found. Reconnect Linear in Settings.",
+      statusReason: "Stored Linear credentials are missing. Reconnect Linear.",
+    },
+    invalidCredential: {
+      message: "The saved Linear credentials are invalid. Reconnect Linear in Settings.",
+      statusReason: "Stored Linear credentials are invalid. Reconnect Linear.",
+    },
+    options: { ...options, acceptAccessTokenWithoutExpiry: true },
+  });
+}
+
+async function refreshLinearIngestCredential(
+  credential: {
+    accessToken: string;
+    refreshToken: string | null;
+    payload: StoredLinearOAuthCredentialPayload;
+  },
+  context: { now: Date; signal?: AbortSignal },
+) {
+  if (!credential.refreshToken) {
+    throw new ExpiringOAuthReauthRequired(
+      "The saved Linear connection has no refresh token. Reconnect Linear in Settings.",
+      "The Linear connection has no refresh token. Reconnect Linear.",
+    );
   }
+  let response: Response;
+  try {
+    response = await fetch(LINEAR_TOKEN_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      signal: context.signal ?? null,
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: credential.refreshToken,
+        client_id: requiredEnv("OPENCOMPANY_LINEAR_CLIENT_ID"),
+        client_secret: requiredEnv("OPENCOMPANY_LINEAR_CLIENT_SECRET"),
+      }),
+    });
+  } catch (error) {
+    if (context.signal?.aborted) throw error;
+    throw new Error("Linear token refresh could not reach Linear.", { cause: error });
+  }
+
+  const result = await tokenResponseJson(response);
+  if (!response.ok) {
+    const oauthError = readString(result.error);
+    if (oauthError === "invalid_grant" || oauthError === "invalid_token") {
+      throw new ExpiringOAuthReauthRequired(
+        "Linear refused the saved refresh token. Reconnect Linear in Settings.",
+        "Linear refused the saved refresh token. Reconnect Linear.",
+      );
+    }
+    throw new Error(`Linear token refresh failed with ${response.status}.`);
+  }
+
+  let refreshed: LinearOAuthResult;
+  try {
+    refreshed = parseLinearTokenResponse(result, context.now);
+  } catch (error) {
+    throw new ExpiringOAuthReauthRequired(
+      error instanceof Error ? error.message : "Linear returned invalid credentials.",
+      "Linear returned invalid refreshed credentials. Reconnect Linear.",
+    );
+  }
+
   return {
-    accessToken,
-    scopes: (result.scope ?? "").split(/[\s,]+/).filter(Boolean),
+    accessToken: refreshed.accessToken,
+    payload: {
+      ...credential.payload,
+      access_token: refreshed.accessToken,
+      refresh_token: refreshed.refreshToken,
+      token_type: refreshed.tokenType,
+      ...(refreshed.scopes.length > 0
+        ? { scope: refreshed.scopes.join(",") }
+        : credential.payload.scope
+          ? { scope: credential.payload.scope }
+          : {}),
+    } satisfies LinearOAuthCredentialPayload,
+    expiresAt: refreshed.accessTokenExpiresAt,
   };
 }
 
@@ -188,6 +320,62 @@ export async function fetchLinearIdentity(accessToken: string): Promise<LinearId
     viewerName: data.viewer?.name?.trim() || data.viewer?.displayName?.trim() || null,
     viewerEmail: data.viewer?.email?.trim() || null,
   };
+}
+
+function parseLinearTokenResponse(value: Record<string, unknown>, now: Date): LinearOAuthResult {
+  const accessToken = readString(value.access_token);
+  const refreshToken = readString(value.refresh_token);
+  const tokenType = readString(value.token_type)?.toLowerCase();
+  const expiresIn = readPositiveNumber(value.expires_in);
+  if (!accessToken || !refreshToken || tokenType !== "bearer" || !expiresIn) {
+    throw new Error("Linear did not return expiring OAuth credentials.");
+  }
+  return {
+    accessToken,
+    refreshToken,
+    tokenType: "bearer",
+    accessTokenExpiresAt: new Date(now.getTime() + expiresIn * 1_000),
+    scopes: readScopes(value.scope),
+  };
+}
+
+function parseStoredLinearTokens(value: Record<string, unknown>): {
+  accessToken: string;
+  refreshToken: string | null;
+  payload: StoredLinearOAuthCredentialPayload;
+} | null {
+  const accessToken = readString(value.access_token);
+  const organizationId = readString(value.organization_id);
+  if (!accessToken || !organizationId) return null;
+  return {
+    accessToken,
+    refreshToken: readString(value.refresh_token),
+    payload: value as StoredLinearOAuthCredentialPayload,
+  };
+}
+
+async function tokenResponseJson(response: Response): Promise<Record<string, unknown>> {
+  const value = (await response.json().catch(() => null)) as unknown;
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readPositiveNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function readScopes(value: unknown) {
+  const scopes = Array.isArray(value)
+    ? value.filter((scope): scope is string => typeof scope === "string")
+    : typeof value === "string"
+      ? value.split(/[\s,]+/)
+      : [];
+  return [...new Set(scopes.map((scope) => scope.trim()).filter(Boolean))];
 }
 
 export function appendLinearIngestStatus(

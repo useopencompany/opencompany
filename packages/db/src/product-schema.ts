@@ -7376,7 +7376,7 @@ export const sessionSubscriptions = productSchema.table(
       .notNull()
       .default({
         acceptedEvents: ["human_text_reply"],
-        authorization: "workspace_member",
+        authorization: "slack_thread_participant",
         queue: "serial",
       }),
     status: text("status").notNull().default("waiting"),
