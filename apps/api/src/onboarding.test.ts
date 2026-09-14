@@ -111,7 +111,6 @@ describe("onboarding service", () => {
       service.saveWorkspace(identity, {
         workspaceId: "goat_ws_new",
         name: " Analytical Co ",
-        slug: "Analytical Co",
       }),
     ).resolves.toEqual({
       workspaceId: "goat_ws_new",
@@ -135,6 +134,30 @@ describe("onboarding service", () => {
     );
   });
 
+  it("suffixes a derived workspace slug that is already taken", async () => {
+    const db = {};
+    vi.mocked(isWorkspaceSlugAvailable)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValue(true);
+    const service = createOnboardingService({ db, workos: workos as never });
+    await service.saveWorkspace(identity, { workspaceId: "workspace_new", name: "Analytical Co" });
+    expect(provisionWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({ slug: "analytical-co-3" }),
+      { db, workos },
+    );
+  });
+
+  it("falls back to a generic slug base when the name has no slug-safe characters", async () => {
+    const db = {};
+    const service = createOnboardingService({ db, workos: workos as never });
+    await service.saveWorkspace(identity, { workspaceId: "workspace_new", name: "株式会社" });
+    expect(provisionWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({ slug: "workspace" }),
+      { db, workos },
+    );
+  });
+
   it("authorizes an existing workspace before renaming its WorkOS organization", async () => {
     vi.mocked(listWorkspacesForUser).mockResolvedValue([{ workspace, role: "member" }] as never);
     const service = createOnboardingService({ db: {}, workos: workos as never });
@@ -142,7 +165,6 @@ describe("onboarding service", () => {
       service.saveWorkspace(identity, {
         workspaceId: "goat_ws_ignored",
         name: "Renamed",
-        slug: "renamed",
       }),
     ).rejects.toMatchObject({ status: 403 });
     expect(ensureWorkspaceOrganization).not.toHaveBeenCalled();
@@ -158,7 +180,6 @@ describe("onboarding service", () => {
       service.saveWorkspace(identity, {
         workspaceId: "goat_ws_ignored",
         name: "Renamed",
-        slug: "renamed",
       }),
     ).resolves.toEqual({
       workspaceId: "goat_ws_current",
@@ -205,7 +226,6 @@ describe("onboarding service", () => {
       service.saveWorkspace(identity, {
         workspaceId: "goat_ws_ignored",
         name: "Analytical Co",
-        slug: "analytical-co",
       }),
     ).resolves.toMatchObject({ workspaceId: "goat_ws_current", brainId: "brain_general" });
     expect(deleteBrainFolderRow).toHaveBeenCalled();

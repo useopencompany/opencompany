@@ -52,11 +52,10 @@ export type OnboardingWorkspaceView = {
 
 export type OnboardingService = {
   getState(identity: ApiIdentity): Promise<OnboardingStateView>;
-  checkSlug(identity: ApiIdentity, rawSlug: string): Promise<{ slug: string; available: boolean }>;
   saveProfile(identity: ApiIdentity, profile: { role: string; companyUrl: string }): Promise<void>;
   saveWorkspace(
     identity: ApiIdentity,
-    command: { workspaceId: string; name: string; slug: string },
+    command: { workspaceId: string; name: string },
   ): Promise<OnboardingWorkspaceView>;
   finish(identity: ApiIdentity, referralSource: string | null): Promise<void>;
 };
@@ -92,20 +91,6 @@ export function createOnboardingService(input: { db: DbLike; workos: WorkOS }): 
       };
     },
 
-    async checkSlug(identity, rawSlug) {
-      const slug = normalizeWorkspaceSlug(rawSlug);
-      if (!slug) return { slug, available: false };
-      const context = await resolveOnboardingContext(identity, db);
-      const available = await isWorkspaceSlugAvailable(
-        {
-          slug,
-          ...(context ? { excludeWorkspaceId: context.workspace.id } : {}),
-        },
-        { db },
-      );
-      return { slug, available };
-    },
-
     async saveProfile(identity, profile) {
       const companyUrl = new URL(profile.companyUrl);
       const context = await resolveOnboardingContext(identity, db);
@@ -129,28 +114,17 @@ export function createOnboardingService(input: { db: DbLike; workos: WorkOS }): 
 
     async saveWorkspace(identity, command) {
       const name = command.name.trim();
-      const slug = normalizeWorkspaceSlug(command.slug);
       if (!name) throw new ApiError(400, "invalid_request", "Enter a company name.");
       if (name.length > 80) {
         throw new ApiError(400, "invalid_request", "Name is too long (max 80 chars).");
       }
-      if (!slug) throw new ApiError(400, "invalid_request", "Enter a valid workspace URL.");
 
       try {
         const context = await resolveOnboardingContext(identity, db);
         if (context && context.role !== "admin") {
           throw new ApiError(403, "forbidden", "Only workspace admins can set this up.");
         }
-        const available = await isWorkspaceSlugAvailable(
-          {
-            slug,
-            ...(context ? { excludeWorkspaceId: context.workspace.id } : {}),
-          },
-          { db },
-        );
-        if (!available) {
-          throw new ApiError(409, "conflict", "That workspace URL is taken.");
-        }
+        const slug = await allocateWorkspaceSlug(name, context?.workspace.id ?? null, db);
 
         if (context) {
           const brain = await activeBrain(identity.userId, context.workspace.id, db);
@@ -307,6 +281,34 @@ async function reconcileFolder(
       error_name: error instanceof Error ? error.name : typeof error,
     });
   }
+}
+
+// Onboarding asks only for a company name; the URL slug is derived from it.
+// The slug column is uniquely indexed, so a taken base gets a numeric suffix the
+// same way brain slugs are allocated. Names with no slug-safe characters at all
+// (e.g. entirely non-Latin) fall back to a generic base rather than failing setup.
+const WORKSPACE_SLUG_MAX_LENGTH = 40;
+const WORKSPACE_SLUG_FALLBACK = "workspace";
+const WORKSPACE_SLUG_MAX_ATTEMPTS = 50;
+
+async function allocateWorkspaceSlug(
+  name: string,
+  excludeWorkspaceId: string | null,
+  db: DbLike,
+): Promise<string> {
+  const base = normalizeWorkspaceSlug(name) || WORKSPACE_SLUG_FALLBACK;
+  for (let attempt = 1; attempt <= WORKSPACE_SLUG_MAX_ATTEMPTS; attempt++) {
+    const suffix = attempt === 1 ? "" : `-${attempt}`;
+    // Truncating for the suffix can leave a dangling separator; drop it so the
+    // result still reads like a slug.
+    const head = base.slice(0, WORKSPACE_SLUG_MAX_LENGTH - suffix.length).replace(/-+$/u, "");
+    const available = await isWorkspaceSlugAvailable(
+      { slug: `${head}${suffix}`, ...(excludeWorkspaceId ? { excludeWorkspaceId } : {}) },
+      { db },
+    );
+    if (available) return `${head}${suffix}`;
+  }
+  throw new ApiError(503, "unavailable", "Could not allocate a workspace URL.", true);
 }
 
 function normalizeWorkspaceSlug(value: string) {
