@@ -45,6 +45,7 @@ import {
   ChevronRight,
   ExternalLink,
   FileArchive,
+  KeyRound,
   Link2,
   Loader2,
   PackageOpen,
@@ -284,6 +285,11 @@ export const OFFICIAL_MCP_PLUGINS = {
 } as const satisfies Record<OfficialMcpPluginName, OfficialMcpPluginConfig>;
 
 export const OFFICIAL_SKILL_PLUGINS = {
+  doppler: {
+    ...OFFICIAL_SKILL_PLUGIN_METADATA.doppler,
+    Icon: KeyRound,
+    iconClassName: "bg-[#FF6100] text-white",
+  },
   "yc-advise": {
     ...OFFICIAL_SKILL_PLUGIN_METADATA["yc-advise"],
     Icon: Sparkles,
@@ -922,7 +928,9 @@ export function OfficialSkillPluginDetail({
             </span>
           </div>
           <p className="mt-1 text-[12.5px] leading-5 text-ink-subtle">
-            Official skills-only plugin. No account connection is required.
+            {name === "doppler"
+              ? "Doppler is preinstalled in coding sandboxes. Install this plugin, then connect your account."
+              : "Official skills-only plugin. No account connection is required."}
           </p>
         </div>
         {canEdit ? (
@@ -995,12 +1003,14 @@ export function PluginDetail({
   title,
   description,
   officialPluginName,
+  connection,
 }: {
   plugin: PluginInstallationDto;
   canEdit: boolean;
   title?: string;
   description?: string;
   officialPluginName?: OfficialPluginName;
+  connection?: ReactNode;
 }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -1036,6 +1046,7 @@ export function PluginDetail({
       }
       backLink={{ href: "/settings/plugins", label: "Plugins" }}
     >
+      {connection}
       {!canEdit ? (
         <p className="text-[13px] leading-5 text-ink-subtle">
           You need plugin write permission to manage your plugins.
