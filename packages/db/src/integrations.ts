@@ -526,6 +526,8 @@ export async function connectSlackBotIntegration(input: {
 
 export type LinearOAuthCredentialPayload = {
   access_token: string;
+  refresh_token: string;
+  token_type: "bearer";
   organization_id: string;
   organization_name?: string;
   organization_url_key?: string;
@@ -547,6 +549,9 @@ export async function connectLinearIngestIntegration(input: {
   viewerName: string | null;
   viewerEmail: string | null;
   accessToken: string;
+  refreshToken: string;
+  tokenType: "bearer";
+  accessTokenExpiresAt: Date;
   scopes: string[];
   db?: IntegrationDb;
   now?: Date;
@@ -597,6 +602,8 @@ export async function connectLinearIngestIntegration(input: {
 
   const payload: LinearOAuthCredentialPayload = {
     access_token: input.accessToken,
+    refresh_token: input.refreshToken,
+    token_type: input.tokenType,
     organization_id: input.organizationId,
     ...(input.organizationName ? { organization_name: input.organizationName } : {}),
     ...(input.organizationUrlKey ? { organization_url_key: input.organizationUrlKey } : {}),
@@ -612,8 +619,7 @@ export async function connectLinearIngestIntegration(input: {
       provider: "linear",
       kind: "oauth_token",
       payload,
-      // Linear OAuth access tokens do not expire.
-      expiresAt: null,
+      expiresAt: input.accessTokenExpiresAt,
       db,
       now,
     });

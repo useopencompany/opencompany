@@ -1,3 +1,4 @@
+import { getLinearIngestAccessToken } from "@opencompany/agent/integrations/linear-ingest";
 import {
   type BrainHydratablePointerProvider,
   type NormalizedBrainPointerSourceItem,
@@ -211,7 +212,15 @@ async function hydrateLinearPointer(input: Parameters<BrainPointerHydrator["hydr
     kind: "oauth_token",
     db: getDb(),
   });
-  const accessToken = readLinearAccessToken(credential?.payload);
+  const accessToken = readLinearIngestAccessToken(credential?.payload)
+    ? await getLinearIngestAccessToken(
+        {
+          userWorkosId: input.userWorkosId,
+          integrationId: input.integrationId,
+        },
+        { db: getDb(), signal: input.signal },
+      )
+    : readLinearAccessToken(credential?.payload);
   if (!accessToken) throw new Error("Reconnect Linear in Settings before hydrating it.");
   const snapshot = await fetchLinearIssueSnapshot({
     token: accessToken,
@@ -271,9 +280,16 @@ function parseLinearPointer(ref: string) {
   return parsed.id.slice("issue:".length).trim() || null;
 }
 
+function readLinearIngestAccessToken(payload: Record<string, unknown> | undefined) {
+  return typeof payload?.access_token === "string" && payload.access_token
+    ? payload.access_token
+    : null;
+}
+
 function readLinearAccessToken(payload: Record<string, unknown> | undefined) {
   if (!payload) return null;
-  if (typeof payload.access_token === "string" && payload.access_token) return payload.access_token;
+  const direct = readLinearIngestAccessToken(payload);
+  if (direct) return direct;
   const tokens =
     payload.tokens && typeof payload.tokens === "object" && !Array.isArray(payload.tokens)
       ? (payload.tokens as Record<string, unknown>)
