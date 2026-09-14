@@ -51,17 +51,20 @@ const ATTIO_ID_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/;
 // with `@` and `:`), so the label path stays permissive; nothing builds a URL.
 const JAMIE_EVENT_PATTERN = /^[A-Za-z0-9_.@:-]{1,128}$/;
 
-const HUBSPOT_OBJECTS: Record<string, { typeId: string; label: string }> = {
-  contact: { typeId: "0-1", label: "HubSpot contact" },
-  company: { typeId: "0-2", label: "HubSpot company" },
-  deal: { typeId: "0-3", label: "HubSpot deal" },
-};
+// Object-type lookups are Maps, not object literals: the key comes straight out
+// of a page body, and a plain literal answers `__proto__` and `constructor` with
+// an inherited truthy value that then sails past the "unknown type" guard.
+const HUBSPOT_OBJECTS = new Map<string, { typeId: string; label: string }>([
+  ["contact", { typeId: "0-1", label: "HubSpot contact" }],
+  ["company", { typeId: "0-2", label: "HubSpot company" }],
+  ["deal", { typeId: "0-3", label: "HubSpot deal" }],
+]);
 
-const ATTIO_OBJECT_LABELS: Record<string, string> = {
-  person: "Attio person",
-  company: "Attio company",
-  deal: "Attio deal",
-};
+const ATTIO_OBJECT_LABELS = new Map<string, string>([
+  ["person", "Attio person"],
+  ["company", "Attio company"],
+  ["deal", "Attio deal"],
+]);
 
 export const WIKI_SOURCE_PROVIDERS: readonly WikiSourceProvider[] = [
   {
@@ -136,7 +139,7 @@ export const WIKI_SOURCE_PROVIDERS: readonly WikiSourceProvider[] = [
       const parts = id.split(":");
       if (parts.length !== 3) return null;
       const [portalId, objectType, objectId] = parts;
-      const object = HUBSPOT_OBJECTS[objectType ?? ""];
+      const object = HUBSPOT_OBJECTS.get(objectType ?? "");
       if (!object) return null;
       if (!portalId || !HUBSPOT_NUMERIC_PATTERN.test(portalId)) return null;
       if (!objectId || !HUBSPOT_NUMERIC_PATTERN.test(objectId)) return null;
@@ -159,7 +162,7 @@ export const WIKI_SOURCE_PROVIDERS: readonly WikiSourceProvider[] = [
       // Attio's app URLs are keyed by workspace *slug*, which the ref does not
       // carry, so this stays a pointer with no link rather than a guess.
       return {
-        label: ATTIO_OBJECT_LABELS[objectType] ?? "Attio record",
+        label: ATTIO_OBJECT_LABELS.get(objectType) ?? "Attio record",
         href: null,
         icon: "link",
       };

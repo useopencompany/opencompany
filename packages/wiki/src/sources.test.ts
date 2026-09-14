@@ -102,6 +102,15 @@ describe("describeWikiSourceRef", () => {
     expect(describeWikiSourceRef("not-a-source-ref")).toBeNull();
   });
 
+  it("treats inherited Object keys as unknown object types", () => {
+    // The object type comes straight out of a page body, so `__proto__` and
+    // `constructor` must not resolve to an inherited value.
+    expect(describeWikiSourceRef("hubspot:12345678:__proto__:9876543")).toBeNull();
+    expect(describeWikiSourceRef("hubspot:12345678:constructor:9876543")).toBeNull();
+    expect(describeWikiSourceRef("attio:ws_1:__proto__:rec_1")?.label).toBe("Attio record");
+    expect(describeWikiSourceRef("attio:ws_1:constructor:rec_1")?.label).toBe("Attio record");
+  });
+
   it("never builds a link from a non-http scheme", () => {
     expect(wikiSourceHref("web:javascript:alert(1)")).toBeNull();
     expect(wikiSourceHref("notion:javascript:alert(1)")).toBeNull();
