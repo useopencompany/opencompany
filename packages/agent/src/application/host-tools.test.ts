@@ -13,15 +13,13 @@ const context: ChatHostContext = {
   workspaceName: "Analytical Engines",
   conversationId: "conversation_1",
   messageId: "message_1",
-  brainRef: null,
   email: "ada@example.test",
   firstName: "Ada",
   lastName: "Lovelace",
   timezone: "Europe/London",
-  taskToolsEnabled: true,
+  automationToolsEnabled: true,
   skillToolsEnabled: true,
   subagentsEnabled: false,
-  legacyBrainEnabled: false,
 };
 
 describe("opencompany Chat Task host tools", () => {
@@ -37,7 +35,7 @@ describe("opencompany Chat Task host tools", () => {
       }),
     ).resolves.toMatchObject({
       ok: true,
-      result: { taskToolsEnabled: false, workflows: [], recurringSchedules: [] },
+      result: { automationToolsEnabled: false, workflows: [], recurringSchedules: [] },
     });
     expect(dependencies.listWorkflowCatalog).not.toHaveBeenCalled();
     expect(dependencies.listSchedules).not.toHaveBeenCalled();
@@ -73,7 +71,6 @@ describe("opencompany Chat Task host tools", () => {
   });
 
   it.each([
-    "start_task",
     "start_workflow",
     "schedule_task",
     "edit_task_schedule",
@@ -103,9 +100,8 @@ describe("opencompany Chat Task host tools", () => {
       }),
     ).resolves.toEqual({
       ok: false,
-      error: "Tasks cannot create other tasks or manage task schedules. Use a main chat instead.",
+      error: "Tasks cannot start workflows or manage task schedules. Use a main chat instead.",
     });
-    expect(dependencies.createTask).not.toHaveBeenCalled();
     expect(dependencies.createWorkflowTask).not.toHaveBeenCalled();
     expect(dependencies.createSchedule).not.toHaveBeenCalled();
     expect(dependencies.listSchedules).not.toHaveBeenCalled();
@@ -427,118 +423,6 @@ describe("opencompany Chat Task host tools", () => {
     expect(updateWorkspaceSkill).not.toHaveBeenCalled();
   });
 
-  it.each([
-    { model: "moonshotai/kimi-k2.6", engine: "opencompany" },
-    { model: "openai/gpt-6-astra", engine: "codex" },
-  ])("delegates $model tasks through the authenticated Task creator", async ({ model, engine }) => {
-    const createTask = vi.fn(async () => taskResult);
-    const dependencies = testDependencies({ createTask });
-
-    await expect(
-      executeChatHostToolService({
-        command: {
-          operation: "start_task",
-          sessionId: "runtime_1",
-          runId: "run_1",
-          input: {
-            name: "Market research",
-            prompt: "Research the market.",
-            model,
-            engine,
-          },
-        },
-        dependencies,
-      }),
-    ).resolves.toEqual({ ok: true, result: taskResult });
-
-    expect(createTask).toHaveBeenCalledWith({
-      actorId: "user_1",
-      workspaceId: "workspace_1",
-      brainRef: null,
-      name: "Market research",
-      prompt: "Research the market.",
-      model,
-      engine,
-    });
-  });
-
-  it("passes a Brain to created Tasks only when the workspace enables the legacy feature", async () => {
-    const createTask = vi.fn(async () => taskResult);
-    const dependencies = testDependencies({
-      loadContext: vi.fn(async () => ({ ...context, legacyBrainEnabled: true })),
-      createTask,
-    });
-
-    await executeChatHostToolService({
-      command: {
-        operation: "start_task",
-        sessionId: "runtime_1",
-        runId: "run_1",
-        input: {
-          name: "Market research",
-          prompt: "Research the market.",
-          model: "moonshotai/kimi-k2.6",
-          engine: "opencompany",
-        },
-      },
-      dependencies,
-    });
-
-    expect(createTask).toHaveBeenCalledWith(expect.objectContaining({ brainRef: "brain_1" }));
-  });
-
-  it("rejects a task model that the selected coding engine cannot run", async () => {
-    const createTask = vi.fn(async () => taskResult);
-    const dependencies = testDependencies({ createTask });
-
-    await expect(
-      executeChatHostToolService({
-        command: {
-          operation: "start_task",
-          sessionId: "runtime_1",
-          runId: "run_1",
-          input: {
-            name: "Review code",
-            prompt: "Review the code.",
-            model: "anthropic/claude-sonnet-5",
-            engine: "codex",
-          },
-        },
-        dependencies,
-      }),
-    ).resolves.toEqual({
-      ok: false,
-      error: 'Model "anthropic/claude-sonnet-5" is not available for the Codex engine.',
-    });
-    expect(createTask).not.toHaveBeenCalled();
-  });
-
-  it("rejects rollout-gated task models at the host boundary", async () => {
-    const createTask = vi.fn(async () => taskResult);
-    const dependencies = testDependencies({ createTask });
-
-    await expect(
-      executeChatHostToolService({
-        command: {
-          operation: "start_task",
-          sessionId: "runtime_1",
-          runId: "run_1",
-          input: {
-            name: "Analyze launch",
-            prompt: "Analyze the launch.",
-            model: "openai/gpt-6-astra",
-            engine: "opencompany",
-          },
-        },
-        dependencies,
-      }),
-    ).resolves.toEqual({
-      ok: false,
-      error: 'Unsupported model "openai/gpt-6-astra".',
-    });
-    expect(createTask).not.toHaveBeenCalled();
-  });
-
   it("delegates an agent-created Workflow invocation through the Workflow Task creator", async () => {
     const createWorkflowTask = vi.fn(async () => taskResult);
     const dependencies = testDependencies({ createWorkflowTask });
@@ -718,8 +602,6 @@ function testDependencies(
 ): ChatHostToolServiceDependencies {
   return {
     loadContext: vi.fn(async () => context),
-    listBrains: vi.fn(async () => [{ id: "brain_1", slug: "home" }]),
-    defaultBrainSlug: "home",
     browserProfilesAvailable: () => false,
     createAgentSession: vi.fn(),
     endAgentSession: vi.fn(),
@@ -732,7 +614,6 @@ function testDependencies(
     manageWorkspaceSkills: vi.fn(),
     createWorkspaceSkill: vi.fn(),
     updateWorkspaceSkill: vi.fn(),
-    createTask: vi.fn(async () => taskResult),
     listSchedules: vi.fn(async () => []),
     createSchedule: vi.fn(),
     updateSchedule: vi.fn(),

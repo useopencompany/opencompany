@@ -28,7 +28,6 @@ import {
   READ_SKILL_FILE_TOOL_NAME,
   SAVE_TO_BRAIN_TOOL_NAME,
   SCHEDULE_TASK_TOOL_NAME,
-  START_TASK_TOOL_NAME,
   START_WORKFLOW_TOOL_NAME,
   USE_ACTION_TOOL_NAME,
   USE_SKILL_TOOL_NAME,
@@ -167,7 +166,6 @@ export const SUBAGENT_WITHHELD_TOOL_NAMES: readonly string[] = [
   EDIT_WORKSPACE_SKILL_TOOL_NAME,
   WORKSPACE_SKILLS_TOOL_NAME,
   // Spawning and scheduling durable work, which would escape the turn that authorized it.
-  START_TASK_TOOL_NAME,
   START_WORKFLOW_TOOL_NAME,
   SCHEDULE_TASK_TOOL_NAME,
   EDIT_TASK_SCHEDULE_TOOL_NAME,
@@ -253,7 +251,7 @@ export function createSubagentBudget(
       if (runsStarted >= maxRuns) {
         return {
           ok: false,
-          error: `This turn already used its budget of ${maxRuns} subagent runs. Finish with what you have, or start a task for work that needs more.`,
+          error: `This turn already used its budget of ${maxRuns} subagent runs. Finish with what you have.`,
         };
       }
       runsStarted += 1;

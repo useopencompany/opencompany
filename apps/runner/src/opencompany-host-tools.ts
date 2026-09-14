@@ -34,8 +34,6 @@ import type {
   WriteArtifactToolResponse,
 } from "@opencompany/agent-runtime";
 import { assertSafeRelativePath } from "@opencompany/agent-runtime";
-import type { AgentModelId } from "@opencompany/agent-runtime/types";
-import type { HarnessEngine } from "@opencompany/db/product-schema";
 import { executeApiWikiCommand } from "./api-wiki-client";
 import { publishInBandChatArtifact } from "./chat-artifacts";
 import { wakeCodexChatWorker } from "./codex-chat-worker";
@@ -64,15 +62,6 @@ type Context = {
 export type HostTools = {
   bootstrap: ChatHostBootstrap;
   activeSkills: ChatHostBootstrap["activeSkills"];
-  startTask?: (
-    input: {
-      prompt: string;
-      name?: string;
-      model: AgentModelId;
-      engine?: HarnessEngine;
-    },
-    context: { toolCallId: string },
-  ) => Promise<StartedTask>;
   scheduleTask?: (input: ScheduleTaskToolInput) => Promise<ScheduleTaskToolOutput>;
   editTaskSchedule?: (input: EditTaskScheduleToolInput) => Promise<EditTaskScheduleToolOutput>;
   deleteTaskSchedule?: (
@@ -129,10 +118,8 @@ export async function loadHostTools(
   return {
     bootstrap,
     activeSkills: bootstrap.activeSkills,
-    ...(bootstrap.taskToolsEnabled
+    ...(bootstrap.automationToolsEnabled
       ? {
-          startTask: (input, toolContext) =>
-            call("start_task", input, toolContext.toolCallId) as Promise<StartedTask>,
           scheduleTask: (input) => call("schedule_task", input) as Promise<ScheduleTaskToolOutput>,
           editTaskSchedule: (input) =>
             call("edit_task_schedule", input) as Promise<EditTaskScheduleToolOutput>,
@@ -210,7 +197,7 @@ export async function loadHostTools(
           },
         }
       : {}),
-    ...(bootstrap.taskToolsEnabled && bootstrap.workflows.length
+    ...(bootstrap.automationToolsEnabled && bootstrap.workflows.length
       ? {
           workflows: {
             catalog: bootstrap.workflows,

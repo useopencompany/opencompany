@@ -1356,10 +1356,8 @@ async function resolveProductChatRuntime(input: {
 
   const toolContext = createProductChatToolContext({
     model,
-    latestUserMessage: turn.prompt,
     ...(runBrainCli ? { runBrainCli } : {}),
     ...(brainCapture ? { saveToBrain: brainCapture } : {}),
-    ...(hostTools?.startTask ? { startTask: hostTools.startTask } : {}),
     ...(hostTools?.scheduleTask ? { scheduleTask: hostTools.scheduleTask } : {}),
     ...(hostTools?.editTaskSchedule ? { editTaskSchedule: hostTools.editTaskSchedule } : {}),
     ...(hostTools?.deleteTaskSchedule ? { deleteTaskSchedule: hostTools.deleteTaskSchedule } : {}),
@@ -1392,8 +1390,8 @@ async function resolveProductChatRuntime(input: {
     webFetchEnabled: Boolean(exaApiKey),
     webSearchEnabled: Boolean(exaApiKey),
     browserToolsEnabled: Boolean(hostTools?.browserTools),
-    taskToolsEnabled: Boolean(hostTools?.bootstrap.taskToolsEnabled),
-    scheduleToolsEnabled: Boolean(hostTools?.bootstrap.taskToolsEnabled),
+    automationToolsEnabled: Boolean(hostTools?.bootstrap.automationToolsEnabled),
+    scheduleToolsEnabled: Boolean(hostTools?.bootstrap.automationToolsEnabled),
     wikiToolEnabled: Boolean(hostTools?.runWiki),
     artifactToolEnabled: Boolean(hostTools?.writeArtifact),
     subagentsEnabled: Boolean(subagentRunner),

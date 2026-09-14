@@ -1,9 +1,4 @@
-import {
-  CLAUDE_CODE_DEFAULT_MODEL_ID,
-  CODEX_AGENT_MODEL_IDS,
-  CODEX_DEFAULT_MODEL_ID,
-  WRITE_ARTIFACT_TOOL_NAME,
-} from "@opencompany/agent-runtime";
+import { WRITE_ARTIFACT_TOOL_NAME } from "@opencompany/agent-runtime";
 import { WIKI_TOOL_NAME } from "@opencompany/wiki/tool";
 import { generateText } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
@@ -20,7 +15,6 @@ import {
   CREATE_WORKSPACE_SKILL_TOOL_NAME,
   EDIT_WORKSPACE_SKILL_TOOL_NAME,
   LIST_SKILLS_TOOL_NAME,
-  START_TASK_TOOL_NAME,
   START_WORKFLOW_TOOL_NAME,
 } from "./chat-ui";
 
@@ -295,247 +289,6 @@ describe("edit_workspace_skill tool", () => {
   });
 });
 
-describe("start_task tool", () => {
-  it.each(["moonshotai/kimi-k3", "xai/grok-4.3", "anthropic/claude-sonnet-5"])(
-    "normalizes a Codex task from %s main chat to the default Codex model",
-    async (mainModel) => {
-      const startTask = vi.fn(async (task: { prompt: string; name?: string }) => ({
-        id: "task_1",
-        displayId: "TASK-1",
-        name: task.name ?? "Test repo access",
-        prompt: task.prompt,
-      }));
-      const context = createProductChatToolContext({
-        model: mainModel as never,
-        requestedEngine: "codex",
-        startTask,
-      });
-      const startTaskTool = context.tools[START_TASK_TOOL_NAME] as {
-        execute: (args: unknown) => Promise<unknown>;
-      };
-
-      await startTaskTool.execute({
-        name: "Test repo access",
-        prompt: "Check repo access and report whether development work can start.",
-        reason: "Requires connected source-control access.",
-      });
-
-      expect(startTask).toHaveBeenCalledWith(
-        {
-          name: "Test repo access",
-          prompt: "Check repo access and report whether development work can start.",
-          model: CODEX_DEFAULT_MODEL_ID,
-          engine: "codex",
-        },
-        { toolCallId: expect.any(String) },
-      );
-    },
-  );
-
-  it("advertises only current Codex models when the user requests a Codex task", () => {
-    const context = createProductChatToolContext({
-      model,
-      latestUserMessage: "Use Codex to fix the repository.",
-      startTask: vi.fn(),
-    });
-    const startTaskTool = context.tools[START_TASK_TOOL_NAME] as unknown as {
-      inputSchema: { jsonSchema: { properties: { model: { enum: string[] } } } };
-    };
-
-    expect(startTaskTool.inputSchema.jsonSchema.properties.model.enum).toEqual(
-      CODEX_AGENT_MODEL_IDS,
-    );
-  });
-
-  it.each(["openai/gpt-6-astra", "openai/gpt-5.6-terra"])(
-    "preserves Codex task model %s",
-    async (codexModel) => {
-      const startTask = vi.fn(async (task: { prompt: string; name?: string }) => ({
-        id: "task_1",
-        displayId: "TASK-1",
-        name: task.name ?? "Test repo access",
-        prompt: task.prompt,
-      }));
-      const context = createProductChatToolContext({
-        model: codexModel as never,
-        requestedEngine: "codex",
-        startTask,
-      });
-      const startTaskTool = context.tools[START_TASK_TOOL_NAME] as {
-        execute: (args: unknown) => Promise<unknown>;
-      };
-
-      await startTaskTool.execute({
-        name: "Test repo access",
-        model: codexModel,
-        prompt: "Check repo access and report whether development work can start.",
-      });
-
-      expect(startTask).toHaveBeenCalledWith(
-        {
-          name: "Test repo access",
-          prompt: "Check repo access and report whether development work can start.",
-          model: codexModel,
-          engine: "codex",
-        },
-        { toolCallId: expect.any(String) },
-      );
-    },
-  );
-
-  it("uses the model explicitly requested for an opencompany task", async () => {
-    const startTask = vi.fn(async (task: { prompt: string; name?: string }) => ({
-      id: "task_1",
-      displayId: "TASK-1",
-      name: task.name ?? "Analyze launch",
-      prompt: task.prompt,
-    }));
-    const context = createProductChatToolContext({ model, startTask });
-    const startTaskTool = context.tools[START_TASK_TOOL_NAME] as {
-      execute: (args: unknown, context: { toolCallId: string }) => Promise<unknown>;
-    };
-
-    await startTaskTool.execute(
-      {
-        name: "Analyze launch",
-        prompt: "Analyze the launch plan.",
-        engine: "opencompany",
-        model: "xai/grok-4.3",
-      },
-      { toolCallId: "call_model" },
-    );
-
-    expect(startTask).toHaveBeenCalledWith(
-      {
-        name: "Analyze launch",
-        prompt: "Analyze the launch plan.",
-        model: "xai/grok-4.3",
-        engine: "opencompany",
-      },
-      { toolCallId: "call_model" },
-    );
-  });
-
-  it("defaults Claude Code tasks to a Claude Code-compatible model", async () => {
-    const startTask = vi.fn(async (task: { prompt: string; name?: string }) => ({
-      id: "task_1",
-      displayId: "TASK-1",
-      name: task.name ?? "Review code",
-      prompt: task.prompt,
-    }));
-    const context = createProductChatToolContext({
-      model: "moonshotai/kimi-k3",
-      requestedEngine: "claude_code",
-      startTask,
-    });
-    const startTaskTool = context.tools[START_TASK_TOOL_NAME] as {
-      execute: (args: unknown) => Promise<unknown>;
-    };
-
-    await startTaskTool.execute({ name: "Review code", prompt: "Review the code." });
-
-    expect(startTask).toHaveBeenCalledWith(
-      {
-        name: "Review code",
-        prompt: "Review the code.",
-        model: CLAUDE_CODE_DEFAULT_MODEL_ID,
-        engine: "claude_code",
-      },
-      { toolCallId: expect.any(String) },
-    );
-  });
-
-  it("rejects a model that is incompatible with the requested coding engine", async () => {
-    const startTask = vi.fn();
-    const context = createProductChatToolContext({ model, startTask });
-    const startTaskTool = context.tools[START_TASK_TOOL_NAME] as {
-      execute: (args: unknown) => Promise<unknown>;
-    };
-
-    await expect(
-      startTaskTool.execute({
-        name: "Review code",
-        prompt: "Review the code.",
-        engine: "codex",
-        model: "anthropic/claude-sonnet-5",
-      }),
-    ).rejects.toThrow("not available for the Codex engine");
-    expect(startTask).not.toHaveBeenCalled();
-  });
-
-  it("rejects a retired Codex model for a new task", async () => {
-    const startTask = vi.fn();
-    const context = createProductChatToolContext({ model, startTask });
-    const startTaskTool = context.tools[START_TASK_TOOL_NAME] as {
-      execute: (args: unknown) => Promise<unknown>;
-    };
-
-    await expect(
-      startTaskTool.execute({
-        name: "Review code",
-        prompt: "Review the code.",
-        engine: "codex",
-        model: "openai/gpt-5.5",
-      }),
-    ).rejects.toThrow("not available for the Codex engine");
-    expect(startTask).not.toHaveBeenCalled();
-  });
-
-  it("rejects a rollout-gated model for a new task", async () => {
-    const startTask = vi.fn();
-    const context = createProductChatToolContext({ model, startTask });
-    const startTaskTool = context.tools[START_TASK_TOOL_NAME] as {
-      execute: (args: unknown) => Promise<unknown>;
-    };
-
-    await expect(
-      startTaskTool.execute({
-        name: "Analyze launch",
-        prompt: "Analyze the launch.",
-        engine: "opencompany",
-        model: "openai/gpt-6-astra",
-      }),
-    ).rejects.toThrow('Unsupported task model "openai/gpt-6-astra"');
-    expect(startTask).not.toHaveBeenCalled();
-  });
-
-  it("starts distinct tasks for separate calls in the same turn", async () => {
-    const startTask = vi.fn(
-      async (task: { prompt: string; name?: string }, context: { toolCallId: string }) => ({
-        id: `task_${context.toolCallId}`,
-        displayId: `TASK-${context.toolCallId}`,
-        name: task.name ?? "Task",
-        prompt: task.prompt,
-      }),
-    );
-    const context = createProductChatToolContext({ model, startTask });
-    const startTaskTool = context.tools[START_TASK_TOOL_NAME] as {
-      execute: (args: unknown, context: { toolCallId: string }) => Promise<unknown>;
-    };
-
-    const results = await Promise.all([
-      startTaskTool.execute(
-        { name: "Fix search", prompt: "Fix search.", model: "xai/grok-4.3" },
-        { toolCallId: "call_1" },
-      ),
-      startTaskTool.execute(
-        { name: "Fix billing", prompt: "Fix billing.", model: "xai/grok-4.3" },
-        { toolCallId: "call_2" },
-      ),
-    ]);
-
-    expect(results).toEqual([
-      expect.objectContaining({ taskId: "task_call_1", status: "queued" }),
-      expect.objectContaining({ taskId: "task_call_2", status: "queued" }),
-    ]);
-    expect(startTask).toHaveBeenCalledTimes(2);
-    expect(startTask.mock.calls.map(([, callContext]) => callContext.toolCallId)).toEqual([
-      "call_1",
-      "call_2",
-    ]);
-  });
-});
-
 describe("update_task_status tool gating", () => {
   it("is absent when no updateTaskStatus runner is injected (interactive chat / Slack)", () => {
     const context = createProductChatToolContext({ model });
@@ -713,7 +466,41 @@ describe("start_workflow tool", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it("does not start a workflow after a task has already started", async () => {
+  it("refuses a second, different workflow in the same turn instead of replaying the first", async () => {
+    const workflowExecute = vi.fn(async () => ({
+      id: "task_1",
+      displayId: "TASK-1",
+      name: "Customer interview synthesis",
+      prompt: "Synthesize the Acme interview.",
+    }));
+    const context = createProductChatToolContext({
+      model,
+      workflows: {
+        catalog: [
+          ...workflowCatalog,
+          { id: "weekly-digest", name: "Weekly digest", description: "Summarize the week." },
+        ],
+        execute: workflowExecute,
+      },
+    });
+    const startWorkflow = context.tools[START_WORKFLOW_TOOL_NAME] as {
+      execute: (args: unknown) => Promise<unknown>;
+    };
+
+    await expect(
+      startWorkflow.execute({
+        workflowId: "customer-interview-synthesis",
+        prompt: "Synthesize the Acme interview.",
+      }),
+    ).resolves.toMatchObject({ taskId: "task_1", status: "queued" });
+    await expect(
+      startWorkflow.execute({ workflowId: "weekly-digest", prompt: "Summarize the week." }),
+    ).rejects.toThrow("Only one workflow can start per chat turn");
+    expect(workflowExecute).toHaveBeenCalledTimes(1);
+    expect(context.getStartedTask()?.id).toBe("task_1");
+  });
+
+  it("starts at most one workflow task per turn", async () => {
     let releaseTask!: (task: {
       id: string;
       displayId: string;
@@ -728,40 +515,39 @@ describe("start_workflow tool", () => {
     }>((resolve) => {
       releaseTask = resolve;
     });
-    const workflowExecute = vi.fn();
+    const workflowExecute = vi.fn(() => taskInFlight);
     const context = createProductChatToolContext({
       model,
-      startTask: async () => taskInFlight,
       workflows: {
         catalog: workflowCatalog,
         execute: workflowExecute,
       },
     });
-    const startTask = context.tools[START_TASK_TOOL_NAME] as {
-      execute: (args: unknown) => Promise<unknown>;
-    };
     const startWorkflow = context.tools[START_WORKFLOW_TOOL_NAME] as {
       execute: (args: unknown) => Promise<unknown>;
     };
 
-    const taskResult = startTask.execute({ name: "Research market", prompt: "Research market." });
-    const workflowResult = startWorkflow.execute({
+    const first = startWorkflow.execute({
       workflowId: "customer-interview-synthesis",
-      prompt: "Synthesize the interview.",
+      prompt: "Synthesize the Acme interview.",
+    });
+    const second = startWorkflow.execute({
+      workflowId: "customer-interview-synthesis",
+      prompt: "Synthesize the Globex interview.",
     });
     releaseTask({
       id: "task_1",
       displayId: "TASK-1",
-      name: "Research market",
-      prompt: "Research market.",
+      name: "Customer interview synthesis",
+      prompt: "Synthesize the Acme interview.",
     });
 
-    await expect(taskResult).resolves.toMatchObject({ taskId: "task_1", status: "queued" });
-    await expect(workflowResult).resolves.toMatchObject({
+    await expect(first).resolves.toMatchObject({ taskId: "task_1", status: "queued" });
+    await expect(second).resolves.toMatchObject({
       taskId: "task_1",
       status: "already_started",
     });
-    expect(workflowExecute).not.toHaveBeenCalled();
+    expect(workflowExecute).toHaveBeenCalledTimes(1);
   });
 });
 

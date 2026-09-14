@@ -496,7 +496,7 @@ async function runSlackChatAgent(input: {
     workspaceId: input.integration.workspaceId,
     modelResolution: input.modelResolution,
     feature: "slack-bot",
-    taskToolsEnabled: false,
+    automationToolsEnabled: false,
     ...(primaryBrain
       ? {
           activeBrain: {

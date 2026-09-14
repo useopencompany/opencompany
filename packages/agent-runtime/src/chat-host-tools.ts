@@ -5,7 +5,6 @@ export type ChatHostToolOperation =
   | "create_workspace_skill"
   | "edit_workspace_skill"
   | "workspace_skills"
-  | "start_task"
   | "schedule_task"
   | "edit_task_schedule"
   | "delete_task_schedule"
@@ -55,7 +54,7 @@ export type ChatHostBootstrap = {
     timezone: string;
   };
   workspaceName: string;
-  taskToolsEnabled: boolean;
+  automationToolsEnabled: boolean;
   skillToolsEnabled: boolean;
   subagentsEnabled: boolean;
   browserToolsEnabled: boolean;
