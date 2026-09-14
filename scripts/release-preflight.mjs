@@ -227,6 +227,12 @@ const groups = {
       "REDIS_URL",
       "RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED",
       "RUNNER_SANDBOX_NAMESPACE",
+      // One built template per user-selectable sandbox size. A missing alias would
+      // silently fall back to E2B's stock template, so a workspace would get — and
+      // be billed for — a machine other than the one it picked.
+      "OPENCOMPANY_CODEX_E2B_TEMPLATE_SMALL",
+      "OPENCOMPANY_CODEX_E2B_TEMPLATE_STANDARD",
+      "OPENCOMPANY_CODEX_E2B_TEMPLATE_LARGE",
     ],
     // Agent turns and the crash reconciler both call Browserbase from the
     // runner when browser profiles are enabled.
@@ -245,7 +251,6 @@ const groups = {
       "RUNNER_DB_POOL_MAX",
       "RUNNER_WORKER_CONCURRENCY",
       "RUNNER_JOB_LEASE_TTL_MS",
-      "OPENCOMPANY_CODEX_E2B_TEMPLATE",
       "RUNNER_CODEX_MODEL",
       "RUNNER_CODEX_TIMEOUT_MS",
       "RUNNER_CODEX_API_KEY_FALLBACK_ENABLED",

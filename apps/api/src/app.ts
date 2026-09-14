@@ -444,6 +444,7 @@ export function createApiApp(input: CreateApiAppInput) {
         idempotencyKey: c.req.valid("header")["idempotency-key"],
         name: body.name,
         ...(body.description !== undefined ? { description: body.description } : {}),
+        ...(body.scope !== undefined ? { scope: body.scope } : {}),
       });
       return c.json(
         {
@@ -845,6 +846,21 @@ export function createApiApp(input: CreateApiAppInput) {
       await enforceRateLimit(rateLimiter, actor, "write", 60);
       const workspace = await input.workspaceControl.rename(actor, c.req.valid("json").name);
       return c.json({ data: workspace, meta }, 200);
+    },
+    getWorkspaceSandboxSize: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const sandboxSize = await input.workspaceControl.getSandboxSize(actor);
+      return c.json({ data: { sandboxSize }, meta }, 200);
+    },
+    setWorkspaceSandboxSize: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const sandboxSize = await input.workspaceControl.setSandboxSize(
+        actor,
+        c.req.valid("json").sandboxSize,
+      );
+      return c.json({ data: { sandboxSize }, meta }, 200);
     },
     inviteWorkspaceMember: async (c) => {
       const actor = actorFrom(c);

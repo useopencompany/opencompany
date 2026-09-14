@@ -12,6 +12,7 @@ import {
   type WorkflowMutationResult,
   type WorkflowPage,
   type WorkflowRepository,
+  type WorkflowScope,
   type WorkflowStep,
   type WorkflowTrigger,
 } from "@opencompany/core";
@@ -42,6 +43,8 @@ type WorkflowRow = {
   model: string;
   steps: unknown;
   status: "draft" | "active";
+  scope: "personal" | "company";
+  createdByUserId: string | null;
   trigger: "manual" | "slack" | "linear" | "schedule" | "event";
   scheduleCron: string | null;
   scheduleTimezone: string;
@@ -51,7 +54,6 @@ type WorkflowRow = {
   scheduleNextRunAt: Date | string | null;
   eventConfig: unknown;
   automationTriggers: unknown;
-  createdByWorkosId: string | null;
   version: number | string;
   archivedAt: Date | string | null;
   createdAt: Date | string;
@@ -108,6 +110,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
       WHERE workflow.workspace_id = ${input.actor.workspaceId}
         AND workflow.archived_at IS NULL
         AND ${workspaceMembership(input.actor)}
+        AND ${workflowVisibility(input.actor)}
         AND (
           ${input.cursor ?? null}::text IS NULL
           OR EXISTS (
@@ -137,6 +140,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         AND (workflow.id = ${input.workflowId} OR workflow.slug = ${input.workflowId})
         AND workflow.archived_at IS NULL
         AND ${workspaceMembership(input.actor)}
+        AND ${workflowVisibility(input.actor)}
       LIMIT 1
     `);
     return row ? mapWorkflow(row) : null;
@@ -147,6 +151,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     idempotencyKey: string;
     name: string;
     description: string;
+    scope: WorkflowScope;
     initialStep: WorkflowStep;
   }): Promise<WorkflowMutationResult> {
     const ids = this.options.ids ?? defaultIds;
@@ -216,13 +221,13 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
           id, workspace_id, slug, name, description, instructions, model, steps,
           trigger, schedule_cron, schedule_timezone, schedule_prompt,
           schedule_user_workos_id, schedule_harness_spec, schedule_enabled,
-          schedule_next_run_at, status, created_by_workos_id, version,
+          schedule_next_run_at, status, scope, created_by_workos_id, version,
           created_at, updated_at
         )
         SELECT
           winner.resource_id, ${input.actor.workspaceId}, candidate.slug, ${input.name},
           ${input.description}, '', '', ${stringifyPostgresJson([input.initialStep])}::jsonb,
-          'manual', NULL, 'UTC', '', NULL, NULL, false, NULL, 'draft',
+          'manual', NULL, 'UTC', '', NULL, NULL, false, NULL, 'draft', ${input.scope},
           ${input.actor.userId}, 1, ${now}, ${now}
         FROM winner
         CROSS JOIN candidate
@@ -253,6 +258,8 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         workflow.model,
         workflow.steps,
         workflow.status,
+        workflow.scope,
+        workflow.created_by_workos_id AS "createdByUserId",
         workflow.trigger,
         workflow.schedule_cron AS "scheduleCron",
         workflow.schedule_timezone AS "scheduleTimezone",
@@ -262,7 +269,6 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         workflow.schedule_next_run_at AS "scheduleNextRunAt",
         workflow.event_config AS "eventConfig",
         workflow.automation_triggers AS "automationTriggers",
-        workflow.created_by_workos_id AS "createdByWorkosId",
         workflow.version,
         workflow.archived_at AS "archivedAt",
         workflow.created_at AS "createdAt",
@@ -297,6 +303,13 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
       SET name = ${input.name},
           description = ${input.description},
           steps = ${stringifyPostgresJson(input.steps)}::jsonb,
+          scope = ${input.scope},
+          -- A legacy company workflow has no recorded creator. Whoever takes it personal owns it.
+          created_by_workos_id = CASE
+            WHEN ${input.scope} = 'personal'
+              THEN COALESCE(workflow.created_by_workos_id, ${input.actor.userId})
+            ELSE workflow.created_by_workos_id
+          END,
           automation_triggers = CASE
             WHEN ${automationTriggers ? stringifyPostgresJson(automationTriggers) : null}::jsonb IS NULL
               THEN workflow.automation_triggers
@@ -377,6 +390,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         AND workflow.archived_at IS NULL
         AND workflow.version = ${input.expectedVersion}
         AND ${workspaceMembership(input.actor)}
+        AND ${workflowVisibility(input.actor)}
       RETURNING
         workflow.id,
         workflow.slug,
@@ -386,6 +400,8 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         workflow.model,
         workflow.steps,
         workflow.status,
+        workflow.scope,
+        workflow.created_by_workos_id AS "createdByUserId",
         workflow.trigger,
         workflow.schedule_cron AS "scheduleCron",
         workflow.schedule_timezone AS "scheduleTimezone",
@@ -395,7 +411,6 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         workflow.schedule_next_run_at AS "scheduleNextRunAt",
         workflow.event_config AS "eventConfig",
         workflow.automation_triggers AS "automationTriggers",
-        workflow.created_by_workos_id AS "createdByWorkosId",
         workflow.version,
         workflow.archived_at AS "archivedAt",
         workflow.created_at AS "createdAt",
@@ -430,6 +445,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         AND workflow.archived_at IS NULL
         AND workflow.version = ${input.expectedVersion}
         AND ${workspaceMembership(input.actor)}
+        AND ${workflowVisibility(input.actor)}
       RETURNING
         workflow.id,
         workflow.version,
@@ -466,6 +482,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         AND workflow.workspace_id = ${input.actor.workspaceId}
         AND workflow.archived_at IS NULL
         AND ${workspaceMembership(input.actor)}
+        AND ${workflowVisibility(input.actor)}
       ON CONFLICT (workflow_id, trigger_id, scheduled_for) DO UPDATE
       SET task_id = EXCLUDED.task_id,
           status = 'created',
@@ -891,6 +908,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         AND workflow.workspace_id = ${actor.workspaceId}
         AND workflow.archived_at IS NULL
         AND ${workspaceMembership(actor)}
+        AND ${workflowVisibility(actor)}
       LIMIT 1
     `);
     return row ? { status: "conflict" } : { status: "not_found" };
@@ -981,6 +999,8 @@ function workflowSelect() {
       workflow.model,
       workflow.steps,
       workflow.status,
+      workflow.scope,
+      workflow.created_by_workos_id AS "createdByUserId",
       workflow.trigger,
       workflow.schedule_cron AS "scheduleCron",
       workflow.schedule_timezone AS "scheduleTimezone",
@@ -990,7 +1010,6 @@ function workflowSelect() {
       workflow.schedule_next_run_at AS "scheduleNextRunAt",
       workflow.event_config AS "eventConfig",
       workflow.automation_triggers AS "automationTriggers",
-      workflow.created_by_workos_id AS "createdByWorkosId",
       workflow.version,
       workflow.archived_at AS "archivedAt",
       workflow.created_at AS "createdAt",
@@ -1027,6 +1046,15 @@ function workspaceMembership(actor: Actor) {
   )`;
 }
 
+// A company workflow belongs to the workspace; a personal one only to its creator. A personal row
+// whose creator was removed matches nobody, which keeps it out of every list and mutation.
+function workflowVisibility(actor: Actor) {
+  return sql`(
+    workflow.scope = 'company'
+    OR workflow.created_by_workos_id = ${actor.userId}
+  )`;
+}
+
 function enabledWorkspaceMember(actor: Actor) {
   return sql`EXISTS (
     SELECT 1
@@ -1048,9 +1076,10 @@ function mapWorkflow(row: WorkflowRow): Workflow {
     description: row.description,
     steps,
     status: row.status,
+    scope: row.scope,
+    createdByUserId: row.createdByUserId,
     trigger: workflowTrigger(row),
     triggers: workflowAutomationTriggers(row.automationTriggers),
-    createdByWorkosId: row.createdByWorkosId,
     version: Number(row.version),
     archivedAt: nullableDate(row.archivedAt),
     createdAt: asDate(row.createdAt),

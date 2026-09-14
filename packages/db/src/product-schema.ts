@@ -19,6 +19,8 @@ import {
   type RunAttemptStatus,
   type RunEventType,
   type RunStatus,
+  SANDBOX_SIZES,
+  type SandboxSize,
   TASK_SOURCES,
   type TaskSource,
 } from "@opencompany/core";
@@ -80,6 +82,7 @@ export type TaskStatus = "queued" | "running" | "waiting" | "succeeded" | "faile
 
 // Workflows retain the draft/active lifecycle from their original Brain documents.
 export type WorkflowStatus = "draft" | "active";
+export type WorkflowScope = "personal" | "company";
 export type WorkflowTrigger = "manual" | "slack" | "linear" | "schedule" | "event";
 export type WorkflowEventConfig = {
   provider: string;
@@ -812,6 +815,9 @@ export const workspaces = productSchema.table(
     // Reversible cutover switch for the retired Brain UI and agent tools.
     // Wiki is the default knowledge system for every workspace.
     legacyBrainEnabled: boolean("legacy_brain_enabled").notNull().default(false),
+    // Machine size new cloud coding sandboxes start on. Workspace admins own it;
+    // a session pins the value it was created with (codexChatSessions.sandboxSize).
+    sandboxSize: text("sandbox_size").$type<SandboxSize>().notNull().default("standard"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -820,6 +826,13 @@ export const workspaces = productSchema.table(
       table.workosOrganizationId,
     ),
     slugIdx: uniqueIndex("goat_workspaces_slug_idx").on(table.slug),
+    sandboxSizeCheck: check(
+      "goat_workspaces_sandbox_size_check",
+      sql`${table.sandboxSize} IN (${sql.join(
+        SANDBOX_SIZES.map((size) => sql`${size}`),
+        sql`, `,
+      )})`,
+    ),
   }),
 );
 
@@ -3301,6 +3314,9 @@ export const workflows = productSchema.table(
     }),
     eventHarnessSpec: jsonb("event_harness_spec").$type<HarnessSpec | null>(),
     status: text("status").$type<WorkflowStatus>().notNull().default("active"),
+    // Workflows written before scopes existed belong to the whole workspace, so "company" is both
+    // the backfill and the physical default for writers that predate this column.
+    scope: text("scope").$type<WorkflowScope>().notNull().default("company"),
     createdByWorkosId: text("created_by_workos_id").references(() => users.workosUserId, {
       onDelete: "set null",
     }),
@@ -3326,6 +3342,15 @@ export const workflows = productSchema.table(
         sql`${table.trigger} = 'schedule' AND ${table.status} = 'active' AND ${table.archivedAt} IS NULL`,
       ),
     statusCheck: check("goat_workflows_status_check", sql`${table.status} IN ('draft', 'active')`),
+    // created_by_workos_id is cleared when a user row is deleted, so the owner cannot be required
+    // here. Readers treat a personal row without an owner as visible to nobody.
+    scopeCheck: check(
+      "opencompany_workflows_scope_check",
+      sql`${table.scope} IN ('personal', 'company')`,
+    ),
+    personalOwnerIdx: index("opencompany_workflows_personal_owner_idx")
+      .on(table.workspaceId, table.createdByWorkosId)
+      .where(sql`${table.scope} = 'personal' AND ${table.archivedAt} IS NULL`),
     triggerCheck: check(
       "goat_workflows_trigger_check",
       sql`${table.trigger} IN ('manual', 'slack', 'linear', 'schedule', 'event')`,
@@ -4973,6 +4998,10 @@ export const codexChatSessions = productSchema.table(
     }),
     hostToolContractVersion: text("host_tool_contract_version"),
     sandboxId: text("sandbox_id"),
+    // Machine size resolved from the workspace default when the session was created.
+    // Pinned for the session's whole life so a later workspace change never resizes
+    // work that is already running.
+    sandboxSize: text("sandbox_size").$type<SandboxSize>().notNull().default("standard"),
     codexThreadId: text("codex_thread_id"),
     activeTurnId: text("active_turn_id"),
     status: text("status").$type<CodexChatSessionStatus>().notNull().default("queued"),
@@ -5006,6 +5035,13 @@ export const codexChatSessions = productSchema.table(
     engineCheck: check(
       "goat_codex_chat_sessions_engine_check",
       sql`${table.engine} IN ('opencompany', 'codex', 'claude_code')`,
+    ),
+    sandboxSizeCheck: check(
+      "goat_codex_chat_sessions_sandbox_size_check",
+      sql`${table.sandboxSize} IN (${sql.join(
+        SANDBOX_SIZES.map((size) => sql`${size}`),
+        sql`, `,
+      )})`,
     ),
   }),
 );
@@ -5577,12 +5613,13 @@ export const workflowReadModelV1 = productSchema.table(
     description: text("description").notNull(),
     steps: jsonb("steps").$type<WorkflowStep[]>().notNull(),
     status: text("status").$type<WorkflowStatus>().notNull(),
+    scope: text("scope").$type<WorkflowScope>().notNull(),
+    createdByWorkosId: text("created_by_workos_id"),
     trigger: jsonb("trigger").$type<Record<string, unknown>>().notNull(),
     triggers: jsonb("triggers")
       .$type<Record<string, unknown>[]>()
       .notNull()
       .default(sql`'[]'::jsonb`),
-    createdByWorkosId: text("created_by_workos_id"),
     scheduleCron: text("schedule_cron"),
     scheduleTimezone: text("schedule_timezone").notNull(),
     schedulePrompt: text("schedule_prompt").notNull(),

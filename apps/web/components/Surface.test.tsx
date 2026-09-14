@@ -947,7 +947,7 @@ describe("Surface chat streaming UI", () => {
     });
     await waitFor(() => expect(screen.getByTestId("local-chat-states")).toHaveTextContent("none"));
     expect(textarea).toHaveValue("");
-    expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "What should we build next?" })).toBeInTheDocument();
   });
 
   it("keeps an accepted background chat when live completion monitoring fails", async () => {
@@ -1792,7 +1792,7 @@ describe("Surface chat streaming UI", () => {
     expect(textarea).toHaveValue("Start now\n");
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     expect(chatMock.preparedRequestBodies).toHaveLength(0);
-    expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "What should we build next?" })).toBeInTheDocument();
     expect(routerMock.push).not.toHaveBeenCalled();
   });
 
@@ -1866,7 +1866,7 @@ describe("Surface chat streaming UI", () => {
     const composer = screen.getByPlaceholderText("Ask opencompany anything...");
     expect(composer).toHaveValue("");
     expect(composer).toHaveFocus();
-    expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "What should we build next?" })).toBeInTheDocument();
   });
 
   it.each([null, { id: "chat_1", title: "Chat", model: DEFAULT_MODEL, messages: [] }])(
@@ -2128,7 +2128,7 @@ describe("Surface chat streaming UI", () => {
     acceptHeadlessConversation(request.newSessionId);
 
     expect(screen.getByPlaceholderText("Ask opencompany anything...")).toHaveFocus();
-    expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "What should we build next?" })).toBeInTheDocument();
     expect(historyMock.replaceState).not.toHaveBeenCalled();
     expect(routerMock.replace).not.toHaveBeenCalled();
     expect(routerMock.refresh).not.toHaveBeenCalled();
@@ -2163,7 +2163,7 @@ describe("Surface chat streaming UI", () => {
 
     act(() => window.dispatchEvent(new Event(HOME_NAVIGATION_EVENT)));
 
-    expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "What should we build next?" })).toBeInTheDocument();
     expect(screen.getByTestId("local-chat-state")).toHaveTextContent("working");
 
     act(() => chatMock.finishWithSessionId?.("chat_1"));
@@ -3109,35 +3109,21 @@ describe("Surface chat streaming UI", () => {
 
   it("restores Codex composer controls when returning to a Codex chat", async () => {
     const user = userEvent.setup();
+    const codexChat = {
+      id: "goat_chat_codex_1",
+      title: "Codex chat",
+      model: DEFAULT_MODEL,
+      engine: "codex" as const,
+      codexComposerSettings: {
+        reasoningEffort: "high" as const,
+        planModeEnabled: true,
+        goalMode: { objective: "Fix flaky tests", tokenBudget: 200000 },
+      },
+      messages: [],
+    };
 
-    render(
-      <Surface
-        tasks={[]}
-        defaultModel={DEFAULT_MODEL}
-        codexConnected
-        initialChat={{
-          id: "goat_chat_codex_1",
-          title: "Codex chat",
-          model: DEFAULT_MODEL,
-          engine: "codex",
-          codexComposerSettings: {
-            reasoningEffort: "high",
-            planModeEnabled: true,
-            goalMode: { objective: "Fix flaky tests", tokenBudget: 200000 },
-          },
-          messages: [],
-        }}
-        recentChats={[
-          {
-            id: "goat_chat_codex_1",
-            title: "Codex chat",
-            model: DEFAULT_MODEL,
-            engine: "codex",
-            preview: "Run the failing suite",
-            updatedAt: currentTimestamp(),
-          },
-        ]}
-      />,
+    const { rerender } = render(
+      <Surface tasks={[]} defaultModel={DEFAULT_MODEL} codexConnected initialChat={codexChat} />,
     );
 
     expect(
@@ -3154,7 +3140,14 @@ describe("Surface chat streaming UI", () => {
 
     await user.keyboard("{Escape}");
     await nextAnimationFrame();
-    await user.click(screen.getByRole("link", { name: /Codex chat/ }));
+    // Escape only resets local state; the route props follow, and navigating back to the chat is
+    // what has to restore the remembered composer settings.
+    rerender(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} codexConnected initialChat={null} />);
+    await nextAnimationFrame();
+    rerender(
+      <Surface tasks={[]} defaultModel={DEFAULT_MODEL} codexConnected initialChat={codexChat} />,
+    );
+    await nextAnimationFrame();
 
     expect(
       screen.getByRole("button", { name: "Codex reasoning effort: High (click to cycle)" }),
@@ -3278,7 +3271,7 @@ describe("Surface chat streaming UI", () => {
     await user.keyboard("{Escape}");
     await nextAnimationFrame();
 
-    expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "What should we build next?" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Kimi K3");
   });
 
@@ -3348,7 +3341,7 @@ describe("Surface chat streaming UI", () => {
     await user.keyboard("{Escape}");
     await nextAnimationFrame();
 
-    expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "What should we build next?" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Kimi K3");
   });
 
@@ -3968,17 +3961,32 @@ describe("Surface chat streaming UI", () => {
     expect(screen.queryByText("No results yet.")).not.toBeInTheDocument();
   });
 
-  it("keeps the home screen clean when there is no activity", () => {
-    render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} userName="Louis" />);
+  it("opens home on the new chat prompt instead of activity lists", () => {
+    render(
+      <Surface
+        taskSpawningEnabled
+        tasks={[taskView({ id: "task_1", name: "Run market report" })]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={null}
+        recentChats={[
+          {
+            id: "chat_1",
+            title: "Market research",
+            model: DEFAULT_MODEL,
+            preview: "Compare the latest pricing.",
+            updatedAt: currentTimestamp(),
+          },
+        ]}
+      />,
+    );
 
-    expect(screen.getByText("welcome back, Louis")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "What should we build next?" })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Ask a question or describe a task...")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Chats" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Routines" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Tasks" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Results" })).not.toBeInTheDocument();
-    expect(screen.queryByText("No chats yet.")).not.toBeInTheDocument();
-    expect(screen.queryByText("No recurring tasks yet.")).not.toBeInTheDocument();
-    expect(screen.queryByText("No results yet.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Routines" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Market research")).not.toBeInTheDocument();
+    expect(screen.queryByText("Run market report")).not.toBeInTheDocument();
   });
 
   it("opens a chat started from a project on that project's prompt", () => {
@@ -3987,7 +3995,6 @@ describe("Surface chat streaming UI", () => {
         tasks={[]}
         defaultModel={DEFAULT_MODEL}
         initialChat={null}
-        userName="Louis"
         newChatProjectId="project_1"
         newChatProjectName="product"
         recentChats={[
@@ -4006,222 +4013,21 @@ describe("Surface chat streaming UI", () => {
     expect(
       screen.getByRole("heading", { name: "What should we build in product?" }),
     ).toBeInTheDocument();
-    expect(screen.queryByText("welcome back, Louis")).not.toBeInTheDocument();
     expect(screen.queryByText("Older chat")).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText("Ask opencompany anything...")).toBeInTheDocument();
   });
 
-  it("keeps the plain home screen when a project name is missing", () => {
+  it("keeps the plain home prompt when a project name is missing", () => {
     render(
       <Surface
         tasks={[]}
         defaultModel={DEFAULT_MODEL}
         initialChat={null}
-        userName="Louis"
         newChatProjectId="project_1"
       />,
     );
 
-    expect(screen.getByText("welcome back, Louis")).toBeInTheDocument();
-  });
-
-  it("renders recent chat history with links to each chat", () => {
-    render(
-      <Surface
-        tasks={[]}
-        defaultModel={DEFAULT_MODEL}
-        initialChat={null}
-        recentChats={[
-          {
-            id: "chat_1",
-            title: "Market research",
-            model: DEFAULT_MODEL,
-            preview: "Compare the latest pricing.",
-            updatedAt: currentTimestamp(),
-          },
-        ]}
-      />,
-    );
-
-    const chatLink = screen.getByRole("link", { name: /Market research/ });
-    expect(chatLink).toHaveAttribute("href", "/chat/chat_1");
-    expect(screen.getByText("Compare the latest pricing.")).toBeInTheDocument();
-  });
-
-  it("renders home chat state indicators", () => {
-    render(
-      <Surface
-        tasks={[]}
-        defaultModel={DEFAULT_MODEL}
-        initialChat={null}
-        recentChats={[
-          codexChatSummary({
-            id: "working_chat",
-            title: "Working chat",
-            status: "running",
-          }),
-          {
-            id: "unseen_chat",
-            title: "Done unseen",
-            model: DEFAULT_MODEL,
-            preview: "Ready to review.",
-            updatedAt: currentTimestamp(),
-            state: "done_unseen",
-          },
-          {
-            id: "seen_chat",
-            title: "Done seen",
-            model: DEFAULT_MODEL,
-            preview: "Already opened.",
-            updatedAt: currentTimestamp(),
-            state: "done_seen",
-          },
-        ]}
-      />,
-    );
-
-    expect(screen.getByRole("link", { name: /Working chat/ })).toHaveAttribute(
-      "href",
-      "/chat/working_chat",
-    );
-    expect(screen.getByRole("link", { name: /Done unseen/ })).toHaveAttribute(
-      "href",
-      "/chat/unseen_chat",
-    );
-    expect(screen.getByRole("link", { name: /Done seen/ })).toHaveAttribute(
-      "href",
-      "/chat/seen_chat",
-    );
-    expect(screen.getByTestId("home-chat-working")).toBeInTheDocument();
-    expect(screen.getByTestId("home-chat-unseen")).toBeInTheDocument();
-    expect(screen.getByTestId("home-chat-seen")).toBeInTheDocument();
-  });
-
-  it("keeps Codex and Claude Code sessions in Chats while Tasks show real tasks", () => {
-    const { container } = render(
-      <Surface
-        taskSpawningEnabled
-        tasks={[taskView({ id: "task_1", name: "Prepare report" })]}
-        schedules={[
-          {
-            id: "schedule_1",
-            name: "Monday update",
-            sourceDescription: "Every Monday",
-            cron: "0 9 * * 1",
-            timezone: "Europe/Berlin",
-            prompt: "Prepare the weekly update",
-            enabled: true,
-            version: 1,
-            lastRunAt: null,
-            nextRunAt: "2026-07-20T07:00:00.000Z",
-            createdAt: currentTimestamp(),
-            updatedAt: currentTimestamp(),
-          },
-        ]}
-        defaultModel={DEFAULT_MODEL}
-        initialChat={null}
-        recentChats={[
-          codexChatSummary({ id: "codex_1", title: "Fix deployment" }),
-          codexChatSummary({
-            id: "claude_1",
-            title: "Update docs",
-            engine: "claude_code",
-            preview: "Claude is updating the docs.",
-          }),
-          {
-            id: "chat_1",
-            title: "Market research",
-            model: DEFAULT_MODEL,
-            engine: "opencompany",
-            preview: "Compare the latest pricing.",
-            updatedAt: currentTimestamp(),
-          },
-        ]}
-      />,
-    );
-
-    const tasksSection = screen.getByRole("heading", { name: "Tasks" }).closest("section");
-    const chatsSection = screen.getByRole("heading", { name: "Chats" }).closest("section");
-    expect(tasksSection).not.toBeNull();
-    expect(chatsSection).not.toBeNull();
-    expect(within(tasksSection!).getByRole("link", { name: /Prepare report/ })).toHaveAttribute(
-      "href",
-      "/tasks/TASK-1",
-    );
-    expect(within(tasksSection!).queryByText("Fix deployment")).not.toBeInTheDocument();
-    expect(within(tasksSection!).queryByText("Update docs")).not.toBeInTheDocument();
-    expect(within(chatsSection!).getByRole("link", { name: /Fix deployment/ })).toHaveAttribute(
-      "href",
-      "/chat/codex_1",
-    );
-    expect(within(chatsSection!).getByRole("link", { name: /Update docs/ })).toHaveAttribute(
-      "href",
-      "/chat/claude_1",
-    );
-    expect(within(chatsSection!).getByText("Market research")).toBeInTheDocument();
-    expect(
-      within(container)
-        .getAllByRole("heading")
-        .map((heading) => heading.textContent)
-        .filter((heading) => ["Tasks", "Chats", "Routines"].includes(heading ?? "")),
-    ).toEqual(["Tasks", "Chats", "Routines"]);
-  });
-
-  it("updates a recurring Task through the versioned schedule command", async () => {
-    const user = userEvent.setup();
-    render(
-      <Surface
-        taskSpawningEnabled
-        workspaceId="workspace_1"
-        tasks={[]}
-        schedules={[
-          {
-            id: "schedule_1",
-            name: "Monday update",
-            sourceDescription: "Every Monday",
-            cron: "0 9 * * 1",
-            timezone: "Europe/Berlin",
-            prompt: "Prepare the weekly update",
-            enabled: true,
-            version: 4,
-            lastRunAt: null,
-            nextRunAt: "2026-07-20T07:00:00.000Z",
-            createdAt: currentTimestamp(),
-            updatedAt: currentTimestamp(),
-          },
-        ]}
-        defaultModel={DEFAULT_MODEL}
-        initialChat={null}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Pause Monday update" }));
-
-    await waitFor(() =>
-      expect(automationCommandMocks.updateSchedule).toHaveBeenCalledWith(
-        "schedule_1",
-        { expectedVersion: 4, enabled: false },
-        { scopeKey: "workspace_1" },
-      ),
-    );
-  });
-
-  it("shows Codex chats in Chats when background task spawning is disabled", () => {
-    render(
-      <Surface
-        tasks={[]}
-        defaultModel={DEFAULT_MODEL}
-        initialChat={null}
-        recentChats={[codexChatSummary()]}
-      />,
-    );
-
-    expect(screen.queryByRole("heading", { name: "Tasks" })).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Chats" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Codex task/ })).toHaveAttribute(
-      "href",
-      "/chat/goat_chat_codex_1",
-    );
+    expect(screen.getByRole("heading", { name: "What should we build next?" })).toBeInTheDocument();
   });
 
   it("renders coding workspaces only for persistent Codex and Claude Code chats", () => {
@@ -4269,293 +4075,6 @@ describe("Surface chat streaming UI", () => {
     });
     expect(screen.queryByRole("button", { name: "Open workspace" })).not.toBeInTheDocument();
     backgroundTask.unmount();
-  });
-
-  it("keeps active and pinned coding chats visible outside the recent window", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-07-04T17:44:00.000Z"));
-    try {
-      render(
-        <Surface
-          tasks={[]}
-          defaultModel={DEFAULT_MODEL}
-          initialChat={null}
-          recentChats={[
-            codexChatSummary({
-              id: "recent_ready",
-              title: "Recent ready",
-              status: "idle",
-              updatedAt: "2026-07-04T17:00:00.000Z",
-            }),
-            codexChatSummary({
-              id: "old_running",
-              title: "Old but working",
-              status: "running",
-              updatedAt: "2026-06-26T17:00:00.000Z",
-            }),
-            codexChatSummary({
-              id: "old_pinned",
-              title: "Pinned ready",
-              status: "idle",
-              updatedAt: "2026-06-26T17:00:00.000Z",
-              pinnedAt: "2026-07-04T12:00:00.000Z",
-            }),
-            codexChatSummary({
-              id: "old_hidden",
-              title: "Old hidden",
-              status: "idle",
-              updatedAt: "2026-06-26T17:00:00.000Z",
-            }),
-          ]}
-        />,
-      );
-
-      const chatsSection = screen.getByRole("heading", { name: "Chats" }).closest("section");
-      expect(chatsSection).not.toBeNull();
-      expect(within(chatsSection!).getByText("Recent ready")).toBeInTheDocument();
-      expect(within(chatsSection!).getByText("Old but working")).toBeInTheDocument();
-      expect(within(chatsSection!).getByText("Pinned ready")).toBeInTheDocument();
-      expect(within(chatsSection!).queryByText("Old hidden")).not.toBeInTheDocument();
-      expect(screen.queryByRole("heading", { name: "Tasks" })).not.toBeInTheDocument();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("prefetches recent chats and task results before navigation", async () => {
-    const user = userEvent.setup();
-    render(
-      <Surface
-        taskSpawningEnabled
-        tasks={[
-          {
-            id: "task_1",
-            displayId: "TASK-1",
-            name: "Run market report",
-            prompt: "Write a report",
-            model: DEFAULT_MODEL,
-            status: "succeeded",
-            stage: "completed",
-            result: "Done",
-            error: null,
-            archivedAt: null,
-            createdAt: currentTimestamp(),
-            updatedAt: currentTimestamp(),
-          },
-        ]}
-        defaultModel={DEFAULT_MODEL}
-        initialChat={null}
-        recentChats={[
-          {
-            id: "chat_1",
-            title: "Market research",
-            model: DEFAULT_MODEL,
-            preview: "Compare the latest pricing.",
-            updatedAt: currentTimestamp(),
-          },
-          codexChatSummary({
-            id: "codex_chat_1",
-            title: "Fix deployment",
-            status: "idle",
-            updatedAt: currentTimestamp(),
-          }),
-        ]}
-      />,
-    );
-
-    await user.hover(screen.getByRole("link", { name: /Market research/ }));
-    await user.hover(screen.getByRole("link", { name: /Fix deployment/ }));
-    await user.hover(screen.getByRole("link", { name: /Run market report/ }));
-
-    expect(routerMock.prefetch).toHaveBeenCalledWith("/chat/chat_1");
-    expect(routerMock.prefetch).toHaveBeenCalledWith("/chat/codex_chat_1");
-    expect(routerMock.prefetch).toHaveBeenCalledWith("/tasks/TASK-1");
-  });
-
-  it("archives canonical results while keeping compatibility results read-only", async () => {
-    const user = userEvent.setup();
-    render(
-      <Surface
-        taskSpawningEnabled
-        tasks={[
-          taskView({
-            id: "canonical_task",
-            displayId: "TASK-1",
-            name: "Canonical result",
-            sessionId: "canonical_conversation",
-          }),
-          taskView({
-            id: "legacy_task",
-            displayId: "TASK-2",
-            name: "Legacy result",
-            sessionId: null,
-          }),
-        ]}
-        defaultModel={DEFAULT_MODEL}
-        initialChat={null}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Archive Canonical result" }));
-
-    expect(taskCommandMocks.archive).toHaveBeenCalledWith("canonical_task", { scopeKey: "" });
-    expect(screen.queryByRole("button", { name: "Archive Legacy result" })).not.toBeInTheDocument();
-  });
-
-  it.each(["waiting", "failed", "succeeded", "canceled"] as const)(
-    "archives a %s task from the home list",
-    async (status) => {
-      const user = userEvent.setup();
-      render(
-        <Surface
-          taskSpawningEnabled
-          tasks={[
-            taskView({
-              id: "settled_task",
-              name: "Review deployment",
-              sessionId: "task_conversation",
-              status,
-              stage: status === "failed" ? "failed" : "completed",
-              reportedOutcome: "needs_attention",
-            }),
-          ]}
-          defaultModel={DEFAULT_MODEL}
-          initialChat={null}
-        />,
-      );
-
-      await user.click(screen.getByRole("button", { name: "Archive Review deployment" }));
-
-      expect(taskCommandMocks.archive).toHaveBeenCalledWith("settled_task", { scopeKey: "" });
-      expect(screen.queryByRole("link", { name: /Review deployment/ })).not.toBeInTheDocument();
-    },
-  );
-
-  it.each(["queued", "running"] as const)("does not offer to archive a %s task", (status) => {
-    render(
-      <Surface
-        taskSpawningEnabled
-        tasks={[taskView({ name: "Active task", sessionId: "task_conversation", status })]}
-        defaultModel={DEFAULT_MODEL}
-        initialChat={null}
-      />,
-    );
-
-    expect(screen.getByRole("link", { name: /Active task/ })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Archive Active task" })).not.toBeInTheDocument();
-  });
-
-  it("hides old home chats but shows all unarchived tasks regardless of age", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-07-04T17:44:00.000Z"));
-    try {
-      render(
-        <Surface
-          taskSpawningEnabled
-          tasks={[
-            taskView({
-              id: "recent_task",
-              displayId: "TASK-1",
-              name: "Recent result",
-              createdAt: "2026-07-04T10:00:00.000Z",
-              updatedAt: "2026-07-04T10:00:00.000Z",
-            }),
-            taskView({
-              id: "old_task",
-              displayId: "TASK-2",
-              name: "Old result",
-              createdAt: "2026-07-02T10:00:00.000Z",
-              updatedAt: "2026-07-02T10:00:00.000Z",
-            }),
-            taskView({
-              id: "archived_task",
-              displayId: "TASK-3",
-              name: "Archived result",
-              archivedAt: "2026-07-04T12:00:00.000Z",
-            }),
-          ]}
-          defaultModel={DEFAULT_MODEL}
-          initialChat={null}
-          recentChats={[
-            {
-              id: "recent_chat",
-              title: "Recent chat",
-              model: DEFAULT_MODEL,
-              preview: "Visible",
-              updatedAt: "2026-07-04T10:00:00.000Z",
-            },
-            {
-              id: "old_chat",
-              title: "Old chat",
-              model: DEFAULT_MODEL,
-              preview: "Hidden",
-              updatedAt: "2026-06-26T10:00:00.000Z",
-            },
-          ]}
-        />,
-      );
-
-      expect(screen.getByText("Recent chat")).toBeInTheDocument();
-      expect(screen.queryByText("Old chat")).not.toBeInTheDocument();
-      expect(screen.getByText("Recent result")).toBeInTheDocument();
-      expect(screen.getByText("Old result")).toBeInTheDocument();
-      expect(screen.queryByText("Archived result")).not.toBeInTheDocument();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("archives a chat from the home list", async () => {
-    const user = userEvent.setup();
-    render(
-      <Surface
-        tasks={[]}
-        defaultModel={DEFAULT_MODEL}
-        initialChat={null}
-        recentChats={[
-          {
-            id: "chat_1",
-            title: "Market research",
-            model: DEFAULT_MODEL,
-            preview: "Compare the latest pricing.",
-            updatedAt: currentTimestamp(),
-          },
-        ]}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Archive Market research" }));
-
-    expect(updateHeadlessChatConversation).toHaveBeenCalledWith("chat_1", { archived: true });
-    expect(screen.queryByText("Market research")).not.toBeInTheDocument();
-  });
-
-  it("restores a home chat when the archive request rejects", async () => {
-    const user = userEvent.setup();
-    headlessChatCommandMocks.updateConversation.mockRejectedValueOnce(
-      new Error("network unavailable"),
-    );
-    render(
-      <Surface
-        tasks={[]}
-        defaultModel={DEFAULT_MODEL}
-        initialChat={null}
-        recentChats={[
-          {
-            id: "chat_1",
-            title: "Market research",
-            model: DEFAULT_MODEL,
-            preview: "Compare the latest pricing.",
-            updatedAt: currentTimestamp(),
-          },
-        ]}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Archive Market research" }));
-
-    await waitFor(() => expect(screen.getByText("Market research")).toBeInTheDocument());
-    expect(routerMock.refresh).not.toHaveBeenCalled();
   });
 
   it("opens the same composer as main chat with Cmd+K and starts a background chat without navigating", async () => {
@@ -4617,7 +4136,7 @@ describe("Surface chat streaming UI", () => {
       screen.queryByPlaceholderText("Ask opencompany anything, or describe a task..."),
     ).not.toBeInTheDocument();
     // Never navigates away from the home screen it was opened on.
-    expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "What should we build next?" })).toBeInTheDocument();
   });
 
   it("highlights and strips an ampersand background directive in Cmd+K compose", async () => {
@@ -5278,7 +4797,7 @@ describe("Surface chat streaming UI", () => {
     await nextAnimationFrame();
 
     expect(screen.queryByText("Earlier answer")).not.toBeInTheDocument();
-    expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "What should we build next?" })).toBeInTheDocument();
     expect(routerMock.replace).toHaveBeenCalledWith("/");
     expect(updateHeadlessChatConversation).not.toHaveBeenCalledWith("chat_1", { archived: true });
   });
@@ -5310,7 +4829,7 @@ describe("Surface chat streaming UI", () => {
     await nextAnimationFrame();
 
     expect(screen.queryByText("Earlier answer")).not.toBeInTheDocument();
-    expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "What should we build next?" })).toBeInTheDocument();
   });
 
   it("allows drafting but blocks Enter submission while streaming", async () => {
@@ -6314,26 +5833,6 @@ describe("Surface chat streaming UI", () => {
     expect(screen.getByText("Web Fetch")).toBeInTheDocument();
     expect(screen.queryByText("Failed")).not.toBeInTheDocument();
     expect(screen.getByText("Web fetch returned no readable page content.")).toBeInTheDocument();
-  });
-
-  it("labels freshly created result rows as just now", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-07-02T17:44:00.000Z"));
-    try {
-      render(
-        <Surface
-          taskSpawningEnabled
-          tasks={[taskView({ createdAt: "2026-07-02T17:43:45.000Z" })]}
-          defaultModel={DEFAULT_MODEL}
-          initialChat={null}
-        />,
-      );
-
-      expect(screen.getByText("just now")).toBeInTheDocument();
-      expect(screen.queryByText("0m ago")).not.toBeInTheDocument();
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
   describe("pane contract", () => {

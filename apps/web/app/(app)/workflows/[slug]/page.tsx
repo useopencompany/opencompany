@@ -4,6 +4,7 @@ import { TasksWorkflowsDisabledRoute } from "@/components/Routes";
 import { WorkflowEditor } from "@/components/WorkflowEditor";
 import { currentUser } from "@/lib/auth";
 import { getHeadlessWorkflow } from "@/lib/headless-automation-server";
+import { canManageWorkflowScope } from "@/lib/headless-automation-types";
 import { listHeadlessPlugins, listHeadlessSkillCatalog } from "@/lib/headless-knowledge-server";
 import { getPersonalAccounts } from "@/lib/integrations/personal-accounts";
 import { workflowEventProviderOptions } from "@/lib/workflow-event-triggers";
@@ -52,7 +53,7 @@ export default async function WorkflowEditorPage({ params }: WorkflowEditorPageP
 
   const eventProviders = workflowEventProviderOptions({ plugins, personalAccounts });
   const owner = members.find(
-    (member: WorkspaceMemberView) => member.userWorkosId === workflow.createdByWorkosId,
+    (member: WorkspaceMemberView) => member.userWorkosId === workflow.createdByUserId,
   ) ?? {
     name:
       [context.user.firstName, context.user.lastName].filter(Boolean).join(" ") ||
@@ -64,6 +65,11 @@ export default async function WorkflowEditorPage({ params }: WorkflowEditorPageP
       workflow={workflow}
       workspaceId={context.workspace.id}
       canEdit
+      canManageScope={canManageWorkflowScope(workflow, {
+        userId: context.user.workosUserId,
+        role: context.role,
+      })}
+      // A workflow can be run by anyone who can see it, so it never carries a personal Skill.
       skillCatalog={skillCatalog.filter((skill: SkillCatalogItemDto) => skill.scope !== "personal")}
       eventProviders={eventProviders}
       owner={{ name: owner.name, avatarUrl: owner.avatarUrl }}

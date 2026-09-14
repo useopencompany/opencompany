@@ -295,7 +295,40 @@ describe("WorkflowsRoute", () => {
     view.rerender(<WorkflowsRoute {...props} />);
 
     expect(screen.queryByText("Weekly research")).not.toBeInTheDocument();
-    expect(screen.getByText("No workflows yet")).toBeInTheDocument();
+    expect(screen.getByText("No company workflows yet")).toBeInTheDocument();
+  });
+
+  it("filters the list by visibility and creates in the filtered scope", async () => {
+    workflowLiveQueryMock.data = [
+      workflowListItem(),
+      workflowListItem({
+        id: "workflow_2",
+        slug: "morning-digest",
+        name: "Morning digest",
+        scope: "personal",
+      }),
+    ];
+    workflowLiveQueryMock.isLoading = false;
+    const user = userEvent.setup();
+    render(<WorkflowsRoute workflows={[]} workspaceId="workspace_1" canEdit />);
+
+    expect(screen.getByText("Weekly research")).toBeInTheDocument();
+    expect(screen.queryByText("Morning digest")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Personal/ }));
+    expect(screen.queryByText("Weekly research")).not.toBeInTheDocument();
+    expect(screen.getByText("Morning digest")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "New workflow" }));
+    await user.type(screen.getByPlaceholderText("Weekly investor update"), "Evening digest");
+    await user.click(screen.getByRole("button", { name: "Create workflow" }));
+
+    await waitFor(() =>
+      expect(workflowActionsMock.createHeadlessWorkflow).toHaveBeenCalledWith({
+        name: "Evening digest",
+        scope: "personal",
+      }),
+    );
   });
 
   it("creates through the typed Workflow command", async () => {
@@ -313,6 +346,7 @@ describe("WorkflowsRoute", () => {
       expect(workflowActionsMock.createHeadlessWorkflow).toHaveBeenCalledWith({
         name: "Test workflow",
         description: "Run the test",
+        scope: "company",
       }),
     );
     expect(routerMock.push).toHaveBeenCalledWith("/workflows/test-workflow");
@@ -369,31 +403,6 @@ describe("WorkflowsRoute", () => {
     );
     expect(screen.queryByText("Weekly research")).not.toBeInTheDocument();
   });
-
-  it("marks the personal scope unavailable and routes back to company workflows", async () => {
-    workflowLiveQueryMock.hydrated = false;
-    workflowLiveQueryMock.isLoading = false;
-    Object.assign(appDataMock.value, { tasks: [] });
-    const user = userEvent.setup();
-
-    render(<WorkflowsRoute workflows={[workflowListItem()]} workspaceId="workspace_1" canEdit />);
-
-    const scope = within(screen.getByRole("group", { name: "Workflow scope" }));
-    const company = scope.getByRole("button", { name: /Company/ });
-    const personal = scope.getByRole("button", { name: /Personal/ });
-    expect(company).toHaveAttribute("aria-pressed", "true");
-    expect(company).toHaveTextContent("1");
-    expect(personal).toHaveTextContent("Soon");
-
-    await user.click(personal);
-    expect(personal).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByText("Personal workflows aren’t live yet")).toBeInTheDocument();
-    expect(screen.queryByText("Weekly research")).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "View company workflows" }));
-    expect(company).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByText("Weekly research")).toBeInTheDocument();
-  });
 });
 
 describe("SettingsRoute", () => {
@@ -444,7 +453,12 @@ describe("SettingsRoute", () => {
   });
 
   it("renders the workspace inference settings", () => {
-    render(<InferenceSettingsRoute />);
+    render(
+      <InferenceSettingsRoute
+        sandboxSize={{ ok: true, sandboxSize: "standard" }}
+        sandboxSizeOptions={[]}
+      />,
+    );
 
     expect(screen.getByRole("heading", { name: "Inference" })).toBeInTheDocument();
     expect(
@@ -1093,7 +1107,8 @@ const brainSnapshot = {
   ],
 };
 
-function workflowListItem({ model = "" }: { model?: string } = {}) {
+function workflowListItem(overrides: Record<string, unknown> & { model?: string } = {}) {
+  const { model = "", ...workflowOverrides } = overrides;
   return {
     id: "workflow_1",
     slug: "weekly-research",
@@ -1108,10 +1123,13 @@ function workflowListItem({ model = "" }: { model?: string } = {}) {
       },
     ],
     status: "draft" as const,
+    scope: "company" as const,
+    createdByUserId: "user_1",
     trigger: { type: "manual" as const },
     version: 1,
     archivedAt: null,
     createdAt: "2026-08-11T09:00:00.000Z",
     updatedAt: "2026-08-11T09:00:00.000Z",
+    ...workflowOverrides,
   };
 }

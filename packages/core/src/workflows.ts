@@ -12,6 +12,25 @@ import type { CreateTaskResult } from "./tasks";
 export const WORKFLOW_STATUSES = ["draft", "active"] as const;
 export type WorkflowStatus = (typeof WORKFLOW_STATUSES)[number];
 
+// A company workflow belongs to the workspace: every member can see, run, and edit it. A personal
+// workflow is only visible to its creator. Workflows that predate scopes are company workflows.
+export const WORKFLOW_SCOPES = ["personal", "company"] as const;
+export type WorkflowScope = (typeof WORKFLOW_SCOPES)[number];
+
+// Only the creator changes a workflow's visibility; an admin can additionally claim one that
+// predates scopes and has no recorded creator. Admins deliberately cannot take someone else's
+// workflow personal: a scheduled or event-driven workflow fires as a specific user, and that
+// identity has to stay the owner. Archiving is the honest way to retire a teammate's workflow.
+export function canManageWorkflowScope(
+  actor: Pick<Actor, "userId" | "role">,
+  workflow: Pick<Workflow, "createdByUserId">,
+) {
+  return (
+    workflow.createdByUserId === actor.userId ||
+    (workflow.createdByUserId === null && actor.role === "admin")
+  );
+}
+
 export type WorkflowStep = {
   id: string;
   title: string;
@@ -110,9 +129,10 @@ export type Workflow = {
   description: string;
   steps: WorkflowStep[];
   status: WorkflowStatus;
+  scope: WorkflowScope;
+  createdByUserId: string | null;
   trigger: WorkflowTrigger;
   triggers?: WorkflowAutomationTrigger[];
-  createdByWorkosId?: string | null;
   version: number;
   archivedAt: Date | null;
   createdAt: Date;
@@ -235,6 +255,7 @@ export interface WorkflowRepository {
     idempotencyKey: string;
     name: string;
     description: string;
+    scope: WorkflowScope;
     initialStep: WorkflowStep;
   }): Promise<WorkflowMutationResult>;
   updateWorkflow(input: {
@@ -245,6 +266,7 @@ export interface WorkflowRepository {
     description: string;
     steps: WorkflowStep[];
     status: WorkflowStatus;
+    scope: WorkflowScope;
     trigger: WorkflowTriggerInput;
     automationTriggers?: Array<{
       trigger: WorkflowAutomationTrigger;
@@ -402,11 +424,17 @@ export class WorkflowApplicationService {
 
   createWorkflow(
     actor: Actor,
-    input: { idempotencyKey: string; name: string; description?: string },
+    input: {
+      idempotencyKey: string;
+      name: string;
+      description?: string;
+      scope?: WorkflowScope;
+    },
   ): Promise<WorkflowMutationResult> {
     requirePermission(actor, WORKFLOW_WRITE_PERMISSION, "Workflows");
     const name = workflowName(input.name);
     const description = workflowDescription(input.description ?? "");
+    const scope = workflowScope(input.scope ?? "company");
     const initialStep: WorkflowStep = {
       id: resourceId(this.options.newStepId?.() ?? crypto.randomUUID(), "stepId"),
       title: "",
@@ -422,6 +450,7 @@ export class WorkflowApplicationService {
       idempotencyKey: idempotencyKey(input.idempotencyKey),
       name,
       description,
+      scope,
       initialStep,
     });
   }
@@ -435,6 +464,7 @@ export class WorkflowApplicationService {
       description: string;
       steps: WorkflowStep[];
       status: WorkflowStatus;
+      scope?: WorkflowScope;
       trigger: WorkflowTriggerInput;
       triggers?: WorkflowAutomationTriggerInput[];
     },
@@ -445,6 +475,13 @@ export class WorkflowApplicationService {
     const current = await this.repository.getWorkflow({ actor, workflowId: id });
     if (!current) throw new CoreError("not_found", "Workflow not found.");
     if (current.version !== expectedVersion) throw versionConflict("Workflow");
+    const scope = input.scope === undefined ? current.scope : workflowScope(input.scope);
+    if (scope !== current.scope && !canManageWorkflowScope(actor, current)) {
+      throw new CoreError(
+        "forbidden",
+        "Only the creator or a workspace admin can change this workflow's visibility.",
+      );
+    }
     const normalized = normalizeWorkflowDefinition(input, this.options.validateDefinition);
     const { triggers: normalizedTriggers, ...normalizedDefinition } = normalized;
     const activationError = workflowActivationDisabledReason(normalized.steps);
@@ -473,7 +510,12 @@ export class WorkflowApplicationService {
                 ? validatedExecution(
                     await this.options.planner.prepareWorkflow({
                       actor,
-                      workflow: { ...current, ...normalizedDefinition, trigger: publicTrigger },
+                      workflow: {
+                        ...current,
+                        ...normalizedDefinition,
+                        scope,
+                        trigger: publicTrigger,
+                      },
                       prompt: publicTrigger.prompt,
                     }),
                   )
@@ -508,7 +550,12 @@ export class WorkflowApplicationService {
               ? validatedExecution(
                   await this.options.planner.prepareWorkflow({
                     actor,
-                    workflow: { ...current, ...normalizedDefinition, trigger: publicTrigger },
+                    workflow: {
+                      ...current,
+                      ...normalizedDefinition,
+                      scope,
+                      trigger: publicTrigger,
+                    },
                     prompt: publicTrigger.prompt,
                   }),
                 )
@@ -525,6 +572,7 @@ export class WorkflowApplicationService {
         actor,
         workflowId: id,
         expectedVersion,
+        scope,
         ...normalized,
         trigger: legacyTriggerFromAutomation(automationTriggers[0]?.trigger),
         automationTriggers,
@@ -575,6 +623,7 @@ export class WorkflowApplicationService {
         const pending: Workflow = {
           ...current,
           ...normalizedDefinition,
+          scope,
           trigger: {
             type: "schedule",
             cron: definition.cron,
@@ -605,6 +654,7 @@ export class WorkflowApplicationService {
         const pending: Workflow = {
           ...current,
           ...normalizedDefinition,
+          scope,
           trigger: normalized.trigger,
         };
         event.execution = validatedExecution(
@@ -620,6 +670,7 @@ export class WorkflowApplicationService {
       actor,
       workflowId: id,
       expectedVersion,
+      scope,
       ...normalized,
       ...(schedule ? { schedule } : {}),
       ...(event ? { event } : {}),
@@ -1134,6 +1185,13 @@ function workflowStatus(status: WorkflowStatus) {
 
 function workflowName(value: string) {
   return bounded(value, MAX_WORKFLOW_NAME_LENGTH, "Workflow name");
+}
+
+function workflowScope(value: WorkflowScope): WorkflowScope {
+  if (!WORKFLOW_SCOPES.includes(value)) {
+    throw new CoreError("invalid_argument", "Workflow visibility must be personal or company.");
+  }
+  return value;
 }
 
 function workflowDescription(value: string) {

@@ -6,6 +6,14 @@ import { useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CodingWorkspacePanel, type CodingWorkspacePanelHandle } from "./CodingWorkspacePanel";
 
+// xterm needs matchMedia, ResizeObserver, and a canvas, none of which jsdom provides.
+// The panel's contract is that the terminal receives the live socket, so stand in for it.
+vi.mock("./CodingWorkspaceTerminal", () => ({
+  default: ({ socket }: { socket: WebSocket }) => (
+    <div data-testid="workspace-terminal" data-socket-ready={socket.readyState} />
+  ),
+}));
+
 // The panel no longer owns its own open/close trigger — a host (Surface's header
 // button, in production) drives it through the imperative handle. This harness stands
 // in for that host.
@@ -170,6 +178,31 @@ describe("CodingWorkspacePanel", () => {
       "http://localhost:3000/v1/conversations/chat_1/engine-session/runtime-access",
       expect.objectContaining({ method: "POST", credentials: "include" }),
     );
+  });
+
+  it("keeps the Files tab mounted behind other tabs so an unsaved edit survives", async () => {
+    const user = userEvent.setup();
+    render(<Harness chatSessionId="chat_1" sandboxStatus="running" engineLabel="Codex" />);
+
+    await user.click(screen.getByRole("button", { name: "Toggle workspace" }));
+    expect(fetch).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Files" }));
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    act(() => MockWebSocket.instances[0]!.open());
+
+    const files = await screen.findByTestId("workspace-files");
+    expect(files).not.toHaveAttribute("hidden");
+    // Opening Files must not kick off a port scan; that is the Preview tab's job.
+    expect(MockWebSocket.instances[0]!.send).not.toHaveBeenCalledWith(
+      JSON.stringify({ type: "ports.refresh" }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Terminal" }));
+    expect(screen.getByTestId("workspace-files")).toHaveAttribute("hidden");
+
+    await user.click(screen.getByRole("button", { name: "Files" }));
+    expect(screen.getByTestId("workspace-files")).not.toHaveAttribute("hidden");
   });
 
   it("uses the intended default desktop width when no preference is stored", () => {

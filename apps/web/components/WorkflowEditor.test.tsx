@@ -41,10 +41,14 @@ vi.mock("@/components/MarkdownBrainEditor", () => ({
 }));
 
 function WorkflowEditor(
-  props: Omit<ComponentProps<typeof WorkflowEditorComponent>, "workspaceId" | "owner">,
+  props: Omit<
+    ComponentProps<typeof WorkflowEditorComponent>,
+    "workspaceId" | "owner" | "canManageScope"
+  > & { canManageScope?: boolean },
 ) {
   return (
     <WorkflowEditorComponent
+      canManageScope
       {...props}
       workspaceId="workspace_1"
       owner={{ name: "Louis Morgner", avatarUrl: null }}
@@ -58,6 +62,8 @@ const workflow = {
   name: "Weekly update",
   description: "Summarize the week.",
   status: "draft" as const,
+  scope: "company" as const,
+  createdByUserId: "user_1",
   trigger: { type: "manual" as const },
   steps: [
     {
@@ -111,6 +117,7 @@ describe("WorkflowEditor", () => {
       name: "Weekly update",
       description: "Summarize the week.",
       status: "draft",
+      scope: "company",
       steps: [{ ...workflow.steps[0], instructions: "Write a concise weekly update." }],
       trigger: { type: "manual" },
       triggers: [],
@@ -188,6 +195,25 @@ describe("WorkflowEditor", () => {
     expect(screen.queryByText(/Add instructions to this step/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Status: Draft" }));
     expect(screen.getByRole("button", { name: "Active" })).toBeDisabled();
+  });
+
+  it("saves visibility changes and locks visibility for non-owners", async () => {
+    const { rerender } = render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
+
+    fireEvent.change(screen.getByLabelText("Visibility"), { target: { value: "personal" } });
+    await advanceAutosave();
+    expect(workflowActionsMock.update).toHaveBeenLastCalledWith(
+      "workflow_1",
+      expect.objectContaining({ scope: "personal" }),
+    );
+
+    rerender(
+      <WorkflowEditor workflow={workflow} canEdit canManageScope={false} skillCatalog={[]} />,
+    );
+    expect(screen.queryByLabelText("Visibility")).not.toBeInTheDocument();
+    expect(
+      screen.getByLabelText("Visibility managed by the creator or an admin"),
+    ).toBeInTheDocument();
   });
 
   it("uses a provider submenu to add an event trigger", async () => {

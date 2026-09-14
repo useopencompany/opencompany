@@ -1,3 +1,5 @@
+import type { SandboxSize } from "@opencompany/core/sandbox-sizes";
+
 export const DEFAULT_CODING_AGENT_TURN_TIMEOUT_MS = 3 * 60 * 60 * 1000;
 export const CODING_SANDBOX_TURN_GRACE_MS = 15 * 60 * 1000;
 export const ACTIVE_CODING_SANDBOX_TIMEOUT_MS =
@@ -10,4 +12,15 @@ export function settledCodingSandboxIdleTimeoutMs(input: {
 }) {
   if (!input.taskSession) return input.configuredIdleTimeoutMs;
   return Math.min(input.configuredIdleTimeoutMs, FINISHED_TASK_SANDBOX_IDLE_TIMEOUT_MS);
+}
+
+// E2B has no per-sandbox CPU/RAM override, so each machine size is a separate
+// prebuilt template alias. Production sets all three (the release preflight
+// requires them); local development falls back to E2B's stock `codex` template,
+// where every size is the same machine.
+export function codingSandboxTemplate(
+  templates: Record<SandboxSize, string | undefined>,
+  size: SandboxSize,
+) {
+  return templates[size] ?? "codex";
 }

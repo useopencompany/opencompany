@@ -29,6 +29,7 @@ import {
 } from "react";
 import { taskRowToView, useAppData } from "@/components/AppDataProvider";
 import { EmptyState, formatRelativeTime, TasksWorkflowsDisabledRoute } from "@/components/Routes";
+import { Routines } from "@/components/Routines";
 import type { TaskView } from "@/components/Surface";
 import { useHydrated } from "@/components/useHydrated";
 import { formatUsdMicros } from "@/lib/cost-format";
@@ -108,7 +109,7 @@ export function TasksBoardRoute({
   initialViewMode?: TaskViewMode;
   initialTimeRange?: TaskTimeRange;
 }) {
-  const { featureFlags, taskRows, tasksReady } = useAppData();
+  const { featureFlags, schedules, taskRows, tasksReady, workspace } = useAppData();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
   const [timeRange, setTimeRangeState] = useState<TaskTimeRange>(initialTimeRange);
@@ -292,6 +293,10 @@ export function TasksBoardRoute({
               ))}
             </div>
           )}
+
+          {schedules.length > 0 ? (
+            <Routines schedules={schedules} workspaceId={workspace.id} />
+          ) : null}
         </div>
       </div>
 

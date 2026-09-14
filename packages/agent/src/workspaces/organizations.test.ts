@@ -110,6 +110,7 @@ function workspace() {
     createdByWorkosId: "user_1",
     capabilitySessionBudgetUsdMicros: null,
     legacyBrainEnabled: false,
+    sandboxSize: "standard" as const,
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
     updatedAt: new Date("2026-01-01T00:00:00.000Z"),
   };

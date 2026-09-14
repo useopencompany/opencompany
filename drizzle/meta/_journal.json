@@ -1931,7 +1931,21 @@
       "idx": 275,
       "version": "7",
       "when": 1789754800000,
-      "tag": "0275_workflow_multiple_triggers",
+      "tag": "0275_workflow_personal_company_scope",
+      "breakpoints": true
+    },
+    {
+      "idx": 276,
+      "version": "7",
+      "when": 1789841200000,
+      "tag": "0276_sandbox_size_tiers",
+      "breakpoints": true
+    },
+    {
+      "idx": 277,
+      "version": "7",
+      "when": 1789927600000,
+      "tag": "0277_workflow_multiple_triggers",
       "breakpoints": true
     }
   ]

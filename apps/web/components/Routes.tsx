@@ -22,8 +22,6 @@ import {
 import { FilterPills } from "@opencompany/ui/components/filter-pills";
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import { toast } from "@opencompany/ui/components/sonner";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@opencompany/ui/components/tooltip";
-import { cn } from "@opencompany/ui/lib/utils";
 import { useLiveQuery } from "@tanstack/react-db";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -38,7 +36,6 @@ import {
   Link2,
   ListTodo,
   Loader2,
-  LockKeyhole,
   Mail,
   Monitor,
   Moon,
@@ -68,10 +65,20 @@ import { BrainSettings } from "@/components/BrainSettings";
 import { BrainView } from "@/components/BrainView";
 import { BrowserProfilesSettings } from "@/components/BrowserProfilesSettings";
 import { FathomIntegrationSetup } from "@/components/FathomIntegrationSetup";
-import { InferenceSettingsPanel } from "@/components/InferenceSettingsPanel";
+import {
+  InferenceSettingsPanel,
+  type SandboxSizeOptionView,
+} from "@/components/InferenceSettingsPanel";
 import { IntentPrefetchLink } from "@/components/IntentPrefetchLink";
 import { McpSetupGuide } from "@/components/McpSetupGuide";
 import { RepositorySettings } from "@/components/RepositorySettings";
+import {
+  ScopeBadge,
+  ScopeField,
+  type ScopeFilter,
+  ScopeFilterTabs,
+  type Scope as SkillScope,
+} from "@/components/ScopeControls";
 import { SettingsContent } from "@/components/SettingsChrome";
 import { Surface } from "@/components/Surface";
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
@@ -100,6 +107,7 @@ import {
 import type { BrainOverviewStats, BrainSnapshot } from "@/lib/headless-knowledge-types";
 import { DEFAULT_MODEL } from "@/lib/model-options";
 import type { RepoConfigView, WorkspaceRepository } from "@/lib/repo-config-actions";
+import type { WorkspaceSandboxSizeResult } from "@/lib/sandbox-size";
 import {
   updateAutoModelRoutingAction,
   updateBotsAction,
@@ -126,7 +134,6 @@ export function HomeRoute({
   initialChat?: ChatSessionView | null;
 }) {
   const data = useAppData();
-  const userName = data.user.firstName?.trim() || data.user.email.split("@")[0] || "there";
   const initialChat = useMemo(() => {
     if (!chatId) return null;
     if (routeInitialChat?.id === chatId) return routeInitialChat;
@@ -154,7 +161,6 @@ export function HomeRoute({
         key={data.activeBrain?.id ?? "no-brain"}
         tasks={data.tasks}
         allTasks={data.allTasks}
-        schedules={data.schedules}
         defaultModel={DEFAULT_MODEL}
         initialChat={initialChat}
         newChatProjectId={projectId}
@@ -166,7 +172,6 @@ export function HomeRoute({
         taskSpawningEnabled={data.featureFlags.taskSpawning}
         autoModelRoutingEnabled={data.featureFlags.autoModelRouting}
         workspaceId={data.workspace.id}
-        userName={userName}
         userWorkosId={data.user.workosUserId}
       />
     </main>
@@ -229,7 +234,13 @@ export function SettingsRoute({
   );
 }
 
-export function InferenceSettingsRoute() {
+export function InferenceSettingsRoute({
+  sandboxSize,
+  sandboxSizeOptions,
+}: {
+  sandboxSize: WorkspaceSandboxSizeResult;
+  sandboxSizeOptions: SandboxSizeOptionView[];
+}) {
   const { integrations, workspace } = useAppData();
 
   return (
@@ -241,6 +252,8 @@ export function InferenceSettingsRoute() {
         codex={integrations.codex}
         claudeCode={integrations.claude_code}
         canManage={workspace.role === "admin"}
+        sandboxSize={sandboxSize}
+        sandboxSizeOptions={sandboxSizeOptions}
       />
     </SettingsContent>
   );
@@ -715,9 +728,6 @@ function getInitials(firstName: string | null, lastName: string | null, email: s
 
 // --- Workflows ---------------------------------------------------------------
 
-// Workflows are workspace-scoped today. The personal scope stays visible so the split is obvious
-// up front, but it carries a "Soon" badge instead of pretending to be an empty filter.
-type WorkflowScope = "personal" | "company";
 const WORKFLOW_RUN_WINDOW_MS = 30 * 24 * 60 * 60 * 1_000;
 
 export function WorkflowsRoute({
@@ -732,7 +742,7 @@ export function WorkflowsRoute({
   const router = useRouter();
   const data = useAppData();
   const [creating, setCreating] = useState(false);
-  const [scope, setScope] = useState<WorkflowScope>("company");
+  const [scope, setScope] = useState<SkillScope>("company");
   const [workflowToDelete, setWorkflowToDelete] = useState<WorkflowListItem | null>(null);
   const [deletedWorkflowIds, setDeletedWorkflowIds] = useState<ReadonlySet<string>>(new Set());
   const [isDeleting, startDeleting] = useTransition();
@@ -756,9 +766,7 @@ export function WorkflowsRoute({
     () => workflowRunStats(data.allTasks ?? data.tasks),
     [data.allTasks, data.tasks],
   );
-  // Workflows are currently workspace-scoped. Keep the selector useful and truthful while the
-  // future personal workflow contract is still separate from this company collection.
-  const scopedWorkflows = scope === "company" ? visibleWorkflows : [];
+  const scopedWorkflows = visibleWorkflows.filter((workflow) => workflow.scope === scope);
 
   const deleteWorkflow = () => {
     if (!workflowToDelete || isDeleting) return;
@@ -786,7 +794,7 @@ export function WorkflowsRoute({
               </h1>
               <p className="text-[13px] leading-5 text-ink-subtle">
                 Automations you fire with <span className="font-medium text-ink">#</span> in chat;
-                each run becomes a Task.
+                each run becomes a Task. Keep one to yourself or share it with the company.
               </p>
             </div>
             {canEdit ? (
@@ -806,36 +814,34 @@ export function WorkflowsRoute({
               value={scope}
               onChange={setScope}
               options={[
-                { value: "company", label: "Company", count: visibleWorkflows.length },
-                { value: "personal", label: "Personal", badge: "Soon" },
+                {
+                  value: "company",
+                  label: "Company",
+                  count: visibleWorkflows.filter((workflow) => workflow.scope === "company").length,
+                },
+                {
+                  value: "personal",
+                  label: "Personal",
+                  count: visibleWorkflows.filter((workflow) => workflow.scope === "personal")
+                    .length,
+                },
               ]}
             />
 
             {scopedWorkflows.length === 0 ? (
               <EmptyState
-                icon={scope === "personal" ? LockKeyhole : Workflow}
-                title={
-                  scope === "personal" ? "Personal workflows aren’t live yet" : "No workflows yet"
-                }
+                icon={Workflow}
+                title={`No ${scope} workflows yet`}
                 description={
-                  scope === "personal"
-                    ? "Every workflow you create today belongs to the company and is visible to your workspace. Private workflows are coming."
-                    : canEdit
-                      ? "Create a workflow to automate a recurring job. Fire it with # in chat, and each run shows up as a Task."
-                      : "Workflows are automations your workspace admins set up. Fire one with # in chat and each run becomes a Task."
-                }
-                action={
-                  scope === "personal" ? (
-                    <Button variant="secondary" size="sm" onClick={() => setScope("company")}>
-                      View company workflows
-                    </Button>
-                  ) : null
+                  canEdit
+                    ? "Create a workflow to automate a recurring job. Fire it with # in chat, and each run shows up as a Task."
+                    : "Workflows are automations your workspace admins set up. Fire one with # in chat and each run becomes a Task."
                 }
               />
             ) : (
               <div className="overflow-x-auto rounded-xl border border-border bg-surface">
                 <table className="w-full min-w-[820px] table-fixed text-left">
-                  <caption className="sr-only">Company workflows and recent run activity</caption>
+                  <caption className="sr-only">Workflows and recent run activity</caption>
                   <colgroup>
                     <col className="w-[28%]" />
                     <col className="w-[19%]" />
@@ -890,6 +896,12 @@ export function WorkflowsRoute({
           namePlaceholder="Weekly investor update"
           descriptionPlaceholder="What this workflow does"
           submitLabel="Create workflow"
+          initialScope={scope}
+          scopeHint={(scope) =>
+            scope === "personal"
+              ? "Only you can see and run it"
+              : "Everyone in the workspace can run and edit it"
+          }
           create={async (input) => {
             const workflow = await createHeadlessWorkflow(input);
             return { ok: true, slug: workflow.slug };
@@ -909,8 +921,8 @@ export function WorkflowsRoute({
           <DialogHeader>
             <DialogTitle className="text-[15px]">Delete workflow?</DialogTitle>
             <DialogDescription className="text-[12.5px] leading-5 text-ink-subtle">
-              “{workflowToDelete?.name}” will be removed from the company workflow list. Existing
-              Task runs will stay in your history.
+              “{workflowToDelete?.name}” will be removed from the workflow list. Existing Task runs
+              will stay in your history.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -957,6 +969,7 @@ function WorkflowTableRow({
           <span className="truncate" title={workflow.name}>
             {workflow.name}
           </span>
+          <ScopeBadge>{workflow.scope === "personal" ? "Personal" : "Company"}</ScopeBadge>
           <ItemStatusBadge status={workflow.status} />
         </IntentPrefetchLink>
       </td>
@@ -1081,8 +1094,6 @@ function workflowRunStats(
 
 // --- Skills (settings) -------------------------------------------------------
 
-type SkillScope = "personal" | "company";
-
 export function SkillsSettingsRoute({
   skills,
   canEdit,
@@ -1093,7 +1104,7 @@ export function SkillsSettingsRoute({
   const router = useRouter();
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
-  const [scopeFilter, setScopeFilter] = useState<"all" | SkillScope>("all");
+  const [scopeFilter, setScopeFilter] = useState<ScopeFilter>("all");
   const creationScope = scopeFilter === "company" ? "company" : "personal";
   const visibleSkills = skills.filter(
     (skill) => scopeFilter === "all" || skill.scope === scopeFilter,
@@ -1102,24 +1113,7 @@ export function SkillsSettingsRoute({
   return (
     <SettingsContent title="Skills">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <FilterPills
-          label="Skill scope"
-          value={scopeFilter}
-          onChange={setScopeFilter}
-          options={[
-            { value: "all", label: "All", count: skills.length },
-            {
-              value: "company",
-              label: "Company",
-              count: skills.filter((skill) => skill.scope === "company").length,
-            },
-            {
-              value: "personal",
-              label: "Personal",
-              count: skills.filter((skill) => skill.scope === "personal").length,
-            },
-          ]}
-        />
+        <ScopeFilterTabs label="Skill scope" value={scopeFilter} onChange={setScopeFilter} />
         {canEdit ? (
           <div className="ml-auto flex items-center gap-2">
             <Button
@@ -1632,6 +1626,8 @@ function NewItemDialog({
   namePlaceholder,
   descriptionPlaceholder,
   submitLabel,
+  initialScope,
+  scopeHint,
   create,
   onClose,
   onCreated,
@@ -1640,15 +1636,19 @@ function NewItemDialog({
   namePlaceholder: string;
   descriptionPlaceholder: string;
   submitLabel: string;
+  initialScope: SkillScope;
+  scopeHint: (scope: SkillScope) => string;
   create: (input: {
     name: string;
     description?: string;
+    scope: SkillScope;
   }) => Promise<{ ok: true; slug: string } | { ok: false; message: string }>;
   onClose: () => void;
   onCreated: (slug: string) => void;
 }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [scope, setScope] = useState<SkillScope>(initialScope);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -1671,6 +1671,7 @@ function NewItemDialog({
       try {
         const result = await create({
           name: trimmed,
+          scope,
           ...(description.trim() ? { description: description.trim() } : {}),
         });
         if (result.ok) {
@@ -1737,6 +1738,13 @@ function NewItemDialog({
               className="h-9 rounded-md border border-border bg-canvas px-2.5 text-[13px] text-ink outline-none transition-colors placeholder:text-ink-faint focus-visible:ring-1 focus-visible:ring-ink/20"
             />
           </label>
+          <ScopeField
+            scope={scope}
+            onChange={setScope}
+            disabled={isPending}
+            hint={scopeHint}
+            managedTooltip="Only the creator or an admin can change visibility."
+          />
           {error ? <div className="text-[12px] leading-4 text-warning">{error}</div> : null}
         </div>
         <div className="mt-5 flex justify-end gap-2">
@@ -2218,54 +2226,25 @@ export function formatRelativeTime(value: Date | string) {
   return new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(timestamp);
 }
 
-function SkillScopeBadge({ scope }: { scope: "personal" | "company" | null }) {
+function SkillScopeBadge({ scope }: { scope: SkillScope | null }) {
   return (
-    <span className="rounded bg-surface-muted px-1.5 py-0.5 text-[11px] text-ink-subtle">
+    <ScopeBadge>
       {scope === "personal" ? "Personal" : scope === "company" ? "Company" : "Plugin"}
-    </span>
+    </ScopeBadge>
   );
 }
 
-function SkillScopeField({
-  scope,
-  onChange,
-  disabled,
-  canManage = true,
-}: {
+function SkillScopeField(props: {
   scope: SkillScope;
   onChange: (scope: SkillScope) => void;
   disabled?: boolean;
   canManage?: boolean;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-      <span className="text-[12px] font-medium text-ink-subtle">Visibility</span>
-      {canManage ? (
-        <select
-          aria-label="Visibility"
-          value={scope}
-          disabled={disabled}
-          onChange={(event) => onChange(event.target.value as SkillScope)}
-          className={cn(EDITOR_INPUT_CLASS, "w-auto")}
-        >
-          <option value="personal">Personal</option>
-          <option value="company">Company</option>
-        </select>
-      ) : (
-        <Tooltip>
-          <TooltipTrigger
-            aria-label="Visibility managed by the creator or an admin"
-            className="inline-flex h-9 items-center gap-2 rounded-md bg-surface-muted px-2.5 text-[13px] text-ink-subtle"
-          >
-            {scope === "company" ? "Company" : "Personal"}
-            <LockKeyhole size={12} aria-hidden="true" />
-          </TooltipTrigger>
-          <TooltipContent>Only the creator or an admin can change visibility.</TooltipContent>
-        </Tooltip>
-      )}
-      <span className="text-[12px] leading-5 text-ink-subtle">
-        {scope === "personal" ? "Only you" : "Everyone can use and edit"}
-      </span>
-    </div>
+    <ScopeField
+      {...props}
+      hint={(scope) => (scope === "personal" ? "Only you" : "Everyone can use and edit")}
+      managedTooltip="Only the creator or an admin can change visibility."
+    />
   );
 }
