@@ -42,7 +42,7 @@ export const OFFICIAL_PLUGIN_SOURCES = {
   vercel:
     "https://github.com/useopencompany/plugins/tree/14e7f6d3e978103c5427c725229ae93bc3e47f8c/vercel",
   dash0:
-    "https://github.com/useopencompany/plugins/tree/8dc7734fecfb78618fd6b95fb6781f86c58ab7a1/dash0",
+    "https://github.com/useopencompany/plugins/tree/0827036ccb34da2ed37c43453f5d14faca75511a/dash0",
   signoz:
     "https://github.com/useopencompany/plugins/tree/053e9e9207f320651f1cb9b4e8feb84ab2af6bba/signoz",
   slack:
