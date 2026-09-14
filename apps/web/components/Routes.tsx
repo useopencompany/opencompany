@@ -88,7 +88,7 @@ import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
 import { useHydrated } from "@/components/useHydrated";
 import { useTaskRun } from "@/components/useTaskRun";
 import { useTaskSeenAcknowledgement } from "@/components/useTaskSeenAcknowledgement";
-import { WorkflowTemplateGallery } from "@/components/WorkflowTemplateGallery";
+import { WorkflowTemplatesButton } from "@/components/WorkflowTemplatesButton";
 import type { ChatSessionView } from "@/lib/chat-ui";
 import { getHeadlessWorkflows } from "@/lib/headless-automation-collections";
 import {
@@ -765,7 +765,7 @@ export function WorkflowsRoute({
     <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
       <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
         <div className="flex w-full max-w-[1040px] flex-col gap-8 pb-24 pt-10 sm:pt-12">
-          <header className="flex items-start justify-between gap-4">
+          <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="flex flex-col gap-1.5">
               <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-ink">
                 Workflows
@@ -776,19 +776,18 @@ export function WorkflowsRoute({
               </p>
             </div>
             {canEdit ? (
-              <Button size="sm" onClick={() => setCreating(true)} className="shadow-sm">
-                <Plus size={14} strokeWidth={2} />
-                New workflow
-              </Button>
+              <div className="flex shrink-0 items-center gap-2">
+                <WorkflowTemplatesButton
+                  missingPlugins={templateMissingPlugins}
+                  scope={scopeFilter === "all" ? "company" : scopeFilter}
+                />
+                <Button size="sm" onClick={() => setCreating(true)} className="shadow-sm">
+                  <Plus size={14} strokeWidth={2} />
+                  New workflow
+                </Button>
+              </div>
             ) : null}
           </header>
-
-          {canEdit ? (
-            <WorkflowTemplateGallery
-              missingPlugins={templateMissingPlugins}
-              scope={scopeFilter === "all" ? "company" : scopeFilter}
-            />
-          ) : null}
 
           <section aria-labelledby="workflow-list-heading" className="flex min-w-0 flex-col gap-3">
             <h2 id="workflow-list-heading" className="sr-only">

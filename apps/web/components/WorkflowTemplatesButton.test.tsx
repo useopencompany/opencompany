@@ -3,7 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WORKFLOW_TEMPLATES } from "@/lib/workflow-templates";
-import { WorkflowTemplateGallery } from "./WorkflowTemplateGallery";
+import { WorkflowTemplatesButton } from "./WorkflowTemplatesButton";
 
 const routerMock = vi.hoisted(() => ({ push: vi.fn(), prefetch: vi.fn(), refresh: vi.fn() }));
 const toastMock = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
@@ -28,7 +28,16 @@ function createdWorkflow() {
   };
 }
 
-describe("WorkflowTemplateGallery", () => {
+async function openTemplates() {
+  await userEvent.click(screen.getByRole("button", { name: "Workflow templates" }));
+}
+
+async function useTemplate(name: string) {
+  await openTemplates();
+  await userEvent.click(screen.getByRole("button", { name: new RegExp(name) }));
+}
+
+describe("WorkflowTemplatesButton", () => {
   beforeEach(() => {
     routerMock.push.mockClear();
     toastMock.error.mockClear();
@@ -37,8 +46,19 @@ describe("WorkflowTemplateGallery", () => {
     commandsMock.archiveHeadlessWorkflow.mockReset().mockResolvedValue({ version: 2 });
   });
 
-  it("shows every template with its trigger and outcome", () => {
-    render(<WorkflowTemplateGallery missingPlugins={{}} scope="company" />);
+  it("keeps the templates behind the button until it is pressed", async () => {
+    render(<WorkflowTemplatesButton missingPlugins={{}} scope="company" />);
+
+    expect(screen.queryByText(template.name)).not.toBeInTheDocument();
+
+    await openTemplates();
+
+    expect(screen.getByRole("dialog", { name: "Workflow templates" })).toBeInTheDocument();
+  });
+
+  it("shows every template with its trigger and outcome", async () => {
+    render(<WorkflowTemplatesButton missingPlugins={{}} scope="company" />);
+    await openTemplates();
 
     for (const entry of WORKFLOW_TEMPLATES) {
       expect(screen.getByText(entry.name)).toBeInTheDocument();
@@ -50,7 +70,7 @@ describe("WorkflowTemplateGallery", () => {
 
   it("links each missing plugin to its setup page instead of blocking the card", async () => {
     render(
-      <WorkflowTemplateGallery
+      <WorkflowTemplatesButton
         missingPlugins={{
           [template.id]: [
             { plugin: "slack", label: "Slack", setupHref: "/settings/plugins/slack" },
@@ -59,6 +79,7 @@ describe("WorkflowTemplateGallery", () => {
         scope="company"
       />,
     );
+    await openTemplates();
 
     expect(screen.getByRole("link", { name: "Slack" })).toHaveAttribute(
       "href",
@@ -69,16 +90,17 @@ describe("WorkflowTemplateGallery", () => {
     await waitFor(() => expect(commandsMock.createHeadlessWorkflow).toHaveBeenCalled());
   });
 
-  it("hides the setup hints when the plugin snapshot is unavailable", () => {
-    render(<WorkflowTemplateGallery missingPlugins={null} scope="company" />);
+  it("hides the setup hints when the plugin snapshot is unavailable", async () => {
+    render(<WorkflowTemplatesButton missingPlugins={null} scope="company" />);
+    await openTemplates();
 
     expect(screen.queryByText(/before it can run/)).not.toBeInTheDocument();
   });
 
   it("fills the draft with the template's step and schedule, then opens it", async () => {
-    render(<WorkflowTemplateGallery missingPlugins={{}} scope="company" />);
+    render(<WorkflowTemplatesButton missingPlugins={{}} scope="company" />);
 
-    await userEvent.click(screen.getByRole("button", { name: new RegExp(template.name) }));
+    await useTemplate(template.name);
 
     await waitFor(() =>
       expect(routerMock.push).toHaveBeenCalledWith("/workflows/weekly-shipping-digest"),
@@ -110,9 +132,9 @@ describe("WorkflowTemplateGallery", () => {
   });
 
   it("clones into the scope the list is filtered to, matching New workflow", async () => {
-    render(<WorkflowTemplateGallery missingPlugins={{}} scope="personal" />);
+    render(<WorkflowTemplatesButton missingPlugins={{}} scope="personal" />);
 
-    await userEvent.click(screen.getByRole("button", { name: new RegExp(template.name) }));
+    await useTemplate(template.name);
 
     await waitFor(() =>
       expect(commandsMock.createHeadlessWorkflow).toHaveBeenCalledWith(
@@ -123,9 +145,9 @@ describe("WorkflowTemplateGallery", () => {
 
   it("archives the empty draft when filling it in fails, so a failed clone leaves no debris", async () => {
     commandsMock.updateHeadlessWorkflow.mockRejectedValue(new Error("Workflow update failed"));
-    render(<WorkflowTemplateGallery missingPlugins={{}} scope="company" />);
+    render(<WorkflowTemplatesButton missingPlugins={{}} scope="company" />);
 
-    await userEvent.click(screen.getByRole("button", { name: new RegExp(template.name) }));
+    await useTemplate(template.name);
 
     await waitFor(() =>
       expect(commandsMock.archiveHeadlessWorkflow).toHaveBeenCalledWith("workflow_1", {

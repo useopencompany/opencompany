@@ -2,6 +2,14 @@
 
 import { scheduleSummary } from "@opencompany/agent-runtime";
 import type { WorkflowScope } from "@opencompany/protocol";
+import { Button } from "@opencompany/ui/components/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@opencompany/ui/components/dialog";
 import { toast } from "@opencompany/ui/components/sonner";
 import {
   GitHubIcon,
@@ -10,7 +18,16 @@ import {
   SlackIcon,
   StripeIcon,
 } from "@opencompany/ui/icons";
-import { ArrowRight, Clock, CreditCard, Inbox, ListTodo, Loader2, Rocket } from "lucide-react";
+import {
+  ArrowRight,
+  Clock,
+  CreditCard,
+  Inbox,
+  LayoutTemplate,
+  ListTodo,
+  Loader2,
+  Rocket,
+} from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -42,7 +59,7 @@ const OUTCOME_ICONS: Record<WorkflowTemplateOutcomePlugin, LucideIcon> = {
   stripe: StripeIcon,
 };
 
-export function WorkflowTemplateGallery({
+export function WorkflowTemplatesButton({
   /**
    * Required plugins each template is still missing, keyed by template id. `null` when the plugin or
    * account snapshot could not be loaded, which drops the setup hints rather than guessing at them.
@@ -55,6 +72,7 @@ export function WorkflowTemplateGallery({
   scope: WorkflowScope;
 }) {
   const router = useRouter();
+  const [open, setOpen] = useState(false);
   const [pendingTemplateId, setPendingTemplateId] = useState<string | null>(null);
 
   const startFromTemplate = async (template: WorkflowTemplate) => {
@@ -71,28 +89,43 @@ export function WorkflowTemplateGallery({
   };
 
   return (
-    <section aria-labelledby="workflow-template-heading" className="flex min-w-0 flex-col gap-3">
-      <div className="flex flex-col gap-1">
-        <h2 id="workflow-template-heading" className="text-[13px] font-medium text-ink">
-          Start from a template
-        </h2>
-        <p className="text-[12.5px] leading-5 text-ink-subtle">
-          Each one opens as a draft you can edit. Nothing runs until you activate it.
-        </p>
-      </div>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {WORKFLOW_TEMPLATES.map((template) => (
-          <WorkflowTemplateCard
-            key={template.id}
-            template={template}
-            missingPlugins={missingPlugins?.[template.id] ?? []}
-            pending={pendingTemplateId === template.id}
-            disabled={pendingTemplateId !== null && pendingTemplateId !== template.id}
-            onUse={() => void startFromTemplate(template)}
-          />
-        ))}
-      </div>
-    </section>
+    <>
+      <Button variant="outline" size="sm" className="shadow-sm" onClick={() => setOpen(true)}>
+        <LayoutTemplate size={14} strokeWidth={2} />
+        Workflow templates
+      </Button>
+
+      <Dialog
+        open={open}
+        onOpenChange={(next) => {
+          // A clone is two API calls; closing mid-flight would hide the spinner on a draft that is
+          // still being created and then navigate out from under the list.
+          if (!next && pendingTemplateId) return;
+          setOpen(next);
+        }}
+      >
+        <DialogContent className="max-h-[calc(100vh-4rem)] max-w-[560px] gap-5 overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-[15px]">Workflow templates</DialogTitle>
+            <DialogDescription className="text-[12.5px] leading-5 text-ink-subtle">
+              Each one opens as a draft you can edit. Nothing runs until you activate it.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2.5">
+            {WORKFLOW_TEMPLATES.map((template) => (
+              <WorkflowTemplateCard
+                key={template.id}
+                template={template}
+                missingPlugins={missingPlugins?.[template.id] ?? []}
+                pending={pendingTemplateId === template.id}
+                disabled={pendingTemplateId !== null && pendingTemplateId !== template.id}
+                onUse={() => void startFromTemplate(template)}
+              />
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
