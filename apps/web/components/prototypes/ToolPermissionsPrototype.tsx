@@ -16,7 +16,7 @@ import { useState } from "react";
 import { CapabilityModeToggle } from "@/components/CapabilityModeToggle";
 import { ApprovalCard } from "@/components/chat/ApprovalCard";
 import { SettingsContent } from "@/components/SettingsChrome";
-import { APPROVAL_TOOL_ID, GMAIL_GROUPS } from "./tool-permission-fixture";
+import { APPROVAL_GROUP, APPROVAL_TOOL, GMAIL_GROUPS } from "./tool-permission-fixture";
 import {
   clearGroupOverrides,
   effectiveToolMode,
@@ -33,13 +33,6 @@ import {
 } from "./tool-permission-model";
 
 const EMPTY_STATE: PrototypeState = { groups: {}, tools: {} };
-
-const APPROVAL_GROUP = GMAIL_GROUPS.find((group) =>
-  group.tools.some((tool) => tool.id === APPROVAL_TOOL_ID),
-) as PrototypeGroup;
-const APPROVAL_TOOL = APPROVAL_GROUP.tools.find(
-  (tool) => tool.id === APPROVAL_TOOL_ID,
-) as PrototypeGroup["tools"][number];
 
 export function ToolPermissionsPrototype() {
   const [state, setState] = useState<PrototypeState>(EMPTY_STATE);
@@ -304,11 +297,14 @@ function ApprovalSection({
   onChoose: (choice: string | null) => void;
 }) {
   const siblingCount = APPROVAL_GROUP.tools.length - 1;
+  // Phrased off the live group mode: the settings panel above can already have moved it, and a
+  // demo that misstates its own outcome is worse than no demo.
+  const siblingMode = MODE_LABELS[groupMode(state, APPROVAL_GROUP)];
 
   const decide = (next: string) => {
     onChoose(next);
     if (next === "always_tool") {
-      setState(setToolMode(state, APPROVAL_TOOL_ID, "on"));
+      setState(setToolMode(state, APPROVAL_TOOL.id, "on"));
     } else if (next === "always_group") {
       setState(setGroupMode(state, APPROVAL_GROUP, "on"));
     }
@@ -357,9 +353,10 @@ function ApprovalSection({
       <p className="text-[12px] leading-5 text-ink-muted">
         {choice === "always_tool" ? (
           <>
-            <span className="font-medium text-ink">Label thread</span> is now On. The other{" "}
-            {siblingCount} tools in {APPROVAL_GROUP.label} — including{" "}
-            <span className="font-medium text-ink">Trash thread</span> — still ask.
+            <span className="font-medium text-ink">{APPROVAL_TOOL.name}</span> is now On on its own.
+            The other {siblingCount} tools in {APPROVAL_GROUP.label} — including{" "}
+            <span className="font-medium text-ink">Trash thread</span> — still follow the group (
+            {siblingMode}).
           </>
         ) : choice === "always_group" ? (
           <>

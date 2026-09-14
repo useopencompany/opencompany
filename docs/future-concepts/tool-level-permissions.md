@@ -12,7 +12,7 @@ group is `On`, `Ask`, or `Off`
 unit, which produces three concrete failures:
 
 1. **One dangerous tool poisons a useful group.** Gmail's `write` group ("Organize Gmail") holds 9
-   tools. Eight are harmless label operations. `trash_thread` and `trash_message` are not. Today the
+   tools. Seven are harmless label operations. `trash_thread` and `trash_message` are not. Today the
    user either puts all nine on Ask, or accepts nine automatic writes. Most people pick Ask and then
    click approve nine times a day for label changes.
 2. **"Always allow" in chat silently widens everything.** `alwaysAllowAction`
