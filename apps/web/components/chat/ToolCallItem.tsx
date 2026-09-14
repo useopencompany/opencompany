@@ -1002,9 +1002,7 @@ export function SubagentRow({
   children: ReactNode;
   detail?: HistoricalPresentationDetailController;
 }) {
-  // Expanded while the subagent is still working so its live trace is visible; collapsed once it
-  // finishes to keep the transcript tidy (the user can re-open it).
-  const [expanded, setExpanded] = useState(tool.status === "running" || tool.status === "waiting");
+  const [expanded, setExpanded] = useState(false);
   useHistoricalPresentationDetail(expanded, detail);
   const meta = getToolCallMeta(tool);
   // The coding engines return `result`; the opencompany engine's run_subagent returns `summary`.
