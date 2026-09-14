@@ -64,15 +64,16 @@ import { BrainSettings } from "@/components/BrainSettings";
 import { BrainView } from "@/components/BrainView";
 import { BrowserProfilesSettings } from "@/components/BrowserProfilesSettings";
 import { FathomIntegrationSetup } from "@/components/FathomIntegrationSetup";
-import {
-  InferenceSettingsPanel,
-  type SandboxSizeOptionView,
-} from "@/components/InferenceSettingsPanel";
+import { InferenceSettingsPanel } from "@/components/InferenceSettingsPanel";
 import { IntentPrefetchLink } from "@/components/IntentPrefetchLink";
 import { McpSetupGuide } from "@/components/McpSetupGuide";
 import { ModelProviderIcon } from "@/components/ModelProviderIcon";
 import { PageContent } from "@/components/PageContent";
 import { RepositorySettings } from "@/components/RepositorySettings";
+import {
+  SandboxSettingsPanel,
+  type SandboxSizeOptionView,
+} from "@/components/SandboxSettingsPanel";
 import {
   SCOPE_FILTERS,
   ScopeBadge,
@@ -237,13 +238,7 @@ export function SettingsRoute({
   );
 }
 
-export function InferenceSettingsRoute({
-  sandboxSize,
-  sandboxSizeOptions,
-}: {
-  sandboxSize: WorkspaceSandboxSizeResult;
-  sandboxSizeOptions: SandboxSizeOptionView[];
-}) {
+export function InferenceSettingsRoute() {
   const { integrations, workspace } = useAppData();
 
   return (
@@ -254,6 +249,27 @@ export function InferenceSettingsRoute({
       <InferenceSettingsPanel
         codex={integrations.codex}
         claudeCode={integrations.claude_code}
+        canManage={workspace.role === "admin"}
+      />
+    </SettingsContent>
+  );
+}
+
+export function SandboxSettingsRoute({
+  sandboxSize,
+  sandboxSizeOptions,
+}: {
+  sandboxSize: WorkspaceSandboxSizeResult;
+  sandboxSizeOptions: SandboxSizeOptionView[];
+}) {
+  const { workspace } = useAppData();
+
+  return (
+    <SettingsContent
+      title="Sandboxes"
+      description="Control the machines your cloud coding sessions run on."
+    >
+      <SandboxSettingsPanel
         canManage={workspace.role === "admin"}
         sandboxSize={sandboxSize}
         sandboxSizeOptions={sandboxSizeOptions}

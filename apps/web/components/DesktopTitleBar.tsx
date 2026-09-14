@@ -26,6 +26,7 @@ const SETTINGS_TITLES: Record<string, string> = {
   "/settings/workspace": "Workspace",
   "/settings/usage": "Usage",
   "/settings/workspace/inference": "Inference",
+  "/settings/workspace/sandboxes": "Sandboxes",
   "/settings/repositories": "Repositories",
   "/settings/mcp": "MCP",
 };
