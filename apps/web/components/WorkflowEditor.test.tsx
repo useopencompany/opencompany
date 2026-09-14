@@ -232,6 +232,10 @@ describe("WorkflowEditor", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /Linear/ }));
     fireEvent.click(screen.getByRole("button", { name: /Issue created/ }));
+    expect(screen.queryByText("Additional run context (optional)")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Each run follows the instructions in your steps."),
+    ).toBeInTheDocument();
     await advanceAutosave();
 
     expect(workflowActionsMock.update).toHaveBeenLastCalledWith(
@@ -244,6 +248,46 @@ describe("WorkflowEditor", () => {
             event: "issue.created",
             integrationId: "gint_1",
           }),
+        ],
+      }),
+    );
+  });
+
+  it("keeps an existing event trigger prompt when the editor saves", async () => {
+    render(
+      <WorkflowEditor
+        workflow={{
+          ...workflow,
+          triggers: [
+            {
+              id: "trigger_linear",
+              type: "event",
+              provider: "linear",
+              event: "issue.created",
+              integrationId: "gint_1",
+              filters: {},
+              prompt: "Only handle billing issues.",
+            },
+          ],
+        }}
+        canEdit
+        skillCatalog={[]}
+        eventProviders={[linearEventProvider()]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Issue created/ }));
+    expect(screen.queryByText("Additional run context (optional)")).not.toBeInTheDocument();
+    expect(screen.queryByText("Run context")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Describe what this step should do..."), {
+      target: { value: "Collect the week's updates and post them." },
+    });
+    await advanceAutosave();
+
+    expect(workflowActionsMock.update).toHaveBeenLastCalledWith(
+      "workflow_1",
+      expect.objectContaining({
+        triggers: [
+          expect.objectContaining({ id: "trigger_linear", prompt: "Only handle billing issues." }),
         ],
       }),
     );
