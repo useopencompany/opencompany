@@ -14,18 +14,10 @@ vi.mock("@opencompany/db/codex-auth", async (importOriginal) => ({
   loadWorkspaceCodexEngineAccount: mocks.loadWorkspaceCodexEngineAccount,
 }));
 
-import { isCodexSubscriptionModel, resolveProductLanguageModel } from "./language-model";
+import { resolveProductLanguageModel } from "./language-model";
 
 describe("resolveProductLanguageModel", () => {
   beforeEach(() => vi.clearAllMocks());
-
-  it("recognizes only the subscription-eligible model IDs", () => {
-    expect(isCodexSubscriptionModel("openai/gpt-6-astra")).toBe(false);
-    expect(isCodexSubscriptionModel("openai/gpt-5.6-sol")).toBe(true);
-    expect(isCodexSubscriptionModel("openai/gpt-5.6-terra")).toBe(true);
-    expect(isCodexSubscriptionModel("openai/gpt-5.6-luna")).toBe(false);
-    expect(isCodexSubscriptionModel("gpt-5.6-sol")).toBe(false);
-  });
 
   it("selects Codex backend for an enabled designation even when reauth is needed", async () => {
     mocks.loadWorkspaceCodexEngineAccount.mockResolvedValue({

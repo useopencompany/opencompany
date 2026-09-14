@@ -92,6 +92,10 @@
       "types": "./src/infisical-auth.ts",
       "default": "./src/infisical-auth.ts"
     },
+    "./doppler-auth": {
+      "types": "./src/doppler-auth.ts",
+      "default": "./src/doppler-auth.ts"
+    },
     "./repo-configs": {
       "types": "./src/repo-configs.ts",
       "default": "./src/repo-configs.ts"

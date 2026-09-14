@@ -98,6 +98,16 @@ export async function findLiveOwnedSandboxIds(
           AND flow.status IN ('pending', 'link_ready')
           AND flow.expires_at > ${now}
       )
+    ) OR (
+      candidate."ownerKind" = 'doppler_auth_flow'
+      AND EXISTS (
+        SELECT 1
+        FROM goat.doppler_auth_flows AS flow
+        WHERE flow.id = candidate."ownerId"
+          AND flow.sandbox_id = candidate."sandboxId"
+          AND flow.status IN ('pending', 'link_ready')
+          AND flow.expires_at > ${now}
+      )
     )
   `);
   return new Set(rowsFromExecute<{ sandboxId: string }>(result).map((row) => row.sandboxId));
@@ -169,6 +179,7 @@ function isManagedSandboxOwnerKind(value: string | undefined): value is ManagedS
   return (
     value === "codex_chat_session" ||
     value === "codex_device_auth_flow" ||
-    value === "infisical_auth_flow"
+    value === "infisical_auth_flow" ||
+    value === "doppler_auth_flow"
   );
 }

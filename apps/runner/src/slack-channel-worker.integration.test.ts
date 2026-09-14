@@ -68,7 +68,7 @@ beforeAll(async () => {
     `);
     await db.exec(
       await readFile(
-        new URL("../../../drizzle/0281_durable_session_subscriptions.sql", import.meta.url),
+        new URL("../../../drizzle/0282_durable_session_subscriptions.sql", import.meta.url),
         "utf8",
       ),
     );

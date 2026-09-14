@@ -556,7 +556,7 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/convex",
     );
-    expect(within(engineering).getAllByRole("link")).toHaveLength(11);
+    expect(within(engineering).getAllByRole("link")).toHaveLength(12);
     expect(within(engineering).getByRole("link", { name: /supabase/i })).toHaveAttribute(
       "href",
       "/settings/plugins/supabase",

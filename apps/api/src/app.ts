@@ -2737,6 +2737,41 @@ export function createApiApp(input: CreateApiAppInput) {
       await input.engineAuth.disconnectCodex(actor);
       return c.json({ data: { deleted: true as const }, meta }, 200);
     },
+    getDopplerAuth: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      return c.json({ data: await input.engineAuth.getDopplerStatus(actor), meta }, 200);
+    },
+    startDopplerAuth: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "engine-auth-start", 10);
+      return c.json({ data: { flow: await input.engineAuth.startDopplerAuth(actor) }, meta }, 201);
+    },
+    pollDopplerAuth: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      return c.json(
+        {
+          data: {
+            flow: await input.engineAuth.pollDopplerAuth(actor, c.req.valid("param").flowId),
+          },
+          meta,
+        },
+        200,
+      );
+    },
+    deleteDopplerAuth: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      await input.engineAuth.cancelDopplerAuth(actor, true);
+      return c.json({ data: { deleted: true as const }, meta }, 200);
+    },
+    cancelDopplerAuth: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      await input.engineAuth.cancelDopplerAuth(actor, false);
+      return c.json({ data: { deleted: true as const }, meta }, 200);
+    },
     getInfisicalAuth: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);

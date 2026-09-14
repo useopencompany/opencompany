@@ -228,6 +228,7 @@ export async function AppShell({ children }: { children: ReactNode }) {
     featureFlags,
     codexConnected: codex.status === "connected",
     claudeCodeConnected: claudeCode.status === "connected",
+    sharedModelAccessEnabled: codex.workspaceEngine?.enabled === true,
     mcpSetup: {
       preferredClient: user.preferredMcpClient,
       completedAt: user.mcpSetupCompletedAt?.toISOString() ?? null,

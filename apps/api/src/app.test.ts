@@ -3607,6 +3607,11 @@ describe("canonical Hono API", () => {
       ["/v1/engine-auth/codex", "GET"],
       ["/v1/engine-auth/codex/usage", "GET"],
       ["/v1/engine-auth/codex/device", "POST"],
+      ["/v1/engine-auth/doppler", "GET"],
+      ["/v1/engine-auth/doppler/start", "POST"],
+      ["/v1/engine-auth/doppler/flow/poll", "POST"],
+      ["/v1/engine-auth/doppler/cancel", "POST"],
+      ["/v1/engine-auth/doppler", "DELETE"],
       ["/v1/engine-auth/infisical", "GET"],
       ["/v1/engine-auth/infisical/start", "POST"],
       ["/v1/engine-auth/infisical", "DELETE"],
@@ -4198,6 +4203,36 @@ describe("canonical Hono API", () => {
     expect(codexRemoved.status).toBe(200);
     await expect(codexRemoved.json()).resolves.toMatchObject({ data: { deleted: true } });
     expect(disconnectCodex).toHaveBeenCalledWith(actor);
+  });
+
+  it("scopes Doppler start, poll, cancel and disconnect to the authenticated actor", async () => {
+    const flow = {
+      id: "gdopf_test",
+      status: "link_ready" as const,
+      loginUrl: "https://dashboard.doppler.com/workplace/auth/cli",
+      userCode: "synthetic_auth_code",
+      statusReason: null,
+      expiresAt: "2026-09-14T15:00:00.000Z",
+    };
+    const startDopplerAuth = vi.fn(async () => flow);
+    const pollDopplerAuth = vi.fn(async () => flow);
+    const cancelDopplerAuth = vi.fn(async () => {});
+    const app = testApp(fakeRepository(), {
+      engineAuth: engineAuthService({ startDopplerAuth, pollDopplerAuth, cancelDopplerAuth }),
+    });
+    const started = await app.request("/v1/engine-auth/doppler/start", { method: "POST" });
+    expect(started.status).toBe(201);
+    await expect(started.json()).resolves.toMatchObject({ data: { flow } });
+    expect(startDopplerAuth).toHaveBeenCalledWith(actor);
+    const polled = await app.request("/v1/engine-auth/doppler/gdopf_test/poll", { method: "POST" });
+    expect(polled.status).toBe(200);
+    expect(pollDopplerAuth).toHaveBeenCalledWith(actor, flow.id);
+    expect((await app.request("/v1/engine-auth/doppler/cancel", { method: "POST" })).status).toBe(
+      200,
+    );
+    expect(cancelDopplerAuth).toHaveBeenLastCalledWith(actor, false);
+    expect((await app.request("/v1/engine-auth/doppler", { method: "DELETE" })).status).toBe(200);
+    expect(cancelDopplerAuth).toHaveBeenLastCalledWith(actor, true);
   });
 
   it("gives engine auth flow starts their own small rate bucket", async () => {
@@ -5636,6 +5671,18 @@ function integrationAccountService(
 
 function fakeEngineAuth(): Parameters<typeof createApiApp>[0]["engineAuth"] {
   return {
+    getDopplerStatus: async () => {
+      throw new Error("Unexpected Doppler status read.");
+    },
+    startDopplerAuth: async () => {
+      throw new Error("Unexpected Doppler auth start.");
+    },
+    pollDopplerAuth: async () => {
+      throw new Error("Unexpected Doppler auth poll.");
+    },
+    cancelDopplerAuth: async () => {
+      throw new Error("Unexpected Doppler auth cancellation.");
+    },
     getClaudeCodeStatus: async () => {
       throw new Error("Unexpected Claude Code status read.");
     },

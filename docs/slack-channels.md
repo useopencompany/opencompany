@@ -56,7 +56,7 @@ Slack contracts: [posting and thread timestamps](https://docs.slack.dev/referenc
 [channel history](https://docs.slack.dev/reference/methods/conversations.history/), and
 [thread history](https://docs.slack.dev/reference/methods/conversations.replies/).
 
-Migration `0281_durable_session_subscriptions` is additive. Deploy it before the new API and
+Migration `0282_durable_session_subscriptions` is additive. Deploy it before the new API and
 runner. Application rollback can retain these tables and their queued data. Rolling back the
 API also restores legacy bot ingress behavior, so disable Slack event delivery during rollback
 if that behavior is unwanted. Do not drop the tables while subscriptions or deliveries are active.

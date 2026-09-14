@@ -11,6 +11,7 @@ import {
   CODEX_REASONING_EFFORTS,
   claudeCodeModelSupportsReasoningEffort,
   getAgentModelDefinition,
+  isCodexSubscriptionModel,
 } from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import { captureProductEvent } from "@opencompany/analytics/product/client";
@@ -49,6 +50,7 @@ import {
   Archive,
   ArrowLeft,
   ArrowUp,
+  Box,
   Check,
   ChevronDown,
   Code2,
@@ -405,6 +407,7 @@ export function Surface({
   claudeCodeConnected = false,
   taskSpawningEnabled = false,
   autoModelRoutingEnabled = false,
+  sharedModelAccessEnabled = false,
   workspaceId = "",
   userWorkosId = "",
   taskConversation = null,
@@ -431,6 +434,9 @@ export function Surface({
   claudeCodeConnected?: boolean;
   taskSpawningEnabled?: boolean;
   autoModelRoutingEnabled?: boolean;
+  // Shared GPT models run on the workspace's ChatGPT subscription, so the picker marks them as
+  // included rather than metered.
+  sharedModelAccessEnabled?: boolean;
   workspaceId?: string;
   // Scopes chat attachment uploads; attachments are disabled when absent.
   userWorkosId?: string;
@@ -2842,6 +2848,7 @@ export function Surface({
                 claudeCodeConnected={claudeCodeConnected}
                 taskSpawningEnabled={taskSpawningEnabled}
                 autoModelRoutingEnabled={autoModelRoutingEnabled}
+                sharedModelAccessEnabled={sharedModelAccessEnabled}
                 creditBalance={creditBalance}
                 workspaceId={workspaceId}
                 onSubmitted={closeCommandPalette}
@@ -3396,7 +3403,7 @@ export function Surface({
                     onStop={stopGeneration}
                   />
                 </div>
-                <div className="flex items-center gap-1 border-t border-border px-2.5 py-1.5">
+                <div className="flex flex-wrap items-center gap-1 border-t border-border px-2.5 py-1.5">
                   {attachmentsEnabled ? (
                     <>
                       <input
@@ -3490,6 +3497,7 @@ export function Surface({
                           codexConnected={codexConnected}
                           claudeCodeConnected={claudeCodeConnected}
                           autoModelRoutingEnabled={autoModelRoutingEnabled}
+                          sharedModelAccessEnabled={sharedModelAccessEnabled}
                         />
                       )}
                       {showEngineComposerControls && !selectedWorkflow ? (
@@ -3530,6 +3538,9 @@ export function Surface({
                           onGoalObjectiveChange={setCodexGoalObjective}
                           onGoalTokenBudgetChange={setCodexGoalTokenBudget}
                         />
+                      ) : null}
+                      {showEngineComposerControls && !selectedWorkflow ? (
+                        <SandboxIndicator />
                       ) : null}
                     </>
                   )}
@@ -3577,6 +3588,7 @@ export function QuickChatComposer({
   claudeCodeConnected,
   taskSpawningEnabled,
   autoModelRoutingEnabled,
+  sharedModelAccessEnabled,
   creditBalance,
   workspaceId,
   onSubmitted,
@@ -3591,6 +3603,7 @@ export function QuickChatComposer({
   claudeCodeConnected: boolean;
   taskSpawningEnabled: boolean;
   autoModelRoutingEnabled: boolean;
+  sharedModelAccessEnabled: boolean;
   creditBalance: ReturnType<typeof useCreditBalance>["balance"];
   workspaceId: string;
   onSubmitted?: () => void;
@@ -4417,7 +4430,7 @@ export function QuickChatComposer({
               onStop={() => {}}
             />
           </div>
-          <div className="flex items-center gap-1 border-t border-border px-2.5 py-1.5">
+          <div className="flex flex-wrap items-center gap-1 border-t border-border px-2.5 py-1.5">
             {attachmentsEnabled ? (
               <>
                 <input
@@ -4475,6 +4488,7 @@ export function QuickChatComposer({
                 codexConnected={codexConnected}
                 claudeCodeConnected={claudeCodeConnected}
                 autoModelRoutingEnabled={autoModelRoutingEnabled}
+                sharedModelAccessEnabled={sharedModelAccessEnabled}
               />
             )}
             {showEngineComposerControls && !selectedWorkflow ? (
@@ -4507,6 +4521,7 @@ export function QuickChatComposer({
                 onGoalTokenBudgetChange={setCodexGoalTokenBudget}
               />
             ) : null}
+            {showEngineComposerControls && !selectedWorkflow ? <SandboxIndicator /> : null}
           </div>
         </div>
       </form>
@@ -5679,6 +5694,28 @@ function renderEngineModelPicker(model: EngineModelPickerModel | null, disabled:
   }
 }
 
+// The composer already says which coding agent will answer; it does not say where that agent
+// runs. Cloud coding engines execute on an isolated sandbox VM — never the user's machine — and
+// that is worth knowing before sending, not after. Sits at the end of the composer footer so it
+// reads as a property of the run rather than another control to press.
+function SandboxIndicator() {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        type="button"
+        aria-label="Runs in an isolated cloud sandbox"
+        className="ml-auto flex shrink-0 cursor-default items-center gap-1.5 rounded-md px-1.5 py-1 text-[11.5px] font-medium leading-none text-ink-subtle outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+      >
+        <Box size={12} strokeWidth={1.9} className="shrink-0" aria-hidden="true" />
+        <span className="hidden sm:inline">Sandbox</span>
+      </TooltipTrigger>
+      <TooltipContent>
+        Runs in an isolated cloud sandbox. Your machine and local files are never touched.
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 function EngineComposerControls({
   model,
   engineLabel,
@@ -6067,6 +6104,7 @@ function ModelPicker({
   codexConnected = false,
   claudeCodeConnected = false,
   autoModelRoutingEnabled = false,
+  sharedModelAccessEnabled = false,
 }: {
   value: ChatModelSelection;
   onChange: (modelId: ChatModelSelection) => void;
@@ -6074,6 +6112,7 @@ function ModelPicker({
   codexConnected?: boolean;
   claudeCodeConnected?: boolean;
   autoModelRoutingEnabled?: boolean;
+  sharedModelAccessEnabled?: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -6167,8 +6206,10 @@ function ModelPicker({
             <CommandInput placeholder="Search models..." />
             <CommandList className="max-h-[min(320px,calc(100vh-9rem))]">
               <CommandEmpty>No models found.</CommandEmpty>
-              {autoModelRoutingEnabled ? (
-                <CommandGroup heading="Routing">
+              {/* Auto leads the one list rather than sitting in its own section: it is the
+                  model choice for people who do not want to make one, not a separate mode. */}
+              <CommandGroup>
+                {autoModelRoutingEnabled ? (
                   <CommandItem
                     value={AUTO_MODEL_SELECTION}
                     keywords={["Auto", "automatic", "routing", "recommended"]}
@@ -6195,13 +6236,13 @@ function ModelPicker({
                       </div>
                     </div>
                   </CommandItem>
-                </CommandGroup>
-              ) : null}
-              <CommandGroup heading="Models">
+                ) : null}
                 {MODELS.map((model) => {
                   if (model.id === "anthropic/claude-opus-4.8") return null;
                   const isSelected =
                     !isAutoSelected && !isEngineSelected && model.id === selectedModel?.id;
+                  const isSubscriptionCovered =
+                    sharedModelAccessEnabled && isCodexSubscriptionModel(model.id);
                   return (
                     <CommandItem
                       key={model.id}
@@ -6234,6 +6275,14 @@ function ModelPicker({
                           {modelProviderLabel(model.id)}
                         </div>
                       </div>
+                      {isSubscriptionCovered ? (
+                        <span
+                          title="Covered by your workspace's ChatGPT subscription, so it uses no credits."
+                          className="inline-flex shrink-0 items-center rounded-full bg-surface-muted px-1.5 py-px text-[10.5px] font-medium leading-4 text-ink-subtle"
+                        >
+                          Included
+                        </span>
+                      ) : null}
                     </CommandItem>
                   );
                 })}

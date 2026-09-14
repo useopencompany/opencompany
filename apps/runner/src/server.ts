@@ -10,6 +10,7 @@ import { wakeCodexChatWorker } from "./codex-chat-worker";
 import { CodingWorkspaceAccessError, mintCodingWorkspaceAccess } from "./coding-workspace-runtime";
 import { createCodingWorkspaceTransport } from "./coding-workspace-runtime-transport";
 import { createDictationTicket } from "./dictation-auth";
+import { cancelDopplerAuth, pollDopplerAuthFlow, startDopplerAuthFlow } from "./doppler-auth";
 import type { RunnerEnv } from "./env";
 import { wakeGoogleDriveSyncWorker } from "./google-drive-sync-worker";
 import { planHarnessForTask } from "./harness";
@@ -377,6 +378,47 @@ export function createServer(
       });
     }
   });
+
+  for (const operation of ["start", "cancel", ":flowId/poll"] as const) {
+    app.post(`/internal/goat/doppler-auth/${operation}`, async (request, reply) => {
+      requireInternalAuth(request.headers.authorization, env.internalToken);
+      const body = request.body as
+        | { workspaceId?: unknown; requestedByWorkosId?: unknown; disconnect?: unknown }
+        | undefined;
+      const workspaceId = boundedString(body?.workspaceId, 256);
+      const requestedByWorkosId = boundedString(body?.requestedByWorkosId, 256);
+      if (
+        !workspaceId ||
+        !requestedByWorkosId ||
+        (operation === "cancel" && typeof body?.disconnect !== "boolean")
+      )
+        return reply.status(400).send({ error: "Invalid Doppler connection request." });
+      try {
+        if (operation === "cancel") {
+          await cancelDopplerAuth({
+            workspaceId,
+            requestedByWorkosId,
+            disconnect: body?.disconnect === true,
+          });
+          return reply.send({ ok: true });
+        }
+        const flow =
+          operation === "start"
+            ? await startDopplerAuthFlow({ workspaceId, requestedByWorkosId, env })
+            : await pollDopplerAuthFlow({
+                workspaceId,
+                requestedByWorkosId,
+                flowId: (request.params as { flowId: string }).flowId,
+              });
+        if (!flow) return reply.status(404).send({ error: "Doppler sign-in was not found." });
+        return reply.send({ ok: true, flow });
+      } catch {
+        return reply
+          .status(502)
+          .send({ error: "Doppler connection could not be prepared. Please try again." });
+      }
+    });
+  }
 
   return app;
 }

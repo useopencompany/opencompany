@@ -1032,6 +1032,44 @@ describe("Surface chat streaming UI", () => {
     expect(textarea).toHaveValue("Keep this new draft");
   });
 
+  it("marks the composer as sandboxed only while a cloud coding agent is selected", async () => {
+    const { unmount } = render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={null}
+        userWorkosId="user_1"
+        workspaceId="workspace_1"
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "Runs in an isolated cloud sandbox" }),
+    ).not.toBeInTheDocument();
+    unmount();
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "conversation_codex_sandbox",
+          title: "Codex",
+          model: CODEX_CHAT_DEFAULT_MODEL_ID,
+          engine: "codex",
+          messages: [],
+        }}
+        codexConnected
+        userWorkosId="user_1"
+        workspaceId="workspace_1"
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Runs in an isolated cloud sandbox" }),
+    ).toBeInTheDocument();
+  });
+
   it("starts a bare ampersand message from Home defaults instead of the active Codex runtime", async () => {
     const user = userEvent.setup();
     persistLastChatSelection("user_1", DEFAULT_MODEL);
@@ -2271,6 +2309,9 @@ describe("Surface chat streaming UI", () => {
         autoModelRoutingEnabled
       />,
     );
+    // Auto leads the single model list rather than sitting in a "Routing" section of its own.
+    expect(screen.queryByText("Routing")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("option")[0]).toHaveTextContent("Auto");
     await user.click(screen.getByText("Picks once from your first message"));
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Auto");
 
@@ -2285,6 +2326,37 @@ describe("Surface chat streaming UI", () => {
       expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Kimi K2.6"),
     );
     expect(screen.getByRole("button", { name: "Model" })).toBeDisabled();
+  });
+
+  it("marks the GPT models a shared ChatGPT subscription covers as included", async () => {
+    const user = userEvent.setup();
+
+    const { rerender } = render(
+      <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />,
+    );
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    expect(screen.queryByText("Included")).not.toBeInTheDocument();
+
+    rerender(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={null}
+        sharedModelAccessEnabled
+      />,
+    );
+
+    expect(screen.getAllByText("Included")).toHaveLength(2);
+    expect(screen.getByText("GPT 5.6 Sol").closest('[role="option"]')).toHaveTextContent(
+      "Included",
+    );
+    expect(screen.getByText("GPT 5.6 Terra").closest('[role="option"]')).toHaveTextContent(
+      "Included",
+    );
+    // Metered models stay unlabelled, including the other OpenAI entry.
+    expect(screen.getByText("GPT 5.5").closest('[role="option"]')).not.toHaveTextContent(
+      "Included",
+    );
   });
 
   it("remembers the last main chat model when returning Home and remounting", async () => {
