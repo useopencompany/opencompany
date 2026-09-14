@@ -824,19 +824,24 @@ const WORKFLOW_TRIGGER_LABELS: Record<WorkflowListItem["trigger"]["type"], strin
 function WorkflowListRow({ workflow }: { workflow: WorkflowListItem }) {
   const model = workflowModelSummary(workflow.steps);
   return (
-    <IntentPrefetchLink
+    // The row keeps table semantics so the metadata columns stay labelled, and the
+    // link lives in the name cell so it is still announced as a link. The overlay
+    // stretches its hit area across the whole row.
+    <div
       role="row"
-      href={`/workflows/${encodeURIComponent(workflow.slug)}`}
       className={cn(
         WORKFLOW_ROW_GRID,
-        "group -mx-3 rounded-lg border-b border-border px-3 py-2.5 transition-colors duration-150 last:border-b-0 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20",
+        "group relative -mx-3 rounded-lg border-b border-border px-3 py-2.5 transition-colors duration-150 last:border-b-0 hover:bg-surface-hover focus-within:ring-1 focus-within:ring-ink/20",
       )}
     >
       <span role="cell" className="min-w-0">
         <span className="flex items-center gap-2">
-          <span className="truncate text-[13.5px] font-medium leading-tight text-ink">
+          <IntentPrefetchLink
+            href={`/workflows/${encodeURIComponent(workflow.slug)}`}
+            className="truncate text-[13.5px] font-medium leading-tight text-ink after:absolute after:inset-0 after:content-[''] focus:outline-none"
+          >
             {workflow.name}
-          </span>
+          </IntentPrefetchLink>
           <ItemStatusBadge status={workflow.status} />
         </span>
         {workflow.description.trim() ? (
@@ -875,7 +880,7 @@ function WorkflowListRow({ workflow }: { workflow: WorkflowListItem }) {
       <span role="cell" className="hidden text-[12.5px] leading-5 text-ink-subtle lg:block">
         {workflow.lastExecutedAt ? formatRelativeTime(workflow.lastExecutedAt) : "Never"}
       </span>
-    </IntentPrefetchLink>
+    </div>
   );
 }
 
