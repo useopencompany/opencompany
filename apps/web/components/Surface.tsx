@@ -3403,7 +3403,7 @@ export function Surface({
                     onStop={stopGeneration}
                   />
                 </div>
-                <div className="flex items-center gap-1 border-t border-border px-2.5 py-1.5">
+                <div className="flex flex-wrap items-center gap-1 border-t border-border px-2.5 py-1.5">
                   {attachmentsEnabled ? (
                     <>
                       <input
@@ -4430,7 +4430,7 @@ export function QuickChatComposer({
               onStop={() => {}}
             />
           </div>
-          <div className="flex items-center gap-1 border-t border-border px-2.5 py-1.5">
+          <div className="flex flex-wrap items-center gap-1 border-t border-border px-2.5 py-1.5">
             {attachmentsEnabled ? (
               <>
                 <input
@@ -5707,7 +5707,7 @@ function SandboxIndicator() {
         className="ml-auto flex shrink-0 cursor-default items-center gap-1.5 rounded-md px-1.5 py-1 text-[11.5px] font-medium leading-none text-ink-subtle outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
       >
         <Box size={12} strokeWidth={1.9} className="shrink-0" aria-hidden="true" />
-        Sandbox
+        <span className="hidden sm:inline">Sandbox</span>
       </TooltipTrigger>
       <TooltipContent>
         Runs in an isolated cloud sandbox. Your machine and local files are never touched.
