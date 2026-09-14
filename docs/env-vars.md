@@ -108,6 +108,9 @@ processes.
 `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY`) that seals the macOS desktop app's Google sign-in handoff
 token. Add it to prod `/web` before enabling desktop distribution. The release preflight requires it
 for the web app so a deployment cannot expose the desktop auth flow without its sealing key.
+For local development, `bun run setup` generates a valid key in `.env.local` and mirrors it to
+`apps/web/.env.local`. Valid keys are preserved on reruns and shared env pulls; invalid personal
+overrides fail setup with instructions. `bun run setup -- --check` reports desktop-auth readiness.
 
 `REDIS_URL` is optional for correctness but required by the production activation preflight. When
 configured for both `apps/api` and `apps/runner`, it
