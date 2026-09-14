@@ -6,8 +6,8 @@ import {
   AppWindow,
   ChevronDown,
   ExternalLink,
+  Files,
   FileText,
-  LoaderCircle,
   Maximize2,
   Minimize2,
   PanelRightClose,
@@ -18,7 +18,6 @@ import dynamic from "next/dynamic";
 import {
   forwardRef,
   type KeyboardEvent as ReactKeyboardEvent,
-  type ReactNode,
   type Ref,
   useCallback,
   useEffect,
@@ -28,11 +27,16 @@ import {
   useSyncExternalStore,
 } from "react";
 import { createEngineRuntimeAccess } from "@/lib/headless-chat-commands";
+import { PanelButton, WorkspaceNotice } from "./CodingWorkspaceControls";
 import { type ArtifactSelection, ArtifactViewer } from "./chat/ArtifactViewer";
 
 const CodingWorkspaceTerminal = dynamic(() => import("./CodingWorkspaceTerminal"), {
   ssr: false,
   loading: () => <WorkspaceNotice title="Loading terminal…" busy />,
+});
+const CodingWorkspaceFiles = dynamic(() => import("./CodingWorkspaceFiles"), {
+  ssr: false,
+  loading: () => <WorkspaceNotice title="Loading files…" busy />,
 });
 
 const MIN_PANEL_WIDTH = 340;
@@ -43,7 +47,7 @@ const PANEL_WIDTH_EVENT = "goat-coding-workspace-panel-width";
 const WORKSPACE_CONNECTION_TIMEOUT_MS = 150_000;
 const PORT_DISCOVERY_POLL_MS = 5_000;
 
-type WorkspaceTab = "preview" | "terminal";
+type WorkspaceTab = "preview" | "terminal" | "files";
 type PanelTab = WorkspaceTab | "artifact";
 type ConnectionState = "dormant" | "waking" | "ready" | "disconnected" | "error";
 type PreviewPort = { port: number; isHttp: boolean; score: number };
@@ -93,6 +97,9 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
     artifactSelection ? "artifact" : null,
   );
   const [connectionState, setConnectionState] = useState<ConnectionState>("dormant");
+  // Files stays mounted after its first visit so an unsaved edit survives a trip to
+  // Terminal or Preview and back.
+  const [filesMounted, setFilesMounted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [socket, setSocket] = useState<WebSocket | null>(null);
   const [ports, setPorts] = useState<PreviewPort[]>([]);
@@ -259,6 +266,7 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
     setMobilePanelOpened(true);
     setActiveTab(tab);
     setError(null);
+    if (tab === "files") setFilesMounted(true);
     if (connectionState === "ready" && socketRef.current?.readyState === WebSocket.OPEN) {
       if (tab === "preview") {
         setPortsLoaded(false);
@@ -277,6 +285,7 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
     setFullscreen(false);
     setConnectionState("dormant");
     setActiveTab(null);
+    setFilesMounted(false);
   }, [disconnect]);
 
   useEffect(() => {
@@ -339,6 +348,8 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
       ? [{ port: selectedPort, isHttp: false, score: 0 }, ...ports]
       : ports;
   const previewSrc = previewUrl === null ? null : composePreviewSrc(previewUrl, previewPath);
+  // Files renders as a sibling of the tab chain because it stays mounted while hidden.
+  const filesTabShowing = activeTab === "files" && connectionState === "ready" && socket !== null;
 
   const addressValue = addressDraft ?? canonicalAddress;
 
@@ -465,6 +476,14 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
             >
               <TerminalSquare size={14} /> Terminal
             </button>
+            <button
+              type="button"
+              onClick={() => selectTab("files")}
+              aria-pressed={activeTab === "files"}
+              className={tabClass(activeTab === "files")}
+            >
+              <Files size={14} /> Files
+            </button>
           </>
         ) : null}
         {artifactSelection ? (
@@ -500,7 +519,15 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
       ) : null}
 
       <div className="flex min-h-0 flex-1 flex-col">
-        {activeTab === "artifact" && artifactSelection ? (
+        {filesMounted && connectionState === "ready" && socket ? (
+          <CodingWorkspaceFiles
+            socket={socket}
+            sessionKey={chatSessionId}
+            rootLabel={engineLabel}
+            active={activeTab === "files"}
+          />
+        ) : null}
+        {filesTabShowing ? null : activeTab === "artifact" && artifactSelection ? (
           <ArtifactViewer
             key={`${artifactSelection.artifact.artifactId}:${artifactSelection.artifact.artifactVersionId}`}
             selection={artifactSelection}
@@ -510,7 +537,7 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
             title={workspaceEnabled ? workspaceStateTitle(sandboxStatus) : "Choose an artifact"}
             detail={
               workspaceEnabled
-                ? "Choose Preview or Terminal to wake and connect to this workspace. Opening the panel alone keeps a sleeping sandbox dormant."
+                ? "Choose Preview, Terminal, or Files to wake and connect to this workspace. Opening the panel alone keeps a sleeping sandbox dormant."
                 : "Open an artifact card in the conversation to read it here."
             }
           />
@@ -683,70 +710,14 @@ function serverNarrowLayout() {
   return true;
 }
 
-function WorkspaceNotice({
-  title,
-  detail,
-  busy = false,
-  actionLabel,
-  onAction,
-}: {
-  title: string;
-  detail?: string;
-  busy?: boolean;
-  actionLabel?: string;
-  onAction?: () => void;
-}) {
-  return (
-    <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center">
-      <div className="flex max-w-xs flex-col items-center gap-2">
-        {busy ? <LoaderCircle size={18} className="animate-spin text-ink-subtle" /> : null}
-        <p className="text-[13px] font-medium text-ink">{title}</p>
-        {detail ? <p className="text-[12px] leading-5 text-ink-subtle">{detail}</p> : null}
-        {actionLabel && onAction ? (
-          <button
-            type="button"
-            onClick={onAction}
-            className="mt-2 rounded-md border border-border bg-canvas px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-surface-hover"
-          >
-            {actionLabel}
-          </button>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function PanelButton({
-  label,
-  children,
-  disabled = false,
-  onClick,
-}: {
-  label: string;
-  children: ReactNode;
-  disabled?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      disabled={disabled}
-      onClick={onClick}
-      className="flex h-8 min-w-8 items-center justify-center rounded-md px-1.5 text-[11px] font-medium text-ink-subtle hover:bg-surface-hover hover:text-ink disabled:pointer-events-none disabled:opacity-40"
-    >
-      {children}
-    </button>
-  );
-}
-
 function focusableElements(container: HTMLElement) {
   return Array.from(
     container.querySelectorAll<HTMLElement>(
       'a[href], button:not([disabled]), select:not([disabled]), textarea:not([disabled]), input:not([disabled]), iframe, [tabindex]:not([tabindex="-1"])',
     ),
-  ).filter((element) => !element.hasAttribute("hidden"));
+    // `closest` rather than `hasAttribute`: the Files tab stays mounted behind a hidden
+    // wrapper, so its controls must drop out of the trap along with their container.
+  ).filter((element) => !element.closest("[hidden]"));
 }
 
 function trapFocus(container: HTMLElement | null, event: ReactKeyboardEvent<HTMLElement>) {

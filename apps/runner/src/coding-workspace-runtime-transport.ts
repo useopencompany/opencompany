@@ -9,6 +9,13 @@ import { CLOUD_CODING_ENGINE_CONFIG, shellQuote } from "@opencompany/agent-runti
 import { createLogger } from "@opencompany/observability";
 import WebSocket, { type RawData, WebSocketServer } from "ws";
 import {
+  CodingWorkspaceFileError,
+  listCodingWorkspaceDirectory,
+  normalizeWorkspaceRelativePath,
+  readCodingWorkspaceFile,
+  writeCodingWorkspaceFile,
+} from "./coding-workspace-files";
+import {
   type CodingWorkspaceSession,
   discoverCodingWorkspacePreviewPorts,
   isAllowedPreviewPort,
@@ -37,6 +44,10 @@ const RUNTIME_PROTOCOL = "goat-coding-workspace-v1";
 const TICKET_PROTOCOL_PREFIX = "goat-ticket.";
 const TMUX_SESSION = "goat-coding-workspace";
 const HEARTBEAT_INTERVAL_MS = 60_000;
+// Terminal keystrokes and control messages are tiny, but a file save carries the whole
+// document as one JSON frame. The editor caps a saveable file at 256 KB, and this leaves
+// room for JSON escaping on top of it.
+const MAX_RUNTIME_PAYLOAD_BYTES = 1_024 * 1_024;
 const PREVIEW_UPSTREAM_CONNECT_TIMEOUT_MS = 15_000;
 const PREVIEW_SESSION_CACHE_MS = 5_000;
 const MAX_PREVIEW_SESSION_CACHE_ENTRIES = 256;
@@ -60,7 +71,7 @@ type RunnerServerFactory = (
 export function createCodingWorkspaceTransport(env: RunnerEnv) {
   const runtimeWebSockets = new WebSocketServer({
     noServer: true,
-    maxPayload: 64 * 1_024,
+    maxPayload: MAX_RUNTIME_PAYLOAD_BYTES,
     handleProtocols(protocols) {
       return protocols.has(RUNTIME_PROTOCOL) ? RUNTIME_PROTOCOL : false;
     },
@@ -365,6 +376,61 @@ export function attachRuntimeConnection(
     });
   };
 
+  const listFiles = async (relativePath: string) => {
+    sendControl({
+      type: "files.listing",
+      ...(await listCodingWorkspaceDirectory(sandbox, { workDirectory, relativePath })),
+    });
+  };
+
+  const openFile = async (relativePath: string) => {
+    sendControl({
+      type: "files.content",
+      ...(await readCodingWorkspaceFile(sandbox, { workDirectory, relativePath })),
+    });
+  };
+
+  const saveFile = async (relativePath: string, content: unknown, baseRevision: unknown) => {
+    if (typeof content !== "string") {
+      throw new CodingWorkspaceFileError("The file contents are missing.", "invalid_path");
+    }
+    sendControl({
+      type: "files.saved",
+      ...(await writeCodingWorkspaceFile(sandbox, {
+        workDirectory,
+        relativePath,
+        content,
+        baseRevision: typeof baseRevision === "string" ? baseRevision : null,
+      })),
+    });
+  };
+
+  // File errors stay on the files channel so a failed save never clears the preview or
+  // terminal state, and they carry the scope so the editor can attribute a failure to the
+  // tree, the open file, or the save it just attempted.
+  const runFileOperation = async (
+    scope: "list" | "open" | "save",
+    rawPath: unknown,
+    operate: (relativePath: string) => Promise<void>,
+  ) => {
+    let relativePath = "";
+    try {
+      relativePath = normalizeWorkspaceRelativePath(rawPath);
+      await operate(relativePath);
+    } catch (error) {
+      sendControl({
+        type: "files.error",
+        scope,
+        path: relativePath,
+        code: error instanceof CodingWorkspaceFileError ? error.code : "failed",
+        message:
+          error instanceof CodingWorkspaceFileError
+            ? error.message
+            : "The workspace could not complete that file request.",
+      });
+    }
+  };
+
   webSocket.on("message", (raw, isBinary) => {
     if (isBinary) {
       enqueueTerminalInput(copyWebSocketData(raw));
@@ -393,6 +459,14 @@ export function attachRuntimeConnection(
           await refreshPorts();
         } else if (message.type === "preview.open") {
           await openPreview(Number(message.port));
+        } else if (message.type === "files.list") {
+          await runFileOperation("list", message.path, listFiles);
+        } else if (message.type === "files.open") {
+          await runFileOperation("open", message.path, openFile);
+        } else if (message.type === "files.save") {
+          await runFileOperation("save", message.path, (relativePath) =>
+            saveFile(relativePath, message.content, message.baseRevision),
+          );
         } else if (message.type === "ping") {
           sendControl({ type: "pong" });
         }
@@ -424,7 +498,9 @@ export function attachRuntimeConnection(
 type RuntimeControlMessage =
   | { type: "terminal.attach" | "terminal.resize"; cols?: number; rows?: number }
   | { type: "ports.refresh" | "ping" }
-  | { type: "preview.open"; port?: number };
+  | { type: "preview.open"; port?: number }
+  | { type: "files.list" | "files.open"; path?: unknown }
+  | { type: "files.save"; path?: unknown; content?: unknown; baseRevision?: unknown };
 
 async function proxyPreviewHttp(
   request: IncomingMessage,
