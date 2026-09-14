@@ -45,14 +45,6 @@ import {
 export default async function PluginDetailPage({ params }: { params: Promise<{ name: string }> }) {
   const { name } = await params;
   const normalizedName = name.toLocaleLowerCase();
-  if (normalizedName === "doppler") {
-    const [, pluginState, settings] = await Promise.all([
-      currentUser(),
-      loadOfficialPlugin("doppler"),
-      loadCurrentDopplerAuthSettings(),
-    ]);
-    return <DopplerPluginDetail pluginState={pluginState} settings={settings} />;
-  }
   if (isOfficialMcpPluginName(normalizedName)) {
     const [, pluginState] = await Promise.all([currentUser(), loadOfficialPlugin(normalizedName)]);
     const Detail = {
@@ -87,6 +79,14 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
     return <Detail pluginState={pluginState} canEdit={true} />;
   }
   if (isOfficialSkillPluginName(normalizedName)) {
+    if (normalizedName === "doppler") {
+      const [, pluginState, settings] = await Promise.all([
+        currentUser(),
+        loadOfficialPlugin("doppler"),
+        loadCurrentDopplerAuthSettings(),
+      ]);
+      return <DopplerPluginDetail pluginState={pluginState} settings={settings} />;
+    }
     const [, plugin] = await Promise.all([currentUser(), getHeadlessPlugin(normalizedName)]);
     const metadata = OFFICIAL_SKILL_PLUGIN_METADATA[normalizedName];
     return plugin ? (
