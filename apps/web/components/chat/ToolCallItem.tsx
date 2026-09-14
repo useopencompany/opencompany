@@ -381,16 +381,17 @@ function ActionApprovalCard({
     // and this card unmounts into the resolved row.
   };
 
-  // A custom MCP server can redefine what an action name does at any time, so a standing
-  // permission for one of its actions would not mean what the user agreed to.
-  const alwaysAllowed =
-    allowAlways && !taskApproval && !/^plugin:custom-[a-f0-9]{24}:/.test(action);
+  // Every plugin action is one discovered MCP tool, so its standing permission is saved against
+  // that tool alone — approving "label this thread" can no longer grant automatic "trash thread".
+  // Native actions have no tool key and still save against their capability, as before.
+  const pluginTool = action.startsWith("plugin:");
+  const alwaysAllowed = allowAlways && !taskApproval;
   const allow: ApprovalChoice[] = [
     ...(alwaysAllowed
       ? [
           {
             id: "accept_always" satisfies ActionApprovalDecision,
-            label: "Always allow",
+            label: pluginTool ? "Always allow this tool" : "Always allow",
             busyLabel: "Saving...",
             disabled: !approvalAvailable,
           },

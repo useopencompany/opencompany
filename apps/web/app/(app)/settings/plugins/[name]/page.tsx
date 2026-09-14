@@ -1,8 +1,10 @@
 import { CustomMcpPluginDetail } from "@/components/CustomMcpPluginSettings";
+import { DopplerPluginDetail } from "@/components/DopplerPluginSettings";
 import {
   AttioPluginDetail,
   BetterStackPluginDetail,
   ConvexPluginDetail,
+  Dash0PluginDetail,
   FathomPluginDetail,
   GitHubPluginDetail,
   GmailPluginDetail,
@@ -31,6 +33,7 @@ import {
 import { OfficialSkillPluginDetail, PluginDetail } from "@/components/PluginSettings";
 import { SettingsContent } from "@/components/SettingsChrome";
 import { currentUser } from "@/lib/auth";
+import { loadCurrentDopplerAuthSettings } from "@/lib/doppler-auth";
 import { getHeadlessCustomMcp, getHeadlessPlugin } from "@/lib/headless-knowledge-server";
 import {
   isOfficialMcpPluginName,
@@ -67,6 +70,7 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
       convex: ConvexPluginDetail,
       render: RenderPluginDetail,
       signoz: SigNozPluginDetail,
+      dash0: Dash0PluginDetail,
       slack: SlackPluginDetail,
       stripe: StripePluginDetail,
       vercel: VercelPluginDetail,
@@ -75,6 +79,14 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
     return <Detail pluginState={pluginState} canEdit={true} />;
   }
   if (isOfficialSkillPluginName(normalizedName)) {
+    if (normalizedName === "doppler") {
+      const [, pluginState, settings] = await Promise.all([
+        currentUser(),
+        loadOfficialPlugin("doppler"),
+        loadCurrentDopplerAuthSettings(),
+      ]);
+      return <DopplerPluginDetail pluginState={pluginState} settings={settings} />;
+    }
     const [, plugin] = await Promise.all([currentUser(), getHeadlessPlugin(normalizedName)]);
     const metadata = OFFICIAL_SKILL_PLUGIN_METADATA[normalizedName];
     return plugin ? (
@@ -114,7 +126,7 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
 }
 
 async function loadOfficialPlugin(
-  name: keyof typeof OFFICIAL_MCP_PLUGIN_METADATA,
+  name: keyof typeof OFFICIAL_MCP_PLUGIN_METADATA | "doppler",
 ): Promise<PluginLoadState> {
   try {
     return { status: "ready", plugin: await getHeadlessPlugin(name) };
@@ -124,7 +136,7 @@ async function loadOfficialPlugin(
       message:
         error instanceof Error
           ? error.message
-          : `${OFFICIAL_MCP_PLUGIN_METADATA[name].label} plugin details could not be loaded.`,
+          : `${name === "doppler" ? "Doppler" : OFFICIAL_MCP_PLUGIN_METADATA[name].label} plugin details could not be loaded.`,
     };
   }
 }

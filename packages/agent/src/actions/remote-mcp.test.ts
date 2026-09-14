@@ -972,3 +972,47 @@ describe("reviewed Supabase package permissions", () => {
     });
   });
 });
+
+describe("Dash0 permission defaults", () => {
+  it("keeps paid investigations off despite read-only annotations and new tools behind Ask", async () => {
+    const url = OFFICIAL_PLUGIN_SOURCES.dash0;
+    const fetcher = await createOfficialPluginFetcher({ url });
+    const plugin = await resolvePlugin({
+      url,
+      fetcher: fetcher!,
+      trustedCapabilitySources: ["useopencompany/plugins"],
+    });
+    const tools = ["getLogRecords", "runTask", "newReadTool", "newManagementTool"].map((name) => ({
+      name,
+      inputSchema: { type: "object" },
+      annotations: { readOnlyHint: true },
+    }));
+    expect(
+      classifyRemoteTool(
+        { name: "runTask", annotations: { readOnlyHint: true } },
+        plugin.capabilities,
+      ),
+    ).toMatchObject({ capability: { defaultMode: "off" }, curated: true });
+    const base = registration({
+      pluginName: "dash0",
+      source: "plugin:dash0:dash0",
+      connectionProvider: "dash0",
+      capabilities: plugin.capabilities,
+    });
+    const deps = {
+      createClient: vi.fn(async () => client({ pages: [{ tools }] })),
+      recordDispatch: vi.fn(async () => {}),
+    };
+    const snapshot = await discoverRemoteMcpSnapshot(identity, base, deps);
+    const catalog = await resolveRemoteMcpActions(
+      identity,
+      { ...base, discoverySnapshot: snapshot ?? [] },
+      deps,
+    );
+    expect(catalog?.actions.map(({ id, permissionMode }) => ({ id, permissionMode }))).toEqual([
+      { id: "plugin:dash0:dash0.getLogRecords", permissionMode: "ask" },
+      { id: "plugin:dash0:dash0.newReadTool", permissionMode: "ask" },
+      { id: "plugin:dash0:dash0.newManagementTool", permissionMode: "ask" },
+    ]);
+  });
+});

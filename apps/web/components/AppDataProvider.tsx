@@ -105,6 +105,9 @@ export type AppInitialData = {
   featureFlags: FeatureFlags;
   codexConnected: boolean;
   claudeCodeConnected: boolean;
+  // True when the workspace routes its shared GPT models through an admin's ChatGPT
+  // subscription, which makes those models free of workspace credits.
+  sharedModelAccessEnabled: boolean;
   mcpSetup: {
     preferredClient: McpClient | null;
     completedAt: string | null;
@@ -228,14 +231,9 @@ function AppLiveDataSubscriptions({
     [initialData.workspace.id],
   );
   const taskSchedulesCollection = useMemo(
-    () =>
-      initialData.featureFlags.taskSpawning
-        ? getHeadlessTaskSchedules(initialData.workspace.id)
-        : null,
-    [initialData.featureFlags.taskSpawning, initialData.workspace.id],
+    () => getHeadlessTaskSchedules(initialData.workspace.id),
+    [initialData.workspace.id],
   );
-  // Keep Task metadata live even while the feature is disabled so every surface has current data
-  // as soon as the user enables it. Authorization and shape identity stay in the API.
   const { data: taskRows, isLoading: tasksLoading } = useLiveQuery(
     (q) => q.from({ task: tasksCollection }),
     [tasksCollection],
@@ -268,8 +266,8 @@ function AppLiveDataSubscriptions({
     [legacyTaskRows, taskRows],
   );
   const { data: scheduleRows, isLoading: schedulesLoading } = useLiveQuery(
-    (q) => (taskSchedulesCollection ? q.from({ schedule: taskSchedulesCollection }) : undefined),
-    [initialData.featureFlags.taskSpawning, taskSchedulesCollection],
+    (q) => q.from({ schedule: taskSchedulesCollection }),
+    [taskSchedulesCollection],
   );
   const conversationsCollection = useMemo(() => getHeadlessChatConversations(), []);
   const integrationAccountsCollection = useMemo(
@@ -299,17 +297,11 @@ function AppLiveDataSubscriptions({
   }, [allTasks]);
 
   const schedules = useMemo(() => {
-    if (!initialData.featureFlags.taskSpawning) return [];
     if (schedulesLoading && !scheduleRows?.length) return initialData.schedules;
     return ((scheduleRows ?? []) as HeadlessTaskScheduleReadModel[])
       .map(taskScheduleReadModelToView)
       .toSorted((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [
-    initialData.featureFlags.taskSpawning,
-    initialData.schedules,
-    scheduleRows,
-    schedulesLoading,
-  ]);
+  }, [initialData.schedules, scheduleRows, schedulesLoading]);
 
   // An archive the user just clicked applies to every list built from the conversation projection,
   // so the row leaves the sidebar and the review queue on the click rather than a beat later when
@@ -334,6 +326,7 @@ function AppLiveDataSubscriptions({
         runtime: row.runtime,
         activityState: row.activityState,
         hasUnseen: row.hasUnseen,
+        awaitingInput: row.awaitingInput,
         preview: initial?.preview ?? "No messages yet.",
         updatedAt: row.updatedAt,
         lastSeenAt: row.lastSeenAt,
@@ -398,6 +391,7 @@ function AppLiveDataSubscriptions({
         runtime: row.runtime,
         activityState: row.activityState,
         hasUnseen: row.hasUnseen,
+        awaitingInput: row.awaitingInput,
         preview: "Archived",
         updatedAt: row.updatedAt,
         lastSeenAt: row.lastSeenAt,
@@ -569,6 +563,7 @@ function sidebarTaskViewFrom(row: HeadlessTaskReadModel): SidebarTaskView {
     name: row.name,
     status: row.status,
     hasUnseen: row.hasUnseen,
+    awaitingInput: row.awaitingInput,
     updatedAt: row.updatedAt,
   };
 }

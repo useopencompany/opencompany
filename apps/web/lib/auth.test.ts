@@ -55,7 +55,6 @@ const identity = {
     lastName: authUser.lastName,
     avatarUrl: null,
     timezone: "Europe/London",
-    taskSpawningEnabled: true,
     autoModelRoutingEnabled: false,
     chatCapabilitiesBetaEnabled: false,
     wikiEnabled: true as const,

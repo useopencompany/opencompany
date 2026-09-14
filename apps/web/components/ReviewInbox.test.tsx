@@ -37,7 +37,7 @@ vi.mock("@/components/AppDataProvider", async () => {
         tasks: [],
         allTasks: [],
         schedules: [],
-        featureFlags: { taskSpawning: true, autoModelRouting: false },
+        featureFlags: { autoModelRouting: false },
         activeBrain: null,
         codexConnected: false,
         claudeCodeConnected: false,
@@ -108,22 +108,31 @@ function chatItem(
   updatedAt: string,
   source: Partial<Extract<ReviewItem["source"], { kind: "chat" }>> = {},
   unread = true,
+  awaitingInput = false,
 ): ReviewItem {
   return {
     conversationId: id,
     title,
     updatedAt,
     unread,
+    awaitingInput,
     source: { kind: "chat", model: "claude-opus-5", engine: "opencompany", ...source },
   };
 }
 
-function taskItem(id: string, title: string, updatedAt: string, unread = true): ReviewItem {
+function taskItem(
+  id: string,
+  title: string,
+  updatedAt: string,
+  unread = true,
+  awaitingInput = false,
+): ReviewItem {
   return {
     conversationId: id,
     title,
     updatedAt,
     unread,
+    awaitingInput,
     source: { kind: "task", taskId: `task_${id}`, displayId: "TASK-7" },
   };
 }

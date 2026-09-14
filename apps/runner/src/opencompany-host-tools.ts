@@ -71,6 +71,11 @@ export type HostTools = {
   createWorkspaceSkill?: CreateWorkspaceSkillRunner;
   editWorkspaceSkill?: EditWorkspaceSkillRunner;
   runWiki?: (input: Record<string, unknown>, context: { toolCallId: string }) => Promise<unknown>;
+  postSlackMessage: (input: {
+    channel: string;
+    text: string;
+    messageKey: string;
+  }) => Promise<unknown>;
   writeArtifact: (
     input: WriteArtifactToolInput,
     context: { toolCallId: string },
@@ -146,6 +151,7 @@ export async function loadHostTools(
       : {}),
     runWiki: (input: Record<string, unknown>, wikiContext: { toolCallId: string }) =>
       call("wiki", input, wikiContext.toolCallId),
+    postSlackMessage: (input) => call("post_slack_message", input),
     writeArtifact: (input, artifactContext) =>
       call(
         "write_artifact",

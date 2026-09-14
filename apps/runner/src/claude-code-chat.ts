@@ -109,6 +109,7 @@ import {
 } from "./coding-sandbox-lifecycle";
 import { CODING_WORKSPACE_SANDBOX_NETWORK } from "./coding-workspace-runtime";
 import { getDb } from "./db";
+import { reconcileDopplerSandboxAuth } from "./doppler-sandbox-auth";
 import type { RunnerEnv } from "./env";
 import type { ExternalEngineTurnSummary } from "./external-engine-contract";
 import {
@@ -555,6 +556,11 @@ export async function runClaudeCodeChatTurn(input: {
       workspaceId: session.workspaceId,
       userWorkosId: turn.userWorkosId,
     });
+    const dopplerAuth = await reconcileDopplerSandboxAuth({
+      sandbox,
+      workspaceId: session.workspaceId,
+      userWorkosId: turn.userWorkosId,
+    });
     executionStage = "load_github_auth";
     let github: GitHubCommandAuth | null = null;
     let githubNotice: string | null = null;
@@ -626,6 +632,7 @@ export async function runClaudeCodeChatTurn(input: {
       actionGatewayTicket,
       ...repositoryBootstrap.secretValues,
       ...infisicalAuth.redactionValues,
+      ...dopplerAuth.redactionValues,
     ]);
     if (input.recovery) {
       // Permission requests are bound to the dead ACP connection. Cancel them before the
@@ -767,6 +774,7 @@ export async function runClaudeCodeChatTurn(input: {
               botPrompt,
               repositoryBootstrap.promptFragment,
               infisicalAuth.promptFragment,
+              dopplerAuth.promptFragment,
             ),
             previousProgress: summarizeCodexChatRecoveryProgress(initialParts),
             attachmentPaths: materializedAttachments.paths,
@@ -790,6 +798,7 @@ export async function runClaudeCodeChatTurn(input: {
               botPrompt,
               repositoryBootstrap.promptFragment,
               infisicalAuth.promptFragment,
+              dopplerAuth.promptFragment,
             ),
             attachmentPaths: materializedAttachments.paths,
             skillPaths: invokedSkillPaths,

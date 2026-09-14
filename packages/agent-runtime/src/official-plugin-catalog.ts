@@ -41,6 +41,8 @@ export const OFFICIAL_PLUGIN_SOURCES = {
     "https://github.com/useopencompany/plugins/tree/569241125c96a07b9072d42aee404822a6950b26/render",
   vercel:
     "https://github.com/useopencompany/plugins/tree/14e7f6d3e978103c5427c725229ae93bc3e47f8c/vercel",
+  dash0:
+    "https://github.com/useopencompany/plugins/tree/0827036ccb34da2ed37c43453f5d14faca75511a/dash0",
   signoz:
     "https://github.com/useopencompany/plugins/tree/053e9e9207f320651f1cb9b4e8feb84ab2af6bba/signoz",
   slack:
@@ -52,4 +54,6 @@ export const OFFICIAL_PLUGIN_SOURCES = {
   x: "https://github.com/useopencompany/plugins/tree/21060c09d1bbe70df85519cc3ad74cd5d097fbb6/x",
   "yc-advise":
     "https://github.com/useopencompany/plugins/tree/2e092c3bc518622f1dc4ac1a6777d87ae3695ec6/yc-advise",
+  doppler:
+    "https://github.com/useopencompany/plugins/tree/891c084c347ff69288635b651e545c9bfd47b212/doppler",
 } as const;

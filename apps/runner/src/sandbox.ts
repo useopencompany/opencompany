@@ -28,7 +28,8 @@ export const OPENCOMPANY_SANDBOX_OWNER_ID_METADATA_KEY = "opencompany_owner_id";
 export type ManagedSandboxOwnerKind =
   | "codex_chat_session"
   | "codex_device_auth_flow"
-  | "infisical_auth_flow";
+  | "infisical_auth_flow"
+  | "doppler_auth_flow";
 
 export function managedSandboxMetadata(input: {
   namespace: string;

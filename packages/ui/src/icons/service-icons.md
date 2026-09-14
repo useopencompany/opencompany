@@ -45,3 +45,5 @@ GoogleAdminIcon retains all six paths, original blue colors, and the 96 × 96
 viewBox. The two redundant rectangular clips exactly covering the viewBox were
 removed; there are no remaining SVG IDs or references. Width and height follow
 shared icon props. Catalog, installed rows, and details share this component.
+
+Dash0: verified 2026-09-14 against its [official MCP integration page](https://www.dash0.com/hub/integrations/int_dash0_mcp/overview), which uses [this vendor SVG](https://www.dash0.com/shared/logo_colors.svg). Original paths, colors, gradient, proportions, and 19×19 viewBox preserved. Removed unused path IDs and made the gradient ID unique per instance.

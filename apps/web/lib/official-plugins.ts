@@ -24,10 +24,11 @@ export type OfficialMcpPluginName =
   | "render"
   | "vercel"
   | "signoz"
+  | "dash0"
   | "slack"
   | "stripe"
   | "x";
-export type OfficialSkillPluginName = "yc-advise";
+export type OfficialSkillPluginName = "yc-advise" | "doppler";
 export type OfficialPluginName = OfficialMcpPluginName | OfficialSkillPluginName;
 export type OfficialPluginCategory = "communication" | "productivity" | "engineering" | "business";
 
@@ -74,6 +75,7 @@ export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
     | "render"
     | "vercel"
     | "signoz"
+    | "dash0"
     | "slack"
     | "stripe"
     | "x_account";
@@ -92,6 +94,7 @@ export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
 export type OfficialSkillPluginMetadata = OfficialPluginMetadataBase & {
   name: OfficialSkillPluginName;
   kind: "skills";
+  connectionProvider?: "doppler";
 };
 
 export type OfficialPluginMetadata = OfficialMcpPluginMetadata | OfficialSkillPluginMetadata;
@@ -389,6 +392,18 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
       "Vercel requires MCP clients and their production callback URLs to be approved before they can connect. opencompany is awaiting that approval.",
     accountDescription: "The account opencompany uses when you run Vercel tools.",
   },
+  dash0: {
+    name: "dash0",
+    kind: "mcp",
+    label: "Dash0",
+    description: "Investigate telemetry and Agent0 findings in your Dash0 organization.",
+    category: "engineering",
+    source: OFFICIAL_PLUGIN_SOURCES.dash0,
+    connectionProvider: "dash0",
+    connectHref: "/api/integrations/dash0/start?returnTo=/settings/plugins/dash0",
+    accountDescription:
+      "Connect your Dash0 organization. Its region is detected automatically across AWS Ireland, AWS Germany, AWS Oregon, and GCP Netherlands. Telemetry reads ask for approval; paid Agent0 investigations start off.",
+  },
   signoz: {
     name: "signoz",
     kind: "mcp",
@@ -440,6 +455,15 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
 } as const satisfies Record<OfficialMcpPluginName, OfficialMcpPluginMetadata>;
 
 export const OFFICIAL_SKILL_PLUGIN_METADATA = {
+  doppler: {
+    name: "doppler",
+    kind: "skills",
+    label: "Doppler",
+    description: "Run your existing development scripts with Doppler in your coding sandbox.",
+    category: "engineering",
+    source: OFFICIAL_PLUGIN_SOURCES.doppler,
+    connectionProvider: "doppler",
+  },
   "yc-advise": {
     name: "yc-advise",
     kind: "skills",

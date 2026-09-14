@@ -35,7 +35,6 @@ const workspacesMock = vi.hoisted(() => ({
 }));
 const mcpSetupMock = vi.hoisted(() => ({ completedAt: null as string | null }));
 const featureFlagsMock = vi.hoisted(() => ({
-  taskSpawning: false,
   autoModelRouting: false,
   legacyBrain: true,
   reviewInbox: false,
@@ -58,7 +57,8 @@ const recentChatsMock = vi.hoisted(() => ({
     } | null;
     activityState?: "working" | "idle";
     hasUnseen?: boolean;
-    state?: "working" | "done_unseen" | "done_seen";
+    awaitingInput?: boolean;
+    state?: "awaiting_input" | "working" | "done_unseen" | "done_seen";
     preview: string;
     updatedAt: string;
     lastSeenAt?: string | null;
@@ -73,6 +73,7 @@ const sidebarTasksMock = vi.hoisted(() => ({
     name: string;
     status: "queued" | "running" | "waiting" | "succeeded" | "failed" | "canceled";
     hasUnseen: boolean;
+    awaitingInput?: boolean;
     updatedAt: string;
   }>,
 }));
@@ -222,7 +223,6 @@ vi.mock("@/components/AppDataProvider", async () => {
         recentChats,
         openChats: recentChats,
         featureFlags: {
-          taskSpawning: featureFlagsMock.taskSpawning,
           autoModelRouting: featureFlagsMock.autoModelRouting,
           legacyBrain: featureFlagsMock.legacyBrain,
           reviewInbox: featureFlagsMock.reviewInbox,
@@ -281,7 +281,6 @@ describe("Sidebar", () => {
     workspaceRoleMock.value = "admin";
     workspacesMock.value = [{ id: "goat_ws_1", name: "Ada's Workspace", role: "admin" }];
     mcpSetupMock.completedAt = null;
-    featureFlagsMock.taskSpawning = false;
     featureFlagsMock.legacyBrain = true;
     featureFlagsMock.reviewInbox = false;
     featureFlagsMock.sidebarProjects = false;
@@ -311,8 +310,11 @@ describe("Sidebar", () => {
     const home = within(nav).getByRole("link", { name: "New Chat" });
     expect(home).toHaveAttribute("href", "/");
     expect(home).toHaveAttribute("aria-current", "page");
-    expect(within(nav).queryByRole("link", { name: "Tasks" })).not.toBeInTheDocument();
-    expect(within(nav).queryByRole("link", { name: "Workflows" })).not.toBeInTheDocument();
+    expect(within(nav).getByRole("link", { name: "Tasks" })).toHaveAttribute("href", "/tasks");
+    expect(within(nav).getByRole("link", { name: "Workflows" })).toHaveAttribute(
+      "href",
+      "/workflows",
+    );
     expect(within(nav).queryByRole("link", { name: "Brain" })).not.toBeInTheDocument();
     expect(within(nav).queryByRole("link", { name: "Wiki" })).not.toBeInTheDocument();
     expect(screen.getByText("Brains")).toBeInTheDocument();
@@ -348,7 +350,7 @@ describe("Sidebar", () => {
       render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
       const section = await screen.findByRole("region", { name: "Wiki" });
-      const links = within(section).getAllByRole("link");
+      const links = await within(section).findAllByRole("link");
       expect(links.map((link) => link.textContent)).toEqual(["Company", "Handbook"]);
       expect(links[0]).toHaveAttribute("href", "/wiki/company");
       expect(links[1]).toHaveAttribute("href", "/wiki/handbook");
@@ -833,7 +835,6 @@ describe("Sidebar", () => {
   });
 
   it("shows the Tasks and Workflows nav when the beta feature is enabled", () => {
-    featureFlagsMock.taskSpawning = true;
     render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
     const nav = screen.getByRole("navigation", { name: "opencompany primary" });
@@ -856,7 +857,6 @@ describe("Sidebar", () => {
 
   it("shows the Tasks nav on nested task routes without inline task rows", () => {
     pathnameMock.value = "/tasks/TASK-7";
-    featureFlagsMock.taskSpawning = true;
     tasksMock.value = [
       {
         id: "goat_task_workflow",
@@ -943,21 +943,7 @@ describe("Sidebar", () => {
     expect(within(recentNav).queryByRole("link", { name: "Pinned chat" })).not.toBeInTheDocument();
   });
 
-  it("keeps Tasks out of Recents while Tasks are disabled", () => {
-    featureFlagsMock.taskSpawning = false;
-    sidebarTasksMock.value = [
-      taskRow("task_hidden", { name: "Hidden task", updatedAt: "2026-07-14T09:05:00.000Z" }),
-    ];
-    recentChatsMock.value = [chatRow("chat_only", { title: "Only chat" })];
-
-    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
-
-    expect(screen.getByRole("navigation", { name: "Recents" })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /Hidden task/ })).not.toBeInTheDocument();
-  });
-
   it("lists chats and tasks together in one recency-ordered section", () => {
-    featureFlagsMock.taskSpawning = true;
     recentChatsMock.value = [
       chatRow("chat_older", {
         title: "Older chat",
@@ -1020,7 +1006,6 @@ describe("Sidebar", () => {
   });
 
   it("shows the same unread dot and working spinner for tasks as for chats", () => {
-    featureFlagsMock.taskSpawning = true;
     sidebarTasksMock.value = [
       taskRow("task_running", {
         displayId: "T-1",
@@ -1050,9 +1035,84 @@ describe("Sidebar", () => {
     expect(screen.getAllByTestId(/sidebar-chat-/)).toHaveLength(2);
   });
 
+  it("shows a parked run over a retained local working state", () => {
+    pathnameMock.value = "/";
+    // This tab started the run and is still holding its optimistic spinner when the approval lands.
+    setLocalChatState("goat_chat_parked", "working");
+    recentChatsMock.value = [
+      {
+        id: "goat_chat_parked",
+        title: "Parked on approval",
+        model: "claude-sonnet-5",
+        engine: "opencompany",
+        codexComposerSettings: null,
+        activityState: "working",
+        hasUnseen: false,
+        awaitingInput: true,
+        preview: "Approve send_email?",
+        updatedAt: "2026-07-14T09:01:00.000Z",
+        pinnedAt: null,
+      },
+    ];
+
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.getByTestId("sidebar-chat-awaiting-input")).toBeInTheDocument();
+    expect(screen.queryByTestId("sidebar-chat-working")).not.toBeInTheDocument();
+  });
+
+  it("marks a task blocked on an approval as waiting for the reader, not as an unread result", () => {
+    sidebarTasksMock.value = [
+      taskRow("task_waiting", {
+        displayId: "T-1",
+        name: "Waiting task",
+        status: "waiting",
+        // Already opened once. The request is still unanswered, so the row must still say so.
+        hasUnseen: false,
+        updatedAt: "2026-07-14T09:05:00.000Z",
+      }),
+    ];
+
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.getByTestId("sidebar-chat-awaiting-input")).toBeInTheDocument();
+    expect(screen.queryByTestId("sidebar-chat-unseen")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Waiting for you")).toBeInTheDocument();
+  });
+
+  it("marks a chat blocked on a foreground approval as waiting, not as still working", () => {
+    pathnameMock.value = "/";
+    recentChatsMock.value = [
+      {
+        id: "goat_chat_blocked",
+        title: "Blocked on approval",
+        model: "claude-sonnet-5",
+        engine: "opencompany",
+        codexComposerSettings: null,
+        runtime: {
+          status: "running",
+          activeRunId: "goat_codex_chat_turn_1",
+          hasError: false,
+          updatedAt: "2026-07-14T09:01:00.000Z",
+        },
+        // The MCP call polls while it waits, so the runtime is genuinely running.
+        activityState: "working",
+        hasUnseen: false,
+        awaitingInput: true,
+        preview: "Approve send_email?",
+        updatedAt: "2026-07-14T09:01:00.000Z",
+        pinnedAt: null,
+      },
+    ];
+
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.getByTestId("sidebar-chat-awaiting-input")).toBeInTheDocument();
+    expect(screen.queryByTestId("sidebar-chat-working")).not.toBeInTheDocument();
+  });
+
   it("archives a settled task from its row and offers no archive on a running one", async () => {
     const user = userEvent.setup();
-    featureFlagsMock.taskSpawning = true;
     pathnameMock.value = "/tasks/T-2";
     sidebarTasksMock.value = [
       taskRow("task_running", {
@@ -1089,7 +1149,6 @@ describe("Sidebar", () => {
 
   it("keeps the Tasks nav row current on the board itself", () => {
     pathnameMock.value = "/tasks";
-    featureFlagsMock.taskSpawning = true;
 
     render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
@@ -1104,7 +1163,6 @@ describe("Sidebar", () => {
   // claim rather than leaving the page with nothing marked current.
   it("keeps the Tasks nav row current on a task the list does not hold", () => {
     pathnameMock.value = "/tasks/T-99";
-    featureFlagsMock.taskSpawning = true;
     sidebarTasksMock.value = [taskRow("task_other", { displayId: "T-1", name: "Other task" })];
 
     render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
@@ -1118,7 +1176,6 @@ describe("Sidebar", () => {
   });
 
   it("marks a task row current on its run subroute and a lowercased display id", () => {
-    featureFlagsMock.taskSpawning = true;
     pathnameMock.value = "/tasks/t-12/run";
     sidebarTasksMock.value = [
       taskRow("task_open", { displayId: "T-12", name: "Open task", status: "running" }),
@@ -1137,7 +1194,6 @@ describe("Sidebar", () => {
 
   it("restores the task row and reports the failure when archiving rejects", async () => {
     const user = userEvent.setup();
-    featureFlagsMock.taskSpawning = true;
     taskCommandsMock.archiveHeadlessTask.mockRejectedValueOnce(new Error("network unavailable"));
     sidebarTasksMock.value = [
       taskRow("task_settled", { displayId: "T-2", name: "Settled task", status: "succeeded" }),
@@ -1656,7 +1712,6 @@ describe("Sidebar", () => {
 
     it("lists a project's chats and keeps them out of Recents", async () => {
       featureFlagsMock.sidebarProjects = true;
-      featureFlagsMock.taskSpawning = true;
       recentChatsMock.value = [chatRow("chat_filed"), chatRow("chat_loose")];
       sidebarTasksMock.value = [taskRow("task_filed")];
       projectsApiMock.listProjects.mockResolvedValue([
@@ -1680,7 +1735,6 @@ describe("Sidebar", () => {
 
     it("indents a folder's rows and leaves loose Recents rows flush", async () => {
       featureFlagsMock.sidebarProjects = true;
-      featureFlagsMock.taskSpawning = true;
       recentChatsMock.value = [chatRow("chat_filed"), chatRow("chat_loose")];
       sidebarTasksMock.value = [taskRow("task_filed")];
       projectsApiMock.listProjects.mockResolvedValue([
@@ -2039,6 +2093,7 @@ function taskRow(
     name: `${id} name`,
     status: "succeeded",
     hasUnseen: false,
+    awaitingInput: false,
     updatedAt: "2026-07-14T09:00:00.000Z",
     ...overrides,
   };

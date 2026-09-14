@@ -21,6 +21,7 @@ import { captureProductServerEvent } from "@opencompany/analytics/product/server
 import type { Actor } from "@opencompany/core";
 import {
   applyIntegrationCapabilityMode,
+  applyIntegrationToolMode,
   disconnectPersonalIntegration,
 } from "@opencompany/db/integrations";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -30,6 +31,7 @@ import type { RunnerClient } from "./runner-client";
 vi.mock("@opencompany/db/integrations", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   applyIntegrationCapabilityMode: vi.fn(async () => undefined),
+  applyIntegrationToolMode: vi.fn(async () => undefined),
   disconnectPersonalIntegration: vi.fn(async () => true),
   loadIntegrationCredential: vi.fn(async () => null),
 }));
@@ -219,6 +221,7 @@ describe("integration account service", () => {
         statusReason: null,
         scopes: ["gmail.readonly"],
         capabilityModes: { read: "on" },
+        toolModes: {},
       },
       {
         integrationId: "gint_fathom_mcp",
@@ -231,6 +234,7 @@ describe("integration account service", () => {
         statusReason: null,
         scopes: ["mcp"],
         capabilityModes: { query: "ask" },
+        toolModes: {},
       },
       {
         integrationId: "gint_betterstack_mcp",
@@ -243,6 +247,7 @@ describe("integration account service", () => {
         statusReason: null,
         scopes: ["read", "write"],
         capabilityModes: { read: "on", query: "ask", write: "ask" },
+        toolModes: {},
       },
     ]);
   });
@@ -347,6 +352,44 @@ describe("integration account service", () => {
     ).resolves.toBeUndefined();
     expect(applyIntegrationCapabilityMode).toHaveBeenCalledWith(
       expect.objectContaining({ integrationIds: ["gint_x"], capabilityId: "write", mode: "ask" }),
+    );
+  });
+
+  it("validates the tool mode and tool id before touching the connection", async () => {
+    const service = createIntegrationAccountService({ db: fakeDb() });
+    await expect(
+      service.setToolMode(member, "gint_x", "trash_thread", "sometimes"),
+    ).rejects.toMatchObject({ status: 400, message: "Unknown permission mode." });
+    await expect(service.setToolMode(member, "gint_x", "  ", "on")).rejects.toMatchObject({
+      status: 400,
+      message: "A valid tool is required.",
+    });
+    await expect(
+      service.setToolMode(member, "gint_x", "trash thread; drop", "on"),
+    ).rejects.toMatchObject({ status: 400, message: "A valid tool is required." });
+    expect(applyIntegrationToolMode).not.toHaveBeenCalled();
+  });
+
+  it("applies a per-tool override and clears it back to the group with inherit", async () => {
+    const row = {
+      id: "gint_x",
+      provider: "gmail",
+      userWorkosId: "user_1",
+      workspaceId: null,
+    };
+    const service = createIntegrationAccountService({ db: fakeDb([[row], [row]]) });
+    await expect(
+      service.setToolMode(member, "gint_x", "trash_thread", "ask"),
+    ).resolves.toBeUndefined();
+    expect(applyIntegrationToolMode).toHaveBeenCalledWith(
+      expect.objectContaining({ integrationIds: ["gint_x"], toolId: "trash_thread", mode: "ask" }),
+    );
+    await expect(
+      service.setToolMode(member, "gint_x", "trash_thread", "inherit"),
+    ).resolves.toBeUndefined();
+    // A null mode is how the store removes the key so the tool follows its group again.
+    expect(applyIntegrationToolMode).toHaveBeenLastCalledWith(
+      expect.objectContaining({ integrationIds: ["gint_x"], toolId: "trash_thread", mode: null }),
     );
   });
 

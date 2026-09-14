@@ -29,7 +29,7 @@ describe("slackBotScopesSatisfied", () => {
     expect(slackBotScopesSatisfied([...SLACK_BOT_SCOPES, "extra:scope"])).toBe(true);
   });
 
-  it("is false for pre-v2 installs missing the DM/reaction/user scopes", () => {
+  it("is false for installs missing the user scope needed to filter bots", () => {
     const v1Scopes = [
       "app_mentions:read",
       "chat:write",

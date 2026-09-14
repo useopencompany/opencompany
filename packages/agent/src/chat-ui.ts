@@ -59,6 +59,12 @@ export const EDIT_TASK_SCHEDULE_TOOL_PART_TYPE = `tool-${EDIT_TASK_SCHEDULE_TOOL
 export const DELETE_TASK_SCHEDULE_TOOL_NAME = "delete_task_schedule";
 export const DELETE_TASK_SCHEDULE_TOOL_PART_TYPE =
   `tool-${DELETE_TASK_SCHEDULE_TOOL_NAME}` as const;
+// Named for how people ask for it: workflow instructions say "send this with the
+// opencompany Slack bot", and the model has to pick this over a member's personal
+// Slack plugin action, which can also post messages.
+export const SLACK_BOT_TOOL_NAME = "opencompany_slack_bot_send_message";
+/** Model-facing name before the tool was renamed; kept so old transcripts still label correctly. */
+export const LEGACY_SLACK_BOT_TOOL_NAME = "post_slack_message";
 export const BRAIN_TOOL_NAME = "goat_brain";
 export const BRAIN_TOOL_PART_TYPE = `tool-${BRAIN_TOOL_NAME}` as const;
 export const SAVE_TO_BRAIN_TOOL_NAME = "save_to_brain";
@@ -714,6 +720,7 @@ export type ChatSessionView = {
   runtime?: ConversationRuntimeView | null;
   activityState?: "working" | "idle";
   hasUnseen?: boolean;
+  awaitingInput?: boolean;
   updatedAt?: string;
   messages: ChatUiMessage[];
 };
@@ -725,7 +732,15 @@ export type ConversationRuntimeView = {
   updatedAt: string;
 };
 
-export type ChatState = "working" | "done_unseen" | "done_seen";
+/**
+ * What a Conversation row means to the reader, in priority order.
+ *
+ * `awaiting_input` leads because it is the only state the reader can clear by acting: the run is
+ * parked on an approval or a question and will not move until they answer. It deliberately
+ * outranks `working` — a foreground approval holds the engine open while it polls, so a
+ * blocked Conversation would otherwise render as a spinner that never resolves.
+ */
+export type ChatState = "awaiting_input" | "working" | "done_unseen" | "done_seen";
 
 export type ChatSummaryView = {
   id: string;
@@ -736,8 +751,9 @@ export type ChatSummaryView = {
   runtime?: ConversationRuntimeView | null;
   activityState?: "working" | "idle";
   hasUnseen?: boolean;
+  awaitingInput?: boolean;
   // Compatibility fallback for optimistic and rolling-deploy snapshots. Live API rows own
-  // activityState/hasUnseen and always take precedence.
+  // activityState/hasUnseen/awaitingInput and always take precedence.
   state?: ChatState;
   preview: string;
   updatedAt: string;
@@ -749,8 +765,9 @@ export type ChatSummaryView = {
 export const PINNED_CHAT_LIMIT = 20;
 
 export function chatSummaryState(
-  chat: Pick<ChatSummaryView, "activityState" | "hasUnseen" | "state">,
+  chat: Pick<ChatSummaryView, "activityState" | "hasUnseen" | "awaitingInput" | "state">,
 ): ChatState {
+  if (chat.awaitingInput) return "awaiting_input";
   if (chat.activityState === "working") return "working";
   if (chat.activityState === "idle") return chat.hasUnseen ? "done_unseen" : "done_seen";
   return chat.state ?? "done_seen";

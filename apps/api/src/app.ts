@@ -2653,6 +2653,25 @@ export function createApiApp(input: CreateApiAppInput) {
         200,
       );
     },
+    setIntegrationToolMode: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const params = c.req.valid("param");
+      const mode = c.req.valid("json").mode;
+      await input.integrationAccounts.setToolMode(actor, params.integrationId, params.toolId, mode);
+      return c.json(
+        {
+          data: {
+            integrationId: params.integrationId,
+            toolId: params.toolId,
+            // The service rejects anything outside the tool mode vocabulary.
+            mode: mode as "on" | "ask" | "off" | "inherit",
+          },
+          meta,
+        },
+        200,
+      );
+    },
     alwaysAllowAction: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 60);
@@ -2735,6 +2754,41 @@ export function createApiApp(input: CreateApiAppInput) {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 60);
       await input.engineAuth.disconnectCodex(actor);
+      return c.json({ data: { deleted: true as const }, meta }, 200);
+    },
+    getDopplerAuth: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      return c.json({ data: await input.engineAuth.getDopplerStatus(actor), meta }, 200);
+    },
+    startDopplerAuth: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "engine-auth-start", 10);
+      return c.json({ data: { flow: await input.engineAuth.startDopplerAuth(actor) }, meta }, 201);
+    },
+    pollDopplerAuth: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      return c.json(
+        {
+          data: {
+            flow: await input.engineAuth.pollDopplerAuth(actor, c.req.valid("param").flowId),
+          },
+          meta,
+        },
+        200,
+      );
+    },
+    deleteDopplerAuth: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      await input.engineAuth.cancelDopplerAuth(actor, true);
+      return c.json({ data: { deleted: true as const }, meta }, 200);
+    },
+    cancelDopplerAuth: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      await input.engineAuth.cancelDopplerAuth(actor, false);
       return c.json({ data: { deleted: true as const }, meta }, 200);
     },
     getInfisicalAuth: async (c) => {
@@ -3182,7 +3236,9 @@ export function createApiApp(input: CreateApiAppInput) {
     app.get("/integrations/fathom-mcp/start", (c) => ingress.start("fathom", c.req.raw));
     app.get("/integrations/fathom-mcp/callback", (c) => ingress.callback("fathom", c.req.raw));
     app.get("/integrations/signoz/start", (c) => ingress.start("signoz", c.req.raw));
+    app.get("/integrations/dash0/start", (c) => ingress.start("dash0", c.req.raw));
     app.get("/integrations/signoz/callback", (c) => ingress.callback("signoz", c.req.raw));
+    app.get("/integrations/dash0/callback", (c) => ingress.callback("dash0", c.req.raw));
     app.get("/integrations/vercel/start", (c) => ingress.start("vercel", c.req.raw));
     app.get("/integrations/vercel/callback", (c) => ingress.callback("vercel", c.req.raw));
     app.get("/integrations/linear/start", (c) => ingress.start("linear", c.req.raw));
@@ -3560,6 +3616,7 @@ function conversationDto(conversation: {
   } | null;
   activityState: "working" | "idle";
   hasUnseen: boolean;
+  awaitingInput: boolean;
   pinnedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;

@@ -23,6 +23,7 @@ import {
   resolveActiveAgentSession,
 } from "../browser-profiles/index";
 import { createChatBrowserToolSession } from "../browser-tools-runtime";
+import { postWorkflowSlackMessage } from "../integrations/slack-channel";
 import {
   activateAndListChatSessionSkills,
   createWorkspaceSkillForActor,
@@ -193,6 +194,7 @@ export function executePersistedChatHostTool(input: {
         idempotencyKey,
       });
     },
+    postSlackMessage: postWorkflowSlackMessage,
     writeArtifact: () => {
       throw new Error("Artifact publishing is not configured for this runtime.");
     },
@@ -248,7 +250,6 @@ async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostCo
       firstName: users.firstName,
       lastName: users.lastName,
       timezone: users.timezone,
-      taskSpawningEnabled: users.taskSpawningEnabled,
       subagentsEnabled: users.subagentsEnabled,
       workspaceName: workspaces.name,
       workspaceRole: workspaceMembers.role,
@@ -293,7 +294,7 @@ async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostCo
     firstName: row.firstName,
     lastName: row.lastName,
     timezone: row.timezone,
-    automationToolsEnabled: row.taskSpawningEnabled && row.workspaceRole === "admin",
+    automationToolsEnabled: row.workspaceRole === "admin",
     // Read-only and personal, so unlike the automation tools this needs no admin role.
     subagentsEnabled: row.subagentsEnabled,
     skillToolsEnabled: true,

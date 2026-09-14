@@ -115,10 +115,15 @@ const NAV_GROUPS: SettingsNavGroup[] = [
         label: "Members",
         isActive: (pathname) => pathname === "/settings/workspace",
       },
+    ],
+  },
+  {
+    label: "Channels",
+    items: [
       {
         href: "/settings/workspace/slack",
         icon: MessageSquare,
-        label: "Slack bot",
+        label: "Slack",
         badge: "Beta",
         adminOnly: true,
         isActive: (pathname) => pathname === "/settings/workspace/slack",

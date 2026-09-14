@@ -11,6 +11,7 @@ import {
   CODEX_REASONING_EFFORTS,
   claudeCodeModelSupportsReasoningEffort,
   getAgentModelDefinition,
+  isCodexSubscriptionModel,
 } from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import { captureProductEvent } from "@opencompany/analytics/product/client";
@@ -36,19 +37,14 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import { toast } from "@opencompany/ui/components/sonner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@opencompany/ui/components/tooltip";
-import {
-  AnthropicIcon,
-  DeepSeekIcon,
-  MoonshotIcon,
-  OpenAIIcon,
-  XaiIcon,
-} from "@opencompany/ui/icons";
+import { AnthropicIcon, OpenAIIcon } from "@opencompany/ui/icons";
 import { cn } from "@opencompany/ui/lib/utils";
 import { useLiveQuery } from "@tanstack/react-db";
 import {
   Archive,
   ArrowLeft,
   ArrowUp,
+  Box,
   Check,
   ChevronDown,
   Code2,
@@ -107,6 +103,7 @@ import type { ActionApprovalRequest, CodexToolAction } from "@/components/chat/T
 import { useChatAttachments } from "@/components/chat/useChatAttachments";
 import { useCreditBalance } from "@/components/chat/useCreditBalance";
 import { useWorkflowComposer } from "@/components/chat/useWorkflowComposer";
+import { ModelProviderIcon } from "@/components/ModelProviderIcon";
 import { useHeadlessChatTranscript } from "@/components/useHeadlessChatTranscript";
 import { useHydrated } from "@/components/useHydrated";
 import { WorkflowComposerControls } from "@/components/WorkflowComposerControls";
@@ -403,8 +400,8 @@ export function Surface({
   archivedChats = [],
   codexConnected = false,
   claudeCodeConnected = false,
-  taskSpawningEnabled = false,
   autoModelRoutingEnabled = false,
+  sharedModelAccessEnabled = false,
   workspaceId = "",
   userWorkosId = "",
   taskConversation = null,
@@ -429,8 +426,10 @@ export function Surface({
   archivedChats?: readonly ChatSummaryView[];
   codexConnected?: boolean;
   claudeCodeConnected?: boolean;
-  taskSpawningEnabled?: boolean;
   autoModelRoutingEnabled?: boolean;
+  // Shared GPT models run on the workspace's ChatGPT subscription, so the picker marks them as
+  // included rather than metered.
+  sharedModelAccessEnabled?: boolean;
   workspaceId?: string;
   // Scopes chat attachment uploads; attachments are disabled when absent.
   userWorkosId?: string;
@@ -619,7 +618,7 @@ export function Surface({
     taskConversation && initialChat?.id === chatSessionId ? taskConversation : null;
   const backgroundInputDirective = parseBackgroundChatDirective(input);
   const backgroundDirectiveActive = Boolean(backgroundInputDirective);
-  const workflowMentionsEnabled = taskSpawningEnabled && !activeTaskConversation;
+  const workflowMentionsEnabled = !activeTaskConversation;
   const readOnly = readOnlyNotice !== null;
   const skillMentionsEnabled = !readOnly && !activeTaskConversation;
   const activeSelectedMentions = selectedMentions.filter((mention) => {
@@ -895,11 +894,9 @@ export function Surface({
       creditBalance.balanceUsdMicros > 0 &&
       creditBalance.balanceUsdMicros < creditBalance.lowBalanceWarnUsdMicros,
   );
-  const adHocTaskMentionEnabled = taskSpawningEnabled && !activeEngine && !activeTaskConversation;
+  const adHocTaskMentionEnabled = !activeEngine && !activeTaskConversation;
   const backgroundAdHocTaskSelected = Boolean(
-    backgroundChatDirective &&
-      taskSpawningEnabled &&
-      hasAdHocTaskToken(backgroundChatDirective.prompt),
+    backgroundChatDirective && hasAdHocTaskToken(backgroundChatDirective.prompt),
   );
   const selectedAdHocTask =
     backgroundAdHocTaskSelected ||
@@ -1195,14 +1192,12 @@ export function Surface({
   const commandPaletteItems = useMemo<CommandPaletteItem[]>(
     () =>
       [
-        ...(taskSpawningEnabled
-          ? allTasks.map((task) => ({
-              kind: "task" as const,
-              task,
-              archived: Boolean(task.archivedAt),
-              searchValue: `task ${task.archivedAt ? "archived " : ""}${task.name} ${task.prompt} ${task.displayId} ${task.id}`,
-            }))
-          : []),
+        ...allTasks.map((task) => ({
+          kind: "task" as const,
+          task,
+          archived: Boolean(task.archivedAt),
+          searchValue: `task ${task.archivedAt ? "archived " : ""}${task.name} ${task.prompt} ${task.displayId} ${task.id}`,
+        })),
         ...recentChats.map((chat) => ({
           kind: "chat" as const,
           chat,
@@ -1220,7 +1215,7 @@ export function Surface({
           new Date(b.kind === "task" ? b.task.updatedAt : b.chat.updatedAt).getTime() -
           new Date(a.kind === "task" ? a.task.updatedAt : a.chat.updatedAt).getTime(),
       ),
-    [allTasks, archivedChats, recentChats, taskSpawningEnabled],
+    [allTasks, archivedChats, recentChats],
   );
   const commandPaletteResults = useMemo(
     () => selectCommandPaletteItems(commandPaletteItems, chatSearchQuery),
@@ -1260,15 +1255,8 @@ export function Surface({
   ]);
 
   const chatTaskLookup = useMemo(
-    () =>
-      taskSpawningEnabled
-        ? buildChatTaskLookup({
-            messages: chatMessages,
-            tasks,
-            liveTasks: liveChatTasks,
-          })
-        : new Map(),
-    [chatMessages, liveChatTasks, taskSpawningEnabled, tasks],
+    () => buildChatTaskLookup({ messages: chatMessages, tasks, liveTasks: liveChatTasks }),
+    [chatMessages, liveChatTasks, tasks],
   );
   useEffect(() => {
     const pending = pendingChatFirstOutputRef.current;
@@ -1902,7 +1890,7 @@ export function Surface({
         restoreDraft();
       };
 
-      if (taskSpawningEnabled && hasAdHocTaskToken(messagePrompt)) {
+      if (hasAdHocTaskToken(messagePrompt)) {
         const description = descriptionFromAdHocTaskPrompt(messagePrompt);
         if (!description) {
           toast.error(`Describe the task after ${AD_HOC_TASK_TOKEN}.`);
@@ -2705,9 +2693,11 @@ export function Surface({
       return;
     }
 
+    // Each catalog falls back to what is already loaded, so one failing request still lets the
+    // other resolve its half of the pasted mentions.
     void Promise.all([
-      fetchBrainSkillCatalog(),
-      workflowMentionsEnabled ? fetchBrainWorkflowCatalog() : Promise.resolve([]),
+      fetchBrainSkillCatalog().catch(() => skillCatalog),
+      workflowMentionsEnabled ? fetchBrainWorkflowCatalog().catch(() => workflowCatalog) : [],
     ])
       .then(([skills, workflows]) => {
         if (!mountedRef.current) return;
@@ -2840,8 +2830,8 @@ export function Surface({
                 defaultModel={defaultModel}
                 codexConnected={codexConnected}
                 claudeCodeConnected={claudeCodeConnected}
-                taskSpawningEnabled={taskSpawningEnabled}
                 autoModelRoutingEnabled={autoModelRoutingEnabled}
+                sharedModelAccessEnabled={sharedModelAccessEnabled}
                 creditBalance={creditBalance}
                 workspaceId={workspaceId}
                 onSubmitted={closeCommandPalette}
@@ -3119,7 +3109,7 @@ export function Surface({
               pollSandbox={Boolean(activeEngineChat)}
             />
           ) : null}
-          {mode === "chat" && taskSpawningEnabled ? (
+          {mode === "chat" ? (
             <LiveChatTasks workspaceId={workspaceId} setTasks={setLiveChatTasks} />
           ) : null}
 
@@ -3316,9 +3306,7 @@ export function Surface({
                       placeholder={
                         activeTaskConversation || mode === "chat"
                           ? "Reply..."
-                          : taskSpawningEnabled
-                            ? "Ask a question or describe a task..."
-                            : "Ask opencompany anything..."
+                          : "Ask a question or describe a task..."
                       }
                       onChange={onInputChange}
                       onBlur={() => setMentionToken(null)}
@@ -3396,7 +3384,7 @@ export function Surface({
                     onStop={stopGeneration}
                   />
                 </div>
-                <div className="flex items-center gap-1 border-t border-border px-2.5 py-1.5">
+                <div className="flex flex-wrap items-center gap-1 border-t border-border px-2.5 py-1.5">
                   {attachmentsEnabled ? (
                     <>
                       <input
@@ -3490,6 +3478,7 @@ export function Surface({
                           codexConnected={codexConnected}
                           claudeCodeConnected={claudeCodeConnected}
                           autoModelRoutingEnabled={autoModelRoutingEnabled}
+                          sharedModelAccessEnabled={sharedModelAccessEnabled}
                         />
                       )}
                       {showEngineComposerControls && !selectedWorkflow ? (
@@ -3530,6 +3519,9 @@ export function Surface({
                           onGoalObjectiveChange={setCodexGoalObjective}
                           onGoalTokenBudgetChange={setCodexGoalTokenBudget}
                         />
+                      ) : null}
+                      {showEngineComposerControls && !selectedWorkflow ? (
+                        <SandboxIndicator />
                       ) : null}
                     </>
                   )}
@@ -3575,8 +3567,8 @@ export function QuickChatComposer({
   defaultModel,
   codexConnected,
   claudeCodeConnected,
-  taskSpawningEnabled,
   autoModelRoutingEnabled,
+  sharedModelAccessEnabled,
   creditBalance,
   workspaceId,
   onSubmitted,
@@ -3589,8 +3581,8 @@ export function QuickChatComposer({
   defaultModel: string;
   codexConnected: boolean;
   claudeCodeConnected: boolean;
-  taskSpawningEnabled: boolean;
   autoModelRoutingEnabled: boolean;
+  sharedModelAccessEnabled: boolean;
   creditBalance: ReturnType<typeof useCreditBalance>["balance"];
   workspaceId: string;
   onSubmitted?: () => void;
@@ -3647,13 +3639,11 @@ export function QuickChatComposer({
   const [codexGoalObjective, setCodexGoalObjective] = useState("");
   const [codexGoalTokenBudget, setCodexGoalTokenBudget] = useState("");
 
-  const workflowMentionsEnabled = taskSpawningEnabled;
   const activeSelectedMentions = selectedMentions.filter((mention) => {
     if (!chatMentionIsVisible(input, mention)) return false;
     if (mention.kind === "engine") {
       return mention.id === "claude" ? claudeCodeConnected : codexConnected;
     }
-    if (mention.kind === "workflow") return workflowMentionsEnabled;
     return true;
   });
   const chatModel =
@@ -3681,11 +3671,9 @@ export function QuickChatComposer({
     ? (backgroundLaunchSelection?.engine ?? null)
     : selectedEngine;
   const isEngineChat = composerEngine !== null;
-  const adHocTaskMentionEnabled = taskSpawningEnabled && !selectedEngine;
+  const adHocTaskMentionEnabled = !selectedEngine;
   const backgroundAdHocTaskSelected = Boolean(
-    parsedBackgroundChatDirective &&
-      taskSpawningEnabled &&
-      hasAdHocTaskToken(parsedBackgroundChatDirective.prompt),
+    parsedBackgroundChatDirective && hasAdHocTaskToken(parsedBackgroundChatDirective.prompt),
   );
   const selectedAdHocTask =
     backgroundAdHocTaskSelected ||
@@ -3702,7 +3690,7 @@ export function QuickChatComposer({
     codexConnected,
     claudeCodeConnected,
     skillsEnabled: true,
-    workflowsEnabled: workflowMentionsEnabled,
+    workflowsEnabled: true,
     adHocTaskEnabled: adHocTaskMentionEnabled || Boolean(parsedBackgroundChatDirective),
   });
   const selectedWorkflowMention = selectedAdHocTask
@@ -3769,9 +3757,7 @@ export function QuickChatComposer({
   // Mirrors the main composer: refetch each catalog whenever its menu opens so
   // recently created Skills and workflows show up.
   const skillCommandMenuOpen = Boolean(userWorkosId && mentionToken?.sigil === "/");
-  const workflowMentionMenuOpen = Boolean(
-    userWorkosId && mentionToken?.sigil === "#" && workflowMentionsEnabled,
-  );
+  const workflowMentionMenuOpen = Boolean(userWorkosId && mentionToken?.sigil === "#");
   useEffect(() => {
     if (
       !skillCommandMenuOpen &&
@@ -3914,9 +3900,7 @@ export function QuickChatComposer({
 
     const pastedText = event.clipboardData.getData("text/plain");
     const pastedSkillIds = skillMentionIdsFromText(pastedText);
-    const pastedWorkflowIds = workflowMentionsEnabled
-      ? workflowMentionIdsFromText(pastedText)
-      : new Set<string>();
+    const pastedWorkflowIds = workflowMentionIdsFromText(pastedText);
     if (pastedSkillIds.size === 0 && pastedWorkflowIds.size === 0) return;
 
     event.preventDefault();
@@ -3965,14 +3949,16 @@ export function QuickChatComposer({
       return;
     }
 
+    // Each catalog falls back to what is already loaded, so one failing request still lets the
+    // other resolve its half of the pasted mentions.
     void Promise.all([
-      fetchBrainSkillCatalog(),
-      workflowMentionsEnabled ? fetchBrainWorkflowCatalog() : Promise.resolve([]),
+      fetchBrainSkillCatalog().catch(() => skillCatalog),
+      fetchBrainWorkflowCatalog().catch(() => workflowCatalog),
     ])
       .then(([skills, workflows]) => {
         if (!mountedRef.current) return;
         setSkillCatalog(skills);
-        if (workflowMentionsEnabled) setWorkflowCatalog(workflows);
+        setWorkflowCatalog(workflows);
         const currentInput = inputRef.current?.value ?? nextInput;
         const resolvedMentions = [
           ...skillMentionsFromPastedText({
@@ -4054,11 +4040,7 @@ export function QuickChatComposer({
       ...(attachment.blobPathname ? { blobPathname: attachment.blobPathname } : {}),
       ...(attachment.previewUrl ? { previewUrl: attachment.previewUrl } : {}),
     }));
-    if (
-      taskSpawningEnabled &&
-      (isBackgroundChatDirective || adHocTaskMentionEnabled) &&
-      hasAdHocTaskToken(prompt)
-    ) {
+    if ((isBackgroundChatDirective || adHocTaskMentionEnabled) && hasAdHocTaskToken(prompt)) {
       const description = descriptionFromAdHocTaskPrompt(prompt);
       if (!description) {
         toast.error(`Describe the task after ${AD_HOC_TASK_TOKEN}.`);
@@ -4417,7 +4399,7 @@ export function QuickChatComposer({
               onStop={() => {}}
             />
           </div>
-          <div className="flex items-center gap-1 border-t border-border px-2.5 py-1.5">
+          <div className="flex flex-wrap items-center gap-1 border-t border-border px-2.5 py-1.5">
             {attachmentsEnabled ? (
               <>
                 <input
@@ -4475,6 +4457,7 @@ export function QuickChatComposer({
                 codexConnected={codexConnected}
                 claudeCodeConnected={claudeCodeConnected}
                 autoModelRoutingEnabled={autoModelRoutingEnabled}
+                sharedModelAccessEnabled={sharedModelAccessEnabled}
               />
             )}
             {showEngineComposerControls && !selectedWorkflow ? (
@@ -4507,6 +4490,7 @@ export function QuickChatComposer({
                 onGoalTokenBudgetChange={setCodexGoalTokenBudget}
               />
             ) : null}
+            {showEngineComposerControls && !selectedWorkflow ? <SandboxIndicator /> : null}
           </div>
         </div>
       </form>
@@ -5679,6 +5663,28 @@ function renderEngineModelPicker(model: EngineModelPickerModel | null, disabled:
   }
 }
 
+// The composer already says which coding agent will answer; it does not say where that agent
+// runs. Cloud coding engines execute on an isolated sandbox VM — never the user's machine — and
+// that is worth knowing before sending, not after. Sits at the end of the composer footer so it
+// reads as a property of the run rather than another control to press.
+function SandboxIndicator() {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        type="button"
+        aria-label="Runs in an isolated cloud sandbox"
+        className="ml-auto flex shrink-0 cursor-default items-center gap-1.5 rounded-md px-1.5 py-1 text-[11.5px] font-medium leading-none text-ink-subtle outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+      >
+        <Box size={12} strokeWidth={1.9} className="shrink-0" aria-hidden="true" />
+        <span className="hidden sm:inline">Sandbox</span>
+      </TooltipTrigger>
+      <TooltipContent>
+        Runs in an isolated cloud sandbox. Your machine and local files are never touched.
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 function EngineComposerControls({
   model,
   engineLabel,
@@ -6067,6 +6073,7 @@ function ModelPicker({
   codexConnected = false,
   claudeCodeConnected = false,
   autoModelRoutingEnabled = false,
+  sharedModelAccessEnabled = false,
 }: {
   value: ChatModelSelection;
   onChange: (modelId: ChatModelSelection) => void;
@@ -6074,7 +6081,9 @@ function ModelPicker({
   codexConnected?: boolean;
   claudeCodeConnected?: boolean;
   autoModelRoutingEnabled?: boolean;
+  sharedModelAccessEnabled?: boolean;
 }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const isAutoSelected = value === AUTO_MODEL_SELECTION;
   const isCodexSelected = value === CODEX_PICKER_VALUE;
@@ -6082,6 +6091,20 @@ function ModelPicker({
   const isEngineSelected = isCodexSelected || isClaudeSelected;
   const selectedModel =
     !isAutoSelected && !isEngineSelected ? (findModel(value) ?? findModel(DEFAULT_MODEL)) : null;
+  const [tab, setTab] = useState<"chat" | "coding">(isEngineSelected ? "coding" : "chat");
+  // Reopening should land on the tab matching what's currently selected, but the user
+  // stays free to switch tabs while the popover is open without being reset mid-browse.
+  // Adjusting state during render (rather than in an effect) avoids an extra commit.
+  const [tabSyncedOpen, setTabSyncedOpen] = useState(open);
+  if (open !== tabSyncedOpen) {
+    setTabSyncedOpen(open);
+    if (open) setTab(isEngineSelected ? "coding" : "chat");
+  }
+
+  const goToCodingSubscriptions = () => {
+    setOpen(false);
+    router.push("/settings/workspace/inference");
+  };
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -6121,51 +6144,49 @@ function ModelPicker({
         sideOffset={10}
         className="w-[360px] max-w-[calc(100vw-1.5rem)] bg-surface p-0 text-ink"
       >
-        <Command className="bg-surface text-ink">
-          <CommandInput placeholder="Search models..." />
-          <CommandList className="max-h-[min(320px,calc(100vh-9rem))]">
-            <CommandEmpty>No models found.</CommandEmpty>
-            {autoModelRoutingEnabled ? (
-              <CommandGroup heading="Routing">
-                <CommandItem
-                  value={AUTO_MODEL_SELECTION}
-                  keywords={["Auto", "automatic", "routing", "recommended"]}
-                  onSelect={() => {
-                    onChange(AUTO_MODEL_SELECTION);
-                    setOpen(false);
-                  }}
-                  title="Choose a model from the first message and keep it for the chat."
-                  className="gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink data-[selected=true]:bg-surface-hover data-[selected=true]:text-ink"
-                >
-                  <Check
-                    size={13}
-                    strokeWidth={2}
-                    className={cn(
-                      "shrink-0 text-ink",
-                      isAutoSelected ? "opacity-100" : "opacity-0",
-                    )}
-                  />
-                  <Sparkles size={14} strokeWidth={1.85} className="shrink-0 text-ink-muted" />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate font-medium leading-4">Auto</div>
-                    <div className="truncate text-[11.5px] leading-4 text-ink-subtle">
-                      Picks once from your first message
-                    </div>
-                  </div>
-                </CommandItem>
-              </CommandGroup>
-            ) : null}
-            {codexConnected || claudeCodeConnected ? (
-              <CommandGroup heading="Engines">
-                {codexConnected ? (
+        <div className="flex gap-1 border-b border-border p-2 pb-1.5">
+          <button
+            type="button"
+            aria-pressed={tab === "chat"}
+            onClick={() => setTab("chat")}
+            className={cn(
+              "flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-[12.5px] font-medium transition-colors duration-150",
+              tab === "chat" ? "bg-surface-active text-ink" : "text-ink-subtle hover:text-ink",
+            )}
+          >
+            <MessageSquare size={12} strokeWidth={2} />
+            Chat
+          </button>
+          <button
+            type="button"
+            aria-pressed={tab === "coding"}
+            onClick={() => setTab("coding")}
+            className={cn(
+              "flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-[12.5px] font-medium transition-colors duration-150",
+              tab === "coding" ? "bg-surface-active text-ink" : "text-ink-subtle hover:text-ink",
+            )}
+          >
+            <Code2 size={12} strokeWidth={2} />
+            Coding agents
+          </button>
+        </div>
+        {tab === "chat" ? (
+          <Command className="bg-surface text-ink">
+            <CommandInput placeholder="Search models..." />
+            <CommandList className="max-h-[min(320px,calc(100vh-9rem))]">
+              <CommandEmpty>No models found.</CommandEmpty>
+              {/* Auto leads the one list rather than sitting in its own section: it is the
+                  model choice for people who do not want to make one, not a separate mode. */}
+              <CommandGroup>
+                {autoModelRoutingEnabled ? (
                   <CommandItem
-                    value={CODEX_PICKER_VALUE}
-                    keywords={["Codex", "cloud", "sandbox", "engine"]}
+                    value={AUTO_MODEL_SELECTION}
+                    keywords={["Auto", "automatic", "routing", "recommended"]}
                     onSelect={() => {
-                      onChange(CODEX_PICKER_VALUE);
+                      onChange(AUTO_MODEL_SELECTION);
                       setOpen(false);
                     }}
-                    title="Chat with Codex in a persistent cloud sandbox."
+                    title="Choose a model from the first message and keep it for the chat."
                     className="gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink data-[selected=true]:bg-surface-hover data-[selected=true]:text-ink"
                   >
                     <Check
@@ -6173,129 +6194,178 @@ function ModelPicker({
                       strokeWidth={2}
                       className={cn(
                         "shrink-0 text-ink",
-                        isCodexSelected ? "opacity-100" : "opacity-0",
+                        isAutoSelected ? "opacity-100" : "opacity-0",
                       )}
                     />
-                    <OpenAIIcon size={14} strokeWidth={1.85} className="shrink-0 text-ink-muted" />
+                    <Sparkles size={14} strokeWidth={1.85} className="shrink-0 text-ink-muted" />
                     <div className="min-w-0 flex-1">
-                      <div className="truncate font-medium leading-4">Codex</div>
+                      <div className="truncate font-medium leading-4">Auto</div>
                       <div className="truncate text-[11.5px] leading-4 text-ink-subtle">
-                        Cloud Codex sandbox
+                        Picks once from your first message
                       </div>
                     </div>
                   </CommandItem>
                 ) : null}
-                {claudeCodeConnected ? (
-                  <CommandItem
-                    value={CLAUDE_PICKER_VALUE}
-                    keywords={["Claude", "Claude Code", "cloud", "sandbox", "engine"]}
-                    onSelect={() => {
-                      onChange(CLAUDE_PICKER_VALUE);
-                      setOpen(false);
-                    }}
-                    title="Chat with Claude Code in a persistent cloud sandbox."
-                    className="gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink data-[selected=true]:bg-surface-hover data-[selected=true]:text-ink"
-                  >
-                    <Check
-                      size={13}
-                      strokeWidth={2}
-                      className={cn(
-                        "shrink-0 text-ink",
-                        isClaudeSelected ? "opacity-100" : "opacity-0",
-                      )}
-                    />
-                    <AnthropicIcon
-                      size={14}
-                      strokeWidth={1.85}
-                      className="shrink-0 text-ink-muted"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate font-medium leading-4">Claude Code</div>
-                      <div className="truncate text-[11.5px] leading-4 text-ink-subtle">
-                        Cloud Claude Code sandbox
+                {MODELS.map((model) => {
+                  if (model.id === "anthropic/claude-opus-4.8") return null;
+                  const isSelected =
+                    !isAutoSelected && !isEngineSelected && model.id === selectedModel?.id;
+                  const isSubscriptionCovered =
+                    sharedModelAccessEnabled && isCodexSubscriptionModel(model.id);
+                  return (
+                    <CommandItem
+                      key={model.id}
+                      value={model.id}
+                      keywords={[model.label, modelProviderLabel(model.id)]}
+                      onSelect={() => {
+                        onChange(model.id);
+                        setOpen(false);
+                      }}
+                      title={model.description}
+                      className="gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink data-[selected=true]:bg-surface-hover data-[selected=true]:text-ink"
+                    >
+                      <Check
+                        size={13}
+                        strokeWidth={2}
+                        className={cn(
+                          "shrink-0 text-ink",
+                          isSelected ? "opacity-100" : "opacity-0",
+                        )}
+                      />
+                      <ModelProviderIcon
+                        modelId={model.id}
+                        size={14}
+                        strokeWidth={1.85}
+                        className="shrink-0 text-ink-muted"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-medium leading-4">{model.label}</div>
+                        <div className="truncate text-[11.5px] leading-4 text-ink-subtle">
+                          {modelProviderLabel(model.id)}
+                        </div>
                       </div>
-                    </div>
-                  </CommandItem>
-                ) : null}
+                      {isSubscriptionCovered ? (
+                        <span
+                          title="Covered by your workspace's ChatGPT subscription, so it uses no credits."
+                          className="inline-flex shrink-0 items-center rounded-full bg-surface-muted px-1.5 py-px text-[10.5px] font-medium leading-4 text-ink-subtle"
+                        >
+                          Included
+                        </span>
+                      ) : null}
+                    </CommandItem>
+                  );
+                })}
               </CommandGroup>
-            ) : null}
-            <CommandGroup heading="Models">
-              {MODELS.map((model) => {
-                if (model.id === "anthropic/claude-opus-4.8") return null;
-                const isSelected =
-                  !isAutoSelected && !isEngineSelected && model.id === selectedModel?.id;
-                return (
-                  <CommandItem
-                    key={model.id}
-                    value={model.id}
-                    keywords={[model.label, modelProviderLabel(model.id)]}
-                    onSelect={() => {
-                      onChange(model.id);
-                      setOpen(false);
-                    }}
-                    title={model.description}
-                    className="gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink data-[selected=true]:bg-surface-hover data-[selected=true]:text-ink"
-                  >
-                    <Check
-                      size={13}
-                      strokeWidth={2}
-                      className={cn("shrink-0 text-ink", isSelected ? "opacity-100" : "opacity-0")}
-                    />
-                    <ModelProviderIcon
-                      modelId={model.id}
-                      size={14}
-                      strokeWidth={1.85}
-                      className="shrink-0 text-ink-muted"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate font-medium leading-4">{model.label}</div>
-                      <div className="truncate text-[11.5px] leading-4 text-ink-subtle">
-                        {modelProviderLabel(model.id)}
-                      </div>
-                    </div>
-                  </CommandItem>
-                );
-              })}
-            </CommandGroup>
-          </CommandList>
-        </Command>
+            </CommandList>
+          </Command>
+        ) : (
+          <div className="flex flex-col gap-1 p-2 pt-1.5">
+            <CodingAgentOption
+              engine="codex"
+              connected={codexConnected}
+              selected={isCodexSelected}
+              onSelect={() => {
+                onChange(CODEX_PICKER_VALUE);
+                setOpen(false);
+              }}
+              onConnect={goToCodingSubscriptions}
+            />
+            <CodingAgentOption
+              engine="claude_code"
+              connected={claudeCodeConnected}
+              selected={isClaudeSelected}
+              onSelect={() => {
+                onChange(CLAUDE_PICKER_VALUE);
+                setOpen(false);
+              }}
+              onConnect={goToCodingSubscriptions}
+            />
+          </div>
+        )}
       </PopoverContent>
     </Popover>
   );
 }
 
-function findModel(id: string) {
-  return MODELS.find((model) => model.id === id);
+// Always shown, connected or not: a disconnected agent still needs a way to be
+// discovered and connected, rather than silently disappearing from the picker.
+function CodingAgentOption({
+  engine,
+  connected,
+  selected,
+  onSelect,
+  onConnect,
+}: {
+  engine: "codex" | "claude_code";
+  connected: boolean;
+  selected: boolean;
+  onSelect: () => void;
+  onConnect: () => void;
+}) {
+  const label = engine === "codex" ? "Codex" : "Claude Code";
+  const subscriptionLabel = engine === "codex" ? "ChatGPT" : "Claude";
+  const icon =
+    engine === "codex" ? (
+      <OpenAIIcon size={14} strokeWidth={1.85} className="shrink-0 text-ink-muted" />
+    ) : (
+      <AnthropicIcon size={14} strokeWidth={1.85} className="shrink-0 text-ink-muted" />
+    );
+  const header = (
+    <>
+      <Check
+        size={13}
+        strokeWidth={2}
+        className={cn("shrink-0 text-ink", selected ? "opacity-100" : "opacity-0")}
+      />
+      {icon}
+      <div className="min-w-0 flex-1">
+        <div
+          className={cn(
+            "truncate font-medium leading-4",
+            connected ? "text-ink" : "text-ink-muted",
+          )}
+        >
+          {label}
+        </div>
+        <div className="truncate text-[11.5px] leading-4 text-ink-subtle">
+          {connected
+            ? `Included with your ${subscriptionLabel} subscription`
+            : `Connect your ${subscriptionLabel} account to use this`}
+        </div>
+      </div>
+    </>
+  );
+
+  if (!connected) {
+    return (
+      <div className="flex flex-col gap-2 rounded-md px-2 py-1.5">
+        <div className="flex items-center gap-2">{header}</div>
+        <button
+          type="button"
+          onClick={onConnect}
+          // Lines up with the label text above: the check icon (13px) plus its gap-2 (8px).
+          className="ml-[21px] self-start rounded-full border border-border-strong bg-surface px-3 py-1 text-[11.5px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover"
+        >
+          Connect {label}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      aria-label={`${label}: included with your ${subscriptionLabel} subscription`}
+      onClick={onSelect}
+      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors duration-150 hover:bg-surface-hover"
+    >
+      {header}
+    </button>
+  );
 }
 
-function ModelProviderIcon({
-  modelId,
-  size,
-  strokeWidth,
-  className,
-}: {
-  modelId: string;
-  size: number;
-  strokeWidth: number;
-  className?: string;
-}) {
-  const provider = modelId.split("/")[0] ?? "";
-  if (provider === "anthropic") {
-    return <AnthropicIcon size={size} strokeWidth={strokeWidth} className={className} />;
-  }
-  if (provider === "deepseek") {
-    return <DeepSeekIcon size={size} strokeWidth={strokeWidth} className={className} />;
-  }
-  if (provider === "moonshotai") {
-    return <MoonshotIcon size={size} strokeWidth={strokeWidth} className={className} />;
-  }
-  if (provider === "openai") {
-    return <OpenAIIcon size={size} strokeWidth={strokeWidth} className={className} />;
-  }
-  if (provider === "xai") {
-    return <XaiIcon size={size} strokeWidth={strokeWidth} className={className} />;
-  }
-  return <Sparkles size={size} strokeWidth={strokeWidth} className={className} />;
+function findModel(id: string) {
+  return MODELS.find((model) => model.id === id);
 }
 
 function modelProviderLabel(id: string) {

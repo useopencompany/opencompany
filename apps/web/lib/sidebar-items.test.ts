@@ -50,6 +50,21 @@ describe("selectSidebarChats", () => {
       "recent_9",
     ]);
   });
+
+  it("keeps an old chat listed while it is parked on an approval", () => {
+    const selected = selectSidebarChats(
+      [
+        chat("old_awaiting", {
+          awaitingInput: true,
+          updatedAt: new Date(now - 30 * 24 * 60 * 60 * 1_000).toISOString(),
+        }),
+        chat("recent", { updatedAt: new Date(now - 60_000).toISOString() }),
+      ],
+      now,
+    );
+
+    expect(selected.map((entry) => entry.id)).toEqual(["old_awaiting", "recent"]);
+  });
 });
 
 describe("selectSidebarTasks", () => {
@@ -132,24 +147,51 @@ describe("selectSidebarTasks", () => {
 
 describe("sidebarTaskState", () => {
   it("reports a running task as working regardless of its unread flag", () => {
-    expect(sidebarTaskState({ status: "queued", hasUnseen: true })).toBe("working");
-    expect(sidebarTaskState({ status: "running", hasUnseen: false })).toBe("working");
+    expect(sidebarTaskState({ status: "queued", hasUnseen: true, awaitingInput: false })).toBe(
+      "working",
+    );
+    expect(sidebarTaskState({ status: "running", hasUnseen: false, awaitingInput: false })).toBe(
+      "working",
+    );
   });
 
   it("reports a settled task with an unread result as unseen", () => {
-    expect(sidebarTaskState({ status: "succeeded", hasUnseen: true })).toBe("done_unseen");
-    expect(sidebarTaskState({ status: "failed", hasUnseen: true })).toBe("done_unseen");
-    // A waiting run has a request to read, even when it is an ordinary question rather than a
-    // connected-action approval.
-    expect(sidebarTaskState({ status: "waiting", hasUnseen: true })).toBe("done_unseen");
+    expect(sidebarTaskState({ status: "succeeded", hasUnseen: true, awaitingInput: false })).toBe(
+      "done_unseen",
+    );
+    expect(sidebarTaskState({ status: "failed", hasUnseen: true, awaitingInput: false })).toBe(
+      "done_unseen",
+    );
+  });
+
+  it("reports a waiting task as awaiting input, read or not", () => {
+    expect(sidebarTaskState({ status: "waiting", hasUnseen: true, awaitingInput: false })).toBe(
+      "awaiting_input",
+    );
+    // Reading the request is not answering it, so the row keeps saying so.
+    expect(sidebarTaskState({ status: "waiting", hasUnseen: false, awaitingInput: false })).toBe(
+      "awaiting_input",
+    );
+  });
+
+  it("reports a running task with a pending approval as awaiting input, not working", () => {
+    // The coding engine holds its run open while it polls for a permission decision, so the Task
+    // stays `running` even though nothing moves until the reader answers.
+    expect(sidebarTaskState({ status: "running", hasUnseen: false, awaitingInput: true })).toBe(
+      "awaiting_input",
+    );
   });
 
   it("reports a read task as seen", () => {
-    expect(sidebarTaskState({ status: "succeeded", hasUnseen: false })).toBe("done_seen");
+    expect(sidebarTaskState({ status: "succeeded", hasUnseen: false, awaitingInput: false })).toBe(
+      "done_seen",
+    );
   });
 
   it("withholds the dot from a canceled run, which has nothing that would clear it", () => {
-    expect(sidebarTaskState({ status: "canceled", hasUnseen: true })).toBe("done_seen");
+    expect(sidebarTaskState({ status: "canceled", hasUnseen: true, awaitingInput: false })).toBe(
+      "done_seen",
+    );
   });
 });
 
@@ -219,6 +261,7 @@ function chat(
   id: string,
   overrides: Partial<{
     activityState: "working" | "idle";
+    awaitingInput: boolean;
     archivedAt: string | null;
     pinnedAt: string | null;
     updatedAt: string;
@@ -227,6 +270,7 @@ function chat(
   return {
     id,
     activityState: "idle" as const,
+    awaitingInput: false,
     archivedAt: null,
     pinnedAt: null,
     updatedAt: "2026-08-25T12:00:00.000Z",
@@ -274,6 +318,7 @@ function taskView(id: string, overrides: Partial<SidebarTaskView> = {}): Sidebar
     name: `${id} name`,
     status: "succeeded",
     hasUnseen: false,
+    awaitingInput: false,
     updatedAt: "2026-08-25T12:00:00.000Z",
     ...overrides,
   };

@@ -20,6 +20,7 @@ import { Loader2, Plus, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { SettingsContent } from "@/components/SettingsChrome";
+import { ToolPermissionRow } from "@/components/ToolPermissionRow";
 import {
   archiveHeadlessPlugin,
   connectCustomMcp,
@@ -464,53 +465,39 @@ export function CustomMcpPluginDetail({
                 No tools are available yet. Refresh after adding tools to your server.
               </p>
             ) : (
-              <div className="divide-y divide-border rounded-lg border border-border">
-                {account.tools.map((tool: CustomMcpToolView) => (
-                  <div key={tool.name} className="flex items-start justify-between gap-4 p-4">
-                    <div className="min-w-0">
-                      <p className="break-words text-sm font-medium text-ink">{tool.name}</p>
-                      {tool.description ? (
-                        <p className="mt-1 text-xs text-ink-subtle">{tool.description}</p>
-                      ) : null}
-                    </div>
-                    <Select
-                      value={account.toolModes[tool.name] ?? "ask"}
+              <ul className="overflow-hidden rounded-lg border border-border">
+                {account.tools.map((tool: CustomMcpToolView) => {
+                  // A custom server has no capability group, so Ask is the only thing a tool can
+                  // fall back to. "Default" therefore means Ask, and the dot marks the tools the
+                  // user moved off it.
+                  const storedMode = account.toolModes[tool.name];
+                  return (
+                    <ToolPermissionRow
+                      key={tool.name}
+                      name={tool.name}
+                      description={tool.description ?? null}
+                      effectiveMode={storedMode ?? "ask"}
+                      inheritedMode="ask"
+                      inheritLabel="Default"
+                      overridden={Boolean(storedMode) && storedMode !== "ask"}
                       disabled={
                         pending || !status.enabled || !account.connected || editingCredentials
                       }
-                      onValueChange={(mode) =>
+                      onChange={(mode) =>
                         void run(async () =>
                           setStatus(
                             await setCustomMcpToolMode(plugin.name, {
                               tool: tool.name,
-                              mode: mode as "on" | "ask" | "off",
+                              mode: mode === "inherit" ? "ask" : mode,
                               revision: account.revision,
                             }),
                           ),
                         )
                       }
-                    >
-                      <SelectTrigger
-                        className="w-24 shrink-0"
-                        aria-label={`Permission for ${tool.name}`}
-                      >
-                        <SelectValue>
-                          {
-                            { ask: "Ask", on: "On", off: "Off" }[
-                              (account.toolModes[tool.name] ?? "ask") as "ask" | "on" | "off"
-                            ]
-                          }
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="ask">Ask</SelectItem>
-                        <SelectItem value="on">On</SelectItem>
-                        <SelectItem value="off">Off</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                ))}
-              </div>
+                    />
+                  );
+                })}
+              </ul>
             )}
             <p className="text-xs text-ink-subtle">
               Last checked {new Date(account.checkedAt).toLocaleString()}

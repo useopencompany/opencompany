@@ -11,6 +11,7 @@ import { taskHasReadableUpdate } from "@/lib/review-inbox";
 type SidebarChatCandidate = {
   id: string;
   activityState?: "working" | "idle";
+  awaitingInput?: boolean;
   archived?: boolean;
   archivedAt?: string | null;
   pinnedAt?: string | null;
@@ -26,19 +27,25 @@ export function selectSidebarChats<T extends SidebarChatCandidate>(
     .filter((chat) => chat.pinnedAt)
     .toSorted((a, b) => new Date(b.pinnedAt ?? 0).getTime() - new Date(a.pinnedAt ?? 0).getTime())
     .slice(0, PINNED_CHAT_LIMIT);
-  const working = openChats
-    .filter((chat) => !chat.pinnedAt && chat.activityState === "working")
+  // A chat blocked on an approval leads alongside a streaming one and, like a `waiting` Task,
+  // never ages out: the run is parked on the reader, so dropping it past the recency window would
+  // hide the one row they have to act on.
+  const unfinished = openChats
+    .filter((chat) => !chat.pinnedAt && isChatUnfinished(chat))
     .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
   const recent = openChats
     .filter(
       (chat) =>
-        !chat.pinnedAt &&
-        chat.activityState !== "working" &&
-        isRecentChatActivity(chat.updatedAt, now),
+        !chat.pinnedAt && !isChatUnfinished(chat) && isRecentChatActivity(chat.updatedAt, now),
     )
     .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 
-  return [...pinned, ...working, ...recent];
+  return [...pinned, ...unfinished, ...recent];
+}
+
+// The chat equivalent of `isTaskUnfinished`: mid-run, or parked on an approval the reader owes it.
+function isChatUnfinished(chat: Pick<SidebarChatCandidate, "activityState" | "awaitingInput">) {
+  return chat.activityState === "working" || Boolean(chat.awaitingInput);
 }
 
 // The Task the sidebar lists. It is deliberately narrower than the Tasks board's row: the sidebar
@@ -52,11 +59,16 @@ export type SidebarTaskView = {
   name: string;
   status: TaskStatus;
   hasUnseen: boolean;
+  // A run of this Task is parked on a pending approval or question. `waiting` covers the Task the
+  // runner parked for one; this also catches the coding engine that holds its run open while it
+  // polls for a permission decision, which leaves the Task `running`.
+  awaitingInput: boolean;
   updatedAt: string;
 };
 
 type SidebarTaskCandidate = {
   status: TaskStatus;
+  awaitingInput?: boolean;
   archivedAt?: string | null;
   updatedAt: string;
 };
@@ -74,11 +86,9 @@ export function selectSidebarTasks<T extends SidebarTaskCandidate>(
   now = Date.now(),
 ): T[] {
   const openTasks = tasks.filter((task) => !task.archivedAt);
-  const unfinished = openTasks
-    .filter((task) => isTaskUnfinished(task.status))
-    .toSorted(byUpdatedAtDescending);
+  const unfinished = openTasks.filter(isTaskCandidateUnfinished).toSorted(byUpdatedAtDescending);
   const recent = openTasks
-    .filter((task) => !isTaskUnfinished(task.status) && isRecentChatActivity(task.updatedAt, now))
+    .filter((task) => !isTaskCandidateUnfinished(task) && isRecentChatActivity(task.updatedAt, now))
     .toSorted(byUpdatedAtDescending);
 
   return [...unfinished, ...recent];
@@ -88,6 +98,10 @@ export function selectSidebarTasks<T extends SidebarTaskCandidate>(
 // approval. Distinct from `isTaskRunning`, which decides whether the row spins.
 export function isTaskUnfinished(status: TaskStatus) {
   return isTaskRunning(status) || status === "waiting";
+}
+
+function isTaskCandidateUnfinished(task: SidebarTaskCandidate) {
+  return isTaskUnfinished(task.status) || Boolean(task.awaitingInput);
 }
 
 /**
@@ -100,8 +114,16 @@ export function isTaskUnfinished(status: TaskStatus) {
  * a `waiting` one has an approval to answer, and both clear as soon as that is done. A canceled
  * run raises the same flag on its way out with neither, so a dot for it would be one nothing in
  * the product could ever turn off.
+ *
+ * Being blocked on the reader outranks both, and unlike the unread dot it does not clear when
+ * they look: only answering the request does. `waiting` and a pending approval are two records of
+ * the same situation — the runner parks the Task for the durable pause, the coding engine holds a
+ * `running` Task open while it polls — so the row says the same thing either way.
  */
-export function sidebarTaskState(task: Pick<SidebarTaskView, "status" | "hasUnseen">): ChatState {
+export function sidebarTaskState(
+  task: Pick<SidebarTaskView, "status" | "hasUnseen" | "awaitingInput">,
+): ChatState {
+  if (task.awaitingInput || task.status === "waiting") return "awaiting_input";
   if (isTaskRunning(task.status)) return "working";
   return task.hasUnseen && taskHasReadableUpdate(task.status) ? "done_unseen" : "done_seen";
 }
@@ -134,7 +156,7 @@ export function orderSidebarWorkItems(input: {
     title: chat.title,
     updatedAt: chat.updatedAt,
     state: chatSummaryState(chat),
-    unfinished: chat.activityState === "working",
+    unfinished: isChatUnfinished(chat),
     chat,
   }));
   const tasks = input.tasks.map<SidebarWorkItem>((task) => ({
@@ -143,7 +165,7 @@ export function orderSidebarWorkItems(input: {
     title: task.name,
     updatedAt: task.updatedAt,
     state: sidebarTaskState(task),
-    unfinished: isTaskUnfinished(task.status),
+    unfinished: isTaskCandidateUnfinished(task),
     task,
   }));
   return [...chats, ...tasks].toSorted((left, right) => {

@@ -34,7 +34,6 @@ import {
   FolderOpen,
   Inbox,
   Link2,
-  ListTodo,
   Loader2,
   Mail,
   Monitor,
@@ -71,8 +70,10 @@ import {
 } from "@/components/InferenceSettingsPanel";
 import { IntentPrefetchLink } from "@/components/IntentPrefetchLink";
 import { McpSetupGuide } from "@/components/McpSetupGuide";
+import { ModelProviderIcon } from "@/components/ModelProviderIcon";
 import { RepositorySettings } from "@/components/RepositorySettings";
 import {
+  SCOPE_FILTERS,
   ScopeBadge,
   ScopeField,
   type ScopeFilter,
@@ -80,12 +81,14 @@ import {
   type Scope as SkillScope,
 } from "@/components/ScopeControls";
 import { SettingsContent } from "@/components/SettingsChrome";
+import { StatusDot } from "@/components/StatusDot";
 import { Surface } from "@/components/Surface";
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
 import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
 import { useHydrated } from "@/components/useHydrated";
 import { useTaskRun } from "@/components/useTaskRun";
 import { useTaskSeenAcknowledgement } from "@/components/useTaskSeenAcknowledgement";
+import { WorkflowTemplatesButton } from "@/components/WorkflowTemplatesButton";
 import type { ChatSessionView } from "@/lib/chat-ui";
 import { getHeadlessWorkflows } from "@/lib/headless-automation-collections";
 import {
@@ -115,9 +118,9 @@ import {
   updateReviewInboxAction,
   updateSidebarProjectsAction,
   updateSubagentsAction,
-  updateTaskSpawningAction,
 } from "@/lib/user-preferences";
 import { DEFAULT_WORKFLOW_MODEL_TOKEN, WORKFLOW_MODEL_OPTIONS } from "@/lib/workflow-model-options";
+import type { WorkflowTemplateMissingPlugin } from "@/lib/workflow-templates";
 
 export function HomeRoute({
   chatId,
@@ -169,7 +172,7 @@ export function HomeRoute({
         archivedChats={data.archivedChats}
         codexConnected={data.codexConnected}
         claudeCodeConnected={data.claudeCodeConnected}
-        taskSpawningEnabled={data.featureFlags.taskSpawning}
+        sharedModelAccessEnabled={data.sharedModelAccessEnabled}
         autoModelRoutingEnabled={data.featureFlags.autoModelRouting}
         workspaceId={data.workspace.id}
         userWorkosId={data.user.workosUserId}
@@ -309,13 +312,6 @@ export function PreferencesSettingsRoute() {
           description="Create named bots for ongoing work and return to their conversations from the sidebar."
           checked={featureFlags.bots === true}
           update={updateBotsAction}
-        />
-        <BetaFeatureSwitch
-          icon={ListTodo}
-          label="Tasks & Workflows"
-          description="Fire workflows, run tracked background tasks, and schedule recurring routines."
-          checked={featureFlags.taskSpawning}
-          update={updateTaskSpawningAction}
         />
         <BetaFeatureSwitch
           icon={Sparkles}
@@ -532,42 +528,13 @@ function BrainSettingsRoute({ brain }: { brain: BrainSummaryView }) {
 
 export function TaskDetailRoute({ taskId }: { taskId: string }) {
   const run = useTaskRun(taskId);
-  const { featureFlags } = useAppData();
   // The route resolves a display id as well as a canonical id, so the acknowledgment keys off the
-  // run's own identifier rather than the one in the URL. A disabled workspace renders the beta
-  // notice instead of a result, so there is nothing there to acknowledge.
-  useTaskSeenAcknowledgement(featureFlags.taskSpawning ? (run?.task.id ?? null) : null);
-
-  if (!featureFlags.taskSpawning) return <TasksWorkflowsDisabledRoute />;
+  // run's own identifier rather than the one in the URL.
+  useTaskSeenAcknowledgement(run?.task.id ?? null);
 
   return (
     <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
       {run ? <TaskDetailPanel initialRun={run} /> : <TaskRouteSkeleton label="Loading task" />}
-    </main>
-  );
-}
-
-export function TasksWorkflowsDisabledRoute() {
-  return (
-    <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
-      <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
-        <div className="flex w-full max-w-[720px] flex-col gap-4 pb-24 pt-16 sm:pt-24">
-          <BackLink href="/" label="Chat" />
-          <h1 className="text-[24px] font-semibold leading-tight text-ink">
-            Tasks &amp; Workflows is a beta feature
-          </h1>
-          <p className="text-[13px] leading-5 text-ink-subtle">
-            Enable Tasks &amp; Workflows in Preferences to fire workflows, run background tasks, and
-            set up recurring routines.
-          </p>
-          <Link
-            href="/settings/preferences"
-            className="inline-flex w-fit rounded-md border border-border bg-surface px-3 py-2 text-[13px] font-medium text-ink hover:bg-surface-hover"
-          >
-            Open Preferences
-          </Link>
-        </div>
-      </div>
     </main>
   );
 }
@@ -734,15 +701,24 @@ export function WorkflowsRoute({
   workflows,
   workspaceId,
   canEdit,
+  ownerNames,
+  templateMissingPlugins,
 }: {
   workflows: WorkflowListItem[];
   workspaceId: string;
   canEdit: boolean;
+  /**
+   * Creator WorkOS id to display name, so each row can name its owner without a client fetch.
+   * `null` when the member list could not be loaded, which blanks the column instead of guessing.
+   */
+  ownerNames: Record<string, string> | null;
+  /** Required plugins each template is still missing, keyed by template id; `null` hides the hints. */
+  templateMissingPlugins: Record<string, WorkflowTemplateMissingPlugin[]> | null;
 }) {
   const router = useRouter();
   const data = useAppData();
   const [creating, setCreating] = useState(false);
-  const [scope, setScope] = useState<SkillScope>("company");
+  const [scopeFilter, setScopeFilter] = useState<ScopeFilter>("all");
   const [workflowToDelete, setWorkflowToDelete] = useState<WorkflowListItem | null>(null);
   const [deletedWorkflowIds, setDeletedWorkflowIds] = useState<ReadonlySet<string>>(new Set());
   const [isDeleting, startDeleting] = useTransition();
@@ -766,7 +742,9 @@ export function WorkflowsRoute({
     () => workflowRunStats(data.allTasks ?? data.tasks),
     [data.allTasks, data.tasks],
   );
-  const scopedWorkflows = visibleWorkflows.filter((workflow) => workflow.scope === scope);
+  const scopedWorkflows = visibleWorkflows.filter(
+    (workflow) => scopeFilter === "all" || workflow.scope === scopeFilter,
+  );
 
   const deleteWorkflow = () => {
     if (!workflowToDelete || isDeleting) return;
@@ -786,8 +764,8 @@ export function WorkflowsRoute({
   return (
     <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
       <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
-        <div className="flex w-full max-w-[1040px] flex-col gap-8 pb-24 pt-16 sm:pt-24">
-          <header className="flex items-start justify-between gap-4">
+        <div className="flex w-full max-w-[1040px] flex-col gap-8 pb-24 pt-10 sm:pt-12">
+          <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="flex flex-col gap-1.5">
               <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-ink">
                 Workflows
@@ -798,10 +776,16 @@ export function WorkflowsRoute({
               </p>
             </div>
             {canEdit ? (
-              <Button size="sm" onClick={() => setCreating(true)} className="shadow-sm">
-                <Plus size={14} strokeWidth={2} />
-                New workflow
-              </Button>
+              <div className="flex shrink-0 items-center gap-2">
+                <WorkflowTemplatesButton
+                  missingPlugins={templateMissingPlugins}
+                  scope={scopeFilter === "all" ? "company" : scopeFilter}
+                />
+                <Button size="sm" onClick={() => setCreating(true)} className="shadow-sm">
+                  <Plus size={14} strokeWidth={2} />
+                  New workflow
+                </Button>
+              </div>
             ) : null}
           </header>
 
@@ -811,27 +795,24 @@ export function WorkflowsRoute({
             </h2>
             <FilterPills
               label="Workflow scope"
-              value={scope}
-              onChange={setScope}
-              options={[
-                {
-                  value: "company",
-                  label: "Company",
-                  count: visibleWorkflows.filter((workflow) => workflow.scope === "company").length,
-                },
-                {
-                  value: "personal",
-                  label: "Personal",
-                  count: visibleWorkflows.filter((workflow) => workflow.scope === "personal")
-                    .length,
-                },
-              ]}
+              value={scopeFilter}
+              onChange={setScopeFilter}
+              options={SCOPE_FILTERS.map((filter) => ({
+                value: filter.value,
+                label: filter.label,
+                count:
+                  filter.value === "all"
+                    ? visibleWorkflows.length
+                    : visibleWorkflows.filter((workflow) => workflow.scope === filter.value).length,
+              }))}
             />
 
             {scopedWorkflows.length === 0 ? (
               <EmptyState
                 icon={Workflow}
-                title={`No ${scope} workflows yet`}
+                title={
+                  scopeFilter === "all" ? "No workflows yet" : `No ${scopeFilter} workflows yet`
+                }
                 description={
                   canEdit
                     ? "Create a workflow to automate a recurring job. Fire it with # in chat, and each run shows up as a Task."
@@ -843,17 +824,21 @@ export function WorkflowsRoute({
                 <table className="w-full min-w-[820px] table-fixed text-left">
                   <caption className="sr-only">Workflows and recent run activity</caption>
                   <colgroup>
-                    <col className="w-[28%]" />
-                    <col className="w-[19%]" />
-                    <col className="w-[22%]" />
-                    <col className="w-[13%]" />
+                    <col className="w-[26%]" />
                     <col className="w-[15%]" />
+                    <col className="w-[15%]" />
+                    <col className="w-[19%]" />
+                    <col className="w-[11%]" />
+                    <col className="w-[14%]" />
                     <col className="w-12" />
                   </colgroup>
                   <thead>
                     <tr className="border-b border-border-subtle text-[11.5px] font-medium text-ink-subtle">
                       <th scope="col" className="px-4 py-3 font-medium">
                         Name
+                      </th>
+                      <th scope="col" className="px-3 py-3 font-medium">
+                        Owner
                       </th>
                       <th scope="col" className="px-3 py-3 font-medium">
                         Model
@@ -878,6 +863,7 @@ export function WorkflowsRoute({
                         key={workflow.id}
                         workflow={workflow}
                         stats={runStats.get(workflow.slug)}
+                        ownerName={workflowOwnerName(workflow, ownerNames)}
                         canEdit={canEdit}
                         onDelete={() => setWorkflowToDelete(workflow)}
                       />
@@ -896,7 +882,7 @@ export function WorkflowsRoute({
           namePlaceholder="Weekly investor update"
           descriptionPlaceholder="What this workflow does"
           submitLabel="Create workflow"
-          initialScope={scope}
+          initialScope={scopeFilter === "all" ? "company" : scopeFilter}
           scopeHint={(scope) =>
             scope === "personal"
               ? "Only you can see and run it"
@@ -948,16 +934,19 @@ export function WorkflowsRoute({
 function WorkflowTableRow({
   workflow,
   stats,
+  ownerName,
   canEdit,
   onDelete,
 }: {
   workflow: WorkflowListItem;
   stats: { runCount: number; lastExecutedAt: string } | undefined;
+  ownerName: string;
   canEdit: boolean;
   onDelete: () => void;
 }) {
-  const modelLabel = workflowModelLabel(workflow);
+  const model = workflowModelPresentation(workflow);
   const triggerLabel = workflowTriggerLabel(workflow);
+  const statusLabel = workflow.status === "active" ? "Active" : "Draft";
 
   return (
     <tr className="group border-b border-border-subtle text-[13px] text-ink last:border-b-0 hover:bg-surface-hover/60">
@@ -966,15 +955,32 @@ function WorkflowTableRow({
           href={`/workflows/${encodeURIComponent(workflow.slug)}`}
           className="flex min-w-0 items-center gap-2 rounded-sm font-medium focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
         >
+          <span
+            role="img"
+            aria-label={statusLabel}
+            title={statusLabel}
+            className="inline-flex shrink-0 items-center"
+          >
+            <StatusDot status={workflow.status} />
+          </span>
           <span className="truncate" title={workflow.name}>
             {workflow.name}
           </span>
-          <ScopeBadge>{workflow.scope === "personal" ? "Personal" : "Company"}</ScopeBadge>
-          <ItemStatusBadge status={workflow.status} />
         </IntentPrefetchLink>
       </td>
-      <td className="truncate px-3 py-3.5 text-ink-muted" title={modelLabel}>
-        {modelLabel}
+      <td className="truncate px-3 py-3.5 text-ink-muted" title={ownerName}>
+        {ownerName}
+      </td>
+      <td className="px-3 py-3.5 text-ink-muted" title={model.label}>
+        <span className="flex min-w-0 items-center gap-1.5">
+          <ModelProviderIcon
+            modelId={model.modelId}
+            size={13}
+            strokeWidth={1.9}
+            className="shrink-0 text-ink-subtle"
+          />
+          <span className="truncate">{model.label}</span>
+        </span>
       </td>
       <td className="truncate px-3 py-3.5 text-ink-muted" title={triggerLabel}>
         {triggerLabel}
@@ -1038,19 +1044,38 @@ function WorkflowRowMenu({
   );
 }
 
-function workflowModelLabel(workflow: WorkflowListItem) {
-  const defaultLabel =
-    WORKFLOW_MODEL_OPTIONS.find((option) => option.token === DEFAULT_WORKFLOW_MODEL_TOKEN)?.label ??
-    "Default";
-  const labels = new Set(
-    workflow.steps.map((step) => {
-      const option = WORKFLOW_MODEL_OPTIONS.find((candidate) => candidate.token === step.model);
-      return option?.label ?? (step.model.trim() || defaultLabel);
-    }),
+// Workflows created before scopes carry no creator, and a creator who left the workspace is no
+// longer in the member list. Both still need a readable owner cell.
+function workflowOwnerName(workflow: WorkflowListItem, ownerNames: Record<string, string> | null) {
+  if (!workflow.createdByUserId) return "Workspace";
+  if (!ownerNames) return "—";
+  return ownerNames[workflow.createdByUserId] ?? "Former member";
+}
+
+// The Model cell shows one model per workflow: its label plus the provider mark. Steps can each
+// pick their own model, so a workflow that mixes them collapses to a count with no provider, and
+// an empty `modelId` falls back to the generic sparkle so the column stays aligned.
+function workflowModelPresentation(workflow: WorkflowListItem): {
+  label: string;
+  modelId: string;
+} {
+  const defaultOption = WORKFLOW_MODEL_OPTIONS.find(
+    (option) => option.token === DEFAULT_WORKFLOW_MODEL_TOKEN,
   );
-  if (labels.size === 0) return defaultLabel;
-  if (labels.size === 1) return Array.from(labels)[0]!;
-  return `${labels.size} models`;
+  const fallback = { label: defaultOption?.label ?? "Default", modelId: defaultOption?.id ?? "" };
+  const models = new Map<string, string>();
+  for (const step of workflow.steps) {
+    const option = WORKFLOW_MODEL_OPTIONS.find((candidate) => candidate.token === step.model);
+    if (option) models.set(option.label, option.id);
+    else if (step.model.trim()) models.set(step.model.trim(), "");
+    else models.set(fallback.label, fallback.modelId);
+  }
+  if (models.size === 0) return fallback;
+  if (models.size === 1) {
+    const [label, modelId] = Array.from(models)[0]!;
+    return { label, modelId };
+  }
+  return { label: `${models.size} models`, modelId: "" };
 }
 
 function workflowTriggerLabel(workflow: WorkflowListItem) {
@@ -1566,22 +1591,6 @@ function EditorField({ label, children }: { label: string; children: ReactNode }
       </span>
       {children}
     </div>
-  );
-}
-
-function ItemStatusBadge({ status }: { status: "draft" | "active" }) {
-  if (status === "active") {
-    return (
-      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-success/10 px-1.5 py-px text-[10.5px] font-medium leading-4 text-success">
-        <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-success" />
-        Active
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex shrink-0 items-center rounded-full bg-surface-muted px-1.5 py-px text-[10.5px] font-medium leading-4 text-ink-subtle">
-      Draft
-    </span>
   );
 }
 

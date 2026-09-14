@@ -163,7 +163,7 @@ export function createIdentityService(input: {
         avatarUrl: user.avatarUrl,
         timezone: user.timezone,
         botsEnabled: user.botsEnabled === true,
-        taskSpawningEnabled: user.taskSpawningEnabled,
+        taskSpawningEnabled: true as const,
         autoModelRoutingEnabled: user.autoModelRoutingEnabled,
         chatCapabilitiesBetaEnabled: user.chatCapabilitiesBetaEnabled,
         reviewInboxEnabled: user.reviewInboxEnabled,

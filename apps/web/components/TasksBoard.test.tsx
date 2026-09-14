@@ -7,7 +7,6 @@ import { TASK_BOARD_COLUMN_CAP, TasksBoardRoute } from "./TasksBoard";
 
 const appDataMock = vi.hoisted(() => ({
   featureFlags: {
-    taskSpawning: true,
     autoModelRouting: false,
     legacyBrain: false,
   },
@@ -99,7 +98,6 @@ vi.mock("@/components/AppDataProvider", () => ({
 vi.mock("@/components/Routes", () => ({
   formatRelativeTime: () => "2m ago",
   EmptyState: ({ title }: { title: string }) => <div>{title}</div>,
-  TasksWorkflowsDisabledRoute: () => <div>Tasks &amp; Workflows is a beta feature</div>,
 }));
 
 vi.mock("@/lib/headless-task-commands", () => ({
@@ -138,7 +136,6 @@ describe("TasksBoardRoute", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
-    appDataMock.featureFlags.taskSpawning = true;
     appDataMock.taskRows = [];
     appDataMock.tasksReady = true;
     activityRowsMock.rows = [];
@@ -695,14 +692,6 @@ describe("TasksBoardRoute", () => {
 
     await user.click(screen.getByRole("combobox", { name: "Filter tasks by workflow" }));
     expect(await screen.findByRole("option", { name: "#old-launch-flow" })).toBeInTheDocument();
-  });
-
-  it("shows the Tasks & Workflows beta gate when disabled", () => {
-    appDataMock.featureFlags.taskSpawning = false;
-
-    render(<TasksBoardRoute workflowNames={{}} />);
-
-    expect(screen.getByText("Tasks & Workflows is a beta feature")).toBeInTheDocument();
   });
 
   it("switches to a grouped list view and persists the choice per user", async () => {

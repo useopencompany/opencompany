@@ -135,6 +135,7 @@ export const ConversationSchema = z
     runtime: ConversationRuntimeSchema.nullable(),
     activityState: ConversationActivityStateSchema,
     hasUnseen: z.boolean(),
+    awaitingInput: z.boolean(),
     pinnedAt: TimestampSchema.nullable().optional(),
     createdAt: TimestampSchema,
     updatedAt: TimestampSchema,
@@ -506,6 +507,7 @@ export const IntegrationAccountReadModelSchema = z
       "render",
       "vercel",
       "signoz",
+      "dash0",
       "stripe",
       "latitude",
       "posthog",
@@ -559,6 +561,7 @@ export const ConversationReadModelSchema = ConversationReadModelV1Schema.extend(
   runtime: ConversationRuntimeSchema.nullable(),
   activityState: ConversationActivityStateSchema,
   hasUnseen: z.boolean(),
+  awaitingInput: z.boolean(),
   messageShapeEpoch: z.number().int().min(0),
 })
   .strict()
@@ -655,11 +658,13 @@ export const EngineRuntimeAccessEnvelopeSchema = z
   .strict()
   .openapi("EngineRuntimeAccessEnvelope");
 
-// The streamed Task projection carries the unread flag that the Task resource itself does not:
-// it belongs to the Task's conversation and only ever matters to surfaces reading a live queue.
-export const TaskReadModelSchema = TaskSchema.extend({ hasUnseen: z.boolean() }).openapi(
-  "TaskReadModelV1",
-);
+// The streamed Task projection carries the unread and awaiting-input flags that the Task resource
+// itself does not: both belong to the Task's conversation and only ever matter to surfaces reading
+// a live queue.
+export const TaskReadModelSchema = TaskSchema.extend({
+  hasUnseen: z.boolean(),
+  awaitingInput: z.boolean(),
+}).openapi("TaskReadModelV1");
 export const TaskActivityAuthorSchema = z.enum(["user", "orchestrator", "system"]);
 export const TaskActivityKindSchema = z.enum([
   "created",
@@ -3873,7 +3878,8 @@ export const IdentityUserSchema = z
     avatarUrl: z.string().max(4_096).nullable(),
     timezone: z.string().min(1).max(100),
     botsEnabled: z.boolean().optional(),
-    taskSpawningEnabled: z.boolean(),
+    /** @deprecated Tasks & Workflows is always enabled. */
+    taskSpawningEnabled: z.literal(true),
     autoModelRoutingEnabled: z.boolean(),
     chatCapabilitiesBetaEnabled: z.boolean(),
     reviewInboxEnabled: z.boolean(),
@@ -3938,7 +3944,8 @@ export const UserPreferencesSchema = z
   .object({
     botsEnabled: z.boolean(),
     timezone: z.string().min(1).max(100),
-    taskSpawningEnabled: z.boolean(),
+    /** @deprecated Tasks & Workflows is always enabled. */
+    taskSpawningEnabled: z.literal(true),
     /** @deprecated Wiki is always enabled. */
     wikiEnabled: z.literal(true),
     taskViewMode: TaskViewModeSchema,
@@ -3956,6 +3963,7 @@ export const UpdateUserPreferencesBodySchema = z
   .object({
     botsEnabled: z.boolean().optional(),
     timezone: z.string().min(1).max(100).optional(),
+    /** @deprecated Accepted for compatibility and ignored; Tasks & Workflows is always enabled. */
     taskSpawningEnabled: z.boolean().optional(),
     /** @deprecated Accepted for compatibility and ignored; Wiki is always enabled. */
     wikiEnabled: z.boolean().optional(),
@@ -4130,6 +4138,7 @@ export const PersonalIntegrationProviderSchema = z.enum([
   "render",
   "vercel",
   "signoz",
+  "dash0",
   "latitude",
   "neon",
   "supabase",
@@ -4149,6 +4158,7 @@ export const IntegrationAccountSchema = z
     statusReason: z.string().max(2_000).nullable(),
     scopes: z.array(z.string().max(512)).max(1_000),
     capabilityModes: z.record(z.string(), z.unknown()),
+    toolModes: z.record(z.string(), z.unknown()),
   })
   .strict()
   .openapi("IntegrationAccount");
@@ -4258,6 +4268,25 @@ export const SetIntegrationCapabilityModeBodySchema = z
   .object({ mode: z.string().min(1).max(16) })
   .strict()
   .openapi("SetIntegrationCapabilityModeBody");
+
+export const SetIntegrationToolModeBodySchema = z
+  .object({ mode: z.string().min(1).max(16) })
+  .strict()
+  .openapi("SetIntegrationToolModeBody");
+
+export const IntegrationToolModeEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        integrationId: IntegrationAccountIdSchema,
+        toolId: z.string().min(1).max(128),
+        mode: z.enum(["on", "ask", "off", "inherit"]),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("IntegrationToolModeEnvelope");
 
 export const IntegrationCapabilityModeEnvelopeSchema = z
   .object({
@@ -4631,6 +4660,41 @@ export const InfisicalAuthFlowEnvelopeSchema = z
   })
   .strict()
   .openapi("InfisicalAuthFlowEnvelope");
+
+export const DopplerAuthStatusSchema = z
+  .object({
+    status: z.enum(["connected", "needs_reauth", "disconnected"]).nullable(),
+    statusReason: z.string().nullable(),
+    accountName: z.string().nullable(),
+    lastValidatedAt: TimestampSchema.nullable(),
+  })
+  .strict()
+  .openapi("DopplerAuthStatus");
+
+export const DopplerAuthStatusEnvelopeSchema = z
+  .object({ data: DopplerAuthStatusSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("DopplerAuthStatusEnvelope");
+
+export const DopplerAuthFlowSchema = z
+  .object({
+    id: EngineAuthFlowIdSchema,
+    status: z.enum(["pending", "link_ready", "completed", "failed", "expired"]),
+    loginUrl: z.string().nullable(),
+    userCode: z.string().nullable(),
+    statusReason: z.string().nullable(),
+    expiresAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("DopplerAuthFlow");
+
+export const DopplerAuthFlowEnvelopeSchema = z
+  .object({
+    data: z.object({ flow: DopplerAuthFlowSchema }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("DopplerAuthFlowEnvelope");
 
 export type ConversationDto = z.infer<typeof ConversationSchema>;
 export type ConversationRuntimeDto = z.infer<typeof ConversationRuntimeSchema>;

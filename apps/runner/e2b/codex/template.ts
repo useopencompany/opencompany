@@ -12,6 +12,7 @@ import {
   CODEX_CLI_PACKAGE,
   CODEX_CLI_VERSION,
 } from "../../src/codex-version";
+import { DOPPLER_INSTALL_COMMAND } from "../../src/doppler-version";
 import {
   INFISICAL_CLI_LINUX_AMD64_SHA256,
   INFISICAL_CLI_VERSION,
@@ -236,4 +237,5 @@ export const template = Template()
     ].join(" && "),
     user,
   )
-  .runCmd(["id -nG | tr ' ' '\\n' | grep -qx docker", "docker version"].join(" && "), user);
+  .runCmd(["id -nG | tr ' ' '\\n' | grep -qx docker", "docker version"].join(" && "), user)
+  .runCmd(DOPPLER_INSTALL_COMMAND, root);
