@@ -343,7 +343,6 @@ function ReviewChatConversation({
   onClose: () => void;
 }) {
   const data = useAppData();
-  const userName = data.user.firstName?.trim() || data.user.email.split("@")[0] || "there";
   // The sidebar list is bounded by recency, so an older unread chat is missing from it. The queue
   // item carries everything needed to open the conversation; the summary only sharpens it.
   const summary = data.recentChats.find((chat) => chat.id === conversationId) ?? null;
@@ -371,7 +370,6 @@ function ReviewChatConversation({
       key={data.activeBrain?.id ?? "no-brain"}
       tasks={data.tasks}
       allTasks={data.allTasks}
-      schedules={data.schedules}
       defaultModel={DEFAULT_MODEL}
       initialChat={initialChat}
       recentChats={data.recentChats}
@@ -381,7 +379,6 @@ function ReviewChatConversation({
       taskSpawningEnabled={data.featureFlags.taskSpawning}
       autoModelRoutingEnabled={data.featureFlags.autoModelRouting}
       workspaceId={data.workspace.id}
-      userName={userName}
       userWorkosId={data.user.workosUserId}
       // Closing this pane returns to the list rather than navigating home and cancelling a run
       // that is still going; the queue, not the chat route, is where the reader came from.

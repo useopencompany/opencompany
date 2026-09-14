@@ -108,7 +108,6 @@ describe("TaskDetailPanel", () => {
     expect(mocks.surfaceProps).toMatchObject({
       taskSpawningEnabled: true,
       workspaceId: "workspace_1",
-      userName: "Ada",
       userWorkosId: "user_1",
     });
   });
