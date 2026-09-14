@@ -53,23 +53,17 @@ export function setGroupMode(
   group: PrototypeGroup,
   mode: CapabilityMode,
 ): PrototypeState {
-  const groups = { ...state.groups };
-  // Storage stays sparse: selecting the registry default drops the key instead of writing it.
-  if (mode === group.defaultMode) delete groups[group.id];
-  else groups[group.id] = mode;
-  return { ...state, groups };
+  // Matches applyIntegrationCapabilityMode, which merges the chosen mode in and never deletes a
+  // key the user has touched.
+  return { ...state, groups: { ...state.groups, [group.id]: mode } };
 }
 
-export function setToolMode(
-  state: PrototypeState,
-  group: PrototypeGroup,
-  toolId: string,
-  mode: ToolMode,
-): PrototypeState {
+export function setToolMode(state: PrototypeState, toolId: string, mode: ToolMode): PrototypeState {
   const tools = { ...state.tools };
-  // Choosing the value the tool already inherits is not an exception, so the "custom" marker
-  // can never claim a difference that does not exist.
-  if (mode === "inherit" || mode === groupMode(state, group)) delete tools[toolId];
+  // Only "Use group" clears a tool. Pinning a tool to the mode it currently inherits still counts,
+  // because the user is saying "keep this one here" — and a later group change must not quietly
+  // undo that.
+  if (mode === "inherit") delete tools[toolId];
   else tools[toolId] = mode;
   return { ...state, tools };
 }

@@ -19,28 +19,48 @@ const empty: PrototypeState = { groups: {}, tools: {} };
 describe("tool permission resolution", () => {
   it("inherits the group until a tool is pinned", () => {
     expect(effectiveToolMode(empty, organize, trashThread)).toBe("ask");
-    const state = setGroupMode(empty, organize, "on");
-    expect(effectiveToolMode(state, organize, trashThread)).toBe("on");
+    expect(effectiveToolMode(setGroupMode(empty, organize, "on"), organize, trashThread)).toBe(
+      "on",
+    );
   });
 
   it("lets a pinned tool stay stricter than an On group", () => {
-    const state = setToolMode(setGroupMode(empty, organize, "on"), organize, trashThread, "ask");
+    const state = setToolMode(setGroupMode(empty, organize, "on"), trashThread, "ask");
     expect(effectiveToolMode(state, organize, trashThread)).toBe("ask");
     expect(effectiveToolMode(state, organize, labelThread)).toBe("on");
   });
 
   it("lets a pinned tool stay looser than an Off group", () => {
-    const state = setToolMode(setGroupMode(empty, organize, "off"), organize, labelThread, "on");
+    const state = setToolMode(setGroupMode(empty, organize, "off"), labelThread, "on");
     expect(effectiveToolMode(state, organize, labelThread)).toBe("on");
     expect(effectiveToolMode(state, organize, trashThread)).toBe("off");
   });
 
-  it("keeps overrides when the group changes, so an explicit decision is never dropped", () => {
-    const pinned = setToolMode(empty, organize, trashThread, "off");
+  it("keeps a pin that currently matches its group, so widening the group cannot undo it", () => {
+    const pinned = setToolMode(empty, trashThread, "ask");
+    expect(overriddenToolIds(pinned, organize)).toEqual([trashThread]);
     const widened = setGroupMode(pinned, organize, "on");
-    expect(effectiveToolMode(widened, organize, trashThread)).toBe("off");
-    expect(overriddenToolIds(widened, organize)).toEqual([trashThread]);
-    expect(overriddenToolIds(clearGroupOverrides(widened, organize), organize)).toEqual([]);
+    expect(effectiveToolMode(widened, organize, trashThread)).toBe("ask");
+    expect(effectiveToolMode(widened, organize, labelThread)).toBe("on");
+  });
+
+  it("clears a tool back to its group only through Use group", () => {
+    const pinned = setToolMode(setGroupMode(empty, organize, "on"), trashThread, "off");
+    const released = setToolMode(pinned, trashThread, "inherit");
+    expect(overriddenToolIds(released, organize)).toEqual([]);
+    expect(effectiveToolMode(released, organize, trashThread)).toBe("on");
+  });
+
+  it("resets every exception in one group without touching the group mode", () => {
+    const state = setToolMode(
+      setToolMode(setGroupMode(empty, organize, "on"), trashThread, "off"),
+      labelThread,
+      "ask",
+    );
+    expect(overriddenToolIds(state, organize)).toEqual([labelThread, trashThread]);
+    const reset = clearGroupOverrides(state, organize);
+    expect(overriddenToolIds(reset, organize)).toEqual([]);
+    expect(groupMode(reset, organize)).toBe("on");
   });
 });
 
@@ -49,27 +69,19 @@ describe("persisted payload", () => {
     expect(persistedPayload(empty)).toEqual({});
   });
 
-  it("drops a group set back to its registry default", () => {
+  it("records a group the user touched, the way applyIntegrationCapabilityMode does", () => {
     const state = setGroupMode(setGroupMode(empty, organize, "on"), organize, organize.defaultMode);
-    expect(persistedPayload(state)).toEqual({});
+    expect(persistedPayload(state)).toEqual({ write: "ask" });
     expect(groupMode(state, organize)).toBe("ask");
   });
 
-  it("does not record a tool set to the value it already inherits", () => {
-    const state = setToolMode(empty, organize, trashThread, "ask");
-    expect(persistedPayload(state)).toEqual({});
-  });
-
-  it("drops an override once the group catches up to it", () => {
-    const pinned = setToolMode(empty, organize, labelThread, "on");
-    expect(persistedPayload(pinned)).toEqual({ tools: { [labelThread]: "on" } });
-    // Re-selecting the same value after the group moved normalizes back to inherit.
-    const widened = setToolMode(setGroupMode(pinned, organize, "on"), organize, labelThread, "on");
-    expect(persistedPayload(widened)).toEqual({ write: "on" });
-  });
-
   it("stores groups and tool exceptions side by side", () => {
-    const state = setToolMode(setGroupMode(empty, organize, "on"), organize, trashThread, "off");
+    const state = setToolMode(setGroupMode(empty, organize, "on"), trashThread, "off");
     expect(persistedPayload(state)).toEqual({ write: "on", tools: { [trashThread]: "off" } });
+  });
+
+  it("drops the tools key once the last exception is released", () => {
+    const state = setToolMode(setToolMode(empty, trashThread, "off"), trashThread, "inherit");
+    expect(persistedPayload(state)).toEqual({});
   });
 });

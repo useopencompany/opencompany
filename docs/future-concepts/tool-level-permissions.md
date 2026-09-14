@@ -60,8 +60,10 @@ Resolution is one line: `effective = override ?? groupMode`. The explicit tool s
 directions. That is the only rule a user has to hold, and it matches how people already read
 specific-beats-general settings.
 
-Setting a tool to the value it already inherits is normalized back to `inherit`, so a "custom"
-marker never lies.
+Only `Use group` releases a tool. Pinning a tool to the mode it currently inherits still counts as
+an exception, because the user is saying "keep this one here" — and a later group change must not
+quietly undo that. So the "custom" marker means *set by hand*, not *differs from its group*, which
+is both the truthful reading and the one that keeps a decision from evaporating.
 
 ### Storage
 

@@ -266,7 +266,7 @@ function ToolModeSelect({
   return (
     <Select
       value={overridden ? effective : "inherit"}
-      onValueChange={(next) => setState(setToolMode(state, group, toolId, next as ToolMode))}
+      onValueChange={(next) => setState(setToolMode(state, toolId, next as ToolMode))}
     >
       <SelectTrigger
         aria-label={`Permission for ${toolName}`}
@@ -308,7 +308,7 @@ function ApprovalSection({
   const decide = (next: string) => {
     onChoose(next);
     if (next === "always_tool") {
-      setState(setToolMode(state, APPROVAL_GROUP, APPROVAL_TOOL_ID, "on"));
+      setState(setToolMode(state, APPROVAL_TOOL_ID, "on"));
     } else if (next === "always_group") {
       setState(setGroupMode(state, APPROVAL_GROUP, "on"));
     }
@@ -396,8 +396,9 @@ function PersistedSection({ state, onReset }: { state: PrototypeState; onReset: 
           </h2>
           <p className="text-[12px] leading-4 text-ink-subtle">
             The existing <code className="font-mono text-[11.5px]">capability_modes</code> jsonb,
-            plus a <code className="font-mono text-[11.5px]">tools</code> key. Defaults and
-            inherited tools write nothing, so no migration is needed.
+            plus a <code className="font-mono text-[11.5px]">tools</code> key. Inherited tools write
+            nothing, so no migration is needed and an untouched connection stores what it does
+            today.
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={onReset}>
