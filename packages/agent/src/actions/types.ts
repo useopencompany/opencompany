@@ -29,6 +29,7 @@ export type ActionProviderId =
   | "render"
   | "vercel"
   | "signoz"
+  | "dash0"
   | "fathom"
   | "infisical"
   | "x_account";

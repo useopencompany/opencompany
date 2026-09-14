@@ -13,7 +13,9 @@ import {
   AttioPluginDetail,
   BetterStackPluginDetailView,
   betterStackToolsStateFromPlugin,
+  Dash0PluginDetail,
   defaultAttioToolsState,
+  defaultDash0ToolsState,
   defaultFathomToolsState,
   defaultHubSpotToolsState,
   defaultLatitudeToolsState,
@@ -367,6 +369,7 @@ const appData = vi.hoisted(() => ({
           capabilityModes: { query: "ask", draft: "ask", write: "ask" },
         },
       ],
+      dash0: [],
       signoz: [
         {
           integrationId: "gint_signoz",
@@ -1683,6 +1686,29 @@ describe("Linear plugin settings", () => {
     expect(html).toContain("Read SigNoz documentation");
     expect(html).toContain("Inspect observability data");
     expect(html).toContain("Manage SigNoz");
+  });
+
+  it("maps the personal Dash0 connection onto the official plugin surface", () => {
+    const dash0Plugin = {
+      ...plugin,
+      id: "plugin_dash0",
+      name: "dash0",
+      manifest: { name: "dash0", description: "Investigate Dash0 telemetry." },
+      source: { ...plugin.source, path: "dash0" },
+    } satisfies PluginInstallationDto;
+    const html = renderToString(
+      <Dash0PluginDetail
+        pluginState={{ status: "ready", plugin: dash0Plugin }}
+        toolsState={defaultDash0ToolsState()}
+        canEdit
+      />,
+    );
+
+    expect(html).toContain("AWS Ireland");
+    expect(html).toContain("Other regions are not supported");
+    expect(html).toContain("Read Agent0 investigations");
+    expect(html).toContain("Inspect observability data");
+    expect(html).toContain("Run paid Agent0 investigations");
   });
 
   it("maps the dedicated Fathom MCP connection onto the official plugin surface", () => {

@@ -613,6 +613,25 @@ export function SigNozPluginDetail({
   );
 }
 
+export function Dash0PluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.dash0}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
 export function XPluginDetail({
   pluginState,
   canEdit,
@@ -2325,4 +2344,8 @@ function formatDateTime(value: string) {
 
 function errorMessage(value: unknown) {
   return value instanceof Error ? value.message : "Something went wrong.";
+}
+
+export function defaultDash0ToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("dash0");
 }

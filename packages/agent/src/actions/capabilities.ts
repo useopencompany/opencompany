@@ -488,6 +488,28 @@ export const PROVIDER_CAPABILITIES: Partial<
       defaultMode: "off",
     },
   ],
+  dash0: [
+    {
+      id: "query",
+      label: "Inspect observability data",
+      description:
+        "Read datasets, metrics, logs, and failed checks, which may contain sensitive data.",
+      defaultMode: "ask",
+    },
+    {
+      id: "read",
+      label: "Read Agent0 investigations",
+      description: "Read investigation threads and wait for their results.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Run paid Agent0 investigations",
+      description:
+        "Start or continue Agent0 work that consumes Dash0 credits and may use outbound network access.",
+      defaultMode: "off",
+    },
+  ],
   signoz: [
     {
       id: "read",

@@ -55,7 +55,9 @@ const mocks = vi.hoisted(() => ({
   getSlackState: vi.fn(),
   loadSlackConnection: vi.fn(),
   getSigNozState: vi.fn(),
+  getDash0State: vi.fn(),
   loadSigNozConnection: vi.fn(),
+  loadDash0Connection: vi.fn(),
   getStripeState: vi.fn(),
   loadStripeConnection: vi.fn(),
   getXState: vi.fn(),
@@ -201,6 +203,11 @@ vi.mock("./integrations/signoz-mcp", () => ({
   SIGNOZ_MCP_ENDPOINT_URL: "https://mcp.us.signoz.cloud/mcp",
   getSigNozIntegrationState: mocks.getSigNozState,
   loadSigNozMcpWorkerConnection: mocks.loadSigNozConnection,
+}));
+vi.mock("./integrations/dash0-mcp", () => ({
+  DASH0_MCP_ENDPOINT_URL: "https://api.eu-west-1.aws.dash0.com/mcp",
+  getDash0IntegrationState: mocks.getDash0State,
+  loadDash0McpWorkerConnection: mocks.loadDash0Connection,
 }));
 vi.mock("./integrations/stripe", () => ({
   STRIPE_MCP_ENDPOINT_URL: "https://mcp.stripe.com",
@@ -871,6 +878,51 @@ describe("plugin gateway registration cache", () => {
       }),
     ]);
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
+  it("binds Dash0 credentials only to the reviewed AWS Ireland endpoint", async () => {
+    mocks.listRegistrations.mockResolvedValueOnce([
+      record({
+        pluginName: "dash0",
+        pluginLabel: "dash0",
+        pluginDescription: "Dash0 plugin tools.",
+        connectionProvider: "dash0",
+        server: {
+          name: "dash0",
+          type: "streamable-http",
+          url: "https://api.eu-west-1.aws.dash0.com/mcp",
+          headers: {},
+        },
+        refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+      }),
+    ]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:dash0:dash0",
+        connectionProvider: "dash0",
+        getState: mocks.getDash0State,
+        loadConnection: mocks.loadDash0Connection,
+      }),
+    ]);
+
+    for (const url of [
+      "https://api.us-west-2.aws.dash0.com/mcp",
+      "https://api.eu-west-1.aws.dash0.com.evil.example/mcp",
+      "https://api.eu-west-1.aws.dash0.com/mcp?target=other",
+      "https://api.eu-west-1.aws.dash0.com/other",
+      "http://api.eu-west-1.aws.dash0.com/mcp",
+      "https://user:password@api.eu-west-1.aws.dash0.com/mcp",
+    ]) {
+      mocks.listRegistrations.mockResolvedValueOnce([
+        record({
+          pluginName: "dash0",
+          connectionProvider: "dash0",
+          server: { name: "dash0", type: "streamable-http", url, headers: {} },
+        }),
+      ]);
+      await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+    }
   });
 
   it("binds PostHog credentials only to the reviewed tool-filtered endpoint", async () => {
