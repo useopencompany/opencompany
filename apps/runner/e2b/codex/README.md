@@ -87,7 +87,9 @@ docker run --rm hello-world
 
 ## Rollout
 
-After the build and a passing soak, set all three aliases in Infisical (`prod` `/runner`):
+After the build and a passing soak, set all three aliases in Infisical (`prod` `/runner`). They
+are declared on the `opencompany-runner` service in `render.yaml` with `sync: false`, so Render
+takes them from the environment group rather than the blueprint:
 
 ```
 OPENCOMPANY_CODEX_E2B_TEMPLATE_SMALL=opencompany-codex-toolbox-small
