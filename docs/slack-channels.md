@@ -2,10 +2,12 @@
 
 Workspace admins install the workspace bot in **Settings → Channels → Slack**. This is separate
 from every member's personal Slack plugin. Invite the bot to a public, unshared channel, then put
-the destination in normal workflow instructions: “Post the investigation summary in #product.”
-There is no destination picker in the workflow editor.
+the destination in normal workflow instructions: “Post the investigation summary in #product with
+the opencompany Slack bot.” There is no destination picker in the workflow editor.
 
-`post_slack_message` is available to workflow runtimes. It queues a root post with a stable
+`opencompany_slack_bot_send_message` is available to workflow runtimes. It is named after the
+phrase people write in instructions so the model picks it over a member's personal Slack plugin
+action, which can also post messages. It queues a root post with a stable
 `messageKey`; each successful root creates a 30-day subscription to the workflow's existing
 Conversation. Slack replies become Task follow-up Messages and Runs through the existing Task
 repository. The original Task, Conversation, harness, artifacts, and runtime references remain;
@@ -13,11 +15,15 @@ a reply never starts another workflow. While idle, the subscription is `waiting`
 uses its normal durable idle/checkpoint lifecycle. No engine process is kept alive for Slack.
 
 Only plain text replies in the exact subscribed `(workspace, team, channel, root timestamp)`
-are eligible. Before execution the worker rechecks public/unshared channel access, resolves the
-Slack user's email, and requires an unambiguous opencompany workspace membership. Bots, guests,
-DMs, mentions outside a subscribed thread, edits, attachments, and untracked threads are ignored.
+are eligible. Anyone who can post a plain text reply in the subscribed Slack thread can continue the work,
+including guests and people without an opencompany account. The worker rechecks public/unshared
+channel access and filters bots and deleted users. Follow-up Runs use the workflow owner’s
+existing authority, connected tools, context, and artifacts; the prompt attributes the Slack
+sender by ID. The owner must still belong to the opencompany workspace. No sender email match
+is required. DMs, mentions outside a subscribed thread, edits, attachments, and untracked threads
+are ignored.
 A paused Run awaiting approval stays paused; later Slack replies wait. Expired, disconnected,
-archived, or closed work cannot silently restart. Authorized replies to a closed thread receive
+archived, or closed work cannot silently restart. Human replies to a closed thread receive
 an explicit closed-thread response. Disconnecting permanently closes existing subscriptions;
 reconnecting enables new workflow posts.
 
@@ -47,7 +53,7 @@ Use the existing `OPENCOMPANY_SLACK_BOT_*` credentials. OAuth still uses
 `/api/integrations/slack-bot/start` and `/api/integrations/slack-bot/callback`; signed events use
 `/webhooks/slack-bot/events` on the API. Subscribe to `message.channels`, `app_uninstalled`, and
 `tokens_revoked`. Required bot scopes: `chat:write`, `channels:read`, `channels:history`,
-`users:read`, and `users:read.email`. New installs no longer request DM, private-channel, mention,
+and `users:read`. New installs no longer request DM, private-channel, mention,
 or reaction scopes. Old grants may remain until the Slack app is reinstalled; ingress ignores
 those event types. Stop configuring the legacy Wiki answer bot's Brain destinations.
 
@@ -60,3 +66,8 @@ Migration `0282_durable_session_subscriptions` is additive. Deploy it before the
 runner. Application rollback can retain these tables and their queued data. Rolling back the
 API also restores legacy bot ingress behavior, so disable Slack event delivery during rollback
 if that behavior is unwanted. Do not drop the tables while subscriptions or deliveries are active.
+
+Migration `0284_slack_thread_participants` updates the subscription policy default and existing
+Slack thread policy labels. It preserves subscriptions and queued events. Rollback can restore
+`workspace_member` policy labels alongside the previous worker. Previously ignored replies stay
+ignored; a new reply is needed to resume those threads.

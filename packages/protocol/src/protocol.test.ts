@@ -222,6 +222,7 @@ describe("headless protocol", () => {
       "/v1/brains/{brainId}/slack-bot/channels",
       "/v1/integration-accounts/{integrationId}/usage",
       "/v1/integration-accounts/{integrationId}/capability-modes/{capabilityId}",
+      "/v1/integration-accounts/{integrationId}/tool-modes/{toolId}",
       "/v1/actions/{actionId}/permissions/always-allow",
       "/v1/integration-accounts/{integrationId}",
       "/v1/engine-auth/claude-code",

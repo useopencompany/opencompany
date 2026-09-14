@@ -171,9 +171,9 @@ export function Sidebar({
   // The Tasks row hands the current-page claim to the Task's own row, but only when the list
   // actually holds one: an older or archived Task has no row, and the page still has to say where
   // the reader is.
-  const openTaskHasRow =
-    featureFlags.taskSpawning &&
-    sidebarTasks.some((task) => isTaskRouteActive(pathname, taskHref(task.displayId)));
+  const openTaskHasRow = sidebarTasks.some((task) =>
+    isTaskRouteActive(pathname, taskHref(task.displayId)),
+  );
   const workflowsActive = pathname === "/workflows" || pathname.startsWith("/workflows/");
   // `/wiki/sources` and `/wiki/import` are static routes under /wiki, not wikis, so neither marks
   // a row as current. Bare `/wiki` redirects, so it is only ever in flight.
@@ -240,23 +240,19 @@ export function Sidebar({
               count={reviewCount}
             />
           ) : null}
-          {featureFlags.taskSpawning ? (
-            <>
-              <SidebarNavRow
-                href="/tasks"
-                icon={ListTodo}
-                label="Tasks"
-                active={tasksActive}
-                current={tasksActive && !openTaskHasRow}
-              />
-              <SidebarNavRow
-                href="/workflows"
-                icon={Workflow}
-                label="Workflows"
-                active={workflowsActive}
-              />
-            </>
-          ) : null}
+          <SidebarNavRow
+            href="/tasks"
+            icon={ListTodo}
+            label="Tasks"
+            active={tasksActive}
+            current={tasksActive && !openTaskHasRow}
+          />
+          <SidebarNavRow
+            href="/workflows"
+            icon={Workflow}
+            label="Workflows"
+            active={workflowsActive}
+          />
           {!mcpSetup.completedAt ? (
             <SidebarNavRow
               href="/settings/mcp"
@@ -502,11 +498,9 @@ function SidebarWorkList() {
   // which of two copies of a row is the real one.
   const filedInProject = (conversationId: string) => projects.membership.has(conversationId);
   const pinnedChats = recentChats.filter((chat) => isPinned(chat) && !filedInProject(chat.id));
-  // Tasks follow the same flag as the Tasks nav row.
-  const showTasks = featureFlags.taskSpawning;
   const workItems = orderSidebarWorkItems({
     chats: recentChats.filter((chat) => !isPinned(chat) && !filedInProject(chat.id)),
-    tasks: showTasks ? sidebarTasks.filter((task) => !filedInProject(task.conversationId)) : [],
+    tasks: sidebarTasks.filter((task) => !filedInProject(task.conversationId)),
   });
 
   // The row goes on the click. The write and the projection behind it take about a second, and
@@ -640,7 +634,7 @@ function SidebarWorkList() {
     for (const conversationId of project.conversationIds) {
       const task = tasksByConversation.get(conversationId);
       if (task) {
-        if (showTasks) tasks.push(task);
+        tasks.push(task);
         continue;
       }
       const chat = chatsById.get(conversationId);

@@ -123,7 +123,6 @@ function CanonicalTaskDetailView({
       archivedChats={data.archivedChats}
       codexConnected={data.codexConnected}
       claudeCodeConnected={data.claudeCodeConnected}
-      taskSpawningEnabled={data.featureFlags.taskSpawning}
       workspaceId={data.workspace.id}
       userWorkosId={data.user.workosUserId}
       {...pane}
@@ -168,7 +167,6 @@ function LegacyTaskDetailPanel({
       archivedChats={data.archivedChats}
       codexConnected={data.codexConnected}
       claudeCodeConnected={data.claudeCodeConnected}
-      taskSpawningEnabled={data.featureFlags.taskSpawning}
       workspaceId={data.workspace.id}
       userWorkosId={data.user.workosUserId}
       {...pane}

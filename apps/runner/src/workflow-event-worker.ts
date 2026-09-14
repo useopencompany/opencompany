@@ -61,7 +61,6 @@ export async function createNextWorkflowEventTask(
               ON member.user_workos_id = actor_user.workos_user_id
              AND member.workspace_id = event.workspace_id
             WHERE actor_user.workos_user_id = event.user_workos_id
-              AND actor_user.task_spawning_enabled = true
               AND actor_user.onboarded_at IS NOT NULL
               AND EXISTS (
                 SELECT 1

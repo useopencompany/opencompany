@@ -71,8 +71,7 @@ describe("Postgres Task repository", () => {
     restoreDatabase = await snapshotPGliteSchema(async (database) => {
       await database.exec(BASE_SCHEMA);
       await database.exec(`
-      INSERT INTO goat.users (workos_user_id, task_spawning_enabled)
-      VALUES ('migration_user', true);
+      INSERT INTO goat.users (workos_user_id) VALUES ('migration_user');
       INSERT INTO goat.workspaces (id) VALUES ('migration_workspace'), ('migration_other_workspace');
       INSERT INTO goat.chat_sessions (id, user_workos_id, title, model, engine, kind)
       VALUES
@@ -318,8 +317,7 @@ describe("Postgres Task repository", () => {
       DELETE FROM goat.workspaces;
     `);
       await database.exec(`
-      INSERT INTO goat.users (workos_user_id, task_spawning_enabled)
-      VALUES ('user_1', true), ('user_2', false), ('user_3', true);
+      INSERT INTO goat.users (workos_user_id) VALUES ('user_1'), ('user_2'), ('user_3');
       INSERT INTO goat.workspaces (id) VALUES ('workspace_1'), ('workspace_2');
       INSERT INTO goat.workspace_members (id, workspace_id, user_workos_id, role)
       VALUES
@@ -746,17 +744,17 @@ describe("Postgres Task repository", () => {
     ).resolves.toMatchObject({ rows: [{ plugin_ids: ["plugin_enabled"] }] });
   });
 
-  it("enforces feature policy and actor/workspace isolation without partial writes", async () => {
+  it("enforces actor/workspace isolation without partial writes", async () => {
     const command = {
-      idempotencyKey: "task-disabled",
+      idempotencyKey: "task-outside-workspace",
       goal: "This must not be created",
       engine: "opencompany" as const,
       model: "moonshotai/kimi-k3",
       source: "manual" as const,
     };
     await expect(
-      service.createTask(actor({ userId: "user_2", workspaceId: "workspace_2" }), command),
-    ).rejects.toMatchObject({ code: "forbidden" });
+      service.createTask(actor({ userId: "user_2", workspaceId: "workspace_1" }), command),
+    ).rejects.toMatchObject({ code: "not_found" });
     expect(
       (await database.query<{ count: number }>("SELECT COUNT(*)::int AS count FROM goat.tasks"))
         .rows,

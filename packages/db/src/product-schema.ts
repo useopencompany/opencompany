@@ -760,7 +760,6 @@ export const users = productSchema.table(
     avatarUrl: text("avatar_url"),
     timezone: text("timezone").notNull().default("UTC"),
     botsEnabled: boolean("bots_enabled").notNull().default(false),
-    taskSpawningEnabled: boolean("task_spawning_enabled").notNull().default(false),
     autoModelRoutingEnabled: boolean("auto_model_routing_enabled").notNull().default(false),
     chatCapabilitiesBetaEnabled: boolean("chat_capabilities_beta_enabled").notNull().default(false),
     reviewInboxEnabled: boolean("review_inbox_enabled").notNull().default(false),
@@ -7377,7 +7376,7 @@ export const sessionSubscriptions = productSchema.table(
       .notNull()
       .default({
         acceptedEvents: ["human_text_reply"],
-        authorization: "workspace_member",
+        authorization: "slack_thread_participant",
         queue: "serial",
       }),
     status: text("status").notNull().default("waiting"),

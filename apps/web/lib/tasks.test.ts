@@ -97,25 +97,6 @@ describe("createTaskForUser", () => {
     );
   });
 
-  it("does not create or dispatch when Tasks & Workflows is disabled", async () => {
-    mockSelectRows([{ workspaceId: "workspace_1" }]);
-    mocks.execute
-      .mockReset()
-      .mockResolvedValueOnce([{ authorized: true, featureEnabled: false, commandId: null }]);
-
-    await expect(
-      createTaskForUser({
-        userWorkosId: "user_1",
-        prompt: "Research x",
-        model: DEFAULT_MODEL,
-      }),
-    ).rejects.toThrow("Tasks & Workflows is disabled");
-
-    expect(mocks.execute).toHaveBeenCalledOnce();
-    expect(mocks.captureProductTaskSpawned).not.toHaveBeenCalled();
-    expect(mocks.triggerCodexChatWake).not.toHaveBeenCalled();
-  });
-
   it("reports an actor without workspace membership", async () => {
     mockSelectRows([]);
 

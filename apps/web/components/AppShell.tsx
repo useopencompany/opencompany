@@ -60,9 +60,7 @@ export async function AppShell({ children }: { children: ReactNode }) {
     workspaceSettings,
     personalAccounts,
   ] = await Promise.all([
-    featureFlags.taskSpawning
-      ? loadOptionalAppShellData("schedules", listHeadlessTaskSchedules, [])
-      : Promise.resolve([]),
+    loadOptionalAppShellData("schedules", listHeadlessTaskSchedules, []),
     loadOptionalAppShellData("recent_chats", listCurrentUserRecentChats, []),
     loadOptionalAppShellData(
       "google_integrations",

@@ -43,7 +43,6 @@ vi.mock("@/components/AppDataProvider", () => ({
     codexConnected: false,
     claudeCodeConnected: false,
     featureFlags: {
-      taskSpawning: true,
       autoModelRouting: false,
       legacyBrain: false,
     },
@@ -106,7 +105,6 @@ describe("TaskDetailPanel", () => {
       status: "succeeded",
     });
     expect(mocks.surfaceProps).toMatchObject({
-      taskSpawningEnabled: true,
       workspaceId: "workspace_1",
       userWorkosId: "user_1",
     });

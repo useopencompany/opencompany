@@ -15,6 +15,7 @@ import {
 } from "@opencompany/agent/application/persisted-action-gateway";
 import { executePersistedBrainCapture } from "@opencompany/agent/application/persisted-brain-capture";
 import { authorizePersistedExternalEngineToolCapability } from "@opencompany/agent/application/persisted-external-engine-capability";
+import { SLACK_BOT_TOOL_NAME } from "@opencompany/agent/chat-ui";
 import {
   postWorkflowSlackMessage,
   SLACK_CHANNEL_INPUT_SCHEMA,
@@ -190,7 +191,7 @@ export function registerAcpToolsMcpRoute(
       }
       if (authorizedContext.taskConversation) {
         server.registerTool(
-          "post_slack_message",
+          SLACK_BOT_TOOL_NAME,
           {
             description: SLACK_CHANNEL_TOOL_DESCRIPTION,
             inputSchema: mcpInputSchema(SLACK_CHANNEL_INPUT_SCHEMA),

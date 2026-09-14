@@ -211,7 +211,6 @@ function ReviewStartComposer() {
           defaultModel={DEFAULT_MODEL}
           codexConnected={codexConnected}
           claudeCodeConnected={claudeCodeConnected}
-          taskSpawningEnabled={featureFlags.taskSpawning}
           autoModelRoutingEnabled={featureFlags.autoModelRouting}
           sharedModelAccessEnabled={sharedModelAccessEnabled}
           creditBalance={creditBalance}
@@ -402,7 +401,6 @@ function ReviewChatConversation({
       archivedChats={data.archivedChats}
       codexConnected={data.codexConnected}
       claudeCodeConnected={data.claudeCodeConnected}
-      taskSpawningEnabled={data.featureFlags.taskSpawning}
       autoModelRoutingEnabled={data.featureFlags.autoModelRouting}
       workspaceId={data.workspace.id}
       userWorkosId={data.user.workosUserId}

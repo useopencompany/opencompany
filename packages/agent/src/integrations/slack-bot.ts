@@ -28,13 +28,12 @@ const SLACK_BOT_ENVS = [
   "OPENCOMPANY_SLACK_BOT_STATE_SECRET",
 ] as const;
 
-// Public workflow posts, delivery reconciliation, and workspace-member identity mapping.
+// Public workflow posts, delivery reconciliation, and bot-message filtering.
 export const SLACK_BOT_SCOPES = [
   "chat:write",
   "channels:read",
   "channels:history",
   "users:read",
-  "users:read.email",
 ] as const;
 
 // Settings surfaces missing grants as a reconnect requirement.
