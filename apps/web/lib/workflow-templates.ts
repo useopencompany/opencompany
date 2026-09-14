@@ -63,14 +63,14 @@ If a repository or channel is ambiguous, pick the most active one and say which 
   {
     id: "daily-inbox-triage",
     name: "Daily inbox triage",
-    description: "Sort yesterday's email into what needs a reply, what's FYI, and what's noise.",
+    description: "Sort new email into what needs a reply, what's FYI, and what's noise.",
     icon: "inbox",
     requiredPlugins: ["gmail"],
     outcome: { label: "Summary in Tasks", plugin: null },
     schedule: { cron: "0 8 * * 1-5", prompt: "Triage yesterday's inbox." },
     step: {
       title: "Triage the inbox",
-      instructions: `Read the email that arrived in the last 24 hours and turn it into a short triage list.
+      instructions: `Read the email that arrived since the previous weekday morning and turn it into a short triage list. This runs on weekdays, so a Monday run covers the whole weekend, not just Sunday.
 
 Sort every message into exactly one bucket:
 
@@ -116,10 +116,6 @@ Report the numbers Stripe actually returns. If a figure is unavailable, say whic
     },
   },
 ];
-
-export function findWorkflowTemplate(templateId: string): WorkflowTemplate | null {
-  return WORKFLOW_TEMPLATES.find((template) => template.id === templateId) ?? null;
-}
 
 export type WorkflowTemplateMissingPlugin = {
   plugin: OfficialMcpPluginName;

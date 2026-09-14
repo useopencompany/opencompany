@@ -430,6 +430,7 @@ describe("WorkflowsRoute", () => {
         workspaceId="workspace_1"
         canEdit
         ownerNames={WORKFLOW_OWNER_NAMES}
+        templateMissingPlugins={null}
       />,
     );
 

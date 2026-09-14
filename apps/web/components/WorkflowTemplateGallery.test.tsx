@@ -38,7 +38,7 @@ describe("WorkflowTemplateGallery", () => {
   });
 
   it("shows every template with its trigger and outcome", () => {
-    render(<WorkflowTemplateGallery missingPlugins={{}} />);
+    render(<WorkflowTemplateGallery missingPlugins={{}} scope="company" />);
 
     for (const entry of WORKFLOW_TEMPLATES) {
       expect(screen.getByText(entry.name)).toBeInTheDocument();
@@ -56,6 +56,7 @@ describe("WorkflowTemplateGallery", () => {
             { plugin: "slack", label: "Slack", setupHref: "/settings/plugins/slack" },
           ],
         }}
+        scope="company"
       />,
     );
 
@@ -69,13 +70,13 @@ describe("WorkflowTemplateGallery", () => {
   });
 
   it("hides the setup hints when the plugin snapshot is unavailable", () => {
-    render(<WorkflowTemplateGallery missingPlugins={null} />);
+    render(<WorkflowTemplateGallery missingPlugins={null} scope="company" />);
 
     expect(screen.queryByText(/before it can run/)).not.toBeInTheDocument();
   });
 
   it("fills the draft with the template's step and schedule, then opens it", async () => {
-    render(<WorkflowTemplateGallery missingPlugins={{}} />);
+    render(<WorkflowTemplateGallery missingPlugins={{}} scope="company" />);
 
     await userEvent.click(screen.getByRole("button", { name: new RegExp(template.name) }));
 
@@ -108,9 +109,21 @@ describe("WorkflowTemplateGallery", () => {
     expect(update.trigger).toMatchObject({ type: "schedule", cron: template.schedule.cron });
   });
 
+  it("clones into the scope the list is filtered to, matching New workflow", async () => {
+    render(<WorkflowTemplateGallery missingPlugins={{}} scope="personal" />);
+
+    await userEvent.click(screen.getByRole("button", { name: new RegExp(template.name) }));
+
+    await waitFor(() =>
+      expect(commandsMock.createHeadlessWorkflow).toHaveBeenCalledWith(
+        expect.objectContaining({ scope: "personal" }),
+      ),
+    );
+  });
+
   it("archives the empty draft when filling it in fails, so a failed clone leaves no debris", async () => {
     commandsMock.updateHeadlessWorkflow.mockRejectedValue(new Error("Workflow update failed"));
-    render(<WorkflowTemplateGallery missingPlugins={{}} />);
+    render(<WorkflowTemplateGallery missingPlugins={{}} scope="company" />);
 
     await userEvent.click(screen.getByRole("button", { name: new RegExp(template.name) }));
 

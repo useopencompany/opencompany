@@ -1,6 +1,7 @@
 "use client";
 
 import { scheduleSummary } from "@opencompany/agent-runtime";
+import type { WorkflowScope } from "@opencompany/protocol";
 import { toast } from "@opencompany/ui/components/sonner";
 import {
   GitHubIcon,
@@ -47,8 +48,11 @@ export function WorkflowTemplateGallery({
    * account snapshot could not be loaded, which drops the setup hints rather than guessing at them.
    */
   missingPlugins,
+  /** Visibility the clone is created with, so a template follows the list filter like "New workflow" does. */
+  scope,
 }: {
   missingPlugins: Record<string, WorkflowTemplateMissingPlugin[]> | null;
+  scope: WorkflowScope;
 }) {
   const router = useRouter();
   const [pendingTemplateId, setPendingTemplateId] = useState<string | null>(null);
@@ -57,7 +61,7 @@ export function WorkflowTemplateGallery({
     if (pendingTemplateId) return;
     setPendingTemplateId(template.id);
     try {
-      router.push(await createWorkflowFromTemplate(template));
+      router.push(await createWorkflowFromTemplate(template, scope));
     } catch (cause) {
       setPendingTemplateId(null);
       toast.error(
@@ -170,7 +174,7 @@ function WorkflowTemplateCard({
 // Creation is two calls because the API creates an empty draft and fills it on update. A failure
 // between them would leave a nameless empty workflow in the list, so the draft is archived before
 // the error surfaces.
-async function createWorkflowFromTemplate(template: WorkflowTemplate) {
+async function createWorkflowFromTemplate(template: WorkflowTemplate, scope: WorkflowScope) {
   const schedule = {
     type: "schedule" as const,
     cron: template.schedule.cron,
@@ -181,7 +185,7 @@ async function createWorkflowFromTemplate(template: WorkflowTemplate) {
   const workflow = await createHeadlessWorkflow({
     name: template.name,
     description: template.description,
-    scope: "company",
+    scope,
   });
   try {
     await updateHeadlessWorkflow(workflow.id, {

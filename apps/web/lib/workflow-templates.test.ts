@@ -1,11 +1,7 @@
 import { schedulePresetFromCron } from "@opencompany/agent-runtime";
 import { describe, expect, it } from "vitest";
 import type { IntegrationAccountView } from "@/lib/integration-state";
-import {
-  findWorkflowTemplate,
-  WORKFLOW_TEMPLATES,
-  workflowTemplateMissingPlugins,
-} from "./workflow-templates";
+import { WORKFLOW_TEMPLATES, workflowTemplateMissingPlugins } from "./workflow-templates";
 
 type TestPlugin = Parameters<typeof workflowTemplateMissingPlugins>[1]["plugins"][number];
 
@@ -17,7 +13,7 @@ function account(connected = true): IntegrationAccountView {
   return { integrationId: "gint_1", connected } as unknown as IntegrationAccountView;
 }
 
-const digest = findWorkflowTemplate("weekly-shipping-digest");
+const digest = WORKFLOW_TEMPLATES.find((template) => template.id === "weekly-shipping-digest");
 if (!digest) throw new Error("The weekly shipping digest template is missing from the catalog.");
 
 describe("workflow template catalog", () => {
@@ -41,10 +37,6 @@ describe("workflow template catalog", () => {
       if (!template.outcome.plugin) continue;
       expect(template.requiredPlugins).toContain(template.outcome.plugin);
     }
-  });
-
-  it("returns no template for an unknown id", () => {
-    expect(findWorkflowTemplate("nope")).toBeNull();
   });
 });
 

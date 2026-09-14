@@ -822,7 +822,12 @@ export function WorkflowsRoute({
             ) : null}
           </header>
 
-          {canEdit ? <WorkflowTemplateGallery missingPlugins={templateMissingPlugins} /> : null}
+          {canEdit ? (
+            <WorkflowTemplateGallery
+              missingPlugins={templateMissingPlugins}
+              scope={scopeFilter === "all" ? "company" : scopeFilter}
+            />
+          ) : null}
 
           <section aria-labelledby="workflow-list-heading" className="flex min-w-0 flex-col gap-3">
             <h2 id="workflow-list-heading" className="sr-only">
