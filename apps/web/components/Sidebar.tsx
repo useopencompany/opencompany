@@ -134,7 +134,9 @@ function SidebarNavRow({
       <Icon
         size={14}
         strokeWidth={1.75}
-        className={`shrink-0 ${active ? "text-ink" : "text-ink/60 group-hover:text-ink/80"} ${iconClassName ?? ""}`}
+        className={`shrink-0 ${active ? "text-ink" : "text-ink/60 group-hover:text-ink/80"}${
+          iconClassName ? ` ${iconClassName}` : ""
+        }`}
       />
       <span className="truncate tracking-[-0.005em]">{label}</span>
       {count ? (
