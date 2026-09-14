@@ -28,6 +28,7 @@ const TOOL_NAMES = [
   "download_attachment",
   "list_labels",
   "create_draft",
+  "send_email",
   "label_thread",
   "unlabel_thread",
   "trash_thread",
@@ -137,7 +138,7 @@ describe("opencompany Gmail MCP server", () => {
     }
   });
 
-  it("creates a reviewable draft through stable Gmail REST without exposing a send tool", async () => {
+  it("creates a reviewable draft through stable Gmail REST", async () => {
     mocks.apiCall.mockResolvedValueOnce({
       id: "draft_1",
       message: { id: "message_1", threadId: "thread_1" },
@@ -168,7 +169,6 @@ describe("opencompany Gmail MCP server", () => {
     expect(raw).toContain("To: ada@example.com\r\n");
     expect(raw).not.toContain("\r\nBcc: attacker@example.com\r\n");
     expect(raw).toContain("Looks good to me.");
-    expect(TOOL_NAMES).not.toContain("send_message");
   });
 
   it("creates replies in the original thread with safe RFC message headers", async () => {
@@ -208,6 +208,113 @@ describe("opencompany Gmail MCP server", () => {
     const raw = Buffer.from(requestBody.message.raw, "base64url").toString("utf8");
     expect(raw).toContain("In-Reply-To: <original@example.com>\r\n");
     expect(raw).toContain("References: <original@example.com>\r\n");
+  });
+
+  it("sends email through stable Gmail REST with a sanitized header block", async () => {
+    mocks.apiCall.mockResolvedValueOnce({ id: "message_1", threadId: "thread_1" });
+    const response = await service().handle(
+      request({ type: "tools/call", tool: "send_email", capability: "write" }, "tools/call", {
+        name: "send_email",
+        arguments: {
+          to: ["ada@example.com"],
+          subject: "Launch plan\nBcc: attacker@example.com",
+          body: "Shipping today.",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await responseJson(response);
+    expect(body.result.isError).not.toBe(true);
+    expect(JSON.parse(body.result.content[0].text)).toEqual({
+      messageId: "message_1",
+      threadId: "thread_1",
+    });
+    const [connection, method, url, options] = mocks.apiCall.mock.calls[0]!;
+    expect(connection).toEqual({
+      userWorkosId: "user_1",
+      integrationId: "integration_1",
+      provider: "gmail",
+    });
+    expect(method).toBe("POST");
+    expect(url.toString()).toBe("https://gmail.googleapis.com/gmail/v1/users/me/messages/send");
+    // messages.send takes the Message resource directly rather than nesting it under `message`.
+    expect(options.body.message).toBeUndefined();
+    const raw = Buffer.from(options.body.raw, "base64url").toString("utf8");
+    expect(raw).toContain("To: ada@example.com\r\n");
+    expect(raw).not.toContain("\r\nBcc: attacker@example.com\r\n");
+    expect(raw).toContain("Shipping today.");
+  });
+
+  it("sends replies inside the original thread", async () => {
+    mocks.apiCall
+      .mockResolvedValueOnce({
+        id: "message_original",
+        threadId: "thread_1",
+        payload: { headers: [{ name: "Message-ID", value: "<original@example.com>" }] },
+      })
+      .mockResolvedValueOnce({ id: "message_reply", threadId: "thread_1" });
+    const response = await service().handle(
+      request({ type: "tools/call", tool: "send_email", capability: "write" }, "tools/call", {
+        name: "send_email",
+        arguments: {
+          to: ["ada@example.com"],
+          subject: "Re: Launch plan",
+          body: "Confirmed.",
+          replyToMessageId: "message_original",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect((await responseJson(response)).result.isError).not.toBe(true);
+    const requestBody = mocks.apiCall.mock.calls[1]?.[3].body;
+    expect(requestBody.threadId).toBe("thread_1");
+    const raw = Buffer.from(requestBody.raw, "base64url").toString("utf8");
+    expect(raw).toContain("In-Reply-To: <original@example.com>\r\n");
+    expect(raw).toContain("References: <original@example.com>\r\n");
+  });
+
+  it("rejects sending without a recipient or a body before calling Google", async () => {
+    const noRecipient = await service().handle(
+      request({ type: "tools/call", tool: "send_email", capability: "write" }, "tools/call", {
+        name: "send_email",
+        arguments: { subject: "Launch plan", body: "Shipping today." },
+      }),
+    );
+    expect((await responseJson(noRecipient)).result).toMatchObject({ isError: true });
+
+    const noBody = await service().handle(
+      request({ type: "tools/call", tool: "send_email", capability: "write" }, "tools/call", {
+        name: "send_email",
+        arguments: { to: ["ada@example.com"], subject: "Launch plan" },
+      }),
+    );
+    expect((await responseJson(noBody)).result).toMatchObject({ isError: true });
+    expect(mocks.apiCall).not.toHaveBeenCalled();
+  });
+
+  it("refuses to send under a draft-scoped ticket or a disabled send permission", async () => {
+    const draftTicket = await service().handle(
+      request({ type: "tools/call", tool: "send_email", capability: "draft" }, "tools/call", {
+        name: "send_email",
+        arguments: { to: ["ada@example.com"], subject: "Launch plan", body: "Shipping today." },
+      }),
+    );
+    expect(draftTicket.status).toBe(403);
+
+    mocks.loadIntegration.mockResolvedValueOnce({
+      ...connectedRow,
+      toolModes: { send_email: "off" },
+    });
+    const disabled = await service().handle(
+      request({ type: "tools/call", tool: "send_email", capability: "write" }, "tools/call", {
+        name: "send_email",
+        arguments: { to: ["ada@example.com"], subject: "Launch plan", body: "Shipping today." },
+      }),
+    );
+    expect(disabled.status).toBe(403);
+    expect(mocks.apiCall).not.toHaveBeenCalled();
   });
 
   it("maps read tools to Gmail REST and returns bounded decoded message content", async () => {
