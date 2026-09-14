@@ -45,9 +45,10 @@ import { InfisicalPluginConnectionForm } from "@/components/InfisicalPluginConne
 import { JamieEventsSetup } from "@/components/JamieEventsSetup";
 import { PluginAccountRow, PluginConnectionFeedback } from "@/components/PluginConnectionSettings";
 import {
-  installOfficialMcpPlugin,
+  installOfficialPlugin,
   OFFICIAL_MCP_PLUGINS,
   type OfficialMcpPluginConfig,
+  type OfficialPluginConfig,
 } from "@/components/PluginSettings";
 import { RenderApiKeyConnectionForm } from "@/components/RenderApiKeyConnectionForm";
 import { SettingsContent } from "@/components/SettingsChrome";
@@ -121,7 +122,7 @@ type PluginSkill = {
   description: string;
 };
 
-type PluginPreviewState =
+export type PluginPreviewState =
   | { status: "loading" }
   | { status: "error"; message: string }
   | { status: "ready"; preview: PluginImportPreviewDto };
@@ -1095,14 +1096,14 @@ function PluginSetupCallout({
   );
 }
 
-function PluginHeaderSection({
+export function PluginHeaderSection({
   config,
   state,
   previewState,
   updateAvailable,
   canEdit,
 }: {
-  config: OfficialMcpPluginConfig;
+  config: OfficialPluginConfig;
   state: PluginLoadState;
   previewState: PluginPreviewState;
   updateAvailable: boolean;
@@ -1126,7 +1127,7 @@ function PluginHeaderSection({
     setError(null);
     startTransition(async () => {
       try {
-        await installOfficialMcpPlugin(
+        await installOfficialPlugin(
           config,
           previewState.status === "ready" ? previewState.preview : undefined,
         );
@@ -1154,7 +1155,7 @@ function PluginHeaderSection({
     setError(null);
     startTransition(async () => {
       try {
-        await installOfficialMcpPlugin(config);
+        await installOfficialPlugin(config);
         toast.success(`${config.label} updated.`);
         router.refresh();
       } catch (cause) {
@@ -1281,8 +1282,8 @@ function PluginHeaderSection({
           <DialogHeader className="text-left">
             <DialogTitle className="text-[15px]">Uninstall {config.label}?</DialogTitle>
             <DialogDescription className="text-[12.5px] leading-5 text-ink-subtle">
-              {config.label} tools and plugin skills will be removed. Connected accounts will not be
-              changed.
+              {config.label} {config.kind === "mcp" ? "tools and plugin skills" : "plugin skills"}{" "}
+              will be removed. Connected accounts will not be changed.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -1792,14 +1793,16 @@ function ToolRows({ tools }: { tools: PluginToolView[] }) {
   );
 }
 
-function SkillsSection({
+export function SkillsSection({
   config,
   state,
   previewState,
+  description = "Workflows supplied by the integrity-pinned plugin package.",
 }: {
-  config: OfficialMcpPluginConfig;
+  config: OfficialPluginConfig;
   state: PluginLoadState;
   previewState: PluginPreviewState;
+  description?: string;
 }) {
   const plugin = state.status === "ready" ? state.plugin : null;
   const skills: PluginSkill[] = plugin
@@ -1820,12 +1823,7 @@ function SkillsSection({
   const headingId = `${config.name}-skills-heading`;
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-3">
-      <SectionHeading
-        id={headingId}
-        icon={Sparkles}
-        title="Skills"
-        description="Workflows supplied by the integrity-pinned plugin package."
-      />
+      <SectionHeading id={headingId} icon={Sparkles} title="Skills" description={description} />
       {state.status === "loading" ? (
         <SectionSkeleton label={`Loading ${config.label} skills`} rows={2} compact />
       ) : state.status === "error" ? (

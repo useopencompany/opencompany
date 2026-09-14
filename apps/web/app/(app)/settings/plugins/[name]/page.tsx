@@ -1,5 +1,5 @@
 import { CustomMcpPluginDetail } from "@/components/CustomMcpPluginSettings";
-import { DopplerPluginConnectionForm } from "@/components/DopplerPluginConnectionForm";
+import { DopplerPluginDetail } from "@/components/DopplerPluginSettings";
 import {
   AttioPluginDetail,
   BetterStackPluginDetail,
@@ -45,6 +45,14 @@ import {
 export default async function PluginDetailPage({ params }: { params: Promise<{ name: string }> }) {
   const { name } = await params;
   const normalizedName = name.toLocaleLowerCase();
+  if (normalizedName === "doppler") {
+    const [, pluginState, settings] = await Promise.all([
+      currentUser(),
+      loadOfficialPlugin("doppler"),
+      loadCurrentDopplerAuthSettings(),
+    ]);
+    return <DopplerPluginDetail pluginState={pluginState} settings={settings} />;
+  }
   if (isOfficialMcpPluginName(normalizedName)) {
     const [, pluginState] = await Promise.all([currentUser(), loadOfficialPlugin(normalizedName)]);
     const Detail = {
@@ -88,16 +96,6 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
         title={metadata.label}
         description={metadata.description}
         officialPluginName={normalizedName}
-        {...(normalizedName === "doppler"
-          ? {
-              connection: (
-                <DopplerPluginConnectionForm
-                  settings={await loadCurrentDopplerAuthSettings()}
-                  enabled={plugin.status === "enabled"}
-                />
-              ),
-            }
-          : {})}
       />
     ) : (
       <OfficialSkillPluginDetail name={normalizedName} canEdit={true} />
@@ -128,7 +126,7 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
 }
 
 async function loadOfficialPlugin(
-  name: keyof typeof OFFICIAL_MCP_PLUGIN_METADATA,
+  name: keyof typeof OFFICIAL_MCP_PLUGIN_METADATA | "doppler",
 ): Promise<PluginLoadState> {
   try {
     return { status: "ready", plugin: await getHeadlessPlugin(name) };
@@ -138,7 +136,7 @@ async function loadOfficialPlugin(
       message:
         error instanceof Error
           ? error.message
-          : `${OFFICIAL_MCP_PLUGIN_METADATA[name].label} plugin details could not be loaded.`,
+          : `${name === "doppler" ? "Doppler" : OFFICIAL_MCP_PLUGIN_METADATA[name].label} plugin details could not be loaded.`,
     };
   }
 }

@@ -46,7 +46,10 @@ export async function pollDopplerAuth(flowId: string) {
         error: await serverApiErrorMessage(response, "Could not check Doppler sign-in."),
       };
     const flow = (await response.json()).data.flow;
-    if (flow.status === "completed") revalidatePath("/settings/plugins/doppler");
+    if (flow.status === "completed") {
+      revalidatePath("/settings/plugins/doppler");
+      revalidatePath("/settings/plugins");
+    }
     return { ok: true as const, flow };
   } catch {
     return { ok: false as const, error: "Could not check Doppler sign-in. Please try again." };
@@ -62,6 +65,7 @@ export async function cancelDopplerAuth(disconnect: boolean) {
         error: await serverApiErrorMessage(response, "Could not disconnect Doppler."),
       };
     revalidatePath("/settings/plugins/doppler");
+    revalidatePath("/settings/plugins");
     return { ok: true as const };
   } catch {
     return { ok: false as const, error: "Could not disconnect Doppler. Please try again." };
