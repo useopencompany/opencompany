@@ -40,9 +40,12 @@ export async function resolveManagedCapabilities(
   );
   // Actions sold through a paid plugin exist only while that plugin is installed. A price is what
   // makes one sellable, so an uninstalled plugin leaves its actions out of the catalog entirely
-  // rather than exposing them unpriced.
+  // rather than exposing them unpriced. Skipped entirely when no managed source is available,
+  // so a killed or unconfigured runtime does not pay for the lookup.
   const pricedActionIds = new Set(
-    (await loadManagedCapabilityPrices(input).catch(() => new Map())).keys(),
+    managedCapabilityStates.length > 0
+      ? (await loadManagedCapabilityPrices(input).catch(() => new Map())).keys()
+      : [],
   );
   const actions: ResolvedAction[] = MANAGED_CAPABILITY_ACTIONS.filter(
     (spec) =>
