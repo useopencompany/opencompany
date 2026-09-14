@@ -134,22 +134,26 @@ describe("convexFunctionFailureGroups", () => {
     expect(nextWindow[0]?.deliveryId).not.toBe(first[0]?.deliveryId);
   });
 
-  it("bounds how many groups one delivery can enqueue, keeping the loudest", () => {
+  it("ranks groups loudest first so a caller capping the list keeps what matters", () => {
     const failures = convexFunctionFailures(
       Array.from({ length: 25 }, (_, index) =>
         failureEvent({
           function: { path: `messages:fn${index}`, type: "query", request_id: `r${index}` },
         }),
       ).concat(
-        // One function fails twice, so it must survive the cut.
+        // One function fails twice, so it must sort ahead of the ones that failed once.
         failureEvent({ function: { path: "messages:fn3", type: "query", request_id: "again" } }),
       ),
     );
 
     const groups = convexFunctionFailureGroups(failures);
 
-    expect(groups).toHaveLength(20);
+    // Grouping itself is uncapped: the per-route cap belongs to the caller, which applies it after
+    // filter matching so a filtered trigger cannot lose its incident to noisier groups.
+    expect(groups).toHaveLength(25);
     expect(groups[0]?.failure.functionPath).toBe("messages:fn3");
+    expect(groups[0]?.failureCount).toBe(2);
+    expect(groups.slice(1).every((group) => group.failureCount === 1)).toBe(true);
   });
 });
 

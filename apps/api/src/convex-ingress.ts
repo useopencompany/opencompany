@@ -5,6 +5,7 @@ import {
 } from "@opencompany/agent/integrations/convex-webhook-auth";
 import {
   CONVEX_EVENT_MAX_AGE_MS,
+  CONVEX_FAILURE_GROUP_LIMIT,
   CONVEX_FUNCTION_FAILED_EVENT,
   CONVEX_FUNCTION_TYPE_FILTER_ID,
   CONVEX_PROVIDER,
@@ -19,6 +20,7 @@ import {
   enqueueWorkflowEventRuns,
   listWorkflowEventTriggerRoutes,
   type WorkflowEventIntegration,
+  type WorkflowEventTriggerRoute,
   workflowEventFiltersMatch,
 } from "@opencompany/db/workflow-event-routes";
 import { createLogger } from "@opencompany/observability";
@@ -112,12 +114,18 @@ async function handleConvexEvents(
   ).filter((route) => route.event === CONVEX_FUNCTION_FAILED_EVENT);
   if (routes.length === 0) return { ok: true, workflowRuns: 0 };
 
+  // Groups arrive loudest first, and each route takes at most CONVEX_FAILURE_GROUP_LIMIT of the
+  // ones it matches. Capping per route rather than per delivery is what stops a trigger filtered to
+  // one function type from losing its incident to noisier groups it was never going to match.
   let workflowRuns = 0;
+  const enqueuedPerRoute = new Map<WorkflowEventTriggerRoute, number>();
   for (const group of convexFunctionFailureGroups(failures)) {
-    const matched = routes.filter((route) =>
-      workflowEventFiltersMatch(route, {
-        [CONVEX_FUNCTION_TYPE_FILTER_ID]: convexFunctionTypeScope(group.failure),
-      }),
+    const matched = routes.filter(
+      (route) =>
+        (enqueuedPerRoute.get(route) ?? 0) < CONVEX_FAILURE_GROUP_LIMIT &&
+        workflowEventFiltersMatch(route, {
+          [CONVEX_FUNCTION_TYPE_FILTER_ID]: convexFunctionTypeScope(group.failure),
+        }),
     );
     if (matched.length === 0) continue;
     workflowRuns += await enqueueWorkflowEventRuns(
@@ -129,6 +137,9 @@ async function handleConvexEvents(
       },
       db,
     );
+    for (const route of matched) {
+      enqueuedPerRoute.set(route, (enqueuedPerRoute.get(route) ?? 0) + 1);
+    }
   }
   return { ok: true, workflowRuns };
 }

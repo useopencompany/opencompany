@@ -185,6 +185,47 @@ describe("Convex ingress", () => {
     expect(enqueueWorkflowEventRuns).toHaveBeenCalledTimes(1);
   });
 
+  it("caps enqueued incidents per route, after the route's filter has matched", async () => {
+    // One quiet HTTP-action failure behind 25 noisier query failures. A trigger filtered to HTTP
+    // actions must still see it, and an unfiltered trigger must stay bounded.
+    const events = [
+      ...Array.from({ length: 25 }, (_, index) =>
+        failure({
+          timestamp: NOW.getTime() - 30_000 - index,
+          function: { path: `messages:fn${index}`, type: "query", request_id: `r${index}` },
+          error_message: `Uncaught Error: query ${index} broke on a value`,
+        }),
+      ),
+      ...Array.from({ length: 25 }, (_, index) =>
+        failure({
+          timestamp: NOW.getTime() - 20_000 - index,
+          function: { path: `messages:fn${index}`, type: "query", request_id: `dup${index}` },
+          error_message: `Uncaught Error: query ${index} broke on a value`,
+        }),
+      ),
+      failure({
+        function: { path: "POST /stripe", type: "http_action", request_id: "req_http" },
+        error_message: "Uncaught Error: signature mismatch",
+      }),
+    ];
+
+    vi.mocked(listWorkflowEventTriggerRoutes).mockResolvedValue([
+      route({ function_type: { id: "http_action" } }),
+    ] as never);
+    await deliver(events);
+    expect(enqueueWorkflowEventRuns).toHaveBeenCalledTimes(1);
+    expect(
+      vi.mocked(enqueueWorkflowEventRuns).mock.calls[0]?.[0]?.context.lines.join("\n"),
+    ).toContain("POST /stripe");
+
+    vi.mocked(enqueueWorkflowEventRuns).mockClear();
+    vi.mocked(listWorkflowEventTriggerRoutes).mockResolvedValue([route()] as never);
+    const response = await deliver(events);
+
+    await expect(response.json()).resolves.toEqual({ ok: true, workflowRuns: 20 });
+    expect(enqueueWorkflowEventRuns).toHaveBeenCalledTimes(20);
+  });
+
   it("asks for a retry when a durable write fails", async () => {
     vi.mocked(enqueueWorkflowEventRuns).mockRejectedValue(new Error("connection terminated"));
 

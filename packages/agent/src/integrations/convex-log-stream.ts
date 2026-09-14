@@ -80,19 +80,18 @@ export async function enableConvexErrorEvents(input: {
   });
   const url = convexEventsWebhookUrl(integrationId);
 
+  // Convex allows one webhook log stream per deployment, so an existing one is either opencompany's
+  // own from an earlier setup — adopted and re-secured — or somebody else's, which is reported
+  // rather than replaced.
   const existing = await findWebhookLogStream(deployment.name, credential.apiKey);
-  const stream =
-    existing?.url === url
-      ? // Re-running setup adopts the stream already pointed here rather than tripping Convex's
-        // one-webhook-stream-per-deployment rule against opencompany's own stream.
-        await updateWebhookLogStream(deployment.name, credential.apiKey, existing.id, url)
-      : existing
-        ? (() => {
-            throw new ConvexLogStreamError(
-              `Convex allows one webhook log stream per deployment and ${deployment.name} already streams to ${existing.url}. Remove that stream in Convex, or point it at opencompany, and try again.`,
-            );
-          })()
-        : await createWebhookLogStream(deployment.name, credential.apiKey, url);
+  if (existing && existing.url !== url) {
+    throw new ConvexLogStreamError(
+      `Convex allows one webhook log stream per deployment and ${deployment.name} already streams to ${existing.url}. Remove that stream in Convex, or point it at opencompany, and try again.`,
+    );
+  }
+  const stream = existing
+    ? await updateWebhookLogStream(deployment.name, credential.apiKey, existing.id, url)
+    : await createWebhookLogStream(deployment.name, credential.apiKey, url);
 
   await saveIntegrationCredential({
     userWorkosId: input.userWorkosId,

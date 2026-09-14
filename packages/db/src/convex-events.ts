@@ -25,16 +25,17 @@ export const CONVEX_FAILURE_GROUP_WINDOW_MS = 15 * 60 * 1000;
 // agent for, and it is what a replayed capture of a signed body would look like. Deliveries are
 // still acknowledged; only triggering is skipped.
 export const CONVEX_EVENT_MAX_AGE_MS = 15 * 60 * 1000;
-// Bounds the durable writes one catastrophic delivery can cause. Groups are ranked by how many
-// failures they contributed, so the loudest failures are the ones that survive the cut.
-const CONVEX_FAILURE_GROUP_LIMIT = 20;
+// Bounds the durable writes one catastrophic delivery can cause. Applied per matched route rather
+// than to the delivery as a whole, so a trigger filtered to one function type cannot lose its
+// incident to twenty noisier groups it was never going to match.
+export const CONVEX_FAILURE_GROUP_LIMIT = 20;
 const CONVEX_ERROR_MESSAGE_LIMIT = 4_000;
 const CONVEX_ERROR_SIGNATURE_LIMIT = 200;
 
-// Convex has no webhook-management API for its log streams beyond create/delete, so each
-// connection gets its own endpoint URL and the delivery is routed by the opencompany-minted id in
-// that path. Looking the connection up by its own primary key means an unauthenticated probe is
-// rejected by one indexed read, before any credential is decrypted.
+// A Convex log stream posts to one fixed URL, so each connection gets its own endpoint URL and the
+// delivery is routed by the opencompany-minted id in that path. Looking the connection up by its
+// own primary key means an unauthenticated probe is rejected by one indexed read, before any
+// credential is decrypted.
 export async function findConvexEventConnection(
   endpointId: string,
   db: DbLike = getDb(),
@@ -144,10 +145,11 @@ export function convexFunctionFailures(payload: unknown): ConvexFunctionFailure[
 }
 
 // Collapses a delivery into the incidents it describes: one group per function and error, per
-// window. The window is derived from the failure's own timestamp rather than the delivery's, so a
-// Convex retry of the same batch produces the same delivery ids and enqueues nothing new. Two
-// failures either side of a window boundary do start two runs; that is the cost of keeping the
-// grouping stateless, and it bounds the duplication at one extra run per window.
+// window, ranked loudest first so a caller capping the list keeps the failures that matter. The
+// window is derived from the failure's own timestamp rather than the delivery's, so a Convex retry
+// of the same batch produces the same delivery ids and enqueues nothing new. Two failures either
+// side of a window boundary do start two runs; that is the cost of keeping the grouping stateless,
+// and it bounds the duplication at one extra run per window.
 export function convexFunctionFailureGroups(
   failures: readonly ConvexFunctionFailure[],
 ): ConvexFunctionFailureGroup[] {
@@ -175,9 +177,7 @@ export function convexFunctionFailureGroups(
       existing.failure = failure;
     }
   }
-  return [...groups.values()]
-    .sort((left, right) => right.failureCount - left.failureCount)
-    .slice(0, CONVEX_FAILURE_GROUP_LIMIT);
+  return [...groups.values()].sort((left, right) => right.failureCount - left.failureCount);
 }
 
 // Which side of the `function_type` filter this failure falls on. Convex names HTTP actions

@@ -67,8 +67,10 @@ grouping across deliveries would need state this design deliberately does not ke
 Two consequences of keeping it stateless are accepted rather than hidden. Failures either side of a
 window boundary start two runs, which bounds duplication at one extra run per window. And the number
 of distinct groups one delivery may enqueue is capped at 20, ranked by failure count, so a
-catastrophic batch cannot turn into unbounded durable writes; the loudest failures are the ones that
-survive.
+catastrophic batch cannot turn into unbounded durable writes. That cap is applied per matched route,
+after the route's filter has run, rather than to the delivery as a whole: capping first would let a
+trigger filtered to one function type lose its incident to twenty noisier groups it was never going
+to match.
 
 Convex delivers best-effort and documents that retries can duplicate an event, so the signature is
 the whole credential check and the grouping absorbs the duplicates. Replay protection is the age
