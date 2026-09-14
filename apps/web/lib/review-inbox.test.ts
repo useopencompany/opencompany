@@ -30,6 +30,7 @@ function task(overrides: Partial<TaskInput> & { id: string }): TaskInput {
     conversationId: `conversation_${overrides.id}`,
     status: "succeeded",
     hasUnseen: true,
+    awaitingInput: false,
     archivedAt: null,
     updatedAt: "2026-09-10T10:00:00.000Z",
     ...overrides,
@@ -69,6 +70,7 @@ describe("selectReviewItems", () => {
         title: "Draft the update",
         updatedAt: "2026-09-10T10:00:00.000Z",
         unread: true,
+        awaitingInput: false,
         source: { kind: "chat", model: "claude-opus-5", engine: "opencompany" },
       },
     ]);
@@ -135,6 +137,7 @@ describe("selectReviewItems", () => {
         title: "Refresh the pipeline",
         updatedAt: "2026-09-10T10:00:00.000Z",
         unread: true,
+        awaitingInput: false,
         source: { kind: "task", taskId: "t1", displayId: "TASK-42" },
       },
     ]);
@@ -162,13 +165,12 @@ describe("selectReviewItems", () => {
     ]);
   });
 
-  it("excludes tasks that are unfinished, waiting on input, canceled, or archived", () => {
+  it("excludes tasks that are unfinished, canceled, or archived", () => {
     const items = selectReviewItems({
       conversations: [],
       tasks: [
         task({ id: "queued", status: "queued" }),
         task({ id: "running", status: "running" }),
-        task({ id: "waiting", status: "waiting" }),
         task({ id: "canceled", status: "canceled" }),
         task({ id: "archived", archivedAt: "2026-09-09T10:00:00.000Z" }),
         task({ id: "unread" }),
@@ -178,6 +180,71 @@ describe("selectReviewItems", () => {
     expect(items.map((item) => item.source)).toEqual([
       { kind: "task", taskId: "unread", displayId: "TASK-unread" },
     ]);
+  });
+
+  // The blocked run is the only thing in the queue the reader can unblock, so it leads — over a
+  // newer finished result, and over an archived Task's exclusion staying intact.
+  it("leads with parked runs, ahead of newer finished work", () => {
+    const items = selectReviewItems({
+      conversations: [
+        conversation({ id: "newest-chat", updatedAt: "2026-09-10T14:00:00.000Z" }),
+        conversation({
+          id: "blocked-chat",
+          awaitingInput: true,
+          hasUnseen: false,
+          lastSeenAt: null,
+          updatedAt: "2026-09-10T06:00:00.000Z",
+        }),
+      ],
+      tasks: [
+        task({ id: "waiting", conversationId: "waiting-task", status: "waiting" }),
+        task({
+          id: "blocked-running",
+          conversationId: "blocked-running-task",
+          status: "running",
+          awaitingInput: true,
+          updatedAt: "2026-09-10T05:00:00.000Z",
+        }),
+        task({
+          id: "archived-waiting",
+          conversationId: "archived-task",
+          status: "waiting",
+          archivedAt: "2026-09-09T10:00:00.000Z",
+        }),
+      ],
+    });
+
+    expect(items.map((item) => item.conversationId)).toEqual([
+      "waiting-task",
+      "blocked-chat",
+      "blocked-running-task",
+      "newest-chat",
+    ]);
+    expect(items.filter((item) => item.awaitingInput)).toHaveLength(3);
+  });
+
+  // A parked run is not a read item, so the tail must never cut it.
+  it("keeps every parked run past the read tail", () => {
+    const read = Array.from({ length: 60 }, (_, index) =>
+      conversation({
+        id: `read-${index}`,
+        hasUnseen: false,
+        lastSeenAt: "2026-09-01T10:00:00.000Z",
+        updatedAt: `2026-09-10T10:${String(index).padStart(2, "0")}:00.000Z`,
+      }),
+    );
+    const blocked = conversation({
+      id: "blocked",
+      awaitingInput: true,
+      hasUnseen: false,
+      lastSeenAt: "2026-09-01T10:00:00.000Z",
+      updatedAt: "2026-08-01T10:00:00.000Z",
+    });
+
+    const items = selectReviewItems({ conversations: [...read, blocked], tasks: [] });
+
+    expect(items[0]?.conversationId).toBe("blocked");
+    expect(items).toHaveLength(51);
   });
 
   it("sorts tasks and chats together, newest first", () => {
@@ -233,13 +300,44 @@ describe("countAwaitingReview", () => {
         conversation({ id: "seen", hasUnseen: false, lastSeenAt: "2026-09-10T10:05:00.000Z" }),
         conversation({ id: "archived", archivedAt: "2026-09-09T10:00:00.000Z" }),
       ],
+      tasks: [task({ id: "unread-task" }), task({ id: "seen-task", hasUnseen: false })],
+    });
+
+    expect(count).toBe(3);
+  });
+
+  // Reading a parked run does not answer it, so it keeps counting until it is resolved.
+  it("counts a parked run even after it has been read", () => {
+    const count = countAwaitingReview({
+      conversations: [
+        conversation({
+          id: "blocked",
+          awaitingInput: true,
+          hasUnseen: false,
+          lastSeenAt: "2026-09-10T10:05:00.000Z",
+        }),
+      ],
       tasks: [
-        task({ id: "unread-task" }),
-        task({ id: "waiting", status: "waiting" }),
-        task({ id: "seen-task", hasUnseen: false }),
+        task({ id: "waiting", status: "waiting", hasUnseen: false }),
+        task({ id: "blocked-running", status: "running", awaitingInput: true, hasUnseen: false }),
       ],
     });
 
     expect(count).toBe(3);
+  });
+
+  it("does not count a parked run once it is archived", () => {
+    const count = countAwaitingReview({
+      conversations: [
+        conversation({
+          id: "blocked",
+          awaitingInput: true,
+          archivedAt: "2026-09-09T10:00:00.000Z",
+        }),
+      ],
+      tasks: [task({ id: "waiting", status: "waiting", archivedAt: "2026-09-09T10:00:00.000Z" })],
+    });
+
+    expect(count).toBe(0);
   });
 });

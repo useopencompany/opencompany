@@ -135,6 +135,7 @@ export const ConversationSchema = z
     runtime: ConversationRuntimeSchema.nullable(),
     activityState: ConversationActivityStateSchema,
     hasUnseen: z.boolean(),
+    awaitingInput: z.boolean(),
     pinnedAt: TimestampSchema.nullable().optional(),
     createdAt: TimestampSchema,
     updatedAt: TimestampSchema,
@@ -559,6 +560,7 @@ export const ConversationReadModelSchema = ConversationReadModelV1Schema.extend(
   runtime: ConversationRuntimeSchema.nullable(),
   activityState: ConversationActivityStateSchema,
   hasUnseen: z.boolean(),
+  awaitingInput: z.boolean(),
   messageShapeEpoch: z.number().int().min(0),
 })
   .strict()
@@ -655,11 +657,13 @@ export const EngineRuntimeAccessEnvelopeSchema = z
   .strict()
   .openapi("EngineRuntimeAccessEnvelope");
 
-// The streamed Task projection carries the unread flag that the Task resource itself does not:
-// it belongs to the Task's conversation and only ever matters to surfaces reading a live queue.
-export const TaskReadModelSchema = TaskSchema.extend({ hasUnseen: z.boolean() }).openapi(
-  "TaskReadModelV1",
-);
+// The streamed Task projection carries the unread and awaiting-input flags that the Task resource
+// itself does not: both belong to the Task's conversation and only ever matter to surfaces reading
+// a live queue.
+export const TaskReadModelSchema = TaskSchema.extend({
+  hasUnseen: z.boolean(),
+  awaitingInput: z.boolean(),
+}).openapi("TaskReadModelV1");
 export const TaskActivityAuthorSchema = z.enum(["user", "orchestrator", "system"]);
 export const TaskActivityKindSchema = z.enum([
   "created",

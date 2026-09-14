@@ -53,6 +53,7 @@ const migrationPaths = [
   "0263_personal_company_skills.sql",
   "0270_opencompany_sidebar_projects.sql",
   "0276_sandbox_size_tiers.sql",
+  "0278_goat_awaiting_input_state.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 

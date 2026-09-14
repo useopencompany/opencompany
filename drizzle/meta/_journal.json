@@ -1947,6 +1947,20 @@
       "when": 1789927600000,
       "tag": "0277_workflow_multiple_triggers",
       "breakpoints": true
+    },
+    {
+      "idx": 278,
+      "version": "7",
+      "when": 1790014000000,
+      "tag": "0278_goat_awaiting_input_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 279,
+      "version": "7",
+      "when": 1790100400000,
+      "tag": "0279_goat_awaiting_input_tasks",
+      "breakpoints": true
     }
   ]
 }

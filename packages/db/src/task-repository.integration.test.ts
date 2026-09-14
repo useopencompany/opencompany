@@ -37,7 +37,11 @@ const migrationPaths = [
   "0246_goat_task_waiting_status.sql",
   "0248_goat_chat_attachment_upload_idempotency.sql",
   "0255_goat_task_waiting_projection.sql",
+  "0261_persistent_bots.sql",
   "0268_goat_task_review_unseen.sql",
+  "0270_opencompany_sidebar_projects.sql",
+  "0278_goat_awaiting_input_state.sql",
+  "0279_goat_awaiting_input_tasks.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -1481,6 +1485,159 @@ describe("Postgres Task repository", () => {
           [task.id],
         ),
       ).resolves.toMatchObject({ rows: [{ has_unseen: true }] });
+    });
+  });
+
+  // A run blocked on the reader is projected from the approval itself rather than from the Task's
+  // status, so a coding engine that holds a `running` Task open while it polls still reports it.
+  // Raising an approval happens alongside a conversation write, but resolving one does not touch
+  // the conversation at all, which is why the approval table drives its own projection refresh.
+  describe("Awaiting input projection", () => {
+    async function pendingApproval(runId: string, approvalId: string) {
+      await database.query(
+        `INSERT INTO goat.run_approvals (id, run_id, kind, prompt, options)
+         VALUES ($1, $2, 'use_action', 'Send the investor update?', '["approved","denied"]'::jsonb)`,
+        [approvalId, runId],
+      );
+    }
+
+    async function resolveApproval(approvalId: string) {
+      await database.query(
+        `UPDATE goat.run_approvals
+         SET status = 'resolved', resolution = 'approved', resolved_at = now()
+         WHERE id = $1`,
+        [approvalId],
+      );
+    }
+
+    async function taskAwaitingInput(idempotencyKey: string, approvalId: string) {
+      const created = await service.createTask(actor(), {
+        idempotencyKey,
+        goal: "Email the investor update",
+        engine: "opencompany",
+        model: "moonshotai/kimi-k3",
+        source: "manual",
+      });
+      await pendingApproval(created.runId, approvalId);
+      return created;
+    }
+
+    // A chat conversation is built directly because the Task service only produces conversations
+    // of kind 'task', which the conversation projection deliberately drops.
+    async function chatAwaitingInput(suffix: string, approvalId: string) {
+      const conversationId = `chat_conversation_${suffix}`;
+      const runtimeId = `chat_runtime_${suffix}`;
+      const runId = `chat_run_${suffix}`;
+      await database.query(
+        `INSERT INTO goat.chat_sessions (id, user_workos_id, model, kind)
+         VALUES ($1, 'user_1', 'moonshotai/kimi-k3', 'chat')`,
+        [conversationId],
+      );
+      await database.query(
+        `INSERT INTO goat.codex_chat_sessions (
+           id, user_workos_id, chat_session_id, engine, model, workspace_id, status
+         ) VALUES ($1, 'user_1', $2, 'opencompany', 'moonshotai/kimi-k3', 'workspace_1', 'running')`,
+        [runtimeId, conversationId],
+      );
+      await database.query(
+        `INSERT INTO goat.chat_messages (id, session_id, role, content)
+         VALUES ($1, $2, 'user', 'Send it'), ($3, $2, 'assistant', '')`,
+        [`chat_user_message_${suffix}`, conversationId, `chat_assistant_message_${suffix}`],
+      );
+      await database.query(
+        `INSERT INTO goat.codex_chat_turns (
+           id, user_workos_id, codex_chat_session_id, chat_session_id,
+           user_message_id, assistant_message_id, status, prompt
+         ) VALUES ($1, 'user_1', $2, $3, $4, $5, 'running', 'Send it')`,
+        [
+          runId,
+          runtimeId,
+          conversationId,
+          `chat_user_message_${suffix}`,
+          `chat_assistant_message_${suffix}`,
+        ],
+      );
+      await pendingApproval(runId, approvalId);
+      return { conversationId, runId };
+    }
+
+    const taskAwaitingInputFlag = (taskId: string) =>
+      database.query<{ status: string; awaiting_input: boolean }>(
+        `SELECT status, awaiting_input FROM goat.task_read_model_v1 WHERE id = $1`,
+        [taskId],
+      );
+    const conversationAwaitingInputFlag = (conversationId: string) =>
+      database.query<{ activity_state: string; awaiting_input: boolean }>(
+        `SELECT activity_state, awaiting_input FROM goat.conversation_read_model_v1 WHERE id = $1`,
+        [conversationId],
+      );
+
+    it("raises the flag on the Task projection while its status is unchanged", async () => {
+      const created = await taskAwaitingInput("task-awaiting-raise", "approval_raise");
+
+      await expect(taskAwaitingInputFlag(created.task.id)).resolves.toMatchObject({
+        // Still `queued`: the flag does not wait for the runner to park the Task.
+        rows: [{ status: "queued", awaiting_input: true }],
+      });
+    });
+
+    it("raises the flag on a chat that is still working, because the engine polls while it waits", async () => {
+      const { conversationId } = await chatAwaitingInput("raise", "approval_chat_raise");
+
+      await expect(conversationAwaitingInputFlag(conversationId)).resolves.toMatchObject({
+        rows: [{ activity_state: "working", awaiting_input: true }],
+      });
+    });
+
+    it("clears the flag when the approval resolves, which never touches the conversation", async () => {
+      const created = await taskAwaitingInput("task-awaiting-resolve", "approval_resolve");
+      const { conversationId } = await chatAwaitingInput("resolve", "approval_chat_resolve");
+      await expect(taskAwaitingInputFlag(created.task.id)).resolves.toMatchObject({
+        rows: [{ awaiting_input: true }],
+      });
+      await expect(conversationAwaitingInputFlag(conversationId)).resolves.toMatchObject({
+        rows: [{ awaiting_input: true }],
+      });
+
+      await resolveApproval("approval_resolve");
+      await resolveApproval("approval_chat_resolve");
+
+      await expect(taskAwaitingInputFlag(created.task.id)).resolves.toMatchObject({
+        rows: [{ awaiting_input: false }],
+      });
+      await expect(conversationAwaitingInputFlag(conversationId)).resolves.toMatchObject({
+        rows: [{ awaiting_input: false }],
+      });
+    });
+
+    it("keeps the flag raised while any approval of the run is still pending", async () => {
+      const created = await taskAwaitingInput("task-awaiting-partial", "approval_first");
+      await pendingApproval(created.runId, "approval_second");
+
+      await resolveApproval("approval_first");
+
+      await expect(taskAwaitingInputFlag(created.task.id)).resolves.toMatchObject({
+        rows: [{ awaiting_input: true }],
+      });
+    });
+
+    it("keeps the flag raised after the Task is acknowledged, which only clears the unread dot", async () => {
+      // Reading a request is not answering it, so the two flags move independently.
+      const created = await taskAwaitingInput("task-awaiting-ack", "approval_ack");
+      await database.query(`UPDATE goat.chat_sessions SET has_unseen = true WHERE id = $1`, [
+        created.task.conversationId,
+      ]);
+
+      await expect(
+        service.updateTask(actor(), created.task.id, { markSeen: true }),
+      ).resolves.toMatchObject({ task: { id: created.task.id } });
+
+      await expect(
+        database.query<{ has_unseen: boolean; awaiting_input: boolean }>(
+          `SELECT has_unseen, awaiting_input FROM goat.task_read_model_v1 WHERE id = $1`,
+          [created.task.id],
+        ),
+      ).resolves.toMatchObject({ rows: [{ has_unseen: false, awaiting_input: true }] });
     });
   });
 });

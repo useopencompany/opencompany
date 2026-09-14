@@ -30,8 +30,8 @@ const allowedStandaloneFiles = new Set([
 // merge. Comparing with origin/main plus a PR-specific delta makes the check
 // self-invalidating once origin/main advances to that merged tree.
 const protectedCompatibilityTokens = [
-  // 1161 = 1162 - the id in the home activity-list test fixture deleted with those lists.
-  ["physical and stored quoted goat_* identifiers", /["'`]goat_[a-z0-9_]*["'`]/gu, 1161],
+  // 1163 = 1161 + the conversation and run ids in the sidebar awaiting-input test fixture.
+  ["physical and stored quoted goat_* identifiers", /["'`]goat_[a-z0-9_]*["'`]/gu, 1163],
   ["quoted sandbox runtime roots", /["'`]opencompany-goat[a-z0-9_./${}:*-]*["'`]/gu, 26],
   ["chat source-provider values", /["']goat-chat["']/gu, 28],
   ["import source-provider values", /["']goat-import["']/gu, 13],

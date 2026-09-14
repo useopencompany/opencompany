@@ -3560,6 +3560,7 @@ function conversationDto(conversation: {
   } | null;
   activityState: "working" | "idle";
   hasUnseen: boolean;
+  awaitingInput: boolean;
   pinnedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;

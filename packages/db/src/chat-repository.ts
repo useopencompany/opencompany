@@ -341,6 +341,7 @@ export class PostgresChatRepository implements ChatRepository {
         conversation.message_shape_epoch AS "messageShapeEpoch",
         conversation.activity_state AS "activityState",
         conversation.has_unseen AS "hasUnseen",
+        conversation.awaiting_input AS "awaitingInput",
         conversation.pinned_at AS "pinnedAt",
         conversation.created_at AS "createdAt",
         conversation.updated_at AS "updatedAt"
@@ -393,6 +394,7 @@ export class PostgresChatRepository implements ChatRepository {
         conversation.message_shape_epoch AS "messageShapeEpoch",
         conversation.activity_state AS "activityState",
         conversation.has_unseen AS "hasUnseen",
+        conversation.awaiting_input AS "awaitingInput",
         conversation.pinned_at AS "pinnedAt",
         conversation.created_at AS "createdAt",
         conversation.updated_at AS "updatedAt"
@@ -2459,6 +2461,7 @@ type ConversationRow = {
   messageShapeEpoch: number | string;
   activityState: Conversation["activityState"];
   hasUnseen: boolean;
+  awaitingInput: boolean;
   pinnedAt: Date | string | null;
   createdAt: Date | string;
   updatedAt: Date | string;
@@ -2727,6 +2730,7 @@ function mapConversation(row: ConversationRow): Conversation {
         : null,
     activityState: row.activityState,
     hasUnseen: row.hasUnseen,
+    awaitingInput: row.awaitingInput,
     pinnedAt: row.pinnedAt === null ? null : asDate(row.pinnedAt),
     createdAt: asDate(row.createdAt),
     updatedAt: asDate(row.updatedAt),
