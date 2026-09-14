@@ -90,9 +90,22 @@ beforeEach(async () => {
     db: drizzle(pg),
     credential: vi.fn(async () => ({ token: "test-token", botUserId: "BOT" })),
     validateChannel: vi.fn(async (_token, id) => id),
-    request: vi.fn(async () => ({
-      user: { id: "U1", team_id: "T1", profile: { email: "member@example.com" } },
-    })) as unknown as SlackChannelWorkerDependencies["request"],
+    request: vi.fn(async ({ method }: { method: string }) =>
+      method === "users.info"
+        ? {
+            user: {
+              id: "U1",
+              team_id: "T1",
+              profile: { real_name: "Member Person", email: "member@example.com" },
+            },
+          }
+        : {
+            messages: [
+              { user: "BOT", text: "Investigation result" },
+              { user: "U1", text: "What are the DB implications?" },
+            ],
+          },
+    ) as unknown as SlackChannelWorkerDependencies["request"],
   };
   await pg.exec(`
     INSERT INTO goat.users (workos_user_id, email) VALUES ('owner', 'owner@example.com'), ('member', 'member@example.com');
@@ -139,7 +152,7 @@ describe("durable Slack subscriptions", () => {
   });
   it("persists workflow root intents with a stable key and rejects foreign callers", async () => {
     await pg.exec(`
-      UPDATE goat.integrations SET scopes = '["chat:write","channels:read","channels:history","users:read"]';
+      UPDATE goat.integrations SET scopes = '["chat:write","channels:read","channels:history","users:read","users:read.email"]';
       INSERT INTO goat.chat_messages (id, session_id, role, content, task_id) VALUES ('initial_user','session','user','Investigate','task'), ('initial_assistant','session','assistant','','task');
       INSERT INTO goat.codex_chat_turns (id,user_workos_id,codex_chat_session_id,chat_session_id,user_message_id,assistant_message_id,status,prompt,lease_id,lease_expires_at)
         VALUES ('initial_run','owner','runtime','session','initial_user','initial_assistant','running','Investigate','lease',now() + interval '1 minute');
@@ -208,9 +221,19 @@ describe("durable Slack subscriptions", () => {
       { sandbox_id: "saved-sandbox" },
     ]);
     await pg.exec(
-      `UPDATE goat.codex_chat_turns SET status = 'completed'; UPDATE goat.codex_chat_sessions SET status = 'idle'; UPDATE goat.tasks SET status = 'succeeded'; UPDATE goat.chat_messages SET content = 'Additive migration; retained artifacts.' WHERE role = 'assistant';`,
+      `UPDATE goat.integrations SET scopes = '["chat:write","channels:read","channels:history","users:read","users:read.email"]';
+       UPDATE goat.codex_chat_turns SET status = 'running', lease_id = 'reply-lease', lease_expires_at = now() + interval '1 minute';
+       UPDATE goat.codex_chat_sessions SET status = 'running';`,
     );
-    expect(await processNextSubscriptionEvent(deps)).toBe(true);
+    const posted = await postWorkflowSlackMessage(
+      {
+        runId: runs[0]!.id,
+        actorId: "owner",
+        post: { text: "Additive migration; retained artifacts.", messageKey: "slack-follow-up-1" },
+      },
+      execute,
+    );
+    expect(posted.message).toContain("originating Slack thread");
     expect(await processNextSubscriptionEvent(deps)).toBe(false);
     const deliveries = (
       await pg.query(
@@ -220,11 +243,32 @@ describe("durable Slack subscriptions", () => {
     expect(deliveries).toEqual([
       { channel_id: "C1", thread_ts: "100.001", text: "Additive migration; retained artifacts." },
     ]);
-    await pg.exec("UPDATE goat.channel_deliveries SET status = 'sent'");
-    await processNextSubscriptionEvent(deps);
-    await processNextSubscriptionEvent(deps);
+    await pg.exec("UPDATE goat.channel_deliveries SET status = 'sent' WHERE id <> 'root'");
+    expect(await processNextSubscriptionEvent(deps)).toBe(true);
+    expect(await processNextSubscriptionEvent(deps)).toBe(false);
+    await pg.exec(
+      `UPDATE goat.codex_chat_turns SET status = 'completed'; UPDATE goat.codex_chat_sessions SET status = 'idle'; UPDATE goat.tasks SET status = 'succeeded';`,
+    );
+    expect(await processNextSubscriptionEvent(deps)).toBe(true);
     expect((await pg.query("SELECT id FROM goat.codex_chat_turns")).rows).toHaveLength(2);
     expect((await pg.query("SELECT id FROM goat.tasks")).rows).toHaveLength(1);
+  });
+  it("does not copy a completed assistant turn into Slack when the reply tool was not used", async () => {
+    await enqueueSlackThreadReply(execute, reply);
+    await processNextSubscriptionEvent(deps);
+    await pg.exec(
+      `UPDATE goat.codex_chat_turns SET status = 'completed';
+       UPDATE goat.codex_chat_sessions SET status = 'idle';
+       UPDATE goat.tasks SET status = 'succeeded';
+       UPDATE goat.chat_messages SET content = 'Task-only final answer' WHERE role = 'assistant';`,
+    );
+    expect(await processNextSubscriptionEvent(deps)).toBe(true);
+    expect(
+      (await pg.query("SELECT id FROM goat.channel_deliveries WHERE id <> 'root'")).rows,
+    ).toEqual([]);
+    expect((await pg.query("SELECT status FROM goat.subscription_events")).rows).toEqual([
+      { status: "done" },
+    ]);
   });
   it.each([
     { label: "a different email", profile: { email: "different@example.com" } },
@@ -265,11 +309,31 @@ describe("durable Slack subscriptions", () => {
       ).toEqual([
         {
           author_workos_id: "owner",
-          body: expect.stringContaining("Slack thread follow-up from <@U1>"),
+          body: expect.stringContaining("--- New follow-up message begins ---"),
         },
       ]);
     },
   );
+  it("attributes the sender and includes the full thread before the clearly marked message", async () => {
+    await enqueueSlackThreadReply(execute, reply);
+    await processNextSubscriptionEvent(deps);
+    const [activity] = (
+      await pg.query<{ body: string }>(
+        "SELECT body FROM goat.task_activities WHERE kind = 'comment'",
+      )
+    ).rows;
+    expect(activity?.body).toContain("Sender: Member Person <member@example.com> (Slack user U1)");
+    expect(activity?.body).toContain("opencompany bot (Slack user BOT):\n> Investigation result");
+    expect(activity?.body).toContain(
+      "Member Person <member@example.com> (Slack user U1):\n> What are the DB implications?",
+    );
+    expect(activity?.body).toContain(
+      'call post_slack_message with your final Slack reply as text and "slack-follow-up-1" as messageKey',
+    );
+    expect(activity?.body.indexOf("--- Full Slack thread ---")).toBeLessThan(
+      activity?.body.indexOf("--- New follow-up message begins ---") ?? 0,
+    );
+  });
   it.each([
     { id: "BOT" },
     { id: "U1", is_bot: true },

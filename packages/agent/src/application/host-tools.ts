@@ -226,7 +226,7 @@ export type ChatHostToolServiceDependencies = {
   postSlackMessage?: (input: {
     runId: string;
     actorId: string;
-    post: { channel: string; text: string; messageKey: string };
+    post: { channel?: string; text: string; messageKey: string };
   }) => Promise<unknown>;
   writeArtifact?: (input: {
     context: ChatHostContext;
@@ -548,7 +548,7 @@ async function executeOperation(
       return dependencies.postSlackMessage({
         runId: command.runId,
         actorId: context.actorId,
-        post: command.input as { channel: string; text: string; messageKey: string },
+        post: command.input as { channel?: string; text: string; messageKey: string },
       });
     }
     case "write_artifact": {
