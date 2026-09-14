@@ -218,6 +218,89 @@ describe("CodingWorkspaceFiles", () => {
     expect(socket.sentMessages().filter((message) => message.type === "files.open").length).toBe(2);
   });
 
+  it("baselines a save on the text it sent, leaving keystrokes from mid-save dirty", async () => {
+    const user = userEvent.setup();
+    const socket = new FakeSocket();
+    renderFiles(socket);
+    socket.receive(ROOT_LISTING);
+
+    await user.click(await screen.findByRole("treeitem", { name: /README\.md/ }));
+    socket.receive({
+      type: "files.content",
+      path: "README.md",
+      kind: "text",
+      content: "# hello",
+      revision: "rev-1",
+      size: 7,
+      editable: true,
+    });
+
+    const editor = await screen.findByLabelText("Edit README.md");
+    await user.type(editor, "!");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    // A keystroke lands while the save is still in flight.
+    await user.type(editor, "?");
+    socket.receive({ type: "files.saved", path: "README.md", revision: "rev-2", size: 8 });
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(socket.sentMessages()).toContainEqual({
+      type: "files.save",
+      path: "README.md",
+      content: "# hello!?",
+      baseRevision: "rev-2",
+    });
+  });
+
+  it("applies a save that lands after the user moved to another file", async () => {
+    const user = userEvent.setup();
+    const socket = new FakeSocket();
+    renderFiles(socket);
+    socket.receive(ROOT_LISTING);
+
+    await user.click(await screen.findByRole("treeitem", { name: /README\.md/ }));
+    socket.receive({
+      type: "files.content",
+      path: "README.md",
+      kind: "text",
+      content: "# hello",
+      revision: "rev-1",
+      size: 7,
+      editable: true,
+    });
+    await user.type(await screen.findByLabelText("Edit README.md"), "!");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await user.click(screen.getByRole("treeitem", { name: /logo\.png/ }));
+    socket.receive({ type: "files.saved", path: "README.md", revision: "rev-2", size: 8 });
+    socket.receive({
+      type: "files.content",
+      path: "logo.png",
+      kind: "image",
+      dataUrl: "data:image/png;base64,AQID",
+      size: 3,
+    });
+    await screen.findByAltText("logo.png");
+
+    await user.click(screen.getByRole("treeitem", { name: /README\.md/ }));
+    const editor = await screen.findByLabelText("Edit README.md");
+    expect(editor).toHaveValue("# hello!");
+    expect(
+      within(screen.getByRole("treeitem", { name: /README\.md/ })).queryByTitle("Unsaved changes"),
+    ).not.toBeInTheDocument();
+
+    // The revision the save returned is what the next edit builds on; without it the
+    // workspace would report a conflict against the user's own write.
+    await user.type(editor, "?");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(socket.sentMessages()).toContainEqual({
+      type: "files.save",
+      path: "README.md",
+      content: "# hello!?",
+      baseRevision: "rev-2",
+    });
+  });
+
   it("navigates the tree with the keyboard", async () => {
     const user = userEvent.setup();
     const socket = new FakeSocket();

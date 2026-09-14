@@ -101,6 +101,9 @@ export default function CodingWorkspaceFiles({
   const selectedPathRef = useRef<string | null>(layout.selectedPath ?? null);
   const expandedPathsRef = useRef<ReadonlySet<string>>(expandedPaths);
   const savingRef = useRef(false);
+  // What the in-flight save sent, so `files.saved` can make exactly that text the new
+  // baseline and leave keystrokes that landed mid-save dirty.
+  const pendingSaveRef = useRef<{ path: string; content: string } | null>(null);
   // Declared before every other effect so the requests below always read fresh values.
   useEffect(() => {
     selectedPathRef.current = selectedPath;
@@ -123,15 +126,28 @@ export default function CodingWorkspaceFiles({
     [send],
   );
 
+  /** Keeps only unsaved work and the file being opened, so browsing stays bounded. */
+  const pruneBuffers = useCallback((keepPath: string) => {
+    setBuffers((current) => {
+      const next = new Map(
+        [...current].filter(
+          ([path, buffer]) => path === keepPath || buffer.content !== buffer.baseContent,
+        ),
+      );
+      return next.size === current.size ? current : next;
+    });
+  }, []);
+
   const openPath = useCallback(
     (path: string) => {
+      pruneBuffers(path);
       setSelectedPath(path);
       setActivePath(path);
       setSaveState({ status: "idle" });
       setOpenFile({ status: "loading" });
       send({ type: "files.open", path });
     },
-    [send],
+    [pruneBuffers, send],
   );
 
   /** Opens a file from the tree, reusing an unsaved edit instead of discarding it. */
@@ -144,11 +160,12 @@ export default function CodingWorkspaceFiles({
         openPath(path);
         return;
       }
+      pruneBuffers(path);
       setSelectedPath(path);
       setSaveState({ status: "idle" });
       setOpenFile({ status: "text", editable: buffer.editable });
     },
-    [buffers, openPath],
+    [buffers, openPath, pruneBuffers],
   );
 
   const toggleDirectory = useCallback(
@@ -203,6 +220,24 @@ export default function CodingWorkspaceFiles({
         return;
       }
 
+      // A completed save has to reach its buffer even if the user has moved on, or the
+      // stored revision goes stale and the next save reports a phantom conflict.
+      if (message.type === "files.saved") {
+        const saved = pendingSaveRef.current;
+        pendingSaveRef.current = null;
+        setBuffers((current) => {
+          const buffer = current.get(message.path);
+          if (!buffer || saved?.path !== message.path) return current;
+          return new Map(current).set(message.path, {
+            ...buffer,
+            baseContent: saved.content,
+            baseRevision: message.revision,
+          });
+        });
+        if (message.path === selectedPathRef.current) setSaveState({ status: "saved" });
+        return;
+      }
+
       // A reply for a file the user has already navigated away from is stale.
       if (message.path !== selectedPathRef.current) return;
 
@@ -220,22 +255,6 @@ export default function CodingWorkspaceFiles({
           }),
         );
         setOpenFile({ status: "text", editable: message.editable });
-        return;
-      }
-
-      if (message.type === "files.saved") {
-        setBuffers((current) => {
-          const buffer = current.get(message.path);
-          if (!buffer) return current;
-          // Only the text that was sent becomes the new baseline, so keystrokes that
-          // landed while the save was in flight stay dirty.
-          return new Map(current).set(message.path, {
-            ...buffer,
-            baseContent: buffer.content,
-            baseRevision: message.revision,
-          });
-        });
-        setSaveState({ status: "saved" });
         return;
       }
 
@@ -278,6 +297,7 @@ export default function CodingWorkspaceFiles({
       // Set eagerly rather than waiting for the state to commit, so a Cmd+S that reaches
       // both the editor keymap and this component cannot send the document twice.
       savingRef.current = true;
+      pendingSaveRef.current = { path, content: current.content };
       setSaveState({ status: "saving" });
       send({
         type: "files.save",
