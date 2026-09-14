@@ -987,11 +987,9 @@ function EventTriggerEditor({
           />
         ))}
       </div>
-      <WorkflowRunContext
-        prompt={trigger.prompt}
-        canEdit={canEdit}
-        onChange={(prompt) => onChange({ ...trigger, prompt })}
-      />
+      <p className="text-[12px] leading-5 text-ink-subtle">
+        Each run follows the instructions in your steps.
+      </p>
     </div>
   );
 }
@@ -1133,48 +1131,6 @@ function unavailableEventLabel(event: string) {
   return event === "issue_enters_triage"
     ? "Issue enters triage (legacy)"
     : `${event} (unavailable)`;
-}
-
-function WorkflowRunContext({
-  prompt,
-  canEdit,
-  onChange,
-}: {
-  prompt: string;
-  canEdit: boolean;
-  onChange: (prompt: string) => void;
-}) {
-  const value = prompt === DEFAULT_WORKFLOW_SCHEDULE_PROMPT ? "" : prompt;
-  const [open, setOpen] = useState(() => Boolean(value.trim()));
-  return (
-    <div className="flex flex-col gap-2">
-      <p className="text-[12px] leading-5 text-ink-subtle">
-        Each run follows the instructions in your steps.
-      </p>
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen(!open)}
-        className="flex w-fit items-center gap-1.5 rounded-md text-[12px] text-ink-subtle hover:text-ink focus-visible:ring-1 focus-visible:ring-ink/20"
-      >
-        <ChevronDown size={12} className={open ? "rotate-180" : ""} />
-        Additional run context (optional)
-      </button>
-      {open ? (
-        <label className="flex min-w-0 flex-col gap-1.5">
-          <span className="text-[12px] font-medium text-ink-subtle">Run context</span>
-          <textarea
-            value={value}
-            readOnly={!canEdit}
-            onChange={(event) => onChange(event.target.value)}
-            rows={3}
-            placeholder="Extra context shared across steps, such as a region or reporting period."
-            className="min-h-20 resize-y rounded-lg border border-border bg-canvas px-2.5 py-2 text-[13px] leading-5 text-ink outline-none transition-colors placeholder:text-ink-faint focus-visible:ring-1 focus-visible:ring-ink/20 read-only:opacity-70"
-          />
-        </label>
-      ) : null}
-    </div>
-  );
 }
 
 type ScheduleFrequency = AgentSchedulePreset["kind"] | "custom";
