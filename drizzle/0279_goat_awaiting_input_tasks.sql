@@ -89,6 +89,32 @@ CREATE TRIGGER "goat_project_run_approval_task_read_model_v1"
 AFTER INSERT OR UPDATE OF "status" OR DELETE ON "goat"."run_approvals"
 FOR EACH ROW EXECUTE FUNCTION "goat"."project_run_approval_task_read_model_v1"();--> statement-breakpoint
 
+-- The Task half of the run-status refresh in 0278: a turn that ends with approvals outstanding
+-- stops being answerable without anything writing to goat.run_approvals.
+CREATE OR REPLACE FUNCTION "goat"."project_run_status_task_read_model_v1"()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.chat_session_id IS NOT NULL THEN
+    PERFORM goat.refresh_task_read_model_v1(task.id)
+    FROM goat.tasks AS task
+    WHERE task.session_id = NEW.chat_session_id;
+  END IF;
+  RETURN NEW;
+END
+$$;--> statement-breakpoint
+
+DROP TRIGGER IF EXISTS "goat_project_run_status_task_read_model_v1" ON "goat"."codex_chat_turns";--> statement-breakpoint
+CREATE TRIGGER "goat_project_run_status_task_read_model_v1"
+AFTER UPDATE OF "status", "interrupt_requested_at" ON "goat"."codex_chat_turns"
+FOR EACH ROW
+WHEN (
+  OLD.status IS DISTINCT FROM NEW.status
+  OR OLD.interrupt_requested_at IS DISTINCT FROM NEW.interrupt_requested_at
+)
+EXECUTE FUNCTION "goat"."project_run_status_task_read_model_v1"();--> statement-breakpoint
+
 UPDATE goat.task_read_model_v1 AS projection
 SET awaiting_input = true
 WHERE goat.conversation_awaiting_input_v1(projection.conversation_id);

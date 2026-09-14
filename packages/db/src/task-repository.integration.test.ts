@@ -1621,6 +1621,41 @@ describe("Postgres Task repository", () => {
       });
     });
 
+    it("drops the flag when the run dies with its approval still pending", async () => {
+      // forceFailClaimedTurn fails a running turn without touching goat.run_approvals, and turn-end
+      // cancellation only covers 'acp_permission'. The approval is stranded 'pending' and can never
+      // be resolved, so a row still claiming to wait on it could never be cleared by anyone.
+      const created = await taskAwaitingInput("task-awaiting-orphan", "approval_orphan");
+      const { conversationId, runId } = await chatAwaitingInput("orphan", "approval_chat_orphan");
+
+      await database.query(`UPDATE goat.codex_chat_turns SET status = 'failed' WHERE id = $1`, [
+        runId,
+      ]);
+      await database.query(`UPDATE goat.codex_chat_turns SET status = 'failed' WHERE id = $1`, [
+        created.runId,
+      ]);
+
+      await expect(taskAwaitingInputFlag(created.task.id)).resolves.toMatchObject({
+        rows: [{ awaiting_input: false }],
+      });
+      await expect(conversationAwaitingInputFlag(conversationId)).resolves.toMatchObject({
+        rows: [{ awaiting_input: false }],
+      });
+    });
+
+    it("drops the flag once the run is interrupted, which the resolve path also refuses", async () => {
+      const { conversationId, runId } = await chatAwaitingInput("interrupted", "approval_chat_int");
+
+      await database.query(
+        `UPDATE goat.codex_chat_turns SET interrupt_requested_at = now() WHERE id = $1`,
+        [runId],
+      );
+
+      await expect(conversationAwaitingInputFlag(conversationId)).resolves.toMatchObject({
+        rows: [{ awaiting_input: false }],
+      });
+    });
+
     it("keeps the flag raised after the Task is acknowledged, which only clears the unread dot", async () => {
       // Reading a request is not answering it, so the two flags move independently.
       const created = await taskAwaitingInput("task-awaiting-ack", "approval_ack");

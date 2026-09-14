@@ -7,6 +7,13 @@ ALTER TABLE "goat"."conversation_read_model_v1" ADD COLUMN "awaiting_input" bool
 -- A pending approval is the canonical record of it: the connected-action "Ask" pause, the coding
 -- engine's permission prompt, and an engine question all land in goat.run_approvals as 'pending'
 -- and all clear the same way.
+--
+-- The run-level conditions mirror the ones resolveApproval authorizes against, so the flag only
+-- stands while the request can still be answered. A run that died with approvals outstanding
+-- leaves them 'pending' forever -- forceFailClaimedTurn fails a running turn without touching
+-- goat.run_approvals, and turn-end cancellation only covers 'acp_permission' -- and a row that
+-- claimed to be waiting on a decision nobody can make would pin itself to the sidebar and the
+-- review queue with no way to clear it.
 CREATE OR REPLACE FUNCTION "goat"."conversation_awaiting_input_v1"(target_conversation_id text)
 RETURNS boolean
 LANGUAGE sql
@@ -18,6 +25,8 @@ AS $$
     JOIN goat.codex_chat_turns AS run ON run.id = approval.run_id
     WHERE run.chat_session_id = target_conversation_id
       AND approval.status = 'pending'
+      AND run.status IN ('running', 'paused', 'queued', 'completed')
+      AND run.interrupt_requested_at IS NULL
   )
 $$;--> statement-breakpoint
 
@@ -134,6 +143,32 @@ DROP TRIGGER IF EXISTS "goat_project_run_approval_conversation_read_model_v1" ON
 CREATE TRIGGER "goat_project_run_approval_conversation_read_model_v1"
 AFTER INSERT OR UPDATE OF "status" OR DELETE ON "goat"."run_approvals"
 FOR EACH ROW EXECUTE FUNCTION "goat"."project_run_approval_conversation_read_model_v1"();--> statement-breakpoint
+
+-- The flag reads the run's status as well as the approval's, so the run has to refresh it too:
+-- a turn that ends with approvals outstanding stops being answerable without anything writing to
+-- goat.run_approvals. Narrower than the run projection trigger beside it, which already fires on
+-- every event-sequence bump.
+CREATE OR REPLACE FUNCTION "goat"."project_run_status_conversation_read_model_v1"()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.chat_session_id IS NOT NULL THEN
+    PERFORM goat.refresh_conversation_read_model_v1(NEW.chat_session_id);
+  END IF;
+  RETURN NEW;
+END
+$$;--> statement-breakpoint
+
+DROP TRIGGER IF EXISTS "goat_project_run_status_conversation_read_model_v1" ON "goat"."codex_chat_turns";--> statement-breakpoint
+CREATE TRIGGER "goat_project_run_status_conversation_read_model_v1"
+AFTER UPDATE OF "status", "interrupt_requested_at" ON "goat"."codex_chat_turns"
+FOR EACH ROW
+WHEN (
+  OLD.status IS DISTINCT FROM NEW.status
+  OR OLD.interrupt_requested_at IS DISTINCT FROM NEW.interrupt_requested_at
+)
+EXECUTE FUNCTION "goat"."project_run_status_conversation_read_model_v1"();--> statement-breakpoint
 
 UPDATE goat.conversation_read_model_v1 AS projection
 SET awaiting_input = true
