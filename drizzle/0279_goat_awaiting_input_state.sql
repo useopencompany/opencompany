@@ -1,5 +1,5 @@
 -- A run blocked on the reader, projected for the Conversation read model. Tasks carry the same
--- flag through their own projection in 0279: one predicate, one trigger per read model, matching
+-- flag through their own projection in 0280: one predicate, one trigger per read model, matching
 -- how every other projection here is wired.
 ALTER TABLE "goat"."conversation_read_model_v1" ADD COLUMN "awaiting_input" boolean DEFAULT false NOT NULL;--> statement-breakpoint
 

@@ -1,4 +1,4 @@
--- The Task half of 0278. It is a separate migration because the two read models are installed
+-- The Task half of 0279. It is a separate migration because the two read models are installed
 -- and refreshed independently, each behind its own projection trigger.
 ALTER TABLE "goat"."task_read_model_v1" ADD COLUMN "awaiting_input" boolean DEFAULT false NOT NULL;--> statement-breakpoint
 
@@ -89,7 +89,7 @@ CREATE TRIGGER "goat_project_run_approval_task_read_model_v1"
 AFTER INSERT OR UPDATE OF "status" OR DELETE ON "goat"."run_approvals"
 FOR EACH ROW EXECUTE FUNCTION "goat"."project_run_approval_task_read_model_v1"();--> statement-breakpoint
 
--- The Task half of the run-status refresh in 0278: a turn that ends with approvals outstanding
+-- The Task half of the run-status refresh in 0279: a turn that ends with approvals outstanding
 -- stops being answerable without anything writing to goat.run_approvals.
 CREATE OR REPLACE FUNCTION "goat"."project_run_status_task_read_model_v1"()
 RETURNS trigger
