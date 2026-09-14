@@ -99,6 +99,10 @@ The 35 known sessionless pre-cutover Tasks are intentionally separate. They rema
 the actor-scoped compatibility API and cannot be replied to, canceled, or archived. ADR 0002 owns
 their retention gate.
 
+Workspace Slack Channels bind exact bot-authored threads to these same durable Task conversations.
+See [Slack Channels](slack-channels.md) for the subscription inbox, delivery outbox, authorization,
+and reconnect/expiry behavior.
+
 ## Knowledge, Skills, Plugins, and integrations
 
 Brain, Wiki, Agent Skills, Agent Plugins, and integration commands are API- or runner-owned. Skills

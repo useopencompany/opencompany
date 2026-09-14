@@ -54,8 +54,7 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
       await database.exec(BASE_SCHEMA);
       await database.exec("ALTER TABLE goat.workflows ADD COLUMN event_activated_at timestamptz");
       await database.exec(`
-      INSERT INTO goat.users (workos_user_id, task_spawning_enabled)
-      VALUES ('migration_user', true);
+      INSERT INTO goat.users (workos_user_id) VALUES ('migration_user');
       INSERT INTO goat.workspaces (id) VALUES ('migration_workspace');
       INSERT INTO goat.workflows (
         id, workspace_id, slug, name, instructions, model, trigger,
@@ -153,8 +152,8 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
       DELETE FROM goat.workspace_members;
       DELETE FROM goat.users;
       DELETE FROM goat.workspaces;
-      INSERT INTO goat.users (workos_user_id, task_spawning_enabled)
-      VALUES ('user_1', true), ('user_2', true), ('user_teammate', true), ('user_disabled', false);
+      INSERT INTO goat.users (workos_user_id)
+      VALUES ('user_1'), ('user_2'), ('user_teammate'), ('user_disabled');
       INSERT INTO goat.workspaces (id) VALUES ('workspace_1'), ('workspace_2');
       INSERT INTO goat.workspace_members (id, workspace_id, user_workos_id, role)
       VALUES
@@ -744,7 +743,7 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
     expect(await save(changedRoute)).toEqual(clock);
   });
 
-  it("keeps Recurring Tasks actor-owned, feature-gated, idempotent, and versioned", async () => {
+  it("keeps Recurring Tasks actor-owned, idempotent, and versioned", async () => {
     const command = {
       idempotencyKey: "schedule-create-1",
       name: "Weekly research",
@@ -776,11 +775,11 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
       ),
     ).rejects.toMatchObject({ code: "not_found" });
     await expect(
-      schedules.createTaskSchedule(actor({ userId: "user_disabled" }), {
+      schedules.createTaskSchedule(actor({ userId: "user_2" }), {
         ...command,
-        idempotencyKey: "disabled-schedule",
+        idempotencyKey: "outside-workspace-schedule",
       }),
-    ).rejects.toMatchObject({ code: "forbidden" });
+    ).rejects.toMatchObject({ code: "not_found" });
 
     await database.exec(`
       INSERT INTO goat.task_schedules (
@@ -831,11 +830,6 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
     ).resolves.toMatchObject({ rows: [{ enabled: false, version: 2 }] });
 
     await schedules.archiveTaskSchedule(actor(), first.schedule.id, 2);
-    await database.exec(`
-      UPDATE goat.users
-      SET task_spawning_enabled = false
-      WHERE workos_user_id = 'user_1'
-    `);
     await expect(schedules.createTaskSchedule(actor(), command)).resolves.toMatchObject({
       schedule: { id: first.schedule.id, enabled: false, version: 3 },
       transactionId: first.transactionId,
@@ -920,10 +914,7 @@ function taskResult(): CreateTaskResult {
 
 const BASE_SCHEMA = `
   CREATE SCHEMA goat;
-  CREATE TABLE goat.users (
-    workos_user_id text PRIMARY KEY,
-    task_spawning_enabled boolean NOT NULL DEFAULT false
-  );
+  CREATE TABLE goat.users (workos_user_id text PRIMARY KEY);
   CREATE TABLE goat.workspaces (id text PRIMARY KEY);
   CREATE TABLE goat.workspace_members (
     id text PRIMARY KEY,

@@ -11,6 +11,8 @@ import type { ActionProviderId } from "./types";
 // server-side action catalog and the settings panel.
 
 export type CapabilityMode = "on" | "off" | "ask";
+// A tool either follows its capability group ("inherit", never stored) or pins its own mode.
+export type ToolMode = CapabilityMode | "inherit";
 export type CapabilityId = "read" | "query" | "draft" | "write";
 
 export type ProviderCapability = {
@@ -600,6 +602,37 @@ export function providerCapability(
   capabilityId: CapabilityId,
 ): ProviderCapability | undefined {
   return providerCapabilities(provider).find((capability) => capability.id === capabilityId);
+}
+
+export function isToolMode(value: unknown): value is ToolMode {
+  return value === "inherit" || isCapabilityMode(value);
+}
+
+// Resolves what one tool actually does, from the connection's stored capability modes and its
+// sparse per-tool overrides. This mirrors effectiveRemoteMcpMode in actions/remote-mcp.ts, which
+// is the enforcement path — the two must agree or settings would describe behavior the gateway
+// does not implement. Uncurated tools are the subtle case: they stay Ask under an "on" group
+// because a newly discovered tool must not inherit a broad grant, but an explicit tool override
+// still wins, which is exactly what makes a tool-level decision worth offering.
+export function effectiveToolMode(input: {
+  provider: string;
+  capabilityId: CapabilityId;
+  curated: boolean;
+  toolId: string;
+  capabilityModes: unknown;
+  toolModes: unknown;
+}): CapabilityMode {
+  const override = readMode(input.toolModes, input.toolId);
+  if (override) return override;
+  const groupMode = readMode(input.capabilityModes, input.capabilityId);
+  if (!input.curated) return groupMode === "off" ? "off" : "ask";
+  return groupMode ?? providerCapability(input.provider, input.capabilityId)?.defaultMode ?? "on";
+}
+
+function readMode(stored: unknown, key: string): CapabilityMode | undefined {
+  if (!stored || typeof stored !== "object" || Array.isArray(stored)) return undefined;
+  const value = (stored as Record<string, unknown>)[key];
+  return isCapabilityMode(value) ? value : undefined;
 }
 
 // Resolves the mode for one capability of one connection from its stored

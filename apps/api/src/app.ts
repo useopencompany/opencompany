@@ -2653,6 +2653,25 @@ export function createApiApp(input: CreateApiAppInput) {
         200,
       );
     },
+    setIntegrationToolMode: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const params = c.req.valid("param");
+      const mode = c.req.valid("json").mode;
+      await input.integrationAccounts.setToolMode(actor, params.integrationId, params.toolId, mode);
+      return c.json(
+        {
+          data: {
+            integrationId: params.integrationId,
+            toolId: params.toolId,
+            // The service rejects anything outside the tool mode vocabulary.
+            mode: mode as "on" | "ask" | "off" | "inherit",
+          },
+          meta,
+        },
+        200,
+      );
+    },
     alwaysAllowAction: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 60);

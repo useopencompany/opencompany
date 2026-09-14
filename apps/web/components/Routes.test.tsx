@@ -35,7 +35,6 @@ const appDataMock = vi.hoisted(() => ({
     workspaceMembers: [],
     featureFlags: {
       bots: false,
-      taskSpawning: false,
       autoModelRouting: false,
       legacyBrain: true,
       reviewInbox: false,
@@ -49,7 +48,6 @@ const appDataMock = vi.hoisted(() => ({
 
 const userPreferencesMock = vi.hoisted(() => ({
   updateBotsAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
-  updateTaskSpawningAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateAutoModelRoutingAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateReviewInboxAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateSidebarProjectsAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
@@ -59,6 +57,7 @@ const userPreferencesMock = vi.hoisted(() => ({
 
 const workflowActionsMock = vi.hoisted(() => ({
   createHeadlessWorkflow: vi.fn(async () => ({ slug: "test-workflow" })),
+  updateHeadlessWorkflow: vi.fn(async () => ({ version: 2 })),
   archiveHeadlessWorkflow: vi.fn(async () => ({ workflowId: "workflow_1", version: 2 })),
 }));
 
@@ -176,7 +175,6 @@ vi.mock("@/components/InferenceSettingsPanel", () => ({
 
 vi.mock("@/lib/user-preferences", () => ({
   updateBotsAction: userPreferencesMock.updateBotsAction,
-  updateTaskSpawningAction: userPreferencesMock.updateTaskSpawningAction,
   updateAutoModelRoutingAction: userPreferencesMock.updateAutoModelRoutingAction,
   updateReviewInboxAction: userPreferencesMock.updateReviewInboxAction,
   updateSidebarProjectsAction: userPreferencesMock.updateSidebarProjectsAction,
@@ -186,6 +184,7 @@ vi.mock("@/lib/user-preferences", () => ({
 
 vi.mock("@/lib/headless-automation-commands", () => ({
   createHeadlessWorkflow: workflowActionsMock.createHeadlessWorkflow,
+  updateHeadlessWorkflow: workflowActionsMock.updateHeadlessWorkflow,
   archiveHeadlessWorkflow: workflowActionsMock.archiveHeadlessWorkflow,
 }));
 
@@ -285,6 +284,7 @@ describe("WorkflowsRoute", () => {
       workspaceId: "workspace_1",
       canEdit: true,
       ownerNames: WORKFLOW_OWNER_NAMES,
+      templateMissingPlugins: null,
     };
     const view = render(<WorkflowsRoute {...props} />);
 
@@ -317,6 +317,7 @@ describe("WorkflowsRoute", () => {
         workspaceId="workspace_1"
         canEdit
         ownerNames={WORKFLOW_OWNER_NAMES}
+        templateMissingPlugins={null}
       />,
     );
 
@@ -353,6 +354,7 @@ describe("WorkflowsRoute", () => {
         workspaceId="workspace_1"
         canEdit
         ownerNames={WORKFLOW_OWNER_NAMES}
+        templateMissingPlugins={null}
       />,
     );
 
@@ -389,6 +391,7 @@ describe("WorkflowsRoute", () => {
         workspaceId="workspace_1"
         canEdit
         ownerNames={WORKFLOW_OWNER_NAMES}
+        templateMissingPlugins={null}
       />,
     );
 
@@ -402,6 +405,40 @@ describe("WorkflowsRoute", () => {
     expect(screen.getByRole("cell", { name: "1" })).toBeInTheDocument();
   });
 
+  it("marks each workflow's model with its provider icon, and collapses mixed steps to a count", () => {
+    workflowLiveQueryMock.hydrated = false;
+    workflowLiveQueryMock.isLoading = false;
+    Object.assign(appDataMock.value, { tasks: [] });
+
+    render(
+      <WorkflowsRoute
+        workflows={[
+          workflowListItem({ model: "claude-code" }),
+          workflowListItem({
+            id: "workflow_2",
+            slug: "mixed-models",
+            name: "Mixed models",
+            steps: [
+              { id: "step_1", title: "Draft", model: "codex", instructions: "Draft it" },
+              { id: "step_2", title: "Review", model: "claude-code", instructions: "Review it" },
+            ],
+          }),
+        ]}
+        workspaceId="workspace_1"
+        canEdit
+        ownerNames={WORKFLOW_OWNER_NAMES}
+        templateMissingPlugins={null}
+      />,
+    );
+
+    const claudeCell = screen.getByRole("cell", { name: "Claude Code" });
+    expect(claudeCell.querySelector("svg")).toBeInTheDocument();
+
+    // Two different models cannot be represented by one provider mark, so the cell counts them.
+    const mixedCell = screen.getByRole("cell", { name: "2 models" });
+    expect(mixedCell.querySelector("svg")).toBeInTheDocument();
+  });
+
   it("carries scope in the tabs only, and status as a dot beside the name", () => {
     workflowLiveQueryMock.hydrated = false;
     workflowLiveQueryMock.isLoading = false;
@@ -413,6 +450,7 @@ describe("WorkflowsRoute", () => {
         workspaceId="workspace_1"
         canEdit
         ownerNames={WORKFLOW_OWNER_NAMES}
+        templateMissingPlugins={null}
       />,
     );
 
@@ -435,6 +473,7 @@ describe("WorkflowsRoute", () => {
         workspaceId="workspace_1"
         canEdit
         ownerNames={WORKFLOW_OWNER_NAMES}
+        templateMissingPlugins={null}
       />,
     );
 
@@ -453,6 +492,7 @@ describe("WorkflowsRoute", () => {
         workspaceId="workspace_1"
         canEdit
         ownerNames={null}
+        templateMissingPlugins={null}
       />,
     );
 
@@ -473,6 +513,7 @@ describe("WorkflowsRoute", () => {
         workspaceId="workspace_1"
         canEdit
         ownerNames={WORKFLOW_OWNER_NAMES}
+        templateMissingPlugins={null}
       />,
     );
 
@@ -500,9 +541,7 @@ describe("SettingsRoute", () => {
     routerMock.refresh.mockReset();
     userPreferencesMock.updateBotsAction.mockReset();
     appDataMock.value.featureFlags.bots = false;
-    userPreferencesMock.updateTaskSpawningAction.mockClear();
     userPreferencesMock.updateAutoModelRoutingAction.mockClear();
-    appDataMock.value.featureFlags.taskSpawning = false;
     appDataMock.value.featureFlags.autoModelRouting = false;
   });
 
@@ -555,17 +594,10 @@ describe("SettingsRoute", () => {
     expect(screen.getByTestId("inference-settings-panel")).toBeInTheDocument();
   });
 
-  it("shows the Tasks & Workflows switch off by default and persists opt-in", async () => {
-    const user = userEvent.setup();
+  it("no longer offers Tasks & Workflows as a beta opt-in", () => {
     render(<PreferencesSettingsRoute />);
 
-    const toggle = screen.getByRole("switch", { name: "Tasks & Workflows" });
-    expect(toggle).toHaveAttribute("aria-checked", "false");
-
-    await user.click(toggle);
-
-    expect(userPreferencesMock.updateTaskSpawningAction).toHaveBeenCalledWith(true);
-    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+    expect(screen.queryByRole("switch", { name: "Tasks & Workflows" })).not.toBeInTheDocument();
   });
 
   it("shows the For review switch off by default and persists opt-in", async () => {
@@ -645,13 +677,13 @@ describe("SettingsRoute", () => {
   });
 
   it("shows an error when a preference update is rejected", async () => {
-    userPreferencesMock.updateTaskSpawningAction.mockRejectedValueOnce(
+    userPreferencesMock.updateReviewInboxAction.mockRejectedValueOnce(
       new Error("database unavailable"),
     );
     const user = userEvent.setup();
     render(<PreferencesSettingsRoute />);
 
-    await user.click(screen.getByRole("switch", { name: "Tasks & Workflows" }));
+    await user.click(screen.getByRole("switch", { name: "For review" }));
 
     expect(await screen.findByText("Could not update this preference.")).toBeInTheDocument();
     expect(routerMock.refresh).not.toHaveBeenCalled();

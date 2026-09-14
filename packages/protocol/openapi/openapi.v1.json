@@ -4693,7 +4693,10 @@
             "type": "boolean"
           },
           "taskSpawningEnabled": {
-            "type": "boolean"
+            "type": "boolean",
+            "enum": [
+              true
+            ]
           },
           "autoModelRoutingEnabled": {
             "type": "boolean"
@@ -10720,7 +10723,10 @@
             "maxLength": 100
           },
           "taskSpawningEnabled": {
-            "type": "boolean"
+            "type": "boolean",
+            "enum": [
+              true
+            ]
           },
           "wikiEnabled": {
             "type": "boolean",
@@ -11888,6 +11894,12 @@
             "additionalProperties": {
               "nullable": true
             }
+          },
+          "toolModes": {
+            "type": "object",
+            "additionalProperties": {
+              "nullable": true
+            }
           }
         },
         "required": [
@@ -11900,7 +11912,8 @@
           "connectionLabel",
           "statusReason",
           "scopes",
-          "capabilityModes"
+          "capabilityModes",
+          "toolModes"
         ],
         "additionalProperties": false
       },
@@ -12237,6 +12250,65 @@
         "additionalProperties": false
       },
       "SetIntegrationCapabilityModeBody": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "additionalProperties": false
+      },
+      "IntegrationToolModeEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "integrationId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "example": "gint_0f8e7d6c5b4a",
+                "description": "Integration connection id."
+              },
+              "toolId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "on",
+                  "ask",
+                  "off",
+                  "inherit"
+                ]
+              }
+            },
+            "required": [
+              "integrationId",
+              "toolId",
+              "mode"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SetIntegrationToolModeBody": {
         "type": "object",
         "properties": {
           "mode": {
@@ -24880,6 +24952,78 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/IntegrationCapabilityModeEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/integration-accounts/{integrationId}/tool-modes/{toolId}": {
+      "put": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "example": "gint_0f8e7d6c5b4a",
+              "description": "Integration connection id."
+            },
+            "required": true,
+            "description": "Integration connection id.",
+            "name": "integrationId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "required": true,
+            "name": "toolId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetIntegrationToolModeBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Per-tool permission override saved for the connection, or cleared with mode \"inherit\" so the tool follows its capability group again. Owner only.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationToolModeEnvelope"
                 }
               }
             }

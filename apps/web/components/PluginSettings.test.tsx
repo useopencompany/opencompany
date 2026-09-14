@@ -304,6 +304,24 @@ describe("Plugin settings", () => {
     expect(screen.queryByRole("link", { name: "Manage" })).toBeNull();
   });
 
+  it("uses Doppler authentication to show whether the installed plugin is ready", async () => {
+    const doppler = installedOfficialPlugin("doppler");
+    const view = render(
+      <PluginsSettings plugins={[doppler]} canEdit workspaceId="w1" dopplerConnected={false} />,
+    );
+    await userEvent.setup().click(screen.getByRole("button", { name: "Show 1 installed plugin" }));
+    expect(screen.getByText("Requires connection")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Connect" })).toHaveAttribute(
+      "href",
+      "/settings/plugins/doppler",
+    );
+    view.rerender(
+      <PluginsSettings plugins={[doppler]} canEdit workspaceId="w1" dopplerConnected />,
+    );
+    expect(screen.queryByText("Requires connection")).not.toBeInTheDocument();
+    expect(screen.getByText("Enabled")).toBeInTheDocument();
+  });
+
   it("keeps a disabled plugin disabled rather than warning about its connection", () => {
     appData.integrations = integrationStateFromRows([]);
     render(

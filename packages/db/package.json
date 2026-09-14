@@ -243,6 +243,14 @@
     "./task-action-approvals": {
       "types": "./src/task-action-approvals.ts",
       "default": "./src/task-action-approvals.ts"
+    },
+    "./session-subscriptions": {
+      "types": "./src/session-subscriptions.ts",
+      "default": "./src/session-subscriptions.ts"
+    },
+    "./test-task-schema": {
+      "types": "./src/test-task-schema.ts",
+      "default": "./src/test-task-schema.ts"
     }
   },
   "scripts": {

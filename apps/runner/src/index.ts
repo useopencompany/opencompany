@@ -1,3 +1,4 @@
+import { startSlackChannelWorker } from "./slack-channel-worker";
 // Load .env files before any module that reads process.env at import time.
 import "./load-env";
 import { RedisChatPresentationStream } from "@opencompany/chat-presentation";
@@ -43,7 +44,6 @@ import { startSandboxBillingWorker } from "./sandbox-billing-worker";
 import { startSandboxReconciler } from "./sandbox-reconciler";
 import { startTaskScheduleWorker } from "./scheduler";
 import { createServer } from "./server";
-import { activeSlackBotEventCount, drainSlackBotEvents } from "./slack-bot-events";
 import { startStuckWorkMonitor } from "./stuck-work-monitor";
 import { startWorkflowEventWorker } from "./workflow-event-worker";
 
@@ -142,6 +142,9 @@ const workflowEventWorker = codexChatWorker
       },
     })
   : null;
+const slackChannelWorker = codexChatWorker
+  ? startSlackChannelWorker(() => codexChatWorker.notify())
+  : null;
 if (!codexChatWorker) {
   logger.info("opencompany task worker disabled", {
     event: "opencompany.goat_task_worker_disabled",
@@ -183,7 +186,6 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       active_goat_google_drive_sync_count: googleDriveSyncWorker?.activeCount() ?? 0,
       active_goat_brain_import_count: brainImportWorker?.activeCount() ?? 0,
       active_goat_codex_chat_count: codexChatWorker?.activeCount() ?? 0,
-      active_goat_slack_bot_event_count: activeSlackBotEventCount(),
     });
     clearInterval(llmBrokerSweepTimer);
     setBrainIngestWakeup(null);
@@ -218,11 +220,6 @@ async function shutdownRunner(signal: "SIGINT" | "SIGTERM") {
       : null,
     runnerDrainTask("brain_ingest", brainIngestWorker),
     runnerDrainTask("brain_import", brainImportWorker),
-    {
-      name: "slack_bot_events",
-      activeCount: activeSlackBotEventCount,
-      stop: async () => drainSlackBotEvents(),
-    },
     runnerDrainTask("linear_flush", linearFlushWorker),
     runnerDrainTask("hubspot_flush", hubspotFlushWorker),
     runnerDrainTask("attio_flush", attioFlushWorker),
@@ -230,6 +227,7 @@ async function shutdownRunner(signal: "SIGINT" | "SIGTERM") {
     runnerDrainTask("gmail_flush", gmailFlushWorker),
     runnerDrainTask("granola_poll", granolaPollWorker),
     runnerDrainTask("fathom_poll", fathomPollWorker),
+    runnerDrainTask("slack_channel", slackChannelWorker),
     runnerDrainTask("google_drive_sync", googleDriveSyncWorker),
     runnerDrainTask("chat_attachment_cleanup", chatAttachmentCleanupWorker),
     runnerDrainTask("stuck_work_monitor", stuckWorkMonitor),

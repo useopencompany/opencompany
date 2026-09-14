@@ -1127,6 +1127,32 @@ export async function applyIntegrationCapabilityMode(input: {
     .where(inArray(integrations.id, input.integrationIds));
 }
 
+// Settings control: applies or clears one per-tool override layered over the connection's
+// capability modes. Passing `null` removes the key so the tool goes back to inheriting its
+// capability group, which is why this cannot reuse the capability-mode merge above. Tool id and
+// mode validation is the caller's responsibility.
+export async function applyIntegrationToolMode(input: {
+  integrationIds: readonly string[];
+  toolId: string;
+  mode: string | null;
+  db?: Pick<IntegrationDb, "update">;
+  now?: Date;
+}) {
+  if (input.integrationIds.length === 0) return;
+  await (input.db ?? getDb())
+    .update(integrations)
+    .set({
+      toolModes:
+        input.mode === null
+          ? sql`${integrations.toolModes} - ${input.toolId}::text`
+          : sql`${integrations.toolModes} || ${stringifyPostgresJson({
+              [input.toolId]: input.mode,
+            })}::jsonb`,
+      updatedAt: input.now ?? new Date(),
+    })
+    .where(inArray(integrations.id, input.integrationIds));
+}
+
 function rowsFromExecute<T>(result: unknown): T[] {
   if (Array.isArray(result)) return result as T[];
   if (result && typeof result === "object" && "rows" in result) {

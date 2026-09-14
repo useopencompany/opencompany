@@ -53,7 +53,8 @@ const access = {
 };
 
 function unusedDb() {
-  return { select: vi.fn(() => ({ from: vi.fn() })) };
+  const db = { execute: vi.fn(async () => []), select: vi.fn(() => ({ from: vi.fn() })) };
+  return { ...db, transaction: async (body: (tx: typeof db) => Promise<void>) => body(db) };
 }
 
 describe("Slack bot settings service", () => {
