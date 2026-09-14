@@ -11,7 +11,7 @@ export const OFFICIAL_PLUGIN_SOURCES = {
   github:
     "https://github.com/useopencompany/plugins/tree/232e380e8850c440c28e4588ef79143d41c000db/github",
   gmail:
-    "https://github.com/useopencompany/plugins/tree/ff6f34b42796129c2a125a32b3a78e8cae353df6/gmail",
+    "https://github.com/useopencompany/plugins/tree/e78fb74bd31f16e9e03b68799e3bcafaa052e88b/gmail",
   granola:
     "https://github.com/useopencompany/plugins/tree/22c1fe7d9bafd4fd63d49c3f0b18d1e3e63d0dae/granola",
   "google-admin":
