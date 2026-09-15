@@ -19,6 +19,7 @@ import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { useAppDataOptional } from "@/components/AppDataProvider";
 import { GitHubInstallGapCard } from "@/components/GitHubRepositoryAccess";
+import { actionRowLabel, actionSourceLabel, actionVerb } from "@/lib/action-identity";
 import {
   BRAIN_TOOL_NAME,
   BROWSER_USE_PROFILE_TOOL_NAME,
@@ -33,6 +34,7 @@ import {
   USE_ACTION_TOOL_NAME,
 } from "@/lib/chat-ui";
 import { githubInstallGapCandidate } from "@/lib/github-repository-access";
+import { actionSourceMark } from "@/lib/service-marks";
 import { ApprovalCard, type ApprovalChoice } from "./ApprovalCard";
 import { type ApprovalPresentation, approvalPresentation } from "./approval-presentation";
 import {
@@ -198,9 +200,7 @@ function LegacyCapabilityApprovalRow({ tool }: { tool: ToolCallView }) {
       className="max-w-[92%] rounded-xl border border-border bg-surface px-4 py-3 shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
     >
       <div className="text-[12px] font-semibold text-ink">Approve paid capability?</div>
-      <p className="mt-1 text-[12px] leading-5 text-ink-muted">
-        {capabilitySourceLabel(approval.source)} · {capabilityActionLabel(approval.action)}
-      </p>
+      <p className="mt-1 text-[12px] leading-5 text-ink-muted">{actionRowLabel(approval.action)}</p>
       <p className="mt-1 text-[11px] leading-4 text-ink-subtle">
         Maximum charge {formatUsdMicros(approval.maxCostUsdMicros)}. The final charge may be lower.
       </p>
@@ -297,8 +297,8 @@ function CapabilityApprovalCard({
   const presentation: ApprovalPresentation = {
     ...approvalPresentation(tool.input),
     kind: "capability",
-    source: capabilitySourceLabel(quote?.source ?? action.split(".", 1)[0] ?? ""),
-    question: `Run the ${capabilityActionLabel(quote?.action ?? action).toLowerCase()} lookup?`,
+    source: actionSourceLabel(quote?.source ?? action),
+    question: `Run the ${actionVerb(quote?.action ?? action) ?? "requested"} lookup?`,
   };
 
   return (
@@ -473,28 +473,6 @@ function managedCapabilityActionFromTool(tool: ToolCallView) {
   if (!isRecord(tool.input) || typeof tool.input.action !== "string") return null;
   const source = tool.input.action.split(".", 1)[0] ?? "";
   return MANAGED_CAPABILITY_SOURCE_IDS.has(source) ? tool.input.action : null;
-}
-
-function capabilitySourceLabel(source: string) {
-  const labels: Record<string, string> = {
-    x: "X",
-    linkedin: "LinkedIn",
-    youtube: "YouTube",
-    instagram: "Instagram",
-    tiktok: "TikTok",
-    lead: "Lead research",
-    seo: "SEO",
-  };
-  return labels[source] ?? source;
-}
-
-function capabilityActionLabel(action: string) {
-  const name = action.split(".").at(-1) ?? action;
-  return name
-    .split("_")
-    .filter(Boolean)
-    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
-    .join(" ");
 }
 
 function capabilityApprovalStatusLabel(status: string) {
@@ -814,7 +792,13 @@ function ToolCallRow({
   detail?: HistoricalPresentationDetailController;
 } & ToolCallDisclosure) {
   const meta = getToolCallMeta(tool);
-  const Icon = meta.icon;
+  // A connected action leads with the service's own mark: which system the agent touched is the
+  // first thing a reader looks for. Its outcome then has to come from the status text, which is
+  // why a failure stays spelled out on these rows.
+  const mark = tool.actionSource ? actionSourceMark(tool.actionSource) : null;
+  const Icon = mark?.Icon ?? meta.icon;
+  const showStatusText =
+    tool.statusText !== "Done" && (mark !== null || tool.statusText !== "Failed");
   const hasOutput = tool.output !== undefined;
   const screenshotUrl = browserScreenshotUrl(tool.output);
   const browserProfileLiveView = browserProfileLiveViewFromTool(tool);
@@ -837,11 +821,19 @@ function ToolCallRow({
             strokeWidth={1.9}
             className={`shrink-0 text-ink-subtle transition-transform ${expanded ? "rotate-90" : ""}`}
           />
-          <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+          {/* The service badge is the plugin catalog's treatment at row scale, so the same
+              integration looks the same wherever the product shows it. */}
+          <span
+            className={`flex h-4 w-4 shrink-0 items-center justify-center ${mark ? `rounded ${mark.iconClassName}` : ""}`}
+          >
             <Icon
-              size={11}
+              size={mark ? 9 : 11}
               strokeWidth={1.75}
-              className={`${meta.className} ${meta.spin ? "animate-[spin_3s_linear_infinite]" : ""}`}
+              className={
+                mark
+                  ? undefined
+                  : `${meta.className} ${meta.spin ? "animate-[spin_3s_linear_infinite]" : ""}`
+              }
             />
           </span>
           <span title={tool.label} className="min-w-0 truncate font-medium text-ink/65">
@@ -850,7 +842,7 @@ function ToolCallRow({
           {detailChips.map((detail, index) => (
             <ToolDetailChip key={`${detail}-${index}`} detail={detail} />
           ))}
-          {tool.statusText !== "Done" && tool.statusText !== "Failed" ? (
+          {showStatusText ? (
             <span className={`${meta.className} shrink-0 text-[10.5px] font-medium`}>
               {tool.statusText}
             </span>

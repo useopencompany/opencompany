@@ -1,6 +1,7 @@
+import { ACP_TOOLS_MCP_SERVER_NAME } from "@opencompany/agent-runtime";
 import type { AcpMcpServer } from "./acp-harness";
 
-export const ACP_TOOLS_MCP_SERVER_NAME = "opencompany";
+export { ACP_TOOLS_MCP_SERVER_NAME };
 export const ACP_TOOLS_GATEWAY_PATH = "/internal/goat/acp-tools";
 export const ACP_TOOLS_TICKET_HEADER = "x-opencompany-tool-ticket";
 
