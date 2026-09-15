@@ -14,7 +14,7 @@ used separately, to start Workflows when a function fails.
 
 ## Connect Convex
 
-1. Open **Settings → Plugins** and choose **Convex**.
+1. Open **Plugins** and choose **Convex**.
 2. Install the official plugin.
 3. In Convex, open the deployment's **Settings → Deploy keys** and generate a key. Grant it
    `deployment:functions:runInternalQueries` and `deployment:data:view` so opencompany can validate
@@ -31,7 +31,7 @@ connected deployment fails. It carries the function path, the error and its stac
 and the write-conflict or scheduler context that explains why the call ran at all — enough for an
 agent to pull the rest of the request through the Convex tools and start triaging.
 
-1. Open **Settings → Plugins → Convex** and install or update the plugin.
+1. Open **Plugins → Convex** and install or update the plugin.
 2. Save a deploy key that has `deployment:integrations:write`.
 3. In **Error events**, choose **Turn on**. opencompany creates a webhook
    [log stream](https://docs.convex.dev/production/integrations/log-streams/) on the deployment and

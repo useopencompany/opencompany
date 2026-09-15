@@ -4922,7 +4922,6 @@ describe("canonical Hono API", () => {
       workspace: null,
       activeBrainId: null,
     }));
-    const checkSlug = vi.fn(async () => ({ slug: "analytical-co", available: true }));
     const saveProfile = vi.fn(async () => undefined);
     const saveWorkspace = vi.fn(async () => ({
       workspaceId: "goat_ws_new",
@@ -4934,21 +4933,13 @@ describe("canonical Hono API", () => {
     const app = testApp(fakeRepository(), {
       authenticate,
       identify,
-      onboarding: { getState, checkSlug, saveProfile, saveWorkspace, finish },
+      onboarding: { getState, saveProfile, saveWorkspace, finish },
     });
 
     const state = await app.request("/v1/onboarding");
     expect(state.status).toBe(200);
     expect(state.headers.get("set-cookie")).toContain("wos-session=refreshed");
     expect(getState).toHaveBeenCalledWith(identity);
-
-    const checked = await app.request("/v1/onboarding/workspace-slug/check", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ slug: "analytical-co" }),
-    });
-    expect(checked.status).toBe(200);
-    expect(checkSlug).toHaveBeenCalledWith(identity, "analytical-co");
 
     const profile = await app.request("/v1/onboarding/profile", {
       method: "PUT",
@@ -4967,14 +4958,12 @@ describe("canonical Hono API", () => {
       body: JSON.stringify({
         workspaceId: "goat_ws_00000000-0000-4000-8000-000000000123",
         name: "Analytical Co",
-        slug: "analytical-co",
       }),
     });
     expect(workspace.status).toBe(200);
     expect(saveWorkspace).toHaveBeenCalledWith(identity, {
       workspaceId: "goat_ws_00000000-0000-4000-8000-000000000123",
       name: "Analytical Co",
-      slug: "analytical-co",
     });
 
     const completed = await app.request("/v1/onboarding/complete", {
@@ -4984,7 +4973,7 @@ describe("canonical Hono API", () => {
     });
     expect(completed.status).toBe(200);
     expect(finish).toHaveBeenCalledWith(identity, "friend");
-    expect(identify).toHaveBeenCalledTimes(5);
+    expect(identify).toHaveBeenCalledTimes(4);
     expect(authenticate).not.toHaveBeenCalled();
   });
 
@@ -5503,9 +5492,6 @@ function fakeOnboarding(): Parameters<typeof createApiApp>[0]["onboarding"] {
   return {
     getState: async () => {
       throw new Error("Unexpected onboarding state read.");
-    },
-    checkSlug: async () => {
-      throw new Error("Unexpected onboarding slug check.");
     },
     saveProfile: async () => {
       throw new Error("Unexpected onboarding profile mutation.");

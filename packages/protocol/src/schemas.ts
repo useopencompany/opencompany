@@ -3858,33 +3858,16 @@ export const OnboardingStateEnvelopeSchema = z
   .strict()
   .openapi("OnboardingStateEnvelope");
 
-export const CheckOnboardingWorkspaceSlugBodySchema = z
-  .object({ slug: z.string().max(256) })
-  .strict()
-  .openapi("CheckOnboardingWorkspaceSlugBody");
-
-export const OnboardingWorkspaceSlugEnvelopeSchema = z
-  .object({
-    data: z.object({ slug: z.string().max(40), available: z.boolean() }).strict(),
-    meta: ProtocolMetadataSchema,
-  })
-  .strict()
-  .openapi("OnboardingWorkspaceSlugEnvelope");
-
 export const SaveOnboardingProfileBodySchema = z
   .object({ role: OnboardingRoleSchema, companyUrl: z.url().max(2_048) })
   .strict()
   .openapi("SaveOnboardingProfileBody");
 
+// The slug is derived from the name server-side; onboarding never asks for one.
 export const SaveOnboardingWorkspaceBodySchema = z
   .object({
     workspaceId: WorkspaceCreationIdSchema,
     name: z.string().trim().min(1).max(80),
-    slug: z
-      .string()
-      .min(1)
-      .max(40)
-      .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u),
   })
   .strict()
   .openapi("SaveOnboardingWorkspaceBody");

@@ -50,7 +50,6 @@ import {
   ChatArtifactDeleteEnvelopeSchema,
   ChatArtifactVersionListEnvelopeSchema,
   ChatShareIdSchema,
-  CheckOnboardingWorkspaceSlugBodySchema,
   ClaudeCodeAuthStatusEnvelopeSchema,
   CodexAuthStatusEnvelopeSchema,
   CodexDeviceAuthFlowEnvelopeSchema,
@@ -125,7 +124,6 @@ import {
   OnboardingCommandEnvelopeSchema,
   OnboardingStateEnvelopeSchema,
   OnboardingWorkspaceEnvelopeSchema,
-  OnboardingWorkspaceSlugEnvelopeSchema,
   PluginArchiveEnvelopeSchema,
   PluginBillingEnvelopeSchema,
   PluginDataDeleteEnvelopeSchema,
@@ -3161,26 +3159,6 @@ export const getOnboardingStateRoute = createRoute({
   },
 });
 
-export const checkOnboardingWorkspaceSlugRoute = createRoute({
-  method: "post",
-  path: "/v1/onboarding/workspace-slug/check",
-  tags: ["Onboarding"],
-  security: actorSecurity,
-  request: {
-    body: {
-      required: true,
-      content: { "application/json": { schema: CheckOnboardingWorkspaceSlugBodySchema } },
-    },
-  },
-  responses: {
-    200: {
-      description: "Normalized workspace slug availability for the authenticated identity.",
-      content: { "application/json": { schema: OnboardingWorkspaceSlugEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
 export const saveOnboardingProfileRoute = createRoute({
   method: "put",
   path: "/v1/onboarding/profile",
@@ -4281,7 +4259,6 @@ export type V1RouteHandlers = {
   createWorkspace: RouteHandler<typeof createWorkspaceRoute>;
   switchWorkspace: RouteHandler<typeof switchWorkspaceRoute>;
   getOnboardingState: RouteHandler<typeof getOnboardingStateRoute>;
-  checkOnboardingWorkspaceSlug: RouteHandler<typeof checkOnboardingWorkspaceSlugRoute>;
   saveOnboardingProfile: RouteHandler<typeof saveOnboardingProfileRoute>;
   saveOnboardingWorkspace: RouteHandler<typeof saveOnboardingWorkspaceRoute>;
   finishOnboarding: RouteHandler<typeof finishOnboardingRoute>;
@@ -4521,7 +4498,6 @@ export function createV1Router(
       .openapi(createWorkspaceRoute, handlers.createWorkspace)
       .openapi(switchWorkspaceRoute, handlers.switchWorkspace)
       .openapi(getOnboardingStateRoute, handlers.getOnboardingState)
-      .openapi(checkOnboardingWorkspaceSlugRoute, handlers.checkOnboardingWorkspaceSlug)
       .openapi(saveOnboardingProfileRoute, handlers.saveOnboardingProfile)
       .openapi(saveOnboardingWorkspaceRoute, handlers.saveOnboardingWorkspace)
       .openapi(finishOnboardingRoute, handlers.finishOnboarding)
@@ -5425,8 +5401,6 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       200,
     ),
-  checkOnboardingWorkspaceSlug: (c) =>
-    c.json({ data: { slug: "contract-workspace", available: true }, meta }, 200),
   saveOnboardingProfile: (c) => c.json({ data: { completed: true as const }, meta }, 200),
   saveOnboardingWorkspace: (c) =>
     c.json(

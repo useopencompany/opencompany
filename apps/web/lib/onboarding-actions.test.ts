@@ -5,7 +5,6 @@ import { enrollOwnerInOnboardingEmails } from "@/lib/email/onboarding-emails";
 import { serverApiErrorMessage } from "@/lib/server-api-client";
 import { activateWorkspace } from "@/lib/workspace-session";
 import {
-  checkWorkspaceSlugAction,
   finishOnboardingAction,
   getOnboardingState,
   saveOnboardingProfileAction,
@@ -13,7 +12,6 @@ import {
 } from "./onboarding-actions";
 
 const mocks = vi.hoisted(() => ({
-  checkSlug: vi.fn(),
   finish: vi.fn(),
   getState: vi.fn(),
   saveProfile: vi.fn(),
@@ -32,7 +30,6 @@ vi.mock("@/lib/server-api-client", () => ({
         complete: { $post: mocks.finish },
         profile: { $put: mocks.saveProfile },
         workspace: { $put: mocks.saveWorkspace },
-        "workspace-slug": { check: { $post: mocks.checkSlug } },
       },
     },
   })),
@@ -68,9 +65,6 @@ describe("opencompany onboarding API adapters", () => {
     } as never);
     enrollOwnerInOnboardingEmailsMock.mockResolvedValue(undefined);
     activateWorkspaceMock.mockResolvedValue(undefined);
-    mocks.checkSlug.mockResolvedValue(
-      Response.json({ data: { slug: "analytical-co", available: true } }),
-    );
     mocks.saveProfile.mockResolvedValue(Response.json({ data: { completed: true } }));
     mocks.saveWorkspace.mockResolvedValue(Response.json({ data: activation }));
     mocks.finish.mockResolvedValue(Response.json({ data: { completed: true } }));
@@ -87,20 +81,6 @@ describe("opencompany onboarding API adapters", () => {
     expect(mocks.getState).toHaveBeenCalledOnce();
   });
 
-  it("normalizes and checks workspace slugs through /v1", async () => {
-    await expect(checkWorkspaceSlugAction("  Analytical Co  ")).resolves.toEqual({
-      slug: "analytical-co",
-      available: true,
-    });
-    expect(mocks.checkSlug).toHaveBeenCalledWith({ json: { slug: "analytical-co" } });
-
-    await expect(checkWorkspaceSlugAction("---")).resolves.toEqual({
-      slug: "",
-      available: false,
-    });
-    expect(mocks.checkSlug).toHaveBeenCalledOnce();
-  });
-
   it("normalizes the profile before sending the canonical command", async () => {
     await expect(
       saveOnboardingProfileAction({ role: "founder", companyUrl: "opencompany.ai" }),
@@ -111,9 +91,7 @@ describe("opencompany onboarding API adapters", () => {
   });
 
   it("creates through /v1, retains web email enrollment, and activates AuthKit", async () => {
-    await expect(
-      saveOnboardingWorkspaceAction({ name: "  Analytical Co  ", slug: "analytical-co" }),
-    ).resolves.toEqual({
+    await expect(saveOnboardingWorkspaceAction({ name: "  Analytical Co  " })).resolves.toEqual({
       ok: true,
       workspaceId: "goat_ws_new",
       brainRef: null,
@@ -122,7 +100,6 @@ describe("opencompany onboarding API adapters", () => {
       json: {
         workspaceId: expect.stringMatching(/^workspace_[0-9a-f-]{36}$/u),
         name: "Analytical Co",
-        slug: "analytical-co",
       },
     });
     expect(enrollOwnerInOnboardingEmailsMock).toHaveBeenCalledWith({ workosUserId: "user_123" });
@@ -138,17 +115,18 @@ describe("opencompany onboarding API adapters", () => {
     mocks.saveWorkspace.mockResolvedValueOnce(
       Response.json({ data: { ...activation, createdByCaller: false } }),
     );
-    await saveOnboardingWorkspaceAction({ name: "Analytical Co", slug: "analytical-co" });
+    await saveOnboardingWorkspaceAction({ name: "Analytical Co" });
     expect(currentIdentityMock).not.toHaveBeenCalled();
     expect(enrollOwnerInOnboardingEmailsMock).not.toHaveBeenCalled();
   });
 
   it("preserves API errors without activating a workspace", async () => {
     mocks.saveWorkspace.mockResolvedValueOnce(Response.json({}, { status: 409 }));
-    serverApiErrorMessageMock.mockResolvedValueOnce("That workspace URL is taken.");
-    await expect(
-      saveOnboardingWorkspaceAction({ name: "Analytical Co", slug: "analytical-co" }),
-    ).resolves.toEqual({ ok: false, error: "That workspace URL is taken." });
+    serverApiErrorMessageMock.mockResolvedValueOnce("Could not save your workspace.");
+    await expect(saveOnboardingWorkspaceAction({ name: "Analytical Co" })).resolves.toEqual({
+      ok: false,
+      error: "Could not save your workspace.",
+    });
     expect(activateWorkspaceMock).not.toHaveBeenCalled();
   });
 

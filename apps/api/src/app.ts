@@ -906,12 +906,6 @@ export function createApiApp(input: CreateApiAppInput) {
       const state = await input.onboarding.getState(identity);
       return c.json({ data: state, meta }, 200);
     },
-    checkOnboardingWorkspaceSlug: async (c) => {
-      const identity = identityFrom(c);
-      await enforceIdentityRateLimit(rateLimiter, identity, "onboarding-slug", 120);
-      const result = await input.onboarding.checkSlug(identity, c.req.valid("json").slug);
-      return c.json({ data: result, meta }, 200);
-    },
     saveOnboardingProfile: async (c) => {
       const identity = identityFrom(c);
       await enforceIdentityRateLimit(rateLimiter, identity, "onboarding-write", 30);
@@ -1009,28 +1003,28 @@ export function createApiApp(input: CreateApiAppInput) {
       throw new ApiError(
         410,
         "invalid_request",
-        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
+        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
       );
     },
     confirmWikiImport: async () => {
       throw new ApiError(
         410,
         "invalid_request",
-        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
+        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
       );
     },
     cancelWikiImport: async () => {
       throw new ApiError(
         410,
         "invalid_request",
-        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
+        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
       );
     },
     retryWikiImport: async () => {
       throw new ApiError(
         410,
         "invalid_request",
-        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
+        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
       );
     },
     createBrainDocument: async (c) => {
@@ -1278,35 +1272,35 @@ export function createApiApp(input: CreateApiAppInput) {
       throw new ApiError(
         410,
         "invalid_request",
-        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
+        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
       );
     },
     listWikiIngestActivity: async () => {
       throw new ApiError(
         410,
         "invalid_request",
-        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
+        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
       );
     },
     upsertWikiSource: async () => {
       throw new ApiError(
         410,
         "invalid_request",
-        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
+        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
       );
     },
     setWikiSourceEnabled: async () => {
       throw new ApiError(
         410,
         "invalid_request",
-        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
+        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
       );
     },
     deleteWikiSource: async () => {
       throw new ApiError(
         410,
         "invalid_request",
-        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
+        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
       );
     },
     listSkills: async (c) => {
