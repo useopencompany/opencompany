@@ -14,6 +14,7 @@ import {
 import { getAvailableHarnessTools } from "./integrations/google-data";
 import { resolveSkillMentions, type SkillMentionRef, type WorkspaceSkill } from "./skills";
 import { resolveWorkflowStepModelSelection } from "./workflow-model-options";
+import { DEFAULT_WORKFLOW_SCHEDULE_PROMPT } from "./workflow-schedule-defaults";
 import { extractWorkflowSkillMentionRefs } from "./workflow-skill-mentions";
 import {
   resolveWorkflowMention,
@@ -126,6 +127,11 @@ export function compileWorkflowHarnessSpec(input: {
   if (!firstStep) {
     throw new WorkflowMentionError("This workflow has no steps to run.");
   }
+  const runContext = input.description.trim();
+  const initialUserMessage =
+    runContext && runContext !== DEFAULT_WORKFLOW_SCHEDULE_PROMPT
+      ? runContext
+      : input.workflow.steps[0]!.instructions.trim();
   return {
     schemaVersion: "goat.harness.v1",
     // Mirror step 0 so an older runner degrades to executing the first step.
@@ -134,7 +140,7 @@ export function compileWorkflowHarnessSpec(input: {
     ...(firstStep.reasoningEffort ? { codex: { reasoningEffort: firstStep.reasoningEffort } } : {}),
     systemPrompt: firstStep.systemPrompt,
     systemBlocks: firstStep.systemBlocks,
-    initialUserMessage: [`Task: ${input.workflow.name}`, "", input.description].join("\n"),
+    initialUserMessage,
     tools: input.tools,
     skills: [],
     maxModelSteps: 16,
@@ -281,7 +287,8 @@ export async function prepareWorkflowRunForUser(
       { cause: error },
     );
   }
-  const description = input.description.trim() || workflow.name;
+  const description =
+    input.description.trim() || workflow.steps[0]?.instructions.trim() || workflow.name;
 
   const harnessSpec = compileWorkflowHarnessSpec({
     workflow,
