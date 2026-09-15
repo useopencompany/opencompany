@@ -381,6 +381,10 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectHref: "/plugins/convex#convex-deploy-key",
     accountDescription:
       "A deployment-scoped key connects one Convex deployment. Production supports schema and function inspection only.",
+    // Convex's event connection is the webhook log stream, not the deploy key the plugin page
+    // connects, so an event trigger with no account to bind to is sent to the Events section.
+    eventAccountHref: "/settings/plugins/convex#convex-error-events",
+    eventAccountLabel: "Turn on Convex error events",
   },
   render: {
     name: "render",

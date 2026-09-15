@@ -10,8 +10,18 @@ import {
   parseConvexDeployKey,
 } from "./convex-policy";
 
-const require = createRequire(import.meta.url);
-const CLI_PATH = join(dirname(require.resolve("convex/package.json")), "bin/main.js");
+// Resolved on first spawn, never at module evaluation: this module is reachable from the Next.js
+// app's server bundle through the Convex integration state helpers, and a bundled `require.resolve`
+// yields a module id instead of a file path. Only the API server ever spawns the CLI.
+let cliPath: string | undefined;
+function convexCliPath(): string {
+  if (!cliPath) {
+    const resolve = createRequire(import.meta.url).resolve;
+    cliPath = join(dirname(resolve("convex/package.json")), "bin/main.js");
+  }
+  return cliPath;
+}
+
 const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 const TIMEOUT_MS = 30_000;
 let activeProcesses = 0;
@@ -74,7 +84,7 @@ async function runProcess(
       const child = spawn(
         process.execPath,
         [
-          CLI_PATH,
+          convexCliPath(),
           "mcp",
           "start",
           "--project-dir",

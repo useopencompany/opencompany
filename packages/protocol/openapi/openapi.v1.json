@@ -8059,6 +8059,9 @@
           "model": {
             "type": "string"
           },
+          "composerSettings": {
+            "$ref": "#/components/schemas/ConversationComposerSettingsV1"
+          },
           "runtime": {
             "$ref": "#/components/schemas/ConversationRuntime"
           },
@@ -8094,12 +8097,59 @@
           "title",
           "engine",
           "model",
+          "composerSettings",
           "runtime",
           "activityState",
           "hasUnseen",
           "awaitingInput",
           "createdAt",
           "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "ConversationComposerSettingsV1": {
+        "type": "object",
+        "nullable": true,
+        "properties": {
+          "reasoningEffort": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "xhigh"
+            ]
+          },
+          "planModeEnabled": {
+            "type": "boolean"
+          },
+          "goalMode": {
+            "$ref": "#/components/schemas/CodexGoalModeV1"
+          }
+        },
+        "required": [
+          "reasoningEffort"
+        ],
+        "additionalProperties": false
+      },
+      "CodexGoalModeV1": {
+        "type": "object",
+        "nullable": true,
+        "properties": {
+          "objective": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          },
+          "tokenBudget": {
+            "type": "integer",
+            "nullable": true,
+            "minimum": 1,
+            "maximum": 2000000
+          }
+        },
+        "required": [
+          "objective"
         ],
         "additionalProperties": false
       },
@@ -8657,27 +8707,6 @@
             "additionalProperties": false
           }
         ]
-      },
-      "CodexGoalModeV1": {
-        "type": "object",
-        "nullable": true,
-        "properties": {
-          "objective": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 4000
-          },
-          "tokenBudget": {
-            "type": "integer",
-            "nullable": true,
-            "minimum": 1,
-            "maximum": 2000000
-          }
-        },
-        "required": [
-          "objective"
-        ],
-        "additionalProperties": false
       },
       "MessageMention": {
         "type": "object",
@@ -11630,6 +11659,91 @@
           "statusReason",
           "capabilityModes",
           "toolModes"
+        ],
+        "additionalProperties": false
+      },
+      "ConvexEventsAccountStateEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "state": {
+                "$ref": "#/components/schemas/ConvexEventsAccountState"
+              }
+            },
+            "required": [
+              "state"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "ConvexEventsAccountState": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "convex"
+            ]
+          },
+          "connected": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "not_connected",
+              "connected",
+              "needs_reauth",
+              "sync_failed"
+            ]
+          },
+          "integrationId": {
+            "type": "string",
+            "nullable": true,
+            "minLength": 1,
+            "maxLength": 128,
+            "example": "gint_0f8e7d6c5b4a",
+            "description": "Integration connection id."
+          },
+          "statusReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "deployment": {
+            "type": "string",
+            "nullable": true
+          },
+          "webhookUrl": {
+            "type": "string",
+            "nullable": true,
+            "format": "uri"
+          },
+          "lastDeliveryAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "provider",
+          "connected",
+          "status",
+          "integrationId",
+          "statusReason",
+          "deployment",
+          "webhookUrl",
+          "lastDeliveryAt"
         ],
         "additionalProperties": false
       },
@@ -24790,6 +24904,90 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ConvexAccountStateEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/integration-accounts/convex-events": {
+      "post": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Convex webhook log stream provisioned for the connected deployment with the deploy key already stored for the Convex plugin.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConvexEventsAccountStateEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Convex webhook log stream deleted in Convex and the event connection removed. The stream is deleted first so Convex stops billing its owner for deliveries opencompany can no longer accept.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationAccountDeleteEnvelope"
                 }
               }
             }

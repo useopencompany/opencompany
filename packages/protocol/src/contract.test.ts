@@ -99,6 +99,11 @@ describe("v1 protocol contract", () => {
       title: "Ship the runtime contract",
       engine: "claude_code" as const,
       model: "anthropic/claude-sonnet-5",
+      composerSettings: {
+        reasoningEffort: "medium" as const,
+        planModeEnabled: false,
+        goalMode: null,
+      },
       runtime,
       activityState: "working" as const,
       hasUnseen: false,
@@ -109,9 +114,13 @@ describe("v1 protocol contract", () => {
     };
 
     expect(ConversationSchema.parse(conversation).runtime).toEqual(runtime);
+    expect(ConversationSchema.parse(conversation).composerSettings).toEqual(
+      conversation.composerSettings,
+    );
+    const { composerSettings: _composerSettings, ...conversationReadModel } = conversation;
     expect(
       ConversationReadModelSchema.parse({
-        ...conversation,
+        ...conversationReadModel,
         messageShapeEpoch: 3,
         archivedAt: null,
         pinnedAt: null,
@@ -120,7 +129,7 @@ describe("v1 protocol contract", () => {
     ).toEqual(runtime);
     expect(() =>
       ConversationReadModelV1Schema.parse({
-        ...conversation,
+        ...conversationReadModel,
         archivedAt: null,
         pinnedAt: null,
         lastSeenAt: null,
@@ -320,6 +329,7 @@ describe("v1 protocol contract", () => {
       "/v1/integration-accounts/jamie-events/endpoint",
       "/v1/integration-accounts/jamie-events",
       "/v1/integration-accounts/convex",
+      "/v1/integration-accounts/convex-events",
       "/v1/integration-accounts/render",
       "/v1/integration-accounts/stripe",
       "/v1/integration-accounts",

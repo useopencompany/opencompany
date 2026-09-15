@@ -1,4 +1,3 @@
-import todesktop from "@todesktop/runtime";
 import {
   app,
   type BrowserWindow,
@@ -7,6 +6,7 @@ import {
   type MenuItemConstructorOptions,
 } from "electron";
 import { handleAuthDeepLink } from "./auth";
+import { checkForUpdates } from "./updates";
 import { APP_URL } from "./urls";
 
 // Cmd+R: reload the app. If we're sitting on the bundled offline page
@@ -30,11 +30,7 @@ export function buildApplicationMenu(getWindow: () => BrowserWindow | null): Men
         { role: "about" },
         {
           label: "Check for Updates…",
-          click: () => {
-            // autoUpdater is only wired up by todesktop.init() in a packaged
-            // build; it's absent in local dev.
-            void todesktop.autoUpdater?.checkForUpdates();
-          },
+          click: checkForUpdates,
         },
         { type: "separator" },
         { role: "services" },

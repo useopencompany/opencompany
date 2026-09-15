@@ -124,12 +124,9 @@ export function createAutomationTaskCreator(
           resolveAttachments: ({ actor, attachmentIds }) =>
             input.resolveAttachments({ actor, attachmentIds }),
           resolveHarness: async () => harness,
-          // Workflow harnesses frame the first turn as "Task: <name>\n\n<goal>",
-          // so the persisted user message must match that framing. Without this
-          // the repository's canonical-command check compares the framed harness
-          // message against the bare goal and throws, masking every workflow
-          // invocation as a generic 500. Mirrors the runner scheduler and the
-          // shared task-creation helper.
+          // The workflow harness owns the visible request: this is explicit run context when
+          // supplied, or the first step's instructions otherwise. Persist that same message so
+          // the repository's canonical-command check and the conversation stay aligned.
           compatibility: {
             initialMessageContent: harness.initialUserMessage.trim() || command.goal,
           },

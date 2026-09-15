@@ -738,6 +738,46 @@ describe("Postgres Chat repositories", () => {
     },
   );
 
+  it("returns the latest engine turn settings with Conversation list and detail reads", async () => {
+    const created = await service.createMessage(actor(), {
+      idempotencyKey: "composer-settings-first",
+      content: "Use medium reasoning.",
+      engine: "codex",
+      model: "provider/model",
+      settings: { reasoningEffort: "medium" },
+    });
+    await service.createMessage(actor(), {
+      idempotencyKey: "composer-settings-latest",
+      conversationId: created.conversationId,
+      content: "Switch to low reasoning and plan mode.",
+      engine: "codex",
+      model: "provider/model",
+      settings: {
+        reasoningEffort: "low",
+        planModeReasoningEffort: "high",
+        goalMode: { objective: "Finish the migration", tokenBudget: 80_000 },
+      },
+    });
+    await database.query(
+      `UPDATE goat.codex_chat_turns
+       SET created_at = created_at + interval '1 second'
+       WHERE chat_session_id = $1 AND prompt = 'Switch to low reasoning and plan mode.'`,
+      [created.conversationId],
+    );
+
+    const expected = {
+      reasoningEffort: "low",
+      planModeEnabled: true,
+      goalMode: { objective: "Finish the migration", tokenBudget: 80_000 },
+    };
+    await expect(service.getConversation(actor(), created.conversationId)).resolves.toMatchObject({
+      composerSettings: expected,
+    });
+    await expect(service.listConversations(actor())).resolves.toMatchObject({
+      conversations: [{ id: created.conversationId, composerSettings: expected }],
+    });
+  });
+
   it("normalizes JSON null attachment text and rejects non-object JSON at the database boundary", async () => {
     const created = await service.createMessage(actor(), {
       idempotencyKey: "attachment-text-invariant",

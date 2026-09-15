@@ -8,6 +8,7 @@ import type { BrainSourceApplicationService } from "@opencompany/agent/brain-sou
 import type { BrowserProfileApplicationService } from "@opencompany/agent/browser-profiles/service";
 import type {
   AttioProviderState,
+  ConvexEventsProviderState,
   FathomProviderState,
   GranolaProviderState,
   JamieEventsProviderState,
@@ -94,6 +95,7 @@ import type { BrainAssetService } from "./brain-assets";
 import type { BrainControlService } from "./brain-control";
 import type { ChatResourceDownload, ChatResourceService } from "./chat-resources";
 import type { ChatTitleService } from "./chat-title";
+import type { ConvexIngressService } from "./convex-ingress";
 import type { ReadModelService } from "./electric-read-models";
 import type { EngineAuthService } from "./engine-auth";
 import { admitEngineMessage } from "./engine-messages";
@@ -237,6 +239,7 @@ export type CreateApiAppInput = {
   hubspotIngress?: HubspotIngressService;
   attioIngress?: AttioIngressService;
   jamieIngress?: JamieIngressService;
+  convexIngress?: ConvexIngressService;
   mcpOAuthIngress?: McpOAuthIngressService;
   xAccountIngress?: XAccountIngressService;
   slackBotIngress?: SlackBotIngressService;
@@ -2579,6 +2582,18 @@ export function createApiApp(input: CreateApiAppInput) {
       );
       return c.json({ data: { state: convexStateDto(state) }, meta }, 200);
     },
+    enableConvexEvents: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const state = await input.integrationAccounts.enableConvexEvents(actor);
+      return c.json({ data: { state: convexEventsStateDto(state) }, meta }, 200);
+    },
+    disableConvexEvents: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      await input.integrationAccounts.disableConvexEvents(actor);
+      return c.json({ data: { deleted: true as const }, meta }, 200);
+    },
     connectRenderAccount: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 60);
@@ -3249,6 +3264,13 @@ export function createApiApp(input: CreateApiAppInput) {
       ingress.webhook(c.req.param("endpointId"), c.req.raw),
     );
   }
+  if (input.convexIngress) {
+    const ingress = input.convexIngress;
+    app.use("/webhooks/convex/:endpointId", ingressBodyLimit(5 * 1024 * 1024));
+    app.post("/webhooks/convex/:endpointId", (c) =>
+      ingress.webhook(c.req.param("endpointId"), c.req.raw),
+    );
+  }
   if (input.mcpOAuthIngress) {
     const ingress = input.mcpOAuthIngress;
     app.get("/integrations/attio-mcp/start", (c) => ingress.start("attio", c.req.raw));
@@ -3631,6 +3653,11 @@ function conversationDto(conversation: {
   title: string;
   engine: "opencompany" | "codex" | "claude_code";
   model: string;
+  composerSettings: {
+    reasoningEffort: "low" | "medium" | "high" | "xhigh";
+    planModeEnabled?: boolean;
+    goalMode?: { objective: string; tokenBudget?: number | null } | null;
+  } | null;
   messageShapeEpoch: number;
   runtime: {
     status: "queued" | "starting" | "idle" | "running" | "failed" | "interrupted" | "closed";
@@ -3979,6 +4006,19 @@ function jamieEventsStateDto(state: JamieEventsProviderState) {
     status: integrationAccountStatusDto(state.status),
     integrationId: state.integrationId,
     statusReason: state.statusReason,
+    webhookUrl: state.webhookUrl,
+    lastDeliveryAt: state.lastDeliveryAt,
+  };
+}
+
+function convexEventsStateDto(state: ConvexEventsProviderState) {
+  return {
+    provider: state.provider,
+    connected: state.connected,
+    status: integrationAccountStatusDto(state.status),
+    integrationId: state.integrationId,
+    statusReason: state.statusReason,
+    deployment: state.deployment,
     webhookUrl: state.webhookUrl,
     lastDeliveryAt: state.lastDeliveryAt,
   };

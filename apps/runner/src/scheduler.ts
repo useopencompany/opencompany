@@ -1,3 +1,4 @@
+import { DEFAULT_WORKFLOW_SCHEDULE_PROMPT } from "@opencompany/agent/workflow-schedule-defaults";
 import { latestCronRunAt, nextCronRunAt } from "@opencompany/agent-runtime";
 import {
   type CaptureProductTaskSpawnedInput,
@@ -35,7 +36,10 @@ type DueWorkflowScheduleRow = {
   name: string;
   cron: string;
   timezone: string;
-  prompt: string;
+  prompt: string | null;
+  // NULL when the workflow has no steps. Activation forbids that, but the sweep reads the row
+  // directly and a wedged claim would stall every later due schedule behind it.
+  firstStepInstructions: string | null;
   scheduleHarnessSpec: HarnessSpec;
   nextRunAt: Date | string;
 };
@@ -140,6 +144,7 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
             automation_trigger.value->>'cron' AS "cron",
             automation_trigger.value->>'timezone' AS "timezone",
             automation_trigger.value->>'prompt' AS "prompt",
+            workflow.steps->0->>'instructions' AS "firstStepInstructions",
             automation_trigger.value->'harnessSpec' AS "scheduleHarnessSpec",
             (automation_trigger.value->>'nextRunAt')::timestamptz AS "nextRunAt"
           FROM goat.workflows AS workflow
@@ -246,12 +251,16 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
         return { status: "duplicate" as const };
       }
 
+      const taskPrompt = scheduledWorkflowTaskPrompt(workflow);
       const createdTask = await createScheduledTask(tx, {
         userWorkosId: workflow.userWorkosId,
         workspaceId: workflow.workspaceId,
-        prompt: workflow.prompt,
+        prompt: taskPrompt,
         name: workflow.name,
-        harnessSpec: workflow.scheduleHarnessSpec,
+        harnessSpec: {
+          ...workflow.scheduleHarnessSpec,
+          initialUserMessage: taskPrompt,
+        },
         workflowId: workflow.slug,
         scheduledFor,
         now,
@@ -439,6 +448,14 @@ async function createScheduledTask(
     scheduleId: task.scheduleId,
     trigger: "schedule",
   };
+}
+
+function scheduledWorkflowTaskPrompt(
+  workflow: Pick<DueWorkflowScheduleRow, "prompt" | "firstStepInstructions">,
+) {
+  const runContext = workflow.prompt?.trim() ?? "";
+  if (runContext && runContext !== DEFAULT_WORKFLOW_SCHEDULE_PROMPT) return runContext;
+  return workflow.firstStepInstructions?.trim() || DEFAULT_WORKFLOW_SCHEDULE_PROMPT;
 }
 
 function rowsFromExecute<T>(result: unknown): T[] {

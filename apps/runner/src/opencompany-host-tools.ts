@@ -72,7 +72,7 @@ export type HostTools = {
   editWorkspaceSkill?: EditWorkspaceSkillRunner;
   runWiki?: (input: Record<string, unknown>, context: { toolCallId: string }) => Promise<unknown>;
   postSlackMessage: (input: {
-    channel: string;
+    channel?: string;
     text: string;
     messageKey: string;
   }) => Promise<unknown>;

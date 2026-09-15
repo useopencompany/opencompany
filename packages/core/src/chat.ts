@@ -27,6 +27,15 @@ export type ConversationRuntime = {
   updatedAt: Date;
 };
 
+export type ConversationComposerSettings = {
+  reasoningEffort: "low" | "medium" | "high" | "xhigh";
+  planModeEnabled?: boolean;
+  goalMode?: {
+    objective: string;
+    tokenBudget?: number | null;
+  } | null;
+};
+
 export const RUN_STATUSES = [
   "queued",
   "running",
@@ -78,6 +87,7 @@ export type Conversation = {
   title: string;
   engine: ChatEngine;
   model: string;
+  composerSettings: ConversationComposerSettings | null;
   messageShapeEpoch: number;
   runtime: ConversationRuntime | null;
   activityState: "working" | "idle";

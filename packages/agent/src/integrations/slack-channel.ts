@@ -4,15 +4,18 @@ import { loadIntegrationCredential, markIntegrationStatus } from "@opencompany/d
 import { type SubscriptionExecute, subscriptionRows } from "@opencompany/db/session-subscriptions";
 import { sql } from "drizzle-orm";
 import { slackApiRequest } from "./slack";
-import { slackBotScopesSatisfied } from "./slack-bot";
+import { slackBotDeliveryScopesSatisfied } from "./slack-bot";
 
 export const SLACK_CHANNEL_TOOL_DESCRIPTION =
-  "Send a message to a public Slack channel as the opencompany Slack bot: the shared workspace bot, not any member's personal Slack plugin. This is the tool for instructions that ask to post, send, or share something in Slack with the opencompany Slack bot, and it should only be used when they ask. Public channels the bot has joined only. Every post subscribes its thread to this same workflow session for 30 days. Use a stable messageKey for retries of the same intended post. Follow-up answers are delivered automatically into their original thread; do not post another root for a Slack reply.";
+  "Send a message as the opencompany Slack bot: the shared workspace bot, not any member's personal Slack plugin. This is the tool for instructions that ask to post, send, or share something in Slack with the opencompany Slack bot, and it should only be used when they ask. For a Slack follow-up, omit channel and the message goes to the originating thread. Otherwise channel is required and must be a public channel the bot has joined; that post subscribes its thread to this same workflow session for 30 days. Use a stable messageKey for retries of the same intended post.";
 export const SLACK_CHANNEL_INPUT_SCHEMA = {
   type: "object" as const,
   additionalProperties: false,
   properties: {
-    channel: { type: "string" as const, description: "Public channel ID or #name." },
+    channel: {
+      type: "string" as const,
+      description: "Public channel ID or #name. Required when starting a new Slack thread.",
+    },
     text: {
       type: "string" as const,
       description: "Concise message in Slack mrkdwn, up to 3500 characters.",
@@ -22,9 +25,9 @@ export const SLACK_CHANNEL_INPUT_SCHEMA = {
       description: "Stable identifier for this intended post, reused on retries.",
     },
   },
-  required: ["channel", "text", "messageKey"],
+  required: ["text", "messageKey"],
 };
-export type SlackChannelPost = { channel: string; text: string; messageKey: string };
+export type SlackChannelPost = { channel?: string; text: string; messageKey: string };
 export type ChannelInstallation = {
   id: string;
   userWorkosId: string;
@@ -70,8 +73,6 @@ export async function postWorkflowSlackMessage(
   const { post } = input;
   if (
     !post ||
-    typeof post.channel !== "string" ||
-    !post.channel.trim() ||
     typeof post.text !== "string" ||
     !post.text.trim() ||
     post.text.length > 3500 ||
@@ -79,17 +80,28 @@ export async function postWorkflowSlackMessage(
     !post.messageKey.trim() ||
     post.messageKey.length > 100
   ) {
-    throw new Error(
-      "Provide channel, text (1–3500 characters), and a stable messageKey (1–100 characters).",
-    );
+    throw new Error("Provide text (1–3500 characters) and a stable messageKey (1–100 characters).");
   }
-  const target = subscriptionRows<ChannelInstallation & { sessionId: string; leaseId: string }>(
+  const target = subscriptionRows<
+    ChannelInstallation & {
+      sessionId: string;
+      leaseId: string;
+      subscriptionEventId: number | null;
+      followUpChannelId: string | null;
+      followUpThreadTs: string | null;
+    }
+  >(
     await execute(sql`
     SELECT integration.id, integration.user_workos_id AS "userWorkosId", integration.workspace_id AS "workspaceId",
-      integration.external_id AS "teamId", integration.scopes, task.session_id AS "sessionId", run.lease_id AS "leaseId"
+      integration.external_id AS "teamId", integration.scopes, task.session_id AS "sessionId", run.lease_id AS "leaseId",
+      event.id AS "subscriptionEventId", subscription.source_key->>'channelId' AS "followUpChannelId",
+      subscription.source_key->>'threadTs' AS "followUpThreadTs"
     FROM goat.codex_chat_turns run JOIN goat.tasks task ON task.session_id = run.chat_session_id
     JOIN goat.chat_sessions conversation ON conversation.id = task.session_id
     JOIN goat.integrations integration ON integration.workspace_id = task.workspace_id AND integration.provider = 'slack_bot'
+    LEFT JOIN goat.subscription_events event ON event.run_id = run.id AND event.status IN ('running', 'delivering')
+    LEFT JOIN goat.session_subscriptions subscription ON subscription.id = event.subscription_id
+      AND subscription.integration_id = integration.id AND subscription.source = 'slack_thread'
     WHERE run.id = ${input.runId} AND run.user_workos_id = ${input.actorId} AND run.status = 'running'
       AND run.lease_expires_at > now() AND task.workflow_id IS NOT NULL AND task.archived_at IS NULL
       AND conversation.closed_at IS NULL AND integration.status = 'connected'
@@ -100,24 +112,59 @@ export async function postWorkflowSlackMessage(
     throw new Error(
       "An active workflow session and a connected workspace Slack Channel are required.",
     );
-  if (!slackBotScopesSatisfied(target.scopes))
+  if (!slackBotDeliveryScopesSatisfied(target.scopes))
     throw new Error("Reconnect Slack in Channels settings to grant required scopes.");
-  // A continuation only answers its originating thread, via the durable outbox.
-  if (
-    subscriptionRows(
-      await execute(
-        sql`SELECT id FROM goat.subscription_events WHERE run_id = ${input.runId} LIMIT 1`,
-      ),
-    ).length
-  ) {
-    throw new Error(
-      "This is a Slack follow-up. Your final answer will be sent to the original thread automatically.",
-    );
+  const text = post.text.trim();
+  if (target.subscriptionEventId !== null) {
+    if (!target.followUpChannelId || !target.followUpThreadTs) {
+      throw new Error("The originating Slack thread is unavailable.");
+    }
+    const deliveryId = `subscription_reply_${target.subscriptionEventId}`;
+    const result = subscriptionRows<{ id: string; status: string }>(
+      await execute(sql`
+      WITH active AS MATERIALIZED (
+        SELECT event.id
+        FROM goat.subscription_events event
+        JOIN goat.codex_chat_turns run ON run.id = event.run_id
+        WHERE event.id = ${target.subscriptionEventId} AND event.run_id = ${input.runId}
+          AND event.status IN ('running', 'delivering') AND run.status = 'running'
+          AND run.lease_id = ${target.leaseId} AND run.lease_expires_at > now()
+        FOR SHARE OF event, run
+      ), delivery AS MATERIALIZED (
+        INSERT INTO goat.channel_deliveries
+          (id, workspace_id, session_id, integration_id, team_id, channel_id, thread_ts, text)
+        SELECT ${deliveryId}, ${target.workspaceId}, ${target.sessionId}, ${target.id}, ${target.teamId},
+          ${target.followUpChannelId}, ${target.followUpThreadTs}, ${text}
+        FROM active
+        ON CONFLICT (id) DO UPDATE SET id = EXCLUDED.id
+        WHERE channel_deliveries.text = EXCLUDED.text
+          AND channel_deliveries.channel_id = EXCLUDED.channel_id
+          AND channel_deliveries.thread_ts IS NOT DISTINCT FROM EXCLUDED.thread_ts
+        RETURNING id, status
+      ), marked AS (
+        UPDATE goat.subscription_events event SET status = 'delivering'
+        FROM active, delivery
+        WHERE event.id = active.id AND event.status IN ('running', 'delivering')
+        RETURNING event.id
+      )
+      SELECT delivery.id, delivery.status FROM delivery JOIN marked ON true
+    `),
+    )[0];
+    if (!result)
+      throw new Error(
+        "The turn is no longer active or this Slack follow-up already has a different reply.",
+      );
+    return {
+      deliveryId,
+      status: result.status,
+      message: "Queued for durable delivery to the originating Slack thread.",
+    };
   }
+  if (typeof post.channel !== "string" || !post.channel.trim())
+    throw new Error("Provide channel when starting a new Slack thread.");
   const id = createHash("sha256")
     .update(`${target.sessionId}:${post.messageKey.trim()}`)
     .digest("hex");
-  const text = post.text.trim();
   const { token } = await channelBotCredential(target);
   try {
     const channelId = await resolvePublicChannel(token, post.channel.trim());
