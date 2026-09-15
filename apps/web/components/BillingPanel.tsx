@@ -4,7 +4,7 @@ import type { BillingOverviewDto } from "@opencompany/protocol";
 import { toast } from "@opencompany/ui/components/sonner";
 import { BadgeCheck, CreditCard, Loader2, RefreshCw, Users, Wallet } from "lucide-react";
 import { useEffect, useRef, useState, useTransition } from "react";
-import { SettingsContent } from "@/components/SettingsChrome";
+import { PageContent } from "@/components/PageContent";
 import {
   createBillingPortalAction,
   createCreditTopUpAction,
@@ -105,7 +105,7 @@ export function BillingPanel({
   };
 
   return (
-    <SettingsContent
+    <PageContent
       title="Billing"
       description="Manage seats, included usage, and top-up funds for this workspace."
     >
@@ -425,7 +425,7 @@ export function BillingPanel({
           </div>
         </section>
       ) : null}
-    </SettingsContent>
+    </PageContent>
   );
 }
 

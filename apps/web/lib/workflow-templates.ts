@@ -148,7 +148,7 @@ export function workflowTemplateMissingPlugins(
         plugin,
         // "GitHub as you" names the plugin; the account label is what a setup prompt should say.
         label: metadata.accountLabel ?? metadata.label,
-        setupHref: `/settings/plugins/${plugin}`,
+        setupHref: `/plugins/${plugin}`,
       },
     ];
   });

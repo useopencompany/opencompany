@@ -72,6 +72,12 @@ beforeAll(async () => {
         "utf8",
       ),
     );
+    await db.exec(
+      await readFile(
+        new URL("../../../drizzle/0284_slack_thread_participants.sql", import.meta.url),
+        "utf8",
+      ),
+    );
   });
 }, 60_000);
 beforeEach(async () => {
@@ -84,9 +90,22 @@ beforeEach(async () => {
     db: drizzle(pg),
     credential: vi.fn(async () => ({ token: "test-token", botUserId: "BOT" })),
     validateChannel: vi.fn(async (_token, id) => id),
-    request: vi.fn(async () => ({
-      user: { id: "U1", team_id: "T1", profile: { email: "member@example.com" } },
-    })) as unknown as SlackChannelWorkerDependencies["request"],
+    request: vi.fn(async ({ method }: { method: string }) =>
+      method === "users.info"
+        ? {
+            user: {
+              id: "U1",
+              team_id: "T1",
+              profile: { real_name: "Member Person", email: "member@example.com" },
+            },
+          }
+        : {
+            messages: [
+              { user: "BOT", text: "Investigation result" },
+              { user: "U1", text: "What are the DB implications?" },
+            ],
+          },
+    ) as unknown as SlackChannelWorkerDependencies["request"],
   };
   await pg.exec(`
     INSERT INTO goat.users (workos_user_id, email) VALUES ('owner', 'owner@example.com'), ('member', 'member@example.com');
@@ -111,6 +130,26 @@ afterEach(async () => {
 });
 
 describe("durable Slack subscriptions", () => {
+  it("upgrades existing thread policies without losing the subscription or other settings", async () => {
+    await pg.exec(
+      `UPDATE goat.session_subscriptions SET policy = '{"authorization":"workspace_member","queue":"serial","custom":true}'`,
+    );
+    await pg.exec(
+      await readFile(
+        new URL("../../../drizzle/0284_slack_thread_participants.sql", import.meta.url),
+        "utf8",
+      ),
+    );
+    expect(
+      (await pg.query("SELECT id, status, policy FROM goat.session_subscriptions")).rows,
+    ).toEqual([
+      {
+        id: "root",
+        status: "waiting",
+        policy: { authorization: "slack_thread_participant", queue: "serial", custom: true },
+      },
+    ]);
+  });
   it("persists workflow root intents with a stable key and rejects foreign callers", async () => {
     await pg.exec(`
       UPDATE goat.integrations SET scopes = '["chat:write","channels:read","channels:history","users:read","users:read.email"]';
@@ -126,6 +165,9 @@ describe("durable Slack subscriptions", () => {
     const first = await postWorkflowSlackMessage(input, execute);
     const replay = await postWorkflowSlackMessage(input, execute);
     expect(first.deliveryId).toBe(replay.deliveryId);
+    expect(
+      (await pg.query("SELECT text FROM goat.channel_deliveries WHERE id <> 'root'")).rows,
+    ).toEqual([{ text: "Investigation summary" }]);
     expect((await pg.query("SELECT id FROM goat.channel_deliveries")).rows).toHaveLength(2);
     await expect(
       postWorkflowSlackMessage({ ...input, actorId: "member" }, execute),
@@ -145,7 +187,13 @@ describe("durable Slack subscriptions", () => {
       threadTs: null,
       messageTs: "100.001",
     });
-    expect((await pg.query("SELECT id FROM goat.session_subscriptions")).rows).toHaveLength(1);
+    expect(
+      (
+        await pg.query(
+          "SELECT policy->>'authorization' AS authorization FROM goat.session_subscriptions",
+        )
+      ).rows,
+    ).toEqual([{ authorization: "slack_thread_participant" }]);
     expect(await enqueueSlackThreadReply(execute, reply)).toBe(1);
     expect(await enqueueSlackThreadReply(execute, reply)).toBe(0);
     expect(
@@ -173,9 +221,19 @@ describe("durable Slack subscriptions", () => {
       { sandbox_id: "saved-sandbox" },
     ]);
     await pg.exec(
-      `UPDATE goat.codex_chat_turns SET status = 'completed'; UPDATE goat.codex_chat_sessions SET status = 'idle'; UPDATE goat.tasks SET status = 'succeeded'; UPDATE goat.chat_messages SET content = 'Additive migration; retained artifacts.' WHERE role = 'assistant';`,
+      `UPDATE goat.integrations SET scopes = '["chat:write","channels:read","channels:history","users:read","users:read.email"]';
+       UPDATE goat.codex_chat_turns SET status = 'running', lease_id = 'reply-lease', lease_expires_at = now() + interval '1 minute';
+       UPDATE goat.codex_chat_sessions SET status = 'running';`,
     );
-    expect(await processNextSubscriptionEvent(deps)).toBe(true);
+    const posted = await postWorkflowSlackMessage(
+      {
+        runId: runs[0]!.id,
+        actorId: "owner",
+        post: { text: "Additive migration; retained artifacts.", messageKey: "slack-follow-up-1" },
+      },
+      execute,
+    );
+    expect(posted.message).toContain("originating Slack thread");
     expect(await processNextSubscriptionEvent(deps)).toBe(false);
     const deliveries = (
       await pg.query(
@@ -185,32 +243,148 @@ describe("durable Slack subscriptions", () => {
     expect(deliveries).toEqual([
       { channel_id: "C1", thread_ts: "100.001", text: "Additive migration; retained artifacts." },
     ]);
-    await pg.exec("UPDATE goat.channel_deliveries SET status = 'sent'");
-    await processNextSubscriptionEvent(deps);
-    await processNextSubscriptionEvent(deps);
+    await pg.exec("UPDATE goat.channel_deliveries SET status = 'sent' WHERE id <> 'root'");
+    expect(await processNextSubscriptionEvent(deps)).toBe(true);
+    expect(await processNextSubscriptionEvent(deps)).toBe(false);
+    await pg.exec(
+      `UPDATE goat.codex_chat_turns SET status = 'completed'; UPDATE goat.codex_chat_sessions SET status = 'idle'; UPDATE goat.tasks SET status = 'succeeded';`,
+    );
+    expect(await processNextSubscriptionEvent(deps)).toBe(true);
     expect((await pg.query("SELECT id FROM goat.codex_chat_turns")).rows).toHaveLength(2);
     expect((await pg.query("SELECT id FROM goat.tasks")).rows).toHaveLength(1);
   });
-  it("ignores nonmembers and rejects expired subscriptions without creating a Run", async () => {
+  it("does not copy a completed assistant turn into Slack when the reply tool was not used", async () => {
     await enqueueSlackThreadReply(execute, reply);
-    await pg.exec("DELETE FROM goat.workspace_members WHERE user_workos_id = 'member'");
+    await processNextSubscriptionEvent(deps);
+    await pg.exec(
+      `UPDATE goat.codex_chat_turns SET status = 'completed';
+       UPDATE goat.codex_chat_sessions SET status = 'idle';
+       UPDATE goat.tasks SET status = 'succeeded';
+       UPDATE goat.chat_messages SET content = 'Task-only final answer' WHERE role = 'assistant';`,
+    );
+    expect(await processNextSubscriptionEvent(deps)).toBe(true);
+    expect(
+      (await pg.query("SELECT id FROM goat.channel_deliveries WHERE id <> 'root'")).rows,
+    ).toEqual([]);
+    expect((await pg.query("SELECT status FROM goat.subscription_events")).rows).toEqual([
+      { status: "done" },
+    ]);
+  });
+  it("tells the Slack thread to check opencompany when the follow-up run never answers", async () => {
+    await enqueueSlackThreadReply(execute, reply);
+    await processNextSubscriptionEvent(deps);
+    await pg.exec(
+      `UPDATE goat.codex_chat_turns SET status = 'failed';
+       UPDATE goat.codex_chat_sessions SET status = 'failed';
+       UPDATE goat.tasks SET status = 'failed';
+       UPDATE goat.chat_messages SET content = 'Task-only final answer' WHERE role = 'assistant';`,
+    );
+    expect(await processNextSubscriptionEvent(deps)).toBe(true);
+    expect(
+      (await pg.query("SELECT text FROM goat.channel_deliveries WHERE id <> 'root'")).rows,
+    ).toEqual([
+      {
+        text: "The workflow needs attention. Open the task in opencompany to review and continue.",
+      },
+    ]);
+  });
+  it.each([
+    { label: "a different email", profile: { email: "different@example.com" } },
+    { label: "no email", profile: {} },
+    { label: "a Slack guest", is_restricted: true, profile: {} },
+    { label: "a single-channel guest", is_ultra_restricted: true, profile: {} },
+  ])(
+    "resumes for a participant with $label and no opencompany membership",
+    async ({ label: _label, ...user }) => {
+      await pg.exec("DELETE FROM goat.workspace_members WHERE user_workos_id = 'member'");
+      deps.request = vi.fn(async () => ({
+        user: { id: "U1", ...user },
+      })) as unknown as SlackChannelWorkerDependencies["request"];
+      await enqueueSlackThreadReply(execute, reply);
+      await processNextSubscriptionEvent(deps);
+      expect(
+        (
+          await pg.query(
+            "SELECT status, run_id IS NOT NULL AS resumed FROM goat.subscription_events",
+          )
+        ).rows,
+      ).toEqual([{ status: "running", resumed: true }]);
+      expect(
+        (
+          await pg.query(
+            "SELECT user_workos_id, chat_session_id, codex_chat_session_id FROM goat.codex_chat_turns",
+          )
+        ).rows,
+      ).toEqual([
+        { user_workos_id: "owner", chat_session_id: "session", codex_chat_session_id: "runtime" },
+      ]);
+      expect(
+        (
+          await pg.query(
+            "SELECT author_workos_id, body FROM goat.task_activities WHERE kind = 'comment'",
+          )
+        ).rows,
+      ).toEqual([
+        {
+          author_workos_id: "owner",
+          body: expect.stringContaining("--- New follow-up message begins ---"),
+        },
+      ]);
+    },
+  );
+  it("attributes the sender and includes the full thread before the clearly marked message", async () => {
+    await enqueueSlackThreadReply(execute, reply);
+    await processNextSubscriptionEvent(deps);
+    const [activity] = (
+      await pg.query<{ body: string }>(
+        "SELECT body FROM goat.task_activities WHERE kind = 'comment'",
+      )
+    ).rows;
+    expect(activity?.body).toContain("Sender: Member Person <member@example.com> (Slack user U1)");
+    expect(activity?.body).toContain("opencompany bot (Slack user BOT):\n> Investigation result");
+    expect(activity?.body).toContain(
+      "Member Person <member@example.com> (Slack user U1):\n> What are the DB implications?",
+    );
+    expect(activity?.body).toContain(
+      'call post_slack_message with your final Slack reply as text and "slack-follow-up-1" as messageKey',
+    );
+    expect(activity?.body.indexOf("--- Full Slack thread ---")).toBeLessThan(
+      activity?.body.indexOf("--- New follow-up message begins ---") ?? 0,
+    );
+  });
+  it.each([
+    { id: "BOT" },
+    { id: "U1", is_bot: true },
+    { id: "U1", deleted: true },
+    { id: "OTHER" },
+  ])("ignores bot, deleted, or mismatched users: %j", async (user) => {
+    deps.request = vi.fn(async () => ({
+      user,
+    })) as unknown as SlackChannelWorkerDependencies["request"];
+    await enqueueSlackThreadReply(execute, {
+      ...reply,
+      slackUserId: user.id === "BOT" ? "BOT" : "U1",
+    });
     await processNextSubscriptionEvent(deps);
     expect((await pg.query("SELECT status FROM goat.subscription_events")).rows).toEqual([
       { status: "ignored" },
     ]);
-    await pg.exec(
-      "INSERT INTO goat.workspace_members VALUES ('m3', 'workspace', 'member', 'member'); UPDATE goat.session_subscriptions SET expires_at = now() - interval '1 day'",
-    );
-    await enqueueSlackThreadReply(execute, { ...reply, eventId: "Ev2" });
+    expect((await pg.query("SELECT id FROM goat.codex_chat_turns")).rows).toHaveLength(0);
+  });
+  it.each([
+    "UPDATE goat.session_subscriptions SET expires_at = now() - interval '1 day'",
+    "UPDATE goat.session_subscriptions SET status = 'closed'",
+    "UPDATE goat.tasks SET archived_at = now()",
+    "UPDATE goat.chat_sessions SET closed_at = now()",
+    "DELETE FROM goat.workspace_members WHERE user_workos_id = 'owner'",
+  ])("closes unavailable work without creating a Run: %s", async (change) => {
+    await pg.exec(change);
+    await enqueueSlackThreadReply(execute, reply);
     await processNextSubscriptionEvent(deps);
     expect((await pg.query("SELECT id FROM goat.codex_chat_turns")).rows).toHaveLength(0);
     expect(
-      (
-        await pg.query<{ text: string }>(
-          "SELECT text FROM goat.channel_deliveries WHERE id <> 'root'",
-        )
-      ).rows[0]?.text,
-    ).toContain("thread is closed");
+      (await pg.query("SELECT text FROM goat.channel_deliveries WHERE id <> 'root'")).rows,
+    ).toEqual([{ text: expect.stringContaining("thread is closed") }]);
   });
   it("reconciles a lost Slack response after restart without reposting", async () => {
     await pg.exec(

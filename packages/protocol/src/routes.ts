@@ -59,6 +59,7 @@ import {
   ConversationPageSchema,
   ConversationShareEnvelopeSchema,
   ConvexAccountStateEnvelopeSchema,
+  ConvexEventsAccountStateEnvelopeSchema,
   CreateBillingTopUpBodySchema,
   CreateBrainBodySchema,
   CreateBrainDocumentBodySchema,
@@ -124,6 +125,7 @@ import {
   OnboardingStateEnvelopeSchema,
   OnboardingWorkspaceEnvelopeSchema,
   PluginArchiveEnvelopeSchema,
+  PluginBillingEnvelopeSchema,
   PluginDataDeleteEnvelopeSchema,
   PluginImportEnvelopeSchema,
   PluginImportPreviewBodySchema,
@@ -159,6 +161,7 @@ import {
   SetCapabilitySessionBudgetBodySchema,
   SetIntegrationCapabilityModeBodySchema,
   SetIntegrationToolModeBodySchema,
+  SetPluginDailySpendLimitBodySchema,
   SetPluginEventEnabledBodySchema,
   SetRepoConfigEnvBodySchema,
   SetRepoConfigSetupBodySchema,
@@ -182,6 +185,7 @@ import {
   SlackBotWorkspaceSettingsEnvelopeSchema,
   StartBrainImportBodySchema,
   StartInfisicalAuthBodySchema,
+  SteerRunEnvelopeSchema,
   StripeAccountDeleteEnvelopeSchema,
   StripeAccountStateEnvelopeSchema,
   SubmitFeedbackBodySchema,
@@ -1909,6 +1913,42 @@ export const deletePluginDataRoute = createRoute({
   },
 });
 
+export const getPluginBillingRoute = createRoute({
+  method: "get",
+  path: "/v1/plugins/{name}/billing",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: { params: z.object({ name: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Action prices, daily spending limit, and spend so far today for a paid plugin.",
+      content: { "application/json": { schema: PluginBillingEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const setPluginDailySpendLimitRoute = createRoute({
+  method: "put",
+  path: "/v1/plugins/{name}/billing/daily-limit",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ name: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: SetPluginDailySpendLimitBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Daily spending limit for a paid plugin updated. Admin only.",
+      content: { "application/json": { schema: PluginBillingEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const setPluginEventEnabledRoute = createRoute({
   method: "post",
   path: "/v1/plugins/{name}/events/{eventId}",
@@ -2523,6 +2563,21 @@ export const cancelRunRoute = createRoute({
     202: {
       description: "Cancellation requested or completed.",
       content: { "application/json": { schema: CancelRunEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const steerRunRoute = createRoute({
+  method: "post",
+  path: "/v1/runs/{runId}/steer",
+  tags: ["Runs"],
+  security: actorSecurity,
+  request: { params: z.object({ runId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "The queued Run's message was injected into the Conversation's running Run.",
+      content: { "application/json": { schema: SteerRunEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -3425,6 +3480,37 @@ export const createJamieEventsEndpointRoute = createRoute({
   },
 });
 
+export const enableConvexEventsRoute = createRoute({
+  method: "post",
+  path: "/v1/integration-accounts/convex-events",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: { headers: z.object({ "idempotency-key": z.string().min(1).max(200) }) },
+  responses: {
+    200: {
+      description:
+        "Convex webhook log stream provisioned for the connected deployment with the deploy key already stored for the Convex plugin.",
+      content: { "application/json": { schema: ConvexEventsAccountStateEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const disableConvexEventsRoute = createRoute({
+  method: "delete",
+  path: "/v1/integration-accounts/convex-events",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description:
+        "Convex webhook log stream deleted in Convex and the event connection removed. The stream is deleted first so Convex stops billing its owner for deliveries opencompany can no longer accept.",
+      content: { "application/json": { schema: IntegrationAccountDeleteEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const connectConvexAccountRoute = createRoute({
   method: "put",
   path: "/v1/integration-accounts/convex",
@@ -4242,6 +4328,8 @@ export type V1RouteHandlers = {
   refreshPluginMcp: RouteHandler<typeof refreshPluginMcpRoute>;
   deletePluginData: RouteHandler<typeof deletePluginDataRoute>;
   setPluginEventEnabled: RouteHandler<typeof setPluginEventEnabledRoute>;
+  getPluginBilling: RouteHandler<typeof getPluginBillingRoute>;
+  setPluginDailySpendLimit: RouteHandler<typeof setPluginDailySpendLimitRoute>;
   listBots: RouteHandler<typeof listBotsRoute>;
   createBot: RouteHandler<typeof createBotRoute>;
   getBot: RouteHandler<typeof getBotRoute>;
@@ -4277,6 +4365,7 @@ export type V1RouteHandlers = {
   getRun: RouteHandler<typeof getRunRoute>;
   streamRunEvents: RouteHandler<typeof streamRunEventsRoute>;
   cancelRun: RouteHandler<typeof cancelRunRoute>;
+  steerRun: RouteHandler<typeof steerRunRoute>;
   resolveApproval: RouteHandler<typeof resolveApprovalRoute>;
   streamReadModel: RouteHandler<typeof streamReadModelRoute>;
   updateUserPreferences: RouteHandler<typeof updateUserPreferencesRoute>;
@@ -4294,6 +4383,8 @@ export type V1RouteHandlers = {
   createJamieEventsEndpoint: RouteHandler<typeof createJamieEventsEndpointRoute>;
   connectJamieEventsAccount: RouteHandler<typeof connectJamieEventsAccountRoute>;
   connectConvexAccount: RouteHandler<typeof connectConvexAccountRoute>;
+  enableConvexEvents: RouteHandler<typeof enableConvexEventsRoute>;
+  disableConvexEvents: RouteHandler<typeof disableConvexEventsRoute>;
   connectRenderAccount: RouteHandler<typeof connectRenderAccountRoute>;
   connectStripeAccount: RouteHandler<typeof connectStripeAccountRoute>;
   disconnectStripeAccount: RouteHandler<typeof disconnectStripeAccountRoute>;
@@ -4492,6 +4583,7 @@ export function createV1Router(
       .openapi(getRunRoute, handlers.getRun)
       .openapi(streamRunEventsRoute, handlers.streamRunEvents)
       .openapi(cancelRunRoute, handlers.cancelRun)
+      .openapi(steerRunRoute, handlers.steerRun)
       .openapi(resolveApprovalRoute, handlers.resolveApproval)
       .openapi(streamReadModelRoute, handlers.streamReadModel)
       .openapi(updateUserPreferencesRoute, handlers.updateUserPreferences)
@@ -4512,6 +4604,8 @@ export function createV1Router(
       .openapi(createJamieEventsEndpointRoute, handlers.createJamieEventsEndpoint)
       .openapi(connectJamieEventsAccountRoute, handlers.connectJamieEventsAccount)
       .openapi(connectConvexAccountRoute, handlers.connectConvexAccount)
+      .openapi(enableConvexEventsRoute, handlers.enableConvexEvents)
+      .openapi(disableConvexEventsRoute, handlers.disableConvexEvents)
       .openapi(connectRenderAccountRoute, handlers.connectRenderAccount)
       .openapi(connectStripeAccountRoute, handlers.connectStripeAccount)
       .openapi(disconnectStripeAccountRoute, handlers.disconnectStripeAccount)
@@ -4573,6 +4667,8 @@ export function createV1Router(
       .openapi(refreshPluginMcpRoute, handlers.refreshPluginMcp)
       .openapi(deletePluginDataRoute, handlers.deletePluginData)
       .openapi(setPluginEventEnabledRoute, handlers.setPluginEventEnabled)
+      .openapi(getPluginBillingRoute, handlers.getPluginBilling)
+      .openapi(setPluginDailySpendLimitRoute, handlers.setPluginDailySpendLimit)
   );
 }
 
@@ -4876,6 +4972,23 @@ const placeholderPlugin = {
   createdAt: placeholderTime,
   updatedAt: placeholderTime,
   archivedAt: null,
+};
+
+const placeholderPluginBilling = {
+  pluginName: "contract-plugin",
+  pricing: {
+    currency: "USD" as const,
+    actions: [
+      {
+        action: "contract_action",
+        label: "Result",
+        unit: "per_result" as const,
+        amountUsdMicros: 80_000,
+      },
+    ],
+  },
+  dailyLimitUsdMicros: 5_000_000,
+  spentTodayUsdMicros: 0,
 };
 
 function placeholderAutomationTaskEnvelope() {
@@ -5623,6 +5736,8 @@ const contractDocumentHandlers: V1RouteHandlers = {
   deletePluginData: (c) =>
     c.json({ data: { name: placeholderPlugin.name, deleted: true }, meta }, 200),
   setPluginEventEnabled: (c) => c.json({ data: placeholderPlugin, meta }, 200),
+  getPluginBilling: (c) => c.json({ data: placeholderPluginBilling, meta }, 200),
+  setPluginDailySpendLimit: (c) => c.json({ data: placeholderPluginBilling, meta }, 200),
   listBots: (c) => c.json({ data: [], meta }, 200),
   createBot: (c) =>
     c.json({ data: { id: "bot_example", name: "Assistant", description: "" }, meta }, 200),
@@ -5808,6 +5923,8 @@ const contractDocumentHandlers: V1RouteHandlers = {
   streamRunEvents: (c) => c.body("", 200, { "Content-Type": "text/event-stream" }),
   cancelRun: (c) =>
     c.json({ data: { runId: "run_contract", status: "canceled", replayed: false }, meta }, 202),
+  steerRun: (c) =>
+    c.json({ data: { runId: "run_contract", targetRunId: "run_contract_active" }, meta }, 200),
   resolveApproval: (c) =>
     c.json(
       {
@@ -5990,6 +6107,26 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       200,
     ),
+  enableConvexEvents: (c) =>
+    c.json(
+      {
+        data: {
+          state: {
+            provider: "convex" as const,
+            connected: true,
+            status: "connected" as const,
+            integrationId: "gint_contract",
+            statusReason: null,
+            deployment: "contract-deployment-123",
+            webhookUrl: "https://app.example.com/api/webhooks/convex/gint_contract",
+            lastDeliveryAt: null,
+          },
+        },
+        meta,
+      },
+      200,
+    ),
+  disableConvexEvents: (c) => c.json({ data: { deleted: true as const }, meta }, 200),
   connectRenderAccount: (c) =>
     c.json(
       {

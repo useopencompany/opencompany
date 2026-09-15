@@ -48,6 +48,14 @@ export const CodexGoalModeSchema = z
   })
   .strict()
   .openapi("CodexGoalModeV1");
+export const ConversationComposerSettingsSchema = z
+  .object({
+    reasoningEffort: EngineReasoningEffortSchema,
+    planModeEnabled: z.boolean().optional(),
+    goalMode: CodexGoalModeSchema.nullable().optional(),
+  })
+  .strict()
+  .openapi("ConversationComposerSettingsV1");
 export const MessageEngineSchema = z
   .discriminatedUnion("type", [
     z
@@ -132,6 +140,7 @@ export const ConversationSchema = z
     title: z.string(),
     engine: ChatEngineSchema,
     model: z.string(),
+    composerSettings: ConversationComposerSettingsSchema.nullable(),
     runtime: ConversationRuntimeSchema.nullable(),
     activityState: ConversationActivityStateSchema,
     hasUnseen: z.boolean(),
@@ -516,6 +525,7 @@ export const IntegrationAccountReadModelSchema = z
       "supabase",
       "resend",
       "x_account",
+      "custom_mcp",
     ]),
     workspaceId: z.string().min(1).max(128).nullable(),
     externalId: z.string().max(1_024),
@@ -1689,6 +1699,21 @@ export const PluginSkillCollisionSchema = z
   .strict()
   .openapi("PluginSkillCollision");
 
+export const PluginActionPriceSchema = z
+  .object({
+    action: z.string().min(1).max(64),
+    label: z.string().min(1).max(120),
+    unit: z.enum(["per_call", "per_result"]),
+    amountUsdMicros: z.number().int().min(1),
+  })
+  .strict()
+  .openapi("PluginActionPrice");
+
+export const PluginPricingSchema = z
+  .object({ currency: z.literal("USD"), actions: z.array(PluginActionPriceSchema) })
+  .strict()
+  .openapi("PluginPricing");
+
 export const PluginValidationReportSchema = z
   .object({
     ignoredManifestFields: z.array(z.string()),
@@ -1714,6 +1739,25 @@ export const PluginValidationReportSchema = z
       ])
       .optional(),
     events: z
+      .discriminatedUnion("status", [
+        z.object({ status: z.literal("absent") }).strict(),
+        z
+          .object({
+            present: z.literal(true),
+            status: z.literal("ignored"),
+            reason: z.string(),
+          })
+          .strict(),
+        z
+          .object({
+            present: z.literal(true),
+            status: z.literal("parsed"),
+            issues: z.array(z.string()),
+          })
+          .strict(),
+      ])
+      .optional(),
+    pricing: z
       .discriminatedUnion("status", [
         z.object({ status: z.literal("absent") }).strict(),
         z
@@ -1904,6 +1948,7 @@ const PluginBaseSchema = z
     integrity: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
     installReport: PluginInstallReportSchema,
     events: z.array(PluginEventDefinitionSchema).max(64),
+    pricing: PluginPricingSchema.nullable(),
     eventModes: z.record(z.string(), z.boolean()),
     mcpApprovedIntegrity: z
       .string()
@@ -1963,6 +2008,7 @@ export const PluginImportPreviewSchema = z
     stdioServers: z.array(PluginStdioServerSchema),
     remoteMcpServers: z.array(PluginRemoteMcpPreviewServerSchema),
     events: z.array(PluginEventDefinitionSchema).max(64),
+    pricing: PluginPricingSchema.nullable(),
     report: PluginValidationReportSchema,
   })
   .strict()
@@ -3321,6 +3367,18 @@ export const CancelRunEnvelopeSchema = z
   .strict()
   .openapi("CancelRunEnvelope");
 
+export const SteerRunEnvelopeSchema = z
+  .object({
+    data: z.object({
+      // The queued Run whose message was promoted, and the running Run it was promoted into.
+      runId: ResourceIdSchema,
+      targetRunId: ResourceIdSchema,
+    }),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("SteerRunEnvelope");
+
 export const ResolveApprovalBodySchema = z
   .object({
     resolution: z.enum(["approved", "denied", "answered", "canceled"]),
@@ -3512,6 +3570,26 @@ export const CapabilitySessionBudgetEnvelopeSchema = z
   })
   .strict()
   .openapi("CapabilitySessionBudgetEnvelope");
+
+export const PluginBillingSchema = z
+  .object({
+    pluginName: z.string().min(1).max(64),
+    pricing: PluginPricingSchema.nullable(),
+    dailyLimitUsdMicros: z.number().int().min(1).nullable(),
+    spentTodayUsdMicros: z.number().int().min(0),
+  })
+  .strict()
+  .openapi("PluginBilling");
+
+export const PluginBillingEnvelopeSchema = z
+  .object({ data: PluginBillingSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("PluginBillingEnvelope");
+
+export const SetPluginDailySpendLimitBodySchema = z
+  .object({ dailyLimitUsd: z.number().nullable() })
+  .strict()
+  .openapi("SetPluginDailySpendLimitBody");
 
 export const CapabilityApprovalStatusSchema = z.enum([
   "awaiting_approval",
@@ -4436,6 +4514,32 @@ export const JamieEventsAccountStateEnvelopeSchema = z
   .strict()
   .openapi("JamieEventsAccountStateEnvelope");
 
+// Convex's event connection is a webhook log stream opencompany provisions in Convex with the
+// deploy key the plugin already holds, so nothing is pasted in either direction. The state names
+// the deployment the stream belongs to and the last signature-verified delivery, which is the only
+// confirmation that the stream reaches opencompany rather than only that Convex accepted it.
+export const ConvexEventsAccountStateSchema = z
+  .object({
+    provider: z.literal("convex"),
+    connected: z.boolean(),
+    status: IntegrationAccountStatusSchema,
+    integrationId: IntegrationAccountIdSchema.nullable(),
+    statusReason: z.string().nullable(),
+    deployment: z.string().nullable(),
+    webhookUrl: z.string().url().nullable(),
+    lastDeliveryAt: z.string().datetime().nullable(),
+  })
+  .strict()
+  .openapi("ConvexEventsAccountState");
+
+export const ConvexEventsAccountStateEnvelopeSchema = z
+  .object({
+    data: z.object({ state: ConvexEventsAccountStateSchema }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("ConvexEventsAccountStateEnvelope");
+
 export const StripeAccountStateSchema = z
   .object({
     provider: z.literal("stripe"),
@@ -4807,6 +4911,9 @@ export type PluginSourceDto = z.infer<typeof PluginSourceSchema>;
 export type PluginRemoteMcpServerDto = z.infer<typeof PluginRemoteMcpServerSchema>;
 export type PluginListItemDto = z.infer<typeof PluginListItemSchema>;
 export type PluginInstallationDto = z.infer<typeof PluginInstallationSchema>;
+export type PluginPricingDto = z.infer<typeof PluginPricingSchema>;
+export type PluginActionPriceDto = z.infer<typeof PluginActionPriceSchema>;
+export type PluginBillingDto = z.infer<typeof PluginBillingSchema>;
 export type PluginEventDefinitionDto = z.infer<typeof PluginEventDefinitionSchema>;
 export type PluginEventFilterDefinitionDto = z.infer<typeof PluginEventFilterDefinitionSchema>;
 export type PluginImportPreviewDto = z.infer<typeof PluginImportPreviewSchema>;
@@ -4826,6 +4933,7 @@ export type ConversationReadModelV1 = z.infer<typeof ConversationReadModelV1Sche
 export type MessageReadModel = z.infer<typeof MessageReadModelSchema>;
 export type MessageSummaryReadModel = z.infer<typeof MessageSummaryReadModelSchema>;
 export type MessagePresentation = z.infer<typeof MessagePresentationSchema>;
+export type SteerRunResult = z.infer<typeof SteerRunEnvelopeSchema>["data"];
 export type RunReadModel = z.infer<typeof RunReadModelSchema>;
 export type EngineSessionReadModel = z.infer<typeof EngineSessionReadModelSchema>;
 export type EngineRuntimeStatus = z.infer<typeof EngineRuntimeStatusSchema>;

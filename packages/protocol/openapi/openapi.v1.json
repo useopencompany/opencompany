@@ -8059,6 +8059,9 @@
           "model": {
             "type": "string"
           },
+          "composerSettings": {
+            "$ref": "#/components/schemas/ConversationComposerSettingsV1"
+          },
           "runtime": {
             "$ref": "#/components/schemas/ConversationRuntime"
           },
@@ -8094,12 +8097,59 @@
           "title",
           "engine",
           "model",
+          "composerSettings",
           "runtime",
           "activityState",
           "hasUnseen",
           "awaitingInput",
           "createdAt",
           "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "ConversationComposerSettingsV1": {
+        "type": "object",
+        "nullable": true,
+        "properties": {
+          "reasoningEffort": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "xhigh"
+            ]
+          },
+          "planModeEnabled": {
+            "type": "boolean"
+          },
+          "goalMode": {
+            "$ref": "#/components/schemas/CodexGoalModeV1"
+          }
+        },
+        "required": [
+          "reasoningEffort"
+        ],
+        "additionalProperties": false
+      },
+      "CodexGoalModeV1": {
+        "type": "object",
+        "nullable": true,
+        "properties": {
+          "objective": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          },
+          "tokenBudget": {
+            "type": "integer",
+            "nullable": true,
+            "minimum": 1,
+            "maximum": 2000000
+          }
+        },
+        "required": [
+          "objective"
         ],
         "additionalProperties": false
       },
@@ -8657,27 +8707,6 @@
             "additionalProperties": false
           }
         ]
-      },
-      "CodexGoalModeV1": {
-        "type": "object",
-        "nullable": true,
-        "properties": {
-          "objective": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 4000
-          },
-          "tokenBudget": {
-            "type": "integer",
-            "nullable": true,
-            "minimum": 1,
-            "maximum": 2000000
-          }
-        },
-        "required": [
-          "objective"
-        ],
-        "additionalProperties": false
       },
       "MessageMention": {
         "type": "object",
@@ -10575,6 +10604,40 @@
         ],
         "additionalProperties": false
       },
+      "SteerRunEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "runId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "targetRunId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              }
+            },
+            "required": [
+              "runId",
+              "targetRunId"
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
       "ResolveApprovalEnvelope": {
         "type": "object",
         "properties": {
@@ -11596,6 +11659,91 @@
           "statusReason",
           "capabilityModes",
           "toolModes"
+        ],
+        "additionalProperties": false
+      },
+      "ConvexEventsAccountStateEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "state": {
+                "$ref": "#/components/schemas/ConvexEventsAccountState"
+              }
+            },
+            "required": [
+              "state"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "ConvexEventsAccountState": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "convex"
+            ]
+          },
+          "connected": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "not_connected",
+              "connected",
+              "needs_reauth",
+              "sync_failed"
+            ]
+          },
+          "integrationId": {
+            "type": "string",
+            "nullable": true,
+            "minLength": 1,
+            "maxLength": 128,
+            "example": "gint_0f8e7d6c5b4a",
+            "description": "Integration connection id."
+          },
+          "statusReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "deployment": {
+            "type": "string",
+            "nullable": true
+          },
+          "webhookUrl": {
+            "type": "string",
+            "nullable": true,
+            "format": "uri"
+          },
+          "lastDeliveryAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "provider",
+          "connected",
+          "status",
+          "integrationId",
+          "statusReason",
+          "deployment",
+          "webhookUrl",
+          "lastDeliveryAt"
         ],
         "additionalProperties": false
       },
@@ -13549,6 +13697,9 @@
             },
             "maxItems": 64
           },
+          "pricing": {
+            "$ref": "#/components/schemas/PluginPricing"
+          },
           "eventModes": {
             "type": "object",
             "additionalProperties": {
@@ -13596,6 +13747,7 @@
           "integrity",
           "installReport",
           "events",
+          "pricing",
           "eventModes",
           "mcpApprovedIntegrity",
           "createdAt",
@@ -13805,6 +13957,80 @@
             ]
           },
           "events": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "absent"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "present": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "ignored"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "present",
+                  "status",
+                  "reason"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "present": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "parsed"
+                    ]
+                  },
+                  "issues": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "present",
+                  "status",
+                  "issues"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "pricing": {
             "oneOf": [
               {
                 "type": "object",
@@ -14273,6 +14499,62 @@
           }
         ]
       },
+      "PluginPricing": {
+        "type": "object",
+        "nullable": true,
+        "properties": {
+          "currency": {
+            "type": "string",
+            "enum": [
+              "USD"
+            ]
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginActionPrice"
+            }
+          }
+        },
+        "required": [
+          "currency",
+          "actions"
+        ],
+        "additionalProperties": false
+      },
+      "PluginActionPrice": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "per_call",
+              "per_result"
+            ]
+          },
+          "amountUsdMicros": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "action",
+          "label",
+          "unit",
+          "amountUsdMicros"
+        ],
+        "additionalProperties": false
+      },
       "PluginDiscoveredTool": {
         "type": "object",
         "properties": {
@@ -14408,6 +14690,9 @@
             },
             "maxItems": 64
           },
+          "pricing": {
+            "$ref": "#/components/schemas/PluginPricing"
+          },
           "eventModes": {
             "type": "object",
             "additionalProperties": {
@@ -14468,6 +14753,7 @@
           "integrity",
           "installReport",
           "events",
+          "pricing",
           "eventModes",
           "mcpApprovedIntegrity",
           "createdAt",
@@ -14810,6 +15096,9 @@
             },
             "maxItems": 64
           },
+          "pricing": {
+            "$ref": "#/components/schemas/PluginPricing"
+          },
           "report": {
             "$ref": "#/components/schemas/PluginValidationReport"
           }
@@ -14825,6 +15114,7 @@
           "stdioServers",
           "remoteMcpServers",
           "events",
+          "pricing",
           "report"
         ],
         "additionalProperties": false
@@ -15050,6 +15340,80 @@
                 "additionalProperties": false
               }
             ]
+          },
+          "pricing": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "absent"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "present": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "ignored"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "present",
+                  "status",
+                  "reason"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "present": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "parsed"
+                    ]
+                  },
+                  "issues": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "present",
+                  "status",
+                  "issues"
+                ],
+                "additionalProperties": false
+              }
+            ]
           }
         },
         "required": [
@@ -15201,6 +15565,64 @@
         },
         "required": [
           "enabled"
+        ],
+        "additionalProperties": false
+      },
+      "PluginBillingEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PluginBilling"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "PluginBilling": {
+        "type": "object",
+        "properties": {
+          "pluginName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "pricing": {
+            "$ref": "#/components/schemas/PluginPricing"
+          },
+          "dailyLimitUsdMicros": {
+            "type": "integer",
+            "nullable": true,
+            "minimum": 1
+          },
+          "spentTodayUsdMicros": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "pluginName",
+          "pricing",
+          "dailyLimitUsdMicros",
+          "spentTodayUsdMicros"
+        ],
+        "additionalProperties": false
+      },
+      "SetPluginDailySpendLimitBody": {
+        "type": "object",
+        "properties": {
+          "dailyLimitUsd": {
+            "type": "number",
+            "nullable": true
+          }
+        },
+        "required": [
+          "dailyLimitUsd"
         ],
         "additionalProperties": false
       }
@@ -23475,6 +23897,56 @@
         }
       }
     },
+    "/v1/runs/{runId}/steer": {
+      "post": {
+        "tags": [
+          "Runs"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "runId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The queued Run's message was injected into the Conversation's running Run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SteerRunEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/runs/{runId}/approvals/{approvalId}": {
       "post": {
         "tags": [
@@ -24432,6 +24904,90 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ConvexAccountStateEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/integration-accounts/convex-events": {
+      "post": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Convex webhook log stream provisioned for the connected deployment with the deploy key already stored for the Convex plugin.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConvexEventsAccountStateEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Convex webhook log stream deleted in Convex and the event connection removed. The stream is deleted first so Convex stops billing its owner for deliveries opencompany can no longer accept.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationAccountDeleteEnvelope"
                 }
               }
             }
@@ -27778,6 +28334,116 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PluginInstallationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/plugins/{name}/billing": {
+      "get": {
+        "tags": [
+          "Plugins"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Action prices, daily spending limit, and spend so far today for a paid plugin.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginBillingEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/plugins/{name}/billing/daily-limit": {
+      "put": {
+        "tags": [
+          "Plugins"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetPluginDailySpendLimitBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Daily spending limit for a paid plugin updated. Admin only.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginBillingEnvelope"
                 }
               }
             }

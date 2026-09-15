@@ -1,7 +1,7 @@
 // Reviewed public package pins. Update artifacts with scripts/package-official-plugins.ts.
 export const OFFICIAL_PLUGIN_SOURCES = {
   convex:
-    "https://github.com/useopencompany/plugins/tree/81b0f81319ad50ea4e03f20055560be4d814d3b8/convex",
+    "https://github.com/useopencompany/plugins/tree/87dbf6935a7312b569763dd3a3f8b614a0973205/convex",
   attio:
     "https://github.com/useopencompany/plugins/tree/0daeec4cff5d5f9925af2901410e1aa6c8baf0d8/attio",
   betterstack:
@@ -26,6 +26,8 @@ export const OFFICIAL_PLUGIN_SOURCES = {
     "https://github.com/useopencompany/plugins/tree/f283f509c195464f90f5f78f7e30a9a472b6393b/infisical",
   jamie:
     "https://github.com/useopencompany/plugins/tree/f1463786dd8cf98e48d89948026118c5bb7cb465/jamie",
+  "lead-research":
+    "https://github.com/useopencompany/plugins/tree/43b234951345de07e77b536a6cbdd80f228a3c32/lead-research",
   latitude:
     "https://github.com/useopencompany/plugins/tree/56855e7d53ee3544520ec1fdef84d9e2f5ae6896/latitude",
   linear:

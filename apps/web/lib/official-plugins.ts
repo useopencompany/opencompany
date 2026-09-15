@@ -29,7 +29,13 @@ export type OfficialMcpPluginName =
   | "stripe"
   | "x";
 export type OfficialSkillPluginName = "yc-advise" | "doppler";
-export type OfficialPluginName = OfficialMcpPluginName | OfficialSkillPluginName;
+// A managed plugin has no connection and no MCP server: opencompany runs its tools server-side and
+// bills the workspace per action at the price the installed package declares.
+export type OfficialManagedPluginName = "lead-research";
+export type OfficialPluginName =
+  | OfficialMcpPluginName
+  | OfficialSkillPluginName
+  | OfficialManagedPluginName;
 export type OfficialPluginCategory = "communication" | "productivity" | "engineering" | "business";
 
 export const OFFICIAL_PLUGIN_CATEGORIES = {
@@ -97,7 +103,18 @@ export type OfficialSkillPluginMetadata = OfficialPluginMetadataBase & {
   connectionProvider?: "doppler";
 };
 
-export type OfficialPluginMetadata = OfficialMcpPluginMetadata | OfficialSkillPluginMetadata;
+export type OfficialManagedPluginMetadata = OfficialPluginMetadataBase & {
+  name: OfficialManagedPluginName;
+  kind: "managed";
+  // What the workspace is buying, in the user's words. Prices themselves come from the installed
+  // package, never from this file.
+  billingSummary: string;
+};
+
+export type OfficialPluginMetadata =
+  | OfficialMcpPluginMetadata
+  | OfficialSkillPluginMetadata
+  | OfficialManagedPluginMetadata;
 
 const OFFICIAL_PLUGIN_SOURCE_PATTERN =
   /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/([0-9a-f]{40})(?:\/|$)/u;
@@ -120,7 +137,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     category: "business",
     source: OFFICIAL_PLUGIN_SOURCES["attio"],
     connectionProvider: "attio",
-    connectHref: "/api/integrations/attio-mcp/start?returnTo=/settings/plugins/attio",
+    connectHref: "/api/integrations/attio-mcp/start?returnTo=/plugins/attio",
     accountDescription: "The Attio account opencompany uses when you run CRM tools.",
   },
   betterstack: {
@@ -132,7 +149,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     category: "engineering",
     source: OFFICIAL_PLUGIN_SOURCES["betterstack"],
     connectionProvider: "betterstack",
-    connectHref: "/api/integrations/betterstack/start?returnTo=/settings/plugins/betterstack",
+    connectHref: "/api/integrations/betterstack/start?returnTo=/plugins/betterstack",
     accountDescription: "The account opencompany uses when you run Better Stack tools.",
   },
   fathom: {
@@ -143,7 +160,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     category: "productivity",
     source: OFFICIAL_PLUGIN_SOURCES["fathom"],
     connectionProvider: "fathom",
-    connectHref: "/api/integrations/fathom-mcp/start?returnTo=/settings/plugins/fathom",
+    connectHref: "/api/integrations/fathom-mcp/start?returnTo=/plugins/fathom",
     accountDescription: "The Fathom account opencompany uses when you search meeting content.",
   },
   github: {
@@ -155,7 +172,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     featured: true,
     source: OFFICIAL_PLUGIN_SOURCES["github"],
     connectionProvider: "github_user",
-    connectHref: "/api/integrations/github-user/start?returnTo=/settings/plugins/github",
+    connectHref: "/api/integrations/github-user/start?returnTo=/plugins/github",
     accountLabel: "GitHub",
     accountDescription: "The personal GitHub account opencompany uses when it works as you.",
   },
@@ -169,7 +186,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     featured: true,
     source: OFFICIAL_PLUGIN_SOURCES["gmail"],
     connectionProvider: "gmail",
-    connectHref: "/api/integrations/gmail/start?access=mcp&returnTo=/settings/plugins/gmail",
+    connectHref: "/api/integrations/gmail/start?access=mcp&returnTo=/plugins/gmail",
     accountDescription: "The most recently connected Gmail account powers Gmail tools.",
   },
   granola: {
@@ -180,11 +197,11 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     category: "productivity",
     source: OFFICIAL_PLUGIN_SOURCES["granola"],
     connectionProvider: "granola",
-    connectHref: "/api/integrations/granola-mcp/start?returnTo=/settings/plugins/granola",
+    connectHref: "/api/integrations/granola-mcp/start?returnTo=/plugins/granola",
     accountDescription: "The Granola account opencompany uses when you search meeting history.",
     // Granola's note events are discovered by polling its REST API, which the MCP OAuth connection
     // cannot call. They bind to the personal API key in the plugin event settings.
-    eventAccountHref: "/settings/plugins/granola#events",
+    eventAccountHref: "/plugins/granola#events",
     eventAccountLabel: "Add a Granola API key",
   },
   "google-admin": {
@@ -195,7 +212,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     category: "productivity",
     source: OFFICIAL_PLUGIN_SOURCES["google-admin"],
     connectionProvider: "google_admin",
-    connectHref: "/api/integrations/google-admin/start?returnTo=/settings/plugins/google-admin",
+    connectHref: "/api/integrations/google-admin/start?returnTo=/plugins/google-admin",
     accountDescription:
       "Connect a Google Workspace administrator with user and group management privileges. The most recently connected account powers these tools. New users need a password reset and sign-in details from Google Admin.",
   },
@@ -207,8 +224,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     category: "productivity",
     source: OFFICIAL_PLUGIN_SOURCES["google-calendar"],
     connectionProvider: "google_calendar",
-    connectHref:
-      "/api/integrations/google-calendar/start?returnTo=/settings/plugins/google-calendar",
+    connectHref: "/api/integrations/google-calendar/start?returnTo=/plugins/google-calendar",
     accountDescription: "The Google account opencompany uses when you run Calendar tools.",
   },
   "google-drive": {
@@ -220,7 +236,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     category: "productivity",
     source: OFFICIAL_PLUGIN_SOURCES["google-drive"],
     connectionProvider: "google_drive",
-    connectHref: "/api/integrations/google-drive/start?returnTo=/settings/plugins/google-drive",
+    connectHref: "/api/integrations/google-drive/start?returnTo=/plugins/google-drive",
     accountDescription:
       "The most recently connected Google Drive account powers plugin tools. Other accounts remain available for Wiki ingestion.",
   },
@@ -232,7 +248,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     category: "business",
     source: OFFICIAL_PLUGIN_SOURCES["hubspot"],
     connectionProvider: "hubspot",
-    connectHref: "/api/integrations/hubspot-mcp/start?returnTo=/settings/plugins/hubspot",
+    connectHref: "/api/integrations/hubspot-mcp/start?returnTo=/plugins/hubspot",
     accountDescription: "The HubSpot account opencompany uses when you run CRM tools.",
   },
   infisical: {
@@ -244,7 +260,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     category: "engineering",
     source: OFFICIAL_PLUGIN_SOURCES["infisical"],
     connectionProvider: "infisical",
-    connectHref: "/settings/plugins/infisical",
+    connectHref: "/plugins/infisical",
     accountDescription:
       "Your personal Infisical login, restored into your coding sandboxes. Its credentials are never sent to the documentation MCP.",
   },
@@ -257,11 +273,11 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     category: "productivity",
     source: OFFICIAL_PLUGIN_SOURCES["jamie"],
     connectionProvider: "jamie",
-    connectHref: "/api/integrations/jamie-mcp/start?returnTo=/settings/plugins/jamie",
+    connectHref: "/api/integrations/jamie-mcp/start?returnTo=/plugins/jamie",
     accountDescription: "The Jamie account opencompany uses when you run meeting tools.",
     // Jamie's meeting events arrive on a webhook the user creates in Jamie; the MCP login cannot
     // register one. They bind to the webhook key saved in the plugin's Events section.
-    eventAccountHref: "/settings/plugins/jamie#events",
+    eventAccountHref: "/plugins/jamie#events",
     eventAccountLabel: "Connect Jamie meeting events",
   },
   latitude: {
@@ -273,7 +289,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     category: "engineering",
     source: OFFICIAL_PLUGIN_SOURCES["latitude"],
     connectionProvider: "latitude",
-    connectHref: "/api/integrations/latitude/start?returnTo=/settings/plugins/latitude",
+    connectHref: "/api/integrations/latitude/start?returnTo=/plugins/latitude",
     accountDescription: "The Latitude account opencompany uses when you run observability tools.",
   },
   linear: {
@@ -285,9 +301,9 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     featured: true,
     source: OFFICIAL_PLUGIN_SOURCES["linear"],
     connectionProvider: "linear",
-    connectHref: "/api/integrations/linear/start?returnTo=/settings/plugins/linear",
+    connectHref: "/api/integrations/linear/start?returnTo=/plugins/linear",
     accountDescription: "The account opencompany uses when you run Linear tools.",
-    eventAccountHref: "/settings/plugins/linear#events",
+    eventAccountHref: "/plugins/linear#events",
     eventAccountLabel: "Connect Linear events",
   },
   neon: {
@@ -299,7 +315,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     category: "engineering",
     source: OFFICIAL_PLUGIN_SOURCES["neon"],
     connectionProvider: "neon",
-    connectHref: "/api/integrations/neon/start?returnTo=/settings/plugins/neon",
+    connectHref: "/api/integrations/neon/start?returnTo=/plugins/neon",
     accountDescription: "The account opencompany uses when you run Neon tools.",
   },
   notion: {
@@ -312,7 +328,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     featured: true,
     source: OFFICIAL_PLUGIN_SOURCES["notion"],
     connectionProvider: "notion",
-    connectHref: "/api/integrations/notion/start?returnTo=/settings/plugins/notion",
+    connectHref: "/api/integrations/notion/start?returnTo=/plugins/notion",
     accountDescription: "The Notion account opencompany uses when you work with workspace content.",
   },
   supabase: {
@@ -324,7 +340,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     category: "engineering",
     source: OFFICIAL_PLUGIN_SOURCES["supabase"],
     connectionProvider: "supabase",
-    connectHref: "/api/integrations/supabase/start?returnTo=/settings/plugins/supabase",
+    connectHref: "/api/integrations/supabase/start?returnTo=/plugins/supabase",
     accountDescription:
       "Choose the Supabase organization to authorize. SQL can read or change data; review permissions before use.",
   },
@@ -337,7 +353,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     category: "communication",
     source: OFFICIAL_PLUGIN_SOURCES["resend"],
     connectionProvider: "resend",
-    connectHref: "/api/integrations/resend/start?returnTo=/settings/plugins/resend",
+    connectHref: "/api/integrations/resend/start?returnTo=/plugins/resend",
     accountDescription:
       "Connect your Resend account. Sending and sensitive reads require approval; access administration and destructive actions start off.",
   },
@@ -350,7 +366,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     category: "business",
     source: OFFICIAL_PLUGIN_SOURCES["posthog"],
     connectionProvider: "posthog",
-    connectHref: "/api/integrations/posthog/start?returnTo=/settings/plugins/posthog",
+    connectHref: "/api/integrations/posthog/start?returnTo=/plugins/posthog",
     accountDescription: "The PostHog account opencompany uses when you run analytics tools.",
   },
   convex: {
@@ -362,9 +378,13 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
       "Inspect deployments, query data, and run Convex functions with permission controls.",
     source: OFFICIAL_PLUGIN_SOURCES.convex,
     connectionProvider: "convex",
-    connectHref: "/settings/plugins/convex#convex-deploy-key",
+    connectHref: "/plugins/convex#convex-deploy-key",
     accountDescription:
       "A deployment-scoped key connects one Convex deployment. Production supports schema and function inspection only.",
+    // Convex's event connection is the webhook log stream, not the deploy key the plugin page
+    // connects, so an event trigger with no account to bind to is sent to the Events section.
+    eventAccountHref: "/settings/plugins/convex#convex-error-events",
+    eventAccountLabel: "Turn on Convex error events",
   },
   render: {
     name: "render",
@@ -375,7 +395,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     category: "engineering",
     source: OFFICIAL_PLUGIN_SOURCES["render"],
     connectionProvider: "render",
-    connectHref: "/settings/plugins/render#render-api-key",
+    connectHref: "/plugins/render#render-api-key",
     accountDescription: "The Render account opencompany uses when you run Render tools.",
   },
   vercel: {
@@ -387,7 +407,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     category: "engineering",
     source: OFFICIAL_PLUGIN_SOURCES["vercel"],
     connectionProvider: "vercel",
-    connectHref: "/api/integrations/vercel/start?returnTo=/settings/plugins/vercel",
+    connectHref: "/api/integrations/vercel/start?returnTo=/plugins/vercel",
     connectionUnavailableReason:
       "Vercel requires MCP clients and their production callback URLs to be approved before they can connect. opencompany is awaiting that approval.",
     accountDescription: "The account opencompany uses when you run Vercel tools.",
@@ -400,7 +420,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     category: "engineering",
     source: OFFICIAL_PLUGIN_SOURCES.dash0,
     connectionProvider: "dash0",
-    connectHref: "/api/integrations/dash0/start?returnTo=/settings/plugins/dash0",
+    connectHref: "/api/integrations/dash0/start?returnTo=/plugins/dash0",
     accountDescription:
       "Connect your Dash0 organization. Its region is detected automatically across AWS Ireland, AWS Germany, AWS Oregon, and GCP Netherlands. Telemetry reads ask for approval; paid Agent0 investigations start off.",
   },
@@ -412,7 +432,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     category: "engineering",
     source: OFFICIAL_PLUGIN_SOURCES["signoz"],
     connectionProvider: "signoz",
-    connectHref: "/api/integrations/signoz/start?returnTo=/settings/plugins/signoz",
+    connectHref: "/api/integrations/signoz/start?returnTo=/plugins/signoz",
     accountDescription: "The SigNoz US Cloud account opencompany uses when you run SigNoz tools.",
   },
   slack: {
@@ -424,7 +444,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     featured: true,
     source: OFFICIAL_PLUGIN_SOURCES["slack"],
     connectionProvider: "slack",
-    connectHref: "/api/integrations/slack/start?returnTo=/settings/plugins/slack",
+    connectHref: "/api/integrations/slack/start?returnTo=/plugins/slack",
     accountDescription: "The most recently connected Slack account powers Slack tools.",
   },
   stripe: {
@@ -436,7 +456,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     category: "business",
     source: OFFICIAL_PLUGIN_SOURCES["stripe"],
     connectionProvider: "stripe",
-    connectHref: "/api/integrations/stripe/start?returnTo=/settings/plugins/stripe",
+    connectHref: "/api/integrations/stripe/start?returnTo=/plugins/stripe",
     accountDescription: "Connect your Stripe account securely through Stripe. No API key required.",
   },
   x: {
@@ -447,7 +467,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     category: "communication",
     source: OFFICIAL_PLUGIN_SOURCES["x"],
     connectionProvider: "x_account",
-    connectHref: "/api/integrations/x-account/start?returnTo=/settings/plugins/x",
+    connectHref: "/api/integrations/x-account/start?returnTo=/plugins/x",
     accountLabel: "X",
     accountDescription:
       "The most recently connected X account powers plugin tools. Other connected X accounts remain available if the plugin is uninstalled.",
@@ -474,6 +494,27 @@ export const OFFICIAL_SKILL_PLUGIN_METADATA = {
     source: OFFICIAL_PLUGIN_SOURCES["yc-advise"],
   },
 } as const satisfies Record<OfficialSkillPluginName, OfficialSkillPluginMetadata>;
+
+export const OFFICIAL_MANAGED_PLUGIN_METADATA = {
+  "lead-research": {
+    name: "lead-research",
+    kind: "managed",
+    label: "Lead research",
+    description:
+      "Find companies and people that match your ICP, and get the work emails needed to reach them.",
+    category: "business",
+    featured: true,
+    source: OFFICIAL_PLUGIN_SOURCES["lead-research"],
+    billingSummary:
+      "Billed per result from your workspace credits. No account to connect and no separate subscription.",
+  },
+} as const satisfies Record<OfficialManagedPluginName, OfficialManagedPluginMetadata>;
+
+export function isOfficialManagedPluginName(value: string): value is OfficialManagedPluginName {
+  return (
+    value === value.toLocaleLowerCase() && Object.hasOwn(OFFICIAL_MANAGED_PLUGIN_METADATA, value)
+  );
+}
 
 export function isOfficialMcpPluginName(value: string): value is OfficialMcpPluginName {
   return value === value.toLocaleLowerCase() && Object.hasOwn(OFFICIAL_MCP_PLUGIN_METADATA, value);

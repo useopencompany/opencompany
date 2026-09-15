@@ -35,14 +35,17 @@ import {
   VercelIcon,
   XIcon,
 } from "@opencompany/ui/icons";
-import { KeyRound, Sparkles } from "lucide-react";
+import { Crosshair, KeyRound, Sparkles } from "lucide-react";
 import {
   importHeadlessPlugin,
   previewHeadlessPluginImport,
 } from "@/lib/headless-knowledge-commands";
 import {
+  OFFICIAL_MANAGED_PLUGIN_METADATA,
   OFFICIAL_MCP_PLUGIN_METADATA,
   OFFICIAL_SKILL_PLUGIN_METADATA,
+  type OfficialManagedPluginMetadata,
+  type OfficialManagedPluginName,
   type OfficialMcpPluginMetadata,
   type OfficialMcpPluginName,
   type OfficialPluginMetadata,
@@ -59,6 +62,7 @@ type OfficialPluginAppearance = {
 export type OfficialPluginConfig = OfficialPluginMetadata & OfficialPluginAppearance;
 export type OfficialMcpPluginConfig = OfficialMcpPluginMetadata & OfficialPluginAppearance;
 export type OfficialSkillPluginConfig = OfficialSkillPluginMetadata & OfficialPluginAppearance;
+export type OfficialManagedPluginConfig = OfficialManagedPluginMetadata & OfficialPluginAppearance;
 
 export const OFFICIAL_MCP_PLUGINS = {
   attio: {
@@ -211,9 +215,18 @@ export const OFFICIAL_SKILL_PLUGINS = {
   },
 } as const satisfies Record<OfficialSkillPluginName, OfficialSkillPluginConfig>;
 
+export const OFFICIAL_MANAGED_PLUGINS = {
+  "lead-research": {
+    ...OFFICIAL_MANAGED_PLUGIN_METADATA["lead-research"],
+    Icon: Crosshair,
+    iconClassName: "bg-[#1F6FEB] text-white",
+  },
+} as const satisfies Record<OfficialManagedPluginName, OfficialManagedPluginConfig>;
+
 export const OFFICIAL_PLUGINS = {
   ...OFFICIAL_MCP_PLUGINS,
   ...OFFICIAL_SKILL_PLUGINS,
+  ...OFFICIAL_MANAGED_PLUGINS,
 } as const satisfies Record<OfficialPluginName, OfficialPluginConfig>;
 
 export const GITHUB_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.github.name;

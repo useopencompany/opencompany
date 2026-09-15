@@ -13,6 +13,7 @@ import {
   codexChatLeaseTtlMs,
   codexChatRetryAt,
   heartbeatCodexChatTurn,
+  RUNNER_ATTACHED_V1,
   resolveCodexChatWorkerConcurrency,
   runClaimedTurn,
   startCodexChatWorker,
@@ -111,7 +112,11 @@ describe("claimNextCodexChatTurn", () => {
 
   it("atomically moves the claimed session from queued to starting", async () => {
     await expect(
-      claimNextCodexChatTurn({ leaseOwner: "runner_1", leaseTtlMs: 300_000 }),
+      claimNextCodexChatTurn({
+        leaseOwner: "runner_1",
+        leaseTtlMs: 300_000,
+        supportedExecutions: [RUNNER_ATTACHED_V1],
+      }),
     ).resolves.toMatchObject({ id: "goat_codex_chat_turn_1", status: "running", attempts: 1 });
 
     const statement = sqlText(dbMock.execute.mock.calls[0]?.[0]);
@@ -122,7 +127,11 @@ describe("claimNextCodexChatTurn", () => {
 
   it("only lets due delayed turns participate in claiming and per-session FIFO", async () => {
     await expect(
-      claimNextCodexChatTurn({ leaseOwner: "runner_1", leaseTtlMs: 300_000 }),
+      claimNextCodexChatTurn({
+        leaseOwner: "runner_1",
+        leaseTtlMs: 300_000,
+        supportedExecutions: [RUNNER_ATTACHED_V1],
+      }),
     ).resolves.toMatchObject({
       id: "goat_codex_chat_turn_1",
       runAfter: new Date("2026-07-10T08:59:00.000Z"),
@@ -136,7 +145,11 @@ describe("claimNextCodexChatTurn", () => {
   });
 
   it("fences queued turns on supported host-tool contract versions, bypassing reclaims", async () => {
-    await claimNextCodexChatTurn({ leaseOwner: "runner_1", leaseTtlMs: 300_000 });
+    await claimNextCodexChatTurn({
+      leaseOwner: "runner_1",
+      leaseTtlMs: 300_000,
+      supportedExecutions: [RUNNER_ATTACHED_V1],
+    });
 
     const statement = sqlText(dbMock.execute.mock.calls[0]?.[0]);
     expect(statement).toContain("turn.status <> 'queued'");
@@ -155,11 +168,47 @@ describe("claimNextCodexChatTurn", () => {
     );
   });
 
+  it("requires and repeats the worker execution compatibility fence", async () => {
+    await claimNextCodexChatTurn({
+      leaseOwner: "runner_1",
+      leaseTtlMs: 300_000,
+      supportedExecutions: [RUNNER_ATTACHED_V1],
+    });
+
+    const statement = sqlText(dbMock.execute.mock.calls[0]?.[0]);
+    // The exact allow-list appears in both the candidate SELECT and the claiming UPDATE.
+    expect(statement.match(/turn\.execution_backend =/g)).toHaveLength(2);
+    expect(statement).toContain("session.execution_backend = turn.execution_backend");
+    expect(statement).toContain(
+      "session.execution_backend_version = turn.execution_backend_version",
+    );
+    expect(
+      sqlParamValues(dbMock.execute.mock.calls[0]?.[0]).filter(
+        (value) => value === "runner_attached",
+      ),
+    ).toHaveLength(2);
+  });
+
+  it("rejects a worker with no declared execution compatibility", async () => {
+    await expect(
+      claimNextCodexChatTurn({
+        leaseOwner: "runner_1",
+        leaseTtlMs: 300_000,
+        supportedExecutions: [],
+      }),
+    ).rejects.toThrow("must declare at least one compatible execution backend");
+    expect(dbMock.execute).not.toHaveBeenCalled();
+  });
+
   it("returns no work when the database skips a not-yet-due turn", async () => {
     dbMock.execute.mockResolvedValueOnce({ rows: [] });
 
     await expect(
-      claimNextCodexChatTurn({ leaseOwner: "runner_1", leaseTtlMs: 300_000 }),
+      claimNextCodexChatTurn({
+        leaseOwner: "runner_1",
+        leaseTtlMs: 300_000,
+        supportedExecutions: [RUNNER_ATTACHED_V1],
+      }),
     ).resolves.toBeNull();
   });
 });
@@ -460,6 +509,9 @@ describe("terminal opencompany Codex sandbox reconciliation", () => {
     await expect(sweepTerminalCodexChatSandboxes({ idleTimeoutMs: 300_000 })).resolves.toBe(1);
 
     expect(sqlText(dbMock.execute.mock.calls[0]?.[0])).toContain("sandbox_id IS NOT NULL");
+    expect(sqlText(dbMock.execute.mock.calls[0]?.[0])).toContain(
+      "runtime.execution_backend = 'runner_attached'",
+    );
     expect(sandboxMocks.armSandboxIdleTimeoutById).toHaveBeenCalledWith("sbx_1", 300_000);
     expect(sqlText(dbMock.execute.mock.calls[1]?.[0])).toContain("sandbox_timeout_armed_at");
   });
@@ -938,6 +990,8 @@ function claimedTurnRow() {
     status: "running",
     prompt: "Fix the bug.",
     settings: {},
+    execution_backend: "runner_attached",
+    execution_backend_version: 1,
     error: null,
     interrupt_requested_at: null,
     attempts: 1,
@@ -1003,8 +1057,11 @@ function turn(overrides: Partial<CodexChatTurn> = {}): CodexChatTurn {
     status: "running",
     prompt: "Fix the bug.",
     settings: {},
+    executionBackend: "runner_attached",
+    executionBackendVersion: 1,
     error: null,
     interruptRequestedAt: null,
+    steerIntoRunId: null,
     attempts: 1,
     recoveryAttempts: 0,
     engineRecoveryRequired: false,
@@ -1032,6 +1089,9 @@ function session(overrides: Partial<CodexChatSession> = {}): CodexChatSession {
     brainRef: null,
     workspaceId: null,
     hostToolContractVersion: null,
+    executionBackend: "runner_attached",
+    executionBackendVersion: 1,
+    supervisorTemplateVersion: null,
     sandboxSize: "standard",
     sandboxId: "sbx_1",
     codexThreadId: "thread_1",

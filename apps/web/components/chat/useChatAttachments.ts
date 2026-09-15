@@ -39,14 +39,21 @@ export function useChatAttachments(opts: {
   const { modelName, enabled = true, upload } = opts;
   const imagesOverride = opts.capabilities?.images;
   const pdfOverride = opts.capabilities?.pdf;
-  const [attachments, setAttachments] = useState<PendingChatAttachment[]>([]);
+  const [attachments, setRenderedAttachments] = useState<PendingChatAttachment[]>([]);
   const [isDragActive, setIsDragActive] = useState(false);
   const dragCounterRef = useRef(0);
 
-  const attachmentsRef = useRef(attachments);
-  useEffect(() => {
-    attachmentsRef.current = attachments;
-  }, [attachments]);
+  const attachmentsRef = useRef<PendingChatAttachment[]>([]);
+  const replaceAttachments = useCallback((next: PendingChatAttachment[]) => {
+    attachmentsRef.current = next;
+    setRenderedAttachments(next);
+  }, []);
+  const updateAttachments = useCallback(
+    (update: (current: PendingChatAttachment[]) => PendingChatAttachment[]) => {
+      replaceAttachments(update(attachmentsRef.current));
+    },
+    [replaceAttachments],
+  );
 
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -81,7 +88,12 @@ export function useChatAttachments(opts: {
   const acceptFiles = useCallback(
     (files: File[]) => {
       if (!enabledRef.current) return;
-      setAttachments((prev) => {
+      const pendingUploads: Array<{
+        file: File;
+        mediaType: string;
+        pendingId: string;
+      }> = [];
+      updateAttachments((prev) => {
         const next = [...prev];
         for (const file of files) {
           if (next.length >= CHAT_ATTACHMENT_MAX_PER_MESSAGE) {
@@ -116,54 +128,68 @@ export function useChatAttachments(opts: {
             status: "uploading",
             ...(validation.kind === "image" ? { previewUrl: URL.createObjectURL(file) } : {}),
           });
-          const uploadPromise = upload({ file, mediaType: validation.mediaType, pendingId: id });
-          void uploadPromise
-            .then((res) => {
-              if (mountedRef.current) {
-                setAttachments((cur) =>
-                  cur.map((a) =>
-                    a.id === id
-                      ? {
-                          ...a,
-                          ...res,
-                          id: ("id" in res ? res.id : undefined) ?? a.id,
-                          status: "ready",
-                        }
-                      : a,
-                  ),
-                );
-              }
-            })
-            .catch((err) => {
-              if (mountedRef.current) {
-                setAttachments((cur) =>
-                  cur.map((a) => (a.id === id ? { ...a, status: "error", error: String(err) } : a)),
-                );
-              }
-            });
+          pendingUploads.push({ file, mediaType: validation.mediaType, pendingId: id });
         }
         return next;
       });
+
+      // Uploads are started outside the queue update because React may replay a state
+      // updater, which would upload the same file twice. Deferring by a microtask also
+      // routes a synchronous `upload` throw into the rejection handler below.
+      for (const pendingUpload of pendingUploads) {
+        void Promise.resolve()
+          .then(() => upload(pendingUpload))
+          .then((res) => {
+            if (mountedRef.current) {
+              updateAttachments((cur) =>
+                cur.map((a) =>
+                  a.id === pendingUpload.pendingId
+                    ? {
+                        ...a,
+                        ...res,
+                        id: ("id" in res ? res.id : undefined) ?? a.id,
+                        status: "ready",
+                      }
+                    : a,
+                ),
+              );
+            }
+          })
+          .catch((err) => {
+            if (mountedRef.current) {
+              updateAttachments((cur) =>
+                cur.map((a) =>
+                  a.id === pendingUpload.pendingId
+                    ? { ...a, status: "error", error: String(err) }
+                    : a,
+                ),
+              );
+            }
+          });
+      }
     },
-    [upload],
+    [updateAttachments, upload],
   );
 
-  const removeAttachment = useCallback((id: string) => {
-    setAttachments((prev) => {
-      const target = prev.find((a) => a.id === id);
-      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
-      return prev.filter((a) => a.id !== id);
-    });
-  }, []);
+  const removeAttachment = useCallback(
+    (id: string) => {
+      updateAttachments((prev) => {
+        const target = prev.find((a) => a.id === id);
+        if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
+        return prev.filter((a) => a.id !== id);
+      });
+    },
+    [updateAttachments],
+  );
 
   const clearAttachments = useCallback(() => {
-    setAttachments((prev) => {
+    updateAttachments((prev) => {
       for (const attachment of prev) {
         if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
       }
       return [];
     });
-  }, []);
+  }, [updateAttachments]);
 
   // Revoke any still-live preview object URLs on unmount so they don't leak.
   useEffect(() => {
@@ -265,7 +291,7 @@ export function useChatAttachments(opts: {
 
   return {
     attachments,
-    setAttachments,
+    setAttachments: replaceAttachments,
     acceptFiles,
     removeAttachment,
     clearAttachments,

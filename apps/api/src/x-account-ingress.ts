@@ -61,7 +61,7 @@ async function handleStart(input: IngressInput, request: Request): Promise<Respo
   const session = await resolveIngressSession(input, request);
   if (session.kind === "redirect") return session.response;
   const url = new URL(request.url);
-  const returnTo = url.searchParams.get("returnTo") ?? "/settings/plugins/x";
+  const returnTo = url.searchParams.get("returnTo") ?? "/plugins/x";
 
   if (!isXAccountIntegrationConfigured()) {
     return statusRedirect(session, returnTo, "error", "not_configured");

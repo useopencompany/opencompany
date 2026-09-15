@@ -7,6 +7,7 @@ import {
   parsePluginCapabilities,
   parsePluginEvents,
   parsePluginManifest,
+  parsePluginPricing,
 } from "./plugin-spec";
 
 const PLUGIN_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json";
@@ -483,6 +484,72 @@ describe("plugin event choice filters", () => {
       { trusted: true },
     );
     expect(result.definitions).toEqual([]);
+    expect(result.report).toMatchObject({ status: "parsed", issues: [expect.any(String)] });
+  });
+});
+
+describe("parsePluginPricing", () => {
+  const pricing = {
+    currency: "USD",
+    actions: {
+      search_prospects: { label: "Prospect found", unit: "per_result", amountUsdMicros: 80_000 },
+      find_person_email: { label: "Email lookup", unit: "per_call", amountUsdMicros: 150_000 },
+    },
+  };
+
+  it("parses a reviewed price table into a sorted definition", () => {
+    const result = parsePluginPricing({ "so.opencompany.pricing": pricing }, { trusted: true });
+    expect(result.report).toEqual({ present: true, status: "parsed", issues: [] });
+    expect(result.definition).toEqual({
+      currency: "USD",
+      actions: [
+        {
+          action: "find_person_email",
+          label: "Email lookup",
+          unit: "per_call",
+          amountUsdMicros: 150_000,
+        },
+        {
+          action: "search_prospects",
+          label: "Prospect found",
+          unit: "per_result",
+          amountUsdMicros: 80_000,
+        },
+      ],
+    });
+  });
+
+  it("ignores prices from an untrusted source so they can never be charged", () => {
+    const result = parsePluginPricing({ "so.opencompany.pricing": pricing }, { trusted: false });
+    expect(result.definition).toBeNull();
+    expect(result.report).toMatchObject({ present: true, status: "ignored" });
+  });
+
+  it("reports no pricing when the extension is absent", () => {
+    expect(parsePluginPricing(undefined, { trusted: true })).toEqual({
+      definition: null,
+      report: { status: "absent" },
+    });
+  });
+
+  it.each([
+    { currency: "EUR", actions: pricing.actions },
+    { currency: "USD", actions: {} },
+    {
+      currency: "USD",
+      actions: { "Bad Name": { label: "x", unit: "per_call", amountUsdMicros: 1 } },
+    },
+    { currency: "USD", actions: { a: { label: "x", unit: "per_month", amountUsdMicros: 1 } } },
+    { currency: "USD", actions: { a: { label: "x", unit: "per_call", amountUsdMicros: 0 } } },
+    { currency: "USD", actions: { a: { label: "x", unit: "per_call", amountUsdMicros: 1.5 } } },
+    {
+      currency: "USD",
+      actions: { a: { label: "x", unit: "per_call", amountUsdMicros: 10_000_001 } },
+    },
+    { currency: "USD", actions: { a: { label: "", unit: "per_call", amountUsdMicros: 1 } } },
+  ])("voids the whole table when any price is invalid", (invalid) => {
+    const result = parsePluginPricing({ "so.opencompany.pricing": invalid }, { trusted: true });
+    expect(result.definition).toBeNull();
     expect(result.report).toMatchObject({ status: "parsed", issues: [expect.any(String)] });
   });
 });

@@ -237,12 +237,10 @@ export function startWorkflowEventWorker(
   });
 }
 
-export function eventHarness(
-  event: Pick<PendingWorkflowEvent, "workflowName" | "goal" | "harnessSpec">,
-) {
+export function eventHarness(event: Pick<PendingWorkflowEvent, "goal" | "harnessSpec">) {
   return {
     ...event.harnessSpec,
-    initialUserMessage: [`Task: ${event.workflowName}`, "", event.goal].join("\n"),
+    initialUserMessage: event.goal.trim(),
   };
 }
 

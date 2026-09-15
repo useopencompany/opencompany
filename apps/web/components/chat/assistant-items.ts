@@ -2,6 +2,7 @@ import { SUBAGENT_TOOL_NAME } from "@opencompany/agent/subagent";
 import type { TaskStatus } from "@opencompany/agent/task-runtime-types";
 import {
   CHAT_ARTIFACT_DATA_PART_TYPE,
+  CHAT_STEERING_DATA_PART_TYPE,
   CODEX_DYNAMIC_TOOL_NAME,
   type PublishedChatArtifact,
   parsePublishedChatArtifact,
@@ -23,7 +24,9 @@ import {
   CODEX_WEB_SEARCH_TOOL_NAME,
   DELETE_TASK_SCHEDULE_TOOL_NAME,
   EDIT_TASK_SCHEDULE_TOOL_NAME,
+  LEGACY_SLACK_BOT_TOOL_NAME,
   SCHEDULE_TASK_TOOL_NAME,
+  SLACK_BOT_TOOL_NAME,
   START_TASK_TOOL_NAME,
   START_TASK_TOOL_PART_TYPE,
   START_WORKFLOW_TOOL_NAME,
@@ -42,12 +45,15 @@ import { codingToolPresentation } from "@/lib/coding-tool-presentation";
 export type AssistantRenderItem =
   | { type: "text"; key: string; text: string; citations: BrainCitation[] }
   | { type: "reasoning"; key: string; text: string }
+  | { type: "steering"; key: string; text: string }
   | { type: "task"; key: string; task: ChatTaskCardView }
   | { type: "artifact"; key: string; artifact: PublishedChatArtifact }
   | { type: "tool"; key: string; tool: ToolCallView }
   | { type: "subagent"; key: string; subagent: SubagentRenderView };
 
-export type AssistantVisibleOutputKind = AssistantRenderItem["type"] | "error";
+// What the user first saw the engine produce. Steering is the user's own message echoed into the
+// turn, not engine output, so it never satisfies time-to-first-output.
+export type AssistantVisibleOutputKind = Exclude<AssistantRenderItem["type"], "steering"> | "error";
 
 // A Claude Code Task call: the tool header plus the subagent's own nested trace, already
 // resolved into render items so the UI can render them under an expandable subagent row.
@@ -133,8 +139,10 @@ export function firstVisibleAssistantOutputKind(
   taskLookup: ChatTaskLookup,
   options: AssistantRenderOptions = {},
 ): AssistantVisibleOutputKind | null {
-  const firstItem = getOrderedAssistantItems(message, taskLookup, options)[0];
-  if (firstItem) return firstItem.type;
+  const firstItem = getOrderedAssistantItems(message, taskLookup, options).find(
+    (item) => item.type !== "steering",
+  );
+  if (firstItem) return firstItem.type as AssistantVisibleOutputKind;
   return message.metadata?.error ? "error" : null;
 }
 
@@ -178,6 +186,14 @@ function collectRenderItems(
       if (!text.trim()) continue;
       flushText(`${keyPrefix}text-${index}`);
       items.push({ type: "reasoning", key: `${keyPrefix}reasoning-${index}`, text });
+      continue;
+    }
+    if (part.type === CHAT_STEERING_DATA_PART_TYPE) {
+      const data = part.data as { text?: unknown } | undefined;
+      const text = typeof data?.text === "string" ? data.text : "";
+      if (!text.trim()) continue;
+      flushText(`${keyPrefix}text-${index}`);
+      items.push({ type: "steering", key: `${keyPrefix}steering-${index}`, text });
       continue;
     }
     if (part.type === CHAT_ARTIFACT_DATA_PART_TYPE) {
@@ -431,6 +447,7 @@ export function toolLabel(name: string) {
   if (name === SCHEDULE_TASK_TOOL_NAME) return "Recurring task";
   if (name === EDIT_TASK_SCHEDULE_TOOL_NAME) return "Edit routine";
   if (name === DELETE_TASK_SCHEDULE_TOOL_NAME) return "Delete routine";
+  if (name === SLACK_BOT_TOOL_NAME || name === LEGACY_SLACK_BOT_TOOL_NAME) return "Slack bot";
   if (name === WEB_FETCH_TOOL_NAME) return "Web Fetch";
   if (name === WEB_SEARCH_TOOL_NAME) return "Web Search";
   if (name === "browser_open") return "Open page";
@@ -489,6 +506,11 @@ export function toolDetail(
   }
   if (name === EDIT_TASK_SCHEDULE_TOOL_NAME || name === DELETE_TASK_SCHEDULE_TOOL_NAME) {
     return taskScheduleMutationToolDetail(part);
+  }
+  if (name === SLACK_BOT_TOOL_NAME || name === LEGACY_SLACK_BOT_TOOL_NAME) {
+    // The destination is what a reader checks; the message body is already in the transcript.
+    const channel = isRecord(part.input) ? readString(part.input.channel) : null;
+    return channel ? truncateToolPreview(channel) : formatToolInput(part.input);
   }
   if (name === USE_ACTION_TOOL_NAME) {
     return actionToolDetail(part);

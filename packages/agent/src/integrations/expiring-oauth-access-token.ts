@@ -64,6 +64,10 @@ type GetExpiringOAuthAccessTokenInput<TPayload extends object> = {
     // Refresh only while the rejected token is still current so it cannot invalidate the newer one.
     refreshIfAccessToken?: string;
     minimumValidityMs?: number;
+    // Compatibility for credentials saved before a provider began returning expiries and refresh
+    // tokens. Use the access token until the provider rejects it; a forced refresh still requires
+    // the current refresh-token contract.
+    acceptAccessTokenWithoutExpiry?: boolean;
     db?: DbLike;
     now?: Date;
   };
@@ -94,10 +98,7 @@ export async function getExpiringOAuthAccessToken<TPayload extends object>(
   ) {
     return parsed.accessToken;
   }
-  if (
-    !refreshRequested(input.options) &&
-    isFresh(credential, now, input.options?.minimumValidityMs)
-  ) {
+  if (!refreshRequested(input.options) && isUsable(credential, now, input.options)) {
     return parsed.accessToken;
   }
 
@@ -142,7 +143,7 @@ async function refreshWithLease<TPayload extends object>(
   const alreadyRotated = !sameInstant(current.lastRotatedAt, initiallyLoaded.lastRotatedAt);
   if (
     (alreadyRotated || !refreshRequested(input.options)) &&
-    isFresh(current, now, input.options?.minimumValidityMs)
+    isUsable(current, now, input.options)
   ) {
     return parsed.accessToken;
   }
@@ -248,6 +249,17 @@ function isFresh(
   const requiredValidityMs = Math.max(REFRESH_SKEW_MS, minimumValidityMs ?? 0);
   return Boolean(
     credential.expiresAt && credential.expiresAt.getTime() - requiredValidityMs > now.getTime(),
+  );
+}
+
+function isUsable(
+  credential: LoadedIntegrationCredential,
+  now: Date,
+  options: GetExpiringOAuthAccessTokenInput<object>["options"],
+) {
+  return (
+    isFresh(credential, now, options?.minimumValidityMs) ||
+    Boolean(options?.acceptAccessTokenWithoutExpiry && !credential.expiresAt)
   );
 }
 

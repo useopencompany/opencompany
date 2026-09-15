@@ -28,19 +28,27 @@ const SLACK_BOT_ENVS = [
   "OPENCOMPANY_SLACK_BOT_STATE_SECRET",
 ] as const;
 
-// Public workflow posts, delivery reconciliation, and workspace-member identity mapping.
-export const SLACK_BOT_SCOPES = [
+// Public workflow posts, delivery reconciliation, and bot-message filtering.
+const SLACK_BOT_DELIVERY_SCOPES = [
   "chat:write",
   "channels:read",
   "channels:history",
   "users:read",
-  "users:read.email",
 ] as const;
+
+// Email attribution is requested for new installs. Existing installations can keep delivering
+// while Settings asks an admin to reconnect and grant this additive scope.
+export const SLACK_BOT_SCOPES = [...SLACK_BOT_DELIVERY_SCOPES, "users:read.email"] as const;
 
 // Settings surfaces missing grants as a reconnect requirement.
 export function slackBotScopesSatisfied(grantedScopes: readonly string[]): boolean {
   const granted = new Set(grantedScopes);
   return SLACK_BOT_SCOPES.every((scope) => granted.has(scope));
+}
+
+export function slackBotDeliveryScopesSatisfied(grantedScopes: readonly string[]): boolean {
+  const granted = new Set(grantedScopes);
+  return SLACK_BOT_DELIVERY_SCOPES.every((scope) => granted.has(scope));
 }
 
 export function slackBotHasScope(grantedScopes: readonly string[], scope: string): boolean {

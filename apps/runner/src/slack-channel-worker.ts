@@ -22,6 +22,9 @@ import { createPollingWorker } from "./polling-worker";
 const logger = createLogger({ service: "opencompany-runner", runtime: "slack-channel" });
 const CLOSED_REPLY =
   "This workflow thread is closed. Open the task in opencompany to continue the work.";
+const UNANSWERED_REPLY =
+  "The workflow needs attention. Open the task in opencompany to review and continue.";
+const MAX_SLACK_THREAD_CONTEXT_CHARS = 100_000;
 
 type Event = {
   id: number;
@@ -29,13 +32,32 @@ type Event = {
   workspaceId: string;
   sessionId: string;
   taskId: string;
+  ownerId: string;
   payload: SlackThreadReply;
   status: string;
   runId: string | null;
   closed: boolean;
   runStatus: string | null;
-  answer: string | null;
   installation: ChannelInstallation;
+};
+type SlackUser = {
+  id?: string;
+  name?: string;
+  real_name?: string;
+  is_bot?: boolean;
+  deleted?: boolean;
+  profile?: {
+    display_name?: string;
+    display_name_normalized?: string;
+    real_name?: string;
+    real_name_normalized?: string;
+    email?: string;
+  };
+};
+type SlackThreadMessage = {
+  user?: string;
+  username?: string;
+  text?: string;
 };
 type Transaction = { execute: SubscriptionExecute };
 export type SlackChannelWorkerDependencies = {
@@ -61,10 +83,10 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
       const event = subscriptionRows<Event>(
         await tx.execute(sql`
       SELECT event.id, event.subscription_id AS "subscriptionId", subscription.workspace_id AS "workspaceId",
-        subscription.session_id AS "sessionId", task.id AS "taskId", event.payload, event.status, event.run_id AS "runId",
+        subscription.session_id AS "sessionId", task.id AS "taskId", task.user_workos_id AS "ownerId", event.payload, event.status, event.run_id AS "runId",
         (subscription.status = 'closed' OR subscription.expires_at <= now() OR task.archived_at IS NOT NULL
           OR conversation.closed_at IS NOT NULL) AS closed,
-        run.status AS "runStatus", message.content AS answer,
+        run.status AS "runStatus",
         jsonb_build_object('id', integration.id, 'workspaceId', integration.workspace_id,
           'userWorkosId', integration.user_workos_id, 'teamId', integration.external_id, 'scopes', integration.scopes) AS installation
       FROM goat.subscription_events event
@@ -74,7 +96,6 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
       JOIN goat.integrations integration ON integration.id = subscription.integration_id AND integration.workspace_id = subscription.workspace_id
         AND integration.external_id = subscription.source_key->>'teamId'
       LEFT JOIN goat.codex_chat_turns run ON run.id = event.run_id
-      LEFT JOIN goat.chat_messages message ON message.id = run.assistant_message_id
       WHERE event.status IN ('pending', 'running', 'delivering') AND event.next_attempt_at <= now() AND integration.status = 'connected'
         AND NOT EXISTS (
           SELECT 1 FROM goat.subscription_events earlier
@@ -109,11 +130,17 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
       if (event.status === "running") {
         if (!event.runStatus || !["completed", "failed", "interrupted"].includes(event.runStatus))
           return false;
-        const answer =
-          event.runStatus === "completed" && event.answer?.trim()
-            ? event.answer.trim()
-            : "The workflow needs attention. Open the task in opencompany to review and continue.";
-        await queueReply(tx.execute.bind(tx), event, deliveryId, answer);
+        // Slack replies are explicit tool actions. A completed turn that did not use the tool
+        // must not leak its task-facing assistant message into the external thread. A turn that
+        // never got to answer is different: the fixed notice carries no task content, and without
+        // it the person who asked in Slack is left waiting on a reply that will never come.
+        if (event.runStatus === "completed") {
+          await tx.execute(
+            sql`UPDATE goat.subscription_events SET status = 'done' WHERE id = ${event.id} AND status = 'running'`,
+          );
+          return true;
+        }
+        await queueReply(tx.execute.bind(tx), event, deliveryId, UNANSWERED_REPLY);
         return true;
       }
       const { token, botUserId } = await deps.credential(event.installation);
@@ -122,49 +149,31 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
         return true;
       }
       await deps.validateChannel(token, event.payload.channelId);
-      const user = await deps.request<{
-        user?: {
-          id?: string;
-          team_id?: string;
-          is_bot?: boolean;
-          deleted?: boolean;
-          is_restricted?: boolean;
-          is_ultra_restricted?: boolean;
-          profile?: { email?: string };
-        };
-      }>({
+      const user = await deps.request<{ user?: SlackUser }>({
         method: "users.info",
         token,
         form: { user: event.payload.slackUserId },
         signal: AbortSignal.timeout(10_000),
       });
-      const email = user.user?.profile?.email?.trim();
-      if (
-        !email ||
-        user.user?.id !== event.payload.slackUserId ||
-        user.user.team_id !== event.installation.teamId ||
-        user.user.is_bot ||
-        user.user.deleted ||
-        user.user.is_restricted ||
-        user.user.is_ultra_restricted
-      ) {
+      if (user.user?.id !== event.payload.slackUserId || user.user.is_bot || user.user.deleted) {
         await ignoreEvent(tx.execute.bind(tx), event.id);
         return true;
       }
-      const members = subscriptionRows<{ userId: string; role: "admin" | "member" }>(
+      const thread = await readSlackThread({
+        token,
+        channelId: event.payload.channelId,
+        threadTs: event.payload.threadTs,
+        request: deps.request,
+      });
+      // Publishing the workflow thread lets its Slack participants continue the owner's work.
+      // The sender is attributed in the prompt; execution keeps the owner's existing authority.
+      const [owner] = subscriptionRows<{ userId: string; role: "admin" | "member" }>(
         await tx.execute(sql`
-      SELECT member.user_workos_id AS "userId", member.role FROM goat.workspace_members member
-      JOIN goat.users actor ON actor.workos_user_id = member.user_workos_id
-      WHERE member.workspace_id = ${event.workspaceId} AND lower(actor.email) = ${email.toLowerCase()}
-      LIMIT 2
+      SELECT user_workos_id AS "userId", role FROM goat.workspace_members
+      WHERE workspace_id = ${event.workspaceId} AND user_workos_id = ${event.ownerId}
     `),
       );
-      const member = members.length === 1 ? members[0] : null;
-      if (!member) {
-        await ignoreEvent(tx.execute.bind(tx), event.id);
-        return true;
-      }
-      if (event.closed) {
+      if (event.closed || !owner) {
         await tx.execute(
           sql`UPDATE goat.session_subscriptions SET status = 'closed' WHERE id = ${event.subscriptionId}`,
         );
@@ -175,16 +184,23 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
       // turn the same event into another Run. The existing runner owns the fenced Run lease.
       const result = await new PostgresTaskRepository(tx.execute.bind(tx)).createTaskCommentAndRun({
         actor: {
-          userId: member.userId,
+          userId: owner.userId,
           workspaceId: event.workspaceId,
-          role: member.role,
+          role: owner.role,
           permissions: [TASK_WRITE_PERMISSION],
           authenticationMethod: "service",
         },
         taskId: event.taskId,
         command: {
           id: `subscription_event_${event.id}`,
-          body: `Slack thread follow-up from <@${event.payload.slackUserId}>. Continue this same workflow using its saved context and artifacts. Your final answer will be delivered to the original Slack thread automatically. Do not create another task or root Slack message.\n\n${event.payload.text}`,
+          body: slackFollowUpPrompt({
+            eventId: event.id,
+            slackUserId: event.payload.slackUserId,
+            text: event.payload.text,
+            user: user.user,
+            botUserId,
+            thread,
+          }),
         },
       });
       if (!result) throw new Error("The subscribed task could not be resumed.");
@@ -202,6 +218,95 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
     }
     throw error;
   }
+}
+async function readSlackThread(input: {
+  token: string;
+  channelId: string;
+  threadTs: string;
+  request: typeof slackApiRequest;
+}) {
+  const messages: SlackThreadMessage[] = [];
+  let cursor: string | undefined;
+  for (let page = 0; page < 5; page++) {
+    const response = await input.request<{
+      messages?: SlackThreadMessage[];
+      response_metadata?: { next_cursor?: string };
+    }>({
+      method: "conversations.replies",
+      token: input.token,
+      form: {
+        channel: input.channelId,
+        ts: input.threadTs,
+        limit: "200",
+        ...(cursor ? { cursor } : {}),
+      },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (response.messages) messages.push(...response.messages);
+    cursor = response.response_metadata?.next_cursor?.trim() || undefined;
+    if (!cursor) return { messages, truncated: false };
+  }
+  return { messages, truncated: Boolean(cursor) };
+}
+
+export function slackFollowUpPrompt(input: {
+  eventId: number;
+  slackUserId: string;
+  text: string;
+  user: SlackUser;
+  botUserId: string;
+  thread: { messages: SlackThreadMessage[]; truncated: boolean };
+}) {
+  const name = slackUserName(input.user, input.slackUserId);
+  const email = compactSlackProfileField(input.user.profile?.email);
+  const sender = `${name}${email ? ` <${email}>` : ""} (Slack user ${input.slackUserId})`;
+  const messages: string[] = [];
+  let contextLength = 0;
+  let contentTruncated = false;
+  for (const message of input.thread.messages) {
+    const author =
+      message.user === input.slackUserId
+        ? sender
+        : message.user === input.botUserId
+          ? `opencompany bot (Slack user ${input.botUserId})`
+          : message.user
+            ? `Slack user ${message.user}`
+            : compactSlackProfileField(message.username) || "Slack app";
+    const formatted = `${author}:\n${quoteSlackText(message.text ?? "")}`;
+    if (contextLength + formatted.length > MAX_SLACK_THREAD_CONTEXT_CHARS) {
+      contentTruncated = true;
+      break;
+    }
+    messages.push(formatted);
+    contextLength += formatted.length;
+  }
+  if (input.thread.truncated || contentTruncated)
+    messages.push("[Additional Slack thread context was omitted because the thread is very long.]");
+  return `Slack thread follow-up\n\nSender: ${sender}\n\nContinue this same workflow using its saved context and artifacts. The full Slack thread so far is included as context below. Do not create another task or a root Slack message.\n\nBefore writing your final task answer, call post_slack_message with your final Slack reply as text and \"slack-follow-up-${input.eventId}\" as messageKey. Omit channel so the tool posts to the originating thread. The assistant turn itself is not sent to Slack.\n\n--- Full Slack thread ---\n${messages.join("\n\n")}\n--- End Slack thread ---\n\n--- New follow-up message begins ---\nFrom: ${sender}\n${quoteSlackText(input.text)}\n--- New follow-up message ends ---`;
+}
+
+function slackUserName(user: SlackUser, fallbackId: string) {
+  return (
+    compactSlackProfileField(user.profile?.display_name_normalized) ||
+    compactSlackProfileField(user.profile?.display_name) ||
+    compactSlackProfileField(user.profile?.real_name_normalized) ||
+    compactSlackProfileField(user.profile?.real_name) ||
+    compactSlackProfileField(user.real_name) ||
+    compactSlackProfileField(user.name) ||
+    fallbackId
+  );
+}
+
+function compactSlackProfileField(value: string | undefined) {
+  return value?.replace(/\s+/g, " ").trim() || "";
+}
+
+function quoteSlackText(text: string) {
+  return text
+    .trim()
+    .split("\n")
+    .map((line) => `> ${line}`)
+    .join("\n");
 }
 async function ignoreEvent(execute: SubscriptionExecute, id: number) {
   await execute(sql`UPDATE goat.subscription_events SET status = 'ignored' WHERE id = ${id}`);

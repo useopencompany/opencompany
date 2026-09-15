@@ -59,16 +59,14 @@ describe("mapWorkflowPreparationError", () => {
 });
 
 describe("createAutomationTaskCreator", () => {
-  // Workflow harnesses frame the first turn as "Task: <name>\n\n<goal>". The
-  // repository rejects a task whose harness message does not match its stored
-  // user message, so the task creator must persist the framed message. This
-  // guards against reintroducing the masked-500 regression on workflow invoke.
+  // The repository rejects a task whose harness message does not match its stored user message,
+  // so the task creator must persist the harness-owned workflow request.
   const workflowHarness: HarnessSpec = {
     schemaVersion: "goat.harness.v1",
     engine: "opencompany",
     model: "openai/gpt-5.6-sol",
     systemPrompt: "You are executing step 1 of the workflow.",
-    initialUserMessage: "Task: Morning briefing\n\nSummarize overnight activity.",
+    initialUserMessage: "Summarize overnight activity.",
     tools: [],
     skills: [],
     maxModelSteps: 16,
@@ -92,7 +90,7 @@ describe("createAutomationTaskCreator", () => {
     };
   }
 
-  it("persists the framed workflow message so the canonical-command check passes", async () => {
+  it("persists the workflow request so the canonical-command check passes", async () => {
     const creator = createAutomationTaskCreator({
       execute: fakeExecute() as never,
       resolveAttachments: async () => ({ attachments: [], attachmentTexts: null }),

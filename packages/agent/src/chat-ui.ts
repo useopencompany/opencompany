@@ -4,6 +4,7 @@ import {
   type ActionGatewayResponse,
   type ActionSummary,
   CHAT_ARTIFACT_DATA_PART_TYPE,
+  CHAT_STEERING_DATA_PART_TYPE,
   type CodexCommandToolInput,
   type CodexCommandToolOutput,
   type DescribeActionsInput,
@@ -59,6 +60,12 @@ export const EDIT_TASK_SCHEDULE_TOOL_PART_TYPE = `tool-${EDIT_TASK_SCHEDULE_TOOL
 export const DELETE_TASK_SCHEDULE_TOOL_NAME = "delete_task_schedule";
 export const DELETE_TASK_SCHEDULE_TOOL_PART_TYPE =
   `tool-${DELETE_TASK_SCHEDULE_TOOL_NAME}` as const;
+// Named for how people ask for it: workflow instructions say "send this with the
+// opencompany Slack bot", and the model has to pick this over a member's personal
+// Slack plugin action, which can also post messages.
+export const SLACK_BOT_TOOL_NAME = "opencompany_slack_bot_send_message";
+/** Model-facing name before the tool was renamed; kept so old transcripts still label correctly. */
+export const LEGACY_SLACK_BOT_TOOL_NAME = "post_slack_message";
 export const BRAIN_TOOL_NAME = "goat_brain";
 export const BRAIN_TOOL_PART_TYPE = `tool-${BRAIN_TOOL_NAME}` as const;
 export const SAVE_TO_BRAIN_TOOL_NAME = "save_to_brain";
@@ -643,6 +650,8 @@ export type ChatTools = {
 
 export type ChatDataTypes = {
   "artifact-file": PublishedChatArtifact;
+  // A user message injected into a coding turn that was already running (ACP steering).
+  steering: { text: string; itemId?: string };
 };
 
 export type ChatUiMessage = UIMessage<ChatMessageMetadata, ChatDataTypes, ChatTools>;
@@ -1032,6 +1041,16 @@ function parseDebugTraceUiMessageParts(
     if (part.type === CHAT_ARTIFACT_DATA_PART_TYPE) {
       const artifact = parsePublishedChatArtifact({ ok: true, artifact: part.data });
       if (artifact) parts.push({ type: CHAT_ARTIFACT_DATA_PART_TYPE, data: artifact });
+      continue;
+    }
+    if (part.type === CHAT_STEERING_DATA_PART_TYPE && isRecord(part.data)) {
+      const { text, itemId } = part.data;
+      if (typeof text === "string" && text.trim()) {
+        parts.push({
+          type: CHAT_STEERING_DATA_PART_TYPE,
+          data: { text, ...(typeof itemId === "string" ? { itemId } : {}) },
+        });
+      }
       continue;
     }
     if (isPersistedToolPart(part)) {

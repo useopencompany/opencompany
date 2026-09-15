@@ -105,7 +105,7 @@ describe("GitHub user ingress", () => {
   it("lets a workspace member start the personal App install and authorization flow", async () => {
     const response = await ingress().start(
       new Request(
-        "https://api.example.com/integrations/github-user/start?returnTo=/settings/plugins/github",
+        "https://api.example.com/integrations/github-user/start?returnTo=/plugins/github",
       ),
     );
 
@@ -118,7 +118,7 @@ describe("GitHub user ingress", () => {
   it("targets the requested organization through GitHub's documented permissions route", async () => {
     const response = await ingress().start(
       new Request(
-        "https://api.example.com/integrations/github-user/start?returnTo=/settings/plugins/github&owner=opencompany",
+        "https://api.example.com/integrations/github-user/start?returnTo=/plugins/github&owner=opencompany",
       ),
     );
 
@@ -237,7 +237,7 @@ describe("GitHub user ingress", () => {
     const refresh = vi.fn(async () => undefined);
     const state = createGitHubUserIntegrationState({
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/github",
+      returnTo: "/plugins/github",
     });
     const response = await ingress({ refresh }).callback(
       new Request(
@@ -264,7 +264,7 @@ describe("GitHub user ingress", () => {
       workspaceIds: ["workspace_1"],
     });
     const location = new URL(response.headers.get("location") ?? "");
-    expect(location.pathname).toBe("/settings/plugins/github");
+    expect(location.pathname).toBe("/plugins/github");
     expect(location.searchParams.get("integration")).toBe("github_user");
     expect(location.searchParams.get("setup")).toBe("connected");
     expect(verifyGitHubAppUserInstallation).toHaveBeenCalledWith({
@@ -277,7 +277,7 @@ describe("GitHub user ingress", () => {
     vi.mocked(verifyGitHubAppUserInstallation).mockRejectedValueOnce(new Error("not available"));
     const state = createGitHubUserIntegrationState({
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/github",
+      returnTo: "/plugins/github",
     });
     const response = await ingress().callback(
       new Request(
@@ -293,7 +293,7 @@ describe("GitHub user ingress", () => {
   it("requires the combined install callback grant before exchanging the code", async () => {
     const state = createGitHubUserIntegrationState({
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/github",
+      returnTo: "/plugins/github",
     });
     const response = await ingress().callback(
       new Request(
@@ -310,7 +310,7 @@ describe("GitHub user ingress", () => {
   it("rejects state for another opencompany user before exchanging the code", async () => {
     const state = createGitHubUserIntegrationState({
       userWorkosId: "user_other",
-      returnTo: "/settings/plugins/github",
+      returnTo: "/plugins/github",
     });
     const response = await ingress().callback(
       new Request(

@@ -329,9 +329,9 @@ describe("Sidebar", () => {
     expect(account).toBeInTheDocument();
 
     const plugins = screen.getByRole("link", { name: "Plugins" });
-    expect(plugins).toHaveAttribute("href", "/settings/plugins");
+    expect(plugins).toHaveAttribute("href", "/plugins");
     const skills = screen.getByRole("link", { name: "Skills" });
-    expect(skills).toHaveAttribute("href", "/settings/skills");
+    expect(skills).toHaveAttribute("href", "/skills");
     const feedback = screen.getByRole("button", { name: "Feedback" });
     expect(plugins.nextElementSibling).toBe(skills);
     expect(skills.nextElementSibling).toBe(feedback);
@@ -651,14 +651,14 @@ describe("Sidebar", () => {
   });
 
   it("marks Plugins active throughout plugin settings", () => {
-    pathnameMock.value = "/settings/plugins/linear";
+    pathnameMock.value = "/plugins/linear";
     render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
     expect(screen.getByRole("link", { name: "Plugins" })).toHaveAttribute("aria-current", "page");
   });
 
   it("marks Skills active throughout skill settings", () => {
-    pathnameMock.value = "/settings/skills/weekly-report";
+    pathnameMock.value = "/skills/weekly-report";
     render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
     expect(screen.getByRole("link", { name: "Skills" })).toHaveAttribute("aria-current", "page");

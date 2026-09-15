@@ -1,7 +1,7 @@
 import type { BillingUsageDto } from "@opencompany/protocol";
 import { AlertCircle, DatabaseZap } from "lucide-react";
 import Link from "next/link";
-import { SettingsContent } from "@/components/SettingsChrome";
+import { PageContent } from "@/components/PageContent";
 import { SpendChart } from "@/components/SpendChart";
 import {
   buildDailySpendSeries,
@@ -39,7 +39,7 @@ export function UsagePanel({ data }: { data: UsageData }) {
   const avgPerDay = totalSpend / USAGE_REPORTING_WINDOW_DAYS;
 
   return (
-    <SettingsContent
+    <PageContent
       title="Usage"
       description="What this workspace spent over the last 30 days at provider cost."
     >
@@ -127,7 +127,7 @@ export function UsagePanel({ data }: { data: UsageData }) {
           <p className="text-[12.5px] text-ink-subtle">No ingestion activity yet.</p>
         )}
       </section>
-    </SettingsContent>
+    </PageContent>
   );
 }
 

@@ -214,6 +214,71 @@ describe("TaskDetailPanel", () => {
     expect(mocks.surfaceProps?.taskConversation).toMatchObject({ status: "waiting" });
   });
 
+  it("keeps a queued message from becoming the Task's active run", () => {
+    const initialTask = { ...task(), status: "running" as const, stage: "running" as const };
+    mocks.tasks = [initialTask];
+    mocks.runRows = [
+      { id: "run_working", status: "running", createdAt: "2026-01-01T00:00:00.000Z" },
+      // The user's message, sent while the turn above was still working.
+      { id: "run_queued", status: "queued", createdAt: "2026-01-01T00:05:00.000Z" },
+    ];
+
+    render(
+      <TaskDetailPanel
+        initialRun={buildHarnessRun({ task: initialTask, messages: [], events: [] })}
+      />,
+    );
+
+    expect(mocks.surfaceProps?.taskConversation).toMatchObject({
+      status: "running",
+      activeRunId: "run_working",
+    });
+  });
+
+  it("times a resumed task from the live task, then its active run", () => {
+    const initialTask = {
+      ...task(),
+      status: "running" as const,
+      stage: "running" as const,
+      updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+    };
+    mocks.tasks = [
+      {
+        ...initialTask,
+        updatedAt: "2026-01-01T02:26:59.000Z",
+      },
+    ];
+
+    const view = render(
+      <TaskDetailPanel
+        initialRun={buildHarnessRun({ task: initialTask, messages: [], events: [] })}
+      />,
+    );
+
+    expect(mocks.surfaceProps?.taskConversation).toMatchObject({
+      activeRunId: null,
+      startedAtMs: Date.parse("2026-01-01T02:26:59.000Z"),
+    });
+
+    mocks.runRows = [
+      {
+        id: "run_resumed",
+        status: "running",
+        createdAt: "2026-01-01T02:27:00.000Z",
+      },
+    ];
+    view.rerender(
+      <TaskDetailPanel
+        initialRun={buildHarnessRun({ task: initialTask, messages: [], events: [] })}
+      />,
+    );
+
+    expect(mocks.surfaceProps?.taskConversation).toMatchObject({
+      activeRunId: "run_resumed",
+      startedAtMs: Date.parse("2026-01-01T02:27:00.000Z"),
+    });
+  });
+
   it("adopts the live canonical Task status after its active Run completes", () => {
     const initialTask = { ...task(), status: "running" as const, stage: "running" as const };
     mocks.tasks = [

@@ -846,7 +846,7 @@ function EventTriggerZeroState({ providers }: { providers: WorkflowEventProvider
       ) : (
         <>
           Turn on an event in{" "}
-          <Link href="/settings/plugins" className="underline underline-offset-2 hover:text-ink">
+          <Link href="/plugins" className="underline underline-offset-2 hover:text-ink">
             plugin settings
           </Link>{" "}
           to trigger workflows from your connected tools.
@@ -892,10 +892,7 @@ function EventTriggerEditor({
       {accounts.length === 0 ? (
         <p className="text-[12px] text-warning">
           This {provider?.label ?? trigger.provider} account is disconnected.{" "}
-          <Link
-            href={provider?.accountHref ?? "/settings/plugins"}
-            className="underline underline-offset-2"
-          >
+          <Link href={provider?.accountHref ?? "/plugins"} className="underline underline-offset-2">
             {provider?.accountLabel ?? "Connect an account"}
           </Link>
           .
@@ -990,11 +987,9 @@ function EventTriggerEditor({
           />
         ))}
       </div>
-      <WorkflowRunContext
-        prompt={trigger.prompt}
-        canEdit={canEdit}
-        onChange={(prompt) => onChange({ ...trigger, prompt })}
-      />
+      <p className="text-[12px] leading-5 text-ink-subtle">
+        Each run follows the instructions in your steps.
+      </p>
     </div>
   );
 }
@@ -1110,7 +1105,7 @@ function EventFilterPicker({
         <span className="text-[11.5px] text-warning">
           {result.error}{" "}
           <Link
-            href={providerOption?.accountHref ?? "/settings/plugins"}
+            href={providerOption?.accountHref ?? "/plugins"}
             className="underline underline-offset-2"
           >
             {providerOption ? `Open ${providerOption.label} settings` : "Open plugin settings"}
@@ -1136,48 +1131,6 @@ function unavailableEventLabel(event: string) {
   return event === "issue_enters_triage"
     ? "Issue enters triage (legacy)"
     : `${event} (unavailable)`;
-}
-
-function WorkflowRunContext({
-  prompt,
-  canEdit,
-  onChange,
-}: {
-  prompt: string;
-  canEdit: boolean;
-  onChange: (prompt: string) => void;
-}) {
-  const value = prompt === DEFAULT_WORKFLOW_SCHEDULE_PROMPT ? "" : prompt;
-  const [open, setOpen] = useState(() => Boolean(value.trim()));
-  return (
-    <div className="flex flex-col gap-2">
-      <p className="text-[12px] leading-5 text-ink-subtle">
-        Each run follows the instructions in your steps.
-      </p>
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen(!open)}
-        className="flex w-fit items-center gap-1.5 rounded-md text-[12px] text-ink-subtle hover:text-ink focus-visible:ring-1 focus-visible:ring-ink/20"
-      >
-        <ChevronDown size={12} className={open ? "rotate-180" : ""} />
-        Additional run context (optional)
-      </button>
-      {open ? (
-        <label className="flex min-w-0 flex-col gap-1.5">
-          <span className="text-[12px] font-medium text-ink-subtle">Run context</span>
-          <textarea
-            value={value}
-            readOnly={!canEdit}
-            onChange={(event) => onChange(event.target.value)}
-            rows={3}
-            placeholder="Extra context shared across steps, such as a region or reporting period."
-            className="min-h-20 resize-y rounded-lg border border-border bg-canvas px-2.5 py-2 text-[13px] leading-5 text-ink outline-none transition-colors placeholder:text-ink-faint focus-visible:ring-1 focus-visible:ring-ink/20 read-only:opacity-70"
-          />
-        </label>
-      ) : null}
-    </div>
-  );
 }
 
 type ScheduleFrequency = AgentSchedulePreset["kind"] | "custom";

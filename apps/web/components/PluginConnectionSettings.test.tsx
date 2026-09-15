@@ -31,14 +31,14 @@ describe("PluginConnectionFeedback", () => {
   beforeEach(() => {
     toastError.mockClear();
     toastSuccess.mockClear();
-    window.history.replaceState({}, "", "/settings/plugins/hubspot");
+    window.history.replaceState({}, "", "/plugins/hubspot");
   });
 
   it("shows an actionable OAuth error once and removes the consumed query parameters", async () => {
     window.history.replaceState(
       {},
       "",
-      "/settings/plugins/hubspot?integration=hubspot&setup=error&reason=not_configured&section=accounts",
+      "/plugins/hubspot?integration=hubspot&setup=error&reason=not_configured&section=accounts",
     );
 
     render(<PluginConnectionFeedback />);
@@ -51,11 +51,7 @@ describe("PluginConnectionFeedback", () => {
   });
 
   it("confirms a completed OAuth connection and clears its callback parameters", async () => {
-    window.history.replaceState(
-      {},
-      "",
-      "/settings/plugins/hubspot?integration=hubspot&setup=connected",
-    );
+    window.history.replaceState({}, "", "/plugins/hubspot?integration=hubspot&setup=connected");
 
     render(<PluginConnectionFeedback />);
 

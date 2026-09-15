@@ -106,6 +106,8 @@ export async function createCustomMcpPackage(
     remoteServers: mcp.remoteServers,
     capabilities: [],
     events: [],
+    // A user-supplied MCP server is never a trusted price source, so it can never be paid.
+    pricing: null,
     report: {
       ignoredManifestFields: [],
       skills: [],

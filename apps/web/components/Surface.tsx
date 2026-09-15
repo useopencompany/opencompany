@@ -98,6 +98,8 @@ import { ChatShareButton } from "@/components/chat/ChatShareButton";
 import { ChatTranscriptSyncError } from "@/components/chat/ChatTranscriptSyncError";
 import { MessageBubble } from "@/components/chat/MessageBubble";
 import { PendingApprovalBanner } from "@/components/chat/PendingApprovalBanner";
+import { QueuedMessageCard } from "@/components/chat/QueuedMessageCard";
+import { pendingRunMessageIds, queuedChatMessages } from "@/components/chat/queued-messages";
 import { PendingActivityIndicator, ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import type { ActionApprovalRequest, CodexToolAction } from "@/components/chat/ToolCallItem";
 import { useChatAttachments } from "@/components/chat/useChatAttachments";
@@ -183,9 +185,11 @@ import { retryHeadlessChatMessages } from "@/lib/headless-chat-collections";
 import {
   cancelHeadlessChatRun,
   resolveEngineQuestions,
+  steerHeadlessChatRun,
   updateHeadlessChatConversation,
 } from "@/lib/headless-chat-commands";
 import {
+  enqueueHeadlessChatMessage,
   HeadlessChatTransport,
   type HeadlessMessageAccepted,
   startHeadlessBackgroundChat,
@@ -396,6 +400,7 @@ export function Surface({
   initialChat,
   newChatProjectId = null,
   newChatProjectName = null,
+  userFirstName = null,
   recentChats = [],
   archivedChats = [],
   codexConnected = false,
@@ -422,6 +427,8 @@ export function Surface({
   // Name of that project. Present only alongside `newChatProjectId`, and names the project in the
   // new-chat prompt.
   newChatProjectName?: string | null;
+  // First name of the signed-in user, greeted on the Home prompt when present.
+  userFirstName?: string | null;
   recentChats?: readonly ChatSummaryView[];
   archivedChats?: readonly ChatSummaryView[];
   codexConnected?: boolean;
@@ -594,6 +601,7 @@ export function Surface({
   );
   const conversationRunning = isChatRuntimeActive(conversationRuntime);
   const [engineSubmitting, setEngineSubmitting] = useState(false);
+  const [queuedMessageSubmitting, setQueuedMessageSubmitting] = useState(false);
   const [backgroundTaskSubmitting, setBackgroundTaskSubmitting] = useState(false);
   const [taskCommentSubmitting, setTaskCommentSubmitting] = useState(false);
   const [stoppingTaskId, setStoppingTaskId] = useState<string | null>(null);
@@ -889,6 +897,18 @@ export function Surface({
   const backgroundChatDirective = backgroundInputDirective;
   const backgroundDirectiveTargetEngine = backgroundLaunchSelection?.engine ?? null;
   const composerEngine = backgroundChatDirective ? backgroundDirectiveTargetEngine : activeEngine;
+  // A running turn gates nothing: the message becomes a queued turn the user can steer into the
+  // live one. A Task is a session like any other here -- viewing one shows the work, not a form to
+  // leave a note on. Background sends keep their own dispatch rules.
+  const queuesRuns = Boolean(activeTaskConversation) || (isEngineChat && !activeTaskConversation);
+  const canQueueWhileWorking = Boolean(
+    (activeTaskConversation || persistedChatSessionId) &&
+      queuesRuns &&
+      !backgroundChatDirective &&
+      !queuedMessageSubmitting &&
+      !taskCommentSubmitting &&
+      !readOnly,
+  );
   const lowCreditBalance = Boolean(
     creditBalance &&
       creditBalance.balanceUsdMicros > 0 &&
@@ -1046,6 +1066,32 @@ export function Surface({
       break;
     }
   }, [adoptResolvedAutoModel, isAutoChatModel, messages]);
+  // A message sent while a turn is running becomes its own queued Run. It renders above the
+  // composer with steer/remove actions until it starts, so the transcript keeps showing only work
+  // that actually happened. The card offers mutations and so follows the composer's read-only
+  // rule; the transcript filter does not, because a Run that never executed has nothing to show a
+  // read-only viewer either.
+  const queuedMessages = useMemo(
+    () =>
+      queuesRuns && !readOnly
+        ? queuedChatMessages({ runs: liveChat.runsById, messages: chatMessages })
+        : [],
+    [chatMessages, liveChat.runsById, queuesRuns, readOnly],
+  );
+  const pendingRunMessages = useMemo(
+    () =>
+      queuesRuns
+        ? pendingRunMessageIds({ runs: liveChat.runsById, messages: chatMessages })
+        : new Set<string>(),
+    [chatMessages, liveChat.runsById, queuesRuns],
+  );
+  const transcriptMessages = useMemo(
+    () =>
+      pendingRunMessages.size === 0
+        ? chatMessages
+        : chatMessages.filter((message) => !pendingRunMessages.has(message.id)),
+    [chatMessages, pendingRunMessages],
+  );
   const latestAssistantMessageId = useMemo(() => {
     for (let index = chatMessages.length - 1; index >= 0; index -= 1) {
       if (chatMessages[index]?.role === "assistant") return chatMessages[index]?.id ?? null;
@@ -1785,8 +1831,11 @@ export function Surface({
       return;
     }
     if (activeTaskConversation) {
-      if (isTaskConversationWorking || taskCommentSubmitting) return;
+      if (taskCommentSubmitting) return;
       if (!prompt && readyAttachments.length === 0) return;
+      // Sending into a working Task queues the message behind the live turn, and the queued card
+      // is the feedback. Only a Task that had stopped needs to be told it started again.
+      const resumesTask = !isTaskConversationWorking;
       const attachmentIds = readyAttachments.map((attachment) => attachment.id);
       const pendingCommand = pendingTaskCommentRef.current;
       const command =
@@ -1813,7 +1862,7 @@ export function Surface({
           if (!mountedRef.current) return;
           pendingTaskCommentRef.current = null;
           router.refresh();
-          toast.success("Message sent. The task is running again.");
+          if (resumesTask) toast.success("Message sent. The task is running again.");
         })
         .catch((error) => {
           if (!mountedRef.current) return;
@@ -1836,7 +1885,11 @@ export function Surface({
       : null;
     const backgroundEngine = backgroundLaunch?.engine ?? null;
     const backgroundModel = backgroundLaunch?.model ?? chatModel;
-    if ((isInteractionPending && !isBackgroundSubmit) || backgroundTaskSubmitting) return;
+    if (
+      (isInteractionPending && !isBackgroundSubmit && !canQueueWhileWorking) ||
+      backgroundTaskSubmitting
+    )
+      return;
     if (chatSendBlocked) {
       toast.error(CHAT_OUT_OF_CREDITS_MESSAGE, {
         action: {
@@ -2242,6 +2295,9 @@ export function Surface({
         : null
       : newOptimisticChatSessionId();
     const requestSessionId = newSessionId ? null : chatSessionId;
+    const queueingBehindActiveTurn = Boolean(
+      activeEngine && requestSessionId && isForegroundTurnWorking && canQueueWhileWorking,
+    );
     if (newSessionId && pendingNewSessionIdRef.current !== newSessionId) {
       pendingNewSessionIdRef.current = newSessionId;
       routedChatSessionIdRef.current = newSessionId;
@@ -2275,13 +2331,55 @@ export function Surface({
           });
         }
       }
-      setEngineSubmitting(true);
+      if (!queueingBehindActiveTurn) setEngineSubmitting(true);
       setCodexPlanModeEnabled(false);
       setCodexGoalModeEnabled(false);
       setCodexGoalObjective("");
       setCodexGoalTokenBudget("");
     }
     clearComposerDraft(persistedChatSessionId);
+    // Clear without revoking previews: the optimistic bubble still shows them.
+    composerAttachments.setAttachments([]);
+    // The API files the new Conversation under the project as it creates it; the local note keeps
+    // the sidebar row under that folder for the moment before the project list catches up.
+    const projectId = newSessionId ? newChatProjectId : null;
+    if (projectId && newSessionId) noteLocalProjectAssignment(projectId, newSessionId);
+    if (queueingBehindActiveTurn && activeEngine && requestSessionId) {
+      // useChat and HeadlessChatTransport own the one foreground stream. Queue through the command
+      // boundary so the current turn remains the foreground/Interrupt target until it finishes.
+      setQueuedMessageSubmitting(true);
+      void enqueueHeadlessChatMessage({
+        content: prompt,
+        conversationId: requestSessionId,
+        clientMessageId: newQueuedChatMessageId(),
+        model: String(model),
+        engine: messageEngine,
+        ...(readyAttachments.length > 0
+          ? { attachmentIds: readyAttachments.map((attachment) => attachment.id) }
+          : {}),
+        ...(mentions.length > 0
+          ? {
+              mentions: mentions.flatMap((mention) =>
+                mention.kind === "skill" ? [{ kind: "skill" as const, id: mention.id }] : [],
+              ),
+            }
+          : {}),
+      })
+        .then(() => revokeAttachmentPreviews(pendingAttachments))
+        .catch((error) => {
+          if (!mountedRef.current) return;
+          if (!inputRef.current?.value) {
+            setInput(rawPrompt);
+            setSelectedMentions(mentions);
+            composerAttachments.setAttachments(pendingAttachments);
+          }
+          toast.error(error instanceof Error ? error.message : "Could not queue that message.");
+        })
+        .finally(() => {
+          if (mountedRef.current) setQueuedMessageSubmitting(false);
+        });
+      return;
+    }
     beginActiveTurn({
       engine: messageEngine.type,
       selectedModel: String(model),
@@ -2294,12 +2392,6 @@ export function Surface({
             : (codingSandboxStatus ?? "unknown"),
       sendSource: "composer",
     });
-    // Clear without revoking previews: the optimistic bubble still shows them.
-    composerAttachments.setAttachments([]);
-    // The API files the new Conversation under the project as it creates it; the local note keeps
-    // the sidebar row under that folder for the moment before the project list catches up.
-    const projectId = newSessionId ? newChatProjectId : null;
-    if (projectId && newSessionId) noteLocalProjectAssignment(projectId, newSessionId);
     void sendMessage(message, {
       body: {
         sessionId: requestSessionId,
@@ -2503,6 +2595,28 @@ export function Surface({
     stop,
   ]);
 
+  const steerQueuedMessage = useCallback(async (runId: string) => {
+    try {
+      await steerHeadlessChatRun(runId);
+    } catch (error) {
+      // The common failure is losing the race: the turn ended and the queued message is already
+      // running on its own. Say so rather than implying the message was lost.
+      toast.error(
+        error instanceof Error ? error.message : "Could not steer that message into the turn.",
+      );
+      throw error;
+    }
+  }, []);
+
+  const removeQueuedMessage = useCallback(async (runId: string) => {
+    try {
+      await cancelHeadlessChatRun(runId);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not remove that queued message.");
+      throw error;
+    }
+  }, []);
+
   const stopGeneration = useCallback(() => {
     cancelChatFirstOutputMeasurement();
     if (activeTaskConversation) {
@@ -2607,7 +2721,10 @@ export function Surface({
 
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      if ((!isInteractionPending || isBackgroundSubmit) && !backgroundTaskSubmitting) {
+      if (
+        (!isInteractionPending || isBackgroundSubmit || canQueueWhileWorking) &&
+        !backgroundTaskSubmitting
+      ) {
         formRef.current?.requestSubmit();
       }
     }
@@ -2963,7 +3080,9 @@ export function Surface({
               <h1 className="max-w-[720px] text-balance text-center text-[26px] font-semibold leading-tight tracking-tight text-ink">
                 {newChatProjectPrompt
                   ? `What should we build in ${newChatProjectPrompt}?`
-                  : "What should we build next?"}
+                  : userFirstName
+                    ? `What should we build next, ${userFirstName}?`
+                    : "What should we build next?"}
               </h1>
             </div>
           ) : (
@@ -3054,7 +3173,7 @@ export function Surface({
                   className="mx-auto flex w-full max-w-[720px] flex-col gap-3 pt-2"
                   style={{ paddingBottom: chatThreadBottomPaddingPx }}
                 >
-                  {chatMessages.map((message) => (
+                  {transcriptMessages.map((message) => (
                     <MessageBubble
                       key={message.id}
                       message={message}
@@ -3236,21 +3355,7 @@ export function Surface({
                   ))}
                 </div>
               ) : null}
-              {activeTaskConversation ? (
-                <div
-                  role="status"
-                  className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-[12px] leading-4 text-ink-subtle shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
-                >
-                  <MessageSquare size={13} strokeWidth={2} className="shrink-0" />
-                  <span>
-                    {isTaskConversationWorking
-                      ? "Draft your reply now — you can send it when the current run finishes."
-                      : taskCommentSubmitting
-                        ? "Sending your message…"
-                        : "Sending a message resumes this task."}
-                  </span>
-                </div>
-              ) : selectedAdHocTask ? (
+              {selectedAdHocTask ? (
                 <div
                   role="status"
                   data-testid="ad-hoc-task-hint"
@@ -3274,6 +3379,18 @@ export function Surface({
                 </div>
               ) : backgroundChatDirective ? (
                 <BackgroundChatDirectiveHint engine={backgroundDirectiveTargetEngine} />
+              ) : null}
+              {queuedMessages.length > 0 ? (
+                <div className="flex flex-col gap-1.5">
+                  {queuedMessages.map((queued) => (
+                    <QueuedMessageCard
+                      key={queued.runId}
+                      message={queued}
+                      onSteer={() => steerQueuedMessage(queued.runId)}
+                      onRemove={() => removeQueuedMessage(queued.runId)}
+                    />
+                  ))}
+                </div>
               ) : null}
               <div
                 {...composerAttachments.dragHandlers}
@@ -3342,10 +3459,15 @@ export function Surface({
                       maxLength={10_000}
                     />
                   </div>
-                  {activeEngine &&
-                  isForegroundTurnWorking &&
-                  !activeTaskConversation &&
-                  !backgroundChatDirective ? (
+                  {activeTaskConversation ? (
+                    isTaskConversationWorking || isTaskConversationStopping ? (
+                      <EngineStopButton
+                        label="this task"
+                        stopping={isTaskConversationStopping}
+                        onStop={stopGeneration}
+                      />
+                    ) : null
+                  ) : activeEngine && isForegroundTurnWorking && !backgroundChatDirective ? (
                     <EngineStopButton
                       label={ENGINE_REGISTRY[activeEngine].label}
                       onStop={stopGeneration}
@@ -3366,8 +3488,7 @@ export function Surface({
                           (attachment) => attachment.status === "ready",
                         )) ||
                       composerAttachments.isUploading ||
-                      (!isBackgroundSubmit && isForegroundTurnWorking) ||
-                      isTaskConversationWorking ||
+                      (!isBackgroundSubmit && isInteractionPending && !canQueueWhileWorking) ||
                       taskCommentSubmitting ||
                       backgroundTaskSubmitting ||
                       voiceDictation.isActive ||
@@ -3375,11 +3496,10 @@ export function Surface({
                       (!activeTaskConversation && chatSendBlocked)
                     }
                     isGenerating={
-                      isBackgroundSubmit
+                      isBackgroundSubmit || activeTaskConversation
                         ? false
-                        : (!isEngineChat && isForegroundTurnWorking) || isTaskConversationWorking
+                        : !isEngineChat && isForegroundTurnWorking
                     }
-                    isStopping={!isBackgroundSubmit && isTaskConversationStopping}
                     startsTask={selectedAdHocTask || Boolean(selectedWorkflowMention)}
                     onStop={stopGeneration}
                   />
@@ -3404,6 +3524,7 @@ export function Surface({
                         aria-label="Attach files"
                         disabled={
                           isForegroundTurnWorking ||
+                          isTaskConversationWorking ||
                           taskCommentSubmitting ||
                           readOnly ||
                           voiceDictation.isActive
@@ -6382,30 +6503,14 @@ function modelProviderLabel(id: string) {
 function SubmitButton({
   disabled,
   isGenerating,
-  isStopping = false,
   startsTask = false,
   onStop,
 }: {
   disabled: boolean;
   isGenerating: boolean;
-  isStopping?: boolean;
   startsTask?: boolean;
   onStop: () => void;
 }) {
-  if (isStopping) {
-    return (
-      <button
-        type="button"
-        aria-label="Stopping task"
-        title="Stopping task"
-        disabled
-        className="mb-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-ink text-canvas opacity-60"
-      >
-        <LoaderCircle size={13} strokeWidth={2.2} className="animate-spin" />
-      </button>
-    );
-  }
-
   if (isGenerating) {
     return (
       <button
@@ -6437,16 +6542,32 @@ function SubmitButton({
   );
 }
 
-function EngineStopButton({ label, onStop }: { label: string; onStop: () => void }) {
+// Sits beside the composer so Send stays free to queue a message into the turn that is still
+// working. `stopping` covers the gap between asking to interrupt and the runner settling it.
+function EngineStopButton({
+  label,
+  stopping = false,
+  onStop,
+}: {
+  label: string;
+  stopping?: boolean;
+  onStop: () => void;
+}) {
+  const action = stopping ? `Stopping ${label}` : `Interrupt ${label}`;
   return (
     <button
       type="button"
-      aria-label={`Interrupt ${label}`}
-      title={`Interrupt ${label}`}
+      aria-label={action}
+      title={action}
+      disabled={stopping}
       onClick={onStop}
-      className="mb-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-ink-muted transition-colors duration-150 hover:border-danger-border hover:bg-danger-bg hover:text-danger focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+      className="mb-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-ink-muted transition-colors duration-150 hover:border-danger-border hover:bg-danger-bg hover:text-danger focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
     >
-      <Square size={11} strokeWidth={2.2} fill="currentColor" />
+      {stopping ? (
+        <LoaderCircle size={12} strokeWidth={2.2} className="animate-spin" />
+      ) : (
+        <Square size={11} strokeWidth={2.2} fill="currentColor" />
+      )}
     </button>
   );
 }
@@ -6490,4 +6611,12 @@ function newBackgroundChatMessageId() {
       ? globalThis.crypto.randomUUID()
       : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
   return `ui_background_${randomId}`;
+}
+
+function newQueuedChatMessageId() {
+  const randomId =
+    typeof globalThis.crypto?.randomUUID === "function"
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  return `ui_queued_${randomId}`;
 }

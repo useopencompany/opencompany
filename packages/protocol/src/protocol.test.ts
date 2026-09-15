@@ -197,6 +197,7 @@ describe("headless protocol", () => {
       "/v1/runs/{runId}",
       "/v1/runs/{runId}/events",
       "/v1/runs/{runId}/cancel",
+      "/v1/runs/{runId}/steer",
       "/v1/runs/{runId}/approvals/{approvalId}",
       "/v1/read-models/{readModel}",
       "/v1/me/preferences",
@@ -213,6 +214,7 @@ describe("headless protocol", () => {
       "/v1/integration-accounts/jamie-events/endpoint",
       "/v1/integration-accounts/jamie-events",
       "/v1/integration-accounts/convex",
+      "/v1/integration-accounts/convex-events",
       "/v1/integration-accounts/render",
       "/v1/integration-accounts/stripe",
       "/v1/integration-accounts",
@@ -264,6 +266,8 @@ describe("headless protocol", () => {
       "/v1/plugins/{name}/mcp/refresh",
       "/v1/plugins/{name}/data/delete",
       "/v1/plugins/{name}/events/{eventId}",
+      "/v1/plugins/{name}/billing",
+      "/v1/plugins/{name}/billing/daily-limit",
     ]);
     expect(document.components?.securitySchemes).toHaveProperty("bearerAuth");
   });

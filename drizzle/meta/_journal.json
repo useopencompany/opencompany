@@ -1989,6 +1989,41 @@
       "when": 1790100400004,
       "tag": "0283_tasks_workflows_general_availability",
       "breakpoints": true
+    },
+    {
+      "idx": 284,
+      "version": "7",
+      "when": 1790100400005,
+      "tag": "0284_slack_thread_participants",
+      "breakpoints": true
+    },
+    {
+      "idx": 285,
+      "version": "7",
+      "when": 1790100400006,
+      "tag": "0285_paid_plugins",
+      "breakpoints": true
+    },
+    {
+      "idx": 286,
+      "version": "7",
+      "when": 1790100400007,
+      "tag": "0286_coding_chat_steering",
+      "breakpoints": true
+    },
+    {
+      "idx": 287,
+      "version": "7",
+      "when": 1790100400008,
+      "tag": "0287_coding_chat_steering_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 288,
+      "version": "7",
+      "when": 1790100400009,
+      "tag": "0288_execution_backend_compatibility",
+      "breakpoints": true
     }
   ]
 }

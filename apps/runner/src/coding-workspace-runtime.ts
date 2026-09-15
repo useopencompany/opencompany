@@ -1,3 +1,4 @@
+import { dirname } from "node:path";
 import { type CloudCodingEngine, isCloudCodingEngine } from "@opencompany/agent-runtime";
 import {
   type CodexChatSessionStatus,
@@ -121,16 +122,46 @@ export type CodingWorkspacePreviewPort = {
   score: number;
 };
 
+export type CodingWorkspacePreviewDiscovery = {
+  ports: CodingWorkspacePreviewPort[];
+  outsideWorkspacePorts: CodingWorkspacePreviewPort[];
+};
+
 export async function discoverCodingWorkspacePreviewPorts(
   sandbox: SandboxHandle,
   input: { workDirectory: string },
 ): Promise<CodingWorkspacePreviewPort[]> {
+  return (await inspectCodingWorkspacePreviewPorts(sandbox, input)).ports;
+}
+
+export async function inspectCodingWorkspacePreviewPorts(
+  sandbox: SandboxHandle,
+  input: { workDirectory: string },
+): Promise<CodingWorkspacePreviewDiscovery> {
   const result = await sandbox.commands.run(LISTENING_PORT_PROCESS_COMMAND, {
     user: "user",
     timeoutMs: 10_000,
   });
   const ports = parseWorkspaceListeningPorts(result.stdout, input.workDirectory);
-  const probed = await Promise.all(
+  const outsideWorkspacePorts = parseSiblingWorkspaceListeningPorts(
+    result.stdout,
+    input.workDirectory,
+  );
+  const [probed, outsideWorkspaceProbed] = await Promise.all([
+    probePreviewPorts(sandbox, ports),
+    probePreviewPorts(sandbox, outsideWorkspacePorts),
+  ]);
+
+  return {
+    ports: probed.sort((a, b) => b.score - a.score || a.port - b.port),
+    outsideWorkspacePorts: outsideWorkspaceProbed.sort(
+      (a, b) => b.score - a.score || a.port - b.port,
+    ),
+  };
+}
+
+async function probePreviewPorts(sandbox: SandboxHandle, ports: number[]) {
+  return Promise.all(
     ports.map(async (port) => {
       const probe = await sandbox.commands
         .run(
@@ -146,8 +177,6 @@ export async function discoverCodingWorkspacePreviewPorts(
       };
     }),
   );
-
-  return probed.sort((a, b) => b.score - a.score || a.port - b.port);
 }
 
 export function parseListeningPorts(output: string) {
@@ -163,6 +192,22 @@ export function parseWorkspaceListeningPorts(output: string, workDirectory: stri
     const port = Number(portValue);
     const cwd = normalizeDirectory(cwdValue ?? "");
     return isAllowedPreviewPort(port) && isPathWithinDirectory(cwd, workspaceRoot) ? [port] : [];
+  });
+  return [...new Set(ports)].slice(0, MAX_DISCOVERED_PORTS);
+}
+
+export function parseSiblingWorkspaceListeningPorts(output: string, workDirectory: string) {
+  const workspaceRoot = normalizeDirectory(workDirectory);
+  const workspaceParent = normalizeDirectory(dirname(workspaceRoot));
+  const ports = output.split(/\n+/).flatMap((line) => {
+    const [portValue, _pid, cwdValue] = line.split("\t");
+    const port = Number(portValue);
+    const cwd = normalizeDirectory(cwdValue ?? "");
+    return isAllowedPreviewPort(port) &&
+      isPathWithinDirectory(cwd, workspaceParent) &&
+      !isPathWithinDirectory(cwd, workspaceRoot)
+      ? [port]
+      : [];
   });
   return [...new Set(ports)].slice(0, MAX_DISCOVERED_PORTS);
 }

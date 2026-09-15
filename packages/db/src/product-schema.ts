@@ -10,6 +10,8 @@ import {
   type PluginGatewayDiscoveredTool,
   type PluginInstallReport,
   type PluginManifest,
+  type PluginPriceUnit,
+  type PluginPricing,
   type PluginStatus,
   type PluginStdioServer,
   RUN_APPROVAL_STATUSES,
@@ -27,6 +29,7 @@ import {
 import type { EncryptedPayload } from "@opencompany/crypto";
 import { relations, type SQL, sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   bigint,
   bigserial,
   boolean,
@@ -621,6 +624,12 @@ export type ChatEngine = "opencompany" | "codex" | "claude_code";
 export type ChatActivityState = "working" | "idle";
 // Engines whose durable turns run through the legacy-named goat.codex_chat_* queue.
 export type CodexChatEngine = ChatEngine;
+export const EXECUTION_BACKENDS = ["runner_attached", "sandbox_supervisor"] as const;
+export type ExecutionBackend = (typeof EXECUTION_BACKENDS)[number];
+export type ExecutionBackendCompatibility = {
+  backend: ExecutionBackend;
+  version: number;
+};
 
 export type ChatAttachmentKind =
   | "image"
@@ -675,6 +684,7 @@ export const CODING_HARNESS_EVENT_TYPES = [
   "turn.started",
   "turn.completed",
   "usage.updated",
+  "steering.delivered",
   "error",
   "unknown",
 ] as const;
@@ -3546,6 +3556,9 @@ export const plugins = productSchema.table(
       .notNull()
       .default(sql`'[]'::jsonb`),
     events: jsonb("events").$type<PluginEventDefinition[]>().notNull().default(sql`'[]'::jsonb`),
+    // Validated list prices from a reviewed, integrity-pinned package. This row is the billing
+    // authority for the plugin's paid actions; a package that declares none stays null and free.
+    pricing: jsonb("pricing").$type<PluginPricing | null>(),
     eventModes: jsonb("event_modes")
       .$type<Record<string, boolean>>()
       .notNull()
@@ -4548,6 +4561,13 @@ export const capabilityRuns = productSchema.table(
     provider: text("provider").notNull(),
     endpoint: text("endpoint").notNull(),
     status: text("status").$type<CapabilityRunStatus>().notNull(),
+    // Set when the run was routed through a paid plugin. The three price columns snapshot the
+    // installed package's list price so settlement and reconciliation bill what was quoted, even
+    // if the workspace updates or uninstalls the plugin while the run is still in flight.
+    pluginName: text("plugin_name"),
+    priceUnit: text("price_unit").$type<PluginPriceUnit>(),
+    priceAmountUsdMicros: bigint("price_amount_usd_micros", { mode: "number" }),
+    priceMaxUnits: integer("price_max_units"),
     quoteProviderCostUsdMicros: bigint("quote_provider_cost_usd_micros", {
       mode: "number",
     }).notNull(),
@@ -4592,6 +4612,9 @@ export const capabilityRuns = productSchema.table(
       table.status,
       table.approvalExpiresAt,
     ),
+    pluginSpendIdx: index("goat_capability_runs_plugin_spend_idx")
+      .on(table.workspaceId, table.pluginName, table.createdAt)
+      .where(sql`${table.pluginName} IS NOT NULL`),
     sourceCheck: check(
       "goat_capability_runs_source_check",
       sql`${table.source} IN ('x', 'linkedin', 'youtube', 'instagram', 'tiktok', 'lead', 'seo', 'image')`,
@@ -4626,6 +4649,46 @@ export const capabilityRuns = productSchema.table(
     statusCheck: check(
       "goat_capability_runs_status_check",
       sql`${table.status} IN ('awaiting_approval', 'approved', 'canceled', 'expired', 'executing', 'running', 'stopping', 'succeeded', 'failed', 'stopped', 'timed_out')`,
+    ),
+    // A plugin-routed run carries a complete price snapshot or none at all; a partial one cannot
+    // be settled deterministically.
+    pluginPriceCheck: check(
+      "goat_capability_runs_plugin_price_check",
+      sql`(
+          ${table.pluginName} IS NULL
+          AND ${table.priceUnit} IS NULL
+          AND ${table.priceAmountUsdMicros} IS NULL
+          AND ${table.priceMaxUnits} IS NULL
+        ) OR (
+          ${table.pluginName} IS NOT NULL
+          AND ${table.priceUnit} IN ('per_call', 'per_result')
+          AND ${table.priceAmountUsdMicros} > 0
+          AND ${table.priceMaxUnits} > 0
+        )`,
+    ),
+  }),
+);
+
+// A workspace-set ceiling on what a paid plugin may spend in a UTC day. Absent row means no limit.
+export const pluginSpendLimits = productSchema.table(
+  "plugin_spend_limits",
+  {
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    pluginName: text("plugin_name").notNull(),
+    dailyLimitUsdMicros: bigint("daily_limit_usd_micros", { mode: "number" }).notNull(),
+    updatedByWorkosId: text("updated_by_workos_id").references(() => users.workosUserId, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.workspaceId, table.pluginName] }),
+    limitCheck: check(
+      "goat_plugin_spend_limits_limit_check",
+      sql`${table.dailyLimitUsdMicros} > 0`,
     ),
   }),
 );
@@ -4997,6 +5060,14 @@ export const codexChatSessions = productSchema.table(
       onDelete: "set null",
     }),
     hostToolContractVersion: text("host_tool_contract_version"),
+    // Private runtime ownership pinned before the first Run. Production admission remains on the
+    // established runner until the sandbox-supervisor implementation clears its rollout gates.
+    executionBackend: text("execution_backend")
+      .$type<ExecutionBackend>()
+      .notNull()
+      .default("runner_attached"),
+    executionBackendVersion: integer("execution_backend_version").notNull().default(1),
+    supervisorTemplateVersion: text("supervisor_template_version"),
     sandboxId: text("sandbox_id"),
     // Machine size resolved from the workspace default when the session was created.
     // Pinned for the session's whole life so a later workspace change never resizes
@@ -5043,6 +5114,25 @@ export const codexChatSessions = productSchema.table(
         sql`, `,
       )})`,
     ),
+    executionBackendCheck: check(
+      "goat_codex_chat_sessions_execution_backend_check",
+      sql`${table.executionBackend} IN (${sql.join(
+        EXECUTION_BACKENDS.map((backend) => sql`${backend}`),
+        sql`, `,
+      )})`,
+    ),
+    executionBackendVersionCheck: check(
+      "goat_codex_chat_sessions_execution_backend_version_check",
+      sql`${table.executionBackendVersion} > 0`,
+    ),
+    supervisorTemplateVersionCheck: check(
+      "goat_codex_chat_sessions_supervisor_template_version_check",
+      sql`(
+        (${table.executionBackend} = 'runner_attached' AND ${table.supervisorTemplateVersion} IS NULL)
+        OR
+        (${table.executionBackend} = 'sandbox_supervisor' AND NULLIF(${table.supervisorTemplateVersion}, '') IS NOT NULL)
+      )`,
+    ),
   }),
 );
 
@@ -5069,9 +5159,22 @@ export const codexChatTurns = productSchema.table(
     status: text("status").$type<CodexChatTurnStatus>().notNull().default("queued"),
     prompt: text("prompt").notNull(),
     settings: jsonb("settings").$type<CodexChatTurnSettings>().notNull().default(sql`'{}'::jsonb`),
+    // Copied from the immutable Session binding when this Run is admitted.
+    executionBackend: text("execution_backend")
+      .$type<ExecutionBackend>()
+      .notNull()
+      .default("runner_attached"),
+    executionBackendVersion: integer("execution_backend_version").notNull().default(1),
     error: text("error"),
     interruptRequestedAt: timestamp("interrupt_requested_at", {
       withTimezone: true,
+    }),
+    // Set when the user promotes this queued turn into the sibling turn that was already running
+    // (ACP steering): its prompt is injected into that live turn instead of starting its own.
+    // The promotion is intent, not a transfer -- this row stays a claimable queued turn until the
+    // running worker actually injects it, so a turn that ends first simply runs it next.
+    steerIntoRunId: text("steer_into_run_id").references((): AnyPgColumn => codexChatTurns.id, {
+      onDelete: "set null",
     }),
     attempts: integer("attempts").notNull().default(0),
     recoveryAttempts: integer("recovery_attempts").notNull().default(0),
@@ -5088,6 +5191,12 @@ export const codexChatTurns = productSchema.table(
   },
   (table) => ({
     claimIdx: index("goat_codex_chat_turns_claim_idx").on(table.status, table.createdAt),
+    executionClaimIdx: index("goat_codex_chat_turns_execution_claim_idx").on(
+      table.executionBackend,
+      table.executionBackendVersion,
+      table.status,
+      table.createdAt,
+    ),
     sessionCreatedIdx: index("goat_codex_chat_turns_session_created_idx").on(
       table.codexChatSessionId,
       table.createdAt,
@@ -5107,6 +5216,17 @@ export const codexChatTurns = productSchema.table(
     eventSequenceCheck: check(
       "goat_codex_chat_turns_event_sequence_check",
       sql`${table.eventSequence} >= 0`,
+    ),
+    executionBackendCheck: check(
+      "goat_codex_chat_turns_execution_backend_check",
+      sql`${table.executionBackend} IN (${sql.join(
+        EXECUTION_BACKENDS.map((backend) => sql`${backend}`),
+        sql`, `,
+      )})`,
+    ),
+    executionBackendVersionCheck: check(
+      "goat_codex_chat_turns_execution_backend_version_check",
+      sql`${table.executionBackendVersion} > 0`,
     ),
   }),
 );
@@ -7338,6 +7458,7 @@ export type ChatSession = typeof chatSessions.$inferSelect;
 export type ChatShare = typeof chatShares.$inferSelect;
 export type ActionTurn = typeof actionTurns.$inferSelect;
 export type CapabilityRun = typeof capabilityRuns.$inferSelect;
+export type PluginSpendLimit = typeof pluginSpendLimits.$inferSelect;
 export type ChatMessage = typeof chatMessages.$inferSelect;
 export type ChatModelRoutingAttempt = typeof chatModelRoutingAttempts.$inferSelect;
 export type ChatSandboxUsage = typeof chatSandboxUsage.$inferSelect;
@@ -7376,7 +7497,7 @@ export const sessionSubscriptions = productSchema.table(
       .notNull()
       .default({
         acceptedEvents: ["human_text_reply"],
-        authorization: "workspace_member",
+        authorization: "slack_thread_participant",
         queue: "serial",
       }),
     status: text("status").notNull().default("waiting"),

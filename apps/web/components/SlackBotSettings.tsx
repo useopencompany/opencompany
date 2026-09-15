@@ -4,7 +4,7 @@ import { MessageSquare } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { SettingsContent } from "@/components/SettingsChrome";
+import { PageContent } from "@/components/PageContent";
 import { disconnectSlackBotAction } from "@/lib/slack-bot-actions";
 
 export type SlackBotSettingsData = {
@@ -32,7 +32,7 @@ const SETUP_ERROR_COPY: Record<string, string> = {
 
 export function SlackBotSettings({ data }: { data: SlackBotSettingsData }) {
   return (
-    <SettingsContent
+    <PageContent
       title="Slack"
       description="Share workflow results in Slack and continue the same work in a thread."
     >
@@ -60,7 +60,7 @@ export function SlackBotSettings({ data }: { data: SlackBotSettingsData }) {
       ) : (
         <SlackBotPanel data={data} />
       )}
-    </SettingsContent>
+    </PageContent>
   );
 }
 
@@ -96,8 +96,8 @@ function SlackBotPanel({ data }: { data: SlackBotSettingsData }) {
               Add opencompany to your Slack workspace
             </span>
             <p className="text-[13px] leading-5 text-ink-subtle">
-              Let workflows post as @opencompany. Replies from workspace members continue the same
-              work, with its context and files, for 30 days.
+              Let workflows post as @opencompany. Anyone who can reply in a workflow thread can
+              continue the same work, with its context and files, for 30 days.
             </p>
           </div>
         </div>
@@ -164,13 +164,14 @@ function SlackBotPanel({ data }: { data: SlackBotSettingsData }) {
           <ol className="flex list-decimal flex-col gap-1 pl-5 text-[13px] leading-5 text-ink-subtle">
             <li>Invite @opencompany to a public Slack channel.</li>
             <li>
-              Add an instruction to a workflow, such as “Post the investigation summary in
-              #product.” Each post opens a thread for follow-up questions.
+              Add an instruction to a workflow, such as “Post the investigation summary in #product
+              with the opencompany Slack bot.” Each post opens a thread for follow-up questions.
             </li>
           </ol>
           <p className="text-[13px] leading-5 text-ink-subtle">
-            Replies continue the original workflow session for 30 days. Members must use the same
-            email in Slack and opencompany. Disconnecting closes existing threads.
+            Anyone who can reply in the Slack thread can continue the workflow for 30 days, using
+            the workflow owner’s connected tools and saved context. Disconnecting closes existing
+            threads.
           </p>
           <Link
             href="/workflows"

@@ -20,6 +20,7 @@ import { CodexChatLeaseLostError } from "./codex-chat-errors";
 import {
   approvalDraftsFromProjection,
   consumeProductChatStream,
+  createSteeringTraceChannel,
   hasHostedTurnCredits,
   isReplaySafeProductChatInfrastructureFailure,
   opencompanyModelMessagesFromStored,
@@ -182,6 +183,42 @@ describe("consumeProductChatStream", () => {
       state: "input-available",
       children: [{ type: "tool-web_search", toolCallId: "t1", state: "output-available" }],
     });
+  });
+
+  it("records a steered message in the transcript at the step that received it", async () => {
+    let clock = 0;
+    const project = vi.fn(async (_projection: ProductChatProjection) => undefined);
+    const steeringTrace = createSteeringTraceChannel();
+    // streamText starts eagerly, so a message steered in before the consumer subscribes still has
+    // to reach the transcript.
+    steeringTrace.publish({ id: "run_queued_1", text: "Focus on hiring instead." });
+
+    const result = await consumeProductChatStream({
+      fullStream: streamParts(
+        { type: "text-start", id: "text_1" },
+        { type: "text-delta", id: "text_1", text: "Working on the tips." },
+        { type: "text-end", id: "text_1" },
+        () => {
+          clock = 600;
+          steeringTrace.publish({ id: "run_queued_2", text: "Ten is enough." });
+          return { type: "text-start", id: "text_2" };
+        },
+        { type: "text-delta", id: "text_2", text: "Switching to hiring." },
+        { type: "text-end", id: "text_2" },
+      ),
+      sink: { project, recordStepUsage: vi.fn(async () => undefined) },
+      signal: new AbortController().signal,
+      flushIntervalMs: 500,
+      now: () => clock,
+      steeringTrace,
+    });
+
+    expect(result.parts).toEqual([
+      { type: "data-steering", data: { text: "Focus on hiring instead.", itemId: "run_queued_1" } },
+      { type: "text", text: "Working on the tips.", state: "done" },
+      { type: "data-steering", data: { text: "Ten is enough.", itemId: "run_queued_2" } },
+      { type: "text", text: "Switching to hiring.", state: "done" },
+    ]);
   });
 
   it("ignores a subagent trace for a tool call that is not in the projection", async () => {

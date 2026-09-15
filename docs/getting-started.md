@@ -34,6 +34,11 @@ and `/runner`, creates or reuses a Neon child branch named for the current Git b
 checked-in migrations, starts local Electric, and mirrors the required values to
 `apps/web/.env.local`. It is safe to rerun.
 
+Setup also generates `OPENCOMPANY_DESKTOP_AUTH_SECRET` for local desktop Google sign-in,
+replaces missing or invalid generated values, and preserves valid keys on reruns and env pulls.
+A value in `.env.override.local` takes precedence; setup reports an invalid override instead of
+overwriting it. With the web server running, use `bun run dev:electron:local` to test the macOS app.
+
 The local web app is a presentation client. Product commands, identity persistence, and authorized
 read models are served by the local API; the runner claims durable execution and background work
 directly from the branch database.

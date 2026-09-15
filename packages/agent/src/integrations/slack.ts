@@ -319,7 +319,7 @@ function isSlackIntegrationStatePayload(value: unknown): value is SlackIntegrati
 }
 
 function sanitizeReturnTo(value: string) {
-  if (!value.startsWith("/") || value.startsWith("//")) return "/settings/plugins/slack";
+  if (!value.startsWith("/") || value.startsWith("//")) return "/plugins/slack";
   return value;
 }
 

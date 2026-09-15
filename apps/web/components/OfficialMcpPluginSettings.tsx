@@ -41,10 +41,12 @@ import { useEffect, useMemo, useOptimistic, useState, useTransition } from "reac
 import { useAppData } from "@/components/AppDataProvider";
 import { CapabilityModeToggle } from "@/components/CapabilityModeToggle";
 import { ConvexDeployKeyConnectionForm } from "@/components/ConvexDeployKeyConnectionForm";
+import { ConvexErrorEventsSetup } from "@/components/ConvexErrorEventsSetup";
 import { GitHubRepositoryAccessSection } from "@/components/GitHubRepositoryAccess";
 import { GranolaIntegrationSetup } from "@/components/GranolaIntegrationSetup";
 import { InfisicalPluginConnectionForm } from "@/components/InfisicalPluginConnectionForm";
 import { JamieEventsSetup } from "@/components/JamieEventsSetup";
+import { PageContent } from "@/components/PageContent";
 import { PluginAccountRow, PluginConnectionFeedback } from "@/components/PluginConnectionSettings";
 import {
   installOfficialPlugin,
@@ -53,7 +55,6 @@ import {
   type OfficialPluginConfig,
 } from "@/components/PluginSettings";
 import { RenderApiKeyConnectionForm } from "@/components/RenderApiKeyConnectionForm";
-import { SettingsContent } from "@/components/SettingsChrome";
 import { ToolPermissionRow } from "@/components/ToolPermissionRow";
 import {
   type CapabilityId,
@@ -897,14 +898,14 @@ function OfficialMcpPluginDetailView({
   return (
     <>
       <PluginConnectionFeedback />
-      <SettingsContent
+      <PageContent
         title={config.label}
         description={
           config.name === "dash0"
             ? config.description
             : plugin?.manifest.description || config.description
         }
-        backLink={{ href: "/settings/plugins", label: "Plugins" }}
+        backLink={{ href: "/plugins", label: "Plugins" }}
         icon={
           <span
             aria-hidden="true"
@@ -951,7 +952,7 @@ function OfficialMcpPluginDetailView({
           }
         />
         <SkillsSection config={config} state={pluginState} previewState={previewState} />
-      </SettingsContent>
+      </PageContent>
     </>
   );
 }
@@ -994,7 +995,7 @@ function EventsSection({ plugin, canEdit }: { plugin: PluginInstallationDto; can
           ) : canEdit ? (
             <a
               className={`${buttonVariants({ variant: "outline", size: "sm" })} mt-2`}
-              href="/api/integrations/linear-ingest/start?returnTo=/settings/plugins/linear%23events"
+              href="/api/integrations/linear-ingest/start?returnTo=/plugins/linear%23events"
             >
               Connect Linear events
             </a>
@@ -1008,6 +1009,12 @@ function EventsSection({ plugin, canEdit }: { plugin: PluginInstallationDto; can
       ) : null}
       {plugin.name === "jamie" && canEdit ? (
         <JamieEventsSetup initialState={integrations.jamie_events} />
+      ) : null}
+      {plugin.name === "convex" && canEdit ? (
+        <ConvexErrorEventsSetup
+          initialState={integrations.convex_events}
+          deployKeyConnected={integrations.convex.connected}
+        />
       ) : null}
       <ul className="overflow-hidden rounded-lg border border-border bg-surface">
         {plugin.events.map((event: PluginEventDefinitionDto) => {

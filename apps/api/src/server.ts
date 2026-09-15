@@ -61,6 +61,7 @@ import { createBrainControlService } from "./brain-control";
 import { parseBrowserOrigins } from "./browser-origins";
 import { createChatResourceService } from "./chat-resources";
 import { createChatTitleService } from "./chat-title";
+import { createConvexIngress } from "./convex-ingress";
 import { ElectricReadModelProxy, parseElectricAuthMode } from "./electric-read-models";
 import { createEngineAuthService } from "./engine-auth";
 import { createEngineSessionService } from "./engine-sessions";
@@ -76,6 +77,7 @@ import { createMcpOAuthIngress } from "./mcp-oauth-ingress";
 import { PostgresMessagePresentationService } from "./message-presentations";
 import { createOnboardingService } from "./onboarding";
 import { createOnboardingEmailService } from "./onboarding-emails";
+import { createPluginBillingService } from "./plugin-billing";
 import { createProjectService } from "./projects";
 import { createRepoConfigService } from "./repo-configs";
 import { PostgresRunEventNotifier } from "./run-event-notifier";
@@ -299,6 +301,7 @@ const app = createApiApp({
   }),
   engineSessions: createEngineSessionService({ db: database.db, runner: runnerClient }),
   workspaceCapabilities: createWorkspaceCapabilityService({ db: database.db }),
+  pluginBilling: createPluginBillingService({ db: database.db }),
   workspaceControl: createWorkspaceControlService({ db: database.db, workos }),
   identity: createIdentityService({ db: database.db, workos, stripe }),
   onboarding: createOnboardingService({ db: database.db, workos }),
@@ -353,6 +356,7 @@ const app = createApiApp({
   hubspotIngress: createHubspotIngress({ db: database.db, identify: identityVerifier }),
   attioIngress: createAttioIngress({ db: database.db }),
   jamieIngress: createJamieIngress({ db: database.db }),
+  convexIngress: createConvexIngress({ db: database.db }),
   mcpOAuthIngress: createMcpOAuthIngress({
     db: database.db,
     identify: identityVerifier,
