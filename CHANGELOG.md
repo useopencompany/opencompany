@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.28.0] - 2026-09-15
+
+### Added
+- send a follow-up while a coding chat or task is working. it queues for the next turn; choose steer to redirect the current turn, or remove it if you change your mind. if the agent cannot take the instruction mid-turn, it stays queued (#1866, #1873) — @louis.
+- find prospects, research people at a company, and look up work emails with the lead research plugin. prices are shown before you spend, and workspace admins can set a daily limit. install the plugin to keep using prospecting tools previously available through capabilities (#1864) — @louis.
+- start a workflow when a convex function fails, with the function and error as context. enable error events in the convex plugin, then choose function failed as the trigger. repeated matching errors are grouped into 15-minute windows. requires convex pro; convex charges for log streams (#1862) — @louis.
+- choose gpt 5.6 sol or terra for workflow steps. models covered by your workspace's shared subscription now show included in the picker (#1877) — @louis.
+
+### Changed
+- connect a coding subscription and install plugins during workspace setup, so your first chat has the tools you need (#1876) — @louis.
+- open plugins and skills from the main sidebar while keeping your chats, tasks, and wiki in view. both have moved out of settings; old links still work (#1855, #1881) — @louis.
+- choose the size of new cloud coding sessions in settings → sandboxes. workspace admins can compare machine sizes and hourly costs there (#1859) — @louis.
+- chat and tasks can now make up to 32 connected-tool calls per turn, up from 16, so longer research and updates can finish before hitting the limit (#1861) — @louis.
+- keep workflow instructions in the steps. event triggers no longer show an additional run context field; existing saved context is preserved (#1865) — @louis.
+- running subagents start collapsed to keep the conversation readable. expand a row to follow its work (#1836) — @louis.
+
+### Fixed
+- coding sessions now finish or stop correctly after a bug left them showing as running even when the agent was done. resumed sessions also avoid repeating earlier tool activity (#1875, #1867) — @louis.
+- plugin tool permissions now keep showing your saved on, ask, or off choice instead of appearing to revert. connected accounts also update reliably when you have a custom mcp connection (#1872, #1858) — @louis.
+- slack follow-ups now include the thread history and readable sender details. workflows send replies back to the original thread explicitly, so an internal task result is no longer automatically copied to slack (#1851) — @louis.
+- workflow tasks now show their actual instructions or event context as the opening request instead of a generic run this workflow message (#1853) — @louis.
+- returning to a coding chat keeps your chosen reasoning effort. starting a new chat no longer briefly replaces the conversation with a loading screen (#1860) — @louis.
+- linear workflow connections now refresh automatically. older connections may need one reconnect before teams and events work again (#1841) — @louis.
+- render tools can connect and run again after a connection error prevented them from loading (#1869) — @louis.
+- sandbox preview keeps looking for your server after an unavailable port. if the server is outside the workspace, preview explains where to start it (#1831) — @louis.
+- attachment cards stay visible and in order while files upload, and a resumed task's timer now measures the current run (#1846, #1848) — @louis.
+
 ## [1.27.0] - 2026-09-14
 
 ### Added
