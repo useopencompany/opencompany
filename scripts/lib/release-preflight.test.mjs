@@ -51,8 +51,10 @@ test("production preflight follows the deployed runtime boundaries", async () =>
     ],
   );
 
-  assertExcludes([...groups.api.required, ...groups.api.optional], ["BETTER_STACK_ERRORS_DSN"]);
+  // The API and runner install the shared Bun exception reporter, so a missing DSN must fail
+  // the release instead of silently downgrading to local-only error logs.
   assertIncludes(groups.api.required, [
+    "BETTER_STACK_ERRORS_DSN",
     "WORKOS_MOBILE_CLIENT_ID",
     "GITHUB_USER_APP_SLUG",
     "GITHUB_USER_APP_CLIENT_ID",
@@ -68,6 +70,7 @@ test("production preflight follows the deployed runtime boundaries", async () =>
   );
 
   assertIncludes(groups.runner.required, [
+    "BETTER_STACK_ERRORS_DSN",
     "BLOB_READ_WRITE_TOKEN",
     "GOOGLE_OAUTH_CLIENT_ID",
     "GOOGLE_OAUTH_CLIENT_SECRET",
