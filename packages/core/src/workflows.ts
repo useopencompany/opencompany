@@ -40,6 +40,11 @@ export type WorkflowStep = {
   instructions: string;
 };
 
+// The prompt a schedule trigger carries when the author never wrote extra run context. It is a
+// placeholder, not an instruction, so every run path substitutes the first step's instructions for
+// it. Defined here because `@opencompany/agent` re-exports it and depends on core, not the reverse.
+export const DEFAULT_WORKFLOW_SCHEDULE_PROMPT = "Run this workflow.";
+
 export function workflowActivationDisabledReason(steps: Pick<WorkflowStep, "instructions">[]) {
   if (steps.length === 0) return "Add a step with instructions before activating this workflow.";
   const emptySteps = steps.flatMap((step, index) => (step.instructions.trim() ? [] : [index + 1]));
@@ -758,7 +763,7 @@ export class WorkflowApplicationService {
     const trigger = workflow.triggers?.[0] ?? workflow.trigger;
     const triggerPrompt = trigger.type === "manual" ? "" : trigger.prompt.trim();
     const goal = prompt(
-      !triggerPrompt || triggerPrompt === "Run this workflow."
+      !triggerPrompt || triggerPrompt === DEFAULT_WORKFLOW_SCHEDULE_PROMPT
         ? workflow.steps[0]!.instructions
         : triggerPrompt,
       "A Workflow prompt is required.",

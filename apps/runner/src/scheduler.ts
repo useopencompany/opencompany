@@ -36,8 +36,10 @@ type DueWorkflowScheduleRow = {
   name: string;
   cron: string;
   timezone: string;
-  prompt: string;
-  firstStepInstructions: string;
+  prompt: string | null;
+  // NULL when the workflow has no steps. Activation forbids that, but the sweep reads the row
+  // directly and a wedged claim would stall every later due schedule behind it.
+  firstStepInstructions: string | null;
   scheduleHarnessSpec: HarnessSpec;
   nextRunAt: Date | string;
 };
@@ -451,9 +453,9 @@ async function createScheduledTask(
 function scheduledWorkflowTaskPrompt(
   workflow: Pick<DueWorkflowScheduleRow, "prompt" | "firstStepInstructions">,
 ) {
-  const runContext = workflow.prompt.trim();
+  const runContext = workflow.prompt?.trim() ?? "";
   if (runContext && runContext !== DEFAULT_WORKFLOW_SCHEDULE_PROMPT) return runContext;
-  return workflow.firstStepInstructions.trim() || DEFAULT_WORKFLOW_SCHEDULE_PROMPT;
+  return workflow.firstStepInstructions?.trim() || DEFAULT_WORKFLOW_SCHEDULE_PROMPT;
 }
 
 function rowsFromExecute<T>(result: unknown): T[] {
