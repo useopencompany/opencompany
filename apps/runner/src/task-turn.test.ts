@@ -805,6 +805,7 @@ function durableTurn(): CodexChatTurn {
     settings: {},
     error: null,
     interruptRequestedAt: null,
+    steerIntoRunId: null,
     attempts: 1,
     recoveryAttempts: 0,
     engineRecoveryRequired: false,

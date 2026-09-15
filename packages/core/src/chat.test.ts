@@ -218,6 +218,29 @@ describe("ChatApplicationService", () => {
     ).rejects.toMatchObject({ code: "forbidden" });
   });
 
+  it("separates a Run that cannot be steered from a Run that does not exist", async () => {
+    const repository = fakeRepository();
+    const service = new ChatApplicationService(repository);
+
+    await expect(service.steerRun(actor(), " run_2 ")).resolves.toEqual({
+      runId: "run_2",
+      targetRunId: "run_1",
+    });
+    expect(repository.steerRun).toHaveBeenCalledWith({ actor: actor(), runId: "run_2" });
+
+    // The queued Run started on its own before the user pressed Steer: nothing is lost, but the
+    // caller must be told the promotion did not happen.
+    repository.steerRun.mockResolvedValueOnce({ result: null, found: true });
+    await expect(service.steerRun(actor(), "run_2")).rejects.toMatchObject({ code: "conflict" });
+
+    repository.steerRun.mockResolvedValueOnce({ result: null, found: false });
+    await expect(service.steerRun(actor(), "run_2")).rejects.toMatchObject({ code: "not_found" });
+
+    await expect(
+      service.steerRun(actor({ permissions: [CHAT_READ_PERMISSION] }), "run_2"),
+    ).rejects.toMatchObject({ code: "forbidden" });
+  });
+
   it("keeps cancellation and approval authorization in the application core", async () => {
     const repository = fakeRepository();
     const service = new ChatApplicationService(repository);
@@ -323,6 +346,7 @@ function fakeRepository(): ChatRepository & {
   getConversation: ReturnType<typeof vi.fn>;
   listConversations: ReturnType<typeof vi.fn>;
   listRunEvents: ReturnType<typeof vi.fn>;
+  steerRun: ReturnType<typeof vi.fn>;
 } {
   return {
     listConversations: vi.fn(async () => ({ conversations: [], nextCursor: null })),
@@ -346,6 +370,10 @@ function fakeRepository(): ChatRepository & {
       runId: "run_1",
       status: "canceled" as const,
       idempotentReplay: false,
+    })),
+    steerRun: vi.fn(async () => ({
+      result: { runId: "run_2", targetRunId: "run_1" },
+      found: true,
     })),
     resolveApproval: vi.fn(async () => ({
       approvalId: "approval_1",

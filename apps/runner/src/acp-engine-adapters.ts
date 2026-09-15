@@ -94,7 +94,6 @@ export const CODEX_ACP_ENGINE_ADAPTER: AcpEngineAdapter = {
       values: { default: "default", plan: "plan" },
     },
   },
-  steeringControlMethod: "_session/steering",
 };
 
 export const ACP_ENGINE_ADAPTERS = {

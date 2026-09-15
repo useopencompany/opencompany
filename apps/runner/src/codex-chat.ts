@@ -91,6 +91,7 @@ import {
   loadCodingChatHistory,
 } from "./coding-chat-history";
 import { codingChatSkillPromptLines } from "./coding-chat-skills";
+import { createSteeringChannel } from "./coding-chat-steering";
 import {
   codingSandboxTemplate,
   settledCodingSandboxIdleTimeoutMs,
@@ -869,6 +870,13 @@ export async function runCodexChatTurn(input: {
           timeoutMs: env.codexTimeoutMs,
           checkAbort,
         }),
+      ...createSteeringChannel({
+        engine: "codex",
+        runId: turn.id,
+        leaseId,
+        leaseOwner,
+        onRuntimeEvents: (events) => turnProjector.push(events),
+      }),
     });
     if (taskContext) await checkAbort(true);
     const acpSummary = acpNormalizer.summary();
