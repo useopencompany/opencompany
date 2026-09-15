@@ -9,7 +9,13 @@ export type ProductAnalyticsUsageSource =
   | "external_harness"
   | "subscription_covered";
 export type ProductOnboardingFlow = "owner" | "member";
-export type ProductOnboardingStep = "profile" | "workspace" | "welcome" | "finish";
+export type ProductOnboardingStep =
+  | "profile"
+  | "workspace"
+  | "welcome"
+  | "subscriptions"
+  | "plugins"
+  | "finish";
 export type ProductPluginKind = "skills" | "mcp" | "hybrid" | "empty";
 
 export type ProductAnalyticsEventPropertiesByName = {

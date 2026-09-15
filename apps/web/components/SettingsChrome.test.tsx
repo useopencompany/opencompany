@@ -34,9 +34,6 @@ describe("SettingsSidebar", () => {
     expect(
       within(workspaceGroup as HTMLElement).getByRole("link", { name: "Repositories" }),
     ).toHaveAttribute("href", "/settings/repositories");
-    expect(
-      within(workspaceGroup as HTMLElement).getByRole("link", { name: "Plugins" }),
-    ).toHaveAttribute("href", "/plugins");
     expect(screen.queryByRole("link", { name: "Integrations" })).not.toBeInTheDocument();
     expect(
       within(workspaceGroup as HTMLElement).getByRole("link", { name: "Inference" }),
@@ -84,19 +81,11 @@ describe("SettingsSidebar", () => {
     expect(screen.getByRole("link", { name: "Members" })).not.toHaveAttribute("aria-current");
   });
 
-  // Plugins and Skills live in the main app view, so these rows hand the reader back to the
-  // primary sidebar rather than staying inside settings.
-  it.each([
-    ["Skills", "/skills"],
-    ["Plugins", "/plugins"],
-  ])("sends %s out of settings and never marks it current", (label, href) => {
-    pathnameMock.value = href;
-
+  // Skills and Plugins are primary-sidebar destinations, not settings pages. This rail stays a
+  // table of contents for /settings only, so it must not duplicate them.
+  it.each([["Skills"], ["Plugins"]])("keeps %s out of the settings rail", (label) => {
     render(<SettingsSidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
-    const row = screen.getByRole("link", { name: label });
-    expect(row).toHaveAttribute("href", href);
-    expect(row).not.toHaveAttribute("aria-current");
-    expect(row.querySelector("svg.lucide-arrow-up-right")).not.toBeNull();
+    expect(screen.queryByRole("link", { name: label })).not.toBeInTheDocument();
   });
 });
