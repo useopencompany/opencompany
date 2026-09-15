@@ -1,8 +1,9 @@
 "use client";
 
 import { Button } from "@opencompany/ui/components/button";
+import { toast } from "@opencompany/ui/components/sonner";
 import { AnthropicIcon, type LucideIcon, OpenAIIcon } from "@opencompany/ui/icons";
-import { Check, Loader2 } from "lucide-react";
+import { Check, Copy, Loader2 } from "lucide-react";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { saveClaudeCodeToken } from "@/lib/claude-code-auth";
 import {
@@ -16,6 +17,8 @@ import {
 } from "@/lib/onboarding-actions";
 
 const CODEX_POLL_INTERVAL_MS = 2500;
+const CLAUDE_SETUP_TOKEN_COMMAND = "claude setup-token";
+const COPY_FEEDBACK_MS = 1500;
 
 // Onboarding's take on the Inference settings cards: same two providers and the
 // same auth mechanics, reduced to "connect or move on". Usage meters, workspace
@@ -142,6 +145,44 @@ function ProviderCard({
   );
 }
 
+// The terminal command gets its own row so it reads as something to run and
+// copy, rather than as a phrase buried in a sentence.
+function CopyCommand({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), COPY_FEEDBACK_MS);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+    } catch {
+      toast.error("Could not copy to your clipboard. Select the command and copy it manually.");
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      <code className="min-w-0 flex-1 truncate rounded-lg bg-surface-muted px-3 py-2 font-mono text-[12px] text-ink">
+        {value}
+      </code>
+      <button
+        type="button"
+        onClick={() => void copy()}
+        aria-label={copied ? "Command copied" : `Copy ${value}`}
+        title="Copy command"
+        className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg border border-border text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
+      >
+        {copied ? <Check size={14} /> : <Copy size={14} />}
+      </button>
+    </div>
+  );
+}
+
 function ClaudeCodeCard({
   connected,
   needsReauth,
@@ -196,15 +237,17 @@ function ClaudeCodeCard({
     >
       {showForm && !connected ? (
         <div className="flex flex-col gap-2 border-t border-border pt-3">
+          <p className="text-[12px] leading-5 text-ink-muted">Run this in your terminal:</p>
+          <CopyCommand value={CLAUDE_SETUP_TOKEN_COMMAND} />
           <p className="text-[12px] leading-5 text-ink-muted">
-            Run <span className="font-mono font-semibold text-ink">claude setup-token</span> in your
-            terminal, approve it in the browser, and paste the token here. Tokens last about a year.
+            Approve it in the browser, then paste the token it prints here. Tokens last about a
+            year.
           </p>
           <input
             type="password"
             value={token}
             onChange={(event) => setToken(event.target.value)}
-            placeholder="sk-ant-oat…"
+            placeholder="Paste your token (sk-ant-oat…)"
             autoComplete="off"
             spellCheck={false}
             className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 font-mono text-[12px] text-ink placeholder:text-ink-subtle focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"

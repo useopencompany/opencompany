@@ -226,16 +226,46 @@ function useConnectionResults(onResult: (result: OnboardingConnectionResult) => 
   }, [onResult]);
 
   useEffect(() => {
-    const stored = window.localStorage.getItem(ONBOARDING_CONNECTION_STORAGE_KEY);
+    let initialResult: OnboardingConnectionResult | null = null;
+    let stored: string | null = null;
+    try {
+      stored = window.localStorage.getItem(ONBOARDING_CONNECTION_STORAGE_KEY);
+    } catch {
+      // Storage can be unavailable in privacy-restricted browser contexts. The
+      // postMessage path below remains the primary connection-result channel.
+    }
     if (stored) {
-      window.localStorage.removeItem(ONBOARDING_CONNECTION_STORAGE_KEY);
       try {
-        const parsed = JSON.parse(stored) as OnboardingConnectionResult;
-        handlerRef.current(parsed);
+        window.localStorage.removeItem(ONBOARDING_CONNECTION_STORAGE_KEY);
+      } catch {
+        // The parsed result is still usable even if clearing storage is denied.
+      }
+      try {
+        initialResult = JSON.parse(stored) as OnboardingConnectionResult;
       } catch {
         // A malformed record is not worth surfacing; it has been cleared.
       }
     }
+
+    // When storage is blocked, the popup fallback returns the same result in
+    // the onboarding URL. Consume it once, then remove only those callback
+    // parameters so refreshes do not replay a stale result.
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("setup")) {
+      initialResult ??= {
+        provider: params.get("integration"),
+        status: params.get("setup"),
+        reason: params.get("reason"),
+      };
+      for (const key of ["integration", "setup", "reason"]) params.delete(key);
+      const search = params.toString();
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `${window.location.pathname}${search ? `?${search}` : ""}${window.location.hash}`,
+      );
+    }
+    if (initialResult) handlerRef.current(initialResult);
 
     const onMessage = (event: MessageEvent) => {
       if (event.origin !== window.location.origin) return;

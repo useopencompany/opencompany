@@ -85,6 +85,7 @@ const OWNER_PROPS = {
 describe("OnboardingWizard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.history.replaceState({}, "", "/");
     mocks.finishOnboardingAction.mockResolvedValue({ ok: true });
     mocks.saveOnboardingProfileAction.mockResolvedValue({ ok: true });
     mocks.saveOnboardingWorkspaceAction.mockResolvedValue({
@@ -149,6 +150,22 @@ describe("OnboardingWizard", () => {
     });
   });
 
+  it("presents the Claude setup command as its own copyable line", async () => {
+    const user = userEvent.setup();
+    render(<OnboardingWizard {...OWNER_PROPS} initialStep={2} initialWorkspaceId="workspace_1" />);
+
+    const claudeCard = (await screen.findByText("Claude")).closest("div.rounded-xl");
+    expect(claudeCard).not.toBeNull();
+    await user.click(within(claudeCard as HTMLElement).getByRole("button", { name: "Connect" }));
+
+    expect(screen.getByText("Run this in your terminal:")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Copy claude setup-token" }));
+    await waitFor(async () =>
+      expect(await navigator.clipboard.readText()).toBe("claude setup-token"),
+    );
+    expect(screen.getByPlaceholderText(/Paste your token/u)).toBeInTheDocument();
+  });
+
   it("installs the recommended plugin and offers to connect it", async () => {
     const user = userEvent.setup();
     render(<OnboardingWizard {...OWNER_PROPS} initialStep={3} initialWorkspaceId="workspace_1" />);
@@ -172,6 +189,20 @@ describe("OnboardingWizard", () => {
       await within(githubRow as HTMLElement).findByRole("button", { name: "Connect" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Continue/u })).toBeInTheDocument();
+  });
+
+  it("consumes a same-tab connection result when browser storage is unavailable", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/onboarding?variant=owner&integration=github_user&setup=connected",
+    );
+    render(<OnboardingWizard {...OWNER_PROPS} initialStep={3} initialWorkspaceId="workspace_1" />);
+
+    const githubRow = (await screen.findByText("GitHub as you")).closest("div.rounded-xl");
+    expect(githubRow).not.toBeNull();
+    expect(within(githubRow as HTMLElement).getByText("Connected")).toBeInTheDocument();
+    expect(window.location.search).toBe("?variant=owner");
   });
 
   it("gives invited members a welcome and their own subscription step only", async () => {

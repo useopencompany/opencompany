@@ -25,10 +25,15 @@ function ConnectionNotifier() {
       return;
     }
 
-    window.localStorage.setItem(
-      ONBOARDING_CONNECTION_STORAGE_KEY,
-      JSON.stringify({ ...message, completedAt: Date.now() }),
-    );
+    try {
+      window.localStorage.setItem(
+        ONBOARDING_CONNECTION_STORAGE_KEY,
+        JSON.stringify({ ...message, completedAt: Date.now() }),
+      );
+    } catch {
+      // Storage may be blocked. The redirect query below still carries the
+      // connection result back to this tab's onboarding route.
+    }
 
     // A popup-blocked fallback opens this route in a plain tab with no usable
     // window.opener, so the storage write above drives the wizard tab. Try to

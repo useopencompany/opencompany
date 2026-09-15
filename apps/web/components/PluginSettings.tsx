@@ -23,6 +23,7 @@ import {
   ServerCog,
   ShieldAlert,
   ShieldCheck,
+  Sparkles,
   Trash2,
 } from "lucide-react";
 import Link from "next/link";
