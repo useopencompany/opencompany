@@ -71,6 +71,7 @@ const PREDECODED_READ_MODEL_FIELDS = new Set([
   "aliases",
   "scopes",
   "capabilityModes",
+  "toolModes",
   "hasUnseen",
   "awaitingInput",
   "enabled",
@@ -468,6 +469,7 @@ function readModelShape(input: {
           "status_reason",
           "scopes",
           "capability_modes",
+          "tool_modes",
         ],
         where:
           `"user_workos_id" = $1 AND "workspace_id" IS NULL AND CAST($2 AS text) = CAST($2 AS text) ` +
@@ -904,6 +906,7 @@ function readModelFieldValue(readModel: ReadModel, name: string, value: unknown)
     name === "discoverySummary" ||
     name === "scopes" ||
     name === "capabilityModes" ||
+    name === "toolModes" ||
     name === "metadata"
   ) {
     return jsonValue(value);
@@ -1295,6 +1298,7 @@ const READ_MODEL_COLUMN_NAMES = {
     status_reason: "statusReason",
     scopes: "scopes",
     capability_modes: "capabilityModes",
+    tool_modes: "toolModes",
   },
   "brain-folders-v1": {
     id: "id",
