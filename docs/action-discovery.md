@@ -65,9 +65,16 @@ capture use the same identity rule.
 Transport identity is separate from operation deduplication. The action gateway still atomically
 blocks identical non-idempotent external writes within the durable turn, and task approvals keep
 their saved operation identity and result across resumes. A stateless HTTP redelivery is a fresh
-dispatch; JSON-RPC IDs alone do not provide exactly-once execution or result replay. Durable
-intent/result receipts and provider idempotency keys are the broader recovery contract described
-in [ADR 0015](./adr/0015-durable-execution-behind-session-run.md).
+dispatch; JSON-RPC IDs alone do not provide exactly-once execution or result replay.
+
+That gateway claim is derived from the action's own parameters, so it holds regardless of transport
+identity. Wiki, Skill, and legacy Brain writes have no equivalent semantic claim: they deduplicated
+purely on the transport-derived key, so a redelivered stateless dispatch now runs twice (a repeated
+`timeline-add` appends a second entry, a repeated Skill edit publishes a second version). That is
+the deliberate trade for never again collapsing two genuinely different writes from clients whose
+request counters happen to agree. Durable intent/result receipts and provider idempotency keys are
+the broader recovery contract described in
+[ADR 0015](./adr/0015-durable-execution-behind-session-run.md).
 
 ## Verification and evaluation
 
