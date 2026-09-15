@@ -416,6 +416,28 @@ describe("integration account service", () => {
     },
   );
   it.each(["read", "query", "write", "draft"])(
+    "updates Todoist %s permission through account settings",
+    async (capabilityId) => {
+      const db = fakeDb([
+        [
+          {
+            id: "gint_todoist",
+            provider: "todoist",
+            userWorkosId: "user_1",
+            workspaceId: null,
+          },
+        ],
+      ]);
+      const service = createIntegrationAccountService({ db });
+      await expect(
+        service.setCapabilityMode(member, "gint_todoist", capabilityId, "ask"),
+      ).resolves.toBeUndefined();
+      expect(applyIntegrationCapabilityMode).toHaveBeenCalledWith(
+        expect.objectContaining({ integrationIds: ["gint_todoist"], capabilityId, mode: "ask" }),
+      );
+    },
+  );
+  it.each(["read", "query", "write", "draft"])(
     "updates Resend %s permission through account settings",
     async (capabilityId) => {
       const db = fakeDb([

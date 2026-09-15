@@ -23,6 +23,7 @@ export type ActionProviderId =
   | "neon"
   | "notion"
   | "supabase"
+  | "todoist"
   | "resend"
   | "betterstack"
   | "convex"

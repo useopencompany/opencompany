@@ -146,6 +146,11 @@ import {
   SUPABASE_MCP_ENDPOINT_URL,
 } from "./integrations/supabase-mcp";
 import {
+  getTodoistMcpIntegrationState,
+  loadTodoistMcpWorkerConnection,
+  TODOIST_MCP_ENDPOINT_URL,
+} from "./integrations/todoist-mcp";
+import {
   getVercelIntegrationState,
   loadVercelMcpWorkerConnection,
   VERCEL_MCP_ENDPOINT_URL,
@@ -273,6 +278,12 @@ const providerBindings = {
     endpointUrl: SUPABASE_MCP_ENDPOINT_URL,
     getState: getSupabaseMcpIntegrationState,
     loadConnection: loadSupabaseMcpWorkerConnection,
+  },
+  todoist: {
+    provider: "todoist",
+    endpointUrl: TODOIST_MCP_ENDPOINT_URL,
+    getState: getTodoistMcpIntegrationState,
+    loadConnection: loadTodoistMcpWorkerConnection,
   },
   resend: {
     provider: "resend",

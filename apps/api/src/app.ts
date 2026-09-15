@@ -3290,9 +3290,11 @@ export function createApiApp(input: CreateApiAppInput) {
     app.get("/integrations/stripe/callback", (c) => ingress.callback("stripe", c.req.raw));
     app.get("/integrations/notion/start", (c) => ingress.start("notion", c.req.raw));
     app.get("/integrations/supabase/start", (c) => ingress.start("supabase", c.req.raw));
+    app.get("/integrations/todoist/start", (c) => ingress.start("todoist", c.req.raw));
     app.get("/integrations/resend/start", (c) => ingress.start("resend", c.req.raw));
     app.get("/integrations/notion/callback", (c) => ingress.callback("notion", c.req.raw));
     app.get("/integrations/supabase/callback", (c) => ingress.callback("supabase", c.req.raw));
+    app.get("/integrations/todoist/callback", (c) => ingress.callback("todoist", c.req.raw));
     app.get("/integrations/resend/callback", (c) => ingress.callback("resend", c.req.raw));
     app.get("/integrations/latitude/start", (c) => ingress.start("latitude", c.req.raw));
     app.get("/integrations/latitude/callback", (c) => ingress.callback("latitude", c.req.raw));

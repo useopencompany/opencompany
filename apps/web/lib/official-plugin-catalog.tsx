@@ -115,6 +115,10 @@ export const OFFICIAL_MCP_PLUGINS = {
     ...OFFICIAL_MCP_PLUGIN_METADATA.supabase,
     ...SERVICE_MARKS.supabase,
   },
+  todoist: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.todoist,
+    ...SERVICE_MARKS.todoist,
+  },
   resend: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.resend,
     ...SERVICE_MARKS.resend,
