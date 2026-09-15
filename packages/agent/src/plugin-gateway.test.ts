@@ -40,6 +40,8 @@ const mocks = vi.hoisted(() => ({
   loadNeonConnection: vi.fn(),
   getNotionState: vi.fn(),
   getSupabaseState: vi.fn(),
+  getTodoistState: vi.fn(),
+  loadTodoistConnection: vi.fn(),
   getResendState: vi.fn(),
   loadNotionConnection: vi.fn(),
   loadSupabaseConnection: vi.fn(),
@@ -178,6 +180,11 @@ vi.mock("./integrations/notion-mcp", () => ({
   NOTION_MCP_ENDPOINT_URL: "https://mcp.notion.com/mcp",
   getNotionMcpIntegrationState: mocks.getNotionState,
   loadNotionMcpWorkerConnection: mocks.loadNotionConnection,
+}));
+vi.mock("./integrations/todoist-mcp", () => ({
+  TODOIST_MCP_ENDPOINT_URL: "https://ai.todoist.net/mcp",
+  getTodoistMcpIntegrationState: mocks.getTodoistState,
+  loadTodoistMcpWorkerConnection: mocks.loadTodoistConnection,
 }));
 vi.mock("./integrations/supabase-mcp", () => ({
   SUPABASE_MCP_ENDPOINT_URL: "https://mcp.supabase.com/mcp",
@@ -1246,6 +1253,46 @@ describe("plugin gateway registration cache", () => {
       },
     ]);
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
+  it("binds Todoist OAuth credentials only to Todoist's exact hosted MCP endpoint", async () => {
+    const todoistRecord = record({
+      pluginName: "todoist",
+      pluginLabel: "todoist",
+      pluginDescription: "Todoist plugin tools.",
+      connectionProvider: "todoist",
+      server: {
+        name: "todoist",
+        type: "streamable-http",
+        url: "https://ai.todoist.net/mcp",
+        headers: {},
+      },
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([todoistRecord]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:todoist:todoist",
+        connectionProvider: "todoist",
+        getState: mocks.getTodoistState,
+        loadConnection: mocks.loadTodoistConnection,
+      }),
+    ]);
+
+    for (const url of [
+      "https://ai.todoist.net.evil.example/mcp",
+      "https://evil.example/mcp",
+      "http://ai.todoist.net/mcp",
+      "https://ai.todoist.net/other",
+      "https://ai.todoist.net/mcp?token=leak",
+      "https://attacker@ai.todoist.net/mcp",
+    ]) {
+      mocks.listRegistrations.mockResolvedValueOnce([
+        { ...todoistRecord, server: { ...todoistRecord.server, url } },
+      ]);
+      await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+    }
   });
 
   it("binds Supabase OAuth credentials only to Supabase's exact hosted MCP endpoint", async () => {

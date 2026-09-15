@@ -96,6 +96,12 @@ import {
   verifySupabaseMcpState,
 } from "@opencompany/agent/integrations/supabase-mcp";
 import {
+  appendTodoistMcpStatus,
+  completeTodoistMcpOAuth,
+  startTodoistMcpOAuth,
+  verifyTodoistMcpState,
+} from "@opencompany/agent/integrations/todoist-mcp";
+import {
   appendVercelMcpStatus,
   completeVercelMcpOAuth,
   startVercelMcpOAuth,
@@ -119,6 +125,7 @@ export type McpOAuthProvider =
   | "notion"
   | "stripe"
   | "supabase"
+  | "todoist"
   | "resend"
   | "latitude"
   | "jamie"
@@ -238,6 +245,13 @@ const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
     verifyState: verifyNotionMcpState,
     appendStatus: appendNotionMcpStatus,
     deniedReason: "notion_denied",
+  },
+  todoist: {
+    start: startTodoistMcpOAuth,
+    complete: completeTodoistMcpOAuth,
+    verifyState: verifyTodoistMcpState,
+    appendStatus: appendTodoistMcpStatus,
+    deniedReason: "todoist_denied",
   },
   supabase: {
     start: startSupabaseMcpOAuth,

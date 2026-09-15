@@ -69,7 +69,7 @@ beforeAll(async () => {
     `);
     await db.exec(
       await readFile(
-        new URL("../../../drizzle/0289_workflow_slack_channel.sql", import.meta.url),
+        new URL("../../../drizzle/0290_workflow_slack_channel.sql", import.meta.url),
         "utf8",
       ),
     );
@@ -87,7 +87,7 @@ beforeAll(async () => {
     );
     await db.exec(
       await readFile(
-        new URL("../../../drizzle/0290_channel_delivery_bot_identity.sql", import.meta.url),
+        new URL("../../../drizzle/0291_channel_delivery_bot_identity.sql", import.meta.url),
         "utf8",
       ),
     );

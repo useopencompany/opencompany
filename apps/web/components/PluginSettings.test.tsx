@@ -417,6 +417,10 @@ describe("Plugin settings", () => {
       "/plugins/google-drive",
     );
     expect(screen.getByRole("link", { name: /jamie/i })).toHaveAttribute("href", "/plugins/jamie");
+    expect(screen.getByRole("link", { name: /todoist/i })).toHaveAttribute(
+      "href",
+      "/plugins/todoist",
+    );
     await user.click(screen.getByRole("button", { name: "All" }));
     await user.click(screen.getByRole("button", { name: "View all engineering plugins" }));
     expect(screen.getByRole("link", { name: /vercel/i })).toHaveAttribute(

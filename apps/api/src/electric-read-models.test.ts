@@ -327,6 +327,7 @@ describe("Electric read models", () => {
       "notion",
       "supabase",
       "resend",
+      "todoist",
       "x_account",
       "custom_mcp",
     ]);

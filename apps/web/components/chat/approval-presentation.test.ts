@@ -19,6 +19,7 @@ describe("coding engine permission requests", () => {
     ).toEqual({
       kind: "terminal",
       source: "Terminal",
+      sourceSlug: null,
       question: "Run this command?",
       description: "Inspect the file and folder hierarchy on the Desktop",
       code: "find /Users/ada/Desktop -maxdepth 2 -print",

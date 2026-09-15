@@ -95,6 +95,7 @@ export function pluginAccountsFromState(
     config.connectionProvider === "neon" ||
     config.connectionProvider === "notion" ||
     config.connectionProvider === "supabase" ||
+    config.connectionProvider === "todoist" ||
     config.connectionProvider === "resend" ||
     config.connectionProvider === "posthog" ||
     config.connectionProvider === "convex" ||

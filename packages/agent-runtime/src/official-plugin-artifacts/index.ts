@@ -4,7 +4,7 @@ import artifact1 from "./attio.json";
 import artifact2 from "./betterstack.json";
 import artifact0 from "./convex.json";
 import artifact22 from "./dash0.json";
-import artifact29 from "./doppler.json";
+import artifact30 from "./doppler.json";
 import artifact3 from "./fathom.json";
 import artifact4 from "./github.json";
 import artifact5 from "./gmail.json";
@@ -27,9 +27,10 @@ import artifact23 from "./signoz.json";
 import artifact24 from "./slack.json";
 import artifact26 from "./stripe.json";
 import artifact25 from "./supabase.json";
+import artifact27 from "./todoist.json";
 import artifact21 from "./vercel.json";
-import artifact27 from "./x.json";
-import artifact28 from "./yc-advise.json";
+import artifact28 from "./x.json";
+import artifact29 from "./yc-advise.json";
 
 export const OFFICIAL_PLUGIN_ARTIFACTS = {
   convex: artifact0,
@@ -59,7 +60,8 @@ export const OFFICIAL_PLUGIN_ARTIFACTS = {
   slack: artifact24,
   supabase: artifact25,
   stripe: artifact26,
-  x: artifact27,
-  "yc-advise": artifact28,
-  doppler: artifact29,
+  todoist: artifact27,
+  x: artifact28,
+  "yc-advise": artifact29,
+  doppler: artifact30,
 };

@@ -2,6 +2,7 @@
 
 import { CreditCard, FilePen, Globe, Plug, Terminal, Wrench } from "lucide-react";
 import type { ReactNode } from "react";
+import { actionSourceMark } from "@/lib/service-marks";
 import type { ApprovalKind, ApprovalPresentation } from "./approval-presentation";
 import {
   APPROVAL_CARD_ID_ATTRIBUTE,
@@ -58,7 +59,9 @@ export function ApprovalCard({
   submitting: string | null;
   error: string | null;
 }) {
-  const Icon = KIND_ICONS[presentation.kind];
+  // A decision about someone else's system reads better with that system's own mark on it.
+  const mark = presentation.sourceSlug ? actionSourceMark(presentation.sourceSlug) : null;
+  const Icon = mark?.Icon ?? KIND_ICONS[presentation.kind];
 
   return (
     <div
@@ -75,7 +78,15 @@ export function ApprovalCard({
       className="group max-w-[92%] overflow-hidden rounded-xl border border-border-strong bg-surface shadow-[0_1px_3px_rgba(0,0,0,0.04)]"
     >
       <div className="flex items-center gap-2 border-b border-border-subtle px-4 py-2">
-        <Icon size={13} strokeWidth={1.8} className="shrink-0 text-ink-subtle" />
+        {mark ? (
+          <span
+            className={`flex size-[18px] shrink-0 items-center justify-center rounded ${mark.iconClassName}`}
+          >
+            <Icon size={11} strokeWidth={1.8} />
+          </span>
+        ) : (
+          <Icon size={13} strokeWidth={1.8} className="shrink-0 text-ink-subtle" />
+        )}
         <span className="min-w-0 truncate text-[11.5px] font-medium text-ink-muted">
           {presentation.source}
         </span>

@@ -9,6 +9,7 @@ import {
 } from "@opencompany/agent-runtime";
 import { isBrowserToolName } from "@opencompany/browser-tools";
 import type { TaskView } from "@/components/Surface";
+import { actionRowLabel, actionSource } from "@/lib/action-identity";
 import {
   BRAIN_TOOL_NAME,
   type BrainToolOutput,
@@ -98,6 +99,8 @@ export type ToolCallView = {
   // approval request apart from an in-flight call.
   state: string;
   approvalId: string | null;
+  // The service a connected action ran against ("linear"), so the row can carry its brand mark.
+  actionSource: string | null;
 };
 
 type AssistantRenderOptions = {
@@ -355,6 +358,10 @@ export function toolCallViewFromPart(
       name === USE_ACTION_TOOL_NAME
         ? actionToolLabel(part.input)
         : (presentation?.label ?? toolLabel(name)),
+    actionSource:
+      name === USE_ACTION_TOOL_NAME
+        ? actionToolSource(part.input)
+        : (presentation?.actionSource ?? null),
     status,
     statusText:
       codexPromptOutcome === "answered"
@@ -601,31 +608,26 @@ function browserUrlLabel(value: string) {
   }
 }
 
+// The row label already names the service and the action, so the chip carries only what the
+// label cannot: why a call failed, and what a metered lookup returned and cost.
 function actionToolDetail(part: Record<string, unknown>) {
-  const action = isRecord(part.input) ? readString(part.input.action) : null;
-  if (part.state === "output-available" && isUseActionToolOutput(part.output)) {
-    if (part.output.ok === false) {
-      return truncateToolPreview([action, part.output.error.message].filter(Boolean).join(" - "));
-    }
-    if (isRecord(part.output.result) && part.output.result.untrustedProviderData === true) {
-      const resultCount =
-        typeof part.output.result.resultCount === "number"
-          ? `${part.output.result.resultCount} result${
-              part.output.result.resultCount === 1 ? "" : "s"
-            }`
-          : null;
-      const cost = isRecord(part.output.result.cost)
-        ? part.output.result.cost.state === "settling"
-          ? "cost settling"
-          : typeof part.output.result.cost.totalUsdMicros === "number"
-            ? formatActionCost(part.output.result.cost.totalUsdMicros)
-            : null
-        : null;
-      return truncateToolPreview([action, resultCount, cost].filter(Boolean).join(" · "));
-    }
-    return truncateToolPreview(action);
+  if (part.state !== "output-available" || !isUseActionToolOutput(part.output)) return null;
+  if (part.output.ok === false) return truncateToolPreview(part.output.error.message);
+  if (!isRecord(part.output.result) || part.output.result.untrustedProviderData !== true) {
+    return null;
   }
-  return truncateToolPreview(action) ?? formatToolInput(part.input);
+  const resultCount =
+    typeof part.output.result.resultCount === "number"
+      ? `${part.output.result.resultCount} result${part.output.result.resultCount === 1 ? "" : "s"}`
+      : null;
+  const cost = isRecord(part.output.result.cost)
+    ? part.output.result.cost.state === "settling"
+      ? "cost settling"
+      : typeof part.output.result.cost.totalUsdMicros === "number"
+        ? formatActionCost(part.output.result.cost.totalUsdMicros)
+        : null
+    : null;
+  return truncateToolPreview([resultCount, cost].filter(Boolean).join(" · "));
 }
 
 function formatActionCost(usdMicros: number) {
@@ -639,12 +641,13 @@ function formatActionCost(usdMicros: number) {
 
 export function actionToolLabel(input: unknown) {
   const action = isRecord(input) ? readString(input.action) : null;
-  if (!action) return "Action";
-  const pluginMatch = /^plugin:([^:]+):[^.]+\.(.+)$/u.exec(action);
-  if (pluginMatch) {
-    return `${toolLabel(pluginMatch[1]!)} · ${toolLabel(pluginMatch[2]!)}`;
-  }
-  return toolLabel(action.split(".").join("_"));
+  return action ? actionRowLabel(action) : "Action";
+}
+
+/** The service slug behind a connected action call, for the row's brand mark. */
+export function actionToolSource(input: unknown) {
+  const action = isRecord(input) ? readString(input.action) : null;
+  return action ? actionSource(action) : null;
 }
 
 export function isUseActionToolOutput(value: unknown): value is UseActionToolOutput {

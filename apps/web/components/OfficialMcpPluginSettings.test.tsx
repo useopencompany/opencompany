@@ -55,6 +55,7 @@ import {
   StripePluginDetail,
   SupabasePluginDetail,
   slackToolsStateFromPlugin,
+  TodoistPluginDetail,
   uncuratedPluginToolGroups,
   VercelPluginDetail,
   XPluginDetail,
@@ -358,6 +359,7 @@ const appData = vi.hoisted(() => ({
       neon: [],
       stripe: [] as IntegrationAccountView<"stripe">[],
       supabase: [],
+      todoist: [],
       resend: [],
       notion: [
         {
@@ -3255,6 +3257,56 @@ describe("Linear plugin settings", () => {
       "/api/integrations/supabase/start?returnTo=/plugins/supabase",
     );
     expect(screen.getByText(/SQL can read or change data/)).toBeInTheDocument();
+  });
+  it("offers the shared Todoist account connection and keeps deletion opt-in", () => {
+    const todoistPlugin = {
+      ...notionPlugin,
+      id: "plugin_todoist",
+      name: "todoist",
+      manifest: { name: "todoist" },
+      remoteMcpServers: [
+        {
+          ...notionPlugin.remoteMcpServers[0],
+          name: "todoist",
+          connectionProvider: "todoist",
+          capabilities: [
+            {
+              id: "read",
+              label: "Read tasks and projects",
+              defaultMode: "on",
+              tools: ["find-tasks"],
+            },
+            {
+              id: "query",
+              label: "Read activity history, analytics, and attachments",
+              defaultMode: "ask",
+              tools: ["find-activity"],
+            },
+            {
+              id: "write",
+              label: "Create and change Todoist items",
+              defaultMode: "ask",
+              tools: ["add-tasks"],
+            },
+            {
+              id: "draft",
+              label: "Permanently delete Todoist items",
+              defaultMode: "off",
+              tools: ["delete-object"],
+            },
+          ],
+          tools: [],
+        },
+      ],
+    } as const satisfies PluginInstallationDto;
+    render(
+      <TodoistPluginDetail pluginState={{ status: "ready", plugin: todoistPlugin }} canEdit />,
+    );
+    expect(screen.getByRole("link", { name: /connect todoist account/i })).toHaveAttribute(
+      "href",
+      "/api/integrations/todoist/start?returnTo=/plugins/todoist",
+    );
+    expect(screen.getByText(/Changes and deletions need your approval/)).toBeInTheDocument();
   });
   it("offers the shared Resend account connection and conservative permission groups", () => {
     const resendPlugin = {

@@ -2029,14 +2029,21 @@
       "idx": 289,
       "version": "7",
       "when": 1790100400010,
-      "tag": "0289_workflow_slack_channel",
+      "tag": "0289_opencompany_todoist_integration",
       "breakpoints": true
     },
     {
       "idx": 290,
       "version": "7",
       "when": 1790100400011,
-      "tag": "0290_channel_delivery_bot_identity",
+      "tag": "0290_workflow_slack_channel",
+      "breakpoints": true
+    },
+    {
+      "idx": 291,
+      "version": "7",
+      "when": 1790100400012,
+      "tag": "0291_channel_delivery_bot_identity",
       "breakpoints": true
     }
   ]
