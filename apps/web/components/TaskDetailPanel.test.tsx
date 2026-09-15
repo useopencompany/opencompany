@@ -214,6 +214,27 @@ describe("TaskDetailPanel", () => {
     expect(mocks.surfaceProps?.taskConversation).toMatchObject({ status: "waiting" });
   });
 
+  it("keeps a queued message from becoming the Task's active run", () => {
+    const initialTask = { ...task(), status: "running" as const, stage: "running" as const };
+    mocks.tasks = [initialTask];
+    mocks.runRows = [
+      { id: "run_working", status: "running", createdAt: "2026-01-01T00:00:00.000Z" },
+      // The user's message, sent while the turn above was still working.
+      { id: "run_queued", status: "queued", createdAt: "2026-01-01T00:05:00.000Z" },
+    ];
+
+    render(
+      <TaskDetailPanel
+        initialRun={buildHarnessRun({ task: initialTask, messages: [], events: [] })}
+      />,
+    );
+
+    expect(mocks.surfaceProps?.taskConversation).toMatchObject({
+      status: "running",
+      activeRunId: "run_working",
+    });
+  });
+
   it("times a resumed task from the live task, then its active run", () => {
     const initialTask = {
       ...task(),

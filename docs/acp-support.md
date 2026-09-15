@@ -28,6 +28,10 @@ extension unless the adapter advertises the corresponding capability on the `ini
 | --- | --- | --- |
 | `_session/steering` | Supported | Advertised by `_meta.steering.supported`. Injects a message the user promoted into the turn that is already running. Only an `injected` outcome consumes the promotion; `startedNewTurn` and any refusal leave the message queued so it runs as the next turn instead. |
 
+The opencompany engine offers the same product behavior without ACP: it has no adapter session, so a
+promoted message is appended to the message list at the next model step and projected into the
+transcript from the runner's own confirmed injection. See `docs/chat-operations.md`.
+
 ## Client methods
 
 | Agent-to-client method | Status | opencompany behavior |

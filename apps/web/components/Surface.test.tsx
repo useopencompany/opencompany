@@ -1585,8 +1585,6 @@ describe("Surface chat streaming UI", () => {
     expect(screen.queryByText("TASK-1 · Done")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Share task run" })).toBeInTheDocument();
 
-    expect(screen.getByText("Sending a message resumes this task.")).toBeVisible();
-
     const body = "  Please check the afternoon too.\n  Preserve this indent.  ";
     fireEvent.change(screen.getByPlaceholderText("Reply..."), { target: { value: body } });
     await user.click(screen.getByRole("button", { name: "Send message" }));
@@ -1739,7 +1737,7 @@ describe("Surface chat streaming UI", () => {
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
   });
 
-  it("keeps the composer typeable but unsendable while the Task run is active", async () => {
+  it("queues a message sent while the Task run is still working", async () => {
     const user = userEvent.setup();
     render(
       <Surface
@@ -1770,14 +1768,18 @@ describe("Surface chat streaming UI", () => {
     expect(composer).toBeEnabled();
     await user.type(composer, "also check the staging deploy{Enter}");
 
-    expect(composer).toHaveValue("also check the staging deploy");
-    expect(
-      screen.getByText("Draft your reply now — you can send it when the current run finishes."),
-    ).toBeVisible();
+    // A working Task is a session, not a form: the message goes now and waits behind the live turn.
+    await waitFor(() =>
+      expect(taskCommandMocks.comment).toHaveBeenCalledWith(
+        "goat_task_1",
+        { id: "task_activity_comment_test", body: "also check the staging deploy" },
+        { scopeKey: "" },
+      ),
+    );
+    expect(composer).toHaveValue("");
     expect(screen.queryByTestId("ad-hoc-task-hint")).not.toBeInTheDocument();
     expect(taskCommandMocks.create).not.toHaveBeenCalled();
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
-    expect(taskCommandMocks.comment).not.toHaveBeenCalled();
   });
 
   it("uses the chat stop control for an active workflow task", async () => {
@@ -1816,13 +1818,15 @@ describe("Surface chat streaming UI", () => {
     );
 
     expect(screen.queryByRole("button", { name: "Interrupt Codex" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Stop response" }));
+    // The Task's stop control sits beside the composer, exactly like a coding chat's, so Send stays
+    // free to queue a message into the turn that is still working.
+    expect(screen.getByRole("button", { name: "Send message" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Interrupt this task" }));
 
     expect(taskCommandMocks.cancel).toHaveBeenCalledWith("run_1");
     await waitFor(() => expect(chatMock.stop).toHaveBeenCalledTimes(1));
-    expect(screen.getByRole("status", { name: "Stopping task…" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Stopping task" })).toBeDisabled();
-    expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stopping this task" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Interrupt this task" })).not.toBeInTheDocument();
 
     rerender(
       <Surface
@@ -1857,7 +1861,7 @@ describe("Surface chat streaming UI", () => {
     );
 
     await waitFor(() =>
-      expect(screen.queryByRole("status", { name: "Stopping task…" })).not.toBeInTheDocument(),
+      expect(screen.queryByRole("button", { name: /this task/ })).not.toBeInTheDocument(),
     );
     expect(screen.getByRole("button", { name: "Send message" })).toBeInTheDocument();
   });
@@ -1886,10 +1890,10 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Stop response" }));
+    await user.click(screen.getByRole("button", { name: "Interrupt this task" }));
 
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument(),
+      expect(screen.getByRole("button", { name: "Interrupt this task" })).toBeEnabled(),
     );
   });
 

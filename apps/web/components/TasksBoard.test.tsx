@@ -331,39 +331,12 @@ describe("TasksBoardRoute", () => {
 
     const sheet = screen.getByRole("dialog");
     expect(within(sheet).getByRole("button", { name: "Archive" })).toBeDisabled();
-    expect(
-      within(sheet).getByText(
-        "Draft your comment now — you can post it when the current run finishes.",
-      ),
-    ).toBeVisible();
-
-    const composer = within(sheet).getByLabelText("Add a comment");
-    expect(composer).toBeEnabled();
-    fireEvent.change(composer, { target: { value: "also check the staging deploy" } });
-    expect(composer).toHaveValue("also check the staging deploy");
-    expect(within(sheet).getByRole("button", { name: "Post comment" })).toBeDisabled();
-    expect(createCommentMock).not.toHaveBeenCalled();
-  });
-
-  it("posts a settled Task comment verbatim and resumes through the canonical command", async () => {
-    const user = userEvent.setup();
-    appDataMock.taskRows = [
-      taskRow({ id: "waiting", name: "Approve the launch", status: "waiting" }),
-    ];
-    render(<TasksBoardRoute workflowNames={{}} />);
-    await user.click(screen.getByRole("link", { name: "Open Approve the launch" }));
-
-    const sheet = screen.getByRole("dialog");
-    const body = "  Approved.\n  Keep the original rollout order.  ";
-    fireEvent.change(within(sheet).getByLabelText("Add a comment"), { target: { value: body } });
-    await user.click(within(sheet).getByRole("button", { name: "Post comment" }));
-
-    await waitFor(() =>
-      expect(createCommentMock).toHaveBeenCalledWith(
-        "waiting",
-        { id: "task_activity_comment_test", body },
-        { scopeKey: "workspace_1" },
-      ),
+    // The peek is a read-only summary. Talking to a Task happens in its session, where the message
+    // can be queued behind the live turn and steered into it.
+    expect(within(sheet).queryByLabelText("Add a comment")).not.toBeInTheDocument();
+    expect(within(sheet).getByRole("link", { name: "Open full view" })).toHaveAttribute(
+      "href",
+      "/tasks/TASK-running",
     );
   });
 
