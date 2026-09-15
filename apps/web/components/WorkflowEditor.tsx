@@ -39,6 +39,7 @@ import {
   StepRuntimePicker,
   type WorkflowStepPatch,
 } from "@/components/WorkflowModelControls";
+import { WorkflowRunHistory } from "@/components/WorkflowRunHistory";
 import {
   archiveHeadlessWorkflow,
   runHeadlessWorkflowNow,
@@ -388,6 +389,8 @@ export function WorkflowEditor({
               </p>
             ) : null}
           </div>
+
+          <WorkflowRunHistory workflowSlug={workflow.slug} />
         </div>
       </div>
     </main>
