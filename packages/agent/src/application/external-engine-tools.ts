@@ -12,6 +12,7 @@ import {
   supportsCompactActionDiscovery,
 } from "@opencompany/agent-runtime";
 import * as z from "zod/v4-mini";
+import { mcpInvocationId } from "../mcp-invocation";
 
 export type ExternalEngineToolContext = {
   sessionId: string;
@@ -202,16 +203,6 @@ function mcpPropertySchema(property: Record<string, unknown>): z.ZodMiniType {
   if (property.type === "integer") return z.number().check(z.int());
   if (property.type === "object") return z.record(z.string(), z.unknown());
   return z.unknown();
-}
-
-function mcpInvocationId(
-  turnId: string,
-  transportSessionId: string | undefined,
-  requestId: unknown,
-) {
-  return ["mcp", turnId, transportSessionId ?? "http", String(requestId)]
-    .map(encodeURIComponent)
-    .join(":");
 }
 
 async function runGateway(

@@ -141,7 +141,7 @@ describe("registerExternalEngineServiceTools", () => {
     expect(publishArtifact).toHaveBeenCalledWith({
       sessionId: "codex_session_1",
       runId: "codex_turn_1",
-      toolCallId: "mcp:codex_turn_1:transport_1:request_1",
+      toolCallId: "mcp:codex_turn_1:transport_1:string:request_1",
       arguments: {
         path: "/home/user/opencompany-goat/claude-chat/plan.md",
         title: "Plan",
@@ -175,6 +175,20 @@ describe("registerExternalEngineServiceTools", () => {
       ok: true,
       sources: [{ id: "gmail", label: "Gmail", description: "Email" }],
     });
+  });
+
+  it("gives stateless file publications distinct identities when the request counter resets", async () => {
+    const publishArtifact = vi.fn<ExternalEngineToolDependencies["publishArtifact"]>(async () => ({
+      ok: false,
+      error: "test publication",
+    }));
+    const tools = registerTools(vi.fn(), publishArtifact);
+    const publish = getTool(tools, "publish_artifact").callback;
+    await publish({ path: "/sandbox/first.md" }, { requestId: 2 });
+    await publish({ path: "/sandbox/second.md" }, { requestId: 2 });
+    expect(publishArtifact.mock.calls[0]?.[0].toolCallId).not.toBe(
+      publishArtifact.mock.calls[1]?.[0].toolCallId,
+    );
   });
 
   it("derives stable, distinct invocation ids from separate MCP requests", async () => {
@@ -213,13 +227,13 @@ describe("registerExternalEngineServiceTools", () => {
       turnId: "codex_turn_1",
       action: "gmail.list",
       params: { limit: 5 },
-      invocationId: "mcp:codex_turn_1:transport_1:jsonrpc_41",
+      invocationId: "mcp:codex_turn_1:transport_1:string:jsonrpc_41",
     });
     expect(secondRequest).toMatchObject({
-      invocationId: "mcp:codex_turn_1:transport_1:jsonrpc_42",
+      invocationId: "mcp:codex_turn_1:transport_1:string:jsonrpc_42",
     });
     expect(retryCall[0].request).toMatchObject({
-      invocationId: "mcp:codex_turn_1:transport_1:jsonrpc_41",
+      invocationId: "mcp:codex_turn_1:transport_1:string:jsonrpc_41",
     });
     expect(firstRequest).not.toEqual(secondRequest);
   });
