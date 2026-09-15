@@ -276,6 +276,7 @@ describe("Electric read models", () => {
               status_reason: null,
               scopes: JSON.stringify(["repo"]),
               capability_modes: JSON.stringify({ repositories: "on" }),
+              tool_modes: JSON.stringify({ "list-broadcasts": "on" }),
               oauth_access_token: "must-not-cross",
             },
           },
@@ -330,6 +331,7 @@ describe("Electric read models", () => {
       "custom_mcp",
     ]);
     expect(requestedUrl?.searchParams.get("columns")).not.toContain("credential");
+    expect(requestedUrl?.searchParams.get("columns")?.split(",")).toContain("tool_modes");
     expect((await response.json())[0]?.value).toEqual({
       id: "integration_1",
       provider,
@@ -343,6 +345,7 @@ describe("Electric read models", () => {
       statusReason: null,
       scopes: ["repo"],
       capabilityModes: { repositories: "on" },
+      toolModes: { "list-broadcasts": "on" },
     });
   });
 
