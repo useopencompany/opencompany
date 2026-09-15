@@ -909,12 +909,39 @@ describe("Postgres Task repository", () => {
         body: "Changed after the first request.",
       }),
     ).rejects.toMatchObject({ code: "idempotency_conflict" });
+    // A Task that is already working takes the message as a queued Run behind the live one, the
+    // same way a Chat does. The Task is not reopened and keeps the turn it is running.
+    const queued = await service.createComment(actor(), created.task.id, {
+      id: "task_comment_2",
+      body: "A second message while the run works.",
+    });
     await expect(
-      service.createComment(actor(), created.task.id, {
-        id: "task_comment_2",
-        body: "A second comment while active.",
-      }),
-    ).rejects.toMatchObject({ code: "conflict" });
+      database.query(
+        `SELECT task.status, task.stage, task.attempts,
+                runtime.status AS runtime_status, runtime.active_turn_id,
+                run.status AS run_status, run.prompt AS run_prompt,
+                (SELECT COUNT(*)::int FROM goat.task_activities
+                  WHERE task_id = task.id AND kind = 'status_changed') AS status_activities
+         FROM goat.tasks AS task
+         JOIN goat.codex_chat_sessions AS runtime ON runtime.chat_session_id = task.session_id
+         JOIN goat.codex_chat_turns AS run ON run.id = $2
+         WHERE task.id = $1`,
+        [created.task.id, queued.runId],
+      ),
+    ).resolves.toMatchObject({
+      rows: [
+        {
+          status: "running",
+          stage: "queued",
+          attempts: 2,
+          runtime_status: "queued",
+          active_turn_id: resumed.runId,
+          run_status: "queued",
+          run_prompt: "A second message while the run works.",
+          status_activities: 1,
+        },
+      ],
+    });
     await expect(
       service.createComment(
         actor({ userId: "user_2", workspaceId: "workspace_2" }),
@@ -934,7 +961,7 @@ describe("Postgres Task repository", () => {
           [created.task.conversationId, created.task.id],
         )
       ).rows,
-    ).toEqual([{ messages: 4, runs: 2, comments: 1 }]);
+    ).toEqual([{ messages: 6, runs: 3, comments: 2 }]);
   });
 
   it("allows a workspace member to comment but keeps the resumed Run owned by the Task owner", async () => {

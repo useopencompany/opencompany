@@ -897,14 +897,15 @@ export function Surface({
   const backgroundChatDirective = backgroundInputDirective;
   const backgroundDirectiveTargetEngine = backgroundLaunchSelection?.engine ?? null;
   const composerEngine = backgroundChatDirective ? backgroundDirectiveTargetEngine : activeEngine;
-  // A running coding turn gates nothing: the message becomes a queued turn the user can steer into
-  // the live one. Tasks and background sends keep their own dispatch rules.
+  // A running turn gates nothing: the message becomes a queued turn the user can steer into the
+  // live one. A Task is a session like any other here -- viewing one shows the work, not a form to
+  // leave a note on. Background sends keep their own dispatch rules.
   const canQueueWhileWorking = Boolean(
-    isEngineChat &&
-      persistedChatSessionId &&
-      !activeTaskConversation &&
+    ((isEngineChat && persistedChatSessionId && !activeTaskConversation) ||
+      activeTaskConversation) &&
       !backgroundChatDirective &&
       !queuedMessageSubmitting &&
+      !taskCommentSubmitting &&
       !readOnly,
   );
   const lowCreditBalance = Boolean(
@@ -1064,24 +1065,25 @@ export function Surface({
       break;
     }
   }, [adoptResolvedAutoModel, isAutoChatModel, messages]);
-  // A coding message sent while a turn is running becomes its own queued Run. It renders above the
+  // A message sent while a turn is running becomes its own queued Run. It renders above the
   // composer with steer/remove actions until it starts, so the transcript keeps showing only work
   // that actually happened. The card offers mutations and so follows the composer's read-only
   // rule; the transcript filter does not, because a Run that never executed has nothing to show a
   // read-only viewer either.
+  const queuesRuns = isEngineChat || Boolean(activeTaskConversation);
   const queuedMessages = useMemo(
     () =>
-      isEngineChat && !activeTaskConversation && !readOnly
+      queuesRuns && !readOnly
         ? queuedChatMessages({ runs: liveChat.runsById, messages: chatMessages })
         : [],
-    [activeTaskConversation, chatMessages, isEngineChat, liveChat.runsById, readOnly],
+    [chatMessages, liveChat.runsById, queuesRuns, readOnly],
   );
   const pendingRunMessages = useMemo(
     () =>
-      isEngineChat && !activeTaskConversation
+      queuesRuns
         ? pendingRunMessageIds({ runs: liveChat.runsById, messages: chatMessages })
         : new Set<string>(),
-    [activeTaskConversation, chatMessages, isEngineChat, liveChat.runsById],
+    [chatMessages, liveChat.runsById, queuesRuns],
   );
   const transcriptMessages = useMemo(
     () =>
@@ -1829,8 +1831,11 @@ export function Surface({
       return;
     }
     if (activeTaskConversation) {
-      if (isTaskConversationWorking || taskCommentSubmitting) return;
+      if (taskCommentSubmitting) return;
       if (!prompt && readyAttachments.length === 0) return;
+      // Sending into a working Task queues the message behind the live turn, and the queued card
+      // is the feedback. Only a Task that had stopped needs to be told it started again.
+      const resumesTask = !isTaskConversationWorking;
       const attachmentIds = readyAttachments.map((attachment) => attachment.id);
       const pendingCommand = pendingTaskCommentRef.current;
       const command =
@@ -1857,7 +1862,7 @@ export function Surface({
           if (!mountedRef.current) return;
           pendingTaskCommentRef.current = null;
           router.refresh();
-          toast.success("Message sent. The task is running again.");
+          if (resumesTask) toast.success("Message sent. The task is running again.");
         })
         .catch((error) => {
           if (!mountedRef.current) return;
@@ -3350,21 +3355,7 @@ export function Surface({
                   ))}
                 </div>
               ) : null}
-              {activeTaskConversation ? (
-                <div
-                  role="status"
-                  className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-[12px] leading-4 text-ink-subtle shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
-                >
-                  <MessageSquare size={13} strokeWidth={2} className="shrink-0" />
-                  <span>
-                    {isTaskConversationWorking
-                      ? "Draft your reply now — you can send it when the current run finishes."
-                      : taskCommentSubmitting
-                        ? "Sending your message…"
-                        : "Sending a message resumes this task."}
-                  </span>
-                </div>
-              ) : selectedAdHocTask ? (
+              {selectedAdHocTask ? (
                 <div
                   role="status"
                   data-testid="ad-hoc-task-hint"
@@ -3389,13 +3380,12 @@ export function Surface({
               ) : backgroundChatDirective ? (
                 <BackgroundChatDirectiveHint engine={backgroundDirectiveTargetEngine} />
               ) : null}
-              {queuedMessages.length > 0 && activeEngine ? (
+              {queuedMessages.length > 0 ? (
                 <div className="flex flex-col gap-1.5">
                   {queuedMessages.map((queued) => (
                     <QueuedMessageCard
                       key={queued.runId}
                       message={queued}
-                      engineLabel={ENGINE_REGISTRY[activeEngine].label}
                       onSteer={() => steerQueuedMessage(queued.runId)}
                       onRemove={() => removeQueuedMessage(queued.runId)}
                     />
@@ -3469,10 +3459,15 @@ export function Surface({
                       maxLength={10_000}
                     />
                   </div>
-                  {activeEngine &&
-                  isForegroundTurnWorking &&
-                  !activeTaskConversation &&
-                  !backgroundChatDirective ? (
+                  {activeTaskConversation ? (
+                    isTaskConversationWorking || isTaskConversationStopping ? (
+                      <EngineStopButton
+                        label="this task"
+                        disabled={isTaskConversationStopping}
+                        onStop={stopGeneration}
+                      />
+                    ) : null
+                  ) : activeEngine && isForegroundTurnWorking && !backgroundChatDirective ? (
                     <EngineStopButton
                       label={ENGINE_REGISTRY[activeEngine].label}
                       onStop={stopGeneration}
@@ -3493,8 +3488,7 @@ export function Surface({
                           (attachment) => attachment.status === "ready",
                         )) ||
                       composerAttachments.isUploading ||
-                      (!isBackgroundSubmit && isForegroundTurnWorking && !canQueueWhileWorking) ||
-                      isTaskConversationWorking ||
+                      (!isBackgroundSubmit && isInteractionPending && !canQueueWhileWorking) ||
                       taskCommentSubmitting ||
                       backgroundTaskSubmitting ||
                       voiceDictation.isActive ||
@@ -3502,11 +3496,11 @@ export function Surface({
                       (!activeTaskConversation && chatSendBlocked)
                     }
                     isGenerating={
-                      isBackgroundSubmit
+                      isBackgroundSubmit || activeTaskConversation
                         ? false
-                        : (!isEngineChat && isForegroundTurnWorking) || isTaskConversationWorking
+                        : !isEngineChat && isForegroundTurnWorking
                     }
-                    isStopping={!isBackgroundSubmit && isTaskConversationStopping}
+                    isStopping={false}
                     startsTask={selectedAdHocTask || Boolean(selectedWorkflowMention)}
                     onStop={stopGeneration}
                   />
@@ -3531,6 +3525,7 @@ export function Surface({
                         aria-label="Attach files"
                         disabled={
                           isForegroundTurnWorking ||
+                          isTaskConversationWorking ||
                           taskCommentSubmitting ||
                           readOnly ||
                           voiceDictation.isActive
@@ -6564,14 +6559,23 @@ function SubmitButton({
   );
 }
 
-function EngineStopButton({ label, onStop }: { label: string; onStop: () => void }) {
+function EngineStopButton({
+  label,
+  disabled = false,
+  onStop,
+}: {
+  label: string;
+  disabled?: boolean;
+  onStop: () => void;
+}) {
   return (
     <button
       type="button"
       aria-label={`Interrupt ${label}`}
       title={`Interrupt ${label}`}
+      disabled={disabled}
       onClick={onStop}
-      className="mb-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-ink-muted transition-colors duration-150 hover:border-danger-border hover:bg-danger-bg hover:text-danger focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+      className="mb-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-ink-muted transition-colors duration-150 hover:border-danger-border hover:bg-danger-bg hover:text-danger focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
     >
       <Square size={11} strokeWidth={2.2} fill="currentColor" />
     </button>

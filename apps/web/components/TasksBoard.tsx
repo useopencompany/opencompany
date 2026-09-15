@@ -17,7 +17,7 @@ import {
 import { toast } from "@opencompany/ui/components/sonner";
 import { GitHubIcon } from "@opencompany/ui/icons";
 import { useLiveQuery } from "@tanstack/react-db";
-import { Archive, ArrowUp, ArrowUpRight, LayoutGrid, ListTodo, Loader2, Rows3 } from "lucide-react";
+import { Archive, ArrowUpRight, LayoutGrid, ListTodo, Loader2, Rows3 } from "lucide-react";
 import Link from "next/link";
 import {
   type KeyboardEvent,
@@ -37,11 +37,7 @@ import {
   getHeadlessTaskActivities,
   type HeadlessTaskActivityReadModel,
 } from "@/lib/headless-task-collections";
-import {
-  archiveHeadlessTask,
-  createHeadlessTaskComment,
-  newHeadlessTaskCommentId,
-} from "@/lib/headless-task-commands";
+import { archiveHeadlessTask } from "@/lib/headless-task-commands";
 import { extractGitHubPullRequestUrl } from "@/lib/pull-request-link";
 import {
   formatStartedAt,
@@ -791,13 +787,6 @@ function TaskBoardSheet({
                   </li>
                 ))}
               </ol>
-              {task.sessionId ? (
-                <TaskCommentComposer
-                  taskId={task.id}
-                  workspaceId={workspace.id}
-                  active={!settled}
-                />
-              ) : null}
             </section>
           </div>
 
@@ -883,86 +872,6 @@ function TaskBoardSheet({
         </footer>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function TaskCommentComposer({
-  taskId,
-  workspaceId,
-  active,
-}: {
-  taskId: string;
-  workspaceId: string;
-  active: boolean;
-}) {
-  const [body, setBody] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const pendingComment = useRef<{ id: string; body: string } | null>(null);
-  // A run in flight gates posting, not composing: the textarea below stays editable so a comment
-  // can be drafted while the task works.
-  const postBlocked = active || submitting;
-
-  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (postBlocked || !body.trim()) return;
-    const command =
-      pendingComment.current?.body === body
-        ? pendingComment.current
-        : { id: newHeadlessTaskCommentId(), body };
-    pendingComment.current = command;
-    setSubmitting(true);
-    try {
-      await createHeadlessTaskComment(taskId, command, { scopeKey: workspaceId });
-      pendingComment.current = null;
-      setBody("");
-      toast.success("Comment posted. The task is running again.");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not post the comment.");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <form className="border-t border-border pt-4" onSubmit={submit}>
-      <label htmlFor={`task-comment-${taskId}`} className="sr-only">
-        Add a comment
-      </label>
-      <div className="rounded-lg border border-border bg-canvas p-2 focus-within:border-ink/30">
-        <textarea
-          id={`task-comment-${taskId}`}
-          value={body}
-          onChange={(event) => {
-            setBody(event.target.value);
-            if (pendingComment.current?.body !== event.target.value) pendingComment.current = null;
-          }}
-          disabled={submitting}
-          maxLength={10_000}
-          rows={3}
-          placeholder="Add a comment…"
-          className="block w-full resize-none bg-transparent px-1 py-0.5 text-[12.5px] leading-5 text-ink outline-none placeholder:text-ink-subtle disabled:cursor-not-allowed disabled:opacity-60"
-        />
-        <div className="mt-2 flex items-center justify-between gap-3">
-          <span className="text-[11px] leading-4 text-ink-subtle">
-            {active
-              ? "Draft your comment now — you can post it when the current run finishes."
-              : "Posting a comment resumes this task."}
-          </span>
-          <button
-            type="submit"
-            aria-label="Post comment"
-            disabled={postBlocked || !body.trim()}
-            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-ink text-canvas transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {submitting ? (
-              <Loader2 size={13} strokeWidth={1.75} className="animate-spin" />
-            ) : (
-              <ArrowUp size={13} strokeWidth={1.75} />
-            )}
-          </button>
-        </div>
-      </div>
-    </form>
   );
 }
 

@@ -11,12 +11,10 @@ import type { QueuedChatMessage } from "./queued-messages";
 
 export function QueuedMessageCard({
   message,
-  engineLabel,
   onSteer,
   onRemove,
 }: {
   message: QueuedChatMessage;
-  engineLabel: string;
   onSteer: () => Promise<void>;
   onRemove: () => Promise<void>;
 }) {
@@ -47,7 +45,7 @@ export function QueuedMessageCard({
           <CornerDownRight size={13} strokeWidth={1.8} />
           {pendingAction === "steer" ? "Steering…" : "Steer"}
         </TooltipTrigger>
-        <TooltipContent>Send this into the turn {engineLabel} is running now</TooltipContent>
+        <TooltipContent>Send this into the turn that is running now</TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger

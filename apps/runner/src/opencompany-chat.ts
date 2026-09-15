@@ -32,6 +32,7 @@ import { createSubagentBudget } from "@opencompany/agent/subagent";
 import {
   AGENT_MODEL_CATALOG,
   CHAT_ARTIFACT_DATA_PART_TYPE,
+  CHAT_STEERING_DATA_PART_TYPE,
   GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
   modelSupportsAttachments,
   parsePublishedChatArtifact,
@@ -82,6 +83,7 @@ import {
   CodexChatRetryableInfrastructureError,
   TaskTurnTerminalError,
 } from "./codex-chat-errors";
+import { createProductSteeringChannel } from "./coding-chat-steering";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { createActionDispatcher } from "./opencompany-action-gateway";
@@ -360,21 +362,41 @@ export async function runProductChatTurn(input: {
       }
     }
     const messages = context.messages;
+    // Steering rides alongside the turn that is already producing work. The product agent has no
+    // adapter session to inject into, so a promoted message joins the next model step's message
+    // list instead; a step that is mid-tool-call finishes first.
+    const steeringTrace = createSteeringTraceChannel();
+    const steering = createProductSteeringChannel({
+      runId: turn.id,
+      leaseId,
+      leaseOwner,
+      onSteered: (message) => steeringTrace.publish(message),
+    });
     const stream = streamText({
       model: guardKimiOutput(modelResolution.model, runtime.model),
       system: runtime.system,
       messages,
       tools: runtime.toolContext.tools,
       stopWhen: stepCountIs(runtime.maxSteps),
-      prepareStep: ({ stepNumber }) =>
-        prepareProductChatStep({
+      prepareStep: async ({ stepNumber, messages: stepMessages }) => {
+        const prepared = prepareProductChatStep({
           stepNumber,
           maxSteps: runtime.maxSteps,
           system: runtime.system,
           wikiContext: runtime.toolContext.getSelectedWikiContext(),
           actionCallsExhausted: runtime.toolContext.areActionCallsExhausted(),
           toolNames: Object.keys(runtime.toolContext.tools),
-        }),
+        });
+        const steered = await steering.take();
+        if (steered.length === 0) return prepared;
+        return {
+          ...prepared,
+          messages: [
+            ...stepMessages,
+            ...steered.map((text) => ({ role: "user" as const, content: text })),
+          ],
+        };
+      },
       ...(runtime.toolContext.repairToolCall
         ? { experimental_repairToolCall: runtime.toolContext.repairToolCall }
         : {}),
@@ -385,6 +407,7 @@ export async function runProductChatTurn(input: {
     projection = await consumeProductChatStream({
       fullStream: stream.fullStream,
       signal: generationController.signal,
+      steeringTrace,
       sink: {
         project: async (nextProjection) => {
           projection = nextProjection;
@@ -540,6 +563,36 @@ export async function hasHostedTurnCredits(workspaceId: string, db = getDb()) {
   return hasPositiveCreditBalance(workspaceId, db);
 }
 
+// A message the user steered into the turn that is running, carried from the step boundary that
+// injected it to the projection that records it.
+export type SteeredMessage = { id: string; text: string };
+
+export function createSteeringTraceChannel() {
+  let listener: ((message: SteeredMessage) => void) | null = null;
+  // streamText starts the first model step eagerly, so a message steered in before this turn's
+  // consumer subscribes would otherwise reach the model without reaching the transcript. Buffer
+  // until there is somewhere to put it.
+  const buffered: SteeredMessage[] = [];
+  return {
+    publish: (message: SteeredMessage) => {
+      if (!listener) {
+        buffered.push(message);
+        return;
+      }
+      listener(message);
+    },
+    subscribe: (next: (message: SteeredMessage) => void) => {
+      // One channel belongs to one turn's projection. A second subscriber would silently replace
+      // the first and drop its messages, so make that state impossible rather than debuggable.
+      if (listener) throw new Error("A steering trace channel accepts one subscriber per turn.");
+      listener = next;
+      for (const message of buffered.splice(0)) next(message);
+    },
+  };
+}
+
+export type SteeringTraceChannel = ReturnType<typeof createSteeringTraceChannel>;
+
 export async function consumeProductChatStream(input: {
   fullStream: AsyncIterable<unknown>;
   signal: AbortSignal;
@@ -551,6 +604,7 @@ export async function consumeProductChatStream(input: {
   now?: () => number;
   initialProjection?: ProductChatProjection;
   subagentTrace?: SubagentTraceChannel;
+  steeringTrace?: SteeringTraceChannel;
 }): Promise<ProductChatProjection> {
   const parts: ProductChatUiPart[] = cloneParts(input.initialProjection?.parts ?? []);
   const textPartIndexes = new Map<string, number>();
@@ -625,6 +679,17 @@ export async function consumeProductChatStream(input: {
     if (!next) return;
     parts.splice(0, parts.length, ...next);
     dirty = true;
+    void flush(false);
+  });
+
+  // A steered message arrives between model steps, while this loop is parked waiting for the next
+  // chunk. Writing it straight into the parts is what puts it in the transcript at the point the
+  // agent received it, instead of leaving the change of direction unexplained.
+  input.steeringTrace?.subscribe((message) => {
+    appendPart({
+      type: CHAT_STEERING_DATA_PART_TYPE,
+      data: { text: message.text, itemId: message.id },
+    });
     void flush(false);
   });
 
@@ -1009,9 +1074,21 @@ async function loadProductChatStoredMessages(input: {
     taskStatus: null,
   }));
   return replayMessagesThroughCurrent(
-    storedMessages,
+    storedMessages.filter((message) => !isUnansweredAssistantMessage(message)),
     input.currentUserMessageId,
     input.includeCurrentAssistantMessage,
+  );
+}
+
+// A Run that never executed -- a queued message the user steered into the live turn, or one they
+// removed from the queue -- leaves an assistant row with nothing in it. Replaying that row would
+// hand the model an empty assistant turn between two user messages, so drop it and keep the user's
+// words, which are what the next turn actually has to answer.
+function isUnansweredAssistantMessage(message: StoredChatMessage) {
+  return (
+    message.role === "assistant" &&
+    !message.content.trim() &&
+    !message.debugTrace?.uiMessageParts?.length
   );
 }
 

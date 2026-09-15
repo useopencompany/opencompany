@@ -922,7 +922,17 @@ export async function settleDurableTurn(input: {
         (
           ${Boolean(next)}::boolean
           AND (NOT ${requestedRetry}::boolean OR task.attempts < 2)
-        ) AS queue_next
+        ) AS insert_next,
+        -- A message the user sent while this turn was working is a Run of its own, waiting behind
+        -- it. The Task is not finished while one is queued: it must not report an outcome or
+        -- notify, it must keep running so the queue claim can pick the message up.
+        EXISTS (
+          SELECT 1
+          FROM goat.codex_chat_turns AS queued
+          WHERE queued.chat_session_id = task.session_id
+            AND queued.status = 'queued'
+            AND queued.id <> ${target.turnId}
+        ) AS has_queued_message
       FROM goat.tasks AS task
       WHERE task.id = ${completion?.taskId ?? null}
         AND task.session_id = ${target.chatSessionId}
@@ -933,6 +943,12 @@ export async function settleDurableTurn(input: {
         )
         AND EXISTS (SELECT 1 FROM settled_turn)
       FOR UPDATE
+    ),
+    settlement_decision AS MATERIALIZED (
+      SELECT
+        settlement.*,
+        (settlement.insert_next OR settlement.has_queued_message) AS queue_next
+      FROM settlement_task AS settlement
     ),
     projected_task AS (
       UPDATE goat.tasks AS task
@@ -962,7 +978,7 @@ export async function settleDurableTurn(input: {
             ELSE ${completion?.outcomeComment ?? null}
           END,
           attempts = CASE
-            WHEN ${requestedRetry}::boolean AND settlement.queue_next THEN 2
+            WHEN ${requestedRetry}::boolean AND settlement.insert_next THEN 2
             ELSE task.attempts
           END,
           harness_spec = COALESCE(
@@ -970,9 +986,9 @@ export async function settleDurableTurn(input: {
             task.harness_spec
           ),
           updated_at = ${input.completedAt}
-      FROM settlement_task AS settlement
+      FROM settlement_decision AS settlement
       WHERE task.id = settlement.id
-      RETURNING task.*, settlement.previous_status, settlement.queue_next
+      RETURNING task.*, settlement.previous_status, settlement.queue_next, settlement.insert_next
     ),
     finished_task_activity AS MATERIALIZED (
       INSERT INTO goat.task_activities (
@@ -1012,7 +1028,7 @@ export async function settleDurableTurn(input: {
         ${new Date(input.completedAt.getTime() + 2)}
       FROM projected_task AS task
       WHERE ${requestedRetry}::boolean
-        AND task.queue_next
+        AND task.insert_next
       RETURNING id
     ),
     tagged_current_task_messages AS (
@@ -1052,7 +1068,7 @@ export async function settleDurableTurn(input: {
         ${input.completedAt}
       FROM projected_task AS task
       WHERE ${Boolean(next)}
-        AND task.queue_next
+        AND task.insert_next
       RETURNING id
     ),
     next_assistant_message AS (
@@ -1070,7 +1086,7 @@ export async function settleDurableTurn(input: {
         ${new Date(input.completedAt.getTime() + 1)}
       FROM projected_task AS task
       WHERE ${Boolean(next)}
-        AND task.queue_next
+        AND task.insert_next
       RETURNING id
     ),
     next_turn AS (
@@ -1105,7 +1121,7 @@ export async function settleDurableTurn(input: {
         ${new Date(input.completedAt.getTime() + 2)}
       FROM projected_task AS task
       WHERE ${Boolean(next)}
-        AND task.queue_next
+        AND task.insert_next
         AND EXISTS (SELECT 1 FROM next_user_message)
         AND EXISTS (SELECT 1 FROM next_assistant_message)
       RETURNING id, chat_session_id, user_message_id
@@ -1265,7 +1281,7 @@ export async function settleDurableTurn(input: {
     WHERE EXISTS (SELECT 1 FROM updated_task_chat)
       AND canonical_guard.materialized = 1
       AND (
-        NOT EXISTS (SELECT 1 FROM projected_task AS task WHERE task.queue_next)
+        NOT EXISTS (SELECT 1 FROM projected_task AS task WHERE task.insert_next)
         OR (
           EXISTS (SELECT 1 FROM next_turn)
           AND EXISTS (SELECT 1 FROM next_queued_event)
@@ -1282,7 +1298,7 @@ export async function settleDurableTurn(input: {
           )
           AND (
             NOT ${requestedRetry}::boolean
-            OR NOT EXISTS (SELECT 1 FROM projected_task AS task WHERE task.queue_next)
+            OR NOT EXISTS (SELECT 1 FROM projected_task AS task WHERE task.insert_next)
             OR EXISTS (SELECT 1 FROM retry_task_activity)
           )
         )

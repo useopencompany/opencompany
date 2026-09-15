@@ -180,9 +180,14 @@ export async function claimNextCodexChatTurn(input: {
                     turn.interrupt_requested_at IS NOT NULL
                     OR (
                       task.archived_at IS NULL
-                      AND (task.status IN ('queued', 'running') OR (
-                        task.status = 'waiting' AND turn.settings ->> 'approvalContinuation' = 'true'
-                      ))
+                      AND (
+                        task.status IN ('queued', 'running')
+                        -- A Task that settled with a Run still queued behind it has work left:
+                        -- a message the user sent while it was working, or an approval
+                        -- continuation. Claiming it resumes the Task rather than stranding the
+                        -- Run. Canceled stays excluded -- the user stopped that Task on purpose.
+                        OR task.status IN ('waiting', 'succeeded', 'failed')
+                      )
                     )
                   )
               )
@@ -231,11 +236,15 @@ export async function claimNextCodexChatTurn(input: {
       RETURNING turn.*
     ), resumed_task AS (
       UPDATE goat.tasks AS task
-      SET status = 'queued', stage = 'queued', reported_outcome = NULL,
-          outcome_comment = NULL, updated_at = ${now}
+      SET status = 'queued', stage = 'queued', result = NULL, error = NULL,
+          reported_outcome = NULL, outcome_comment = NULL, updated_at = ${now}
       FROM claimed
-      WHERE task.session_id = claimed.chat_session_id AND task.status = 'waiting'
-        AND task.archived_at IS NULL AND claimed.settings ->> 'approvalContinuation' = 'true'
+      WHERE task.session_id = claimed.chat_session_id
+        AND task.status IN ('waiting', 'succeeded', 'failed')
+        AND task.archived_at IS NULL
+        -- A cancellation-recovery claim exists only to settle the interrupt. It is not work the
+        -- Task asked for, so it must not restart a Task that has already finished.
+        AND claimed.interrupt_requested_at IS NULL
       RETURNING task.id
     ), started_session AS (
       UPDATE goat.codex_chat_sessions AS session
