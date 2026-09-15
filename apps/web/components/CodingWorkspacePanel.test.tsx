@@ -399,12 +399,70 @@ describe("CodingWorkspacePanel", () => {
       socket.receive({ type: "ports", ports: [{ port: 3_000, isHttp: true, score: 1_100 }] }),
     );
     expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: "preview.open", port: 3_000 }));
+    act(() => socket.receive({ type: "preview", port: 3_000, url: "https://preview.example.com" }));
 
     socket.send.mockClear();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(15_000);
     });
     expect(socket.send).not.toHaveBeenCalled();
+  });
+
+  it("keeps scanning after a typed port is unavailable and opens a later server", async () => {
+    vi.useFakeTimers();
+    render(<Harness chatSessionId="chat_1" sandboxStatus="running" engineLabel="Codex" />);
+    fireEvent.click(screen.getByRole("button", { name: "Toggle workspace" }));
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    const socket = MockWebSocket.instances[0]!;
+    act(() => socket.open());
+    act(() => socket.receive({ type: "ports", ports: [] }));
+
+    const address = screen.getByRole("textbox", { name: "Preview address" });
+    fireEvent.change(address, { target: { value: "localhost:3000/pricing" } });
+    fireEvent.keyDown(address, { key: "Enter" });
+    expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: "preview.open", port: 3_000 }));
+    act(() => socket.receive({ type: "error", message: "Nothing is listening on port 3000." }));
+
+    socket.send.mockClear();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: "ports.refresh" }));
+
+    act(() =>
+      socket.receive({ type: "ports", ports: [{ port: 3_002, isHttp: true, score: 1_000 }] }),
+    );
+    expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: "preview.open", port: 3_002 }));
+    act(() => socket.receive({ type: "preview", port: 3_002, url: "https://preview.example.com" }));
+    expect(address).toHaveValue("localhost:3002/pricing");
+    expect(screen.getByTitle("Codex preview on port 3002")).toHaveAttribute(
+      "src",
+      "https://preview.example.com/pricing",
+    );
+  });
+
+  it("explains when an HTTP server is running outside the coding workspace", async () => {
+    const user = userEvent.setup();
+    render(<Harness chatSessionId="chat_1" sandboxStatus="running" engineLabel="Claude Code" />);
+    await user.click(screen.getByRole("button", { name: "Toggle workspace" }));
+    await user.click(screen.getByRole("button", { name: "Preview" }));
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const socket = MockWebSocket.instances[0]!;
+    act(() => socket.open());
+
+    act(() =>
+      socket.receive({
+        type: "ports",
+        ports: [],
+        outsideWorkspacePorts: [{ port: 3_002, isHttp: true, score: 1_000 }],
+      }),
+    );
+
+    expect(screen.getByText("Development server is outside this workspace")).toBeInTheDocument();
+    expect(screen.getByText(/Restart the server from Claude Code or Terminal/)).toBeInTheDocument();
   });
 
   it("rejects preview URLs with non-HTTP schemes", async () => {

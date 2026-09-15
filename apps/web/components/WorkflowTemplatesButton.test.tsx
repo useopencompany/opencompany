@@ -72,19 +72,14 @@ describe("WorkflowTemplatesButton", () => {
     render(
       <WorkflowTemplatesButton
         missingPlugins={{
-          [template.id]: [
-            { plugin: "slack", label: "Slack", setupHref: "/settings/plugins/slack" },
-          ],
+          [template.id]: [{ plugin: "slack", label: "Slack", setupHref: "/plugins/slack" }],
         }}
         scope="company"
       />,
     );
     await openTemplates();
 
-    expect(screen.getByRole("link", { name: "Slack" })).toHaveAttribute(
-      "href",
-      "/settings/plugins/slack",
-    );
+    expect(screen.getByRole("link", { name: "Slack" })).toHaveAttribute("href", "/plugins/slack");
 
     await userEvent.click(screen.getByRole("button", { name: new RegExp(template.name) }));
     await waitFor(() => expect(commandsMock.createHeadlessWorkflow).toHaveBeenCalled());

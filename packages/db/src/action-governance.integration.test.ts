@@ -1,3 +1,4 @@
+import { ACTION_MAX_CALLS_PER_TURN } from "@opencompany/agent-runtime";
 import { drizzle } from "drizzle-orm/pglite";
 import { expect, it } from "vitest";
 import { claimActionInvocation, recordActionSourceDiscovery } from "./action-governance";
@@ -34,7 +35,7 @@ it("atomically claims both the invocation id and write key while counting one ac
         sourceId: "calendar",
         invocationId,
         ...(deduplicationKey ? { deduplicationKey } : {}),
-        maxCalls: 16,
+        maxCalls: ACTION_MAX_CALLS_PER_TURN,
         db,
       });
     const results = await Promise.all([claim("call_1", "write:one"), claim("call_2", "write:one")]);
@@ -50,14 +51,20 @@ it("atomically claims both the invocation id and write key while counting one ac
     expect(await claim("read_1")).toEqual({ ok: true, duplicate: false, callCount: 3 });
     expect(await claim("read_2")).toEqual({ ok: true, duplicate: false, callCount: 4 });
     expect(await claim("read_1")).toEqual({ ok: true, duplicate: true, callCount: 4 });
-    const batch = await Promise.all(Array.from({ length: 20 }, (_, i) => claim(`batch-${i}`)));
-    expect(batch.filter((result) => result.ok && !result.duplicate)).toHaveLength(12);
-    expect(batch.filter((result) => !result.ok && result.reason === "call_budget")).toHaveLength(8);
-    expect(await claim("read_1")).toEqual({ ok: true, duplicate: true, callCount: 16 });
+    const batch = await Promise.all(Array.from({ length: 40 }, (_, i) => claim(`batch-${i}`)));
+    expect(batch.filter((result) => result.ok && !result.duplicate)).toHaveLength(28);
+    expect(batch.filter((result) => !result.ok && result.reason === "call_budget")).toHaveLength(
+      12,
+    );
+    expect(await claim("read_1")).toEqual({
+      ok: true,
+      duplicate: true,
+      callCount: ACTION_MAX_CALLS_PER_TURN,
+    });
     const { rows } = await database.query<{ action_call_count: number }>(
       "SELECT action_call_count FROM goat.action_turns",
     );
-    expect(rows).toEqual([{ action_call_count: 16 }]);
+    expect(rows).toEqual([{ action_call_count: ACTION_MAX_CALLS_PER_TURN }]);
   } finally {
     await database.close();
   }

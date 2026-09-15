@@ -109,7 +109,7 @@ describe("Google ingress", () => {
     const response = await ingress().start(
       "gmail",
       new Request(
-        "https://api.example.com/integrations/gmail/start?access=mcp&returnTo=/settings/plugins/gmail",
+        "https://api.example.com/integrations/gmail/start?access=mcp&returnTo=/plugins/gmail",
       ),
     );
     const location = new URL(response.headers.get("location") ?? "");
@@ -123,7 +123,7 @@ describe("Google ingress", () => {
     const response = await ingress().start(
       "google_drive",
       new Request(
-        "https://api.example.com/integrations/google-drive/start?returnTo=/settings/plugins/google-drive",
+        "https://api.example.com/integrations/google-drive/start?returnTo=/plugins/google-drive",
       ),
     );
 
@@ -216,7 +216,7 @@ describe("Google ingress", () => {
       provider: "gmail",
       access: "gmail_mcp",
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/gmail",
+      returnTo: "/plugins/gmail",
     });
     const response = await ingress().callback(
       "gmail",
@@ -227,7 +227,7 @@ describe("Google ingress", () => {
     expect(response.status).toBe(302);
     const location = new URL(response.headers.get("location") ?? "");
     expect(location.origin).toBe("https://opencompany.example.com");
-    expect(location.pathname).toBe("/settings/plugins/gmail");
+    expect(location.pathname).toBe("/plugins/gmail");
     expect(location.searchParams.get("setup")).toBe("connected");
     expect(exchangeGoogleCode).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -275,7 +275,7 @@ describe("Google ingress", () => {
     const state = createGoogleIntegrationState({
       provider: "google_admin",
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/google-admin",
+      returnTo: "/plugins/google-admin",
     });
 
     const response = await ingress().callback(
@@ -316,7 +316,7 @@ describe("Google ingress", () => {
     const state = createGoogleIntegrationState({
       provider: "google_calendar",
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/google-calendar",
+      returnTo: "/plugins/google-calendar",
     });
 
     const response = await ingress().callback(
@@ -355,7 +355,7 @@ describe("Google ingress", () => {
     const state = createGoogleIntegrationState({
       provider: "google_drive",
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/google-drive",
+      returnTo: "/plugins/google-drive",
     });
     const response = await ingress({ refreshPluginRegistrations }).callback(
       "google_drive",

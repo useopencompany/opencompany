@@ -14,11 +14,14 @@ import {
   type PluginEventDefinition,
   type PluginEventsReport,
   type PluginManifest,
+  type PluginPricingDefinition,
+  type PluginPricingReport,
   PluginSpecError,
   parseMcpConfig,
   parsePluginCapabilities,
   parsePluginEvents,
   parsePluginManifest,
+  parsePluginPricing,
   type RemoteMcpServer,
   type StdioMcpServer,
 } from "./plugin-spec";
@@ -77,6 +80,7 @@ export type PluginValidationReport = {
   mcp: PluginMcpValidationReport;
   capabilities: PluginCapabilitiesReport;
   events: PluginEventsReport;
+  pricing: PluginPricingReport;
 };
 
 export type ResolvedPlugin = {
@@ -94,6 +98,7 @@ export type ResolvedPlugin = {
   remoteServers: RemoteMcpServer[];
   capabilities: PluginCapabilityDefinition[];
   events: PluginEventDefinition[];
+  pricing: PluginPricingDefinition | null;
   report: PluginValidationReport;
 };
 
@@ -168,6 +173,9 @@ export async function resolvePlugin(input: {
   const events = parsePluginEvents(manifestResult.manifest.extensions, {
     trusted: isTrustedCapabilitySource(parsed.owner, parsed.repo, input.trustedCapabilitySources),
   });
+  const pricing = parsePluginPricing(manifestResult.manifest.extensions, {
+    trusted: isTrustedCapabilitySource(parsed.owner, parsed.repo, input.trustedCapabilitySources),
+  });
 
   const files = await gatherPluginFiles({
     entries: tree.entries,
@@ -236,12 +244,14 @@ export async function resolvePlugin(input: {
     remoteServers,
     capabilities: capabilities.definitions,
     events: events.definitions,
+    pricing: pricing.definition,
     report: {
       ignoredManifestFields: manifestResult.ignoredFields,
       skills: skillReports,
       mcp: mcpReport,
       capabilities: capabilities.report,
       events: events.report,
+      pricing: pricing.report,
     },
   };
 }

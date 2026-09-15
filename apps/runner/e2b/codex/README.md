@@ -26,7 +26,7 @@ one image definition:
 
 The sizes come from `SANDBOX_SIZE_SPECS` in `@opencompany/core/sandbox-sizes`, which is also
 what the workspace setting and the size labels in the app read. Workspace admins pick the
-default in Settings → Inference; a session pins the size it was created with.
+default in Settings → Sandboxes; a session pins the size it was created with.
 
 Billing already meters the CPU and RAM E2B reports for the live sandbox, so a smaller size
 bills less with no billing change.

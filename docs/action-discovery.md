@@ -8,7 +8,7 @@ contract v5. The model sees these operations:
 | `list_actions({})` | All currently available sources, as before. |
 | `list_actions({source})` | Every available action in catalog order, with its exact ID, source, permission mode, and a whitespace-normalized description preview of at most 160 characters. Longer previews end in `…`. No parameter schemas. |
 | `describe_actions({actions: [id, ...]})` | Complete current descriptors for one to five exact IDs, including full descriptions and parameter schemas, plus explicit `not_found` IDs. Repeated IDs are deduplicated after validating the batch size. |
-| `use_action({action, params})` | The existing execution path, with availability checks, approval, deduplication, provider retry limits, and the 16-admission turn budget. |
+| `use_action({action, params})` | The existing execution path, with availability checks, approval, deduplication, provider retry limits, and the 32-admission turn budget. |
 
 Listing and description read the existing policy-filtered catalog. They do not execute providers,
 refresh remote MCP discovery snapshots, require approval, or consume the execution budget.
@@ -27,7 +27,7 @@ approval continuations and legacy Brain capture remain supported.
 
 ## Action budget
 
-The shared limit is 16 admitted invocations per turn for both chat and background tasks.
+The shared limit is 32 admitted invocations per turn for both chat and background tasks.
 Discovery is free. Unknown action IDs and missing source discovery are rejected before admission;
 a known, admitted invocation consumes a slot even when parameter validation or provider execution
 fails. A duplicate invocation does not consume another slot or dispatch the provider again.
