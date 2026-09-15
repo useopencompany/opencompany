@@ -148,6 +148,14 @@ All `/v1` routes require Actor authentication. Browser cookie mutations addition
 allowed `Origin`. Command retries retain existing idempotency semantics, and schema changes require
 additive Drizzle migrations.
 
+The onboarding plugin step permits browser sessions with workspace membership to list plugins
+(`GET /v1/plugins`), preview imports (`POST /v1/plugins/imports/preview`), and install them
+(`POST /v1/plugins/imports`) before onboarding completes. The preceding subscription step can also
+read and connect Claude Code and Codex through the narrow `/v1/engine-auth/*` setup routes it uses.
+These exceptions apply only to browser sessions with an existing workspace membership; they retain
+Actor resolution, workspace permissions, origin checks, and rate limits. Ordinary product routes
+and bearer-token callers still require completed onboarding.
+
 The web WorkOS routes, cached API-backed identity resolver, and `activateWorkspace` remain the
 permanent browser-authentication shell. Production web code has zero `@opencompany/db` and zero
 `drizzle-orm` imports; the boundary check has no exception list or migration baseline.

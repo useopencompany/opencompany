@@ -906,12 +906,6 @@ export function createApiApp(input: CreateApiAppInput) {
       const state = await input.onboarding.getState(identity);
       return c.json({ data: state, meta }, 200);
     },
-    checkOnboardingWorkspaceSlug: async (c) => {
-      const identity = identityFrom(c);
-      await enforceIdentityRateLimit(rateLimiter, identity, "onboarding-slug", 120);
-      const result = await input.onboarding.checkSlug(identity, c.req.valid("json").slug);
-      return c.json({ data: result, meta }, 200);
-    },
     saveOnboardingProfile: async (c) => {
       const identity = identityFrom(c);
       await enforceIdentityRateLimit(rateLimiter, identity, "onboarding-write", 30);
