@@ -3,19 +3,16 @@
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowLeft,
-  ArrowUpRight,
   BrainCircuit,
   CircleDollarSign,
   Container,
   CreditCard,
   FolderGit2,
   MessageSquare,
-  PackageOpen,
   PanelLeft,
   PlugZap,
   SearchCheck,
   SlidersHorizontal,
-  Sparkles,
   UserRound,
   Users,
 } from "lucide-react";
@@ -30,11 +27,6 @@ type SettingsNavItem = {
   label: string;
   badge?: string;
   adminOnly?: boolean;
-  /**
-   * Rows that lead out of /settings. This rail unmounts on arrival, so they are never current and
-   * carry an outbound arrow instead — the reader should expect the left rail to change.
-   */
-  leavesSettings?: boolean;
   isActive?: (pathname: string) => boolean;
 };
 
@@ -87,18 +79,6 @@ const NAV_GROUPS: SettingsNavGroup[] = [
         icon: SearchCheck,
         label: "Capabilities",
         isActive: (pathname) => pathname === "/settings/workspace/capabilities",
-      },
-      {
-        href: "/skills",
-        icon: Sparkles,
-        label: "Skills",
-        leavesSettings: true,
-      },
-      {
-        href: "/plugins",
-        icon: PackageOpen,
-        label: "Plugins",
-        leavesSettings: true,
       },
       {
         href: "/settings/repositories",
@@ -161,14 +141,6 @@ function SettingsNavRow({ item, active }: { item: SettingsNavItem; active: boole
         <span className="ml-auto shrink-0 rounded-full bg-surface-muted px-1.5 py-px text-[10px] font-medium leading-4 text-ink-subtle">
           {item.badge}
         </span>
-      ) : null}
-      {item.leavesSettings ? (
-        <ArrowUpRight
-          size={13}
-          strokeWidth={1.75}
-          aria-hidden
-          className="ml-auto shrink-0 text-ink-subtle/70 group-hover:text-ink/60"
-        />
       ) : null}
     </IntentPrefetchLink>
   );
