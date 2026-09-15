@@ -176,7 +176,7 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
       const futureRunAt = nextCronRunAt(workflow.cron, workflow.timezone, now);
       if (!futureRunAt) {
         await tx.execute(sql`
-          UPDATE goat.workflows
+          UPDATE goat.workflows AS workflow
           SET automation_triggers = (
                 SELECT jsonb_agg(
                   CASE WHEN item.value->>'id' = ${workflow.triggerId}
@@ -192,7 +192,7 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
                 ELSE workflow.schedule_enabled
               END,
               updated_at = ${now}
-          WHERE id = ${workflow.id}
+          WHERE workflow.id = ${workflow.id}
         `);
         return { status: "failed" as const };
       }
@@ -229,7 +229,7 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
 
       if (!insertedRun) {
         await tx.execute(sql`
-          UPDATE goat.workflows
+          UPDATE goat.workflows AS workflow
           SET automation_triggers = (
                 SELECT jsonb_agg(
                   CASE WHEN item.value->>'id' = ${workflow.triggerId}
@@ -246,7 +246,7 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
                 ELSE workflow.schedule_next_run_at
               END,
               updated_at = ${now}
-          WHERE id = ${workflow.id}
+          WHERE workflow.id = ${workflow.id}
         `);
         return { status: "duplicate" as const };
       }
@@ -275,7 +275,7 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
       `);
 
       await tx.execute(sql`
-        UPDATE goat.workflows
+        UPDATE goat.workflows AS workflow
         SET automation_triggers = (
               SELECT jsonb_agg(
                 CASE WHEN item.value->>'id' = ${workflow.triggerId}
@@ -300,7 +300,7 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
               ELSE workflow.schedule_next_run_at
             END,
             updated_at = ${now}
-        WHERE id = ${workflow.id}
+        WHERE workflow.id = ${workflow.id}
       `);
 
       return {

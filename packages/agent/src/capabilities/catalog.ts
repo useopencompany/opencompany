@@ -84,9 +84,9 @@ export const MANAGED_CAPABILITY_SOURCE_DETAILS: Record<
     description: "Search public TikTok creators, videos, comments, hashtags, and trends.",
   },
   lead: {
-    label: "Prospecting",
+    label: "Lead research",
     description:
-      "Look up work emails for known prospects by name and company or by LinkedIn URL, and find new targeted professional prospects.",
+      "Look up work emails for known prospects by name and company or by LinkedIn URL, and find new targeted professional prospects. Sold per result through the Lead research plugin.",
   },
   seo: {
     label: "SEO",

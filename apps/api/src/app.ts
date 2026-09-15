@@ -111,6 +111,7 @@ import type { McpOAuthIngressService } from "./mcp-oauth-ingress";
 import { type MessagePresentationService, messagePresentationEtag } from "./message-presentations";
 import type { OnboardingService } from "./onboarding";
 import type { OnboardingEmailService } from "./onboarding-emails";
+import type { PluginBillingService } from "./plugin-billing";
 import type { ProjectService } from "./projects";
 import { type ApiRateLimiter, InMemoryApiRateLimiter } from "./rate-limit";
 import type { RepoConfigService } from "./repo-configs";
@@ -220,6 +221,7 @@ export type CreateApiAppInput = {
   engineSessions: EngineSessionService;
   billing: BillingApplicationService;
   workspaceCapabilities: WorkspaceCapabilityService;
+  pluginBilling: PluginBillingService;
   workspaceControl: WorkspaceControlService;
   identity: IdentityService;
   onboarding: OnboardingService;
@@ -1641,6 +1643,22 @@ export function createApiApp(input: CreateApiAppInput) {
         c.req.valid("json").enabled,
       );
       return c.json({ data: publicPluginInstallation(plugin), meta }, 200);
+    },
+    getPluginBilling: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const billing = await input.pluginBilling.get(actor, c.req.valid("param").name);
+      return c.json({ data: billing, meta }, 200);
+    },
+    setPluginDailySpendLimit: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const billing = await input.pluginBilling.setDailyLimit(
+        actor,
+        c.req.valid("param").name,
+        c.req.valid("json").dailyLimitUsd,
+      );
+      return c.json({ data: billing, meta }, 200);
     },
     listBots: async (c) => {
       const actor = actorFrom(c);
@@ -3607,6 +3625,11 @@ function conversationDto(conversation: {
   title: string;
   engine: "opencompany" | "codex" | "claude_code";
   model: string;
+  composerSettings: {
+    reasoningEffort: "low" | "medium" | "high" | "xhigh";
+    planModeEnabled?: boolean;
+    goalMode?: { objective: string; tokenBudget?: number | null } | null;
+  } | null;
   messageShapeEpoch: number;
   runtime: {
     status: "queued" | "starting" | "idle" | "running" | "failed" | "interrupted" | "closed";

@@ -26,8 +26,8 @@ vi.mock("@/components/PluginSettings", () => ({
   PluginDetail: vi.fn(() => null),
 }));
 
-vi.mock("@/components/SettingsChrome", () => ({
-  SettingsContent: vi.fn(() => null),
+vi.mock("@/components/PageContent", () => ({
+  PageContent: vi.fn(() => null),
 }));
 
 vi.mock("@/lib/auth", () => ({

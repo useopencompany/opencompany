@@ -412,5 +412,5 @@ function statusRedirect(
 }
 
 function pluginSettingsPath(provider: McpOAuthProvider) {
-  return `/settings/plugins/${provider}`;
+  return `/plugins/${provider}`;
 }

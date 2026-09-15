@@ -97,7 +97,7 @@ API. The App must request Contents, Issues, and Pull requests read/write plus Ac
 Commit statuses, and Metadata read, with expiring user tokens and user authorization during
 installation enabled. Set
 its Setup URL to
-`${OPENCOMPANY_NEXT_PUBLIC_APP_URL}/settings/plugins/github` and enable redirect-on-update so App
+`${OPENCOMPANY_NEXT_PUBLIC_APP_URL}/plugins/github` and enable redirect-on-update so App
 updates return to opencompany.
 
 `BLOB_READ_WRITE_TOKEN` must exist in Infisical `prod` `/runner` before enabling Plugin runtime.
@@ -108,6 +108,9 @@ processes.
 `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY`) that seals the macOS desktop app's Google sign-in handoff
 token. Add it to prod `/web` before enabling desktop distribution. The release preflight requires it
 for the web app so a deployment cannot expose the desktop auth flow without its sealing key.
+For local development, `bun run setup` generates a valid key in `.env.local` and mirrors it to
+`apps/web/.env.local`. Valid keys are preserved on reruns and shared env pulls; invalid personal
+overrides fail setup with instructions. `bun run setup -- --check` reports desktop-auth readiness.
 
 `REDIS_URL` is optional for correctness but required by the production activation preflight. When
 configured for both `apps/api` and `apps/runner`, it

@@ -51,7 +51,7 @@ describe("sweepDueTaskSchedules", () => {
     mocks.db = undefined;
   });
 
-  it("claims a due schedule through the users join without ambiguous timezone columns", async () => {
+  it("executes schedule and workflow duplicate claims against Postgres", async () => {
     const pg = await createTestPGlite();
     try {
       await pg.exec(`
@@ -90,6 +90,21 @@ describe("sweepDueTaskSchedules", () => {
           created_at timestamptz NOT NULL DEFAULT now(),
           updated_at timestamptz NOT NULL DEFAULT now(),
           UNIQUE (schedule_id, scheduled_for)
+        );
+
+        CREATE TABLE goat.workflow_schedule_runs (
+          id text PRIMARY KEY,
+          workflow_id text NOT NULL,
+          trigger_id text NOT NULL,
+          workspace_id text NOT NULL,
+          user_workos_id text NOT NULL,
+          scheduled_for timestamptz NOT NULL,
+          task_id text,
+          status text NOT NULL DEFAULT 'pending',
+          error text,
+          created_at timestamptz NOT NULL DEFAULT now(),
+          updated_at timestamptz NOT NULL DEFAULT now(),
+          UNIQUE (workflow_id, trigger_id, scheduled_for)
         );
 
         CREATE TABLE goat.workflows (
@@ -203,6 +218,86 @@ describe("sweepDueTaskSchedules", () => {
       const updatedSchedule = schedule.rows[0];
       expect(updatedSchedule).toBeDefined();
       expect(new Date(updatedSchedule!.next_run_at).toISOString()).toBe("2026-06-04T09:00:00.000Z");
+
+      await pg.query(
+        `
+          INSERT INTO goat.workflows (
+            id,
+            workspace_id,
+            slug,
+            name,
+            automation_triggers,
+            schedule_next_run_at,
+            schedule_enabled,
+            status,
+            updated_at
+          )
+          VALUES (
+            'workflow_1',
+            'workspace_1',
+            'daily-update',
+            'Daily update',
+            jsonb_build_array(jsonb_build_object(
+              'id', 'trigger_daily',
+              'type', 'schedule',
+              'userWorkosId', 'user_1',
+              'cron', '0 9 * * *',
+              'timezone', 'UTC',
+              'prompt', 'Draft the daily update.',
+              'harnessSpec', $1::jsonb,
+              'enabled', true,
+              'lastRunAt', null,
+              'nextRunAt', '2026-06-03T09:00:00.000Z'
+            )),
+            '2026-06-03T09:00:00.000Z',
+            true,
+            'active',
+            '2026-06-01T08:00:00.000Z'
+          );
+        `,
+        [JSON.stringify(harnessSpec)],
+      );
+      await pg.query(`
+        INSERT INTO goat.workflow_schedule_runs (
+          id,
+          workflow_id,
+          trigger_id,
+          workspace_id,
+          user_workos_id,
+          scheduled_for,
+          status
+        )
+        VALUES (
+          'workflow_schedule_run_existing',
+          'workflow_1',
+          'trigger_daily',
+          'workspace_1',
+          'user_1',
+          '2026-06-03T09:00:00.000Z',
+          'created'
+        );
+      `);
+
+      await expect(
+        sweepDueTaskSchedules({ now: new Date("2026-06-03T12:00:00.000Z") }),
+      ).resolves.toEqual({ checked: 1, created: 0 });
+
+      const workflow = await pg.query<{
+        next_run_at: string;
+        trigger_next_run_at: string;
+      }>(`
+        SELECT
+          schedule_next_run_at AS next_run_at,
+          automation_triggers->0->>'nextRunAt' AS trigger_next_run_at
+        FROM goat.workflows
+        WHERE id = 'workflow_1'
+      `);
+      const updatedWorkflow = workflow.rows[0];
+      expect(updatedWorkflow).toBeDefined();
+      expect(new Date(updatedWorkflow!.next_run_at).toISOString()).toBe("2026-06-04T09:00:00.000Z");
+      expect(new Date(updatedWorkflow!.trigger_next_run_at).toISOString()).toBe(
+        "2026-06-04T09:00:00.000Z",
+      );
     } finally {
       mocks.db = undefined;
       await pg.close();

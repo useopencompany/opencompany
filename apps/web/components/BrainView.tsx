@@ -2615,7 +2615,7 @@ function isSkillLikeBrainFolder(path: string) {
 }
 
 // Workflows and skills were extracted out of the Brain into their own
-// workspace-scoped surfaces (/workflows and /settings/skills). Hide their former
+// workspace-scoped surfaces (/workflows and /skills). Hide their former
 // reserved folders and documents from the Brain tree so the Brain stays purely
 // knowledge/context. The legacy rows remain intact through the rollback window.
 function isKnowledgeDocument(document: { folderPath: string }): boolean {

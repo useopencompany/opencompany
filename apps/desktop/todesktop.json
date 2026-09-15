@@ -6,6 +6,7 @@
   "appProtocolScheme": "opencompany",
   "productName": "opencompany",
   "icon": "./assets/icon.png",
+  "appFiles": ["package.json", "todesktop.json", "dist/**", "assets/**"],
   "nodeVersion": "22.11.0",
   "packageManager": "bun",
   "bunVersion": "1.4.2",

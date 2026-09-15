@@ -5,6 +5,7 @@ import {
   CODEX_MCP_TOOL_NAME,
   CODEX_PLAN_TOOL_NAME,
   CODEX_QUESTION_TOOL_NAME,
+  CODEX_SUBAGENT_TOOL_NAME,
 } from "@opencompany/agent-runtime";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -1670,6 +1671,41 @@ describe("MessageBubble Codex interactions", () => {
     expect(screen.queryByText(/tool call/)).not.toBeInTheDocument();
     expect(screen.getByText("I’m checking the viewer now.")).toBeVisible();
     expect(screen.getByText("Inspect viewer")).toBeVisible();
+  });
+
+  it("starts running subagents collapsed and lets the user expand their trace", async () => {
+    const message: ChatUiMessage = {
+      id: "assistant_running_subagent",
+      role: "assistant",
+      parts: [
+        {
+          type: `tool-${CODEX_SUBAGENT_TOOL_NAME}`,
+          toolCallId: "subagent_running",
+          state: "input-available",
+          input: { label: "Subagent", description: "Inspect the repository" },
+          children: [
+            {
+              type: `tool-${CODEX_COMMAND_TOOL_NAME}`,
+              toolCallId: "subagent_command",
+              state: "output-available",
+              input: { description: "Search the code", command: "rg SubagentRow" },
+              output: { status: "completed", exitCode: 0 },
+            },
+          ],
+        } as unknown as ChatUiMessage["parts"][number],
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} turnActive />);
+
+    const disclosure = screen.getByTitle("Subagent").closest("button")!;
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Search the code")).not.toBeInTheDocument();
+
+    await userEvent.click(disclosure);
+
+    expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Search the code")).toBeVisible();
   });
 
   it("waits for the assistant turn to finish before compacting completed work", () => {

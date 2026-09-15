@@ -1,4 +1,4 @@
-import { WRITE_ARTIFACT_TOOL_NAME } from "@opencompany/agent-runtime";
+import { ACTION_MAX_CALLS_PER_TURN, WRITE_ARTIFACT_TOOL_NAME } from "@opencompany/agent-runtime";
 import { WIKI_TOOL_NAME } from "@opencompany/wiki/tool";
 import { generateText } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
@@ -15,6 +15,7 @@ import {
   CREATE_WORKSPACE_SKILL_TOOL_NAME,
   EDIT_WORKSPACE_SKILL_TOOL_NAME,
   LIST_SKILLS_TOOL_NAME,
+  SLACK_BOT_TOOL_NAME,
   START_WORKFLOW_TOOL_NAME,
 } from "./chat-ui";
 
@@ -137,6 +138,25 @@ describe("write_artifact tool", () => {
       { filename: "report.md", title: "Report", content: "# Report" },
       { toolCallId: "call_artifact_1" },
     );
+  });
+});
+
+describe("opencompany Slack bot tool", () => {
+  it("is available only when the host injects its publisher", () => {
+    expect(SLACK_BOT_TOOL_NAME in createProductChatToolContext({ model }).tools).toBe(false);
+    expect(
+      SLACK_BOT_TOOL_NAME in
+        createProductChatToolContext({ model, postSlackMessage: vi.fn() }).tools,
+    ).toBe(true);
+  });
+
+  it("names itself after the phrase instructions use, so it is not confused with the personal Slack plugin", () => {
+    expect(SLACK_BOT_TOOL_NAME).toBe("opencompany_slack_bot_send_message");
+    const slackTool = createProductChatToolContext({ model, postSlackMessage: vi.fn() }).tools[
+      SLACK_BOT_TOOL_NAME
+    ] as { description: string };
+    expect(slackTool.description).toContain("opencompany Slack bot");
+    expect(slackTool.description).toContain("personal Slack plugin");
   });
 });
 
@@ -656,7 +676,7 @@ describe("action discovery tools", () => {
       actions: { catalog, execute, prelistedSourceIds: ["gmail"] },
     });
     const use = context.tools.use_action as ActionTool;
-    for (let i = 0; i < 15; i++)
+    for (let i = 0; i < ACTION_MAX_CALLS_PER_TURN - 1; i++)
       await use.execute(
         { action: action.id, params: { query: "launch" } },
         { toolCallId: `call-${i}` },
@@ -664,7 +684,7 @@ describe("action discovery tools", () => {
     expect(context.areActionCallsExhausted()).toBe(false);
     await use.execute(
       { action: action.id, params: { query: "launch" } },
-      { toolCallId: "call-15" },
+      { toolCallId: "call-31" },
     );
     expect(context.areActionCallsExhausted()).toBe(true);
     const step = prepareProductChatStep({
@@ -698,7 +718,7 @@ describe("action discovery tools", () => {
         ok: true,
         action: action.id,
         result: [],
-        budget: { limit: 16, used: 16, remaining: 0 },
+        budget: { limit: 32, used: 32, remaining: 0 },
       });
     const context = createProductChatToolContext({
       model,
@@ -716,7 +736,7 @@ describe("action discovery tools", () => {
       ok: true,
       action: action.id,
       result: [],
-      budget: { limit: 16, used: 15, remaining: 1 },
+      budget: { limit: 32, used: 31, remaining: 1 },
     });
     await earlier;
     expect(context.areActionCallsExhausted()).toBe(true);
@@ -736,7 +756,7 @@ describe("action discovery tools", () => {
       { action: action.id, params: { query: "launch" } },
       { toolCallId: "resumed" },
     );
-    expect(result).toMatchObject({ budget: { limit: 16, used: 16, remaining: 0 } });
+    expect(result).toMatchObject({ budget: { limit: 32, used: 32, remaining: 0 } });
     expect(context.areActionCallsExhausted()).toBe(true);
   });
 

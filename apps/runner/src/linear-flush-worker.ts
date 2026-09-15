@@ -1,3 +1,7 @@
+import {
+  getLinearIngestAccessToken,
+  LinearIngestAuthError,
+} from "@opencompany/agent/integrations/linear-ingest";
 import { captureProductIngestionQuotaAnalytics } from "@opencompany/analytics/product";
 import {
   type NormalizedLinearIssueActivity,
@@ -382,30 +386,36 @@ async function loadLinearIntegrationContext(window: LinearDueWindow): Promise<{
       SELECT status FROM goat.integrations WHERE id = ${window.integrationId}
     `),
   );
-  const status = statusRows[0]?.status ?? "unknown";
+  let status: IntegrationStatus | "unknown" = statusRows[0]?.status ?? "unknown";
 
-  const credential =
-    status === "connected"
-      ? await loadIntegrationCredential({
-          userWorkosId: window.userWorkosId,
-          integrationId: window.integrationId,
-          provider: "linear",
-          kind: "oauth_token",
-        }).catch((error) => {
-          logger.warn("opencompany Linear credential load failed", {
-            event: "opencompany.goat_linear_credential_load_failed",
-            integration_id: window.integrationId,
-            error,
-          });
-          return null;
-        })
-      : null;
+  let accessToken: string | null = null;
+  let credential = null;
+  if (status === "connected") {
+    try {
+      accessToken = await getLinearIngestAccessToken({
+        userWorkosId: window.userWorkosId,
+        integrationId: window.integrationId,
+      });
+      credential = await loadIntegrationCredential({
+        userWorkosId: window.userWorkosId,
+        integrationId: window.integrationId,
+        provider: "linear",
+        kind: "oauth_token",
+      });
+    } catch (error) {
+      if (error instanceof LinearIngestAuthError) status = "needs_reauth";
+      logger.warn("opencompany Linear credential load failed", {
+        event: "opencompany.goat_linear_credential_load_failed",
+        integration_id: window.integrationId,
+        error,
+      });
+    }
+  }
 
-  const accessToken = credential?.payload.access_token;
   const organizationUrlKey = credential?.payload.organization_url_key;
   return {
     status,
-    accessToken: typeof accessToken === "string" && accessToken ? accessToken : null,
+    accessToken,
     organizationUrlKey:
       typeof organizationUrlKey === "string" && organizationUrlKey ? organizationUrlKey : null,
   };

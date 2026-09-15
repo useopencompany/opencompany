@@ -36,11 +36,34 @@ describe("SettingsSidebar", () => {
     ).toHaveAttribute("href", "/settings/repositories");
     expect(
       within(workspaceGroup as HTMLElement).getByRole("link", { name: "Plugins" }),
-    ).toHaveAttribute("href", "/settings/plugins");
+    ).toHaveAttribute("href", "/plugins");
     expect(screen.queryByRole("link", { name: "Integrations" })).not.toBeInTheDocument();
     expect(
       within(workspaceGroup as HTMLElement).getByRole("link", { name: "Inference" }),
     ).toHaveAttribute("href", "/settings/workspace/inference");
+    expect(
+      within(workspaceGroup as HTMLElement).getByRole("link", { name: "Sandboxes" }),
+    ).toHaveAttribute("href", "/settings/workspace/sandboxes");
+  });
+
+  it("lists sandboxes directly below inference", () => {
+    render(<SettingsSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    const workspaceLinks = within(
+      screen.getByText("Workspace").parentElement as HTMLElement,
+    ).getAllByRole("link");
+    const labels = workspaceLinks.map((link) => link.textContent);
+
+    expect(labels.indexOf("Sandboxes")).toBe(labels.indexOf("Inference") + 1);
+  });
+
+  it("marks sandboxes active without also marking inference active", () => {
+    pathnameMock.value = "/settings/workspace/sandboxes";
+
+    render(<SettingsSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.getByRole("link", { name: "Sandboxes" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Inference" })).not.toHaveAttribute("aria-current");
   });
 
   it("marks workspace usage active without also marking members active", () => {
@@ -59,5 +82,21 @@ describe("SettingsSidebar", () => {
 
     expect(screen.getByRole("link", { name: "Inference" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: "Members" })).not.toHaveAttribute("aria-current");
+  });
+
+  // Plugins and Skills live in the main app view, so these rows hand the reader back to the
+  // primary sidebar rather than staying inside settings.
+  it.each([
+    ["Skills", "/skills"],
+    ["Plugins", "/plugins"],
+  ])("sends %s out of settings and never marks it current", (label, href) => {
+    pathnameMock.value = href;
+
+    render(<SettingsSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    const row = screen.getByRole("link", { name: label });
+    expect(row).toHaveAttribute("href", href);
+    expect(row).not.toHaveAttribute("aria-current");
+    expect(row.querySelector("svg.lucide-arrow-up-right")).not.toBeNull();
   });
 });

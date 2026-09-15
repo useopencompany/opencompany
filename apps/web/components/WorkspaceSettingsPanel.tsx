@@ -5,7 +5,7 @@ import { Mail, Trash2, UserRound, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { SettingsContent } from "@/components/SettingsChrome";
+import { PageContent } from "@/components/PageContent";
 import {
   inviteToWorkspaceAction,
   removeWorkspaceMemberAction,
@@ -87,7 +87,7 @@ export function WorkspaceSettingsPanel({ initial }: { initial: WorkspaceSettings
   };
 
   return (
-    <SettingsContent
+    <PageContent
       title="Members"
       description="Manage the people who share this workspace and its brains."
     >
@@ -253,6 +253,6 @@ export function WorkspaceSettingsPanel({ initial }: { initial: WorkspaceSettings
           </div>
         ))}
       </section>
-    </SettingsContent>
+    </PageContent>
   );
 }
