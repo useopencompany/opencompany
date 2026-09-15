@@ -45,6 +45,28 @@ After a Chat-affecting release:
 6. Check API and runner telemetry for authorization, idempotency, lease, and settlement failures.
 7. Run `bun run boundary:check` and confirm the web boundary remains clean.
 
+## Queueing and steering
+
+A Message sent while a Run is working becomes its own queued Run rather than a blocked composer.
+Until it starts, the user can steer it into the Run that is already executing or drop it. Steering
+records intent only: the queued Run stays queued and claimable, so a turn that ends before the
+injection lands simply runs the message next. The message is redirected, never lost.
+
+This holds for Task conversations too, including workflow-triggered ones. A Task is a session, so
+viewing one shows the same composer, the same queued-message card, and the same steer and remove
+actions as a Chat -- there is no separate comment surface. Two Task-specific rules follow from that:
+
+- A settled Task takes the message by reopening and running it now; a working Task queues it behind
+  the live turn. `createTaskCommentAndRun` decides between the two under the Task row lock.
+- A Task with a queued Run is not finished. Settlement keeps it running instead of reporting an
+  outcome, and the queue claim resumes a Task that settled first, so a queued message is never
+  stranded. Canceling one Run of a Task with other work pending does not cancel the Task.
+
+Steering reaches the two coding engines through the `_session/steering` ACP extension, which injects
+into the live adapter turn within about a second. The opencompany engine rebuilds its message list
+for every model step and has no adapter session, so a promoted message joins the next step instead;
+a step already inside a tool call finishes first.
+
 ## Failure handling
 
 - Never redispatch an accepted command merely because the browser stream disconnected. Read the

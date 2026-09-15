@@ -2366,6 +2366,70 @@ describe("Postgres Chat repositories", () => {
     });
   });
 
+  it("steers and removes a queued Run on a Task conversation without ending the Task", async () => {
+    const running = await service.createMessage(actor(), {
+      idempotencyKey: "send-steer-task-active",
+      content: "Draft the launch plan.",
+      engine: "opencompany",
+      model: "provider/model",
+    });
+    const queued = await service.createMessage(actor(), {
+      idempotencyKey: "send-steer-task-queued",
+      content: "Lead with the pricing change.",
+      engine: "opencompany",
+      model: "provider/model",
+      conversationId: running.conversationId,
+    });
+    // A Task conversation is the same Conversation, Run, and Message shape a Chat uses. Viewing one
+    // shows that session, so it steers and queues the same way. (The Task write path builds these
+    // rows through createTaskCommentAndRun; this test only needs the shape they leave behind.)
+    await database.query("UPDATE goat.chat_sessions SET kind = 'task' WHERE id = $1", [
+      running.conversationId,
+    ]);
+    await database.query(
+      `INSERT INTO goat.tasks (id, user_workos_id, workspace_id, session_id, status, stage)
+       VALUES ('task_steer', 'user_1', 'workspace_1', $1, 'running', 'running')`,
+      [running.conversationId],
+    );
+    await database.query(
+      `UPDATE goat.codex_chat_turns
+       SET status = 'running', attempts = 1, lease_id = 'lease_task', lease_owner = 'worker_task'
+       WHERE id = $1`,
+      [running.runId],
+    );
+
+    await expect(service.steerRun(actor(), queued.runId)).resolves.toEqual({
+      runId: queued.runId,
+      targetRunId: running.runId,
+    });
+
+    // Dropping the queued message must not end the Task: the turn it was queued behind is still
+    // producing work.
+    await expect(service.cancelRun(actor(), queued.runId)).resolves.toMatchObject({
+      status: "canceled",
+    });
+    expect(
+      (
+        await database.query<{ status: string; stage: string }>(
+          "SELECT status, stage FROM goat.tasks WHERE id = 'task_steer'",
+        )
+      ).rows,
+    ).toEqual([{ status: "running", stage: "running" }]);
+
+    // With nothing else pending, stopping the live Run still stops the Task. The Run itself stays
+    // running until the worker settles the interrupt.
+    await expect(service.cancelRun(actor(), running.runId)).resolves.toMatchObject({
+      status: "running",
+    });
+    expect(
+      (
+        await database.query<{ status: string; stage: string }>(
+          "SELECT status, stage FROM goat.tasks WHERE id = 'task_steer'",
+        )
+      ).rows,
+    ).toEqual([{ status: "canceled", stage: "canceled" }]);
+  });
+
   it("refuses to steer a Run in another member's conversation", async () => {
     const created = await service.createMessage(actor(), {
       idempotencyKey: "send-steer-foreign",
@@ -2988,6 +3052,9 @@ const BASE_SCHEMA = `
     brain_ref text,
     workspace_id text,
     host_tool_contract_version text,
+    execution_backend text NOT NULL DEFAULT 'runner_attached',
+    execution_backend_version integer NOT NULL DEFAULT 1,
+    supervisor_template_version text,
     sandbox_id text,
     codex_thread_id text,
     active_turn_id text,
@@ -3008,6 +3075,8 @@ const BASE_SCHEMA = `
     status text NOT NULL DEFAULT 'queued',
     prompt text NOT NULL,
     settings jsonb NOT NULL DEFAULT '{}',
+    execution_backend text NOT NULL DEFAULT 'runner_attached',
+    execution_backend_version integer NOT NULL DEFAULT 1,
     error text,
     interrupt_requested_at timestamptz,
     attempts integer NOT NULL DEFAULT 0,

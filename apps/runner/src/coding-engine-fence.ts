@@ -5,6 +5,11 @@ import { armSandboxIdleTimeoutById, connectSandbox } from "./sandbox";
 // A crashed worker may leave a detached engine in the sandbox. Fence it even when
 // recovery only needs to cancel or park an approval, without starting a new turn.
 export async function fenceCodingSessionEngine(session: CodexChatSession, idleTimeoutMs: number) {
+  if (session.executionBackend !== "runner_attached" || session.executionBackendVersion !== 1) {
+    throw new Error(
+      `Established runner cannot fence ${session.executionBackend}@${session.executionBackendVersion}.`,
+    );
+  }
   if (!session.sandboxId || session.engine === "opencompany") return;
   try {
     const sandbox = await connectSandbox({ sandboxId: session.sandboxId });

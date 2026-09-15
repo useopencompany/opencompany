@@ -75,6 +75,14 @@ export async function settleSteeredRun(input: {
 
 // Yields every queued message the user steers into this run, oldest first, until the ACP harness
 // closes the iterator at the end of the turn.
+//
+// This is a hand-written iterator rather than an async generator on purpose. The harness keeps one
+// `next()` in flight for the whole turn, and an async generator queues `return()` behind that
+// pending `next()`, which only settles on the next `yield`. A turn nobody steered would therefore
+// never yield, `return()` would never resolve, and the harness would block on iterator cleanup
+// after the prompt had already completed -- the engine finished, the transcript stopped, and the
+// session stayed "running" with its sandbox awake until the turn deadline. Closing here resolves
+// immediately and makes the in-flight poll report done instead of waiting for a message.
 export function steeringMessageSource(input: {
   runId: string;
   leaseId: string;
@@ -85,18 +93,49 @@ export function steeringMessageSource(input: {
   const pollIntervalMs = input.pollIntervalMs ?? STEERING_POLL_INTERVAL_MS;
   const load = input.load ?? loadPendingSteeringMessages;
   return {
-    async *[Symbol.asyncIterator]() {
+    [Symbol.asyncIterator]() {
       // A promotion the adapter refused is left queued on purpose, so it runs as the next turn.
       // Remember what has already been offered so the poll does not retry it every second.
       const offered = new Set<string>();
-      while (true) {
-        await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
-        for (const message of await load(input)) {
-          if (offered.has(message.id)) continue;
-          offered.add(message.id);
-          yield message;
-        }
-      }
+      const buffered: AcpSteeringMessage[] = [];
+      let closed = false;
+      let wake: (() => void) | null = null;
+      const done: IteratorReturnResult<undefined> = { done: true, value: undefined };
+      const sleep = () =>
+        new Promise<void>((resolve) => {
+          const timer = setTimeout(() => {
+            wake = null;
+            resolve();
+          }, pollIntervalMs);
+          timer.unref?.();
+          wake = () => {
+            clearTimeout(timer);
+            wake = null;
+            resolve();
+          };
+        });
+      const iterator: AsyncIterator<AcpSteeringMessage, undefined> = {
+        async next() {
+          while (!closed) {
+            const next = buffered.shift();
+            if (next) return { done: false, value: next };
+            await sleep();
+            if (closed) break;
+            for (const message of await load(input)) {
+              if (offered.has(message.id)) continue;
+              offered.add(message.id);
+              buffered.push(message);
+            }
+          }
+          return done;
+        },
+        async return() {
+          closed = true;
+          wake?.();
+          return done;
+        },
+      };
+      return iterator;
     },
   };
 }
@@ -156,6 +195,69 @@ export function createSteeringChannel(input: {
         },
       ]);
       logger.info("Steered a running coding turn", logFields);
+    },
+  };
+}
+
+// The steering half of an opencompany-engine turn. The product agent keeps no long-lived adapter
+// session to inject into: it rebuilds its message list for every model step, so a promoted message
+// joins the turn at the next step boundary rather than mid-step. Everything else matches the ACP
+// path -- the promoted turn stays queued until it is actually taken, so a turn that ends first
+// simply runs the message next.
+export function createProductSteeringChannel(input: {
+  runId: string;
+  leaseId: string;
+  leaseOwner: string;
+  onSteered: (message: { id: string; text: string }) => void;
+  load?: typeof loadPendingSteeringMessages;
+  settle?: typeof settleSteeredRun;
+}) {
+  const load = input.load ?? loadPendingSteeringMessages;
+  const settle = input.settle ?? settleSteeredRun;
+  // A promotion is settled the moment it is taken, so a poll that overlaps the previous step's
+  // injection cannot hand the same message to the model twice.
+  const taken = new Set<string>();
+  return {
+    // Steering rides alongside a turn that is already producing work, so nothing on this leg may
+    // fail it: a poll or settlement that throws leaves the promotion queued, which is what the
+    // design already promises -- the message runs as the next turn instead of being lost.
+    async take(): Promise<string[]> {
+      const texts: string[] = [];
+      try {
+        for (const message of await load(input)) {
+          if (taken.has(message.id)) continue;
+          const text = message.prompt
+            .flatMap((block) => (block.type === "text" ? [block.text] : []))
+            .join("\n");
+          if (!text.trim()) continue;
+          taken.add(message.id);
+          await settle({
+            steeredRunId: message.id,
+            runId: input.runId,
+            leaseId: input.leaseId,
+            leaseOwner: input.leaseOwner,
+            eventId: `run_event_${randomUUID()}`,
+          });
+          input.onSteered({ id: message.id, text });
+          texts.push(text);
+          logger.info("Steered a running opencompany turn", {
+            event: "opencompany.coding_chat_steering_outcome",
+            engine: "opencompany",
+            run_id: input.runId,
+            steered_run_id: message.id,
+            outcome: "injected",
+          });
+        }
+      } catch (error) {
+        logger.warn("Steering an opencompany turn failed; leaving the message queued", {
+          event: "opencompany.coding_chat_steering_outcome",
+          engine: "opencompany",
+          run_id: input.runId,
+          outcome: "failed",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      return texts;
     },
   };
 }
