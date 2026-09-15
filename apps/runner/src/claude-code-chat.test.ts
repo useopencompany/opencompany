@@ -1,3 +1,4 @@
+import { CLAUDE_CODE_ORGANIZATION_ACCESS_DISABLED_MESSAGE } from "@opencompany/agent/claude-code-access-error";
 import { GitHubUserAccessAuthError } from "@opencompany/agent/integrations/github-user";
 import {
   ACTION_HOST_TOOL_CONTRACT_VERSION,
@@ -19,7 +20,6 @@ import {
   CLAUDE_CORE_MCP_UNAVAILABLE_MESSAGE,
   extractAcpScheduleWakeup,
   inspectClaudeCoreMcpInitialization,
-  isClaudeCodeAuthenticationFailure,
   runClaudeCodeChatTurn,
 } from "./claude-code-chat";
 import { CodexChatRetryableInfrastructureError } from "./codex-chat-errors";
@@ -291,25 +291,6 @@ vi.mock("./workflow-skill-bundles", () => ({
   loadWorkflowTaskPluginRuntime: workflowSkillMocks.loadWorkflowTaskPluginRuntime,
   loadWorkflowTaskSkillBundles: workflowSkillMocks.loadWorkflowTaskSkillBundles,
 }));
-
-describe("isClaudeCodeAuthenticationFailure", () => {
-  it.each([
-    "Failed to authenticate. API Error: 401",
-    "OAuth token has expired",
-    "Unauthorized: login expired",
-    "Invalid API key",
-  ])("recognizes rejected credentials: %s", (message) => {
-    expect(isClaudeCodeAuthenticationFailure(message)).toBe(true);
-  });
-
-  it.each([
-    "You're out of usage credits · resets 10am (UTC)",
-    "Credit balance is too low",
-    "5-hour limit reached - resets 10am (UTC)",
-  ])("keeps credentials connected for usage limits: %s", (message) => {
-    expect(isClaudeCodeAuthenticationFailure(message)).toBe(false);
-  });
-});
 
 describe("inspectClaudeCoreMcpInitialization", () => {
   it("requires all action tools from a connected opencompany server", () => {
@@ -1232,6 +1213,31 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       "[deadline_exceeded] the operation timed out",
       expect.objectContaining({
         failureDiagnostic: "[run_turn] TimeoutError: [deadline_exceeded] the operation timed out",
+      }),
+    );
+  });
+
+  it("preserves the credential when Anthropic reports an organization access denial", async () => {
+    acpMocks.runTurn.mockRejectedValueOnce(
+      new Error(
+        "Internal error: Your organization has disabled Claude subscription access for Claude Code · Use an Anthropic API key instead, or ask your admin to enable access",
+      ),
+    );
+
+    await expect(
+      runClaudeCodeChatTurn({
+        turn: claudeTurn(),
+        session: claudeSession(),
+        env: env(),
+      }),
+    ).resolves.toBe("settled");
+
+    expect(authMocks.markClaudeCodeCredentialNeedsReauth).not.toHaveBeenCalled();
+    const projector = eventMocks.createExternalEngineProjector.mock.results[0]?.value;
+    expect(projector.fail).toHaveBeenCalledWith(
+      CLAUDE_CODE_ORGANIZATION_ACCESS_DISABLED_MESSAGE,
+      expect.objectContaining({
+        failureDiagnostic: expect.stringContaining("organization has disabled"),
       }),
     );
   });

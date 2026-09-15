@@ -175,6 +175,21 @@ describe("engine auth service", () => {
     });
   });
 
+  it("passes a Claude organization access denial through as a retryable 403", async () => {
+    vi.mocked(fetchClaudeCodeUsage).mockRejectedValue(
+      new ClaudeCodeUsageError(
+        "access_disabled",
+        "Ask an Anthropic organization admin to enable access.",
+        403,
+      ),
+    );
+    await expect(service().getClaudeCodeUsage(member)).rejects.toMatchObject({
+      status: 403,
+      message: "Ask an Anthropic organization admin to enable access.",
+      retryable: true,
+    });
+  });
+
   it("maps missing credentials to the retired null status DTO", async () => {
     await expect(service().getClaudeCodeStatus(member)).resolves.toEqual({
       status: null,

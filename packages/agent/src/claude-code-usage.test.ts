@@ -152,6 +152,29 @@ describe("Claude Code subscription usage", () => {
     });
   });
 
+  it("explains an organization policy denial without telling the user to reconnect", async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            type: "error",
+            error: {
+              type: "permission_error",
+              message: "Your organization has disabled Claude subscription access for Claude Code",
+            },
+          }),
+          { status: 403 },
+        ),
+    );
+    await expect(
+      fetchClaudeCodeUsage({ db: dbStub, userWorkosId: "user_1", fetchImpl }),
+    ).rejects.toMatchObject({
+      kind: "access_disabled",
+      statusCode: 403,
+      message: expect.stringContaining("if it continues"),
+    });
+  });
+
   it("never calls Anthropic without a connected credential", async () => {
     db.loadClaudeCodeCredential.mockResolvedValue(null);
     const fetchImpl = vi.fn();

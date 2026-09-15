@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   loadClaudeCodeAuthStatus,
+  markClaudeCodeCredentialNeedsReauth,
   markClaudeCodeCredentialValidated,
   saveClaudeCodeCredential,
 } from "./claude-code-auth";
@@ -86,6 +87,24 @@ describe("opencompany Claude Code credential validation state", () => {
         expectedUpdatedAt: new Date("2026-07-28T10:00:00.000Z"),
       }),
     ).resolves.toBe(false);
+  });
+
+  it("does not invalidate a replacement credential after an older Claude turn fails", async () => {
+    const returning = vi.fn(async () => []);
+    const where = vi.fn(() => ({ returning }));
+    const set = vi.fn(() => ({ where }));
+    const db = { update: vi.fn(() => ({ set })) };
+
+    await expect(
+      markClaudeCodeCredentialNeedsReauth({
+        db: db as never,
+        userWorkosId: "user_123",
+        statusReason: "The old credential was rejected.",
+        expectedUpdatedAt: new Date("2026-07-28T10:00:00.000Z"),
+      }),
+    ).resolves.toBe(false);
+
+    expect(where).toHaveBeenCalledOnce();
   });
 
   it("reads status fields without touching the encrypted payload", async () => {

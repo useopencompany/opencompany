@@ -1,5 +1,6 @@
 import { loadClaudeCodeCredential } from "@opencompany/db/claude-code-auth";
 import type { SubscriptionUsage } from "@opencompany/protocol/schemas";
+import { classifyClaudeCodeAccessFailure } from "./claude-code-access-error";
 
 const MESSAGES_URL = "https://api.anthropic.com/v1/messages";
 const OAUTH_BETA = "oauth-2025-04-20";
@@ -33,7 +34,7 @@ const WINDOW_LABELS: Record<string, string> = {
 };
 const WINDOW_ORDER = Object.keys(WINDOW_LABELS);
 
-export type ClaudeCodeUsageErrorKind = "needs_reauth" | "backend_error";
+export type ClaudeCodeUsageErrorKind = "needs_reauth" | "access_disabled" | "backend_error";
 
 export class ClaudeCodeUsageError extends Error {
   readonly kind: ClaudeCodeUsageErrorKind;
@@ -79,22 +80,26 @@ export async function fetchClaudeCodeUsage(input: {
     redirect: "error",
     cache: "no-store",
   });
-  await response.body?.cancel();
-
   // A rate-limited account still reports its windows, and that reading is exactly
   // what the user opened the card for, so headers win over the response status.
   const reading = readUsageWindows(response.headers);
   if (reading.windows.length > 0) {
+    await response.body?.cancel();
     return { windows: reading.windows, updatedAt: new Date().toISOString() };
   }
 
   if (response.status === 401 || response.status === 403) {
+    const accessFailure = classifyClaudeCodeAccessFailure(await response.text());
+    if (accessFailure?.kind === "organization_access_disabled") {
+      throw new ClaudeCodeUsageError("access_disabled", accessFailure.usageMessage, 403);
+    }
     throw new ClaudeCodeUsageError(
       "needs_reauth",
-      "Reconnect Claude Code to view subscription usage.",
+      accessFailure?.usageMessage ?? "Reconnect Claude Code to view subscription usage.",
       401,
     );
   }
+  await response.body?.cancel();
   // Anthropic reported windows we could not read. Saying the account has no limits
   // would tell a subscriber their allowance is unlimited, so this stays an error.
   if (reading.reportedWindows) {

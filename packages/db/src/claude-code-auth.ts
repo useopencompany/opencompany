@@ -124,16 +124,26 @@ export async function markClaudeCodeCredentialNeedsReauth(input: {
   db: ClaudeCodeAuthDb;
   userWorkosId: string;
   statusReason: string;
+  expectedUpdatedAt?: Date;
   now?: Date;
 }) {
-  await input.db
+  const [credential] = await input.db
     .update(claudeCodeCredentials)
     .set({
       status: "needs_reauth",
       statusReason: input.statusReason,
       updatedAt: input.now ?? new Date(),
     })
-    .where(eq(claudeCodeCredentials.userWorkosId, input.userWorkosId));
+    .where(
+      and(
+        eq(claudeCodeCredentials.userWorkosId, input.userWorkosId),
+        input.expectedUpdatedAt
+          ? eq(claudeCodeCredentials.updatedAt, input.expectedUpdatedAt)
+          : undefined,
+      ),
+    )
+    .returning({ userWorkosId: claudeCodeCredentials.userWorkosId });
+  return Boolean(credential);
 }
 
 export async function loadClaudeCodeCredential(input: {
