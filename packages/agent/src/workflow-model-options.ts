@@ -44,13 +44,13 @@ const WORKFLOW_MODEL_CONFIG = [
     token: "gpt-5.6-sol",
     engine: "opencompany",
     modelId: "openai/gpt-5.6-sol",
-    hint: "Frontier GPT for complex, multi-step steps",
+    hint: "Frontier GPT for complex, multi-step work",
   },
   {
     token: "gpt-5.6-terra",
     engine: "opencompany",
     modelId: "openai/gpt-5.6-terra",
-    hint: "Balanced GPT for everyday steps",
+    hint: "Balanced GPT for everyday work",
   },
   // Superseded by the 5.6 family above, kept so steps already saved on this token keep running.
   {

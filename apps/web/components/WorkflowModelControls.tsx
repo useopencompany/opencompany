@@ -277,7 +277,7 @@ function ModelOption({
       </span>
       {subscriptionCovered ? (
         <span
-          title="Covered by your workspace's ChatGPT subscription, so every run of this step uses no credits."
+          title="Covered by your workspace's ChatGPT subscription, so runs on this model use no credits."
           className="inline-flex shrink-0 items-center rounded-full bg-surface-muted px-1.5 py-px text-[10.5px] font-medium leading-4 text-ink-subtle"
         >
           Included
