@@ -6,6 +6,7 @@ import {
   AcpConfigOptionRejectedError,
   AcpHarness,
   type AcpHarnessTurnInput,
+  type AcpSteeringMessage,
 } from "./acp-harness";
 import { CodexChatRetryableInfrastructureError } from "./codex-chat-errors";
 import type { SandboxHandle } from "./sandbox";
@@ -1433,6 +1434,135 @@ describe("AcpHarness", () => {
     // The turn still completes: an unsteerable agent leaves the message queued to run next.
     expect(outcomes).toEqual(["rejected"]);
     expect(transport.requests.map((request) => request.method)).not.toContain("_session/steering");
+  });
+
+  // Steering rides alongside a turn that is already producing work. Every way that leg can fail
+  // must leave the running turn -- and the work it has done -- intact, with the promoted message
+  // still queued so it runs as the next turn.
+  it("treats a JSON-RPC refusal of the steering extension as a rejected message", async () => {
+    let promptRequestId: number | string | null = null;
+    const transport = fakeAcpSandbox(async (message, emit) => {
+      if (message.method === "initialize") {
+        await emit({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: {
+            agentCapabilities: { loadSession: true },
+            _meta: { steering: { supported: true } },
+          },
+        });
+      } else if (message.method === "session/new") {
+        await emit({ jsonrpc: "2.0", id: message.id, result: { sessionId: "codex_refused" } });
+      } else if (message.method === "session/prompt") {
+        promptRequestId = message.id as number | string;
+      } else if (message.method === "_session/steering") {
+        // The turn ended between the poll and the injection, so there is nothing left to join.
+        await emit({
+          jsonrpc: "2.0",
+          id: message.id,
+          error: { code: -32002, message: "no active turn to steer" },
+        });
+      }
+    });
+    async function* steering() {
+      yield {
+        id: "goat_codex_turn_queued",
+        prompt: [{ type: "text" as const, text: "Also inspect the worker registry." }],
+      };
+    }
+    const outcomes: string[] = [];
+
+    await new AcpHarness().runTurn(
+      harnessInput(transport.sandbox, {
+        adapter: CODEX_ACP_ENGINE_ADAPTER,
+        steering: steering(),
+        onSteeringOutcome: async ({ outcome }) => {
+          outcomes.push(outcome);
+          await transport.emit({
+            jsonrpc: "2.0",
+            id: promptRequestId,
+            result: { stopReason: "end_turn" },
+          });
+        },
+      }),
+    );
+
+    expect(outcomes).toEqual(["rejected"]);
+  });
+
+  it("completes the turn when settling a steered message fails", async () => {
+    let promptRequestId: number | string | null = null;
+    const transport = fakeAcpSandbox(async (message, emit) => {
+      if (message.method === "initialize") {
+        await emit({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: {
+            agentCapabilities: { loadSession: true },
+            _meta: { steering: { supported: true } },
+          },
+        });
+      } else if (message.method === "session/new") {
+        await emit({ jsonrpc: "2.0", id: message.id, result: { sessionId: "codex_settle" } });
+      } else if (message.method === "session/prompt") {
+        promptRequestId = message.id as number | string;
+      } else if (message.method === "_session/steering") {
+        await emit({ jsonrpc: "2.0", id: message.id, result: { outcome: "injected" } });
+        await emit({
+          jsonrpc: "2.0",
+          id: promptRequestId,
+          result: { stopReason: "end_turn" },
+        });
+      }
+    });
+    async function* steering() {
+      yield { id: "goat_codex_turn_queued", prompt: [{ type: "text" as const, text: "Wait." }] };
+    }
+
+    // The promoted turn stays queued, so the injected message runs a second time rather than the
+    // turn that received it being thrown away.
+    await new AcpHarness().runTurn(
+      harnessInput(transport.sandbox, {
+        adapter: CODEX_ACP_ENGINE_ADAPTER,
+        steering: steering(),
+        onSteeringOutcome: async () => {
+          throw new Error("could not settle the steered run");
+        },
+      }),
+    );
+
+    expect(transport.requests.map((request) => request.method)).toContain("_session/steering");
+  });
+
+  it("stops steering for the turn when the poll for promoted messages fails", async () => {
+    const transport = fakeAcpSandbox(async (message, emit) => {
+      if (message.method === "initialize") {
+        await emit({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: {
+            agentCapabilities: { loadSession: true },
+            _meta: { steering: { supported: true } },
+          },
+        });
+      } else if (message.method === "session/new") {
+        await emit({ jsonrpc: "2.0", id: message.id, result: { sessionId: "codex_poll" } });
+      } else if (message.method === "session/prompt") {
+        await emit({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
+      }
+    });
+    const steering: AsyncIterable<AcpSteeringMessage> = {
+      [Symbol.asyncIterator]: () => ({
+        next: () =>
+          Promise.reject(new Error("terminating connection due to administrator command")),
+      }),
+    };
+
+    await new AcpHarness().runTurn(
+      harnessInput(transport.sandbox, { adapter: CODEX_ACP_ENGINE_ADAPTER, steering }),
+    );
+
+    expect(transport.requests.map((request) => request.method)).toContain("session/prompt");
   });
 
   it("cancels an interrupted prompt after persisting its partial updates", async () => {

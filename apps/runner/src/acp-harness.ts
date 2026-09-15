@@ -519,6 +519,57 @@ async function configureSession(
   }
 }
 
+type SteeringStep = { type: "steering"; value: IteratorResult<AcpSteeringMessage> };
+
+// Injects one promoted message into the turn that is already running. Delivery is best-effort by
+// design: an adapter that refuses with a JSON-RPC error, or a settlement that does not land, must
+// not take down a turn that is already producing work. Every failure leaves the promoted turn
+// queued, so the message runs as the next turn -- redirected, never lost.
+async function deliverSteering(input: {
+  client: AcpJsonRpcClient;
+  input: AcpHarnessTurnInput;
+  sessionId: string;
+  steeringControlMethod: string | null;
+  message: AcpSteeringMessage;
+}) {
+  let outcome: AcpSteeringOutcome = "rejected";
+  try {
+    // An agent that does not advertise the extension cannot be steered at all. Report the refusal
+    // rather than failing the turn: the caller still owns an undelivered message.
+    const response = input.steeringControlMethod
+      ? readRecord(
+          await input.client.request(input.steeringControlMethod, {
+            sessionId: input.sessionId,
+            prompt: input.message.prompt,
+          }),
+        )
+      : null;
+    if (readString(response?.outcome) === "injected") outcome = "injected";
+  } catch (error) {
+    // Adapters refuse through a JSON-RPC error as readily as through the outcome field -- most
+    // often because the turn ended between the poll and the injection. That is the same refusal.
+    logger.warn("ACP adapter refused a steering message", {
+      event: "opencompany.goat_acp_steering_refused",
+      engine: input.input.adapter.id,
+      steered_run_id: input.message.id,
+      error: input.input.redact(asError(error).message),
+    });
+  }
+  try {
+    await input.input.onSteeringOutcome?.({ message: input.message, outcome });
+  } catch (error) {
+    // Only the promoted turn's settlement failed. It is still queued, so it runs as the next turn;
+    // a message the adapter did inject is delivered twice rather than lost, as on a worker crash.
+    logger.warn("Could not settle a steered ACP turn; the message stays queued", {
+      event: "opencompany.goat_acp_steering_settle_failed",
+      engine: input.input.adapter.id,
+      steered_run_id: input.message.id,
+      outcome,
+      error: input.input.redact(asError(error).message),
+    });
+  }
+}
+
 async function requestPromptWithAbort(input: {
   client: AcpJsonRpcClient;
   input: AcpHarnessTurnInput;
@@ -542,9 +593,22 @@ async function requestPromptWithAbort(input: {
       (error) => ({ type: "prompt" as const, ok: false as const, error }),
     );
   const steeringIterator = input.input.steering?.[Symbol.asyncIterator]();
-  let nextSteering = steeringIterator
-    ?.next()
-    .then((value) => ({ type: "steering" as const, value }));
+  // Steering runs alongside a turn that is already producing work, so nothing on this leg may
+  // reject into the race below: a poll that fails ends steering for the turn, and the promoted
+  // turn stays queued and simply runs next.
+  const pollSteering = (): Promise<SteeringStep> | undefined =>
+    steeringIterator?.next().then(
+      (value) => ({ type: "steering" as const, value }),
+      (error): SteeringStep => {
+        logger.warn("Could not poll for steered messages; steering is off for this turn", {
+          event: "opencompany.goat_acp_steering_poll_failed",
+          engine: input.input.adapter.id,
+          error: input.input.redact(asError(error).message),
+        });
+        return { type: "steering" as const, value: { done: true, value: undefined } };
+      },
+    );
+  let nextSteering = pollSteering();
   while (true) {
     const settled = await Promise.race([
       outcome,
@@ -563,24 +627,14 @@ async function requestPromptWithAbort(input: {
         nextSteering = undefined;
         continue;
       }
-      const message = settled.value.value;
-      // An agent that does not advertise the extension cannot be steered at all. Report the
-      // refusal rather than failing the turn: the caller still owns an undelivered message.
-      const response = input.steeringControlMethod
-        ? readRecord(
-            await input.client.request(input.steeringControlMethod, {
-              sessionId: input.sessionId,
-              prompt: message.prompt,
-            }),
-          )
-        : null;
-      await input.input.onSteeringOutcome?.({
-        message,
-        outcome: readString(response?.outcome) === "injected" ? "injected" : "rejected",
+      await deliverSteering({
+        client: input.client,
+        input: input.input,
+        sessionId: input.sessionId,
+        steeringControlMethod: input.steeringControlMethod,
+        message: settled.value.value,
       });
-      nextSteering = steeringIterator
-        ?.next()
-        .then((value) => ({ type: "steering" as const, value }));
+      nextSteering = pollSteering();
       continue;
     }
 
