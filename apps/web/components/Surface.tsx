@@ -396,6 +396,7 @@ export function Surface({
   initialChat,
   newChatProjectId = null,
   newChatProjectName = null,
+  userFirstName = null,
   recentChats = [],
   archivedChats = [],
   codexConnected = false,
@@ -422,6 +423,8 @@ export function Surface({
   // Name of that project. Present only alongside `newChatProjectId`, and names the project in the
   // new-chat prompt.
   newChatProjectName?: string | null;
+  // First name of the signed-in user, greeted on the Home prompt when present.
+  userFirstName?: string | null;
   recentChats?: readonly ChatSummaryView[];
   archivedChats?: readonly ChatSummaryView[];
   codexConnected?: boolean;
@@ -2963,7 +2966,9 @@ export function Surface({
               <h1 className="max-w-[720px] text-balance text-center text-[26px] font-semibold leading-tight tracking-tight text-ink">
                 {newChatProjectPrompt
                   ? `What should we build in ${newChatProjectPrompt}?`
-                  : "What should we build next?"}
+                  : userFirstName
+                    ? `What should we build next, ${userFirstName}?`
+                    : "What should we build next?"}
               </h1>
             </div>
           ) : (

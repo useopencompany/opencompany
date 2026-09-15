@@ -135,7 +135,7 @@ function CanonicalTaskDetailView({
               ? "queued"
               : "running"
           : (liveTask?.status ?? run.task.status),
-        startedAtMs: taskActivityStartedAtMs(run),
+        startedAtMs: taskTurnStartedAtMs(liveTask ?? run.task, activeRun?.createdAt),
         activeRunId: activeRun?.id ?? null,
       }}
     />
@@ -173,7 +173,7 @@ function LegacyTaskDetailPanel({
       taskConversation={{
         taskId: initialRun.task.id,
         status: initialRun.task.status,
-        startedAtMs: taskActivityStartedAtMs(initialRun),
+        startedAtMs: taskTurnStartedAtMs(initialRun.task),
       }}
       readOnlyNotice="This pre-cutover task is available as read-only history. Start a new task to continue the work."
     />
@@ -184,7 +184,14 @@ function taskDetailTitle(run: HarnessRunViewModel) {
   return run.task.name.trim() || run.chat?.title.trim() || "Task";
 }
 
-function taskActivityStartedAtMs(run: HarnessRunViewModel) {
-  const parsed = Date.parse(run.task.updatedAt || run.task.createdAt);
-  return Number.isFinite(parsed) ? parsed : Date.now();
+function taskTurnStartedAtMs(
+  task: Pick<HarnessRunViewModel["task"], "createdAt" | "updatedAt">,
+  activeRunCreatedAt?: string,
+) {
+  for (const timestamp of [activeRunCreatedAt, task.updatedAt, task.createdAt]) {
+    if (!timestamp) continue;
+    const parsed = Date.parse(timestamp);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return Date.now();
 }

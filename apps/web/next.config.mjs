@@ -34,7 +34,39 @@ const nextConfig = {
     return [
       {
         source: "/settings/integrations",
-        destination: "/settings/plugins",
+        destination: "/plugins",
+        permanent: false,
+      },
+      // Plugins and Skills moved out of Settings into the main app view. Keep the old paths
+      // working for bookmarks, Slack links, and OAuth apps configured with the former redirect.
+      {
+        source: "/settings/plugins",
+        destination: "/plugins",
+        permanent: false,
+      },
+      {
+        source: "/settings/plugins/:path*",
+        destination: "/plugins/:path*",
+        permanent: false,
+      },
+      {
+        source: "/settings/skills",
+        destination: "/skills",
+        permanent: false,
+      },
+      {
+        source: "/settings/skills/:path*",
+        destination: "/skills/:path*",
+        permanent: false,
+      },
+      {
+        source: "/settings/attio",
+        destination: "/plugins/attio/ingestion",
+        permanent: false,
+      },
+      {
+        source: "/settings/fathom",
+        destination: "/plugins/fathom/ingestion",
         permanent: false,
       },
       {
@@ -44,12 +76,12 @@ const nextConfig = {
       },
       {
         source: "/settings/jamie",
-        destination: "/settings/plugins/jamie",
+        destination: "/plugins/jamie",
         permanent: false,
       },
       {
         source: "/settings/stripe",
-        destination: "/settings/plugins/stripe",
+        destination: "/plugins/stripe",
         permanent: false,
       },
       {

@@ -88,8 +88,9 @@ Saving a scheduled draft clears its next run and prepared execution plan. There 
 workflow definition, so Draft also pauses future runs; it is not a separate unpublished version.
 Plugin event setup, delivery guarantees, and Wiki ingestion retirement are documented in
 [Plugin events and workflows](plugin-events.md).
-Scheduled and event runs follow the step instructions. Optional additional run context is shared
-across steps, and existing custom context remains editable.
+Scheduled and event runs follow the step instructions. The editor does not author extra run
+context; the trigger prompt saved with a workflow is only the run's opening request and stays
+editable through the headless Workflow API.
 
 Canonical Tasks can be archived once their run has settled, including `waiting` ("Waiting for you"),
 `succeeded`, `failed`, and `canceled`. Archiving preserves the outcome and waiting state; it does not

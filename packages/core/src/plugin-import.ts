@@ -113,6 +113,28 @@ export type PluginCapabilitiesReport =
   | { present: true; status: "ignored"; reason: string }
   | { present: true; status: "parsed"; issues: string[] };
 
+// Paid plugins declare a list price per action. The unit decides what a billed unit is: one
+// invocation (`per_call`) or one returned record (`per_result`). Amounts are USD micros so the
+// whole billing path stays in integers.
+export type PluginPriceUnit = "per_call" | "per_result";
+
+export type PluginActionPrice = {
+  action: string;
+  label: string;
+  unit: PluginPriceUnit;
+  amountUsdMicros: number;
+};
+
+export type PluginPricing = {
+  currency: "USD";
+  actions: PluginActionPrice[];
+};
+
+export type PluginPricingReport =
+  | { status: "absent" }
+  | { present: true; status: "ignored"; reason: string }
+  | { present: true; status: "parsed"; issues: string[] };
+
 export type PluginEventFilterDefinition = {
   id: string;
   label: string;
@@ -159,6 +181,7 @@ export type PluginInstallReport = {
   // Optional for compatibility with installations created before capability extensions shipped.
   capabilities?: PluginCapabilitiesReport;
   events?: PluginEventsReport;
+  pricing?: PluginPricingReport;
   collisions: PluginSkillCollision[];
 };
 
@@ -179,6 +202,8 @@ export type ResolvedPluginPackage = {
   remoteServers: PluginRemoteServer[];
   capabilities: PluginCapabilityDefinition[];
   events: PluginEventDefinition[];
+  // Null unless the package is a reviewed, integrity-pinned source that declares paid actions.
+  pricing: PluginPricing | null;
   report: Omit<PluginInstallReport, "collisions">;
 };
 
@@ -205,6 +230,7 @@ export type PluginInstallation = {
   remoteMcpServers: PluginRemoteMcpServer[];
   installReport: PluginInstallReport;
   events: PluginEventDefinition[];
+  pricing: PluginPricing | null;
   eventModes: Record<string, boolean>;
   mcpApprovedIntegrity: string | null;
   createdAt: Date;
@@ -239,6 +265,7 @@ export type PluginImportPreview = {
   stdioServers: PluginStdioServerSummary[];
   remoteMcpServers: PluginRemoteMcpPreviewServer[];
   events: PluginEventDefinition[];
+  pricing: PluginPricing | null;
   report: Omit<PluginInstallReport, "collisions">;
 };
 
@@ -452,6 +479,7 @@ function publicPreview(plugin: ResolvedPluginPackage): PluginImportPreview {
       capabilities: plugin.capabilities,
     })),
     events: plugin.events,
+    pricing: plugin.pricing,
     report: plugin.report,
   };
 }

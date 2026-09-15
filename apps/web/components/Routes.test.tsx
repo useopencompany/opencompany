@@ -10,9 +10,10 @@ import {
   InferenceSettingsRoute,
   McpSettingsRoute,
   PreferencesSettingsRoute,
+  SandboxSettingsRoute,
   SettingsRoute,
   SkillBundleRoute,
-  SkillsSettingsRoute,
+  SkillsRoute,
   WorkflowsRoute,
 } from "./Routes";
 
@@ -171,6 +172,10 @@ vi.mock("@/components/AppDataProvider", () => ({
 
 vi.mock("@/components/InferenceSettingsPanel", () => ({
   InferenceSettingsPanel: () => <div data-testid="inference-settings-panel" />,
+}));
+
+vi.mock("@/components/SandboxSettingsPanel", () => ({
+  SandboxSettingsPanel: () => <div data-testid="sandbox-settings-panel" />,
 }));
 
 vi.mock("@/lib/user-preferences", () => ({
@@ -580,18 +585,29 @@ describe("SettingsRoute", () => {
   });
 
   it("renders the workspace inference settings", () => {
-    render(
-      <InferenceSettingsRoute
-        sandboxSize={{ ok: true, sandboxSize: "standard" }}
-        sandboxSizeOptions={[]}
-      />,
-    );
+    render(<InferenceSettingsRoute />);
 
     expect(screen.getByRole("heading", { name: "Inference" })).toBeInTheDocument();
     expect(
       screen.getByText("Connect model subscriptions and choose how your workspace runs AI."),
     ).toBeInTheDocument();
     expect(screen.getByTestId("inference-settings-panel")).toBeInTheDocument();
+    expect(screen.queryByTestId("sandbox-settings-panel")).not.toBeInTheDocument();
+  });
+
+  it("renders the workspace sandbox settings on their own page", () => {
+    render(
+      <SandboxSettingsRoute
+        sandboxSize={{ ok: true, sandboxSize: "standard" }}
+        sandboxSizeOptions={[]}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Sandboxes" })).toBeInTheDocument();
+    expect(
+      screen.getByText("Control the machines your cloud coding sessions run on."),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("sandbox-settings-panel")).toBeInTheDocument();
   });
 
   it("no longer offers Tasks & Workflows as a beta opt-in", () => {
@@ -991,7 +1007,7 @@ describe("SkillBundleRoute", () => {
   });
 });
 
-describe("SkillsSettingsRoute", () => {
+describe("SkillsRoute", () => {
   beforeEach(() => {
     skillActionsMock.previewHeadlessSkillImport.mockClear();
     skillActionsMock.importHeadlessSkill.mockClear();
@@ -1004,7 +1020,7 @@ describe("SkillsSettingsRoute", () => {
     ["Company", "company"],
     ["Personal", "personal"],
   ])("imports a skill from %s with %s visibility", async (filter, scope) => {
-    render(<SkillsSettingsRoute skills={[]} canEdit />);
+    render(<SkillsRoute skills={[]} canEdit />);
 
     await userEvent.click(screen.getByRole("button", { name: new RegExp(`^${filter}`) }));
     await userEvent.click(screen.getByRole("button", { name: "Import skill" }));
@@ -1029,9 +1045,7 @@ describe("SkillsSettingsRoute", () => {
         expectedIntegrity: `sha256:${"b".repeat(64)}`,
       }),
     );
-    await waitFor(() =>
-      expect(routerMock.push).toHaveBeenCalledWith("/settings/skills/imported_id"),
-    );
+    await waitFor(() => expect(routerMock.push).toHaveBeenCalledWith("/skills/imported_id"));
   });
 
   it("shows when a source directory is normalized to the declared Skill name", async () => {
@@ -1058,7 +1072,7 @@ describe("SkillsSettingsRoute", () => {
         },
       ],
     });
-    render(<SkillsSettingsRoute skills={[]} canEdit />);
+    render(<SkillsRoute skills={[]} canEdit />);
 
     await userEvent.click(screen.getByRole("button", { name: "Import skill" }));
     await userEvent.type(
@@ -1080,7 +1094,7 @@ describe("SkillsSettingsRoute", () => {
   ])(
     "creates a skill from %s with %s visibility and a derived slash command",
     async (filter, scope) => {
-      render(<SkillsSettingsRoute skills={[]} canEdit />);
+      render(<SkillsRoute skills={[]} canEdit />);
 
       await userEvent.click(screen.getByRole("button", { name: new RegExp(`^${filter}`) }));
       await userEvent.click(screen.getByRole("button", { name: `New ${scope} skill` }));
@@ -1105,7 +1119,7 @@ describe("SkillsSettingsRoute", () => {
           instructions: "Reproduce the incident before proposing changes.",
         }),
       );
-      expect(routerMock.push).toHaveBeenCalledWith("/settings/skills/created_id");
+      expect(routerMock.push).toHaveBeenCalledWith("/skills/created_id");
     },
   );
 
@@ -1115,7 +1129,7 @@ describe("SkillsSettingsRoute", () => {
       id: "personal_skill",
       scope: "personal" as const,
     };
-    render(<SkillsSettingsRoute skills={[workspaceSkillFixture, personal]} canEdit />);
+    render(<SkillsRoute skills={[workspaceSkillFixture, personal]} canEdit />);
     const filters = within(screen.getByRole("group", { name: "Skill scope" }));
     expect(filters.getByRole("button", { name: /^All/ })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getAllByRole("link")).toHaveLength(2);
@@ -1125,14 +1139,14 @@ describe("SkillsSettingsRoute", () => {
       "aria-pressed",
       "true",
     );
-    expect(screen.getByRole("link")).toHaveAttribute("href", "/settings/skills/installation_1");
+    expect(screen.getByRole("link")).toHaveAttribute("href", "/skills/installation_1");
 
     await userEvent.click(filters.getByRole("button", { name: /^Personal/ }));
     expect(filters.getByRole("button", { name: /^Company/ })).toHaveAttribute(
       "aria-pressed",
       "false",
     );
-    expect(screen.getByRole("link")).toHaveAttribute("href", "/settings/skills/personal_skill");
+    expect(screen.getByRole("link")).toHaveAttribute("href", "/skills/personal_skill");
 
     await userEvent.click(filters.getByRole("button", { name: /^All/ }));
     expect(screen.getAllByRole("link")).toHaveLength(2);
@@ -1140,7 +1154,7 @@ describe("SkillsSettingsRoute", () => {
   });
 
   it("keeps the selected scope actionable when there are no matching skills", async () => {
-    render(<SkillsSettingsRoute skills={[workspaceSkillFixture]} canEdit />);
+    render(<SkillsRoute skills={[workspaceSkillFixture]} canEdit />);
     await userEvent.click(screen.getByRole("button", { name: /^Personal/ }));
     expect(screen.getByText("No personal skills yet")).toBeInTheDocument();
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
@@ -1149,7 +1163,7 @@ describe("SkillsSettingsRoute", () => {
   });
 
   it("allows overriding the creation scope without changing the list filter", async () => {
-    render(<SkillsSettingsRoute skills={[]} canEdit />);
+    render(<SkillsRoute skills={[]} canEdit />);
     await userEvent.click(screen.getByRole("button", { name: /^Company/ }));
     await userEvent.click(screen.getByRole("button", { name: "New company skill" }));
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Visibility" }), "personal");

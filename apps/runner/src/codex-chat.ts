@@ -1918,7 +1918,7 @@ function buildCodexChatTask(input: {
     "You are Codex running in a persistent cloud sandbox for an ongoing chat with a user.",
     "The sandbox and its files persist across messages in this chat session, so you can build on earlier work.",
     input.githubAvailable
-      ? "GitHub authentication is available through GH_TOKEN and git HTTPS extraheader auth. Clone repositories into the working directory only when the user asks you to work on one."
+      ? `GitHub authentication is available through GH_TOKEN and git HTTPS extraheader auth. Clone repositories under the working directory (${CODEX_CHAT_WORKDIR}) only when the user asks you to work on one. Keep development servers inside that directory so Preview can detect them.`
       : null,
     input.repositoryBootstrapPrompt || null,
     input.brainAvailable

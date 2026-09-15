@@ -117,9 +117,19 @@ function DesktopGoogleButton({
         disabled={pending}
       >
         <GoogleGlyph />
-        {pending ? "Opening browser…" : "Continue with Google"}
+        {pending ? "Waiting for sign-in…" : "Continue with Google"}
         {!pending && lastUsedMethod === "google" ? <UsedLastBadge /> : null}
       </Button>
+      {pending ? (
+        <div className="mt-3 text-center">
+          <p role="status" className="text-sm text-ink-muted">
+            Complete sign-in in your browser, then return here.
+          </p>
+          <Button type="button" variant="ghost" onClick={() => setPending(false)}>
+            Didn&apos;t finish? Try again
+          </Button>
+        </div>
+      ) : null}
     </form>
   );
 }

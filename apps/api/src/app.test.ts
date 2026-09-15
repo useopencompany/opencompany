@@ -343,6 +343,7 @@ describe("canonical Hono API", () => {
       engineSessions: fakeEngineSessions(),
       billing: fakeBilling(),
       workspaceCapabilities: fakeWorkspaceCapabilities(),
+      pluginBilling: fakePluginBilling(),
       workspaceControl: fakeWorkspaceControl(),
       identity: fakeIdentity(),
       onboarding: fakeOnboarding(),
@@ -1125,6 +1126,7 @@ describe("canonical Hono API", () => {
       source: installation.source,
       integrity: installation.integrity,
       files: [{ path: "plugin.json", content: packageBytes, executable: false }],
+      pricing: null,
       fileCount: 1,
       totalBytes: packageBytes.length,
       skills: [],
@@ -5233,6 +5235,7 @@ function testApp(
     engineSessions: fakeEngineSessions(),
     billing: fakeBilling(),
     workspaceCapabilities: fakeWorkspaceCapabilities(),
+    pluginBilling: fakePluginBilling(),
     workspaceControl: fakeWorkspaceControl(),
     identity: fakeIdentity(),
     onboarding: fakeOnboarding(),
@@ -5378,6 +5381,17 @@ function fakeWorkspaceCapabilities(): Parameters<typeof createApiApp>[0]["worksp
     },
     getApprovalByToolCall: async () => {
       throw new Error("Unexpected tool-call capability approval read.");
+    },
+  };
+}
+
+function fakePluginBilling(): Parameters<typeof createApiApp>[0]["pluginBilling"] {
+  return {
+    get: async () => {
+      throw new Error("Unexpected plugin billing read.");
+    },
+    setDailyLimit: async () => {
+      throw new Error("Unexpected plugin spend limit mutation.");
     },
   };
 }
@@ -6168,6 +6182,7 @@ function fakePluginInstallation(): PluginInstallation {
     id: "plugin_1",
     name: "quality-tools",
     status: "enabled",
+    pricing: null,
     manifest: { name: "quality-tools", description: "Quality helpers." },
     source: {
       type: "github",

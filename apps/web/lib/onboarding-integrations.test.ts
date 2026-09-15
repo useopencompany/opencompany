@@ -9,7 +9,7 @@ import {
 describe("opencompany onboarding integrations", () => {
   it("replaces an integration's settings return path with the popup completion route", () => {
     const href = onboardingConnectHref(
-      "/api/integrations/github-user/start?returnTo=/settings/plugins/github",
+      "/api/integrations/github-user/start?returnTo=/plugins/github",
     );
 
     expect(new URL(href, "https://opencompany.test").searchParams.get("returnTo")).toBe(

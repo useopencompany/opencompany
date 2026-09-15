@@ -48,6 +48,7 @@ const plugin: ResolvedPluginPackage = {
   remoteServers: [],
   capabilities: [],
   events: [],
+  pricing: null,
   report: {
     ignoredManifestFields: [],
     skills: [],

@@ -55,9 +55,7 @@ describe("workflowTemplateMissingPlugins", () => {
       plugins: [plugin("github"), plugin("slack")],
       personalAccounts: { github_user: [account()], slack: [account(false)] },
     });
-    expect(missing).toEqual([
-      { plugin: "slack", label: "Slack", setupHref: "/settings/plugins/slack" },
-    ]);
+    expect(missing).toEqual([{ plugin: "slack", label: "Slack", setupHref: "/plugins/slack" }]);
   });
 
   it("reports a connected account whose plugin is not enabled", () => {

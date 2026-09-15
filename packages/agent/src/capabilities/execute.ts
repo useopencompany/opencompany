@@ -25,6 +25,7 @@ import {
 import type { ManagedCapabilityMonidActionSpec } from "./catalog";
 import { assertManagedCapabilityInspection } from "./contract";
 import { hashCapabilityInput } from "./hash";
+import { billedPriceUnits, type ManagedCapabilityPrice } from "./lead-research";
 import {
   isTerminalMonidRun,
   MonidApiError,
@@ -32,6 +33,7 @@ import {
   type MonidInspection,
   type MonidRun,
 } from "./monid";
+import { assertWithinPluginDailyLimit, resolveManagedCapabilityPrice } from "./pricing";
 import { sanitizeCapabilityResult } from "./sanitize";
 
 export const CAPABILITY_APPROVAL_EXPIRES_MS = 15 * 60 * 1_000;
@@ -93,13 +95,18 @@ export async function evaluateManagedCapabilityApproval(input: {
     }
 
     const mapped = input.spec.mapInput(input.params);
+    const price = await resolveManagedCapabilityPrice({
+      spec: input.spec,
+      workspaceId: input.workspaceId,
+      userWorkosId: input.userWorkosId,
+    });
     const quoteTimeoutSignal = AbortSignal.timeout(ACTION_QUOTE_TIMEOUT_MS);
     const inspection = await client.inspect(
       { provider: input.spec.provider, endpoint: input.spec.endpoint },
       input.signal ? AbortSignal.any([input.signal, quoteTimeoutSignal]) : quoteTimeoutSignal,
     );
     assertInspectionMatches(input.spec, mapped, inspection);
-    const quote = capabilityQuote(inputHash, inspection, mapped.resultLimit);
+    const quote = capabilityQuote(inputHash, inspection, mapped.resultLimit, price);
     const [budgetUsdMicros, spentUsdMicros] = await Promise.all([
       getCapabilitySessionBudgetUsdMicros(input.workspaceId),
       sumCapabilitySessionSpendUsdMicros({
@@ -139,6 +146,7 @@ export async function evaluateManagedCapabilityApproval(input: {
       quoteProviderCostUsdMicros: quote.quoteProviderCostUsdMicros,
       quotePlatformFeeUsdMicros: quote.quotePlatformFeeUsdMicros,
       quoteTotalCostUsdMicros: quote.quoteTotalCostUsdMicros,
+      price: capabilityRunPrice(price, mapped.resultLimit),
       approvalExpiresAt: new Date(createdAt.getTime() + CAPABILITY_APPROVAL_EXPIRES_MS),
       now: createdAt,
     });
@@ -200,6 +208,11 @@ export async function executeManagedCapability(input: {
     );
   }
   const mapped = input.spec.mapInput(input.params);
+  const price = await resolveManagedCapabilityPrice({
+    spec: input.spec,
+    workspaceId,
+    userWorkosId: input.context.userWorkosId,
+  });
   const inputHash = hashCapabilityInput({
     action: input.spec.id,
     params: input.params,
@@ -222,8 +235,17 @@ export async function executeManagedCapability(input: {
           inputHash,
           client,
           signal: input.context.signal,
+          price,
         });
 
+  if (price) {
+    await assertWithinPluginDailyLimit({
+      price,
+      quoteTotalCostUsdMicros: quote.quoteTotalCostUsdMicros,
+      workspaceId,
+      now: now(),
+    });
+  }
   await ensureMonthlyIncludedUsage(workspaceId);
   const balanceUsdMicros = await getCreditBalanceUsdMicros(workspaceId);
   if (balanceUsdMicros < quote.quoteTotalCostUsdMicros) {
@@ -258,6 +280,7 @@ export async function executeManagedCapability(input: {
       quoteProviderCostUsdMicros: quote.quoteProviderCostUsdMicros,
       quotePlatformFeeUsdMicros: quote.quotePlatformFeeUsdMicros,
       quoteTotalCostUsdMicros: quote.quoteTotalCostUsdMicros,
+      price: capabilityRunPrice(price, mapped.resultLimit),
       now: now(),
     });
   } else {
@@ -326,6 +349,7 @@ export async function executeManagedCapability(input: {
         quoteProviderCostUsdMicros: quote.quoteProviderCostUsdMicros,
         quotePlatformFeeUsdMicros: quote.quotePlatformFeeUsdMicros,
         quoteTotalCostUsdMicros: quote.quoteTotalCostUsdMicros,
+        price: capabilityRunPrice(price, mapped.resultLimit),
         now: now(),
       });
     }
@@ -486,7 +510,17 @@ export async function executeManagedCapability(input: {
 export async function settleManagedCapabilityRun(input: {
   auditRun: Pick<
     CapabilityRun,
-    "id" | "workspaceId" | "userWorkosId" | "chatSessionId" | "source" | "action" | "createdAt"
+    | "id"
+    | "workspaceId"
+    | "userWorkosId"
+    | "chatSessionId"
+    | "source"
+    | "action"
+    | "createdAt"
+    | "pluginName"
+    | "priceUnit"
+    | "priceAmountUsdMicros"
+    | "priceMaxUnits"
   >;
   providerRun: MonidRun;
   forceFailure?: {
@@ -520,8 +554,27 @@ export async function settleManagedCapabilityRun(input: {
     };
   }
 
-  const settledProviderCostUsdMicros = providerCostUsdMicros;
-  const platformFeeUsdMicros = calculatePlatformFeeUsdMicros(settledProviderCostUsdMicros);
+  // A plugin-routed run bills the list price it was quoted at, applied to the units the provider
+  // actually returned. Everything else passes the provider's settled cost straight through.
+  const runPrice = capabilityRunPriceSnapshot(input.auditRun);
+  const billedUnits = runPrice
+    ? billedPriceUnits({
+        unit: runPrice.unit,
+        maxUnits: runPrice.maxUnits,
+        resultCount: input.providerRun.resultCount ?? null,
+      })
+    : null;
+  const { providerCostUsdMicros: settledProviderCostUsdMicros, platformFeeUsdMicros } =
+    runPrice && billedUnits !== null && success
+      ? splitPricedTotal(runPrice.amountUsdMicros * billedUnits, providerCostUsdMicros)
+      : runPrice
+        ? // A paid plugin sells a result. A run that did not produce one is not charged, even when
+          // the provider still billed us for the attempt.
+          { providerCostUsdMicros: 0, platformFeeUsdMicros: 0 }
+        : {
+            providerCostUsdMicros,
+            platformFeeUsdMicros: calculatePlatformFeeUsdMicros(providerCostUsdMicros),
+          };
   const totalCostUsdMicros = settledProviderCostUsdMicros + platformFeeUsdMicros;
   if (totalCostUsdMicros > 0) {
     await recordCreditDebit({
@@ -533,15 +586,27 @@ export async function settleManagedCapabilityRun(input: {
       platformFeeUsdMicros,
       totalCostUsdMicros,
       chatSessionId: input.auditRun.chatSessionId,
-      costBasis: {
-        kind: "paid_capability",
-        priceType: input.providerRun.price?.type ?? "settled",
-        billedUnits: input.providerRun.billedUnits ?? input.providerRun.resultCount ?? null,
-      },
+      costBasis: runPrice
+        ? {
+            kind: "paid_plugin_action",
+            pluginName: runPrice.pluginName,
+            priceUnit: runPrice.unit,
+            priceAmountUsdMicros: runPrice.amountUsdMicros,
+            billedUnits,
+            // The provider's real cost, kept whole here even where the list-price split caps what
+            // the ledger's provider column can hold.
+            providerCostUsdMicros,
+          }
+        : {
+            kind: "paid_capability",
+            priceType: input.providerRun.price?.type ?? "settled",
+            billedUnits: input.providerRun.billedUnits ?? input.providerRun.resultCount ?? null,
+          },
       metadata: {
         capabilitySource: input.auditRun.source,
         capabilityAction: input.auditRun.action,
         capabilityRunId: input.auditRun.id,
+        ...(runPrice ? { pluginName: runPrice.pluginName } : {}),
       },
       db: input.db,
     });
@@ -628,21 +693,73 @@ function managedCapabilityClient(client?: MonidClient) {
   return new MonidClient({ apiKey });
 }
 
+/**
+ * Splits a charged amount into the ledger's provider/fee columns. The provider column stays the
+ * real cost of goods where it fits under the list price; the remainder is our margin. Both are
+ * bookkeeping — the workspace is charged the total either way — and the true provider cost is
+ * always preserved on the ledger's cost basis.
+ */
+function splitPricedTotal(totalUsdMicros: number, providerCostUsdMicros: number) {
+  const provider = Math.min(providerCostUsdMicros, totalUsdMicros);
+  return { providerCostUsdMicros: provider, platformFeeUsdMicros: totalUsdMicros - provider };
+}
+
+/** Reads the price snapshot a plugin-routed run was created with, if it has one. */
+function capabilityRunPriceSnapshot(
+  run: Pick<CapabilityRun, "pluginName" | "priceUnit" | "priceAmountUsdMicros" | "priceMaxUnits">,
+) {
+  return run.pluginName && run.priceUnit && run.priceAmountUsdMicros && run.priceMaxUnits
+    ? {
+        pluginName: run.pluginName,
+        unit: run.priceUnit,
+        amountUsdMicros: run.priceAmountUsdMicros,
+        maxUnits: run.priceMaxUnits,
+      }
+    : null;
+}
+
+function capabilityRunPrice(price: ManagedCapabilityPrice | null, resultLimit: number) {
+  return price
+    ? {
+        pluginName: price.pluginName,
+        unit: price.unit,
+        amountUsdMicros: price.amountUsdMicros,
+        maxUnits: maximumPricedUnits(price, resultLimit),
+      }
+    : null;
+}
+
+/** The most units a call can bill: one per invocation, or one per result up to the mapped limit. */
+function maximumPricedUnits(price: ManagedCapabilityPrice, resultLimit: number) {
+  return price.unit === "per_call" ? 1 : Math.max(1, resultLimit);
+}
+
 function capabilityQuote(
   inputHash: string,
   inspection: MonidInspection,
   resultLimit: number,
+  price?: ManagedCapabilityPrice | null,
 ): Omit<CapabilityQuote, "decision" | "runId"> {
-  const quoteProviderCostUsdMicros = calculateMaximumProviderQuoteUsdMicros(
-    inspection,
-    resultLimit,
-  );
-  const quotePlatformFeeUsdMicros = calculatePlatformFeeUsdMicros(quoteProviderCostUsdMicros);
+  const providerQuoteUsdMicros = calculateMaximumProviderQuoteUsdMicros(inspection, resultLimit);
+  if (price) {
+    // A paid plugin quotes its own list price at the most units the call can bill. The provider
+    // inspection still runs: it is what proves the reviewed endpoint and input contract have not
+    // changed underneath us.
+    const quoteTotalCostUsdMicros = price.amountUsdMicros * maximumPricedUnits(price, resultLimit);
+    const split = splitPricedTotal(quoteTotalCostUsdMicros, providerQuoteUsdMicros);
+    return {
+      inputHash,
+      quoteProviderCostUsdMicros: split.providerCostUsdMicros,
+      quotePlatformFeeUsdMicros: split.platformFeeUsdMicros,
+      quoteTotalCostUsdMicros,
+    };
+  }
+  const quotePlatformFeeUsdMicros = calculatePlatformFeeUsdMicros(providerQuoteUsdMicros);
   return {
     inputHash,
-    quoteProviderCostUsdMicros,
+    quoteProviderCostUsdMicros: providerQuoteUsdMicros,
     quotePlatformFeeUsdMicros,
-    quoteTotalCostUsdMicros: quoteProviderCostUsdMicros + quotePlatformFeeUsdMicros,
+    quoteTotalCostUsdMicros: providerQuoteUsdMicros + quotePlatformFeeUsdMicros,
   };
 }
 
@@ -652,6 +769,7 @@ async function inspectCapabilityQuote(input: {
   inputHash: string;
   client: MonidClient;
   signal: AbortSignal;
+  price?: ManagedCapabilityPrice | null;
 }) {
   const inspection = await input.client.inspect(
     { provider: input.spec.provider, endpoint: input.spec.endpoint },
@@ -659,7 +777,7 @@ async function inspectCapabilityQuote(input: {
   );
   assertInspectionMatches(input.spec, input.mapped, inspection);
   return {
-    ...capabilityQuote(input.inputHash, inspection, input.mapped.resultLimit),
+    ...capabilityQuote(input.inputHash, inspection, input.mapped.resultLimit, input.price),
     decision: "auto" as const,
   };
 }
