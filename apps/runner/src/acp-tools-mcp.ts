@@ -22,6 +22,7 @@ import {
   SLACK_CHANNEL_TOOL_DESCRIPTION,
   type SlackChannelPost,
 } from "@opencompany/agent/integrations/slack-channel";
+import { mcpInvocationId } from "@opencompany/agent/mcp-invocation";
 import { registerWikiTool } from "@opencompany/agent/mcp-server";
 import { executeWorkspaceSkillToolForActor } from "@opencompany/agent/skills";
 import {
@@ -872,7 +873,11 @@ function registerBrainTools(input: {
         const response = await tool.execute({
           threadId: input.capability.codexChatSessionId,
           turnId: input.capability.codexChatTurnId,
-          callId: `mcp:${input.capability.codexChatTurnId}:${String(extra.requestId)}`,
+          callId: mcpInvocationId(
+            input.capability.codexChatTurnId,
+            extra.sessionId,
+            extra.requestId,
+          ),
           namespace: null,
           tool: tool.spec.name,
           arguments: args,
