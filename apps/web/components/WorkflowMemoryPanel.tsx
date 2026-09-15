@@ -27,6 +27,9 @@ export function WorkflowMemoryPanel({
   const [state, setState] = useState(memory);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  // A run can store a whitespace-only note, which is nothing to show and nothing to clear. Deriving
+  // both the timestamp line and the Clear action from the visible note keeps those in step.
+  const note = state.content.trim();
 
   const commit = (
     optimistic: WorkflowMemoryDto,
@@ -76,11 +79,11 @@ export function WorkflowMemoryPanel({
           <div className="flex flex-col gap-3 border-t border-border px-4 py-3.5">
             <div className="flex min-h-7 items-center justify-between gap-3">
               <span className="text-[12px] text-ink-subtle">
-                {state.updatedAt
+                {note && state.updatedAt
                   ? `Last written ${formatMemoryTimestamp(state.updatedAt)}`
                   : "Nothing remembered yet."}
               </span>
-              {canEdit && state.content.trim() ? (
+              {canEdit && note ? (
                 <Button
                   variant="ghost"
                   size="sm"
@@ -98,9 +101,9 @@ export function WorkflowMemoryPanel({
                 </Button>
               ) : null}
             </div>
-            {state.content.trim() ? (
+            {note ? (
               <div className="max-h-72 overflow-y-auto rounded-lg border border-border bg-canvas px-3 py-2.5">
-                <Markdown content={state.content} />
+                <Markdown content={note} />
               </div>
             ) : (
               <p className="text-[12.5px] leading-5 text-ink-subtle">

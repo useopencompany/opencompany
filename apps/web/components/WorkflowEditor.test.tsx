@@ -376,6 +376,25 @@ describe("WorkflowEditor", () => {
     expect(screen.getByText("Nothing remembered yet.")).toBeInTheDocument();
   });
 
+  it("treats a whitespace-only stored note as nothing remembered", async () => {
+    render(
+      <WorkflowEditor
+        workflow={workflow}
+        canEdit
+        skillCatalog={[]}
+        memory={{
+          workflowId: "workflow_1",
+          enabled: true,
+          content: "   \n  ",
+          updatedAt: "2026-09-01T10:00:00.000Z",
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Nothing remembered yet.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Clear" })).not.toBeInTheDocument();
+  });
+
   it("restores the previous memory state when a command fails", async () => {
     workflowActionsMock.setMemoryEnabled.mockRejectedValueOnce(new Error("Workspace is offline."));
     render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
