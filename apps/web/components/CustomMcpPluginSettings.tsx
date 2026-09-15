@@ -19,7 +19,7 @@ import {
 import { Loader2, Plus, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
-import { SettingsContent } from "@/components/SettingsChrome";
+import { PageContent } from "@/components/PageContent";
 import { ToolPermissionRow } from "@/components/ToolPermissionRow";
 import {
   archiveHeadlessPlugin,
@@ -41,15 +41,15 @@ type Authentication = "none" | "bearer" | "headers";
 export function AddCustomMcpPlugin({ canEdit }: { canEdit: boolean }) {
   const router = useRouter();
   return (
-    <SettingsContent
+    <PageContent
       title="Add custom MCP"
       description="Connect tools from a hosted MCP server."
-      backLink={{ href: "/settings/plugins", label: "Plugins" }}
+      backLink={{ href: "/plugins", label: "Plugins" }}
     >
       {canEdit ? (
         <CustomMcpForm
           onCreated={(plugin) => {
-            router.push(`/settings/plugins/${plugin.name}`);
+            router.push(`/plugins/${plugin.name}`);
             router.refresh();
           }}
         />
@@ -59,7 +59,7 @@ export function AddCustomMcpPlugin({ canEdit }: { canEdit: boolean }) {
           account.
         </p>
       )}
-    </SettingsContent>
+    </PageContent>
   );
 }
 
@@ -371,10 +371,10 @@ export function CustomMcpPluginDetail({
   };
   const account = status.account;
   return (
-    <SettingsContent
+    <PageContent
       title={status.label}
       description="Custom MCP server"
-      backLink={{ href: "/settings/plugins", label: "Plugins" }}
+      backLink={{ href: "/plugins", label: "Plugins" }}
     >
       <div className="max-w-2xl space-y-7">
         <p className="break-all text-sm text-ink-muted">{status.url}</p>
@@ -554,7 +554,7 @@ export function CustomMcpPluginDetail({
                     onClick={() =>
                       void run(async () => {
                         await archiveHeadlessPlugin(plugin.name);
-                        router.push("/settings/plugins");
+                        router.push("/plugins");
                         router.refresh();
                       })
                     }
@@ -575,7 +575,7 @@ export function CustomMcpPluginDetail({
           </section>
         ) : null}
       </div>
-    </SettingsContent>
+    </PageContent>
   );
 }
 

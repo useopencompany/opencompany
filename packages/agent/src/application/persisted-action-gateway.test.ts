@@ -713,7 +713,7 @@ describe("executeActionGateway", () => {
       ok: true,
       action: "gmail.search",
       result: { messages: [] },
-      budget: { limit: 16, used: 1, remaining: 15 },
+      budget: { limit: 32, used: 1, remaining: 31 },
     });
     expect(readAction.execute).toHaveBeenCalledWith(
       { query: "from:ada" },
@@ -776,17 +776,17 @@ describe("executeActionGateway", () => {
       ok: true,
       action: "linkedin.search_posts",
       result: { quotedTotalUsdMicros: 10 },
-      budget: { limit: 16, used: 1, remaining: 15 },
+      budget: { limit: 32, used: 1, remaining: 31 },
     });
     expect(second).toEqual({
       ok: true,
       action: "linkedin.search_posts",
       result: { quotedTotalUsdMicros: 20 },
-      budget: { limit: 16, used: 1, remaining: 15 },
+      budget: { limit: 32, used: 1, remaining: 31 },
     });
   });
 
-  it("rejects call 17 through the shared gateway budget", async () => {
+  it("rejects call 33 through the shared gateway budget", async () => {
     const readAction = createReadAction();
     const catalog: ResolvedActionCatalog = {
       providers: [{ id: "gmail" as const, label: "Gmail", description: "Email" }],
@@ -831,7 +831,7 @@ describe("executeActionGateway", () => {
           turnId: "turn_budget",
           action: readAction.id,
           params: {},
-          invocationId: "call_17",
+          invocationId: "call_33",
         },
         signal: new AbortController().signal,
       }),

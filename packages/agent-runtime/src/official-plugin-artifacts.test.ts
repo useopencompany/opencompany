@@ -8,6 +8,10 @@ import { parseSkillUrl } from "./skill-resolver";
 
 afterEach(() => vi.unstubAllGlobals());
 
+// Packages that ship skills without any MCP server, and packages that sell metered actions.
+const SKILLS_ONLY_OFFICIAL_PLUGINS = new Set(["yc-advise", "doppler", "lead-research"]);
+const PAID_OFFICIAL_PLUGINS = new Set(["lead-research"]);
+
 describe("official plugin release artifacts", () => {
   it("ships exactly the catalog's reviewed package pins", () => {
     expect(Object.keys(OFFICIAL_PLUGIN_ARTIFACTS).sort()).toEqual(
@@ -40,13 +44,20 @@ describe("official plugin release artifacts", () => {
       );
       expect(plugin.report.skills.every((skill) => skill.status === "valid")).toBe(true);
       expect(new Set(plugin.files.map((file) => file.path)).size).toBe(plugin.files.length);
-      if (name === "yc-advise" || name === "doppler") {
+      if (SKILLS_ONLY_OFFICIAL_PLUGINS.has(name)) {
         expect(plugin.skills.length).toBeGreaterThan(0);
         expect(plugin.remoteServers).toHaveLength(0);
       } else {
         expect(plugin.remoteServers.length).toBeGreaterThan(0);
         expect(plugin.capabilities.length).toBeGreaterThan(0);
         expect(plugin.report.mcp).toMatchObject({ status: "parsed" });
+      }
+      // A paid package's prices are charged, so they must survive packaging byte for byte.
+      if (PAID_OFFICIAL_PLUGINS.has(name)) {
+        expect(plugin.report.pricing).toMatchObject({ status: "parsed", issues: [] });
+        expect(plugin.pricing?.actions.length).toBeGreaterThan(0);
+      } else {
+        expect(plugin.pricing).toBeNull();
       }
       expect(fetch).not.toHaveBeenCalled();
     },

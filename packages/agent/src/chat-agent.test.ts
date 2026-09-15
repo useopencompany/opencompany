@@ -1,4 +1,4 @@
-import { WRITE_ARTIFACT_TOOL_NAME } from "@opencompany/agent-runtime";
+import { ACTION_MAX_CALLS_PER_TURN, WRITE_ARTIFACT_TOOL_NAME } from "@opencompany/agent-runtime";
 import { WIKI_TOOL_NAME } from "@opencompany/wiki/tool";
 import { generateText } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
@@ -676,7 +676,7 @@ describe("action discovery tools", () => {
       actions: { catalog, execute, prelistedSourceIds: ["gmail"] },
     });
     const use = context.tools.use_action as ActionTool;
-    for (let i = 0; i < 15; i++)
+    for (let i = 0; i < ACTION_MAX_CALLS_PER_TURN - 1; i++)
       await use.execute(
         { action: action.id, params: { query: "launch" } },
         { toolCallId: `call-${i}` },
@@ -684,7 +684,7 @@ describe("action discovery tools", () => {
     expect(context.areActionCallsExhausted()).toBe(false);
     await use.execute(
       { action: action.id, params: { query: "launch" } },
-      { toolCallId: "call-15" },
+      { toolCallId: "call-31" },
     );
     expect(context.areActionCallsExhausted()).toBe(true);
     const step = prepareProductChatStep({
@@ -718,7 +718,7 @@ describe("action discovery tools", () => {
         ok: true,
         action: action.id,
         result: [],
-        budget: { limit: 16, used: 16, remaining: 0 },
+        budget: { limit: 32, used: 32, remaining: 0 },
       });
     const context = createProductChatToolContext({
       model,
@@ -736,7 +736,7 @@ describe("action discovery tools", () => {
       ok: true,
       action: action.id,
       result: [],
-      budget: { limit: 16, used: 15, remaining: 1 },
+      budget: { limit: 32, used: 31, remaining: 1 },
     });
     await earlier;
     expect(context.areActionCallsExhausted()).toBe(true);
@@ -756,7 +756,7 @@ describe("action discovery tools", () => {
       { action: action.id, params: { query: "launch" } },
       { toolCallId: "resumed" },
     );
-    expect(result).toMatchObject({ budget: { limit: 16, used: 16, remaining: 0 } });
+    expect(result).toMatchObject({ budget: { limit: 32, used: 32, remaining: 0 } });
     expect(context.areActionCallsExhausted()).toBe(true);
   });
 

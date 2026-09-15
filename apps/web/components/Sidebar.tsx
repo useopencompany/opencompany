@@ -178,9 +178,8 @@ export function Sidebar({
   // `/wiki/sources` and `/wiki/import` are static routes under /wiki, not wikis, so neither marks
   // a row as current. Bare `/wiki` redirects, so it is only ever in flight.
   const activeWikiSlug = activeWikiSlugFromPathname(pathname);
-  const pluginsActive =
-    pathname === "/settings/plugins" || pathname.startsWith("/settings/plugins/");
-  const skillsActive = pathname === "/settings/skills" || pathname.startsWith("/settings/skills/");
+  const pluginsActive = pathname === "/plugins" || pathname.startsWith("/plugins/");
+  const skillsActive = pathname === "/skills" || pathname.startsWith("/skills/");
 
   return (
     <aside
@@ -287,18 +286,8 @@ export function Sidebar({
 
         {/* Account / settings footer */}
         <div className="px-2 pb-3 pt-2">
-          <SidebarNavRow
-            href="/settings/plugins"
-            icon={Puzzle}
-            label="Plugins"
-            active={pluginsActive}
-          />
-          <SidebarNavRow
-            href="/settings/skills"
-            icon={Sparkles}
-            label="Skills"
-            active={skillsActive}
-          />
+          <SidebarNavRow href="/plugins" icon={Puzzle} label="Plugins" active={pluginsActive} />
+          <SidebarNavRow href="/skills" icon={Sparkles} label="Skills" active={skillsActive} />
           <SidebarFeedback />
           <SidebarAccountMenu />
         </div>

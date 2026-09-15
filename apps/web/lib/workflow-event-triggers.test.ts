@@ -75,7 +75,7 @@ describe("workflowEventProviderOptions", () => {
     });
 
     expect(option).toMatchObject({
-      accountHref: "/settings/plugins/granola#events",
+      accountHref: "/plugins/granola#events",
       accountLabel: "Add a Granola API key",
       accounts: [],
     });

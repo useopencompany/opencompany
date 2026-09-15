@@ -4226,6 +4226,33 @@ describe("Surface chat streaming UI", () => {
     expect(screen.getByRole("heading", { name: "What should we build next?" })).toBeInTheDocument();
   });
 
+  it("greets the signed-in user by first name on the home prompt", () => {
+    render(
+      <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} userFirstName="Louis" />,
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "What should we build next, Louis?" }),
+    ).toBeInTheDocument();
+  });
+
+  it("prefers the project prompt over the user's first name", () => {
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={null}
+        newChatProjectId="project_1"
+        newChatProjectName="product"
+        userFirstName="Louis"
+      />,
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "What should we build in product?" }),
+    ).toBeInTheDocument();
+  });
+
   it("renders coding workspaces only for persistent Codex and Claude Code chats", () => {
     const renderChat = (
       engine: "codex" | "claude_code" | "opencompany",

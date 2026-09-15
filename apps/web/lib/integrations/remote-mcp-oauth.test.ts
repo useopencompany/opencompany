@@ -129,7 +129,7 @@ describe("opencompany remote MCP OAuth", () => {
     await expect(
       startLatitudeMcpOAuth({
         userWorkosId: "user_1",
-        returnTo: "/settings/plugins/latitude",
+        returnTo: "/plugins/latitude",
       }),
     ).resolves.toEqual({
       status: "redirect",
@@ -165,7 +165,7 @@ describe("opencompany remote MCP OAuth", () => {
     expect(verifyLatitudeMcpState(observed.state)).toMatchObject({
       provider: "latitude",
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/latitude",
+      returnTo: "/plugins/latitude",
     });
     expect(() => verifyLinearMcpState(observed.state)).toThrow(
       "Invalid Linear MCP provider state.",
@@ -175,7 +175,7 @@ describe("opencompany remote MCP OAuth", () => {
   it("preserves Linear's explicit read/write scope in registered client metadata", async () => {
     await startLinearMcpOAuth({
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/linear",
+      returnTo: "/plugins/linear",
     });
 
     expect(auth).toHaveBeenCalledWith(
@@ -191,7 +191,7 @@ describe("opencompany remote MCP OAuth", () => {
   it("connects Attio through dynamic OAuth with its documented endpoint and scopes", async () => {
     await startAttioMcpOAuth({
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/attio",
+      returnTo: "/plugins/attio",
     });
 
     expect(auth).toHaveBeenCalledWith(
@@ -206,14 +206,14 @@ describe("opencompany remote MCP OAuth", () => {
     expect(verifyAttioMcpState(observed.state)).toMatchObject({
       provider: "attio",
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/attio",
+      returnTo: "/plugins/attio",
     });
   });
 
   it("connects Notion through dynamic OAuth with its documented endpoint and scope", async () => {
     await startNotionMcpOAuth({
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/notion",
+      returnTo: "/plugins/notion",
     });
 
     expect(auth).toHaveBeenCalledWith(
@@ -231,14 +231,14 @@ describe("opencompany remote MCP OAuth", () => {
     expect(verifyNotionMcpState(observed.state)).toMatchObject({
       provider: "notion",
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/notion",
+      returnTo: "/plugins/notion",
     });
   });
 
   it("connects PostHog with only the analytics scopes and tools opencompany exposes", async () => {
     await startPostHogMcpOAuth({
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/posthog",
+      returnTo: "/plugins/posthog",
     });
 
     expect(auth).toHaveBeenCalledWith(
@@ -261,14 +261,14 @@ describe("opencompany remote MCP OAuth", () => {
     expect(verifyPostHogMcpState(observed.state)).toMatchObject({
       provider: "posthog",
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/posthog",
+      returnTo: "/plugins/posthog",
     });
   });
 
   it("connects Neon with read-only OAuth and provider-side tool categories", async () => {
     await startNeonMcpOAuth({
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/neon",
+      returnTo: "/plugins/neon",
     });
 
     expect(auth).toHaveBeenCalledWith(
@@ -283,14 +283,14 @@ describe("opencompany remote MCP OAuth", () => {
     expect(verifyNeonMcpState(observed.state)).toMatchObject({
       provider: "neon",
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/neon",
+      returnTo: "/plugins/neon",
     });
   });
 
   it("connects Better Stack to its public hosted MCP with read and write OAuth", async () => {
     await startBetterStackMcpOAuth({
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/betterstack",
+      returnTo: "/plugins/betterstack",
     });
 
     expect(auth).toHaveBeenCalledWith(
@@ -305,7 +305,7 @@ describe("opencompany remote MCP OAuth", () => {
     expect(verifyBetterStackMcpState(observed.state)).toMatchObject({
       provider: "betterstack",
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/betterstack",
+      returnTo: "/plugins/betterstack",
     });
     expect(() => verifyLinearMcpState(observed.state)).toThrow(
       "Invalid Linear MCP provider state.",
@@ -315,7 +315,7 @@ describe("opencompany remote MCP OAuth", () => {
   it("connects Fathom with its supported dynamic-client grant and MCP scope", async () => {
     await startFathomMcpOAuth({
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/fathom",
+      returnTo: "/plugins/fathom",
     });
 
     expect(auth).toHaveBeenCalledWith(
@@ -332,14 +332,14 @@ describe("opencompany remote MCP OAuth", () => {
     expect(verifyFathomMcpState(observed.state)).toMatchObject({
       provider: "fathom",
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/fathom",
+      returnTo: "/plugins/fathom",
     });
   });
 
   it("connects Vercel to its exact MCP root with the advertised OpenID scope", async () => {
     await startVercelMcpOAuth({
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/vercel",
+      returnTo: "/plugins/vercel",
     });
 
     expect(auth).toHaveBeenCalledWith(
@@ -354,7 +354,7 @@ describe("opencompany remote MCP OAuth", () => {
     expect(verifyVercelMcpState(observed.state)).toMatchObject({
       provider: "vercel",
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/vercel",
+      returnTo: "/plugins/vercel",
     });
   });
 
@@ -365,7 +365,7 @@ describe("opencompany remote MCP OAuth", () => {
     await expect(
       startHubSpotMcpOAuth({
         userWorkosId: "user_1",
-        returnTo: "/settings/plugins/hubspot",
+        returnTo: "/plugins/hubspot",
       }),
     ).resolves.toEqual({
       status: "redirect",
@@ -401,7 +401,7 @@ describe("opencompany remote MCP OAuth", () => {
     expect(verifyHubSpotMcpState(observed.state)).toMatchObject({
       provider: "hubspot",
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/hubspot",
+      returnTo: "/plugins/hubspot",
     });
 
     const persistedPayload = vi.mocked(saveIntegrationCredential).mock.calls.at(-1)?.[0].payload;
@@ -443,7 +443,7 @@ describe("opencompany remote MCP OAuth", () => {
   it("connects SigNoz only to the reviewed US Cloud MCP endpoint", async () => {
     await startSigNozMcpOAuth({
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/signoz",
+      returnTo: "/plugins/signoz",
     });
 
     expect(auth).toHaveBeenCalledWith(
@@ -457,14 +457,14 @@ describe("opencompany remote MCP OAuth", () => {
     expect(verifySigNozMcpState(observed.state)).toMatchObject({
       provider: "signoz",
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/signoz",
+      returnTo: "/plugins/signoz",
     });
   });
 
   it("connects Dash0 only to the reviewed AWS Ireland MCP endpoint", async () => {
     await startDash0McpOAuth({
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/dash0",
+      returnTo: "/plugins/dash0",
     });
 
     expect(auth).toHaveBeenCalledWith(
@@ -478,14 +478,14 @@ describe("opencompany remote MCP OAuth", () => {
     expect(verifyDash0McpState(observed.state)).toMatchObject({
       provider: "dash0",
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/dash0",
+      returnTo: "/plugins/dash0",
     });
   });
 
   it("accepts provider-less legacy state only for Linear", async () => {
     await startLinearMcpOAuth({
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/linear",
+      returnTo: "/plugins/linear",
     });
     const [body] = observed.state.split(".");
     const legacyPayload = JSON.parse(
@@ -500,7 +500,7 @@ describe("opencompany remote MCP OAuth", () => {
 
     expect(verifyLinearMcpState(legacyState)).toMatchObject({
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/linear",
+      returnTo: "/plugins/linear",
     });
     expect(() => verifyLatitudeMcpState(legacyState)).toThrow(
       "Invalid Latitude MCP provider state.",
