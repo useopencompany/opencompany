@@ -147,8 +147,10 @@ const BILLING_LOCAL_ENV_KEYS = [
   "OPENCOMPANY_STRIPE_CHECKOUT_ENABLED",
   "CRON_SECRET",
 ];
+// The Better Stack error DSNs are deliberately not mirrored: local runs would report into the
+// shared error tracker as `development` noise. Set them in `.env.override.local` when testing
+// error capture on purpose.
 const RUNTIME_OBSERVABILITY_ENV_KEYS = [
-  "BETTER_STACK_ERRORS_DSN",
   "OBSERVABILITY_ENABLED",
   "OBSERVABILITY_ENV",
   "OBSERVABILITY_RELEASE",
@@ -158,7 +160,6 @@ const RUNTIME_OBSERVABILITY_ENV_KEYS = [
   "BRAINTRUST_API_KEY",
   "BRAINTRUST_PROJECT_ID",
   "BRAINTRUST_PROJECT_NAME",
-  "NEXT_PUBLIC_BETTER_STACK_ERRORS_DSN",
   "NEXT_PUBLIC_OBSERVABILITY_ENABLED",
   "NEXT_PUBLIC_OBSERVABILITY_ENV",
   "NEXT_PUBLIC_OBSERVABILITY_RELEASE",
