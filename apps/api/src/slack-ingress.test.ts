@@ -122,7 +122,7 @@ describe("Slack plugin OAuth ingress", () => {
     const refresh = vi.fn(async () => undefined);
     const state = createSlackIntegrationState({
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/slack",
+      returnTo: "/plugins/slack",
     });
     const response = await ingress({ refresh }).callback(
       new Request(
@@ -153,7 +153,7 @@ describe("Slack plugin OAuth ingress", () => {
       workspaceIds: ["workspace_1"],
     });
     const location = new URL(response.headers.get("location") ?? "");
-    expect(location.pathname).toBe("/settings/plugins/slack");
+    expect(location.pathname).toBe("/plugins/slack");
     expect(location.searchParams.get("integration")).toBe("slack");
     expect(location.searchParams.get("setup")).toBe("connected");
   });
@@ -164,7 +164,7 @@ describe("Slack plugin OAuth ingress", () => {
     });
     const state = createSlackIntegrationState({
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/slack",
+      returnTo: "/plugins/slack",
     });
 
     const response = await ingress({ refresh }).callback(
@@ -191,7 +191,7 @@ describe("Slack plugin OAuth ingress", () => {
   it("rejects state for another opencompany user before exchanging the code", async () => {
     const state = createSlackIntegrationState({
       userWorkosId: "user_other",
-      returnTo: "/settings/plugins/slack",
+      returnTo: "/plugins/slack",
     });
     const response = await ingress().callback(
       new Request(
@@ -227,7 +227,7 @@ describe("Slack plugin OAuth ingress", () => {
     );
     const state = createSlackIntegrationState({
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/slack",
+      returnTo: "/plugins/slack",
     });
 
     await ingress().callback(
@@ -279,7 +279,7 @@ describe("Slack plugin OAuth ingress", () => {
     fail();
     const state = createSlackIntegrationState({
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/slack",
+      returnTo: "/plugins/slack",
     });
 
     await ingress().callback(
@@ -304,7 +304,7 @@ describe("Slack plugin OAuth ingress", () => {
     );
     const state = createSlackIntegrationState({
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/slack",
+      returnTo: "/plugins/slack",
     });
 
     await ingress().callback(

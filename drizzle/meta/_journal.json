@@ -1996,6 +1996,13 @@
       "when": 1790100400005,
       "tag": "0284_slack_thread_participants",
       "breakpoints": true
+    },
+    {
+      "idx": 285,
+      "version": "7",
+      "when": 1790100400006,
+      "tag": "0285_paid_plugins",
+      "breakpoints": true
     }
   ]
 }

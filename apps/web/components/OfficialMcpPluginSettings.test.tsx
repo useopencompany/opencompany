@@ -1428,7 +1428,7 @@ describe("Linear plugin settings", () => {
     accountActions.setIntegrationToolModeAction.mockResolvedValue({ ok: true });
     for (const action of Object.values(infisicalAuth)) action.mockReset();
     useLiveQuery.mockClear();
-    window.history.replaceState({}, "", "/settings/plugins/linear");
+    window.history.replaceState({}, "", "/plugins/linear");
   });
 
   afterEach(() => {
@@ -1763,7 +1763,7 @@ describe("Linear plugin settings", () => {
     expect(screen.getByText(/most recently connected Google Drive account/i)).toBeVisible();
     expect(screen.getByRole("link", { name: "Connect Google Drive account" })).toHaveAttribute(
       "href",
-      "/api/integrations/google-drive/start?returnTo=/settings/plugins/google-drive",
+      "/api/integrations/google-drive/start?returnTo=/plugins/google-drive",
     );
     expect(
       screen.queryByRole("link", { name: "Configure Google Drive ingestion in Wiki sources" }),
@@ -2133,7 +2133,7 @@ describe("Linear plugin settings", () => {
       } else {
         expect(screen.getByRole("link", { name: "Connect Stripe account" })).toHaveAttribute(
           "href",
-          "/api/integrations/stripe/start?returnTo=/settings/plugins/stripe",
+          "/api/integrations/stripe/start?returnTo=/plugins/stripe",
         );
       }
       if (status === "needs_reauth")
@@ -2509,7 +2509,7 @@ describe("Linear plugin settings", () => {
     expect(toasts.error).not.toHaveBeenCalled();
     expect(screen.getByRole("link", { name: "Connect Linear account" })).toHaveAttribute(
       "href",
-      "/api/integrations/linear/start?returnTo=/settings/plugins/linear",
+      "/api/integrations/linear/start?returnTo=/plugins/linear",
     );
   });
 
@@ -2569,7 +2569,7 @@ describe("Linear plugin settings", () => {
     { query: "integration=linear&setup=connected", toast: "success" as const },
     { query: "integration=linear&setup=error&reason=oauth_failed", toast: "error" as const },
   ])("surfaces and clears OAuth return status: $toast", async ({ query, toast }) => {
-    window.history.replaceState({}, "", `/settings/plugins/linear?${query}`);
+    window.history.replaceState({}, "", `/plugins/linear?${query}`);
 
     render(
       <LinearPluginDetailView
@@ -2581,7 +2581,7 @@ describe("Linear plugin settings", () => {
     );
 
     await waitFor(() => expect(toasts[toast]).toHaveBeenCalledTimes(1));
-    expect(window.location.pathname).toBe("/settings/plugins/linear");
+    expect(window.location.pathname).toBe("/plugins/linear");
     expect(window.location.search).toBe("");
   });
 
@@ -2638,7 +2638,7 @@ describe("Linear plugin settings", () => {
 
   it("renders GitHub connection, discovery, and permission controls against github_user", async () => {
     const state = githubToolsStateFromPlugin(githubPlugin);
-    window.history.replaceState({}, "", "/settings/plugins/github");
+    window.history.replaceState({}, "", "/plugins/github");
     let accessRequestCount = 0;
     const fetchMock = vi.fn(async () => {
       accessRequestCount += 1;
@@ -2712,7 +2712,7 @@ describe("Linear plugin settings", () => {
     );
     expect(screen.getByRole("link", { name: "Add organization or account" })).toHaveAttribute(
       "href",
-      "/api/integrations/github-user/start?returnTo=%2Fsettings%2Fplugins%2Fgithub",
+      "/api/integrations/github-user/start?returnTo=%2Fplugins%2Fgithub",
     );
     await userEvent.click(screen.getByRole("link", { name: "Add organization or account" }));
     expect(screen.getByTestId("github-installation-pending")).toHaveTextContent(
@@ -2780,7 +2780,7 @@ describe("Linear plugin settings", () => {
       message: "The selected GitHub App installation is not available to this GitHub account.",
     },
   ])("surfaces and clears GitHub setup status: $toast", async ({ query, toast, message }) => {
-    window.history.replaceState({}, "", `/settings/plugins/github?${query}`);
+    window.history.replaceState({}, "", `/plugins/github?${query}`);
 
     render(
       <GitHubPluginDetailView
@@ -2796,7 +2796,7 @@ describe("Linear plugin settings", () => {
     );
 
     await waitFor(() => expect(toasts[toast]).toHaveBeenCalledWith(message));
-    expect(window.location.pathname).toBe("/settings/plugins/github");
+    expect(window.location.pathname).toBe("/plugins/github");
     expect(window.location.search).toBe("");
   });
 
@@ -2907,7 +2907,7 @@ describe("Linear plugin settings", () => {
     expect(screen.getByText("Not active")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Connect another Slack account" })).toHaveAttribute(
       "href",
-      "/api/integrations/slack/start?returnTo=/settings/plugins/slack",
+      "/api/integrations/slack/start?returnTo=/plugins/slack",
     );
     expect(
       screen.queryByRole("link", { name: /Configure Slack ingestion/ }),
@@ -2992,7 +2992,7 @@ describe("Linear plugin settings", () => {
     expect(screen.getByText("Legacy fallback")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Connect another X account" })).toHaveAttribute(
       "href",
-      "/api/integrations/x-account/start?returnTo=/settings/plugins/x",
+      "/api/integrations/x-account/start?returnTo=/plugins/x",
     );
     expect(
       screen.getByRole("group", { name: "Research public X data permission" }),
@@ -3192,7 +3192,7 @@ describe("Linear plugin settings", () => {
 
     expect(screen.getByRole("link", { name: "Enable full Gmail tools" })).toHaveAttribute(
       "href",
-      "/api/integrations/gmail/start?access=mcp&returnTo=/settings/plugins/gmail",
+      "/api/integrations/gmail/start?access=mcp&returnTo=/plugins/gmail",
     );
   });
 
@@ -3252,7 +3252,7 @@ describe("Linear plugin settings", () => {
     );
     expect(screen.getByRole("link", { name: /connect supabase account/i })).toHaveAttribute(
       "href",
-      "/api/integrations/supabase/start?returnTo=/settings/plugins/supabase",
+      "/api/integrations/supabase/start?returnTo=/plugins/supabase",
     );
     expect(screen.getByText(/SQL can read or change data/)).toBeInTheDocument();
   });
@@ -3300,7 +3300,7 @@ describe("Linear plugin settings", () => {
     render(<ResendPluginDetail pluginState={{ status: "ready", plugin: resendPlugin }} canEdit />);
     expect(screen.getByRole("link", { name: /connect resend account/i })).toHaveAttribute(
       "href",
-      "/api/integrations/resend/start?returnTo=/settings/plugins/resend",
+      "/api/integrations/resend/start?returnTo=/plugins/resend",
     );
     expect(screen.getByText(/Sending and sensitive reads require approval/)).toBeInTheDocument();
   });

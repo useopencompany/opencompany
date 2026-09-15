@@ -28,7 +28,7 @@ describe("feedbackContextFromPathname", () => {
       "/tasks",
       "/chat",
       "/brain/notes/ses_123",
-      "/settings/plugins/linear",
+      "/plugins/linear",
       "/chat/%E0%A4%A",
       `/chat/${"x".repeat(129)}`,
     ]) {

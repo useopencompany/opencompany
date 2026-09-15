@@ -104,6 +104,7 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
   const [socket, setSocket] = useState<WebSocket | null>(null);
   const [ports, setPorts] = useState<PreviewPort[]>([]);
   const [portsLoaded, setPortsLoaded] = useState(false);
+  const [outsideWorkspaceHttpPortCount, setOutsideWorkspaceHttpPortCount] = useState(0);
   const [selectedPort, setSelectedPort] = useState<number | null>(null);
   const [previewPath, setPreviewPath] = useState("/");
   // In-progress address edit; null means the bar mirrors the committed address.
@@ -111,6 +112,7 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewRevision, setPreviewRevision] = useState(0);
   const socketRef = useRef<WebSocket | null>(null);
+  const previewUrlRef = useRef<string | null>(null);
   const connectAttemptRef = useRef(0);
   const connectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectedPortRef = useRef<number | null>(null);
@@ -149,6 +151,7 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
       pendingPathRef.current = path;
       setSelectedPort(port);
       setPreviewPath(path);
+      previewUrlRef.current = null;
       setPreviewUrl(null);
       targetSocket.send(JSON.stringify({ type: "preview.open", port }));
     },
@@ -163,6 +166,8 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
       socketRef.current?.close();
       socketRef.current = null;
       setSocket(null);
+      previewUrlRef.current = null;
+      setPreviewUrl(null);
       setConnectionState("waking");
       setError(null);
       setPortsLoaded(false);
@@ -211,15 +216,23 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
           if (!message) return;
           if (message.type === "ports") {
             setPorts(message.ports);
+            setOutsideWorkspaceHttpPortCount(
+              message.outsideWorkspacePorts.filter((port) => port.isHttp).length,
+            );
             setPortsLoaded(true);
             setError(null);
             const strongest = message.ports.find((port) => port.isHttp);
-            if (strongest && selectedPortRef.current === null) {
-              requestPreview(strongest.port, "/", nextSocket);
+            const requested = message.ports.find(
+              (port) => port.port === selectedPortRef.current && port.isHttp,
+            );
+            const target = requested ?? strongest;
+            if (target && previewUrlRef.current === null) {
+              requestPreview(target.port, pendingPathRef.current, nextSocket);
             }
           } else if (message.type === "preview") {
             selectedPortRef.current = message.port;
             setSelectedPort(message.port);
+            previewUrlRef.current = message.url;
             setPreviewUrl(message.url);
             setPreviewPath(pendingPathRef.current);
             setPreviewRevision(0);
@@ -357,14 +370,14 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
   // the dev server starts listening.
   useEffect(() => {
     if (activeTab !== "preview" || connectionState !== "ready" || !socket) return;
-    if (selectedPort !== null) return;
+    if (previewUrl !== null) return;
     const interval = setInterval(() => {
       if (socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({ type: "ports.refresh" }));
       }
     }, PORT_DISCOVERY_POLL_MS);
     return () => clearInterval(interval);
-  }, [activeTab, connectionState, socket, selectedPort]);
+  }, [activeTab, connectionState, previewUrl, socket]);
 
   const navigateToAddress = () => {
     const parsed = parsePreviewAddress(addressValue, selectedPortRef.current);
@@ -643,13 +656,17 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
                       ? "Looking for development servers…"
                       : ports.some((port) => port.isHttp)
                         ? "Opening preview…"
-                        : "No development server detected"
+                        : outsideWorkspaceHttpPortCount > 0
+                          ? "Development server is outside this workspace"
+                          : "No development server detected"
                   }
                   detail={
                     !portsLoaded
                       ? `Checking listening ports in the ${engineLabel} workspace.`
                       : !ports.some((port) => port.isHttp)
-                        ? `Start a server from ${engineLabel} or Terminal — the preview opens automatically once it is listening. opencompany never runs package scripts automatically.`
+                        ? outsideWorkspaceHttpPortCount > 0
+                          ? `Restart the server from ${engineLabel} or Terminal in this workspace so Preview can open it securely.`
+                          : `Start a server from ${engineLabel} or Terminal — the preview opens automatically once it is listening. opencompany never runs package scripts automatically.`
                         : "Connecting through the secure preview gateway."
                   }
                   busy={!portsLoaded}
@@ -800,7 +817,7 @@ function composePreviewSrc(origin: string, path: string): string {
 }
 
 type RuntimeMessage =
-  | { type: "ports"; ports: PreviewPort[] }
+  | { type: "ports"; ports: PreviewPort[]; outsideWorkspacePorts: PreviewPort[] }
   | { type: "preview"; port: number; url: string }
   | { type: "error"; message: string }
   | { type: "status"; status: string };
@@ -810,7 +827,10 @@ function parseControlMessage(raw: string): RuntimeMessage | null {
     const value = JSON.parse(raw) as Record<string, unknown>;
     if (value.type === "ports" && Array.isArray(value.ports)) {
       const ports = value.ports.filter(isPreviewPort);
-      return { type: "ports", ports };
+      const outsideWorkspacePorts = Array.isArray(value.outsideWorkspacePorts)
+        ? value.outsideWorkspacePorts.filter(isPreviewPort)
+        : [];
+      return { type: "ports", ports, outsideWorkspacePorts };
     }
     if (
       value.type === "preview" &&

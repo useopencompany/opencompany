@@ -7,8 +7,8 @@ import { serverApiClient, serverApiErrorMessage } from "@/lib/server-api-client"
 const LOAD_ERROR_MESSAGE = "Could not load the sandbox size.";
 const SAVE_ERROR_MESSAGE = "Could not update the sandbox size.";
 
-// Read failures stay inside the card instead of throwing the whole Inference page:
-// the model-subscription sections on it do not depend on this setting.
+// Read failures stay inside the card instead of throwing the whole Sandboxes page,
+// so the rest of the settings shell keeps rendering.
 export type WorkspaceSandboxSizeResult =
   | { ok: true; sandboxSize: SandboxSize }
   | { ok: false; error: string };
@@ -37,7 +37,7 @@ export async function setWorkspaceSandboxSizeAction(
     if (!response.ok) {
       return { ok: false, error: await serverApiErrorMessage(response, SAVE_ERROR_MESSAGE) };
     }
-    revalidatePath("/settings/workspace/inference");
+    revalidatePath("/settings/workspace/sandboxes");
     return { ok: true, sandboxSize: (await response.json()).data.sandboxSize };
   } catch (error) {
     console.error("[opencompany] Failed to update the workspace sandbox size", error);

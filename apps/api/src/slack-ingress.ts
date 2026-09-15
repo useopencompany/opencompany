@@ -59,7 +59,7 @@ async function handleStart(input: IngressInput, request: Request): Promise<Respo
   const session = await resolveIngressSession(input, request);
   if (session.kind === "redirect") return session.response;
   const url = new URL(request.url);
-  const returnTo = url.searchParams.get("returnTo") ?? "/settings/plugins/slack";
+  const returnTo = url.searchParams.get("returnTo") ?? "/plugins/slack";
 
   if (!isSlackIntegrationConfigured()) {
     return statusRedirect(session, returnTo, "error", "not_configured");
@@ -84,10 +84,7 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
   } catch {
     return sessionRedirect(
       session,
-      new URL(
-        "/settings/plugins/slack?integration=slack&setup=error&reason=invalid_state",
-        getAppUrl(),
-      ),
+      new URL("/plugins/slack?integration=slack&setup=error&reason=invalid_state", getAppUrl()),
     );
   }
 

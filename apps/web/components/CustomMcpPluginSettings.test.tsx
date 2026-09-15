@@ -69,7 +69,7 @@ it("tests before installation and invalidates the preview when the endpoint chan
       expect.any(String),
     ),
   );
-  expect(router.push).toHaveBeenCalledWith("/settings/plugins/custom-test");
+  expect(router.push).toHaveBeenCalledWith("/plugins/custom-test");
 });
 
 it("shows a connection failure and lets the user retry without installing", async () => {

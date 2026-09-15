@@ -15,10 +15,15 @@ const mocks = vi.hoisted(() => ({
   resolvePluginGatewayRegistrations: vi.fn(async () => []),
   resolveRemoteMcpActions: vi.fn(),
   listWorkspaceCapabilities: vi.fn(),
+  listInstalledPluginPricing: vi.fn(),
 }));
 
 vi.mock("@opencompany/db/capabilities", () => ({
   listWorkspaceCapabilities: mocks.listWorkspaceCapabilities,
+}));
+vi.mock("@opencompany/db/plugin-pricing", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@opencompany/db/plugin-pricing")>()),
+  listInstalledPluginPricing: mocks.listInstalledPluginPricing,
 }));
 
 vi.mock("@opencompany/agent/actions/attio", () => ({
@@ -297,6 +302,9 @@ describe("resolveActionCatalog", () => {
       { source: "seo", enabled: true },
     ]);
 
+    // Prospecting is sold through the Lead research plugin. Enabling its capability source is not
+    // enough: without the installed package's prices it stays out of the catalog entirely.
+    mocks.listInstalledPluginPricing.mockResolvedValue([]);
     const catalog = await resolveActionCatalog({
       userWorkosId: "user_1",
       workspaceId: "workspace_1",
@@ -306,17 +314,65 @@ describe("resolveActionCatalog", () => {
       ["youtube", "managed"],
       ["instagram", "managed"],
       ["tiktok", "managed"],
-      ["lead", "managed"],
       ["seo", "managed"],
     ]);
+    expect(catalog.actions).not.toContainEqual(expect.objectContaining({ provider: "lead" }));
     expect(catalog.actions).not.toContainEqual(expect.objectContaining({ provider: "linkedin" }));
     expect(catalog.actions.filter((action) => action.provider === "x")).toHaveLength(7);
-    expect(catalog.actions.filter((action) => action.provider === "lead")).toHaveLength(5);
     expect(catalog.actions.filter((action) => action.provider === "seo")).toHaveLength(6);
     expect(catalog.actions.find((action) => action.id === "youtube.get_transcript")).toMatchObject({
       provider: "youtube",
       maxResultChars: 256_000,
     });
+
+    mocks.listInstalledPluginPricing.mockResolvedValue([
+      {
+        pluginName: "lead-research",
+        pricing: {
+          currency: "USD",
+          actions: [
+            {
+              action: "search_prospects",
+              label: "Prospect found",
+              unit: "per_result",
+              amountUsdMicros: 80_000,
+            },
+            {
+              action: "list_company_employees",
+              label: "Employee found",
+              unit: "per_result",
+              amountUsdMicros: 50_000,
+            },
+            {
+              action: "search_people_by_name",
+              label: "Person found",
+              unit: "per_result",
+              amountUsdMicros: 50_000,
+            },
+            {
+              action: "get_linkedin_contact",
+              label: "Profile enriched",
+              unit: "per_result",
+              amountUsdMicros: 100_000,
+            },
+            {
+              action: "find_person_email",
+              label: "Email lookup",
+              unit: "per_call",
+              amountUsdMicros: 150_000,
+            },
+          ],
+        },
+      },
+    ]);
+    const withPluginCatalog = await resolveActionCatalog({
+      userWorkosId: "user_1",
+      workspaceId: "workspace_1",
+    });
+    expect(withPluginCatalog.providers.map((source) => source.id)).toContain("lead");
+    expect(withPluginCatalog.actions.filter((action) => action.provider === "lead")).toHaveLength(
+      5,
+    );
 
     vi.stubEnv("OPENCOMPANY_DISABLED_MANAGED_CAPABILITY_ACTIONS", "x.search_posts");
     const endpointDisabledCatalog = await resolveActionCatalog({
