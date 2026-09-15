@@ -691,12 +691,13 @@ describe("Surface chat streaming UI", () => {
 
   it("queues a coding message without replacing the running turn as the Interrupt target", async () => {
     const user = userEvent.setup();
+    const conversationId = "goat_chat_codex_queueing";
     render(
       <Surface
         tasks={[]}
         defaultModel={DEFAULT_MODEL}
         initialChat={{
-          id: "goat_chat_codex_queueing",
+          id: conversationId,
           title: "Active coding",
           model: DEFAULT_MODEL,
           engine: "codex",
@@ -727,7 +728,7 @@ describe("Surface chat streaming UI", () => {
     await waitFor(() =>
       expect(headlessChatMocks.enqueue).toHaveBeenCalledWith(
         expect.objectContaining({
-          conversationId: "goat_chat_codex_queueing",
+          conversationId,
           content: "Also update the changelog.",
           engine: expect.objectContaining({ type: "codex" }),
         }),
@@ -748,7 +749,7 @@ describe("Surface chat streaming UI", () => {
         tasks={[]}
         defaultModel={DEFAULT_MODEL}
         initialChat={{
-          id: "goat_chat_codex_queue_enter",
+          id: "conversation_codex_queue_enter",
           title: "Active coding",
           model: DEFAULT_MODEL,
           engine: "codex",
@@ -771,7 +772,7 @@ describe("Surface chat streaming UI", () => {
     await waitFor(() =>
       expect(headlessChatMocks.enqueue).toHaveBeenCalledWith(
         expect.objectContaining({
-          conversationId: "goat_chat_codex_queue_enter",
+          conversationId: "conversation_codex_queue_enter",
           content: "Also update the changelog.",
         }),
       ),
