@@ -189,6 +189,7 @@ import {
   updateHeadlessChatConversation,
 } from "@/lib/headless-chat-commands";
 import {
+  enqueueHeadlessChatMessage,
   HeadlessChatTransport,
   type HeadlessMessageAccepted,
   startHeadlessBackgroundChat,
@@ -600,6 +601,7 @@ export function Surface({
   );
   const conversationRunning = isChatRuntimeActive(conversationRuntime);
   const [engineSubmitting, setEngineSubmitting] = useState(false);
+  const [queuedMessageSubmitting, setQueuedMessageSubmitting] = useState(false);
   const [backgroundTaskSubmitting, setBackgroundTaskSubmitting] = useState(false);
   const [taskCommentSubmitting, setTaskCommentSubmitting] = useState(false);
   const [stoppingTaskId, setStoppingTaskId] = useState<string | null>(null);
@@ -898,7 +900,12 @@ export function Surface({
   // A running coding turn gates nothing: the message becomes a queued turn the user can steer into
   // the live one. Tasks and background sends keep their own dispatch rules.
   const canQueueWhileWorking = Boolean(
-    isEngineChat && !activeTaskConversation && !backgroundChatDirective && !readOnly,
+    isEngineChat &&
+      persistedChatSessionId &&
+      !activeTaskConversation &&
+      !backgroundChatDirective &&
+      !queuedMessageSubmitting &&
+      !readOnly,
   );
   const lowCreditBalance = Boolean(
     creditBalance &&
@@ -2283,6 +2290,9 @@ export function Surface({
         : null
       : newOptimisticChatSessionId();
     const requestSessionId = newSessionId ? null : chatSessionId;
+    const queueingBehindActiveTurn = Boolean(
+      activeEngine && requestSessionId && isForegroundTurnWorking && canQueueWhileWorking,
+    );
     if (newSessionId && pendingNewSessionIdRef.current !== newSessionId) {
       pendingNewSessionIdRef.current = newSessionId;
       routedChatSessionIdRef.current = newSessionId;
@@ -2316,13 +2326,55 @@ export function Surface({
           });
         }
       }
-      setEngineSubmitting(true);
+      if (!queueingBehindActiveTurn) setEngineSubmitting(true);
       setCodexPlanModeEnabled(false);
       setCodexGoalModeEnabled(false);
       setCodexGoalObjective("");
       setCodexGoalTokenBudget("");
     }
     clearComposerDraft(persistedChatSessionId);
+    // Clear without revoking previews: the optimistic bubble still shows them.
+    composerAttachments.setAttachments([]);
+    // The API files the new Conversation under the project as it creates it; the local note keeps
+    // the sidebar row under that folder for the moment before the project list catches up.
+    const projectId = newSessionId ? newChatProjectId : null;
+    if (projectId && newSessionId) noteLocalProjectAssignment(projectId, newSessionId);
+    if (queueingBehindActiveTurn && activeEngine && requestSessionId) {
+      // useChat and HeadlessChatTransport own the one foreground stream. Queue through the command
+      // boundary so the current turn remains the foreground/Interrupt target until it finishes.
+      setQueuedMessageSubmitting(true);
+      void enqueueHeadlessChatMessage({
+        content: prompt,
+        conversationId: requestSessionId,
+        clientMessageId: newQueuedChatMessageId(),
+        model: String(model),
+        engine: messageEngine,
+        ...(readyAttachments.length > 0
+          ? { attachmentIds: readyAttachments.map((attachment) => attachment.id) }
+          : {}),
+        ...(mentions.length > 0
+          ? {
+              mentions: mentions.flatMap((mention) =>
+                mention.kind === "skill" ? [{ kind: "skill" as const, id: mention.id }] : [],
+              ),
+            }
+          : {}),
+      })
+        .then(() => revokeAttachmentPreviews(pendingAttachments))
+        .catch((error) => {
+          if (!mountedRef.current) return;
+          if (!inputRef.current?.value) {
+            setInput(rawPrompt);
+            setSelectedMentions(mentions);
+            composerAttachments.setAttachments(pendingAttachments);
+          }
+          toast.error(error instanceof Error ? error.message : "Could not queue that message.");
+        })
+        .finally(() => {
+          if (mountedRef.current) setQueuedMessageSubmitting(false);
+        });
+      return;
+    }
     beginActiveTurn({
       engine: messageEngine.type,
       selectedModel: String(model),
@@ -2335,12 +2387,6 @@ export function Surface({
             : (codingSandboxStatus ?? "unknown"),
       sendSource: "composer",
     });
-    // Clear without revoking previews: the optimistic bubble still shows them.
-    composerAttachments.setAttachments([]);
-    // The API files the new Conversation under the project as it creates it; the local note keeps
-    // the sidebar row under that folder for the moment before the project list catches up.
-    const projectId = newSessionId ? newChatProjectId : null;
-    if (projectId && newSessionId) noteLocalProjectAssignment(projectId, newSessionId);
     void sendMessage(message, {
       body: {
         sessionId: requestSessionId,
@@ -2670,7 +2716,10 @@ export function Surface({
 
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      if ((!isInteractionPending || isBackgroundSubmit) && !backgroundTaskSubmitting) {
+      if (
+        (!isInteractionPending || isBackgroundSubmit || canQueueWhileWorking) &&
+        !backgroundTaskSubmitting
+      ) {
         formRef.current?.requestSubmit();
       }
     }
@@ -6568,4 +6617,12 @@ function newBackgroundChatMessageId() {
       ? globalThis.crypto.randomUUID()
       : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
   return `ui_background_${randomId}`;
+}
+
+function newQueuedChatMessageId() {
+  const randomId =
+    typeof globalThis.crypto?.randomUUID === "function"
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  return `ui_queued_${randomId}`;
 }

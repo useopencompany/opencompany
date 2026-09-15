@@ -125,6 +125,16 @@ const knowledgeCommandMocks = vi.hoisted(() => ({
 }));
 
 const headlessChatMocks = vi.hoisted(() => ({
+  enqueue: vi.fn(
+    async (input: { conversationId: string; content: string; clientMessageId: string }) => ({
+      conversationId: input.conversationId,
+      messageId: input.clientMessageId,
+      assistantMessageId: "message_assistant_queued",
+      runId: "run_queued",
+      transactionId: "42",
+      replayed: false,
+    }),
+  ),
   startBackground: vi.fn(
     async (input: {
       content: string;
@@ -185,6 +195,7 @@ vi.mock("@/lib/headless-chat-attachment-upload", () => ({
 
 vi.mock("@/lib/headless-chat-transport", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/headless-chat-transport")>()),
+  enqueueHeadlessChatMessage: headlessChatMocks.enqueue,
   startHeadlessBackgroundChat: headlessChatMocks.startBackground,
 }));
 
@@ -469,6 +480,7 @@ describe("Surface chat streaming UI", () => {
     automationCommandMocks.updateSchedule.mockClear();
     knowledgeCommandMocks.listSkillCatalog.mockReset();
     knowledgeCommandMocks.listSkillCatalog.mockResolvedValue([]);
+    headlessChatMocks.enqueue.mockClear();
     headlessChatMocks.startBackground.mockClear();
     attachmentUploadMock.canonicalUpload.mockReset();
     attachmentUploadMock.canonicalUpload.mockResolvedValue({ id: "attachment_1" });
@@ -677,7 +689,7 @@ describe("Surface chat streaming UI", () => {
     expect(screen.getByRole("button", { name: "Interrupt Claude Code" })).toBeInTheDocument();
   });
 
-  it("lets a coding message be queued while the engine is still working", async () => {
+  it("queues a coding message without replacing the running turn as the Interrupt target", async () => {
     const user = userEvent.setup();
     render(
       <Surface
@@ -710,6 +722,61 @@ describe("Surface chat streaming UI", () => {
     await user.type(screen.getByRole("textbox", { name: "" }), "Also update the changelog.");
 
     expect(send).toBeEnabled();
+    await user.click(send);
+
+    await waitFor(() =>
+      expect(headlessChatMocks.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          conversationId: "goat_chat_codex_queueing",
+          content: "Also update the changelog.",
+          engine: expect.objectContaining({ type: "codex" }),
+        }),
+      ),
+    );
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Interrupt Codex" }));
+
+    expect(headlessChatCommandMocks.cancel).toHaveBeenCalledWith("run_codex_active");
+    expect(chatMock.stop).toHaveBeenCalledOnce();
+  });
+
+  it("queues a coding message with Enter while the engine is still working", async () => {
+    const user = userEvent.setup();
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "goat_chat_codex_queue_enter",
+          title: "Active coding",
+          model: DEFAULT_MODEL,
+          engine: "codex",
+          runtime: {
+            status: "running",
+            activeRunId: "run_codex_active",
+            hasError: false,
+            updatedAt: currentTimestamp(),
+          },
+          activityState: "working",
+          hasUnseen: false,
+          messages: [],
+        }}
+        codexConnected
+      />,
+    );
+
+    await user.type(screen.getByRole("textbox", { name: "" }), "Also update the changelog.{Enter}");
+
+    await waitFor(() =>
+      expect(headlessChatMocks.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          conversationId: "goat_chat_codex_queue_enter",
+          content: "Also update the changelog.",
+        }),
+      ),
+    );
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
   });
 
   it("keeps a reloaded engine Conversation active while its Run id is still syncing", async () => {

@@ -63,12 +63,28 @@ describe("queuedChatMessages", () => {
       }),
     ).toEqual([]);
   });
+
+  it("keeps an ordinary foreground Run in the transcript while it waits to be claimed", () => {
+    expect(
+      queuedChatMessages({
+        runs: runs(run({ triggerMessageId: "message_1" })),
+        messages: [message("message_1", "Start the migration.")],
+      }),
+    ).toEqual([]);
+  });
 });
 
 describe("pendingRunMessageIds", () => {
   it("hides messages for runs that never executed", () => {
     const hidden = pendingRunMessageIds({
       runs: runs(
+        run({
+          id: "run_active",
+          triggerMessageId: "message_active",
+          assistantMessageId: "assistant_active",
+          status: "running",
+          attemptCount: 1,
+        }),
         run({ id: "run_queued", triggerMessageId: "message_q", assistantMessageId: "assistant_q" }),
         run({
           id: "run_steered",
@@ -93,6 +109,15 @@ describe("pendingRunMessageIds", () => {
     expect(
       pendingRunMessageIds({
         runs: runs(run({ status: "canceled", attemptCount: 1 })),
+        messages: [],
+      }).size,
+    ).toBe(0);
+  });
+
+  it("keeps an ordinary queued foreground message in the transcript", () => {
+    expect(
+      pendingRunMessageIds({
+        runs: runs(run({ triggerMessageId: "message_1" })),
         messages: [],
       }).size,
     ).toBe(0);

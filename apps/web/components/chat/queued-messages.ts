@@ -16,6 +16,9 @@ type QueuedMessagesInput = {
 };
 
 export function queuedChatMessages(input: QueuedMessagesInput): QueuedChatMessage[] {
+  // A freshly sent foreground turn is briefly queued before a worker claims it. It belongs in the
+  // transcript like any normal turn; the card is only for work waiting behind a running sibling.
+  if (![...input.runs.values()].some((run) => run.status === "running")) return [];
   const textByMessageId = new Map(
     input.messages.map((message) => [message.id, chatMessageText(message)] as const),
   );
@@ -31,9 +34,10 @@ export function queuedChatMessages(input: QueuedMessagesInput): QueuedChatMessag
 // running turn. Either way the transcript has nothing to show for it.
 export function pendingRunMessageIds(input: QueuedMessagesInput): ReadonlySet<string> {
   const ids = new Set<string>();
+  const hasRunningRun = [...input.runs.values()].some((run) => run.status === "running");
   for (const run of input.runs.values()) {
     if (run.attemptCount > 0) continue;
-    if (run.status !== "queued" && run.status !== "canceled") continue;
+    if (run.status !== "canceled" && !(hasRunningRun && run.status === "queued")) continue;
     ids.add(run.triggerMessageId);
     ids.add(run.assistantMessageId);
   }
