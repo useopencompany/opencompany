@@ -1,5 +1,5 @@
 import { createAcpEventNormalizer } from "@opencompany/agent-runtime";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CLAUDE_ACP_ENGINE_ADAPTER, CODEX_ACP_ENGINE_ADAPTER } from "./acp-engine-adapters";
 import {
   ACP_EMPTY_RESULT_REPAIR_PROMPT,
@@ -10,6 +10,21 @@ import {
 } from "./acp-harness";
 import { CodexChatRetryableInfrastructureError } from "./codex-chat-errors";
 import type { SandboxHandle } from "./sandbox";
+
+const loggerMocks = vi.hoisted(() => ({ warn: vi.fn() }));
+
+vi.mock("@opencompany/observability", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@opencompany/observability")>()),
+  createLogger: () => ({
+    error: vi.fn(),
+    info: vi.fn(),
+    warn: loggerMocks.warn,
+  }),
+}));
+
+beforeEach(() => {
+  loggerMocks.warn.mockClear();
+});
 
 type JsonRpcMessage = Record<string, unknown>;
 
@@ -143,11 +158,26 @@ describe("AcpHarness", () => {
       await vi.advanceTimersByTimeAsync(120_000);
       expect(transport.run).toHaveBeenCalledTimes(3);
       expect(transport.kill).not.toHaveBeenCalled();
+      expect(loggerMocks.warn).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(180_000);
+      expect(loggerMocks.warn).toHaveBeenCalledTimes(1);
+      expect(loggerMocks.warn).toHaveBeenCalledWith(
+        "ACP command stream is silent while its sandbox guest remains healthy",
+        {
+          event: "opencompany.goat_acp_stream_silent_guest_healthy",
+          adapter: "Claude Code",
+          silence_ms: 300_000,
+          pending_methods: ["session/prompt"],
+          pending_notification_count: 0,
+          notification_pump_active: false,
+        },
+      );
       expect(finish).toBeDefined();
       await finish?.();
       await expect(running).resolves.toMatchObject({ promptResponse: { stopReason: "end_turn" } });
       await vi.advanceTimersByTimeAsync(120_000);
-      expect(transport.run).toHaveBeenCalledTimes(3);
+      expect(transport.run).toHaveBeenCalledTimes(6);
+      expect(loggerMocks.warn).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }
