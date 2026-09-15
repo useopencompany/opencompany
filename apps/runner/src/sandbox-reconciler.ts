@@ -7,6 +7,8 @@ import { createPollingWorker } from "./polling-worker";
 import {
   killSandbox,
   type ManagedSandboxOwnerKind,
+  OPENCOMPANY_EXECUTION_BACKEND_METADATA_KEY,
+  OPENCOMPANY_EXECUTION_BACKEND_VERSION_METADATA_KEY,
   OPENCOMPANY_MANAGED_SANDBOX_METADATA_KEY,
   OPENCOMPANY_SANDBOX_NAMESPACE_METADATA_KEY,
   OPENCOMPANY_SANDBOX_OWNER_ID_METADATA_KEY,
@@ -23,6 +25,8 @@ export type ManagedSandboxCandidate = Pick<SandboxInfo, "sandboxId" | "metadata"
 type OwnedSandboxCandidate = ManagedSandboxCandidate & {
   ownerKind: ManagedSandboxOwnerKind;
   ownerId: string;
+  executionBackend?: string;
+  executionBackendVersion?: number;
 };
 
 export async function listManagedSandboxes(signal: AbortSignal, namespace: string) {
@@ -59,24 +63,42 @@ export async function findLiveOwnedSandboxIds(
       sandboxId: candidate.sandboxId,
       ownerKind: candidate.ownerKind,
       ownerId: candidate.ownerId,
+      executionBackend: candidate.executionBackend ?? null,
+      executionBackendVersion: candidate.executionBackendVersion ?? null,
     })),
   );
   const result = await getDb().execute(sql`
     WITH candidate AS (
       SELECT *
       FROM jsonb_to_recordset(${payload}::jsonb)
-        AS item("sandboxId" text, "ownerKind" text, "ownerId" text)
+        AS item(
+          "sandboxId" text,
+          "ownerKind" text,
+          "ownerId" text,
+          "executionBackend" text,
+          "executionBackendVersion" integer
+        )
     )
     SELECT candidate."sandboxId"
     FROM candidate
     WHERE (
       candidate."ownerKind" = 'codex_chat_session'
+      AND candidate."executionBackend" = 'runner_attached'
+      AND candidate."executionBackendVersion" = 1
       AND EXISTS (
         SELECT 1
         FROM goat.codex_chat_sessions AS session
         WHERE session.id = candidate."ownerId"
           AND session.sandbox_id = candidate."sandboxId"
-          AND session.status <> 'closed'
+          AND (
+            (
+              session.execution_backend = candidate."executionBackend"
+              AND session.execution_backend_version = candidate."executionBackendVersion"
+              AND session.status <> 'closed'
+            )
+            OR session.execution_backend <> candidate."executionBackend"
+            OR session.execution_backend_version <> candidate."executionBackendVersion"
+          )
       )
     ) OR (
       candidate."ownerKind" = 'codex_device_auth_flow'
@@ -131,7 +153,23 @@ export async function reconcileManagedSandboxes(input: {
     const ownerId = sandbox.metadata[OPENCOMPANY_SANDBOX_OWNER_ID_METADATA_KEY];
     if (!isManagedSandboxOwnerKind(ownerKind) || !ownerId) return [];
     if (new Date(sandbox.startedAt).getTime() > graceCutoff) return [];
-    return [{ ...sandbox, ownerKind, ownerId }];
+    if (ownerKind !== "codex_chat_session") return [{ ...sandbox, ownerKind, ownerId }];
+
+    // Sandboxes created before execution metadata shipped belong to the established v1 runner.
+    // Any other backend/version is outside this reconciler's authority and must be left intact.
+    const executionBackend =
+      sandbox.metadata[OPENCOMPANY_EXECUTION_BACKEND_METADATA_KEY] ?? "runner_attached";
+    const rawExecutionBackendVersion =
+      sandbox.metadata[OPENCOMPANY_EXECUTION_BACKEND_VERSION_METADATA_KEY] ?? "1";
+    const executionBackendVersion = Number(rawExecutionBackendVersion);
+    if (
+      executionBackend !== "runner_attached" ||
+      executionBackendVersion !== 1 ||
+      !Number.isInteger(executionBackendVersion)
+    ) {
+      return [];
+    }
+    return [{ ...sandbox, ownerKind, ownerId, executionBackend, executionBackendVersion }];
   });
   const live = await (input.findLive ?? findLiveOwnedSandboxIds)(candidates, now);
   let killed = 0;

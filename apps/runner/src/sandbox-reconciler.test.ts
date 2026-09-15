@@ -18,12 +18,15 @@ describe("managedSandboxMetadata", () => {
         namespace: "production",
         ownerKind: "codex_chat_session",
         ownerId: "session_1",
+        execution: { backend: "runner_attached", version: 1 },
       }),
     ).toEqual({
       opencompany_managed: "true",
       opencompany_sandbox_namespace: "production",
       opencompany_owner_kind: "codex_chat_session",
       opencompany_owner_id: "session_1",
+      opencompany_execution_backend: "runner_attached",
+      opencompany_execution_backend_version: "1",
     });
   });
 });
@@ -85,6 +88,15 @@ describe("reconcileManagedSandboxes", () => {
         startedAt: new Date(now.getTime() - 1_000),
       },
       {
+        sandboxId: "v2-orphan",
+        metadata: {
+          ...metadata("session_v2"),
+          opencompany_execution_backend: "sandbox_supervisor",
+          opencompany_execution_backend_version: "1",
+        },
+        startedAt: new Date(now.getTime() - SANDBOX_RECONCILE_GRACE_MS - 1),
+      },
+      {
         sandboxId: "local-orphan",
         metadata: metadata("session_local", "local_workspace_1"),
         startedAt: new Date(now.getTime() - SANDBOX_RECONCILE_GRACE_MS - 1),
@@ -104,6 +116,6 @@ describe("reconcileManagedSandboxes", () => {
 
     expect(kill).toHaveBeenCalledOnce();
     expect(kill).toHaveBeenCalledWith("orphan");
-    expect(result).toEqual({ listed: 4, checked: 2, killed: 1 });
+    expect(result).toEqual({ listed: 5, checked: 2, killed: 1 });
   });
 });

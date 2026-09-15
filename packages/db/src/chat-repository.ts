@@ -1142,7 +1142,8 @@ export class PostgresChatRepository implements ChatRepository {
             goat.codex_chat_sessions.workspace_id IS NULL
             OR goat.codex_chat_sessions.workspace_id = EXCLUDED.workspace_id
           )
-        RETURNING id, chat_session_id, status, active_turn_id
+        RETURNING id, chat_session_id, status, active_turn_id,
+          execution_backend, execution_backend_version
       ),
       claimed_attachments AS MATERIALIZED (
         UPDATE goat.chat_attachment_uploads AS upload
@@ -1262,8 +1263,8 @@ export class PostgresChatRepository implements ChatRepository {
       inserted_run AS MATERIALIZED (
         INSERT INTO goat.codex_chat_turns (
           id, user_workos_id, codex_chat_session_id, chat_session_id,
-          user_message_id, assistant_message_id, status, prompt, settings, event_sequence,
-          created_at, updated_at
+          user_message_id, assistant_message_id, status, prompt, settings,
+          execution_backend, execution_backend_version, event_sequence, created_at, updated_at
         )
         SELECT
             reservation.run_id, target_chat.owner_user_workos_id,
@@ -1274,6 +1275,7 @@ export class PostgresChatRepository implements ChatRepository {
             THEN ${settingsJson}::jsonb
             ELSE ${settingsJson}::jsonb || '{"taskResultMode":"assistant_final"}'::jsonb
           END,
+          upserted_runtime.execution_backend, upserted_runtime.execution_backend_version,
           1, ${now}, ${now}
         FROM winner AS reservation
         JOIN target_chat ON true

@@ -669,17 +669,19 @@ export class PostgresTaskRepository implements TaskRepository {
             winner.run_id, 'queued', ${now}, ${now}
           FROM winner
           JOIN created_task AS task ON task.id = winner.task_id
-          RETURNING id
+          RETURNING id, execution_backend, execution_backend_version
         ),
         inserted_run AS MATERIALIZED (
           INSERT INTO goat.codex_chat_turns (
             id, user_workos_id, codex_chat_session_id, chat_session_id, user_message_id,
-            assistant_message_id, status, prompt, settings, event_sequence, created_at, updated_at
+            assistant_message_id, status, prompt, settings,
+            execution_backend, execution_backend_version, event_sequence, created_at, updated_at
           )
           SELECT
             winner.run_id, ${input.actor.userId}, runtime.id, task.session_id,
             winner.message_id, winner.assistant_message_id, 'queued', ${initialMessageContent},
-            ${stringifyPostgresJson(turnSettingsFromHarness(harness))}::jsonb, 1, ${now}, ${now}
+            ${stringifyPostgresJson(turnSettingsFromHarness(harness))}::jsonb,
+            runtime.execution_backend, runtime.execution_backend_version, 1, ${now}, ${now}
           FROM winner
           JOIN created_task AS task ON task.id = winner.task_id
           JOIN inserted_runtime AS runtime ON true
@@ -954,7 +956,8 @@ export class PostgresTaskRepository implements TaskRepository {
           AND EXISTS (
             SELECT 1 FROM resumed_task_activity AS activity WHERE activity.task_id = task.id
           )
-        RETURNING runtime.id, runtime.chat_session_id
+        RETURNING runtime.id, runtime.chat_session_id,
+          runtime.execution_backend, runtime.execution_backend_version
       ),
       claimed_attachments AS MATERIALIZED (
         UPDATE goat.chat_attachment_uploads AS upload
@@ -1024,8 +1027,8 @@ export class PostgresTaskRepository implements TaskRepository {
       inserted_run AS MATERIALIZED (
         INSERT INTO goat.codex_chat_turns (
           id, user_workos_id, codex_chat_session_id, chat_session_id,
-          user_message_id, assistant_message_id, status, prompt, settings, event_sequence,
-          created_at, updated_at
+          user_message_id, assistant_message_id, status, prompt, settings,
+          execution_backend, execution_backend_version, event_sequence, created_at, updated_at
         )
         SELECT
           ${runId}, task.user_workos_id, task.runtime_id, task.session_id,
@@ -1035,7 +1038,7 @@ export class PostgresTaskRepository implements TaskRepository {
             'goalMode', task.harness_spec #> '{codex,goalMode}',
             'taskResultMode', 'assistant_final'
           )),
-          1, ${now}, ${now}
+          runtime.execution_backend, runtime.execution_backend_version, 1, ${now}, ${now}
         FROM eligible AS task
         JOIN reopened_task AS reopened ON reopened.id = task.id
         JOIN queued_runtime AS runtime ON runtime.id = task.runtime_id

@@ -624,6 +624,12 @@ export type ChatEngine = "opencompany" | "codex" | "claude_code";
 export type ChatActivityState = "working" | "idle";
 // Engines whose durable turns run through the legacy-named goat.codex_chat_* queue.
 export type CodexChatEngine = ChatEngine;
+export const EXECUTION_BACKENDS = ["runner_attached", "sandbox_supervisor"] as const;
+export type ExecutionBackend = (typeof EXECUTION_BACKENDS)[number];
+export type ExecutionBackendCompatibility = {
+  backend: ExecutionBackend;
+  version: number;
+};
 
 export type ChatAttachmentKind =
   | "image"
@@ -5054,6 +5060,14 @@ export const codexChatSessions = productSchema.table(
       onDelete: "set null",
     }),
     hostToolContractVersion: text("host_tool_contract_version"),
+    // Private runtime ownership pinned before the first Run. Production admission remains on the
+    // established runner until the sandbox-supervisor implementation clears its rollout gates.
+    executionBackend: text("execution_backend")
+      .$type<ExecutionBackend>()
+      .notNull()
+      .default("runner_attached"),
+    executionBackendVersion: integer("execution_backend_version").notNull().default(1),
+    supervisorTemplateVersion: text("supervisor_template_version"),
     sandboxId: text("sandbox_id"),
     // Machine size resolved from the workspace default when the session was created.
     // Pinned for the session's whole life so a later workspace change never resizes
@@ -5100,6 +5114,25 @@ export const codexChatSessions = productSchema.table(
         sql`, `,
       )})`,
     ),
+    executionBackendCheck: check(
+      "goat_codex_chat_sessions_execution_backend_check",
+      sql`${table.executionBackend} IN (${sql.join(
+        EXECUTION_BACKENDS.map((backend) => sql`${backend}`),
+        sql`, `,
+      )})`,
+    ),
+    executionBackendVersionCheck: check(
+      "goat_codex_chat_sessions_execution_backend_version_check",
+      sql`${table.executionBackendVersion} > 0`,
+    ),
+    supervisorTemplateVersionCheck: check(
+      "goat_codex_chat_sessions_supervisor_template_version_check",
+      sql`(
+        (${table.executionBackend} = 'runner_attached' AND ${table.supervisorTemplateVersion} IS NULL)
+        OR
+        (${table.executionBackend} = 'sandbox_supervisor' AND NULLIF(${table.supervisorTemplateVersion}, '') IS NOT NULL)
+      )`,
+    ),
   }),
 );
 
@@ -5126,6 +5159,12 @@ export const codexChatTurns = productSchema.table(
     status: text("status").$type<CodexChatTurnStatus>().notNull().default("queued"),
     prompt: text("prompt").notNull(),
     settings: jsonb("settings").$type<CodexChatTurnSettings>().notNull().default(sql`'{}'::jsonb`),
+    // Copied from the immutable Session binding when this Run is admitted.
+    executionBackend: text("execution_backend")
+      .$type<ExecutionBackend>()
+      .notNull()
+      .default("runner_attached"),
+    executionBackendVersion: integer("execution_backend_version").notNull().default(1),
     error: text("error"),
     interruptRequestedAt: timestamp("interrupt_requested_at", {
       withTimezone: true,
@@ -5152,6 +5191,12 @@ export const codexChatTurns = productSchema.table(
   },
   (table) => ({
     claimIdx: index("goat_codex_chat_turns_claim_idx").on(table.status, table.createdAt),
+    executionClaimIdx: index("goat_codex_chat_turns_execution_claim_idx").on(
+      table.executionBackend,
+      table.executionBackendVersion,
+      table.status,
+      table.createdAt,
+    ),
     sessionCreatedIdx: index("goat_codex_chat_turns_session_created_idx").on(
       table.codexChatSessionId,
       table.createdAt,
@@ -5171,6 +5216,17 @@ export const codexChatTurns = productSchema.table(
     eventSequenceCheck: check(
       "goat_codex_chat_turns_event_sequence_check",
       sql`${table.eventSequence} >= 0`,
+    ),
+    executionBackendCheck: check(
+      "goat_codex_chat_turns_execution_backend_check",
+      sql`${table.executionBackend} IN (${sql.join(
+        EXECUTION_BACKENDS.map((backend) => sql`${backend}`),
+        sql`, `,
+      )})`,
+    ),
+    executionBackendVersionCheck: check(
+      "goat_codex_chat_turns_execution_backend_version_check",
+      sql`${table.executionBackendVersion} > 0`,
     ),
   }),
 );
