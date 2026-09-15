@@ -10,6 +10,7 @@ import {
   type CodexChatTurn,
   type CodexChatTurnSettings,
   codexChatSessions,
+  type ExecutionBackendCompatibility,
   tasks,
 } from "@opencompany/db/product-schema";
 import { captureException, createLogger } from "@opencompany/observability";
@@ -67,6 +68,11 @@ const SUPPORTED_HOST_TOOL_CONTRACT_VERSIONS = [
   ...CHAT_HOST_TOOL_CONTRACT_VERSIONS,
   ...ACTION_HOST_TOOL_CONTRACT_VERSIONS,
 ];
+export const RUNNER_ATTACHED_V1 = {
+  backend: "runner_attached",
+  version: 1,
+} as const satisfies ExecutionBackendCompatibility;
+const ESTABLISHED_RUNNER_EXECUTIONS = [RUNNER_ATTACHED_V1] as const;
 
 let registeredWakeup: (() => void) | null = null;
 
@@ -89,8 +95,11 @@ type ClaimedTurnRow = {
   status: CodexChatTurn["status"];
   prompt: string;
   settings: CodexChatTurnSettings;
+  execution_backend: CodexChatTurn["executionBackend"];
+  execution_backend_version: number;
   error: string | null;
   interrupt_requested_at: Date | string | null;
+  steer_into_run_id: string | null;
   attempts: number;
   recovery_attempts: number;
   engine_recovery_required: boolean;
@@ -119,10 +128,26 @@ type ClaimedTurnRow = {
 export async function claimNextCodexChatTurn(input: {
   leaseOwner: string;
   leaseTtlMs: number;
+  supportedExecutions: readonly ExecutionBackendCompatibility[];
 }): Promise<CodexChatTurn | null> {
+  if (
+    input.supportedExecutions.length === 0 ||
+    input.supportedExecutions.some(({ version }) => !Number.isInteger(version) || version <= 0)
+  ) {
+    throw new Error(
+      "A coding worker must declare at least one compatible execution backend with a positive integer version.",
+    );
+  }
   const now = new Date();
   const leaseId = `goat_codex_chat_lease_${randomUUID()}`;
   const leaseExpiresAt = new Date(now.getTime() + input.leaseTtlMs);
+  const compatibleExecution = sql`(${sql.join(
+    input.supportedExecutions.map(
+      ({ backend, version }) =>
+        sql`(turn.execution_backend = ${backend} AND turn.execution_backend_version = ${version})`,
+    ),
+    sql` OR `,
+  )})`;
   const result = await getDb().execute(sql`
     WITH candidate AS (
       SELECT turn.id
@@ -132,6 +157,7 @@ export async function claimNextCodexChatTurn(input: {
           OR (turn.status = 'running' AND turn.lease_expires_at < ${now})
         )
         AND (turn.run_after IS NULL OR turn.run_after <= ${now})
+        AND ${compatibleExecution}
         AND EXISTS (
           SELECT 1
           FROM goat.codex_chat_sessions AS session
@@ -140,6 +166,8 @@ export async function claimNextCodexChatTurn(input: {
            AND chat.user_workos_id = session.user_workos_id
           WHERE session.id = turn.codex_chat_session_id
             AND session.user_workos_id = turn.user_workos_id
+            AND session.execution_backend = turn.execution_backend
+            AND session.execution_backend_version = turn.execution_backend_version
             AND session.status <> 'closed'
             AND chat.closed_at IS NULL
             AND (
@@ -152,9 +180,14 @@ export async function claimNextCodexChatTurn(input: {
                     turn.interrupt_requested_at IS NOT NULL
                     OR (
                       task.archived_at IS NULL
-                      AND (task.status IN ('queued', 'running') OR (
-                        task.status = 'waiting' AND turn.settings ->> 'approvalContinuation' = 'true'
-                      ))
+                      AND (
+                        task.status IN ('queued', 'running')
+                        -- A Task that settled with a Run still queued behind it has work left:
+                        -- a message the user sent while it was working, or an approval
+                        -- continuation. Claiming it resumes the Task rather than stranding the
+                        -- Run. Canceled stays excluded -- the user stopped that Task on purpose.
+                        OR task.status IN ('waiting', 'succeeded', 'failed')
+                      )
                     )
                   )
               )
@@ -199,14 +232,19 @@ export async function claimNextCodexChatTurn(input: {
           updated_at = ${now}
       FROM candidate
       WHERE turn.id = candidate.id
+        AND ${compatibleExecution}
       RETURNING turn.*
     ), resumed_task AS (
       UPDATE goat.tasks AS task
-      SET status = 'queued', stage = 'queued', reported_outcome = NULL,
-          outcome_comment = NULL, updated_at = ${now}
+      SET status = 'queued', stage = 'queued', result = NULL, error = NULL,
+          reported_outcome = NULL, outcome_comment = NULL, updated_at = ${now}
       FROM claimed
-      WHERE task.session_id = claimed.chat_session_id AND task.status = 'waiting'
-        AND task.archived_at IS NULL AND claimed.settings ->> 'approvalContinuation' = 'true'
+      WHERE task.session_id = claimed.chat_session_id
+        AND task.status IN ('waiting', 'succeeded', 'failed')
+        AND task.archived_at IS NULL
+        -- A cancellation-recovery claim exists only to settle the interrupt. It is not work the
+        -- Task asked for, so it must not restart a Task that has already finished.
+        AND claimed.interrupt_requested_at IS NULL
       RETURNING task.id
     ), started_session AS (
       UPDATE goat.codex_chat_sessions AS session
@@ -255,6 +293,8 @@ export async function heartbeatCodexChatTurn(input: {
           END,
           updated_at = ${now}
       WHERE id = ${input.turnId}
+        AND execution_backend = 'runner_attached'
+        AND execution_backend_version = 1
         AND lease_id = ${input.leaseId}
         AND lease_owner = ${input.leaseOwner}
         AND status = 'running'
@@ -275,6 +315,11 @@ export async function runClaimedTurn(
     presentationPublisher?: ChatPresentationPublisher;
   } = {},
 ) {
+  if (!executionIsSupported(turn, ESTABLISHED_RUNNER_EXECUTIONS)) {
+    throw new Error(
+      `Established runner cannot execute ${turn.executionBackend}@${turn.executionBackendVersion}.`,
+    );
+  }
   const leaseId = turn.leaseId;
   const leaseOwner = turn.leaseOwner;
   if (!leaseId || !leaseOwner) throw new Error(`Claimed turn ${turn.id} is missing its lease.`);
@@ -303,6 +348,13 @@ export async function runClaimedTurn(
     throw new Error(`Codex chat session ${turn.codexChatSessionId} not found.`);
   }
   const { session, task } = claimedSession;
+  if (
+    !executionIsSupported(session, ESTABLISHED_RUNNER_EXECUTIONS) ||
+    session.executionBackend !== turn.executionBackend ||
+    session.executionBackendVersion !== turn.executionBackendVersion
+  ) {
+    throw new Error(`Run ${turn.id} does not match a supported Session execution binding.`);
+  }
   const taskContext = task ? resolveTaskTurnContext(task, turn) : null;
   const execution = new PostgresRunExecutionRepository((query) => getDb().execute(query));
   const deployVersion = runnerDeployVersion();
@@ -858,6 +910,8 @@ async function expireCodexChatTurnLeaseForHandoff(input: {
         lease_expires_at = ${new Date(now.getTime() - 1)},
         updated_at = ${now}
     WHERE id = ${input.turnId}
+      AND execution_backend = 'runner_attached'
+      AND execution_backend_version = 1
       AND lease_id = ${input.leaseId}
       AND lease_owner = ${input.leaseOwner}
       AND status = 'running'
@@ -877,6 +931,8 @@ export async function sweepTerminalCodexChatSandboxes(input: {
       ON chat.id = runtime.chat_session_id
      AND chat.user_workos_id = runtime.user_workos_id
     WHERE runtime.sandbox_id IS NOT NULL
+      AND runtime.execution_backend = 'runner_attached'
+      AND runtime.execution_backend_version = 1
       AND runtime.status IN ('idle', 'failed', 'interrupted', 'closed')
       AND (
         runtime.sandbox_timeout_armed_at IS NULL
@@ -906,6 +962,8 @@ export async function sweepTerminalCodexChatSandboxes(input: {
         SET sandbox_id = CASE WHEN ${armed} THEN sandbox_id ELSE NULL END,
             sandbox_timeout_armed_at = ${now}
         WHERE id = ${row.id}
+          AND execution_backend = 'runner_attached'
+          AND execution_backend_version = 1
           AND sandbox_id = ${row.sandbox_id}
           AND status IN ('idle', 'failed', 'interrupted', 'closed')
           AND updated_at = ${row.updated_at}
@@ -916,6 +974,8 @@ export async function sweepTerminalCodexChatSandboxes(input: {
           SELECT status
           FROM goat.codex_chat_sessions
           WHERE id = ${row.id}
+            AND execution_backend = 'runner_attached'
+            AND execution_backend_version = 1
             AND sandbox_id = ${row.sandbox_id}
           LIMIT 1
         `);
@@ -1016,6 +1076,7 @@ export function startCodexChatWorker(
           const turn = await claimNextCodexChatTurn({
             leaseOwner: env.instanceId,
             leaseTtlMs: codexChatLeaseTtlMs(env),
+            supportedExecutions: ESTABLISHED_RUNNER_EXECUTIONS,
           });
           if (!turn) break;
           const handoffController = new AbortController();
@@ -1157,8 +1218,11 @@ function turnFromRow(row: ClaimedTurnRow): CodexChatTurn {
     status: row.status,
     prompt: row.prompt,
     settings: row.settings ?? {},
+    executionBackend: row.execution_backend,
+    executionBackendVersion: row.execution_backend_version,
     error: row.error,
     interruptRequestedAt: dateFromRow(row.interrupt_requested_at),
+    steerIntoRunId: row.steer_into_run_id,
     attempts: row.attempts,
     recoveryAttempts: row.recovery_attempts,
     engineRecoveryRequired: row.engine_recovery_required,
@@ -1172,6 +1236,16 @@ function turnFromRow(row: ClaimedTurnRow): CodexChatTurn {
     createdAt: dateFromRow(row.created_at) ?? new Date(),
     updatedAt: dateFromRow(row.updated_at) ?? new Date(),
   };
+}
+
+function executionIsSupported(
+  value: Pick<CodexChatSession | CodexChatTurn, "executionBackend" | "executionBackendVersion">,
+  supported: readonly ExecutionBackendCompatibility[],
+) {
+  return supported.some(
+    ({ backend, version }) =>
+      backend === value.executionBackend && version === value.executionBackendVersion,
+  );
 }
 
 function dateFromRow(value: Date | string | null): Date | null {

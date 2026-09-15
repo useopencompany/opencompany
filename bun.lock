@@ -176,7 +176,6 @@
         "@opencompany/observability": "workspace:*",
         "@opencompany/telemetry": "workspace:*",
         "@opencompany/wiki": "workspace:*",
-        "@sentry/bun": "^10.73.0",
         "@vercel/blob": "^2.8.0",
         "ai": "^7.0.92",
         "dotenv": "^17.4.2",
@@ -475,6 +474,7 @@
       "name": "@opencompany/observability",
       "version": "0.2.0",
       "dependencies": {
+        "@sentry/bun": "^10.73.0",
         "braintrust": "^3.30.0",
         "zod": "^4.1.11",
       },

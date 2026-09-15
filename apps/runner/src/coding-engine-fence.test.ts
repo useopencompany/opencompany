@@ -14,7 +14,12 @@ vi.mock("./codex-cli", () => mocks);
 vi.mock("./claude-code-cli", () => mocks);
 
 const sandbox = { sandboxId: "sandbox_1" };
-const session = { sandboxId: sandbox.sandboxId, engine: "codex" } as CodexChatSession;
+const session = {
+  sandboxId: sandbox.sandboxId,
+  engine: "codex",
+  executionBackend: "runner_attached",
+  executionBackendVersion: 1,
+} as CodexChatSession;
 
 describe("coding engine cleanup before terminal recovery", () => {
   beforeEach(() => {
@@ -50,6 +55,13 @@ describe("coding engine cleanup before terminal recovery", () => {
 
   it("does not acquire a coding sandbox for native engine cancellation", async () => {
     await fenceCodingSessionEngine({ ...session, engine: "opencompany" }, 300_000);
+    expect(mocks.connectSandbox).not.toHaveBeenCalled();
+  });
+
+  it("does not touch a sandbox owned by another execution backend", async () => {
+    await expect(
+      fenceCodingSessionEngine({ ...session, executionBackend: "sandbox_supervisor" }, 300_000),
+    ).rejects.toThrow("Established runner cannot fence sandbox_supervisor@1");
     expect(mocks.connectSandbox).not.toHaveBeenCalled();
   });
 

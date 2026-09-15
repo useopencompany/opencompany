@@ -71,13 +71,17 @@ function LiveCanonicalTaskDetailPanel({
     (query) => query.from({ run: runsCollection }),
     [runsCollection],
   );
-  const activeRun = useMemo(
-    () =>
-      ((runRows ?? []) as HeadlessChatRunReadModel[])
-        .filter((candidate) => ["queued", "running", "paused"].includes(candidate.status))
-        .toSorted((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0] ?? null,
-    [runRows],
-  );
+  // A message the user queued behind the live turn is a newer Run, but it is not what the Task is
+  // doing. Stop, the run timer, and the working state all follow the Run that is actually working,
+  // and fall back to a queued one only when nothing is.
+  const activeRun = useMemo(() => {
+    const rows = (runRows ?? []) as HeadlessChatRunReadModel[];
+    const newestWith = (statuses: readonly string[]) =>
+      rows
+        .filter((candidate) => statuses.includes(candidate.status))
+        .toSorted((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0] ?? null;
+    return newestWith(["running", "paused"]) ?? newestWith(["queued"]);
+  }, [runRows]);
 
   return (
     <CanonicalTaskDetailView

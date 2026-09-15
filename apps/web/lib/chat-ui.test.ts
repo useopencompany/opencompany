@@ -1,3 +1,4 @@
+import { CHAT_STEERING_DATA_PART_TYPE } from "@opencompany/agent-runtime";
 import type { ChatMessageDebugTrace } from "@opencompany/db/product-schema";
 import { describe, expect, it } from "vitest";
 import {
@@ -85,6 +86,33 @@ describe("toChatUiMessage", () => {
       reason: "Wait for CI",
       dueAt: "2026-07-10T09:02:00.000Z",
     });
+  });
+
+  it("replays a persisted steering part so a steered turn keeps explaining itself", () => {
+    // The persisted-transcript parser drops any part shape it does not recognise, so a steered
+    // instruction that survives a reload is the only proof the durable projection is wired up.
+    const message = storedAssistantMessage({
+      content: "Left the sweep disabled.",
+      debugTrace: {
+        schemaVersion: "goat.codex_chat.debug.v1",
+        model: DEFAULT_MODEL,
+        uiMessageParts: [
+          {
+            type: CHAT_STEERING_DATA_PART_TYPE,
+            data: { text: "Keep the nightly sweep off.", itemId: "goat_codex_turn_2" },
+          },
+          { type: "text", text: "Left the sweep disabled." },
+        ],
+      } as ChatMessageDebugTrace,
+    });
+
+    expect(toChatUiMessage(message).parts).toEqual([
+      {
+        type: CHAT_STEERING_DATA_PART_TYPE,
+        data: { text: "Keep the nightly sweep off.", itemId: "goat_codex_turn_2" },
+      },
+      { type: "text", text: "Left the sweep disabled." },
+    ]);
   });
 
   it("replays persisted UI message parts in their original order", () => {
