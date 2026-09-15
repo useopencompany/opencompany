@@ -187,6 +187,7 @@ import {
   SlackBotWorkspaceSettingsEnvelopeSchema,
   StartBrainImportBodySchema,
   StartInfisicalAuthBodySchema,
+  SteerRunEnvelopeSchema,
   StripeAccountDeleteEnvelopeSchema,
   StripeAccountStateEnvelopeSchema,
   SubmitFeedbackBodySchema,
@@ -2569,6 +2570,21 @@ export const cancelRunRoute = createRoute({
   },
 });
 
+export const steerRunRoute = createRoute({
+  method: "post",
+  path: "/v1/runs/{runId}/steer",
+  tags: ["Runs"],
+  security: actorSecurity,
+  request: { params: z.object({ runId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "The queued Run's message was injected into the Conversation's running Run.",
+      content: { "application/json": { schema: SteerRunEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const resolveApprovalRoute = createRoute({
   method: "post",
   path: "/v1/runs/{runId}/approvals/{approvalId}",
@@ -4372,6 +4388,7 @@ export type V1RouteHandlers = {
   getRun: RouteHandler<typeof getRunRoute>;
   streamRunEvents: RouteHandler<typeof streamRunEventsRoute>;
   cancelRun: RouteHandler<typeof cancelRunRoute>;
+  steerRun: RouteHandler<typeof steerRunRoute>;
   resolveApproval: RouteHandler<typeof resolveApprovalRoute>;
   streamReadModel: RouteHandler<typeof streamReadModelRoute>;
   updateUserPreferences: RouteHandler<typeof updateUserPreferencesRoute>;
@@ -4590,6 +4607,7 @@ export function createV1Router(
       .openapi(getRunRoute, handlers.getRun)
       .openapi(streamRunEventsRoute, handlers.streamRunEvents)
       .openapi(cancelRunRoute, handlers.cancelRun)
+      .openapi(steerRunRoute, handlers.steerRun)
       .openapi(resolveApprovalRoute, handlers.resolveApproval)
       .openapi(streamReadModelRoute, handlers.streamReadModel)
       .openapi(updateUserPreferencesRoute, handlers.updateUserPreferences)
@@ -5931,6 +5949,8 @@ const contractDocumentHandlers: V1RouteHandlers = {
   streamRunEvents: (c) => c.body("", 200, { "Content-Type": "text/event-stream" }),
   cancelRun: (c) =>
     c.json({ data: { runId: "run_contract", status: "canceled", replayed: false }, meta }, 202),
+  steerRun: (c) =>
+    c.json({ data: { runId: "run_contract", targetRunId: "run_contract_active" }, meta }, 200),
   resolveApproval: (c) =>
     c.json(
       {

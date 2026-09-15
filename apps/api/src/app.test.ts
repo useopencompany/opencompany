@@ -6686,6 +6686,10 @@ function fakeRepository(): FakeRepository {
       status: "canceled",
       idempotentReplay: false,
     }),
+    steerRun: async ({ runId }) => ({
+      result: { runId, targetRunId: "run_active" },
+      found: true,
+    }),
     resolveApproval: async ({ command }) => ({
       approvalId: command.approvalId,
       runId: command.runId,

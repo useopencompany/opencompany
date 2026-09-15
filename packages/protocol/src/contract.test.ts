@@ -312,6 +312,7 @@ describe("v1 protocol contract", () => {
       "/v1/runs/{runId}",
       "/v1/runs/{runId}/events",
       "/v1/runs/{runId}/cancel",
+      "/v1/runs/{runId}/steer",
       "/v1/runs/{runId}/approvals/{approvalId}",
       "/v1/read-models/{readModel}",
       "/v1/me/preferences",

@@ -9,6 +9,38 @@ function update(value: Record<string, unknown>) {
 }
 
 describe("createAcpEventNormalizer", () => {
+  it("projects a delivered steering message and keeps it out of the turn result", () => {
+    const normalizer = createAcpEventNormalizer({ attemptScopeId: "scope_steer" });
+    normalizer.beginRun("session_1");
+
+    expect(
+      normalizer.normalize({
+        method: "session/steering_delivered",
+        params: { steeringMessageId: "goat_codex_turn_2", text: "Check the worker registry too." },
+      }),
+    ).toEqual([
+      {
+        type: "steering.delivered",
+        rawEvent: expect.any(Object),
+        payload: { itemId: "goat_codex_turn_2", text: "Check the worker registry too." },
+      },
+    ]);
+    // A steering message with no text carries nothing to show.
+    expect(
+      normalizer.normalize({ method: "session/steering_delivered", params: { text: "" } }),
+    ).toEqual([]);
+
+    normalizer.normalize(
+      update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Done." } }),
+    );
+    normalizer.normalize({
+      method: "session/prompt_result",
+      params: { stopReason: "end_turn" },
+    });
+    // The steered text is the user's, so it must not leak into the assistant result.
+    expect(normalizer.summary()?.result).toBe("Done.");
+  });
+
   it("streams root assistant text and builds a terminal summary with usage", () => {
     const normalizer = createAcpEventNormalizer({ attemptScopeId: "scope_1" });
     normalizer.beginRun("session_1");

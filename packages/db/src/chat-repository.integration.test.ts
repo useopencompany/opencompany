@@ -54,6 +54,7 @@ const migrationPaths = [
   "0270_opencompany_sidebar_projects.sql",
   "0276_sandbox_size_tiers.sql",
   "0279_goat_awaiting_input_state.sql",
+  "0286_coding_chat_steering.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -2271,6 +2272,110 @@ describe("Postgres Chat repositories", () => {
         leaseId: "lease_stale",
       }),
     ).resolves.toBeNull();
+  });
+
+  it("promotes a queued Run into the running Run without letting it start twice", async () => {
+    const running = await service.createMessage(actor(), {
+      idempotencyKey: "send-steer-active",
+      content: "Fix the failing build.",
+      engine: "codex",
+      model: "provider/model",
+    });
+    await database.query(
+      `UPDATE goat.codex_chat_turns
+       SET status = 'running', attempts = 1, lease_id = 'lease_steer', lease_owner = 'worker_steer'
+       WHERE id = $1`,
+      [running.runId],
+    );
+    const queued = await service.createMessage(actor(), {
+      idempotencyKey: "send-steer-queued",
+      content: "Also update the changelog.",
+      engine: "codex",
+      model: "provider/model",
+      conversationId: running.conversationId,
+    });
+
+    await expect(service.steerRun(actor(), queued.runId)).resolves.toEqual({
+      runId: queued.runId,
+      targetRunId: running.runId,
+    });
+    // Promotion is intent only: the Run stays queued and claimable, so a turn that ends before the
+    // runner injects it simply runs the message next.
+    expect(
+      (
+        await database.query<{ status: string; steer_into_run_id: string | null }>(
+          "SELECT status, steer_into_run_id FROM goat.codex_chat_turns WHERE id = $1",
+          [queued.runId],
+        )
+      ).rows,
+    ).toEqual([{ status: "queued", steer_into_run_id: running.runId }]);
+    // Pressing Steer twice must not queue the message into the turn twice.
+    await expect(service.steerRun(actor(), queued.runId)).resolves.toEqual({
+      runId: queued.runId,
+      targetRunId: running.runId,
+    });
+
+    // A Run a worker has already claimed is being answered, not waiting.
+    await database.query(
+      "UPDATE goat.codex_chat_turns SET status = 'running', attempts = 1 WHERE id = $1",
+      [queued.runId],
+    );
+    await expect(service.steerRun(actor(), queued.runId)).rejects.toMatchObject({
+      code: "conflict",
+    });
+    await expect(service.steerRun(actor(), "run_missing")).rejects.toMatchObject({
+      code: "not_found",
+    });
+  });
+
+  it("refuses to steer a Message carrying attachments the injection would drop", async () => {
+    const running = await service.createMessage(actor(), {
+      idempotencyKey: "send-steer-attachment-active",
+      content: "Start the migration.",
+      engine: "codex",
+      model: "provider/model",
+    });
+    await database.query(
+      `UPDATE goat.codex_chat_turns
+       SET status = 'running', attempts = 1, lease_id = 'lease_a', lease_owner = 'worker_a'
+       WHERE id = $1`,
+      [running.runId],
+    );
+    const queued = await service.createMessage(actor(), {
+      idempotencyKey: "send-steer-attachment-queued",
+      content: "Use this screenshot.",
+      engine: "codex",
+      model: "provider/model",
+      conversationId: running.conversationId,
+    });
+    await database.query(
+      `UPDATE goat.chat_messages SET attachments = $2 WHERE id = (
+         SELECT user_message_id FROM goat.codex_chat_turns WHERE id = $1
+       )`,
+      [
+        queued.runId,
+        JSON.stringify([
+          { id: "attachment_1", filename: "shot.png", mediaType: "image/png", sizeBytes: 10 },
+        ]),
+      ],
+    );
+
+    // Steering sends text prompt blocks only, so promoting this Message would drop the file.
+    await expect(service.steerRun(actor(), queued.runId)).rejects.toMatchObject({
+      code: "conflict",
+    });
+  });
+
+  it("refuses to steer a Run in another member's conversation", async () => {
+    const created = await service.createMessage(actor(), {
+      idempotencyKey: "send-steer-foreign",
+      content: "Private work.",
+      engine: "codex",
+      model: "provider/model",
+    });
+    await expect(
+      service.steerRun(actor({ userId: "user_3", role: "member" }), created.runId),
+    ).rejects.toMatchObject({ code: "not_found" });
   });
 
   it("projects queued cancellation to the assistant, runtime, and semantic log", async () => {
