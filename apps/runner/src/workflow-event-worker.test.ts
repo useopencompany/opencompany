@@ -8,7 +8,6 @@ import {
 describe("workflow event worker", () => {
   it("replaces the planned placeholder with the provider event goal", () => {
     const harness = eventHarness({
-      workflowName: "Triage issues",
       goal: "Assess this issue.\n\n<linear_issue_context>\nTitle: Billing bug\n</linear_issue_context>",
       harnessSpec: {
         schemaVersion: "goat.harness.v1",
@@ -24,7 +23,7 @@ describe("workflow event worker", () => {
     });
 
     expect(harness.initialUserMessage).toBe(
-      "Task: Triage issues\n\nAssess this issue.\n\n<linear_issue_context>\nTitle: Billing bug\n</linear_issue_context>",
+      "Assess this issue.\n\n<linear_issue_context>\nTitle: Billing bug\n</linear_issue_context>",
     );
     expect(harness.systemPrompt).toBe("Follow the workflow.");
   });

@@ -5649,6 +5649,12 @@ function fakeIntegrationAccounts(): Parameters<typeof createApiApp>[0]["integrat
     connectConvex: async () => {
       throw new Error("Unexpected Convex connect.");
     },
+    enableConvexEvents: async () => {
+      throw new Error("Unexpected Convex events enable.");
+    },
+    disableConvexEvents: async () => {
+      throw new Error("Unexpected Convex events disable.");
+    },
     connectRender: async () => {
       throw new Error("Unexpected Render connect.");
     },
@@ -6577,6 +6583,7 @@ function fakeRepository(): FakeRepository {
           title: "Chat",
           engine: "opencompany",
           model: "provider/default",
+          composerSettings: null,
           messageShapeEpoch: 4,
           runtime: {
             status: "running",
@@ -6599,6 +6606,7 @@ function fakeRepository(): FakeRepository {
       title: "Chat",
       engine: "opencompany",
       model: "provider/default",
+      composerSettings: null,
       messageShapeEpoch: 4,
       runtime: {
         status: "running",

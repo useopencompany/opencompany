@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   ACTION_HOST_TOOL_CONTRACT_VERSION,
   hostToolContractVersionForEngine,
+  isCodexReasoningEffort,
 } from "@opencompany/agent-runtime";
 import {
   type Actor,
@@ -29,7 +30,7 @@ import { newResourceId } from "@opencompany/core/resource-ids";
 import { DEFAULT_SANDBOX_SIZE } from "@opencompany/core/sandbox-sizes";
 import { type SQL, sql } from "drizzle-orm";
 import { stringifyPostgresJson } from "./postgres-json";
-import type { ChatMessageAttachment } from "./product-schema";
+import type { ChatMessageAttachment, CodexChatTurnSettings } from "./product-schema";
 import {
   conflictingChatSkillNames,
   isChatSkillNameConflict,
@@ -334,6 +335,7 @@ export class PostgresChatRepository implements ChatRepository {
         conversation.title,
         conversation.engine,
         conversation.model,
+        latest_turn.settings AS "latestTurnSettings",
         conversation.runtime_status AS "runtimeStatus",
         conversation.active_run_id AS "activeRunId",
         conversation.runtime_has_error AS "runtimeHasError",
@@ -346,6 +348,15 @@ export class PostgresChatRepository implements ChatRepository {
         conversation.created_at AS "createdAt",
         conversation.updated_at AS "updatedAt"
       FROM goat.conversation_read_model_v1 AS conversation
+      LEFT JOIN goat.codex_chat_sessions AS engine_session
+        ON engine_session.chat_session_id = conversation.id
+      LEFT JOIN LATERAL (
+        SELECT turn.settings
+        FROM goat.codex_chat_turns AS turn
+        WHERE turn.codex_chat_session_id = engine_session.id
+        ORDER BY turn.created_at DESC, turn.id DESC
+        LIMIT 1
+      ) AS latest_turn ON true
       WHERE conversation.actor_id = ${input.actor.userId}
         AND conversation.archived_at IS NULL
         AND conversation.is_bot = false
@@ -387,6 +398,7 @@ export class PostgresChatRepository implements ChatRepository {
         conversation.title,
         conversation.engine,
         conversation.model,
+        latest_turn.settings AS "latestTurnSettings",
         conversation.runtime_status AS "runtimeStatus",
         conversation.active_run_id AS "activeRunId",
         conversation.runtime_has_error AS "runtimeHasError",
@@ -399,6 +411,15 @@ export class PostgresChatRepository implements ChatRepository {
         conversation.created_at AS "createdAt",
         conversation.updated_at AS "updatedAt"
       FROM goat.conversation_read_model_v1 AS conversation
+      LEFT JOIN goat.codex_chat_sessions AS engine_session
+        ON engine_session.chat_session_id = conversation.id
+      LEFT JOIN LATERAL (
+        SELECT turn.settings
+        FROM goat.codex_chat_turns AS turn
+        WHERE turn.codex_chat_session_id = engine_session.id
+        ORDER BY turn.created_at DESC, turn.id DESC
+        LIMIT 1
+      ) AS latest_turn ON true
       WHERE conversation.id = ${input.conversationId}
         AND conversation.actor_id = ${input.actor.userId}
         AND (${input.includeArchived ?? false}::boolean OR conversation.archived_at IS NULL)
@@ -2454,6 +2475,7 @@ type ConversationRow = {
   title: string;
   engine: Conversation["engine"];
   model: string;
+  latestTurnSettings: CodexChatTurnSettings | null;
   runtimeStatus: NonNullable<Conversation["runtime"]>["status"] | null;
   activeRunId: string | null;
   runtimeHasError: boolean | null;
@@ -2718,6 +2740,7 @@ function mapConversation(row: ConversationRow): Conversation {
     title: row.title,
     engine: row.engine,
     model: row.model,
+    composerSettings: mapConversationComposerSettings(row),
     messageShapeEpoch: Number(row.messageShapeEpoch),
     runtime:
       row.runtimeStatus !== null && row.runtimeHasError !== null && row.runtimeUpdatedAt !== null
@@ -2734,6 +2757,42 @@ function mapConversation(row: ConversationRow): Conversation {
     pinnedAt: row.pinnedAt === null ? null : asDate(row.pinnedAt),
     createdAt: asDate(row.createdAt),
     updatedAt: asDate(row.updatedAt),
+  };
+}
+
+function mapConversationComposerSettings(
+  row: Pick<ConversationRow, "engine" | "latestTurnSettings">,
+): Conversation["composerSettings"] {
+  if (row.engine === "opencompany" || !row.latestTurnSettings) return null;
+  const fallbackReasoningEffort = row.engine === "claude_code" ? "high" : "xhigh";
+  const storedReasoningEffort = row.latestTurnSettings.reasoningEffort;
+  const reasoningEffort =
+    typeof storedReasoningEffort === "string" && isCodexReasoningEffort(storedReasoningEffort)
+      ? storedReasoningEffort
+      : fallbackReasoningEffort;
+  const planModeEnabled = isCodexReasoningEffort(
+    row.latestTurnSettings.planModeReasoningEffort ?? "",
+  );
+  return {
+    reasoningEffort,
+    planModeEnabled,
+    goalMode: normalizeConversationGoalMode(row.latestTurnSettings.goalMode),
+  };
+}
+
+function normalizeConversationGoalMode(
+  value: CodexChatTurnSettings["goalMode"],
+): { objective: string; tokenBudget?: number | null } | null {
+  const objective = typeof value?.objective === "string" ? value.objective.trim() : "";
+  if (!objective || objective.length > 4_000) return null;
+  const tokenBudget = value?.tokenBudget;
+  const validTokenBudget =
+    tokenBudget == null ||
+    (Number.isInteger(tokenBudget) && tokenBudget > 0 && tokenBudget <= 2_000_000);
+  if (!validTokenBudget) return null;
+  return {
+    objective,
+    ...(tokenBudget == null ? {} : { tokenBudget }),
   };
 }
 

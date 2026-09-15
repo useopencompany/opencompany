@@ -11,6 +11,11 @@ import {
   webHttpsPort,
 } from "./lib/caddy-dev.mjs";
 import {
+  DESKTOP_AUTH_SECRET_ENV,
+  isValidDesktopAuthSecret,
+  resolveLocalDesktopAuthSecret,
+} from "./lib/desktop-auth-env.mjs";
+import {
   directDatabaseUrl,
   dockerRunArgs,
   ELECTRIC_CONTAINER,
@@ -213,6 +218,7 @@ const LOCAL_WEB_APP_URL = webHttpsOrigin(process.env);
 const LOCAL_WEB_WORKOS_REDIRECT_URI = `${LOCAL_WEB_APP_URL}/auth/callback`;
 const WEB_ENV_PATH = "apps/web/.env.local";
 const LOCAL_ONLY_ENV_KEYS = new Set([
+  DESKTOP_AUTH_SECRET_ENV,
   "DATABASE_URL",
   "NEON_BRANCH",
   "API_BROWSER_ORIGINS",
@@ -238,6 +244,7 @@ const LOCAL_DEV_DEFAULT_ENV_VALUES = {
   RUNNER_SANDBOX_NAMESPACE: localSandboxNamespace(),
 };
 const WEB_LOCAL_ENV_KEYS = [
+  DESKTOP_AUTH_SECRET_ENV,
   "OPENCOMPANY_PORT",
   "OPENCOMPANY_HTTPS_PORT",
   "DATABASE_URL",
@@ -409,6 +416,7 @@ function isPlaceholder(value) {
 
 function inspectState() {
   const env = readEffectiveLocalEnv();
+  const webEnv = parseEnv(WEB_ENV_PATH);
   const workosMissing = WORKOS_ENV_KEYS.filter((k) => isPlaceholder(env[k]));
   const runnerMissing = LOCAL_RUNNER_REQUIRED_ENV_KEYS.filter((k) => isPlaceholder(env[k]));
   const billingMissing = BILLING_LOCAL_ENV_KEYS.filter((key) => isPlaceholder(env[key]));
@@ -420,6 +428,11 @@ function inspectState() {
     nodeModules: existsSync("node_modules") ? "installed" : "missing",
     workos: workosMissing.length === 0 ? "ready" : "placeholder",
     workosMissingKeys: workosMissing,
+    desktopAuth:
+      isValidDesktopAuthSecret(env[DESKTOP_AUTH_SECRET_ENV]) &&
+      webEnv[DESKTOP_AUTH_SECRET_ENV] === env[DESKTOP_AUTH_SECRET_ENV]
+        ? "ready"
+        : "invalid",
     runner: runnerMissing.length === 0 ? "ready" : "placeholder",
     runnerMissingKeys: runnerMissing,
     databaseUrl: isPlaceholder(env.DATABASE_URL) ? "placeholder" : "set",
@@ -606,6 +619,7 @@ async function ensureEnvFile(state) {
 }
 
 async function ensureLocalDevDefaults() {
+  await ensureDesktopAuthSecret();
   const env = parseEnv(".env.local");
   const missingDefaults = Object.fromEntries(
     Object.entries(LOCAL_DEV_DEFAULT_ENV_VALUES).filter(
@@ -617,6 +631,24 @@ async function ensureLocalDevDefaults() {
 
   writeEnvValues(".env.local", missingDefaults);
   ok(`Added local-only defaults: ${Object.keys(missingDefaults).join(", ")}`);
+}
+
+async function ensureDesktopAuthSecret() {
+  const localEnv = parseEnv(".env.local");
+  const personalEnv = parseEnv(PERSONAL_ENV_PATH);
+  const value = resolveLocalDesktopAuthSecret(
+    localEnv[DESKTOP_AUTH_SECRET_ENV],
+    personalEnv[DESKTOP_AUTH_SECRET_ENV],
+  );
+  // setup --dev spawns the server in this process's environment; do not pass
+  // along the placeholder loaded before the generated file was repaired.
+  process.env[DESKTOP_AUTH_SECRET_ENV] = value;
+  if (personalEnv[DESKTOP_AUTH_SECRET_ENV] !== undefined) return;
+  if (localEnv[DESKTOP_AUTH_SECRET_ENV] === value) return;
+
+  writeEnvValues(".env.local", { [DESKTOP_AUTH_SECRET_ENV]: value });
+  chmodSync(".env.local", 0o600);
+  ok("Configured the local desktop sign-in handoff key");
 }
 
 function shouldReplaceLocalDefault(key, current, next) {
@@ -665,6 +697,7 @@ async function ensureWebEnvFile() {
   }
 
   writeEnvValues(WEB_ENV_PATH, values);
+  chmodSync(WEB_ENV_PATH, 0o600);
   ok(`Updated ${WEB_ENV_PATH} with web-local auth/proxy/compatibility/observability env`);
 }
 
@@ -1172,6 +1205,12 @@ async function main() {
     }
     if (state.envFile === "missing") {
       nextSteps.push({ command: "bun run setup", reason: "create .env.local" });
+    }
+    if (state.desktopAuth !== "ready") {
+      nextSteps.push({
+        command: "bun run setup",
+        reason: `configure ${DESKTOP_AUTH_SECRET_ENV} for desktop Google sign-in (remove or correct an invalid personal override first)`,
+      });
     }
     if (
       state.workos === "placeholder" ||

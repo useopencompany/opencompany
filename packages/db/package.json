@@ -176,6 +176,10 @@
       "types": "./src/jamie.ts",
       "default": "./src/jamie.ts"
     },
+    "./convex-events": {
+      "types": "./src/convex-events.ts",
+      "default": "./src/convex-events.ts"
+    },
     "./granola": {
       "types": "./src/granola.ts",
       "default": "./src/granola.ts"

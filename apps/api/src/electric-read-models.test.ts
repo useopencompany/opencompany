@@ -252,7 +252,7 @@ describe("Electric read models", () => {
     ]);
   });
 
-  it("serves integration accounts with a provider-contract-scoped shape", async () => {
+  it.each(["notion", "custom_mcp"])("streams %s integration accounts", async (provider) => {
     let requestedUrl: URL | undefined;
     const proxy = new ElectricReadModelProxy({
       electricUrl: "https://electric.example.test",
@@ -266,7 +266,7 @@ describe("Electric read models", () => {
               id: "integration_1",
               user_workos_id: "must-not-cross",
               workspace_id: "workspace_1",
-              provider: "notion",
+              provider,
               external_id: "123456",
               connection_label: "opencompany",
               account_name: "opencompany",
@@ -327,11 +327,12 @@ describe("Electric read models", () => {
       "supabase",
       "resend",
       "x_account",
+      "custom_mcp",
     ]);
     expect(requestedUrl?.searchParams.get("columns")).not.toContain("credential");
     expect((await response.json())[0]?.value).toEqual({
       id: "integration_1",
-      provider: "notion",
+      provider,
       workspaceId: "workspace_1",
       externalId: "123456",
       connectionLabel: "opencompany",

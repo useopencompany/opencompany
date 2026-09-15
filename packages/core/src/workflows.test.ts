@@ -440,6 +440,45 @@ describe("WorkflowApplicationService", () => {
     expect(repository.recordRunNow).not.toHaveBeenCalled();
   });
 
+  it("uses step instructions as the request when run-now has no extra context", async () => {
+    const scheduled = workflow({
+      trigger: {
+        type: "schedule",
+        cron: "0 9 * * 1",
+        timezone: "UTC",
+        prompt: "Run this workflow.",
+        enabled: true,
+        lastRunAt: null,
+        nextRunAt,
+      },
+      steps: [
+        {
+          id: "step_1",
+          title: "Research",
+          model: "provider/model",
+          instructions: "Summarize what shipped today.",
+        },
+      ],
+    });
+    const taskCreator = fakeTaskCreator();
+    const planner = fakePlanner();
+    const service = workflowService(fakeWorkflowRepository({ workflow: scheduled }), {
+      planner,
+      taskCreator,
+    });
+
+    await service.runWorkflowNow(actor(), scheduled.id, "run-now-default-context");
+
+    expect(planner.prepareWorkflow).toHaveBeenCalledWith({
+      actor: actor(),
+      workflow: scheduled,
+      prompt: "Summarize what shipped today.",
+    });
+    expect(taskCreator.create).toHaveBeenCalledWith(
+      expect.objectContaining({ goal: "Summarize what shipped today." }),
+    );
+  });
+
   it("tests a complete draft without activating its triggers", async () => {
     const draft = workflow({ status: "draft", trigger: { type: "manual" } });
     const repository = fakeWorkflowRepository({ workflow: draft });
