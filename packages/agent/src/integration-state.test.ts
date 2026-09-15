@@ -482,6 +482,30 @@ describe("Resend integration state", () => {
   });
 });
 
+describe("Todoist integration state", () => {
+  it("exposes the personal MCP connection to plugin settings", () => {
+    const state = integrationStateFromRows([
+      {
+        id: "gint_todoist_mcp",
+        provider: "todoist",
+        externalId: "todoist_mcp",
+        accountName: "Todoist",
+        connectionLabel: "leo@meetjamie.ai",
+        status: "connected",
+        scopes: ["data:read_write"],
+        capabilityModes: { read: "on", query: "ask", write: "ask", draft: "off" },
+      },
+    ]);
+
+    expect(state.personalAccounts.todoist).toEqual([
+      expect.objectContaining({
+        integrationId: "gint_todoist_mcp",
+        connectionLabel: "leo@meetjamie.ai",
+      }),
+    ]);
+  });
+});
+
 describe("Granola integration state", () => {
   it("keeps MCP tool authorization separate from legacy API ingestion", () => {
     const state = integrationStateFromRows([

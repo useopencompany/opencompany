@@ -524,6 +524,7 @@ export const IntegrationAccountReadModelSchema = z
       "notion",
       "supabase",
       "resend",
+      "todoist",
       "x_account",
       "custom_mcp",
     ]),
@@ -4205,6 +4206,7 @@ export const PersonalIntegrationProviderSchema = z.enum([
   "neon",
   "supabase",
   "resend",
+  "todoist",
   "x_account",
 ]);
 

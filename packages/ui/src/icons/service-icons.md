@@ -47,3 +47,5 @@ removed; there are no remaining SVG IDs or references. Width and height follow
 shared icon props. Catalog, installed rows, and details share this component.
 
 Dash0: verified 2026-09-14 against its [official MCP integration page](https://www.dash0.com/hub/integrations/int_dash0_mcp/overview), which uses [this vendor SVG](https://www.dash0.com/shared/logo_colors.svg). Original paths, colors, gradient, proportions, and 19×19 viewBox preserved. Removed unused path IDs and made the gradient ID unique per instance.
+
+Todoist: verified 2026-09-15 against Todoist's own [press page](https://www.todoist.com/press) (reached via `doist.com/press`), which is the vendor source Simple Icons cites for this mark. Single-path monochrome symbol and the original 24×24 viewBox are preserved unchanged; the mark inherits `currentColor` so the brand red `#E44332` is applied by the consuming row. This is Doist's Todoist task manager, not the unrelated Todo.txt or Microsoft To Do marks.

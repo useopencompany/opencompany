@@ -11944,6 +11944,7 @@
               "neon",
               "supabase",
               "resend",
+              "todoist",
               "x_account"
             ]
           },

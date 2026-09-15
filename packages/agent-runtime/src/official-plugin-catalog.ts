@@ -53,6 +53,8 @@ export const OFFICIAL_PLUGIN_SOURCES = {
     "https://github.com/useopencompany/plugins/tree/59a06c03a4a12ee9a2d333b0e294f4ad9b8f5229/supabase",
   stripe:
     "https://github.com/useopencompany/plugins/tree/68c22e8a1ffe5eb8a83fb91c68f76f3f45705d3a/stripe",
+  todoist:
+    "https://github.com/useopencompany/plugins/tree/68c0e441f017246765e59e3275cfceace194ccbb/todoist",
   x: "https://github.com/useopencompany/plugins/tree/21060c09d1bbe70df85519cc3ad74cd5d097fbb6/x",
   "yc-advise":
     "https://github.com/useopencompany/plugins/tree/2e092c3bc518622f1dc4ac1a6777d87ae3695ec6/yc-advise",

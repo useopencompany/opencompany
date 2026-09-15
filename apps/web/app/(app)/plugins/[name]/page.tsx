@@ -28,6 +28,7 @@ import {
   SlackPluginDetail,
   StripePluginDetail,
   SupabasePluginDetail,
+  TodoistPluginDetail,
   VercelPluginDetail,
   XPluginDetail,
 } from "@/components/OfficialMcpPluginSettings";
@@ -73,6 +74,7 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
       neon: NeonPluginDetail,
       notion: NotionPluginDetail,
       supabase: SupabasePluginDetail,
+      todoist: TodoistPluginDetail,
       resend: ResendPluginDetail,
       posthog: PostHogPluginDetail,
       convex: ConvexPluginDetail,

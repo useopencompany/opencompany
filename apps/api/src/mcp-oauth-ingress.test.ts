@@ -61,6 +61,10 @@ import {
   startSupabaseMcpOAuth,
 } from "@opencompany/agent/integrations/supabase-mcp";
 import {
+  completeTodoistMcpOAuth,
+  startTodoistMcpOAuth,
+} from "@opencompany/agent/integrations/todoist-mcp";
+import {
   completeVercelMcpOAuth,
   startVercelMcpOAuth,
 } from "@opencompany/agent/integrations/vercel-mcp";
@@ -143,6 +147,11 @@ vi.mock("@opencompany/agent/integrations/supabase-mcp", async (importOriginal) =
   startSupabaseMcpOAuth: vi.fn(),
   completeSupabaseMcpOAuth: vi.fn(),
 }));
+vi.mock("@opencompany/agent/integrations/todoist-mcp", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  startTodoistMcpOAuth: vi.fn(),
+  completeTodoistMcpOAuth: vi.fn(),
+}));
 vi.mock("@opencompany/agent/integrations/resend-mcp", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   startResendMcpOAuth: vi.fn(),
@@ -172,6 +181,7 @@ const PROVIDERS: McpOAuthProvider[] = [
   "notion",
   "stripe",
   "supabase",
+  "todoist",
   "resend",
   "latitude",
   "betterstack",
@@ -193,6 +203,7 @@ const flowMocks = {
   stripe: { start: startStripeMcpOAuth, complete: completeStripeMcpOAuth },
   notion: { start: startNotionMcpOAuth, complete: completeNotionMcpOAuth },
   supabase: { start: startSupabaseMcpOAuth, complete: completeSupabaseMcpOAuth },
+  todoist: { start: startTodoistMcpOAuth, complete: completeTodoistMcpOAuth },
   resend: { start: startResendMcpOAuth, complete: completeResendMcpOAuth },
   latitude: { start: startLatitudeMcpOAuth, complete: completeLatitudeMcpOAuth },
   betterstack: { start: startBetterStackMcpOAuth, complete: completeBetterStackMcpOAuth },

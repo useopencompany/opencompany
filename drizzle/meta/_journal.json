@@ -2024,6 +2024,13 @@
       "when": 1790100400009,
       "tag": "0288_execution_backend_compatibility",
       "breakpoints": true
+    },
+    {
+      "idx": 289,
+      "version": "7",
+      "when": 1790100400010,
+      "tag": "0289_opencompany_todoist_integration",
+      "breakpoints": true
     }
   ]
 }
