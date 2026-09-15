@@ -30,6 +30,11 @@ import { resolveProductLanguageModel } from "@opencompany/agent/language-model";
 import { createProductChatSystemPrompt } from "@opencompany/agent/prompts";
 import { createSubagentBudget } from "@opencompany/agent/subagent";
 import {
+  readWorkflowMemory,
+  updateWorkflowMemory,
+  workflowMemorySystemBlock,
+} from "@opencompany/agent/workflow-memory";
+import {
   AGENT_MODEL_CATALOG,
   CHAT_ARTIFACT_DATA_PART_TYPE,
   CHAT_STEERING_DATA_PART_TYPE,
@@ -1432,6 +1437,24 @@ async function resolveProductChatRuntime(input: {
       })
     : null;
 
+  // A workflow run gets memory tools only while its workflow has memory switched on. The flag is
+  // read live rather than baked into the harness spec, so toggling memory takes effect on the next
+  // run even for a workflow whose scheduled harness spec was planned earlier.
+  const workflowMemory = taskContext?.harnessSpec.workflow
+    ? await readWorkflowMemory({
+        workspaceId: taskContext.harnessSpec.workflow.workspaceId,
+        workflowSlug: taskContext.harnessSpec.workflow.id,
+        db: getDb(),
+      })
+    : null;
+  const workflowMemoryRef =
+    workflowMemory?.enabled && taskContext?.harnessSpec.workflow
+      ? {
+          workspaceId: taskContext.harnessSpec.workflow.workspaceId,
+          workflowSlug: taskContext.harnessSpec.workflow.id,
+        }
+      : null;
+
   const toolContext = createProductChatToolContext({
     model,
     ...(runBrainCli ? { runBrainCli } : {}),
@@ -1454,6 +1477,23 @@ async function resolveProductChatRuntime(input: {
     ...(webSearch ? { webSearch } : {}),
     ...(webFetch ? { webFetch } : {}),
     ...(subagentRunner ? { runSubagent: subagentRunner } : {}),
+    ...(workflowMemoryRef
+      ? {
+          readWorkflowMemory: async () => {
+            const current = await readWorkflowMemory({ ...workflowMemoryRef, db: getDb() });
+            if (!current?.enabled) {
+              return { ok: false as const, error: "Memory is not enabled for this workflow." };
+            }
+            return {
+              ok: true as const,
+              content: current.content,
+              updatedAt: current.updatedAt?.toISOString() ?? null,
+            };
+          },
+          updateWorkflowMemory: ({ content }: { content: string }) =>
+            updateWorkflowMemory({ ...workflowMemoryRef, content, db: getDb() }),
+        }
+      : {}),
     ...(actionDispatcher ? { actions: actionDispatcher } : {}),
     ...(taskContext
       ? {
@@ -1504,6 +1544,9 @@ async function resolveProductChatRuntime(input: {
     ? [
         TASK_SYSTEM_BLOCK,
         TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK,
+        // Injected so a repeating workflow starts with what it already knows instead of spending a
+        // tool call reading memory on every run.
+        ...(workflowMemory?.enabled ? [workflowMemorySystemBlock(workflowMemory)] : []),
         ...(taskContext.harnessSpec.systemBlocks?.length
           ? taskContext.harnessSpec.systemBlocks
           : taskContext.harnessSpec.systemPrompt.trim()

@@ -31,6 +31,12 @@ import type {
 } from "./actions/types";
 import { finiteDurationMs } from "./chat-timing";
 import type { CodexComposerSettingsView } from "./codex-chat-settings";
+import type {
+  ReadWorkflowMemoryToolInput,
+  ReadWorkflowMemoryToolOutput,
+  UpdateWorkflowMemoryToolInput,
+  UpdateWorkflowMemoryToolOutput,
+} from "./workflow-memory";
 import type { WorkspaceSkillsInput } from "./workspace-skill-tools";
 
 export {
@@ -645,6 +651,14 @@ export type ChatTools = {
   codex_command: {
     input: CodexCommandToolInput;
     output: CodexCommandToolOutput;
+  };
+  read_workflow_memory: {
+    input: ReadWorkflowMemoryToolInput;
+    output: ReadWorkflowMemoryToolOutput;
+  };
+  update_workflow_memory: {
+    input: UpdateWorkflowMemoryToolInput;
+    output: UpdateWorkflowMemoryToolOutput;
   };
 } & BrowserChatTools;
 

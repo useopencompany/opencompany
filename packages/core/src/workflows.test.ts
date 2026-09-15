@@ -17,6 +17,7 @@ import {
   type TaskScheduleRepository,
   type Workflow,
   WorkflowApplicationService,
+  type WorkflowMemory,
   type WorkflowRepository,
 } from "./workflows";
 
@@ -24,6 +25,42 @@ const now = new Date("2026-08-12T08:00:00.000Z");
 const nextRunAt = new Date("2026-08-13T09:00:00.000Z");
 
 describe("WorkflowApplicationService", () => {
+  it("toggles and clears memory without a version check, and enforces workflow permissions", async () => {
+    const repository = fakeWorkflowRepository();
+    const service = workflowService(repository);
+
+    await expect(service.getWorkflowMemory(actor(), "workflow_1")).resolves.toMatchObject({
+      enabled: false,
+      content: "Remembered from the last run.",
+    });
+
+    await expect(
+      service.setWorkflowMemoryEnabled(actor(), "workflow_1", true),
+    ).resolves.toMatchObject({ enabled: true });
+    expect(repository.setWorkflowMemoryEnabled).toHaveBeenCalledWith(
+      expect.objectContaining({ workflowId: "workflow_1", enabled: true }),
+    );
+
+    await expect(service.clearWorkflowMemory(actor(), "workflow_1")).resolves.toMatchObject({
+      content: "",
+      updatedAt: null,
+    });
+
+    // Memory lives outside the versioned definition, so none of this rewrites the workflow.
+    expect(repository.updateWorkflow).not.toHaveBeenCalled();
+
+    await expect(
+      service.setWorkflowMemoryEnabled(actor({ permissions: [] }), "workflow_1", true),
+    ).rejects.toThrow("The actor is not allowed to access Workflows.");
+  });
+
+  it("reports a missing or invisible workflow when reading memory", async () => {
+    const service = workflowService(fakeWorkflowRepository());
+    await expect(service.getWorkflowMemory(actor(), "workflow_missing")).rejects.toThrow(
+      "Workflow not found.",
+    );
+  });
+
   it("preserves the existing create shape while enforcing permissions and idempotency input", async () => {
     const repository = fakeWorkflowRepository();
     const service = workflowService(repository);
@@ -887,8 +924,16 @@ function fakeWorkflowRepository(options: { workflow?: Workflow } = {}): Workflow
   createWorkflow: ReturnType<typeof vi.fn>;
   updateWorkflow: ReturnType<typeof vi.fn>;
   recordRunNow: ReturnType<typeof vi.fn>;
+  setWorkflowMemoryEnabled: ReturnType<typeof vi.fn>;
+  clearWorkflowMemory: ReturnType<typeof vi.fn>;
 } {
   const stored = options.workflow ?? workflow();
+  let storedMemory: WorkflowMemory = {
+    workflowId: stored.id,
+    enabled: false,
+    content: "Remembered from the last run.",
+    updatedAt: now,
+  };
   return {
     listWorkflows: vi.fn(async () => ({ workflows: [stored], nextCursor: null })),
     getWorkflow: vi.fn(async ({ workflowId }) =>
@@ -910,6 +955,17 @@ function fakeWorkflowRepository(options: { workflow?: Workflow } = {}): Workflow
       transactionId: "44",
     })),
     recordRunNow: vi.fn(async () => undefined),
+    getWorkflowMemory: vi.fn(async ({ workflowId }) =>
+      workflowId === stored.id || workflowId === stored.slug ? storedMemory : null,
+    ),
+    setWorkflowMemoryEnabled: vi.fn(async ({ enabled }) => {
+      storedMemory = { ...storedMemory, enabled };
+      return storedMemory;
+    }),
+    clearWorkflowMemory: vi.fn(async () => {
+      storedMemory = { ...storedMemory, content: "", updatedAt: null };
+      return storedMemory;
+    }),
   };
 }
 

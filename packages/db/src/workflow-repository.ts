@@ -9,6 +9,7 @@ import {
   type VersionedRepositoryResult,
   type Workflow,
   type WorkflowAutomationTrigger,
+  type WorkflowMemory,
   type WorkflowMutationResult,
   type WorkflowPage,
   type WorkflowRepository,
@@ -58,6 +59,13 @@ type WorkflowRow = {
   archivedAt: Date | string | null;
   createdAt: Date | string;
   updatedAt: Date | string;
+};
+
+type WorkflowMemoryRow = {
+  workflowId: string;
+  enabled: boolean;
+  content: string;
+  contentUpdatedAt: Date | string | null;
 };
 
 type TaskScheduleRow = {
@@ -889,6 +897,67 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     `);
   }
 
+  async getWorkflowMemory(input: {
+    actor: Actor;
+    workflowId: string;
+  }): Promise<WorkflowMemory | null> {
+    const [row] = await this.rows<WorkflowMemoryRow>(sql`
+      ${workflowMemorySelect()}
+      WHERE ${visibleWorkflow(input.actor, input.workflowId)}
+      LIMIT 1
+    `);
+    return row ? mapWorkflowMemory(row) : null;
+  }
+
+  async setWorkflowMemoryEnabled(input: {
+    actor: Actor;
+    workflowId: string;
+    enabled: boolean;
+  }): Promise<WorkflowMemory | null> {
+    const now = this.options.now?.() ?? new Date();
+    // The memory row is created lazily on first toggle, so a workflow that never used memory
+    // carries no row at all.
+    const [row] = await this.rows<WorkflowMemoryRow>(sql`
+      INSERT INTO goat.workflow_memories (workflow_id, workspace_id, enabled, created_at, updated_at)
+      SELECT workflow.id, workflow.workspace_id, ${input.enabled}, ${now}, ${now}
+      FROM goat.workflows AS workflow
+      WHERE ${visibleWorkflow(input.actor, input.workflowId)}
+      ON CONFLICT (workflow_id) DO UPDATE
+      SET enabled = EXCLUDED.enabled,
+          updated_at = EXCLUDED.updated_at
+      RETURNING
+        workflow_id AS "workflowId",
+        enabled,
+        content,
+        content_updated_at AS "contentUpdatedAt"
+    `);
+    return row ? mapWorkflowMemory(row) : null;
+  }
+
+  async clearWorkflowMemory(input: {
+    actor: Actor;
+    workflowId: string;
+  }): Promise<WorkflowMemory | null> {
+    const now = this.options.now?.() ?? new Date();
+    const [row] = await this.rows<WorkflowMemoryRow>(sql`
+      UPDATE goat.workflow_memories AS memory
+      SET content = '',
+          content_updated_at = NULL,
+          updated_at = ${now}
+      FROM goat.workflows AS workflow
+      WHERE memory.workflow_id = workflow.id
+        AND ${visibleWorkflow(input.actor, input.workflowId)}
+      RETURNING
+        memory.workflow_id AS "workflowId",
+        memory.enabled,
+        memory.content,
+        memory.content_updated_at AS "contentUpdatedAt"
+    `);
+    if (row) return mapWorkflowMemory(row);
+    // No memory row yet: clearing is a no-op, but the workflow still has to exist and be visible.
+    return this.getWorkflowMemory(input);
+  }
+
   private async workflowMiss(
     actor: Actor,
     workflowId: string,
@@ -1010,6 +1079,19 @@ function workflowSelect() {
   `;
 }
 
+// Left join so a workflow with no memory row still reads as disabled-and-empty.
+function workflowMemorySelect() {
+  return sql`
+    SELECT
+      workflow.id AS "workflowId",
+      COALESCE(memory.enabled, false) AS enabled,
+      COALESCE(memory.content, '') AS content,
+      memory.content_updated_at AS "contentUpdatedAt"
+    FROM goat.workflows AS workflow
+    LEFT JOIN goat.workflow_memories AS memory ON memory.workflow_id = workflow.id
+  `;
+}
+
 function taskScheduleSelect() {
   return sql`
     SELECT
@@ -1045,6 +1127,25 @@ function workflowVisibility(actor: Actor) {
     workflow.scope = 'company'
     OR workflow.created_by_workos_id = ${actor.userId}
   )`;
+}
+
+// Callers address a workflow by either its id or its workspace-scoped slug, which is what the
+// editor route carries.
+function visibleWorkflow(actor: Actor, workflowId: string) {
+  return sql`(workflow.id = ${workflowId} OR workflow.slug = ${workflowId})
+    AND workflow.workspace_id = ${actor.workspaceId}
+    AND workflow.archived_at IS NULL
+    AND ${workspaceMembership(actor)}
+    AND ${workflowVisibility(actor)}`;
+}
+
+function mapWorkflowMemory(row: WorkflowMemoryRow): WorkflowMemory {
+  return {
+    workflowId: row.workflowId,
+    enabled: row.enabled,
+    content: row.content,
+    updatedAt: nullableDate(row.contentUpdatedAt),
+  };
 }
 
 function mapWorkflow(row: WorkflowRow): Workflow {

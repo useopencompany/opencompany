@@ -1,6 +1,11 @@
 import "server-only";
 
-import { createApiClient, type TaskScheduleDto, type WorkflowDto } from "@opencompany/protocol";
+import {
+  createApiClient,
+  type TaskScheduleDto,
+  type WorkflowDto,
+  type WorkflowMemoryDto,
+} from "@opencompany/protocol";
 import { headers } from "next/headers";
 
 export async function listHeadlessWorkflows(): Promise<WorkflowDto[]> {
@@ -25,6 +30,17 @@ export async function getHeadlessWorkflow(workflowId: string): Promise<WorkflowD
   });
   if (response.status === 404) return null;
   if (!response.ok) throw await serverResponseError(response, "Workflow loading failed");
+  return (await response.json()).data;
+}
+
+export async function getHeadlessWorkflowMemory(
+  workflowId: string,
+): Promise<WorkflowMemoryDto | null> {
+  const response = await (await serverAutomationClient()).v1.workflows[":workflowId"].memory.$get({
+    param: { workflowId },
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) throw await serverResponseError(response, "Workflow memory loading failed");
   return (await response.json()).data;
 }
 

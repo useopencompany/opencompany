@@ -70,6 +70,27 @@ export async function archiveHeadlessWorkflow(
   return (await response.json()).data;
 }
 
+export async function setHeadlessWorkflowMemoryEnabled(
+  workflowId: string,
+  enabled: boolean,
+  options: ClientOptions = {},
+) {
+  const response = await automationClient(options).v1.workflows[":workflowId"].memory.$patch({
+    param: { workflowId },
+    json: { enabled },
+  });
+  if (!response.ok) throw await automationResponseError(response, "Workflow memory update failed");
+  return (await response.json()).data;
+}
+
+export async function clearHeadlessWorkflowMemory(workflowId: string, options: ClientOptions = {}) {
+  const response = await automationClient(options).v1.workflows[":workflowId"].memory.$delete({
+    param: { workflowId },
+  });
+  if (!response.ok) throw await automationResponseError(response, "Workflow memory clear failed");
+  return (await response.json()).data;
+}
+
 export async function invokeHeadlessWorkflow(
   workflowId: string,
   command: InvokeWorkflowBody,
