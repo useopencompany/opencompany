@@ -9,6 +9,7 @@ import {
   type AcpSteeringMessage,
 } from "./acp-harness";
 import { CodexChatRetryableInfrastructureError } from "./codex-chat-errors";
+import { steeringMessageSource } from "./coding-chat-steering";
 import type { SandboxHandle } from "./sandbox";
 
 type JsonRpcMessage = Record<string, unknown>;
@@ -1532,6 +1533,47 @@ describe("AcpHarness", () => {
     );
 
     expect(transport.requests.map((request) => request.method)).toContain("_session/steering");
+  });
+
+  it("settles the turn when the prompt completes while nobody has steered it", async () => {
+    // This is the ordinary production turn: the steering source is polling the database and has
+    // one `next()` in flight when the prompt response arrives. Iterator cleanup must not block on
+    // that poll, otherwise the turn never returns and the session stays "running" after the engine
+    // has finished.
+    const transport = fakeAcpSandbox(async (message, emit) => {
+      if (message.method === "initialize") {
+        await emit({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: {
+            agentCapabilities: { loadSession: true },
+            _meta: { steering: { supported: true } },
+          },
+        });
+      } else if (message.method === "session/new") {
+        await emit({ jsonrpc: "2.0", id: message.id, result: { sessionId: "codex_quiet" } });
+      } else if (message.method === "session/prompt") {
+        await emit({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
+      }
+    });
+    const load = vi.fn(async () => []);
+    const steering = steeringMessageSource({
+      runId: "run_quiet",
+      leaseId: "lease_quiet",
+      leaseOwner: "runner_quiet",
+      pollIntervalMs: 60_000,
+      load,
+    });
+
+    const result = await Promise.race([
+      new AcpHarness().runTurn(
+        harnessInput(transport.sandbox, { adapter: CODEX_ACP_ENGINE_ADAPTER, steering }),
+      ),
+      new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 2_000)),
+    ]);
+
+    expect(result).toMatchObject({ promptResponse: { stopReason: "end_turn" } });
+    expect(transport.kill).toHaveBeenCalledWith(41);
   });
 
   it("stops steering for the turn when the poll for promoted messages fails", async () => {
