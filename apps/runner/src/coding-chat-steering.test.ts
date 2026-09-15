@@ -52,6 +52,49 @@ describe("steeringMessageSource", () => {
 
     expect(load).toHaveBeenCalledWith(expect.objectContaining(lease));
   });
+
+  it("closes immediately while a poll is in flight, so the turn can settle", async () => {
+    // Production regression: the harness keeps one `next()` pending for the whole turn. When nobody
+    // steers, an async-generator source never yields, so its `return()` queued behind that poll
+    // never resolved and every coding turn stayed "running" after the engine had finished.
+    const load = vi.fn().mockResolvedValue([]);
+    const iterator = steeringMessageSource({ ...lease, pollIntervalMs: 60_000, load })[
+      Symbol.asyncIterator
+    ]();
+    const pending = iterator.next();
+
+    const closed = await Promise.race([
+      iterator.return?.(),
+      new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 1_000)),
+    ]);
+
+    expect(closed).toEqual({ done: true, value: undefined });
+    await expect(pending).resolves.toEqual({ done: true, value: undefined });
+    expect(load).not.toHaveBeenCalled();
+    await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined });
+  });
+
+  it("stops polling once closed, even if a poll was mid-flight", async () => {
+    const loadResolvers: Array<(rows: AcpSteeringMessage[]) => void> = [];
+    const load = vi.fn(
+      () =>
+        new Promise<AcpSteeringMessage[]>((resolve) => {
+          loadResolvers.push(resolve);
+        }),
+    );
+    const iterator = steeringMessageSource({ ...lease, pollIntervalMs: 0, load })[
+      Symbol.asyncIterator
+    ]();
+    const pending = iterator.next();
+    await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+
+    await iterator.return?.();
+    loadResolvers[0]?.([message("turn_late")]);
+
+    await expect(pending).resolves.toEqual({ done: true, value: undefined });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(load).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("createProductSteeringChannel", () => {
