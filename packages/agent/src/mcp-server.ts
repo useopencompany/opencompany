@@ -51,6 +51,7 @@ import {
   searchBrainToToolInput,
 } from "./brain-tools";
 import type { BrainToolInput } from "./chat-ui";
+import { mcpInvocationId } from "./mcp-invocation";
 
 // Tool registration for the user-level opencompany MCP connector: one surface spanning
 // every brain the token's user can access, addressed via an optional `brain`
@@ -494,7 +495,7 @@ export function registerWikiTool(server: McpServer, ctx: McpToolContext) {
     },
     async (
       args: WikiToolInput & { workspace?: string | undefined },
-      extra?: { requestId?: string | number },
+      extra?: { requestId?: string | number; sessionId?: string },
     ) => {
       try {
         const wiki = ctx.wiki;
@@ -529,9 +530,11 @@ export function registerWikiTool(server: McpServer, ctx: McpToolContext) {
           });
         }
         const { workspace: _workspace, wiki: wikiId, ...command } = args;
-        // Stable within the authenticated MCP request; distinct requests get
-        // distinct keys so intentional repeat calls are not collapsed.
-        const idempotencyKey = `mcp-wiki:${ctx.userWorkosId}:${workspace.id}:${extra?.requestId ?? "request"}`;
+        const idempotencyKey = mcpInvocationId(
+          `wiki:${ctx.userWorkosId}:${workspace.id}`,
+          extra?.sessionId,
+          extra?.requestId,
+        );
         const output = await wiki.execute({
           userWorkosId: ctx.userWorkosId,
           workspaceId: workspace.id,

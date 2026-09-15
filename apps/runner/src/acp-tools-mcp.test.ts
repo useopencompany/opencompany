@@ -1,6 +1,10 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { ACTION_EFFECTS_READ, type ResolvedActionCatalog } from "@opencompany/agent/actions/types";
+import {
+  ACTION_EFFECTS_READ,
+  ACTION_EFFECTS_WRITE,
+  type ResolvedActionCatalog,
+} from "@opencompany/agent/actions/types";
 import type { ActionGatewayServiceDependencies } from "@opencompany/agent/application/action-gateway";
 import {
   createActionGateway,
@@ -57,6 +61,94 @@ afterEach(async () => {
 });
 
 describe("runner ACP tools MCP", () => {
+  it.each(["codex", "claude_code"] as const)(
+    "admits fresh %s clients in one run without losing duplicate-write protection",
+    async (engine) => {
+      const catalog: ResolvedActionCatalog = {
+        providers: [{ id: "gmail", label: "Gmail", description: "Email" }],
+        actions: ["gmail.list_labels", "gmail.create_draft"].map((id) => ({
+          id,
+          provider: "gmail",
+          capability: id === "gmail.list_labels" ? "read" : "write",
+          effects: id === "gmail.list_labels" ? ACTION_EFFECTS_READ : ACTION_EFFECTS_WRITE,
+          description: id,
+          params: { type: "object" },
+          permissionMode: "on",
+          execute: vi.fn(),
+        })),
+      };
+      const admitted = new Set<string>();
+      let callCount = 0;
+      const providerExecute = vi.fn<ActionGatewayServiceDependencies["executeAction"]>(
+        async ({ actionId }) => ({ ok: true, action: actionId, result: {} }),
+      );
+      const dependencies: Partial<ActionGatewayServiceDependencies> = {
+        actionsKilled: () => false,
+        loadContext: async () => ({ ...authorized, userTimezone: "UTC" }),
+        resolveCatalog: async () => catalog,
+        recordSourceDiscovery: async () => undefined,
+        evaluateApproval: async () => false,
+        claimInvocation: async ({ invocationId, deduplicationKey }) => {
+          const keys = [invocationId, ...(deduplicationKey ? [deduplicationKey] : [])];
+          const duplicate = keys.some((key) => admitted.has(key));
+          if (!duplicate) {
+            for (const key of keys) admitted.add(key);
+            callCount += 1;
+          }
+          return { ok: true, duplicate, callCount };
+        },
+        executeAction: providerExecute,
+      };
+      const app = Fastify();
+      apps.push(app);
+      registerAcpToolsMcpRoute(app, env, {
+        authorize: async () => ({ ...authorized, engine, taskConversation: true }),
+        executeAction: createActionGateway(dependencies),
+        evaluateApproval: createActionHostGateway(dependencies),
+        taskActions: { requests: async () => [], stage: vi.fn() },
+      });
+      await app.listen({ host: "127.0.0.1", port: 0 });
+      const address = app.server.address();
+      if (!address || typeof address === "string") throw new Error("Expected a TCP test server.");
+      const ticket = createExternalEngineGatewayTicket({
+        ...capability,
+        secret: env.internalToken,
+      }).ticket;
+      const callFromFreshClient = async (action: string, params: Record<string, unknown> = {}) => {
+        // Every new client restarts its JSON-RPC counter, including within the same attempt.
+        const client = new Client({ name: "restarted-engine", version: "1" });
+        const transport = new StreamableHTTPClientTransport(
+          new URL(`http://127.0.0.1:${address.port}/internal/goat/acp-tools`),
+          { requestInit: { headers: { "x-opencompany-tool-ticket": ticket } } },
+        );
+        try {
+          await client.connect(transport as Parameters<typeof client.connect>[0]);
+          expect(transport.sessionId).toBeUndefined();
+          await client.callTool({ name: "describe_actions", arguments: { actions: [action] } });
+          return await client.callTool({ name: "use_action", arguments: { action, params } });
+        } finally {
+          await client.close();
+        }
+      };
+
+      expect((await callFromFreshClient("gmail.create_draft", { subject: "First" })).isError).toBe(
+        false,
+      );
+      expect((await callFromFreshClient("gmail.list_labels")).isError).toBe(false);
+      expect((await callFromFreshClient("gmail.list_labels")).isError).toBe(false);
+      expect((await callFromFreshClient("gmail.create_draft", { subject: "Second" })).isError).toBe(
+        false,
+      );
+      const duplicate = await callFromFreshClient("gmail.create_draft", { subject: "First" });
+      expect(duplicate.structuredContent).toMatchObject({
+        ok: false,
+        error: { code: "duplicate_invocation" },
+        budget: { used: 4 },
+      });
+      expect(providerExecute).toHaveBeenCalledTimes(4);
+    },
+  );
+
   it.each(["codex", "claude_code"] as const)(
     "saves a %s task approval without executing or holding an interactive waiter",
     async (engine) => {

@@ -31,6 +31,7 @@ The shared limit is 32 admitted invocations per turn for both chat and backgroun
 Discovery is free. Unknown action IDs and missing source discovery are rejected before admission;
 a known, admitted invocation consumes a slot even when parameter validation or provider execution
 fails. A duplicate invocation does not consume another slot or dispatch the provider again.
+
 Approval requests and denied approvals are handled before the host admission claim.
 
 Execution responses include `budget: { limit, used, remaining }` after admission, including
@@ -51,6 +52,29 @@ discovery calls, or work through unrelated tools. Model-step limits and provider
 remain separate. Approval/retry reconstruction resets local wrapper state; the persisted host is
 the authoritative boundary. An older host without budget metadata can still report `call_budget`,
 which the native runner recognizes.
+
+## MCP invocation identity
+
+External-engine MCP calls use the shared `mcpInvocationId` boundary. JSON-RPC request IDs are
+only stable within an actual MCP transport session. The runner's stateless HTTP route has no
+such session: each dispatch receives a server-generated UUID, so restarted or concurrent clients
+cannot collide when their request counters reset. Adding a runner attempt ID is insufficient
+because multiple clients can exist within one attempt. Artifacts, Skills, Wiki, and legacy Brain
+capture use the same identity rule.
+
+Transport identity is separate from operation deduplication. The action gateway still atomically
+blocks identical non-idempotent external writes within the durable turn, and task approvals keep
+their saved operation identity and result across resumes. A stateless HTTP redelivery is a fresh
+dispatch; JSON-RPC IDs alone do not provide exactly-once execution or result replay.
+
+That gateway claim is derived from the action's own parameters, so it holds regardless of transport
+identity. Wiki, Skill, and legacy Brain writes have no equivalent semantic claim: they deduplicated
+purely on the transport-derived key, so a redelivered stateless dispatch now runs twice (a repeated
+`timeline-add` appends a second entry, a repeated Skill edit publishes a second version). That is
+the deliberate trade for never again collapsing two genuinely different writes from clients whose
+request counters happen to agree. Durable intent/result receipts and provider idempotency keys are
+the broader recovery contract described in
+[ADR 0015](./adr/0015-durable-execution-behind-session-run.md).
 
 ## Verification and evaluation
 
