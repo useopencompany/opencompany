@@ -2,9 +2,10 @@
 
 import { captureException } from "@opencompany/observability";
 import { TimeoutWaitingForTxIdError } from "@tanstack/electric-db-collection";
+import type { CollectionStatus } from "@tanstack/react-db";
 
 type TransactionAwareCollection = {
-  status?: string;
+  status?: CollectionStatus;
   utils: { awaitTxId(transactionId: number, timeoutMs?: number): Promise<unknown> };
 };
 
