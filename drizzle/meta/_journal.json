@@ -2024,6 +2024,20 @@
       "when": 1790100400009,
       "tag": "0288_execution_backend_compatibility",
       "breakpoints": true
+    },
+    {
+      "idx": 289,
+      "version": "7",
+      "when": 1790100400010,
+      "tag": "0289_workflow_slack_channel",
+      "breakpoints": true
+    },
+    {
+      "idx": 290,
+      "version": "7",
+      "when": 1790100400011,
+      "tag": "0290_channel_delivery_bot_identity",
+      "breakpoints": true
     }
   ]
 }

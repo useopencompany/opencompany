@@ -63,6 +63,7 @@ const workflow = {
   description: "Summarize the week.",
   status: "draft" as const,
   scope: "company" as const,
+  slackChannel: { enabled: true, displayName: "" },
   createdByUserId: "user_1",
   trigger: { type: "manual" as const },
   steps: [
@@ -118,9 +119,31 @@ describe("WorkflowEditor", () => {
       description: "Summarize the week.",
       status: "draft",
       scope: "company",
+      slackChannel: { enabled: true, displayName: "" },
       steps: [{ ...workflow.steps[0], instructions: "Write a concise weekly update." }],
       trigger: { type: "manual" },
       triggers: [],
+    });
+  });
+
+  it("turns the Slack channel off and names the identity it posts under", async () => {
+    render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
+
+    expect(screen.getByText("Channels")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Posts as"), { target: { value: "James" } });
+    await advanceAutosave();
+    expect(workflowActionsMock.update.mock.calls.at(-1)?.[1].slackChannel).toEqual({
+      enabled: true,
+      displayName: "James",
+    });
+
+    fireEvent.click(screen.getByRole("switch", { name: "Turn off Slack" }));
+    // The name field belongs to an enabled channel; turning Slack off retires it from the form.
+    expect(screen.queryByLabelText("Posts as")).not.toBeInTheDocument();
+    await advanceAutosave();
+    expect(workflowActionsMock.update.mock.calls.at(-1)?.[1].slackChannel).toEqual({
+      enabled: false,
+      displayName: "James",
     });
   });
 

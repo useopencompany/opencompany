@@ -71,7 +71,7 @@ export type HostTools = {
   createWorkspaceSkill?: CreateWorkspaceSkillRunner;
   editWorkspaceSkill?: EditWorkspaceSkillRunner;
   runWiki?: (input: Record<string, unknown>, context: { toolCallId: string }) => Promise<unknown>;
-  postSlackMessage: (input: {
+  postSlackMessage?: (input: {
     channel?: string;
     text: string;
     messageKey: string;
@@ -151,7 +151,9 @@ export async function loadHostTools(
       : {}),
     runWiki: (input: Record<string, unknown>, wikiContext: { toolCallId: string }) =>
       call("wiki", input, wikiContext.toolCallId),
-    postSlackMessage: (input) => call("post_slack_message", input),
+    ...(bootstrap.slackChannelEnabled
+      ? { postSlackMessage: (input) => call("post_slack_message", input) }
+      : {}),
     writeArtifact: (input, artifactContext) =>
       call(
         "write_artifact",
@@ -334,6 +336,7 @@ function asBootstrap(value: unknown): ChatHostBootstrap {
     !Array.isArray(value.skills) ||
     !Array.isArray(value.activeSkills) ||
     !Array.isArray(value.browserProfiles) ||
+    typeof value.slackChannelEnabled !== "boolean" ||
     typeof value.skillToolsEnabled !== "boolean"
   ) {
     throw new Error("The Chat host-tool gateway returned an invalid bootstrap response.");

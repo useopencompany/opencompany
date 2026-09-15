@@ -261,6 +261,17 @@ export const TaskSchema = z
 export const WorkflowStatusSchema = z.enum(["draft", "active"]);
 // Mirrors Skills: a company workflow belongs to the workspace, a personal one only to its creator.
 export const WorkflowScopeSchema = z.enum(["personal", "company"]).openapi("WorkflowScope");
+
+// Slack is the only workflow channel today. `enabled` decides whether a run is given the Slack
+// send tool at all; `displayName` is a cosmetic chat.postMessage username override and is empty
+// when the workflow posts under the default bot identity.
+export const WorkflowSlackChannelSchema = z
+  .object({
+    enabled: z.boolean(),
+    displayName: z.string().max(80),
+  })
+  .strict()
+  .openapi("WorkflowSlackChannel");
 export const WorkflowStepSchema = z
   .object({
     id: ResourceIdSchema,
@@ -399,6 +410,7 @@ export const WorkflowSchema = z
     steps: z.array(WorkflowStepSchema).max(20),
     status: WorkflowStatusSchema,
     scope: WorkflowScopeSchema,
+    slackChannel: WorkflowSlackChannelSchema,
     // Null for company workflows created before scopes existed; only an admin can take one personal.
     createdByUserId: z.string().max(256).nullable(),
     trigger: WorkflowTriggerSchema,
@@ -698,7 +710,11 @@ export const TaskActivityReadModelSchema = z
   })
   .strict()
   .openapi("TaskActivityReadModelV1");
-export const WorkflowReadModelSchema = WorkflowSchema.openapi("WorkflowReadModelV1");
+// The v1 read model projects the workflow list. Channel configuration is only read on the detail
+// route, which goes through the API, so it deliberately stays out of this replicated shape.
+export const WorkflowReadModelSchema = WorkflowSchema.omit({ slackChannel: true }).openapi(
+  "WorkflowReadModelV1",
+);
 export const TaskScheduleReadModelSchema = TaskScheduleSchema.openapi("TaskScheduleReadModelV1");
 
 export const BrainTimelineEntrySchema = z
@@ -2855,6 +2871,8 @@ export const UpdateWorkflowBodySchema = z
     status: WorkflowStatusSchema,
     // Omitted leaves the current visibility untouched.
     scope: WorkflowScopeSchema.optional(),
+    // Omitted leaves the current channel configuration untouched.
+    slackChannel: WorkflowSlackChannelSchema.optional(),
     trigger: WorkflowTriggerInputSchema,
     triggers: z.array(WorkflowAutomationTriggerInputSchema).max(20).optional(),
   })
@@ -4806,6 +4824,7 @@ export type TaskReadModel = z.infer<typeof TaskReadModelSchema>;
 export type TaskActivityReadModel = z.infer<typeof TaskActivityReadModelSchema>;
 export type WorkflowDto = z.infer<typeof WorkflowSchema>;
 export type WorkflowScope = z.infer<typeof WorkflowScopeSchema>;
+export type WorkflowSlackChannel = z.infer<typeof WorkflowSlackChannelSchema>;
 export type WorkflowReadModel = z.infer<typeof WorkflowReadModelSchema>;
 export type WorkflowScheduleReadModel = z.infer<typeof WorkflowScheduleReadModelSchema>;
 export type TaskScheduleDto = z.infer<typeof TaskScheduleSchema>;

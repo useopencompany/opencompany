@@ -31,6 +31,13 @@ export function canManageWorkflowScope(
   );
 }
 
+// Slack is the only channel a workflow can post to today. The toggle decides whether the run gets
+// the Slack send tool at all; the display name is a cosmetic override on the post itself.
+export type WorkflowSlackChannel = {
+  enabled: boolean;
+  displayName: string;
+};
+
 export type WorkflowStep = {
   id: string;
   title: string;
@@ -135,6 +142,7 @@ export type Workflow = {
   steps: WorkflowStep[];
   status: WorkflowStatus;
   scope: WorkflowScope;
+  slackChannel: WorkflowSlackChannel;
   createdByUserId: string | null;
   trigger: WorkflowTrigger;
   triggers?: WorkflowAutomationTrigger[];
@@ -272,6 +280,7 @@ export interface WorkflowRepository {
     steps: WorkflowStep[];
     status: WorkflowStatus;
     scope: WorkflowScope;
+    slackChannel: WorkflowSlackChannel;
     trigger: WorkflowTriggerInput;
     automationTriggers?: Array<{
       trigger: WorkflowAutomationTrigger;
@@ -398,6 +407,9 @@ const MAX_PROMPT_LENGTH = 10_000;
 const MAX_SCHEDULE_NAME_LENGTH = 80;
 const MAX_SOURCE_DESCRIPTION_LENGTH = 1_024;
 const MAX_WORKFLOW_SKILLS = 16;
+// Slack truncates long custom usernames on the message itself; keep the stored value inside a
+// length Slack renders in full.
+const MAX_SLACK_DISPLAY_NAME_LENGTH = 80;
 
 export class WorkflowApplicationService {
   constructor(
@@ -470,6 +482,8 @@ export class WorkflowApplicationService {
       steps: WorkflowStep[];
       status: WorkflowStatus;
       scope?: WorkflowScope;
+      // Omitted leaves the current channel configuration untouched.
+      slackChannel?: WorkflowSlackChannel;
       trigger: WorkflowTriggerInput;
       triggers?: WorkflowAutomationTriggerInput[];
     },
@@ -481,6 +495,10 @@ export class WorkflowApplicationService {
     if (!current) throw new CoreError("not_found", "Workflow not found.");
     if (current.version !== expectedVersion) throw versionConflict("Workflow");
     const scope = input.scope === undefined ? current.scope : workflowScope(input.scope);
+    const slackChannel =
+      input.slackChannel === undefined
+        ? current.slackChannel
+        : workflowSlackChannel(input.slackChannel);
     if (scope !== current.scope && !canManageWorkflowScope(actor, current)) {
       throw new CoreError(
         "forbidden",
@@ -584,6 +602,7 @@ export class WorkflowApplicationService {
         workflowId: id,
         expectedVersion,
         scope,
+        slackChannel,
         ...normalized,
         trigger: legacyTriggerFromAutomation(automationTriggers[0]?.trigger),
         automationTriggers,
@@ -682,6 +701,7 @@ export class WorkflowApplicationService {
       workflowId: id,
       expectedVersion,
       scope,
+      slackChannel,
       ...normalized,
       ...(schedule ? { schedule } : {}),
       ...(event ? { event } : {}),
@@ -1248,6 +1268,20 @@ function workflowStatus(status: WorkflowStatus) {
 
 function workflowName(value: string) {
   return bounded(value, MAX_WORKFLOW_NAME_LENGTH, "Workflow name");
+}
+
+function workflowSlackChannel(value: WorkflowSlackChannel): WorkflowSlackChannel {
+  if (typeof value.enabled !== "boolean") {
+    throw new CoreError("invalid_argument", "Provide whether the Slack channel is enabled.");
+  }
+  const displayName = value.displayName.trim();
+  if (displayName.length > MAX_SLACK_DISPLAY_NAME_LENGTH) {
+    throw new CoreError(
+      "invalid_argument",
+      `The Slack display name must be ${MAX_SLACK_DISPLAY_NAME_LENGTH} characters or fewer.`,
+    );
+  }
+  return { enabled: value.enabled, displayName };
 }
 
 function workflowScope(value: WorkflowScope): WorkflowScope {

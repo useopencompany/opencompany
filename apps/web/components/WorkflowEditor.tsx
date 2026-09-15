@@ -10,7 +10,9 @@ import {
 import { workflowActivationDisabledReason } from "@opencompany/core/workflows";
 import type { PluginEventFilterDefinitionDto } from "@opencompany/protocol";
 import { Button } from "@opencompany/ui/components/button";
+import { Input } from "@opencompany/ui/components/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
+import { Switch } from "@opencompany/ui/components/switch";
 import {
   CalendarClock,
   Check,
@@ -19,6 +21,7 @@ import {
   Clock,
   Copy,
   Loader2,
+  MessageSquare,
   MoreHorizontal,
   Play,
   Plus,
@@ -94,7 +97,10 @@ type WorkflowTriggerDraft =
       enabled: boolean;
     };
 type WorkflowEventTriggerDraft = Extract<WorkflowTriggerDraft, { type: "event" }>;
-type WorkflowDraft = Pick<WorkflowDetail, "name" | "description" | "status" | "steps" | "scope"> & {
+type WorkflowDraft = Pick<
+  WorkflowDetail,
+  "name" | "description" | "status" | "steps" | "scope" | "slackChannel"
+> & {
   triggers: WorkflowTriggerDraft[];
 };
 type SaveState = "saved" | "saving" | "error";
@@ -168,6 +174,7 @@ export function WorkflowEditor({
           steps: snapshot.steps,
           status: snapshot.status,
           scope: snapshot.scope,
+          slackChannel: snapshot.slackChannel,
           trigger: legacyWorkflowTrigger(snapshot.triggers[0]),
           triggers: snapshot.triggers.map(workflowTriggerInput),
         });
@@ -388,6 +395,12 @@ export function WorkflowEditor({
               </p>
             ) : null}
           </div>
+
+          <ChannelSection
+            slackChannel={draft.slackChannel}
+            canEdit={canEdit}
+            onChange={(slackChannel) => patch({ slackChannel })}
+          />
         </div>
       </div>
     </main>
@@ -1544,6 +1557,70 @@ function EditorMoreMenu({
   );
 }
 
+function ChannelSection({
+  slackChannel,
+  canEdit,
+  onChange,
+}: {
+  slackChannel: WorkflowDetail["slackChannel"];
+  canEdit: boolean;
+  onChange: (slackChannel: WorkflowDetail["slackChannel"]) => void;
+}) {
+  return (
+    <section className="flex flex-col gap-3">
+      <SectionLabel>Channels</SectionLabel>
+      <div className="overflow-hidden rounded-xl border border-border bg-surface">
+        <div className="flex items-center gap-3 px-4 py-3.5">
+          <MessageSquare size={16} strokeWidth={1.8} className="shrink-0 text-ink-subtle" />
+          <div className="min-w-0 flex-1">
+            <span className="block text-[13px] font-medium text-ink">Slack</span>
+            <p className="mt-0.5 text-[12px] leading-4 text-ink-subtle">
+              Let this workflow post results to a channel and answer follow-ups in the thread.
+            </p>
+          </div>
+          <Switch
+            checked={slackChannel.enabled}
+            onCheckedChange={(enabled) => onChange({ ...slackChannel, enabled })}
+            disabled={!canEdit}
+            aria-label={slackChannel.enabled ? "Turn off Slack" : "Turn on Slack"}
+          />
+        </div>
+        {slackChannel.enabled ? (
+          <div className="flex flex-col gap-2 border-t border-border px-4 py-3.5">
+            <label
+              htmlFor="workflow-slack-display-name"
+              className="text-[12px] font-medium text-ink"
+            >
+              Posts as
+            </label>
+            <Input
+              id="workflow-slack-display-name"
+              value={slackChannel.displayName}
+              onChange={(event) => onChange({ ...slackChannel, displayName: event.target.value })}
+              disabled={!canEdit}
+              maxLength={80}
+              placeholder="opencompany"
+              className="max-w-[280px]"
+            />
+            <p className="text-[12px] leading-4 text-ink-subtle">
+              Cosmetic only: the post still comes from the single opencompany bot, keeps its APP
+              badge, and cannot be mentioned by this name. Posting needs the{" "}
+              <Link
+                href="/settings/workspace/slack"
+                prefetch
+                className="text-ink underline underline-offset-2"
+              >
+                workspace Slack connection
+              </Link>
+              .
+            </p>
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
 function SectionLabel({ children }: { children: ReactNode }) {
   return (
     <span className="text-[11px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
@@ -1585,6 +1662,7 @@ function workflowDraft(workflow: WorkflowDetail): WorkflowDraft {
     description: workflow.description,
     status: workflow.status,
     scope: workflow.scope,
+    slackChannel: workflow.slackChannel,
     steps: workflow.steps,
     triggers,
   };

@@ -5,6 +5,18 @@ from every member's personal Slack plugin. Invite the bot to a public, unshared 
 the destination in normal workflow instructions: “Post the investigation summary in #product with
 the opencompany Slack bot.” There is no destination picker in the workflow editor.
 
+## Per-workflow channel configuration
+
+The workflow editor's **Channels** section owns two things, both stored on `goat.workflows`:
+
+- `slack_channel_enabled` decides whether a run is given the Slack send tool at all. Workflows
+  written before this section existed default to on, so their behavior is unchanged; turning the
+  toggle off withholds the tool from every later run of that workflow.
+- `slack_bot_display_name` is a cosmetic identity. One Slack app has one bot user, so the name is
+  only a `chat.postMessage` `username` override: the post keeps the APP badge and cannot be
+  mentioned by that name. It is snapshotted onto the delivery row when the post is queued, so
+  editing the workflow never rewrites an already-queued post.
+
 `opencompany_slack_bot_send_message` is available to workflow runtimes. It is named after the
 phrase people write in instructions so the model picks it over a member's personal Slack plugin
 action, which can also post messages. It queues a root post with a stable
@@ -53,7 +65,10 @@ Use the existing `OPENCOMPANY_SLACK_BOT_*` credentials. OAuth still uses
 `/api/integrations/slack-bot/start` and `/api/integrations/slack-bot/callback`; signed events use
 `/webhooks/slack-bot/events` on the API. Subscribe to `message.channels`, `app_uninstalled`, and
 `tokens_revoked`. Required bot scopes: `chat:write`, `channels:read`, `channels:history`,
-and `users:read`. New installs no longer request DM, private-channel, mention,
+and `users:read`. New installs additionally request `users:read.email` and `chat:write.customize`;
+an install that predates either keeps delivering, and Channels settings asks an admin to reconnect.
+Without `chat:write.customize` a workflow's display name is dropped and the post uses the default
+bot identity rather than failing. New installs no longer request DM, private-channel, mention,
 or reaction scopes. Old grants may remain until the Slack app is reinstalled; ingress ignores
 those event types. Stop configuring the legacy Wiki answer bot's Brain destinations.
 
@@ -66,6 +81,10 @@ Migration `0282_durable_session_subscriptions` is additive. Deploy it before the
 runner. Application rollback can retain these tables and their queued data. Rolling back the
 API also restores legacy bot ingress behavior, so disable Slack event delivery during rollback
 if that behavior is unwanted. Do not drop the tables while subscriptions or deliveries are active.
+
+Migrations `0289_workflow_slack_channel` and `0290_channel_delivery_bot_identity` are additive and
+default every existing row to today's behavior: the Slack channel on, and the default bot identity.
+An application rollback can leave both columns deployed.
 
 Migration `0284_slack_thread_participants` updates the subscription policy default and existing
 Slack thread policy labels. It preserves subscriptions and queued events. Rollback can restore

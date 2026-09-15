@@ -535,11 +535,15 @@ describe("canonical Hono API", () => {
         ],
         status: "active",
         trigger: { type: "manual" },
+        slackChannel: { enabled: false, displayName: "James" },
       }),
     });
     expect(updatedWorkflow.status).toBe(200);
     await expect(updatedWorkflow.json()).resolves.toMatchObject({
-      data: { workflow: { version: 2 }, transactionId: "52" },
+      data: {
+        workflow: { version: 2, slackChannel: { enabled: false, displayName: "James" } },
+        transactionId: "52",
+      },
     });
 
     const invoked = await app.request("/v1/workflows/workflow_1/invoke", {
@@ -6363,6 +6367,7 @@ function populatedAutomationServices() {
     ],
     status: "active",
     scope: "company",
+    slackChannel: { enabled: true, displayName: "" },
     createdByUserId: "user_1",
     trigger: { type: "manual" },
     version: 1,
@@ -6400,6 +6405,7 @@ function populatedAutomationServices() {
         description: input.description,
         steps: input.steps,
         status: input.status,
+        slackChannel: input.slackChannel,
         trigger:
           input.trigger.type === "manual" || input.trigger.type === "event"
             ? input.trigger.type === "event"

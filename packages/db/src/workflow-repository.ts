@@ -44,6 +44,8 @@ type WorkflowRow = {
   steps: unknown;
   status: "draft" | "active";
   scope: "personal" | "company";
+  slackChannelEnabled: boolean;
+  slackBotDisplayName: string;
   createdByUserId: string | null;
   trigger: "manual" | "slack" | "linear" | "schedule" | "event";
   scheduleCron: string | null;
@@ -258,6 +260,8 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         workflow.steps,
         workflow.status,
         workflow.scope,
+        workflow.slack_channel_enabled AS "slackChannelEnabled",
+        workflow.slack_bot_display_name AS "slackBotDisplayName",
         workflow.created_by_workos_id AS "createdByUserId",
         workflow.trigger,
         workflow.schedule_cron AS "scheduleCron",
@@ -303,6 +307,8 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
           description = ${input.description},
           steps = ${stringifyPostgresJson(input.steps)}::jsonb,
           scope = ${input.scope},
+          slack_channel_enabled = ${input.slackChannel.enabled},
+          slack_bot_display_name = ${input.slackChannel.displayName},
           -- A legacy company workflow has no recorded creator. Whoever takes it personal owns it.
           created_by_workos_id = CASE
             WHEN ${input.scope} = 'personal'
@@ -400,6 +406,8 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         workflow.steps,
         workflow.status,
         workflow.scope,
+        workflow.slack_channel_enabled AS "slackChannelEnabled",
+        workflow.slack_bot_display_name AS "slackBotDisplayName",
         workflow.created_by_workos_id AS "createdByUserId",
         workflow.trigger,
         workflow.schedule_cron AS "scheduleCron",
@@ -992,6 +1000,8 @@ function workflowSelect() {
       workflow.steps,
       workflow.status,
       workflow.scope,
+      workflow.slack_channel_enabled AS "slackChannelEnabled",
+      workflow.slack_bot_display_name AS "slackBotDisplayName",
       workflow.created_by_workos_id AS "createdByUserId",
       workflow.trigger,
       workflow.schedule_cron AS "scheduleCron",
@@ -1057,6 +1067,10 @@ function mapWorkflow(row: WorkflowRow): Workflow {
     steps,
     status: row.status,
     scope: row.scope,
+    slackChannel: {
+      enabled: row.slackChannelEnabled,
+      displayName: row.slackBotDisplayName,
+    },
     createdByUserId: row.createdByUserId,
     trigger: workflowTrigger(row),
     triggers: workflowAutomationTriggers(row.automationTriggers),

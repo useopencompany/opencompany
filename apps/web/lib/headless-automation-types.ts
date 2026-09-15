@@ -1,4 +1,9 @@
-import type { TaskScheduleReadModel, WorkflowDto, WorkflowScope } from "@opencompany/protocol";
+import type {
+  TaskScheduleReadModel,
+  WorkflowDto,
+  WorkflowScope,
+  WorkflowSlackChannel,
+} from "@opencompany/protocol";
 
 export type WorkflowStep = {
   id: string;
@@ -44,6 +49,7 @@ export type WorkflowDetail = {
   steps: WorkflowStep[];
   status: "draft" | "active";
   scope: WorkflowScope;
+  slackChannel: WorkflowSlackChannel;
   createdByUserId: string | null;
   trigger: WorkflowTrigger;
   triggers?: WorkflowAutomationTrigger[];

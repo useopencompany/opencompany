@@ -23,6 +23,8 @@ export type ChatHostContext = {
   automationToolsEnabled: boolean;
   subagentsEnabled: boolean;
   skillToolsEnabled: boolean;
+  // True only for a run of a workflow whose Channels section keeps Slack on.
+  slackChannelEnabled: boolean;
 };
 
 export type ChatHostToolCommand = {
@@ -543,8 +545,10 @@ async function executeOperation(
       });
     }
     case "post_slack_message": {
-      if (!context.taskConversation || !dependencies.postSlackMessage)
-        throw new Error("Slack Channel posting is only available in workflows.");
+      if (!context.slackChannelEnabled || !dependencies.postSlackMessage)
+        throw new Error(
+          "Slack Channel posting is only available in workflows that have Slack turned on.",
+        );
       return dependencies.postSlackMessage({
         runId: command.runId,
         actorId: context.actorId,
@@ -614,6 +618,7 @@ async function bootstrap(
     },
     workspaceName: context.workspaceName,
     automationToolsEnabled,
+    slackChannelEnabled: context.slackChannelEnabled,
     skillToolsEnabled: context.skillToolsEnabled,
     // Chat only, for the same reason automation tools are withheld from a task conversation: a task
     // is already the deeper-work primitive, so a second delegation layer inside one is unobserved
