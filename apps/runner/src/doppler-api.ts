@@ -1,6 +1,6 @@
 export class DopplerAuthRejected extends Error {
   constructor() {
-    super("Doppler rejected the saved login. Reconnect in Settings → Plugins → Doppler.");
+    super("Doppler rejected the saved login. Reconnect in Plugins → Doppler.");
   }
 }
 

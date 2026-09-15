@@ -101,7 +101,7 @@ export function OnboardingPluginsStep({
         </h1>
         <p className="text-[14px] leading-6 text-ink-muted">
           Plugins let opencompany act in the tools you already use. Install a few now, or add them
-          later from Settings → Plugins.
+          later from Plugins in the sidebar.
         </p>
       </div>
 
