@@ -8,6 +8,7 @@ import {
   isClaudeCodeModelId,
   isCodexModelId,
   isCodexReasoningEffort,
+  isCodexSubscriptionModel,
 } from "@opencompany/agent-runtime";
 import type { AgentModelId, CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import type { HarnessEngine } from "@opencompany/db/product-schema";
@@ -39,6 +40,19 @@ const WORKFLOW_MODEL_CONFIG = [
     modelId: "anthropic/claude-sonnet-5",
     hint: "Premium writing and judgment",
   },
+  {
+    token: "gpt-5.6-sol",
+    engine: "opencompany",
+    modelId: "openai/gpt-5.6-sol",
+    hint: "Frontier GPT for complex, multi-step work",
+  },
+  {
+    token: "gpt-5.6-terra",
+    engine: "opencompany",
+    modelId: "openai/gpt-5.6-terra",
+    hint: "Balanced GPT for everyday work",
+  },
+  // Superseded by the 5.6 family above, kept so steps already saved on this token keep running.
   {
     token: "gpt-5.5",
     engine: "opencompany",
@@ -113,6 +127,13 @@ export const WORKFLOW_CLAUDE_CODE_MODEL_OPTIONS: readonly WorkflowCloudModelOpti
     ...requireAgentModelDefinition(modelId),
     engine: "claude_code",
   }));
+
+// Steps on the opencompany engine route through the workspace's shared ChatGPT subscription when an
+// admin has connected one, so those runs cost no workspace credits. Cloud coding runtimes bill
+// against the member's own connected agent account, which the picker already states in its hint.
+export function isWorkflowSubscriptionCoveredModel(option: WorkflowModelOption): boolean {
+  return option.engine === "opencompany" && isCodexSubscriptionModel(option.id);
+}
 
 export function isWorkflowModelToken(value: unknown): value is WorkflowModelToken {
   return typeof value === "string" && WORKFLOW_MODEL_TOKEN_SET.has(value);
