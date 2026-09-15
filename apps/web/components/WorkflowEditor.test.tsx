@@ -22,6 +22,13 @@ vi.mock("@/lib/headless-automation-commands", () => ({
   archiveHeadlessWorkflow: workflowActionsMock.archive,
   runHeadlessWorkflowNow: workflowActionsMock.runNow,
 }));
+// Run history reads the live Task collection through AppDataProvider, which this editor-only
+// render tree does not set up. Its own suite covers the section.
+vi.mock("@/components/WorkflowRunHistory", () => ({
+  WorkflowRunHistory: ({ workflowSlug }: { workflowSlug: string }) => (
+    <div data-testid="workflow-run-history">{workflowSlug}</div>
+  ),
+}));
 vi.mock("@/components/MarkdownBrainEditor", () => ({
   MarkdownBrainEditor: ({
     content,
