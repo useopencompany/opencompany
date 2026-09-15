@@ -537,6 +537,7 @@ export const IntegrationAccountReadModelSchema = z
     statusReason: z.string().max(2_000).nullable(),
     scopes: z.array(z.string().max(512)).max(1_000),
     capabilityModes: z.record(z.string(), z.unknown()),
+    toolModes: z.record(z.string(), z.unknown()),
   })
   .strict()
   .openapi("IntegrationAccountReadModelV1");

@@ -4546,6 +4546,36 @@ describe("canonical Hono API", () => {
     }
   });
 
+  it("does not report expected 4xx domain errors to the exception reporter", async () => {
+    const captureException = vi.fn();
+    setExceptionReporter({ captureException });
+    try {
+      const app = testApp(fakeRepository(), { wikiCommandsInternalSecret: "wiki-secret" });
+
+      const notFound = await app.request("/v1/tasks/task_missing");
+      expect(notFound.status).toBe(404);
+      await expect(notFound.json()).resolves.toMatchObject({
+        error: { code: "not_found" },
+      });
+
+      // Routes outside /v1 only have `app.onError` between them and the reporter.
+      const invalid = await app.request("/internal/wiki/commands", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer wiki-secret",
+          "Idempotency-Key": "agent-wiki:turn_1:call_1",
+        },
+        body: JSON.stringify({ userWorkosId: "user_1", workspaceId: "workspace_1", command: {} }),
+      });
+      expect(invalid.status).toBe(400);
+
+      expect(captureException).not.toHaveBeenCalled();
+    } finally {
+      setExceptionReporter(undefined);
+    }
+  });
+
   it("routes custom MCP setup through the actor and strips private discovery metadata", async () => {
     const tool = {
       name: "send",

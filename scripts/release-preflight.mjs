@@ -121,6 +121,8 @@ const groups = {
       "OPENCOMPANY_STRIPE_WEBHOOK_SECRET",
       "OPENCOMPANY_STRIPE_CHECKOUT_ENABLED",
       "MONID_API_KEY",
+      // Sentry-compatible Better Stack DSN; without it API exceptions never leave platform logs.
+      "BETTER_STACK_ERRORS_DSN",
     ],
     // Browser profiles are feature-flag gated: the Browserbase credentials are
     // required only when OPENCOMPANY_BROWSER_PROFILES_ENABLED is "true" in this env.
@@ -199,6 +201,8 @@ const groups = {
   runner: {
     label: "Render runner",
     required: [
+      // Sentry-compatible Better Stack DSN; without it runner exceptions never leave platform logs.
+      "BETTER_STACK_ERRORS_DSN",
       "DATABASE_URL",
       "RUNNER_INTERNAL_TOKEN",
       // Runner→API canonical origin and bearer for the internal wiki command
@@ -280,7 +284,6 @@ const groups = {
       "OPENCOMPANY_DICTATION_REALTIME_MODEL",
       "OPENCOMPANY_DICTATION_FINAL_MODEL",
       "OPENAI_API_KEY",
-      "BETTER_STACK_ERRORS_DSN",
       "OBSERVABILITY_ENABLED",
       "OBSERVABILITY_ENV",
       "OBSERVABILITY_RELEASE",

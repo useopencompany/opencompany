@@ -24,6 +24,12 @@ import {
   ELECTRIC_LOCAL_URL,
 } from "./lib/electric-dev.mjs";
 import { environmentFileMigrationPlan, migrateEnvironmentFile } from "./lib/env-name-migration.mjs";
+import {
+  errorReportingEnvRemovalPlan,
+  intentionalErrorReportingEnv,
+  removeGeneratedErrorReportingEnv,
+  restoreIntentionalErrorReportingEnv,
+} from "./lib/local-error-reporting-env.mjs";
 import { localSandboxNamespace } from "./lib/sandbox-namespace.mjs";
 
 const CHECK_MODE = argv.includes("--check");
@@ -31,20 +37,30 @@ const PULL_ENV_MODE = argv.includes("--pull-env");
 const START_DEV_MODE = argv.includes("--dev");
 const STRIPE_MODE = argv.includes("--stripe");
 const LOCAL_ENV_PATHS = [".env.local", ".env.override.local", "apps/web/.env.local"];
+const PERSONAL_ENV_PATH = ".env.override.local";
+const GENERATED_ERROR_REPORTING_ENV_PATHS = [".env.local", "apps/web/.env.local"];
+const intentionalErrorReportingValues = intentionalErrorReportingEnv({
+  inheritedEnv: process.env,
+  personalEnvPath: PERSONAL_ENV_PATH,
+});
 let initialEnvironmentMoves;
+let initialErrorReportingRemovals;
 try {
   initialEnvironmentMoves = CHECK_MODE
     ? planLocalEnvironmentMigrations()
     : migrateLocalEnvironmentFiles();
+  initialErrorReportingRemovals = CHECK_MODE
+    ? errorReportingEnvRemovalPlan(GENERATED_ERROR_REPORTING_ENV_PATHS)
+    : removeGeneratedErrorReportingEnv(GENERATED_ERROR_REPORTING_ENV_PATHS);
 } catch (error) {
   console.error(`\n\x1b[31m✗ Setup failed:\x1b[0m ${error.message}\n`);
   exit(1);
 }
 await import("./load-env.mjs");
+restoreIntentionalErrorReportingEnv(process.env, intentionalErrorReportingValues);
 
 const SHARED_DATABASE_MODE =
   argv.includes("--shared-db") || process.env.OPENCOMPANY_SHARED_DATABASE === "1";
-const PERSONAL_ENV_PATH = ".env.override.local";
 // .nvmrc pins this project to Node 22.
 const MIN_NODE = [20, 20, 0];
 const WORKOS_ENV_KEYS = [
@@ -147,8 +163,10 @@ const BILLING_LOCAL_ENV_KEYS = [
   "OPENCOMPANY_STRIPE_CHECKOUT_ENABLED",
   "CRON_SECRET",
 ];
+// The Better Stack error DSNs are deliberately not mirrored: local runs would report into the
+// shared error tracker as `development` noise. Set them in `.env.override.local` when testing
+// error capture on purpose.
 const RUNTIME_OBSERVABILITY_ENV_KEYS = [
-  "BETTER_STACK_ERRORS_DSN",
   "OBSERVABILITY_ENABLED",
   "OBSERVABILITY_ENV",
   "OBSERVABILITY_RELEASE",
@@ -158,7 +176,6 @@ const RUNTIME_OBSERVABILITY_ENV_KEYS = [
   "BRAINTRUST_API_KEY",
   "BRAINTRUST_PROJECT_ID",
   "BRAINTRUST_PROJECT_NAME",
-  "NEXT_PUBLIC_BETTER_STACK_ERRORS_DSN",
   "NEXT_PUBLIC_OBSERVABILITY_ENABLED",
   "NEXT_PUBLIC_OBSERVABILITY_ENV",
   "NEXT_PUBLIC_OBSERVABILITY_RELEASE",
@@ -271,7 +288,6 @@ const WEB_LOCAL_ENV_KEYS = [
   "NEXT_PUBLIC_OBSERVABILITY_ENV",
   "NEXT_PUBLIC_OBSERVABILITY_RELEASE",
   "NEXT_PUBLIC_OBSERVABILITY_LOG_LEVEL",
-  "NEXT_PUBLIC_BETTER_STACK_ERRORS_DSN",
   "NEXT_PUBLIC_OPENCOMPANY_POSTHOG_TOKEN",
   "NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST",
   ...RUNTIME_OBSERVABILITY_ENV_KEYS,
@@ -402,6 +418,13 @@ function migrateLocalEnvironmentFiles() {
   return LOCAL_ENV_PATHS.flatMap((path) =>
     migrateEnvironmentFile(path).map((move) => ({ path, ...move })),
   );
+}
+
+function removeGeneratedErrorReportingEnvAfterWrite() {
+  const removals = removeGeneratedErrorReportingEnv(GENERATED_ERROR_REPORTING_ENV_PATHS);
+  if (removals.length > 0) {
+    ok(`Removed generated Better Stack error DSNs from ${formatRemovalPaths(removals)}`);
+  }
 }
 
 function isPlaceholder(value) {
@@ -1168,12 +1191,18 @@ async function main() {
         `Migrated local environment variables: ${formatEnvironmentMoves(initialEnvironmentMoves)}`,
       );
     }
+    if (initialErrorReportingRemovals.length > 0) {
+      ok(
+        `Removed generated Better Stack error DSNs from ${formatRemovalPaths(initialErrorReportingRemovals)}`,
+      );
+    }
     await ensureEnvFile(inspectState());
     const state = inspectState();
     const source = pullSharedDevEnv({
       requireDatabaseUrl: SHARED_DATABASE_MODE,
       requireNeonProject: !SHARED_DATABASE_MODE && state.neonProject !== "set",
     });
+    removeGeneratedErrorReportingEnvAfterWrite();
     await ensureLocalDevDefaults();
     await ensureWebEnvFile();
     ok(`Updated .env.local with shared setup values from ${source}`);
@@ -1187,7 +1216,13 @@ async function main() {
         `Migrated local environment variables: ${formatEnvironmentMoves(initialEnvironmentMoves)}`,
       );
     }
+    if (initialErrorReportingRemovals.length > 0) {
+      ok(
+        `Removed generated Better Stack error DSNs from ${formatRemovalPaths(initialErrorReportingRemovals)}`,
+      );
+    }
     await ensureEnvFile(inspectState());
+    removeGeneratedErrorReportingEnvAfterWrite();
     await ensureLocalDevDefaults();
     await ensureStripe(inspectState());
     await ensureWebEnvFile();
@@ -1201,6 +1236,12 @@ async function main() {
       nextSteps.push({
         command: "bun run setup",
         reason: `migrate moved environment variables (${formatEnvironmentMoves(initialEnvironmentMoves)})`,
+      });
+    }
+    if (initialErrorReportingRemovals.length > 0) {
+      nextSteps.push({
+        command: "bun run setup",
+        reason: `remove generated Better Stack error DSNs from ${formatRemovalPaths(initialErrorReportingRemovals)}`,
       });
     }
     if (state.envFile === "missing") {
@@ -1314,6 +1355,11 @@ async function main() {
   if (initialEnvironmentMoves.length > 0) {
     ok(`Migrated local environment variables: ${formatEnvironmentMoves(initialEnvironmentMoves)}`);
   }
+  if (initialErrorReportingRemovals.length > 0) {
+    ok(
+      `Removed generated Better Stack error DSNs from ${formatRemovalPaths(initialErrorReportingRemovals)}`,
+    );
+  }
 
   // Hard prerequisite — fail fast before touching env/db if the runtime that
   // local Electric needs isn't available.
@@ -1321,6 +1367,7 @@ async function main() {
 
   const state = inspectState();
   await ensureEnvFile(state);
+  removeGeneratedErrorReportingEnvAfterWrite();
   await ensureLocalDevDefaults();
   await ensureWorkOS(inspectState());
   await ensureLocalRunnerEnv(inspectState());
@@ -1356,4 +1403,8 @@ main().catch((err) => {
 
 function formatEnvironmentMoves(moves) {
   return [...new Set(moves.map(({ oldName, newName }) => `${oldName} → ${newName}`))].join(", ");
+}
+
+function formatRemovalPaths(removals) {
+  return [...new Set(removals.map(({ path }) => path))].join(", ");
 }

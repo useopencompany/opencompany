@@ -42,7 +42,8 @@ import { PostgresSkillBundleRepository } from "@opencompany/db/skill-bundle-repo
 import { PostgresTaskRepository } from "@opencompany/db/task-repository";
 import { getWikiAccessForUser } from "@opencompany/db/wiki";
 import { PostgresWikiCommandRepository } from "@opencompany/db/wiki-command-repository";
-import { createLogger } from "@opencompany/observability";
+import { createLogger, flushObservability } from "@opencompany/observability";
+import { installBunExceptionReporter } from "@opencompany/observability/sentry-bun";
 import { registerNodeObservability, shutdownNodeObservability } from "@opencompany/telemetry/node";
 import { WorkOS } from "@workos-inc/node";
 import { createApiApp } from "./app";
@@ -95,6 +96,7 @@ import { createWorkspaceControlService } from "./workspace-control";
 import { createXAccountIngress } from "./x-account-ingress";
 
 const logger = createLogger({ service: "opencompany-api", runtime: "server" });
+installBunExceptionReporter({ serviceName: "opencompany-api" });
 registerNodeObservability({ serviceName: "opencompany-api" });
 const shutdownController = new AbortController();
 
@@ -420,7 +422,7 @@ async function close(signal: string) {
   await presentation?.close();
   await database.close();
   logger.info("API server stopped", { event: "opencompany.api_stopped", signal });
-  await shutdownNodeObservability();
+  await Promise.all([flushObservability(), shutdownNodeObservability()]);
 }
 
 function handleSignal(signal: "SIGINT" | "SIGTERM") {
