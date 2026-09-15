@@ -22,7 +22,10 @@ import { parentWikiPath } from "@opencompany/wiki";
 import { electricCollectionOptions } from "@tanstack/electric-db-collection";
 import { createCollection } from "@tanstack/react-db";
 import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-chat-api";
-import { reconcileCommittedProjection } from "./headless-collection-reconciliation";
+import {
+  awaitCollectionTransaction,
+  reconcileCommittedProjection,
+} from "./headless-collection-reconciliation";
 import {
   addWikiTimelineEntryRequest,
   createWikiPageRequest,
@@ -295,7 +298,9 @@ export async function awaitHeadlessWikiTransactions(
   const collection = getHeadlessWikiCollections(options.wikiId)[options.target ?? "pages"];
   await Promise.all(
     pendingIds.map((transactionId) =>
-      reconcileCommittedProjection(collection.utils.awaitTxId(transactionId, options.timeoutMs)),
+      reconcileCommittedProjection(
+        awaitCollectionTransaction(collection, transactionId, options.timeoutMs),
+      ),
     ),
   );
 }
