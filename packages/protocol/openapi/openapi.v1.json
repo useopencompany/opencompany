@@ -8059,6 +8059,9 @@
           "model": {
             "type": "string"
           },
+          "composerSettings": {
+            "$ref": "#/components/schemas/ConversationComposerSettingsV1"
+          },
           "runtime": {
             "$ref": "#/components/schemas/ConversationRuntime"
           },
@@ -8094,12 +8097,59 @@
           "title",
           "engine",
           "model",
+          "composerSettings",
           "runtime",
           "activityState",
           "hasUnseen",
           "awaitingInput",
           "createdAt",
           "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "ConversationComposerSettingsV1": {
+        "type": "object",
+        "nullable": true,
+        "properties": {
+          "reasoningEffort": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "xhigh"
+            ]
+          },
+          "planModeEnabled": {
+            "type": "boolean"
+          },
+          "goalMode": {
+            "$ref": "#/components/schemas/CodexGoalModeV1"
+          }
+        },
+        "required": [
+          "reasoningEffort"
+        ],
+        "additionalProperties": false
+      },
+      "CodexGoalModeV1": {
+        "type": "object",
+        "nullable": true,
+        "properties": {
+          "objective": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          },
+          "tokenBudget": {
+            "type": "integer",
+            "nullable": true,
+            "minimum": 1,
+            "maximum": 2000000
+          }
+        },
+        "required": [
+          "objective"
         ],
         "additionalProperties": false
       },
@@ -8657,27 +8707,6 @@
             "additionalProperties": false
           }
         ]
-      },
-      "CodexGoalModeV1": {
-        "type": "object",
-        "nullable": true,
-        "properties": {
-          "objective": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 4000
-          },
-          "tokenBudget": {
-            "type": "integer",
-            "nullable": true,
-            "minimum": 1,
-            "maximum": 2000000
-          }
-        },
-        "required": [
-          "objective"
-        ],
-        "additionalProperties": false
       },
       "MessageMention": {
         "type": "object",
