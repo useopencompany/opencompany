@@ -10,6 +10,13 @@ const appDataMock = vi.hoisted(() => ({
   tasksReady: true,
 }));
 
+const routerMock = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }));
+
+vi.mock("next/navigation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next/navigation")>();
+  return { ...actual, useRouter: () => routerMock };
+});
+
 vi.mock("@/components/AppDataProvider", () => ({
   useAppData: () => appDataMock,
 }));
@@ -46,6 +53,7 @@ describe("WorkflowRunHistory", () => {
   afterEach(() => {
     appDataMock.tasks = [];
     appDataMock.tasksReady = true;
+    vi.clearAllMocks();
   });
 
   it("lists only this workflow's runs, newest first", () => {
@@ -73,6 +81,31 @@ describe("WorkflowRunHistory", () => {
     expect(within(row).getByText("Sent the update to 4 investors.")).toBeInTheDocument();
     expect(within(row).getByText("2m 30s")).toBeInTheDocument();
     expect(within(row).getByRole("link")).toHaveAttribute("href", "/tasks/TASK_1");
+  });
+
+  it("names the run's status for assistive technology, which cannot read the colour dot", () => {
+    appDataMock.tasks = [
+      run({
+        id: "task_attention",
+        reportedOutcome: "needs_attention",
+        outcomeComment: "Drafted, but last week's revenue is missing.",
+      }),
+    ];
+
+    render(<WorkflowRunHistory workflowSlug="investor-update" />);
+
+    expect(screen.getByRole("link", { name: /Needs attention/ })).toBeInTheDocument();
+  });
+
+  it("warms a run's Task route on intent rather than on paint", async () => {
+    const user = userEvent.setup();
+    appDataMock.tasks = [run({ id: "task_1" })];
+
+    render(<WorkflowRunHistory workflowSlug="investor-update" />);
+    expect(routerMock.prefetch).not.toHaveBeenCalled();
+
+    await user.hover(screen.getByRole("listitem").getElementsByTagName("a")[0]!);
+    expect(routerMock.prefetch).toHaveBeenCalledWith("/tasks/TASK_1");
   });
 
   it("falls back to the failure when a run left no note", () => {

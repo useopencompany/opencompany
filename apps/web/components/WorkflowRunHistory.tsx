@@ -2,9 +2,9 @@
 
 import { isSettledTaskStatus } from "@opencompany/core/tasks";
 import { ArrowUpRight } from "lucide-react";
-import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useAppData } from "@/components/AppDataProvider";
+import { IntentPrefetchLink } from "@/components/IntentPrefetchLink";
 import { formatRelativeTime } from "@/components/Routes";
 import type { TaskView } from "@/components/Surface";
 import {
@@ -54,14 +54,13 @@ export function WorkflowRunHistory({ workflowSlug }: { workflowSlug: string }) {
           Run history
         </h2>
         {runs.length > 0 ? (
-          <Link
+          <IntentPrefetchLink
             href={`/tasks?workflow=${encodeURIComponent(workflowSlug)}`}
-            prefetch
             className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[12px] text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
           >
             All runs
             <ArrowUpRight size={13} strokeWidth={1.9} />
-          </Link>
+          </IntentPrefetchLink>
         ) : null}
       </div>
       <div className="overflow-hidden rounded-xl border border-border bg-surface">
@@ -99,16 +98,22 @@ export function WorkflowRunHistory({ workflowSlug }: { workflowSlug: string }) {
 
 function WorkflowRunRow({ run }: { run: TaskView }) {
   const dotClass = WORKFLOW_TASK_STATUS_DOT_CLASS[workflowTaskDisplayStatus(run)];
+  const statusCopy = taskBoardStatusCopy(run);
   const startedAt = formatStartedAt(run.createdAt);
 
   return (
-    <Link
+    <IntentPrefetchLink
       href={`/tasks/${encodeURIComponent(run.displayId)}`}
-      prefetch
-      aria-label={`Open run ${toTaskTitle(run.name)}, started ${startedAt}`}
+      // The dot is the only thing carrying status for a run whose note reads like prose, so the
+      // accessible name has to say it outright rather than leave it to colour.
+      aria-label={`Open run ${toTaskTitle(run.name)}, ${statusCopy}, started ${startedAt}`}
       className="flex min-w-0 items-start gap-3 px-4 py-3 transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
     >
-      <span aria-hidden="true" className={`mt-[7px] size-1.5 shrink-0 rounded-full ${dotClass}`} />
+      <span
+        aria-hidden="true"
+        title={statusCopy}
+        className={`mt-[7px] size-1.5 shrink-0 rounded-full ${dotClass}`}
+      />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex min-w-0 items-center gap-2">
           <span className="truncate text-[13px] font-medium leading-tight text-ink">
@@ -121,7 +126,7 @@ function WorkflowRunRow({ run }: { run: TaskView }) {
           ) : null}
         </span>
         <span className="line-clamp-2 text-[12px] leading-[1.45] text-ink-subtle">
-          {runSummary(run)}
+          {runSummary(run, statusCopy)}
         </span>
       </span>
       <span className="flex shrink-0 flex-col items-end gap-0.5 text-[11px] leading-4 text-ink-subtle">
@@ -130,14 +135,14 @@ function WorkflowRunRow({ run }: { run: TaskView }) {
           <span className="tabular-nums">{formatTaskDuration(run.createdAt, run.updatedAt)}</span>
         ) : null}
       </span>
-    </Link>
+    </IntentPrefetchLink>
   );
 }
 
 // What the run left behind, in the order it is worth reading: the agent's own note, then the
 // failure it hit, then the plain status so the line is never blank.
-function runSummary(run: TaskView): string {
-  return run.outcomeComment?.trim() || run.error?.trim() || taskBoardStatusCopy(run);
+function runSummary(run: TaskView, statusCopy: string): string {
+  return run.outcomeComment?.trim() || run.error?.trim() || statusCopy;
 }
 
 function RunHistorySkeleton() {
