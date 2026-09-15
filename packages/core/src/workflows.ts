@@ -408,8 +408,8 @@ const MAX_SCHEDULE_NAME_LENGTH = 80;
 const MAX_SOURCE_DESCRIPTION_LENGTH = 1_024;
 const MAX_WORKFLOW_SKILLS = 16;
 // Slack truncates long custom usernames on the message itself; keep the stored value inside a
-// length Slack renders in full.
-const MAX_SLACK_DISPLAY_NAME_LENGTH = 80;
+// length Slack renders in full. Exported so the editor's input cap cannot drift from validation.
+export const MAX_SLACK_DISPLAY_NAME_LENGTH = 80;
 
 export class WorkflowApplicationService {
   constructor(

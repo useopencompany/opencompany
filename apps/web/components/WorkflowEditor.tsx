@@ -7,7 +7,10 @@ import {
   schedulePresetFromCron,
   scheduleSummary,
 } from "@opencompany/agent-runtime";
-import { workflowActivationDisabledReason } from "@opencompany/core/workflows";
+import {
+  MAX_SLACK_DISPLAY_NAME_LENGTH,
+  workflowActivationDisabledReason,
+} from "@opencompany/core/workflows";
 import type { PluginEventFilterDefinitionDto } from "@opencompany/protocol";
 import { Button } from "@opencompany/ui/components/button";
 import { Input } from "@opencompany/ui/components/input";
@@ -1598,7 +1601,7 @@ function ChannelSection({
               value={slackChannel.displayName}
               onChange={(event) => onChange({ ...slackChannel, displayName: event.target.value })}
               disabled={!canEdit}
-              maxLength={80}
+              maxLength={MAX_SLACK_DISPLAY_NAME_LENGTH}
               placeholder="opencompany"
               className="max-w-[280px]"
             />
