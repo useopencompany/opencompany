@@ -1534,6 +1534,16 @@ export class PostgresChatRepository implements ChatRepository {
         WHERE authorized.id = changed.id
           AND task.id = authorized.task_id
           AND task.status IN ('queued', 'running', 'waiting')
+          -- Dropping one Run does not end the Task while another is still queued or working: a
+          -- queued message removed from behind a live turn, or a live turn stopped while a
+          -- message waits behind it, both leave the Task with work left to do.
+          AND NOT EXISTS (
+            SELECT 1
+            FROM goat.codex_chat_turns AS pending
+            WHERE pending.chat_session_id = task.session_id
+              AND pending.status IN ('queued', 'running', 'paused')
+              AND pending.id NOT IN (SELECT id FROM changed)
+          )
         RETURNING task.id
       ),
       status_changed_activity AS MATERIALIZED (
@@ -1621,8 +1631,25 @@ export class PostgresChatRepository implements ChatRepository {
         JOIN goat.chat_messages AS trigger_message ON trigger_message.id = run.user_message_id
         WHERE run.id = ${input.runId}
           AND runtime.workspace_id = ${input.actor.workspaceId}
-          AND chat.kind = 'chat'
-          AND run.user_workos_id = ${input.actor.userId}
+          AND (
+            (chat.kind = 'chat' AND run.user_workos_id = ${input.actor.userId})
+            OR (
+              chat.kind = 'task'
+              AND EXISTS (
+                SELECT 1 FROM goat.tasks AS task
+                WHERE task.session_id = chat.id
+                  AND task.user_workos_id = run.user_workos_id
+                  AND task.archived_at IS NULL
+                  AND (
+                    task.workspace_id = ${input.actor.workspaceId}
+                    OR (
+                      task.workspace_id IS NULL
+                      AND task.user_workos_id = ${input.actor.userId}
+                    )
+                  )
+              )
+            )
+          )
           AND EXISTS (
             SELECT 1 FROM goat.workspace_members AS member
             WHERE member.workspace_id = ${input.actor.workspaceId}
