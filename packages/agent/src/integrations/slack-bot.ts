@@ -36,9 +36,22 @@ const SLACK_BOT_DELIVERY_SCOPES = [
   "users:read",
 ] as const;
 
-// Email attribution is requested for new installs. Existing installations can keep delivering
-// while Settings asks an admin to reconnect and grant this additive scope.
-export const SLACK_BOT_SCOPES = [...SLACK_BOT_DELIVERY_SCOPES, "users:read.email"] as const;
+// Email attribution and the cosmetic per-workflow display name are requested for new installs.
+// Existing installations can keep delivering while Settings asks an admin to reconnect and grant
+// these additive scopes; without them posts fall back to email-less attribution and the default
+// bot identity.
+export const SLACK_BOT_SCOPES = [
+  ...SLACK_BOT_DELIVERY_SCOPES,
+  "users:read.email",
+  "chat:write.customize",
+] as const;
+
+// One Slack app has one bot user, so a workflow identity can only override the name and icon on
+// the message itself. Slack rejects those fields without this scope, so a delivery for an install
+// that predates it posts under the default identity instead of failing.
+export function slackBotCanCustomizeIdentity(grantedScopes: readonly string[]): boolean {
+  return grantedScopes.includes("chat:write.customize");
+}
 
 // Settings surfaces missing grants as a reconnect requirement.
 export function slackBotScopesSatisfied(grantedScopes: readonly string[]): boolean {
@@ -49,10 +62,6 @@ export function slackBotScopesSatisfied(grantedScopes: readonly string[]): boole
 export function slackBotDeliveryScopesSatisfied(grantedScopes: readonly string[]): boolean {
   const granted = new Set(grantedScopes);
   return SLACK_BOT_DELIVERY_SCOPES.every((scope) => granted.has(scope));
-}
-
-export function slackBotHasScope(grantedScopes: readonly string[], scope: string): boolean {
-  return grantedScopes.includes(scope);
 }
 
 export function isSlackBotConfigured() {

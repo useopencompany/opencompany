@@ -165,6 +165,39 @@ describe("WorkflowApplicationService", () => {
     );
   });
 
+  it("keeps the stored channel configuration when an update omits it and trims a new name", async () => {
+    const repository = fakeWorkflowRepository();
+    const service = workflowService(repository);
+    const definition = {
+      expectedVersion: 1,
+      name: "Weekly research",
+      description: "",
+      steps: [workflow().steps[0]!],
+      status: "draft" as const,
+      trigger: { type: "manual" as const },
+    };
+
+    await service.updateWorkflow(actor(), "workflow_1", definition);
+    expect(repository.updateWorkflow).toHaveBeenCalledWith(
+      expect.objectContaining({ slackChannel: { enabled: true, displayName: "" } }),
+    );
+
+    await service.updateWorkflow(actor(), "workflow_1", {
+      ...definition,
+      slackChannel: { enabled: false, displayName: "  James  " },
+    });
+    expect(repository.updateWorkflow).toHaveBeenLastCalledWith(
+      expect.objectContaining({ slackChannel: { enabled: false, displayName: "James" } }),
+    );
+
+    await expect(
+      service.updateWorkflow(actor(), "workflow_1", {
+        ...definition,
+        slackChannel: { enabled: true, displayName: "J".repeat(81) },
+      }),
+    ).rejects.toThrow("80 characters or fewer");
+  });
+
   it("rejects stale or incomplete scheduled definitions before planning or persistence", async () => {
     const repository = fakeWorkflowRepository();
     const planner = fakePlanner();
@@ -798,6 +831,7 @@ function workflow(overrides: Partial<Workflow> = {}): Workflow {
     ],
     status: "active",
     scope: "company",
+    slackChannel: { enabled: true, displayName: "" },
     createdByUserId: "user_1",
     trigger: { type: "manual" },
     version: 1,

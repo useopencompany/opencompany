@@ -19,10 +19,56 @@ const context: ChatHostContext = {
   timezone: "Europe/London",
   automationToolsEnabled: true,
   skillToolsEnabled: true,
+  slackChannelEnabled: false,
   subagentsEnabled: false,
 };
 
 describe("opencompany Chat Task host tools", () => {
+  it("only exposes and accepts the Slack send tool for a workflow run with Slack turned on", async () => {
+    const postSlackMessage = vi.fn(async () => ({ deliveryId: "delivery_1" }));
+    const post = (slackChannelEnabled: boolean) =>
+      executeChatHostToolService({
+        command: {
+          operation: "post_slack_message",
+          sessionId: "runtime_1",
+          runId: "run_1",
+          input: { channel: "#product", text: "Done.", messageKey: "summary" },
+        },
+        dependencies: testDependencies({
+          loadContext: vi.fn(async () => ({
+            ...context,
+            taskConversation: true,
+            slackChannelEnabled,
+          })),
+          postSlackMessage,
+        }),
+      });
+
+    await expect(post(false)).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining("workflows that have Slack turned on"),
+    });
+    expect(postSlackMessage).not.toHaveBeenCalled();
+
+    await expect(post(true)).resolves.toMatchObject({ ok: true });
+    expect(postSlackMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "run_1",
+        actorId: "user_1",
+        post: { channel: "#product", text: "Done.", messageKey: "summary" },
+      }),
+    );
+
+    await expect(
+      executeChatHostToolService({
+        command: { operation: "bootstrap", sessionId: "runtime_1", runId: "run_1" },
+        dependencies: testDependencies({
+          loadContext: vi.fn(async () => ({ ...context, slackChannelEnabled: true })),
+        }),
+      }),
+    ).resolves.toMatchObject({ ok: true, result: { slackChannelEnabled: true } });
+  });
+
   it("does not advertise task delegation or schedules in a task conversation", async () => {
     const dependencies = testDependencies({
       loadContext: vi.fn(async () => ({ ...context, taskConversation: true })),

@@ -2038,6 +2038,20 @@
       "when": 1790100400011,
       "tag": "0290_workflow_memories",
       "breakpoints": true
+    },
+    {
+      "idx": 291,
+      "version": "7",
+      "when": 1790100400012,
+      "tag": "0291_workflow_slack_channel",
+      "breakpoints": true
+    },
+    {
+      "idx": 292,
+      "version": "7",
+      "when": 1790100400013,
+      "tag": "0292_channel_delivery_bot_identity",
+      "breakpoints": true
     }
   ]
 }

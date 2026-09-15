@@ -9,7 +9,9 @@ import {
   chatSessions,
   codexChatSessions,
   codexChatTurns,
+  tasks,
   users,
+  workflows,
   workspaceMembers,
   workspaces,
 } from "@opencompany/db/product-schema";
@@ -253,6 +255,7 @@ async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostCo
       subagentsEnabled: users.subagentsEnabled,
       workspaceName: workspaces.name,
       workspaceRole: workspaceMembers.role,
+      slackChannelEnabled: workflows.slackChannelEnabled,
     })
     .from(codexChatSessions)
     .innerJoin(chatSessions, eq(chatSessions.id, codexChatSessions.chatSessionId))
@@ -273,6 +276,9 @@ async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostCo
       ),
     )
     .innerJoin(workspaces, eq(workspaces.id, codexChatSessions.workspaceId))
+    // Only a workflow run can post to Slack, and only while its Channels section keeps Slack on.
+    .leftJoin(tasks, eq(tasks.sessionId, codexChatSessions.chatSessionId))
+    .leftJoin(workflows, eq(workflows.id, tasks.workflowId))
     .where(
       and(
         eq(codexChatSessions.id, command.sessionId),
@@ -294,6 +300,7 @@ async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostCo
     firstName: row.firstName,
     lastName: row.lastName,
     timezone: row.timezone,
+    slackChannelEnabled: row.slackChannelEnabled === true,
     automationToolsEnabled: row.workspaceRole === "admin",
     // Read-only and personal, so unlike the automation tools this needs no admin role.
     subagentsEnabled: row.subagentsEnabled,

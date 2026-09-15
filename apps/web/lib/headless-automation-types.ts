@@ -1,4 +1,9 @@
-import type { TaskScheduleReadModel, WorkflowDto, WorkflowScope } from "@opencompany/protocol";
+import type {
+  TaskScheduleReadModel,
+  WorkflowDto,
+  WorkflowScope,
+  WorkflowSlackChannel,
+} from "@opencompany/protocol";
 
 export type WorkflowStep = {
   id: string;
@@ -44,6 +49,7 @@ export type WorkflowDetail = {
   steps: WorkflowStep[];
   status: "draft" | "active";
   scope: WorkflowScope;
+  slackChannel: WorkflowSlackChannel;
   createdByUserId: string | null;
   trigger: WorkflowTrigger;
   triggers?: WorkflowAutomationTrigger[];
@@ -53,7 +59,9 @@ export type WorkflowDetail = {
   updatedAt: string;
 };
 
-export type WorkflowListItem = WorkflowDetail;
+// The list hydrates from the `workflows-v1` read model, which deliberately omits channel
+// configuration. Keeping it off this type stops a list-side read of a field Electric never sends.
+export type WorkflowListItem = Omit<WorkflowDetail, "slackChannel">;
 
 // The API only returns workflows the viewer may edit, so editability needs no client rule. Changing
 // the visibility itself is narrower: the creator, or an admin claiming one that predates scopes.

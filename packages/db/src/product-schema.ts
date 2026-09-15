@@ -3330,6 +3330,12 @@ export const workflows = productSchema.table(
     // Workflows written before scopes existed belong to the whole workspace, so "company" is both
     // the backfill and the physical default for writers that predate this column.
     scope: text("scope").$type<WorkflowScope>().notNull().default("company"),
+    // Every workflow could post to Slack before the Channels section existed, so the default keeps
+    // existing rows working and only an explicit toggle takes the send tool away from a run.
+    slackChannelEnabled: boolean("slack_channel_enabled").notNull().default(true),
+    // Cosmetic per-workflow Slack identity. One Slack app has one bot user, so this only overrides
+    // the display name on the post; empty means the default @opencompany identity.
+    slackBotDisplayName: text("slack_bot_display_name").notNull().default(""),
     createdByWorkosId: text("created_by_workos_id").references(() => users.workosUserId, {
       onDelete: "set null",
     }),
@@ -7589,6 +7595,9 @@ export const channelDeliveries = productSchema.table(
     channelId: text("channel_id").notNull(),
     threadTs: text("thread_ts"),
     text: text("text").notNull(),
+    // Snapshot of the workflow's cosmetic Slack name at enqueue time, so a later edit to the
+    // workflow cannot retroactively change the identity of a queued post. Empty is the default bot.
+    botDisplayName: text("bot_display_name").notNull().default(""),
     status: text("status").notNull().default("pending"),
     messageTs: text("message_ts"),
     leaseId: text("lease_id"),

@@ -59,6 +59,9 @@ export type ChatHostBootstrap = {
   };
   workspaceName: string;
   automationToolsEnabled: boolean;
+  // The Slack send tool is only registered for a workflow run whose Channels section keeps Slack
+  // on, so an ordinary chat never sees a tool it cannot use.
+  slackChannelEnabled: boolean;
   skillToolsEnabled: boolean;
   subagentsEnabled: boolean;
   browserToolsEnabled: boolean;

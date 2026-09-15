@@ -86,6 +86,7 @@ export async function postWorkflowSlackMessage(
     ChannelInstallation & {
       sessionId: string;
       leaseId: string;
+      botDisplayName: string;
       subscriptionEventId: number | null;
       followUpChannelId: string | null;
       followUpThreadTs: string | null;
@@ -94,23 +95,25 @@ export async function postWorkflowSlackMessage(
     await execute(sql`
     SELECT integration.id, integration.user_workos_id AS "userWorkosId", integration.workspace_id AS "workspaceId",
       integration.external_id AS "teamId", integration.scopes, task.session_id AS "sessionId", run.lease_id AS "leaseId",
+      workflow.slack_bot_display_name AS "botDisplayName",
       event.id AS "subscriptionEventId", subscription.source_key->>'channelId' AS "followUpChannelId",
       subscription.source_key->>'threadTs' AS "followUpThreadTs"
     FROM goat.codex_chat_turns run JOIN goat.tasks task ON task.session_id = run.chat_session_id
+    JOIN goat.workflows workflow ON workflow.id = task.workflow_id
     JOIN goat.chat_sessions conversation ON conversation.id = task.session_id
     JOIN goat.integrations integration ON integration.workspace_id = task.workspace_id AND integration.provider = 'slack_bot'
     LEFT JOIN goat.subscription_events event ON event.run_id = run.id AND event.status IN ('running', 'delivering')
     LEFT JOIN goat.session_subscriptions subscription ON subscription.id = event.subscription_id
       AND subscription.integration_id = integration.id AND subscription.source = 'slack_thread'
     WHERE run.id = ${input.runId} AND run.user_workos_id = ${input.actorId} AND run.status = 'running'
-      AND run.lease_expires_at > now() AND task.workflow_id IS NOT NULL AND task.archived_at IS NULL
-      AND conversation.closed_at IS NULL AND integration.status = 'connected'
+      AND run.lease_expires_at > now() AND task.archived_at IS NULL
+      AND workflow.slack_channel_enabled AND conversation.closed_at IS NULL AND integration.status = 'connected'
       AND EXISTS (SELECT 1 FROM goat.workspace_members member WHERE member.workspace_id = task.workspace_id AND member.user_workos_id = ${input.actorId})
   `),
   )[0];
   if (!target)
     throw new Error(
-      "An active workflow session and a connected workspace Slack Channel are required.",
+      "An active workflow session with its Slack channel enabled and a connected workspace Slack Channel are required.",
     );
   if (!slackBotDeliveryScopesSatisfied(target.scopes))
     throw new Error("Reconnect Slack in Channels settings to grant required scopes.");
@@ -132,9 +135,9 @@ export async function postWorkflowSlackMessage(
         FOR SHARE OF event, run
       ), delivery AS MATERIALIZED (
         INSERT INTO goat.channel_deliveries
-          (id, workspace_id, session_id, integration_id, team_id, channel_id, thread_ts, text)
+          (id, workspace_id, session_id, integration_id, team_id, channel_id, thread_ts, text, bot_display_name)
         SELECT ${deliveryId}, ${target.workspaceId}, ${target.sessionId}, ${target.id}, ${target.teamId},
-          ${target.followUpChannelId}, ${target.followUpThreadTs}, ${text}
+          ${target.followUpChannelId}, ${target.followUpThreadTs}, ${text}, ${target.botDisplayName}
         FROM active
         ON CONFLICT (id) DO UPDATE SET id = EXCLUDED.id
         WHERE channel_deliveries.text = EXCLUDED.text
@@ -173,8 +176,8 @@ export async function postWorkflowSlackMessage(
       WITH connected AS MATERIALIZED (
         SELECT id FROM goat.integrations WHERE id = ${target.id} AND status = 'connected' AND external_id = ${target.teamId} FOR SHARE
       )
-      INSERT INTO goat.channel_deliveries (id, workspace_id, session_id, integration_id, team_id, channel_id, text)
-      SELECT ${id}, ${target.workspaceId}, ${target.sessionId}, ${target.id}, ${target.teamId}, ${channelId}, ${text}
+      INSERT INTO goat.channel_deliveries (id, workspace_id, session_id, integration_id, team_id, channel_id, text, bot_display_name)
+      SELECT ${id}, ${target.workspaceId}, ${target.sessionId}, ${target.id}, ${target.teamId}, ${channelId}, ${text}, ${target.botDisplayName}
       FROM connected
       WHERE EXISTS (SELECT 1 FROM goat.codex_chat_turns WHERE id = ${input.runId} AND status = 'running' AND lease_id = ${target.leaseId} AND lease_expires_at > now())
       ON CONFLICT (id) DO UPDATE SET id = EXCLUDED.id

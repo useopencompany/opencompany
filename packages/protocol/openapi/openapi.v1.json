@@ -1001,6 +1001,9 @@
           "scope": {
             "$ref": "#/components/schemas/WorkflowScope"
           },
+          "slackChannel": {
+            "$ref": "#/components/schemas/WorkflowSlackChannel"
+          },
           "createdByUserId": {
             "type": "string",
             "nullable": true,
@@ -1042,6 +1045,7 @@
           "steps",
           "status",
           "scope",
+          "slackChannel",
           "createdByUserId",
           "trigger",
           "version",
@@ -1097,6 +1101,23 @@
           "personal",
           "company"
         ]
+      },
+      "WorkflowSlackChannel": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "displayName": {
+            "type": "string",
+            "maxLength": 80
+          }
+        },
+        "required": [
+          "enabled",
+          "displayName"
+        ],
+        "additionalProperties": false
       },
       "WorkflowTrigger": {
         "oneOf": [
@@ -1519,6 +1540,9 @@
           },
           "scope": {
             "$ref": "#/components/schemas/WorkflowScope"
+          },
+          "slackChannel": {
+            "$ref": "#/components/schemas/WorkflowSlackChannel"
           },
           "trigger": {
             "$ref": "#/components/schemas/WorkflowTriggerInput"

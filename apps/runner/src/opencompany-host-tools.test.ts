@@ -13,6 +13,7 @@ const bootstrap: ChatHostBootstrap = {
   },
   workspaceName: "Analytical Engines",
   automationToolsEnabled: true,
+  slackChannelEnabled: false,
   skillToolsEnabled: true,
   subagentsEnabled: false,
   browserToolsEnabled: true,

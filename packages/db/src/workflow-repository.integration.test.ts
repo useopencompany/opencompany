@@ -26,6 +26,7 @@ const migrationPaths = [
   "drizzle/0222_goat_workflow_event_triggers.sql",
   "drizzle/0275_workflow_personal_company_scope.sql",
   "drizzle/0277_workflow_multiple_triggers.sql",
+  "drizzle/0291_workflow_slack_channel.sql",
 ].map((migration) => path.join(repositoryRoot, migration));
 const dialect = new PgDialect();
 const now = new Date("2026-08-12T08:00:00.000Z");
@@ -42,6 +43,8 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
     workflowTriggerCount: number;
     workflowScope: string;
     workflowScopeProjected: boolean;
+    workflowSlackChannelEnabled: boolean;
+    workflowSlackBotDisplayName: string;
     workflowProjected: boolean;
     workflowScheduleProjected: boolean;
     taskScheduleVersion: number;
@@ -88,6 +91,8 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
           workflow_trigger_count: number;
           workflow_scope: string;
           workflow_scope_projected: boolean;
+          workflow_slack_channel_enabled: boolean;
+          workflow_slack_bot_display_name: string;
           workflow_projected: boolean;
           workflow_schedule_projected: boolean;
           task_schedule_version: number;
@@ -111,6 +116,8 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
             SELECT 1 FROM goat.workflow_read_model_v1
             WHERE id = workflow.id AND scope = workflow.scope
           ) AS workflow_scope_projected,
+          workflow.slack_channel_enabled AS workflow_slack_channel_enabled,
+          workflow.slack_bot_display_name AS workflow_slack_bot_display_name,
           EXISTS (
             SELECT 1 FROM goat.workflow_read_model_v1
             WHERE id = workflow.id AND steps->0->>'instructions' = workflow.instructions
@@ -137,6 +144,8 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
         workflowTriggerCount: migrationRow?.workflow_trigger_count ?? 0,
         workflowScope: migrationRow?.workflow_scope ?? "",
         workflowScopeProjected: migrationRow?.workflow_scope_projected ?? false,
+        workflowSlackChannelEnabled: migrationRow?.workflow_slack_channel_enabled ?? false,
+        workflowSlackBotDisplayName: migrationRow?.workflow_slack_bot_display_name ?? "",
         workflowProjected: migrationRow?.workflow_projected ?? false,
         workflowScheduleProjected: migrationRow?.workflow_schedule_projected ?? false,
         taskScheduleVersion: migrationRow?.task_schedule_version ?? 0,
@@ -209,6 +218,10 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
       // Workflows that predate scopes belong to the whole workspace.
       workflowScope: "company",
       workflowScopeProjected: true,
+      // A workflow written before the Channels section could always post to Slack, so the toggle
+      // backfills to on and the identity stays the default bot.
+      workflowSlackChannelEnabled: true,
+      workflowSlackBotDisplayName: "",
       workflowProjected: true,
       workflowScheduleProjected: true,
       taskScheduleVersion: 1,
@@ -257,6 +270,28 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
         [first.workflow.id],
       ),
     ).resolves.toMatchObject({ rows: [{ count: 1 }] });
+  });
+
+  it("gives a new Workflow the Slack channel every existing row already had, and persists edits", async () => {
+    const created = await workflows.createWorkflow(actor(), {
+      idempotencyKey: "workflow-channel-1",
+      name: "Weekly research",
+    });
+    expect(created.workflow.slackChannel).toEqual({ enabled: true, displayName: "" });
+
+    const updated = await workflows.updateWorkflow(actor(), created.workflow.id, {
+      expectedVersion: 1,
+      name: "Weekly research",
+      description: "",
+      steps: created.workflow.steps,
+      status: "draft",
+      trigger: { type: "manual" },
+      slackChannel: { enabled: false, displayName: "James" },
+    });
+    expect(updated.workflow.slackChannel).toEqual({ enabled: false, displayName: "James" });
+    await expect(workflows.getWorkflow(actor(), created.workflow.id)).resolves.toMatchObject({
+      slackChannel: { enabled: false, displayName: "James" },
+    });
   });
 
   it("keeps personal Workflows out of every teammate read and mutation", async () => {
