@@ -4,10 +4,12 @@ import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import { Check, ChevronDown, Sparkles } from "lucide-react";
 import { useState } from "react";
+import { useAppDataOptional } from "@/components/AppDataProvider";
 import type { WorkflowStep } from "@/lib/headless-automation-types";
 import {
   DEFAULT_WORKFLOW_MODEL_TOKEN,
   DEFAULT_WORKFLOW_REASONING_EFFORT,
+  isWorkflowSubscriptionCoveredModel,
   normalizeWorkflowReasoningEffort,
   normalizeWorkflowRuntimeModel,
   WORKFLOW_MODEL_OPTIONS,
@@ -33,6 +35,7 @@ export function StepRuntimePicker({
   disabled: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const sharedModelAccessEnabled = useAppDataOptional()?.sharedModelAccessEnabled === true;
   const selectedOption = WORKFLOW_MODEL_OPTIONS.find((option) => option.token === value);
   const selectedLabel = selectedOption?.label ?? DEFAULT_MODEL_LABEL;
 
@@ -51,7 +54,7 @@ export function StepRuntimePicker({
       <PopoverContent
         align="end"
         sideOffset={8}
-        className="w-[288px] max-w-[calc(100vw-1.5rem)] bg-surface p-1 text-ink"
+        className="max-h-[calc(100vh-8rem)] w-[288px] max-w-[calc(100vw-1.5rem)] overflow-y-auto bg-surface p-1 text-ink"
       >
         <ModelOption
           label="Default"
@@ -68,6 +71,9 @@ export function StepRuntimePicker({
             label={option.label}
             hint={option.hint}
             selected={value === option.token}
+            subscriptionCovered={
+              sharedModelAccessEnabled && isWorkflowSubscriptionCoveredModel(option)
+            }
             onSelect={() => {
               onChange(option.token);
               setOpen(false);
@@ -245,11 +251,13 @@ function ModelOption({
   label,
   hint,
   selected,
+  subscriptionCovered = false,
   onSelect,
 }: {
   label: string;
   hint: string;
   selected: boolean;
+  subscriptionCovered?: boolean;
   onSelect: () => void;
 }) {
   return (
@@ -267,6 +275,14 @@ function ModelOption({
         <span className="block truncate text-[13px] font-medium leading-4 text-ink">{label}</span>
         <span className="block truncate text-[11.5px] leading-4 text-ink-subtle">{hint}</span>
       </span>
+      {subscriptionCovered ? (
+        <span
+          title="Covered by your workspace's ChatGPT subscription, so every run of this step uses no credits."
+          className="inline-flex shrink-0 items-center rounded-full bg-surface-muted px-1.5 py-px text-[10.5px] font-medium leading-4 text-ink-subtle"
+        >
+          Included
+        </span>
+      ) : null}
     </button>
   );
 }
