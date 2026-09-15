@@ -175,6 +175,7 @@ describe("compileWorkflowHarnessSpec", () => {
       engine: "codex",
       model: "openai/gpt-5.6-luna",
       codex: { reasoningEffort: "medium" },
+      initialUserMessage: "Add the control.",
       workflow: {
         steps: [
           expect.objectContaining({
@@ -185,6 +186,30 @@ describe("compileWorkflowHarnessSpec", () => {
         ],
       },
     });
+  });
+
+  it("uses the first step instructions when a scheduled run has no additional context", () => {
+    const spec = compileWorkflowHarnessSpec({
+      workflow: {
+        id: "daily-update",
+        name: "Daily update",
+        description: "",
+        steps: [
+          {
+            id: "step-1",
+            title: "",
+            model: "kimi-k2.6",
+            instructions: "Summarize what shipped today.",
+          },
+        ],
+      },
+      workspaceId: "ws_1",
+      skills: [],
+      tools: [],
+      description: "Run this workflow.",
+    });
+
+    expect(spec.initialUserMessage).toBe("Summarize what shipped today.");
   });
 
   it("compiles independent step models and skills with a step-zero compatibility mirror", () => {

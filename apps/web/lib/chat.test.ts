@@ -11,9 +11,11 @@ const conversation = {
   title: "Launch plan",
   engine: "opencompany",
   model: "anthropic/claude-sonnet-5",
+  composerSettings: null,
   runtime: null,
   activityState: "idle",
   hasUnseen: true,
+  awaitingInput: false,
   pinnedAt: "2026-08-13T08:30:00.000Z",
   createdAt: "2026-08-13T09:00:00.000Z",
   updatedAt: "2026-08-13T10:00:00.000Z",
@@ -81,9 +83,39 @@ describe("canonical Chat server reads", () => {
       runtime: activeConversation.runtime,
       activityState: activeConversation.activityState,
       hasUnseen: conversation.hasUnseen,
+      awaitingInput: conversation.awaitingInput,
       updatedAt: conversation.updatedAt,
       messages: [],
     });
+  });
+
+  it("restores engine composer settings in detail and sidebar views", async () => {
+    const codexConversation = {
+      ...conversation,
+      engine: "codex" as const,
+      model: "openai/gpt-5.6-sol",
+      composerSettings: {
+        reasoningEffort: "medium" as const,
+        planModeEnabled: true,
+        goalMode: { objective: "Finish the migration", tokenBudget: 80_000 },
+      },
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: URL | RequestInfo) => {
+        const request = input instanceof Request ? input : new Request(input);
+        return new URL(request.url).pathname === "/v1/conversations"
+          ? Response.json({ data: [codexConversation], nextCursor: null, meta })
+          : Response.json({ data: codexConversation, meta });
+      }),
+    );
+
+    await expect(loadCurrentChatSessionById(codexConversation.id)).resolves.toMatchObject({
+      codexComposerSettings: codexConversation.composerSettings,
+    });
+    await expect(listCurrentUserRecentChats()).resolves.toEqual([
+      expect.objectContaining({ codexComposerSettings: codexConversation.composerSettings }),
+    ]);
   });
 
   it("preserves an engine-specific model in detail and sidebar reload views", async () => {

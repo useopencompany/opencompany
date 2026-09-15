@@ -43,6 +43,7 @@ import {
   Archive,
   ChevronDown,
   ChevronRight,
+  Crosshair,
   ExternalLink,
   FileArchive,
   KeyRound,
@@ -74,9 +75,12 @@ import {
   revokeHeadlessPluginMcp,
 } from "@/lib/headless-knowledge-commands";
 import {
+  OFFICIAL_MANAGED_PLUGIN_METADATA,
   OFFICIAL_MCP_PLUGIN_METADATA,
   OFFICIAL_PLUGIN_CATEGORIES,
   OFFICIAL_SKILL_PLUGIN_METADATA,
+  type OfficialManagedPluginMetadata,
+  type OfficialManagedPluginName,
   type OfficialMcpPluginMetadata,
   type OfficialMcpPluginName,
   type OfficialPluginCategory,
@@ -145,6 +149,7 @@ type OfficialPluginAppearance = {
 export type OfficialPluginConfig = OfficialPluginMetadata & OfficialPluginAppearance;
 export type OfficialMcpPluginConfig = OfficialMcpPluginMetadata & OfficialPluginAppearance;
 export type OfficialSkillPluginConfig = OfficialSkillPluginMetadata & OfficialPluginAppearance;
+export type OfficialManagedPluginConfig = OfficialManagedPluginMetadata & OfficialPluginAppearance;
 
 export const OFFICIAL_MCP_PLUGINS = {
   attio: {
@@ -297,9 +302,18 @@ export const OFFICIAL_SKILL_PLUGINS = {
   },
 } as const satisfies Record<OfficialSkillPluginName, OfficialSkillPluginConfig>;
 
+export const OFFICIAL_MANAGED_PLUGINS = {
+  "lead-research": {
+    ...OFFICIAL_MANAGED_PLUGIN_METADATA["lead-research"],
+    Icon: Crosshair,
+    iconClassName: "bg-[#1F6FEB] text-white",
+  },
+} as const satisfies Record<OfficialManagedPluginName, OfficialManagedPluginConfig>;
+
 export const OFFICIAL_PLUGINS = {
   ...OFFICIAL_MCP_PLUGINS,
   ...OFFICIAL_SKILL_PLUGINS,
+  ...OFFICIAL_MANAGED_PLUGINS,
 } as const satisfies Record<OfficialPluginName, OfficialPluginConfig>;
 
 export const GITHUB_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.github.name;
@@ -790,6 +804,7 @@ function PluginCatalogSection({
                     <span className="truncate text-[13.5px] font-medium leading-5 text-ink">
                       {config.label}
                     </span>
+                    {config.kind === "managed" ? <PaidBadge /> : null}
                     {plugin ? (
                       <PluginStatus
                         status={plugin.status}
@@ -1005,12 +1020,15 @@ export function PluginDetail({
   title,
   description,
   officialPluginName,
+  billingSection,
 }: {
   plugin: PluginInstallationDto;
   canEdit: boolean;
   title?: string;
   description?: string;
   officialPluginName?: OfficialPluginName;
+  // Rendered above the package internals for a paid plugin: prices and the daily spending limit.
+  billingSection?: ReactNode;
 }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -1081,6 +1099,8 @@ export function PluginDetail({
         <SectionLabel>Status</SectionLabel>
         <PluginStatus status={plugin.status} />
       </section>
+
+      {billingSection}
 
       <details className="group rounded-lg border border-border bg-surface-muted">
         <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-[12.5px] font-medium text-ink-muted">
@@ -1658,6 +1678,14 @@ function CollisionReport({ collisions }: { collisions: PluginCollisionView[] }) 
         </ul>
       )}
     </section>
+  );
+}
+
+export function PaidBadge() {
+  return (
+    <span className="inline-flex shrink-0 items-center rounded-full bg-surface-muted px-1.5 py-px text-[10.5px] font-medium leading-4 text-ink-subtle">
+      Paid
+    </span>
   );
 }
 

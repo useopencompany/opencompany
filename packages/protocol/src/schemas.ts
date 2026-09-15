@@ -48,6 +48,14 @@ export const CodexGoalModeSchema = z
   })
   .strict()
   .openapi("CodexGoalModeV1");
+export const ConversationComposerSettingsSchema = z
+  .object({
+    reasoningEffort: EngineReasoningEffortSchema,
+    planModeEnabled: z.boolean().optional(),
+    goalMode: CodexGoalModeSchema.nullable().optional(),
+  })
+  .strict()
+  .openapi("ConversationComposerSettingsV1");
 export const MessageEngineSchema = z
   .discriminatedUnion("type", [
     z
@@ -132,6 +140,7 @@ export const ConversationSchema = z
     title: z.string(),
     engine: ChatEngineSchema,
     model: z.string(),
+    composerSettings: ConversationComposerSettingsSchema.nullable(),
     runtime: ConversationRuntimeSchema.nullable(),
     activityState: ConversationActivityStateSchema,
     hasUnseen: z.boolean(),
@@ -516,6 +525,7 @@ export const IntegrationAccountReadModelSchema = z
       "supabase",
       "resend",
       "x_account",
+      "custom_mcp",
     ]),
     workspaceId: z.string().min(1).max(128).nullable(),
     externalId: z.string().max(1_024),
@@ -1689,6 +1699,21 @@ export const PluginSkillCollisionSchema = z
   .strict()
   .openapi("PluginSkillCollision");
 
+export const PluginActionPriceSchema = z
+  .object({
+    action: z.string().min(1).max(64),
+    label: z.string().min(1).max(120),
+    unit: z.enum(["per_call", "per_result"]),
+    amountUsdMicros: z.number().int().min(1),
+  })
+  .strict()
+  .openapi("PluginActionPrice");
+
+export const PluginPricingSchema = z
+  .object({ currency: z.literal("USD"), actions: z.array(PluginActionPriceSchema) })
+  .strict()
+  .openapi("PluginPricing");
+
 export const PluginValidationReportSchema = z
   .object({
     ignoredManifestFields: z.array(z.string()),
@@ -1714,6 +1739,25 @@ export const PluginValidationReportSchema = z
       ])
       .optional(),
     events: z
+      .discriminatedUnion("status", [
+        z.object({ status: z.literal("absent") }).strict(),
+        z
+          .object({
+            present: z.literal(true),
+            status: z.literal("ignored"),
+            reason: z.string(),
+          })
+          .strict(),
+        z
+          .object({
+            present: z.literal(true),
+            status: z.literal("parsed"),
+            issues: z.array(z.string()),
+          })
+          .strict(),
+      ])
+      .optional(),
+    pricing: z
       .discriminatedUnion("status", [
         z.object({ status: z.literal("absent") }).strict(),
         z
@@ -1904,6 +1948,7 @@ const PluginBaseSchema = z
     integrity: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
     installReport: PluginInstallReportSchema,
     events: z.array(PluginEventDefinitionSchema).max(64),
+    pricing: PluginPricingSchema.nullable(),
     eventModes: z.record(z.string(), z.boolean()),
     mcpApprovedIntegrity: z
       .string()
@@ -1963,6 +2008,7 @@ export const PluginImportPreviewSchema = z
     stdioServers: z.array(PluginStdioServerSchema),
     remoteMcpServers: z.array(PluginRemoteMcpPreviewServerSchema),
     events: z.array(PluginEventDefinitionSchema).max(64),
+    pricing: PluginPricingSchema.nullable(),
     report: PluginValidationReportSchema,
   })
   .strict()
@@ -3513,6 +3559,26 @@ export const CapabilitySessionBudgetEnvelopeSchema = z
   .strict()
   .openapi("CapabilitySessionBudgetEnvelope");
 
+export const PluginBillingSchema = z
+  .object({
+    pluginName: z.string().min(1).max(64),
+    pricing: PluginPricingSchema.nullable(),
+    dailyLimitUsdMicros: z.number().int().min(1).nullable(),
+    spentTodayUsdMicros: z.number().int().min(0),
+  })
+  .strict()
+  .openapi("PluginBilling");
+
+export const PluginBillingEnvelopeSchema = z
+  .object({ data: PluginBillingSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("PluginBillingEnvelope");
+
+export const SetPluginDailySpendLimitBodySchema = z
+  .object({ dailyLimitUsd: z.number().nullable() })
+  .strict()
+  .openapi("SetPluginDailySpendLimitBody");
+
 export const CapabilityApprovalStatusSchema = z.enum([
   "awaiting_approval",
   "approved",
@@ -4850,6 +4916,9 @@ export type PluginSourceDto = z.infer<typeof PluginSourceSchema>;
 export type PluginRemoteMcpServerDto = z.infer<typeof PluginRemoteMcpServerSchema>;
 export type PluginListItemDto = z.infer<typeof PluginListItemSchema>;
 export type PluginInstallationDto = z.infer<typeof PluginInstallationSchema>;
+export type PluginPricingDto = z.infer<typeof PluginPricingSchema>;
+export type PluginActionPriceDto = z.infer<typeof PluginActionPriceSchema>;
+export type PluginBillingDto = z.infer<typeof PluginBillingSchema>;
 export type PluginEventDefinitionDto = z.infer<typeof PluginEventDefinitionSchema>;
 export type PluginEventFilterDefinitionDto = z.infer<typeof PluginEventFilterDefinitionSchema>;
 export type PluginImportPreviewDto = z.infer<typeof PluginImportPreviewSchema>;

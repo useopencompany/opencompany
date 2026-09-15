@@ -8,6 +8,7 @@ import {
   parsePluginCapabilities,
   parsePluginEvents,
   parsePluginManifest,
+  parsePluginPricing,
 } from "@opencompany/agent-runtime";
 import {
   CoreError,
@@ -59,6 +60,7 @@ type PluginRow = {
   integrity: string;
   stdioMcpServers: PluginInstallation["stdioServers"];
   events: PluginInstallation["events"];
+  pricing: PluginInstallation["pricing"];
   eventModes: PluginInstallation["eventModes"];
   installReport: PluginInstallReport;
   mcpApprovedIntegrity: string | null;
@@ -82,6 +84,7 @@ const pluginSelection = {
   integrity: plugins.integrity,
   stdioMcpServers: plugins.stdioMcpServers,
   events: plugins.events,
+  pricing: plugins.pricing,
   eventModes: plugins.eventModes,
   installReport: plugins.installReport,
   mcpApprovedIntegrity: plugins.mcpApprovedIntegrity,
@@ -186,6 +189,7 @@ export class PostgresPluginRepository implements PluginRepository {
           integrity: input.plugin.integrity,
           stdioMcpServers: input.plugin.stdioServers,
           events: input.plugin.events,
+          pricing: input.plugin.pricing,
           eventModes: current?.eventModes ?? previous?.eventModes ?? {},
           installReport: initialReport,
           mcpApprovedIntegrity: null,
@@ -589,6 +593,7 @@ async function hydratePlugin(db: DbClient, row: PluginRow): Promise<PluginInstal
     skills,
     stdioServers: row.stdioMcpServers,
     events: row.events,
+    pricing: row.pricing,
     eventModes: row.eventModes,
     remoteMcpServers: (remoteMcpServers as PluginRemoteMcpServerRow[]).map((server) => ({
       ...server,
@@ -728,6 +733,15 @@ async function validateResolvedPlugin(plugin: ResolvedPluginPackage) {
       "invalid_argument",
       "The Plugin event definitions do not match plugin.json.",
     );
+  }
+  // Prices are charged, so the stored table must be re-derived from the package bytes rather than
+  // trusted from the caller-supplied resolution.
+  const parsedPricing =
+    plugin.report.pricing?.status === "parsed"
+      ? parsePluginPricing(parsedManifest.extensions, { trusted: true }).definition
+      : null;
+  if (!isDeepStrictEqual(parsedPricing, plugin.pricing)) {
+    throw new CoreError("invalid_argument", "The Plugin action prices do not match plugin.json.");
   }
 
   const skillNames = new Set<string>();

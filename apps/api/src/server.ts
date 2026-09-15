@@ -77,6 +77,7 @@ import { createMcpOAuthIngress } from "./mcp-oauth-ingress";
 import { PostgresMessagePresentationService } from "./message-presentations";
 import { createOnboardingService } from "./onboarding";
 import { createOnboardingEmailService } from "./onboarding-emails";
+import { createPluginBillingService } from "./plugin-billing";
 import { createProjectService } from "./projects";
 import { createRepoConfigService } from "./repo-configs";
 import { PostgresRunEventNotifier } from "./run-event-notifier";
@@ -300,6 +301,7 @@ const app = createApiApp({
   }),
   engineSessions: createEngineSessionService({ db: database.db, runner: runnerClient }),
   workspaceCapabilities: createWorkspaceCapabilityService({ db: database.db }),
+  pluginBilling: createPluginBillingService({ db: database.db }),
   workspaceControl: createWorkspaceControlService({ db: database.db, workos }),
   identity: createIdentityService({ db: database.db, workos, stripe }),
   onboarding: createOnboardingService({ db: database.db, workos }),
