@@ -75,6 +75,14 @@ export async function settleSteeredRun(input: {
 
 // Yields every queued message the user steers into this run, oldest first, until the ACP harness
 // closes the iterator at the end of the turn.
+//
+// This is a hand-written iterator rather than an async generator on purpose. The harness keeps one
+// `next()` in flight for the whole turn, and an async generator queues `return()` behind that
+// pending `next()`, which only settles on the next `yield`. A turn nobody steered would therefore
+// never yield, `return()` would never resolve, and the harness would block on iterator cleanup
+// after the prompt had already completed -- the engine finished, the transcript stopped, and the
+// session stayed "running" with its sandbox awake until the turn deadline. Closing here resolves
+// immediately and makes the in-flight poll report done instead of waiting for a message.
 export function steeringMessageSource(input: {
   runId: string;
   leaseId: string;
@@ -85,18 +93,49 @@ export function steeringMessageSource(input: {
   const pollIntervalMs = input.pollIntervalMs ?? STEERING_POLL_INTERVAL_MS;
   const load = input.load ?? loadPendingSteeringMessages;
   return {
-    async *[Symbol.asyncIterator]() {
+    [Symbol.asyncIterator]() {
       // A promotion the adapter refused is left queued on purpose, so it runs as the next turn.
       // Remember what has already been offered so the poll does not retry it every second.
       const offered = new Set<string>();
-      while (true) {
-        await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
-        for (const message of await load(input)) {
-          if (offered.has(message.id)) continue;
-          offered.add(message.id);
-          yield message;
-        }
-      }
+      const buffered: AcpSteeringMessage[] = [];
+      let closed = false;
+      let wake: (() => void) | null = null;
+      const done: IteratorReturnResult<undefined> = { done: true, value: undefined };
+      const sleep = () =>
+        new Promise<void>((resolve) => {
+          const timer = setTimeout(() => {
+            wake = null;
+            resolve();
+          }, pollIntervalMs);
+          timer.unref?.();
+          wake = () => {
+            clearTimeout(timer);
+            wake = null;
+            resolve();
+          };
+        });
+      const iterator: AsyncIterator<AcpSteeringMessage, undefined> = {
+        async next() {
+          while (!closed) {
+            const next = buffered.shift();
+            if (next) return { done: false, value: next };
+            await sleep();
+            if (closed) break;
+            for (const message of await load(input)) {
+              if (offered.has(message.id)) continue;
+              offered.add(message.id);
+              buffered.push(message);
+            }
+          }
+          return done;
+        },
+        async return() {
+          closed = true;
+          wake?.();
+          return done;
+        },
+      };
+      return iterator;
     },
   };
 }

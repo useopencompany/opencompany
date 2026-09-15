@@ -2,18 +2,12 @@ import { startSlackChannelWorker } from "./slack-channel-worker";
 // Load .env files before any module that reads process.env at import time.
 import "./load-env";
 import { RedisChatPresentationStream } from "@opencompany/chat-presentation";
-import {
-  captureException,
-  createLogger,
-  flushObservability,
-  isObservabilityEnabled,
-  setExceptionReporter,
-} from "@opencompany/observability";
+import { captureException, createLogger, flushObservability } from "@opencompany/observability";
 import { flushBraintrust } from "@opencompany/observability/braintrust";
+import { installBunExceptionReporter } from "@opencompany/observability/sentry-bun";
 import { METRICS, recordCounter } from "@opencompany/telemetry";
 import { flushLatitude } from "@opencompany/telemetry/latitude";
 import { registerNodeObservability, shutdownNodeObservability } from "@opencompany/telemetry/node";
-import * as Sentry from "@sentry/bun";
 import { startAttioFlushWorker } from "./attio-flush-worker";
 import { setBrainImportWakeup, startBrainImportWorker } from "./brain-import-worker";
 import { setBrainIngestWakeup, startBrainIngestWorker } from "./brain-ingest-worker";
@@ -60,7 +54,10 @@ const RENDER_SHUTDOWN_POST_DRAIN_WAIT_MS = 30_000;
 const RENDER_SHUTDOWN_DB_CLOSE_MS = 10_000;
 const RENDER_SHUTDOWN_TELEMETRY_FLUSH_MS = 10_000;
 
-initializeExceptionReporting();
+installBunExceptionReporter({
+  serviceName: "opencompany-runner-goat",
+  applicationOwnsProcessErrors: true,
+});
 registerNodeObservability({ serviceName: "opencompany-runner-goat" });
 installProcessErrorBackstop();
 
@@ -366,43 +363,4 @@ function reportProcessError(event: string, error: unknown) {
   } catch {
     // Never let the backstop itself crash the process.
   }
-}
-
-function initializeExceptionReporting() {
-  const dsn = process.env.BETTER_STACK_ERRORS_DSN?.trim();
-  if (!isObservabilityEnabled() || !dsn) return;
-
-  Sentry.init({
-    dsn,
-    environment: process.env.OBSERVABILITY_ENV ?? process.env.NODE_ENV ?? "development",
-    release:
-      process.env.OBSERVABILITY_RELEASE ??
-      process.env.RENDER_GIT_COMMIT ??
-      process.env.VERCEL_GIT_COMMIT_SHA,
-    tracesSampleRate: 0,
-  });
-
-  setExceptionReporter({
-    captureException(error, fields) {
-      Sentry.withScope((scope) => {
-        if (typeof fields.user_id === "string" && fields.user_id) {
-          scope.setUser({ id: fields.user_id });
-        }
-        scope.setContext("opencompany", fields);
-        for (const [key, value] of Object.entries(fields)) {
-          if (
-            typeof value === "string" ||
-            typeof value === "number" ||
-            typeof value === "boolean"
-          ) {
-            scope.setTag(key, String(value));
-          }
-        }
-        Sentry.captureException(error);
-      });
-    },
-    flush() {
-      return Sentry.flush();
-    },
-  });
 }

@@ -39,7 +39,7 @@ export async function reconcileDopplerSandboxAuth(input: {
     return {
       ...empty(),
       promptFragment:
-        "Doppler is not connected. If the repository requires it, ask the user to connect Doppler in Settings → Plugins → Doppler.",
+        "Doppler is not connected. If the repository requires it, ask the user to connect Doppler in Plugins → Doppler.",
     };
   }
   let connection: Awaited<ReturnType<typeof loadDopplerConnection>>;
@@ -47,9 +47,7 @@ export async function reconcileDopplerSandboxAuth(input: {
     connection = await loadDopplerConnection(scope);
   } catch {
     await clearDopplerAuth(sandbox);
-    throw new Error(
-      "Doppler credentials could not be prepared. Reconnect Doppler in Settings → Plugins.",
-    );
+    throw new Error("Doppler credentials could not be prepared. Reconnect Doppler in Plugins.");
   }
   const token = connection?.authBundle?.token;
   if (!token) {
@@ -120,7 +118,7 @@ export async function reconcileDopplerSandboxAuth(input: {
       "Doppler is installed and authenticated with your connected personal account.",
       "For each new worktree, follow repository instructions and run `doppler setup --no-interactive` before development commands. Keep the repository's project/config directory mappings.",
       "Use existing `doppler run -- ...` scripts to inject secrets. Never print secret values, tokens, CLI config files, or fallback caches.",
-      "The CLI has the connected account's permissions. Secret writes require an explicit user request and an exact project/config target. If Doppler rejects authentication, tell the user to reconnect in Settings → Plugins → Doppler.",
+      "The CLI has the connected account's permissions. Secret writes require an explicit user request and an exact project/config target. If Doppler rejects authentication, tell the user to reconnect in Plugins → Doppler.",
       "</doppler_cli>",
     ].join("\n"),
   };

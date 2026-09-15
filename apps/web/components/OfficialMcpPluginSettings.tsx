@@ -48,12 +48,6 @@ import { InfisicalPluginConnectionForm } from "@/components/InfisicalPluginConne
 import { JamieEventsSetup } from "@/components/JamieEventsSetup";
 import { PageContent } from "@/components/PageContent";
 import { PluginAccountRow, PluginConnectionFeedback } from "@/components/PluginConnectionSettings";
-import {
-  installOfficialPlugin,
-  OFFICIAL_MCP_PLUGINS,
-  type OfficialMcpPluginConfig,
-  type OfficialPluginConfig,
-} from "@/components/PluginSettings";
 import { RenderApiKeyConnectionForm } from "@/components/RenderApiKeyConnectionForm";
 import { ToolPermissionRow } from "@/components/ToolPermissionRow";
 import {
@@ -76,6 +70,12 @@ import {
   setIntegrationToolModeAction,
 } from "@/lib/integration-account-actions";
 import { type IntegrationAccountView, type PersonalAccountProvider } from "@/lib/integration-state";
+import {
+  installOfficialPlugin,
+  OFFICIAL_MCP_PLUGINS,
+  type OfficialMcpPluginConfig,
+  type OfficialPluginConfig,
+} from "@/lib/official-plugin-catalog";
 import { type OfficialMcpPluginName, officialPluginUpdateAvailable } from "@/lib/official-plugins";
 import {
   type ManagedPluginConnection,

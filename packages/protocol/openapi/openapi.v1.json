@@ -5313,49 +5313,6 @@
         ],
         "additionalProperties": false
       },
-      "OnboardingWorkspaceSlugEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "type": "object",
-            "properties": {
-              "slug": {
-                "type": "string",
-                "maxLength": 40
-              },
-              "available": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "slug",
-              "available"
-            ],
-            "additionalProperties": false
-          },
-          "meta": {
-            "$ref": "#/components/schemas/ProtocolMetadata"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "CheckOnboardingWorkspaceSlugBody": {
-        "type": "object",
-        "properties": {
-          "slug": {
-            "type": "string",
-            "maxLength": 256
-          }
-        },
-        "required": [
-          "slug"
-        ],
-        "additionalProperties": false
-      },
       "OnboardingCommandEnvelope": {
         "type": "object",
         "properties": {
@@ -5473,18 +5430,11 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 80
-          },
-          "slug": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 40,
-            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$/u"
           }
         },
         "required": [
           "workspaceId",
-          "name",
-          "slug"
+          "name"
         ],
         "additionalProperties": false
       },
@@ -18631,53 +18581,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/OnboardingStateEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/onboarding/workspace-slug/check": {
-      "post": {
-        "tags": [
-          "Onboarding"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CheckOnboardingWorkspaceSlugBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Normalized workspace slug availability for the authenticated identity.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OnboardingWorkspaceSlugEnvelope"
                 }
               }
             }

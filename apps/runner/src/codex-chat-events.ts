@@ -112,6 +112,9 @@ export function createExternalEngineProjector(input: {
   let lastDurableWriteAt = now() - assistantWriteDebounceMs;
   const toolEventStates = new Map<string, "started" | "completed" | "failed">();
   const publishedArtifactIds = new Set<string>();
+  // Events are appended before the assistant checkpoint is saved. Rehydrate their state
+  // from that checkpoint so a replacement attempt only emits subsequent transitions.
+  semanticEventsFromCodexParts(parts, toolEventStates, publishedArtifactIds, redact);
   const outputAccumulator = createCodexCommandOutputAccumulator();
 
   const appendProjectionEvents = async (content: string) => {
@@ -929,7 +932,7 @@ function elapsedTurnDurationMs(startedAt: Date | undefined, completedAt: Date) {
   return Math.max(0, completedAt.getTime() - startedAt.getTime());
 }
 
-function semanticEventsFromCodexParts(
+export function semanticEventsFromCodexParts(
   parts: readonly CodexUiMessagePart[],
   toolStates: Map<string, "started" | "completed" | "failed">,
   artifactIds: Set<string>,

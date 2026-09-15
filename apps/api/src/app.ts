@@ -906,12 +906,6 @@ export function createApiApp(input: CreateApiAppInput) {
       const state = await input.onboarding.getState(identity);
       return c.json({ data: state, meta }, 200);
     },
-    checkOnboardingWorkspaceSlug: async (c) => {
-      const identity = identityFrom(c);
-      await enforceIdentityRateLimit(rateLimiter, identity, "onboarding-slug", 120);
-      const result = await input.onboarding.checkSlug(identity, c.req.valid("json").slug);
-      return c.json({ data: result, meta }, 200);
-    },
     saveOnboardingProfile: async (c) => {
       const identity = identityFrom(c);
       await enforceIdentityRateLimit(rateLimiter, identity, "onboarding-write", 30);
@@ -1009,28 +1003,28 @@ export function createApiApp(input: CreateApiAppInput) {
       throw new ApiError(
         410,
         "invalid_request",
-        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
+        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
       );
     },
     confirmWikiImport: async () => {
       throw new ApiError(
         410,
         "invalid_request",
-        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
+        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
       );
     },
     cancelWikiImport: async () => {
       throw new ApiError(
         410,
         "invalid_request",
-        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
+        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
       );
     },
     retryWikiImport: async () => {
       throw new ApiError(
         410,
         "invalid_request",
-        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
+        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
       );
     },
     createBrainDocument: async (c) => {
@@ -1278,35 +1272,35 @@ export function createApiApp(input: CreateApiAppInput) {
       throw new ApiError(
         410,
         "invalid_request",
-        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
+        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
       );
     },
     listWikiIngestActivity: async () => {
       throw new ApiError(
         410,
         "invalid_request",
-        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
+        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
       );
     },
     upsertWikiSource: async () => {
       throw new ApiError(
         410,
         "invalid_request",
-        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
+        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
       );
     },
     setWikiSourceEnabled: async () => {
       throw new ApiError(
         410,
         "invalid_request",
-        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
+        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
       );
     },
     deleteWikiSource: async () => {
       throw new ApiError(
         410,
         "invalid_request",
-        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
+        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
       );
     },
     listSkills: async (c) => {
@@ -2967,20 +2961,16 @@ export function createApiApp(input: CreateApiAppInput) {
               enforceMessageProtocolVersion(c);
               await next();
               span.setAttributes({ "goat.http_status_code": c.res.status });
+              // Hono resolves handler errors through `app.onError` before `next()` returns, so
+              // the response is already an error envelope here. `c.error` carries the cause.
+              if (c.error && c.res.status >= 500) {
+                span.fail(c.error, { "goat.http_status_code": c.res.status });
+              }
               return c.res;
             } catch (error) {
               c.res = apiErrorResponse(c, error);
-              if (
-                c.res.status >= 500 ||
-                (!(error instanceof ApiError) && !(error instanceof CoreError))
-              ) {
-                captureException(error, {
-                  ...requestFailureLogFieldsFrom(c),
-                  event: "opencompany.api_request_failed",
-                  request_id: requestIdFrom(c),
-                  method: c.req.method,
-                  path: c.req.path,
-                });
+              if (shouldReportRequestFailure(error, c.res.status)) {
+                reportRequestFailure(c, error);
               }
               span.setAttributes({ "goat.http_status_code": c.res.status });
               if (c.res.status >= 500) {
@@ -3053,15 +3043,14 @@ export function createApiApp(input: CreateApiAppInput) {
     },
   });
 
+  // Every handler error lands here, including the ones thrown under the /v1 middleware: Hono
+  // routes them to `onError` at the failing handler and only then resumes the middleware chain.
   app.onError((error, c) => {
-    captureException(error, {
-      ...requestFailureLogFieldsFrom(c),
-      event: "opencompany.api_request_failed",
-      request_id: requestIdFrom(c),
-      method: c.req.method,
-      path: c.req.path,
-    });
-    return apiErrorResponse(c, error);
+    const response = apiErrorResponse(c, error);
+    if (shouldReportRequestFailure(error, response.status)) {
+      reportRequestFailure(c, error);
+    }
+    return response;
   });
   app.get("/healthz", (c) =>
     c.json({
@@ -3555,6 +3544,23 @@ function setRequestFailureLogFields(c: Context, fields: LogFields) {
   setContextValue(c, REQUEST_FAILURE_LOG_FIELDS_KEY, {
     ...(isLogFields(existing) ? existing : {}),
     ...fields,
+  });
+}
+
+// Expected domain outcomes (not found, forbidden, rate limited, validation) are modelled as
+// ApiError/CoreError with a 4xx status and are not defects; only 5xx responses and errors of
+// unknown shape belong in the error tracker.
+function shouldReportRequestFailure(error: unknown, status: number) {
+  return status >= 500 || (!(error instanceof ApiError) && !(error instanceof CoreError));
+}
+
+function reportRequestFailure(c: Context, error: unknown) {
+  captureException(error, {
+    ...requestFailureLogFieldsFrom(c),
+    event: "opencompany.api_request_failed",
+    request_id: requestIdFrom(c),
+    method: c.req.method,
+    path: c.req.path,
   });
 }
 
