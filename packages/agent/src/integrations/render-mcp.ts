@@ -1,3 +1,4 @@
+import { createMCPClient } from "@ai-sdk/mcp";
 import { getDb } from "@opencompany/db/client";
 import {
   loadIntegrationCredential,
@@ -6,6 +7,7 @@ import {
 } from "@opencompany/db/integrations";
 import { integrations } from "@opencompany/db/product-schema";
 import { and, desc, eq, isNull, ne, sql } from "drizzle-orm";
+import type { RemoteMcpGatewayDependencies } from "../actions/remote-mcp";
 import { captureConnectionAddedAnalytics } from "./analytics";
 import type { RemoteMcpProviderState } from "./remote-mcp-oauth";
 import { createRemoteMcpStaticBearerAuthProvider } from "./remote-mcp-static-bearer";
@@ -14,6 +16,14 @@ export const RENDER_MCP_ENDPOINT_URL = "https://mcp.render.com/mcp";
 export const RENDER_API_BASE_URL = "https://api.render.com/v1";
 const RENDER_MCP_EXTERNAL_ID = "render_mcp_api_key";
 const RENDER_CREDENTIAL_KIND = "api_key" as const;
+
+export const createRenderMcpClient: RemoteMcpGatewayDependencies["createClient"] = (input) =>
+  createMCPClient({
+    ...input,
+    // Render rejects modern discovery with -32022, which the SDK must not downgrade.
+    // Start its supported initialize handshake for both discovery and tool execution.
+    protocolVersionDiscovery: false,
+  });
 
 type DbLike = any;
 
@@ -199,6 +209,7 @@ export async function loadRenderMcpWorkerConnection(input: {
   return {
     ok: true as const,
     integrationId: row.id,
+    createClient: createRenderMcpClient,
     authProvider: createRemoteMcpStaticBearerAuthProvider({
       accessToken: apiKey,
       onAuthorizationRequired: async () => {
