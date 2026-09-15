@@ -54,7 +54,10 @@ const RENDER_SHUTDOWN_POST_DRAIN_WAIT_MS = 30_000;
 const RENDER_SHUTDOWN_DB_CLOSE_MS = 10_000;
 const RENDER_SHUTDOWN_TELEMETRY_FLUSH_MS = 10_000;
 
-installBunExceptionReporter({ serviceName: "opencompany-runner-goat" });
+installBunExceptionReporter({
+  serviceName: "opencompany-runner-goat",
+  applicationOwnsProcessErrors: true,
+});
 registerNodeObservability({ serviceName: "opencompany-runner-goat" });
 installProcessErrorBackstop();
 

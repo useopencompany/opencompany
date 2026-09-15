@@ -104,4 +104,90 @@ describe("installBunExceptionReporter", () => {
       expect.objectContaining({ api_key: "[redacted]", user_id: "user_1" }),
     );
   });
+
+  it("sanitizes database exceptions before Sentry transports the event", () => {
+    process.env.BETTER_STACK_ERRORS_DSN = "https://key@errors.example/1";
+    installBunExceptionReporter({ serviceName: "opencompany-api" });
+    const databaseError = Object.assign(
+      new Error('duplicate key value violates unique constraint "tasks_pkey"'),
+      {
+        code: "23505",
+        severity: "ERROR",
+        schema: "goat",
+        table: "tasks",
+        constraint: "tasks_pkey",
+        routine: "_bt_check_unique",
+        detail: "Key (id)=(sensitive_task_id) already exists.",
+        query: "SELECT secret FROM private_table",
+        parameters: ["secret-value"],
+      },
+    );
+    const error = new Error(
+      "Failed query: SELECT secret FROM private_table WHERE id = $1\nparams: secret-value",
+      { cause: databaseError },
+    );
+
+    const initOptions = sentry.init.mock.calls[0]?.[0];
+    const event = initOptions?.beforeSend?.(
+      {
+        message: error.message,
+        exception: {
+          values: [
+            { type: "Error", value: databaseError.message },
+            {
+              type: "Error",
+              value: error.message,
+              stacktrace: { frames: [{ filename: "repository.ts", vars: { parameters: [] } }] },
+            },
+          ],
+        },
+        extra: { query: databaseError.query, parameters: databaseError.parameters },
+      },
+      { originalException: error },
+    );
+
+    expect(event).toMatchObject({
+      exception: { values: [{ type: "Error", value: "Database query failed" }] },
+      contexts: {
+        opencompany_error: {
+          message: "Database query failed",
+          cause: {
+            code: "23505",
+            severity: "ERROR",
+            schema: "goat",
+            table: "tasks",
+            constraint: "tasks_pkey",
+            routine: "_bt_check_unique",
+          },
+        },
+      },
+    });
+    expect(event?.exception?.values?.[0]?.stacktrace?.frames?.[0]).not.toHaveProperty("vars");
+    expect(JSON.stringify(event)).not.toMatch(
+      /SELECT secret|sensitive_task_id|private_table|secret-value|detail|parameters/u,
+    );
+  });
+
+  it("leaves process errors to the application without creating a second capture path", () => {
+    process.env.BETTER_STACK_ERRORS_DSN = "https://key@errors.example/1";
+    installBunExceptionReporter({
+      serviceName: "opencompany-runner-goat",
+      applicationOwnsProcessErrors: true,
+    });
+
+    const initOptions = sentry.init.mock.calls[0]?.[0];
+    const integrations = initOptions?.integrations?.([
+      { name: "Http" },
+      { name: "OnUncaughtException" },
+      { name: "OnUnhandledRejection" },
+    ]);
+    expect(integrations?.map((integration: { name: string }) => integration.name)).toEqual([
+      "Http",
+    ]);
+
+    captureException(new Error("one process failure"), {
+      event: "opencompany.runner_unhandled_rejection",
+    });
+    expect(sentry.captureException).toHaveBeenCalledTimes(1);
+  });
 });
