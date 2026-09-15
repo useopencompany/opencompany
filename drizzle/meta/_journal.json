@@ -2031,6 +2031,13 @@
       "when": 1790100400010,
       "tag": "0289_opencompany_todoist_integration",
       "breakpoints": true
+    },
+    {
+      "idx": 290,
+      "version": "7",
+      "when": 1790100400011,
+      "tag": "0290_workflow_memories",
+      "breakpoints": true
     }
   ]
 }

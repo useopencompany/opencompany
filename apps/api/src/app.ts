@@ -60,6 +60,7 @@ import {
   type WikiTimelineEntry,
   type Workflow,
   type WorkflowApplicationService,
+  type WorkflowMemory,
 } from "@opencompany/core";
 import { captureException, createLogger, type LogFields } from "@opencompany/observability";
 import {
@@ -517,6 +518,34 @@ export function createApiApp(input: CreateApiAppInput) {
         c.req.valid("header")["idempotency-key"],
       );
       return c.json({ data: taskCreationDto(result), meta }, 202);
+    },
+    getWorkflowMemory: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const memory = await input.workflows.getWorkflowMemory(
+        actor,
+        c.req.valid("param").workflowId,
+      );
+      return c.json({ data: workflowMemoryDto(memory), meta }, 200);
+    },
+    updateWorkflowMemory: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const memory = await input.workflows.setWorkflowMemoryEnabled(
+        actor,
+        c.req.valid("param").workflowId,
+        c.req.valid("json").enabled,
+      );
+      return c.json({ data: workflowMemoryDto(memory), meta }, 200);
+    },
+    clearWorkflowMemory: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const memory = await input.workflows.clearWorkflowMemory(
+        actor,
+        c.req.valid("param").workflowId,
+      );
+      return c.json({ data: workflowMemoryDto(memory), meta }, 200);
     },
     listTaskSchedules: async (c) => {
       const actor = actorFrom(c);
@@ -3748,6 +3777,10 @@ function workflowDto(workflow: Workflow) {
     createdAt: workflow.createdAt.toISOString(),
     updatedAt: workflow.updatedAt.toISOString(),
   };
+}
+
+function workflowMemoryDto(memory: WorkflowMemory) {
+  return { ...memory, updatedAt: memory.updatedAt?.toISOString() ?? null };
 }
 
 function taskScheduleDto(schedule: TaskSchedule) {

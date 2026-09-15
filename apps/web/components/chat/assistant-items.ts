@@ -455,6 +455,8 @@ export function toolLabel(name: string) {
   if (name === EDIT_TASK_SCHEDULE_TOOL_NAME) return "Edit routine";
   if (name === DELETE_TASK_SCHEDULE_TOOL_NAME) return "Delete routine";
   if (name === SLACK_BOT_TOOL_NAME || name === LEGACY_SLACK_BOT_TOOL_NAME) return "Slack bot";
+  if (name === "read_workflow_memory") return "Workflow memory";
+  if (name === "update_workflow_memory") return "Update workflow memory";
   if (name === WEB_FETCH_TOOL_NAME) return "Web Fetch";
   if (name === WEB_SEARCH_TOOL_NAME) return "Web Search";
   if (name === "browser_open") return "Open page";

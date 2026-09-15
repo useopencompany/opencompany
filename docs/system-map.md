@@ -92,6 +92,15 @@ Scheduled and event runs follow the step instructions. The editor does not autho
 context; the trigger prompt saved with a workflow is only the run's opening request and stays
 editable through the headless Workflow API.
 
+The editor's Advanced section carries workflow memory: one markdown document per workflow, off by
+default. While it is on, the current memory is injected into every run's system context and the run
+gets `read_workflow_memory` and `update_workflow_memory` (whole-document replace, capped at 20,000
+characters). Memory lives in `goat.workflow_memories`, not in the workflow row, so a run rewriting
+its memory never bumps the definition's version or reorders the workflow list, and toggling memory
+takes effect on the next run without re-planning a scheduled workflow's execution plan. It is served
+by `/v1/workflows/{workflowId}/memory` (GET, PATCH for the toggle, DELETE to clear) and is not part
+of the workflow read model.
+
 Canonical Tasks can be archived once their run has settled, including `waiting` ("Waiting for you"),
 `succeeded`, `failed`, and `canceled`. Archiving preserves the outcome and waiting state; it does not
 resume execution. The UI and archive repository share this status rule in `@opencompany/core`.
