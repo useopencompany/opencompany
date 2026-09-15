@@ -100,14 +100,17 @@ export function TasksBoardRoute({
   workflowNames,
   initialViewMode = "board",
   initialTimeRange = "7d",
+  initialWorkflowId = null,
 }: {
   workflowNames: Record<string, string>;
   initialViewMode?: TaskViewMode;
   initialTimeRange?: TaskTimeRange;
+  /** Workflow slug to pre-select in the source filter, so a workflow can link to its own runs. */
+  initialWorkflowId?: string | null;
 }) {
   const { schedules, taskRows, tasksReady, workspace } = useAppData();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(initialWorkflowId);
   const [timeRange, setTimeRangeState] = useState<TaskTimeRange>(initialTimeRange);
   const [viewMode, setViewModeState] = useState<TaskViewMode>(initialViewMode);
   const [, startViewModeTransition] = useTransition();
