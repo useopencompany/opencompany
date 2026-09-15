@@ -270,6 +270,24 @@ describe("durable Slack subscriptions", () => {
       { status: "done" },
     ]);
   });
+  it("tells the Slack thread to check opencompany when the follow-up run never answers", async () => {
+    await enqueueSlackThreadReply(execute, reply);
+    await processNextSubscriptionEvent(deps);
+    await pg.exec(
+      `UPDATE goat.codex_chat_turns SET status = 'failed';
+       UPDATE goat.codex_chat_sessions SET status = 'failed';
+       UPDATE goat.tasks SET status = 'failed';
+       UPDATE goat.chat_messages SET content = 'Task-only final answer' WHERE role = 'assistant';`,
+    );
+    expect(await processNextSubscriptionEvent(deps)).toBe(true);
+    expect(
+      (await pg.query("SELECT text FROM goat.channel_deliveries WHERE id <> 'root'")).rows,
+    ).toEqual([
+      {
+        text: "The workflow needs attention. Open the task in opencompany to review and continue.",
+      },
+    ]);
+  });
   it.each([
     { label: "a different email", profile: { email: "different@example.com" } },
     { label: "no email", profile: {} },

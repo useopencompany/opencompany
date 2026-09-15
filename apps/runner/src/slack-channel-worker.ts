@@ -22,6 +22,8 @@ import { createPollingWorker } from "./polling-worker";
 const logger = createLogger({ service: "opencompany-runner", runtime: "slack-channel" });
 const CLOSED_REPLY =
   "This workflow thread is closed. Open the task in opencompany to continue the work.";
+const UNANSWERED_REPLY =
+  "The workflow needs attention. Open the task in opencompany to review and continue.";
 const MAX_SLACK_THREAD_CONTEXT_CHARS = 100_000;
 
 type Event = {
@@ -129,10 +131,16 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
         if (!event.runStatus || !["completed", "failed", "interrupted"].includes(event.runStatus))
           return false;
         // Slack replies are explicit tool actions. A completed turn that did not use the tool
-        // must not leak its task-facing assistant message into the external thread.
-        await tx.execute(
-          sql`UPDATE goat.subscription_events SET status = 'done' WHERE id = ${event.id} AND status = 'running'`,
-        );
+        // must not leak its task-facing assistant message into the external thread. A turn that
+        // never got to answer is different: the fixed notice carries no task content, and without
+        // it the person who asked in Slack is left waiting on a reply that will never come.
+        if (event.runStatus === "completed") {
+          await tx.execute(
+            sql`UPDATE goat.subscription_events SET status = 'done' WHERE id = ${event.id} AND status = 'running'`,
+          );
+          return true;
+        }
+        await queueReply(tx.execute.bind(tx), event, deliveryId, UNANSWERED_REPLY);
         return true;
       }
       const { token, botUserId } = await deps.credential(event.installation);
