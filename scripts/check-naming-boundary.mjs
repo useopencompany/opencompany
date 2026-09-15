@@ -30,8 +30,8 @@ const allowedStandaloneFiles = new Set([
 // merge. Comparing with origin/main plus a PR-specific delta makes the check
 // self-invalidating once origin/main advances to that merged tree.
 const protectedCompatibilityTokens = [
-  // 1181 = 1168 + the run, turn, and conversation ids in the coding-chat steering tests.
-  ["physical and stored quoted goat_* identifiers", /["'`]goat_[a-z0-9_]*["'`]/gu, 1181],
+  // 1187 = 1168 + the coding-chat steering ids and Phase 1's physical execution-binding objects.
+  ["physical and stored quoted goat_* identifiers", /["'`]goat_[a-z0-9_]*["'`]/gu, 1187],
   ["quoted sandbox runtime roots", /["'`]opencompany-goat[a-z0-9_./${}:*-]*["'`]/gu, 26],
   ["chat source-provider values", /["']goat-chat["']/gu, 28],
   ["import source-provider values", /["']goat-import["']/gu, 13],

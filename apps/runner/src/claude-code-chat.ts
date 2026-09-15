@@ -425,6 +425,10 @@ export async function runClaudeCodeChatTurn(input: {
         namespace: env.sandboxNamespace,
         ownerKind: "codex_chat_session",
         ownerId: session.id,
+        execution: {
+          backend: session.executionBackend,
+          version: session.executionBackendVersion,
+        },
         metadata: { user_id: turn.userWorkosId },
       }),
       network: CODING_WORKSPACE_SANDBOX_NETWORK,

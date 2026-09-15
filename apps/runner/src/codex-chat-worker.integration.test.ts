@@ -9,6 +9,7 @@ import {
   claimNextCodexChatTurn,
   forceFailClaimedTurn,
   heartbeatCodexChatTurn,
+  RUNNER_ATTACHED_V1,
 } from "./codex-chat-worker";
 import type { TaskTurnContext } from "./task-turn";
 
@@ -71,6 +72,8 @@ const SCHEMA = `
     chat_session_id text NOT NULL,
     engine text NOT NULL,
     model text NOT NULL,
+    execution_backend text NOT NULL DEFAULT 'runner_attached',
+    execution_backend_version integer NOT NULL DEFAULT 1,
     active_turn_id text,
     status text NOT NULL DEFAULT 'queued',
     error text,
@@ -83,6 +86,8 @@ const SCHEMA = `
     chat_session_id text NOT NULL,
     status text NOT NULL DEFAULT 'queued',
     prompt text NOT NULL,
+    execution_backend text NOT NULL DEFAULT 'runner_attached',
+    execution_backend_version integer NOT NULL DEFAULT 1,
     error text,
     lease_id text,
     lease_owner text,
@@ -191,7 +196,11 @@ describe("durable worker claims and settlement against real Postgres", () => {
       UPDATE goat.codex_chat_turns SET lease_expires_at=now() - interval '1 second';
     `);
     expect(
-      await claimNextCodexChatTurn({ leaseOwner: "other_worker", leaseTtlMs: 60_000 }),
+      await claimNextCodexChatTurn({
+        leaseOwner: "other_worker",
+        leaseTtlMs: 60_000,
+        supportedExecutions: [RUNNER_ATTACHED_V1],
+      }),
     ).toBeNull();
     await pg.exec(`
       UPDATE goat.codex_chat_turns SET interrupt_requested_at=now(), lease_expires_at=now() + interval '1 minute';
@@ -207,6 +216,7 @@ describe("durable worker claims and settlement against real Postgres", () => {
     const claimed = await claimNextCodexChatTurn({
       leaseOwner: "cleanup_worker",
       leaseTtlMs: 60_000,
+      supportedExecutions: [RUNNER_ATTACHED_V1],
     });
     expect(claimed).toMatchObject({
       id: "turn_1",
@@ -227,19 +237,31 @@ describe("durable worker claims and settlement against real Postgres", () => {
       { status: "canceled", stage: "canceled" },
     ]);
     expect(
-      await claimNextCodexChatTurn({ leaseOwner: "other_worker", leaseTtlMs: 60_000 }),
+      await claimNextCodexChatTurn({
+        leaseOwner: "other_worker",
+        leaseTtlMs: 60_000,
+        supportedExecutions: [RUNNER_ATTACHED_V1],
+      }),
     ).toBeNull();
     await pg.exec(
       "UPDATE goat.codex_chat_turns SET lease_expires_at=now() - interval '1 second'; UPDATE goat.tasks SET archived_at=now()",
     );
     expect(
-      await claimNextCodexChatTurn({ leaseOwner: "archive_cleanup_worker", leaseTtlMs: 60_000 }),
+      await claimNextCodexChatTurn({
+        leaseOwner: "archive_cleanup_worker",
+        leaseTtlMs: 60_000,
+        supportedExecutions: [RUNNER_ATTACHED_V1],
+      }),
     ).toMatchObject({ id: "turn_1", interruptRequestedAt: claimed!.interruptRequestedAt });
     await pg.exec(
       "UPDATE goat.codex_chat_turns SET lease_expires_at=now() - interval '1 second', interrupt_requested_at=NULL",
     );
     expect(
-      await claimNextCodexChatTurn({ leaseOwner: "other_worker", leaseTtlMs: 60_000 }),
+      await claimNextCodexChatTurn({
+        leaseOwner: "other_worker",
+        leaseTtlMs: 60_000,
+        supportedExecutions: [RUNNER_ATTACHED_V1],
+      }),
     ).toBeNull();
   });
 
@@ -249,7 +271,12 @@ describe("durable worker claims and settlement against real Postgres", () => {
       UPDATE goat.tasks SET status='waiting';
       UPDATE goat.codex_chat_turns SET status='queued';
     `);
-    const claim = () => claimNextCodexChatTurn({ leaseOwner: "new_worker", leaseTtlMs: 60_000 });
+    const claim = () =>
+      claimNextCodexChatTurn({
+        leaseOwner: "new_worker",
+        leaseTtlMs: 60_000,
+        supportedExecutions: [RUNNER_ATTACHED_V1],
+      });
     expect(await claim()).toBeNull();
     await pg.exec(
       `UPDATE goat.codex_chat_turns SET settings='{"approvalContinuation":true}'; UPDATE goat.tasks SET archived_at=now();`,
@@ -264,6 +291,53 @@ describe("durable worker claims and settlement against real Postgres", () => {
     expect((await pg.query("SELECT status,stage FROM goat.tasks WHERE id='task_1'")).rows).toEqual([
       { status: "queued", stage: "queued" },
     ]);
+  });
+
+  it("leaves a supervisor Run for a worker that declares the matching backend version", async () => {
+    await prepareClaimSchema();
+    await pg.exec(`
+      UPDATE goat.codex_chat_sessions
+      SET status='queued', execution_backend='sandbox_supervisor', execution_backend_version=1;
+      UPDATE goat.codex_chat_turns
+      SET status='queued', lease_id=NULL, lease_owner=NULL,
+          execution_backend='sandbox_supervisor', execution_backend_version=1;
+    `);
+
+    await expect(
+      claimNextCodexChatTurn({
+        leaseOwner: "established_worker",
+        leaseTtlMs: 60_000,
+        supportedExecutions: [RUNNER_ATTACHED_V1],
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      claimNextCodexChatTurn({
+        leaseOwner: "v2_worker",
+        leaseTtlMs: 60_000,
+        supportedExecutions: [{ backend: "sandbox_supervisor", version: 1 }],
+      }),
+    ).resolves.toMatchObject({
+      id: "turn_1",
+      executionBackend: "sandbox_supervisor",
+      executionBackendVersion: 1,
+      leaseOwner: "v2_worker",
+    });
+  });
+
+  it("does not let a supervisor worker claim an established Run", async () => {
+    await prepareClaimSchema();
+    await pg.exec(`
+      UPDATE goat.codex_chat_sessions SET status='queued';
+      UPDATE goat.codex_chat_turns SET status='queued', lease_id=NULL, lease_owner=NULL;
+    `);
+
+    await expect(
+      claimNextCodexChatTurn({
+        leaseOwner: "v2_worker",
+        leaseTtlMs: 60_000,
+        supportedExecutions: [{ backend: "sandbox_supervisor", version: 1 }],
+      }),
+    ).resolves.toBeNull();
   });
 
   it("fails the turn, attempt, runtime, and task in one statement", async () => {

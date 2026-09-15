@@ -803,6 +803,8 @@ function durableTurn(): CodexChatTurn {
     status: "running",
     prompt: "Ship the requested change.",
     settings: {},
+    executionBackend: "runner_attached",
+    executionBackendVersion: 1,
     error: null,
     interruptRequestedAt: null,
     steerIntoRunId: null,
