@@ -45,6 +45,7 @@ import {
   StepRuntimePicker,
   type WorkflowStepPatch,
 } from "@/components/WorkflowModelControls";
+import { WorkflowRunHistory } from "@/components/WorkflowRunHistory";
 import {
   archiveHeadlessWorkflow,
   runHeadlessWorkflowNow,
@@ -404,6 +405,8 @@ export function WorkflowEditor({
             canEdit={canEdit}
             onChange={(slackChannel) => patch({ slackChannel })}
           />
+
+          <WorkflowRunHistory workflowSlug={workflow.slug} />
         </div>
       </div>
     </main>

@@ -1,6 +1,9 @@
 import { TimeoutWaitingForTxIdError } from "@tanstack/electric-db-collection";
 import { describe, expect, it, vi } from "vitest";
-import { reconcileCommittedProjection } from "./headless-collection-reconciliation";
+import {
+  awaitCollectionTransaction,
+  reconcileCommittedProjection,
+} from "./headless-collection-reconciliation";
 
 const captureExceptionMock = vi.hoisted(() => vi.fn());
 
@@ -22,5 +25,24 @@ describe("committed projection reconciliation", () => {
     await expect(
       reconcileCommittedProjection(Promise.reject(new Error("Invalid projection"))),
     ).rejects.toThrow("Invalid projection");
+  });
+});
+
+describe("collection transaction waits", () => {
+  it("waits on a collection that is syncing its shape", async () => {
+    const awaitTxId = vi.fn(async () => undefined);
+
+    await awaitCollectionTransaction({ status: "ready", utils: { awaitTxId } }, 42, 1_000);
+
+    expect(awaitTxId).toHaveBeenCalledWith(42, 1_000);
+  });
+
+  it("skips a collection nobody subscribed to, whose transaction ids can never arrive", async () => {
+    const awaitTxId = vi.fn(async () => undefined);
+
+    await awaitCollectionTransaction({ status: "idle", utils: { awaitTxId } }, 42);
+    await awaitCollectionTransaction({ status: "cleaned-up", utils: { awaitTxId } }, 42);
+
+    expect(awaitTxId).not.toHaveBeenCalled();
   });
 });

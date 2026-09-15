@@ -650,6 +650,31 @@ describe("TasksBoardRoute", () => {
     expect(screen.getByText("Research competitors")).toBeInTheDocument();
   });
 
+  it("opens pre-filtered when a workflow's run history links here", () => {
+    appDataMock.taskRows = [
+      taskRow({
+        id: "ship-feature",
+        name: "Add workflow filtering",
+        status: "running",
+        workflow_id: "ship-feature",
+      }),
+      taskRow({ id: "ad-hoc", name: "Research competitors", status: "running" }),
+    ];
+
+    render(
+      <TasksBoardRoute
+        workflowNames={{ "ship-feature": "Ship feature" }}
+        initialWorkflowId="ship-feature"
+      />,
+    );
+
+    expect(screen.getByRole("combobox", { name: "Filter tasks by workflow" })).toHaveTextContent(
+      "#Ship feature",
+    );
+    expect(screen.getByText("Add workflow filtering")).toBeInTheDocument();
+    expect(screen.queryByText("Research competitors")).not.toBeInTheDocument();
+  });
+
   it("offers workflow slugs from task history when the workflow is no longer active", async () => {
     const user = userEvent.setup();
     appDataMock.taskRows = [
