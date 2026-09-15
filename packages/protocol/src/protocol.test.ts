@@ -92,6 +92,7 @@ describe("headless protocol", () => {
       "/v1/workflows/{workflowId}/archive",
       "/v1/workflows/{workflowId}/invoke",
       "/v1/workflows/{workflowId}/run-now",
+      "/v1/workflows/{workflowId}/memory",
       "/v1/schedules",
       "/v1/schedules/{scheduleId}",
       "/v1/schedules/{scheduleId}/archive",

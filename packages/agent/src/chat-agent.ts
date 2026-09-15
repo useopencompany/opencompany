@@ -186,6 +186,16 @@ import {
   subagentToolSet,
 } from "./subagent";
 import {
+  READ_WORKFLOW_MEMORY_TOOL_DESCRIPTION,
+  READ_WORKFLOW_MEMORY_TOOL_NAME,
+  type ReadWorkflowMemoryToolInput,
+  type ReadWorkflowMemoryToolOutput,
+  UPDATE_WORKFLOW_MEMORY_TOOL_DESCRIPTION,
+  UPDATE_WORKFLOW_MEMORY_TOOL_NAME,
+  type UpdateWorkflowMemoryToolInput,
+  type UpdateWorkflowMemoryToolOutput,
+} from "./workflow-memory";
+import {
   WORKSPACE_SKILL_AUTHORING_INPUT_SCHEMA,
   WORKSPACE_SKILL_EDIT_INPUT_SCHEMA,
   WORKSPACE_SKILLS_INPUT_SCHEMA,
@@ -220,6 +230,10 @@ export type UpdateTaskStatusToolOutput = {
   comment: string;
 };
 export type UpdateTaskStatusRunner = (input: UpdateTaskStatusToolInput) => Promise<void>;
+export type ReadWorkflowMemoryRunner = () => Promise<ReadWorkflowMemoryToolOutput>;
+export type UpdateWorkflowMemoryRunner = (
+  input: UpdateWorkflowMemoryToolInput,
+) => Promise<UpdateWorkflowMemoryToolOutput>;
 export const UPDATE_TASK_STATUS_TOOL_DESCRIPTION =
   'Report this background task\'s final user-facing status. Call exactly once, near the end, before your final message. Use "done" when the request is fully handled; use "needs_attention" when there are partial results, blockers, errors, questions, or anything the user should review. The comment is one short plain-text sentence shown on the task card.';
 const UPDATE_TASK_STATUS_STATUS_DESCRIPTION =
@@ -625,6 +639,10 @@ export function createProductChatToolContext(input: {
   // report its own outcome. Absent in interactive chat and the Slack bot, so
   // the update_task_status tool never appears there.
   updateTaskStatus?: UpdateTaskStatusRunner;
+  // Workflow-run-only: injected by the runner when the running workflow has memory enabled, so a
+  // repeating workflow can carry a single markdown document between its runs.
+  readWorkflowMemory?: ReadWorkflowMemoryRunner;
+  updateWorkflowMemory?: UpdateWorkflowMemoryRunner;
   // Injected by the runner, the only composition root that can build a nested tool context.
   // `budget` is shared with every nested context so one turn's whole subagent tree draws from
   // the same run allowance; `depth` is 0 in the main conversation.
@@ -1635,6 +1653,56 @@ export function createProductChatToolContext(input: {
         const comment = typeof args.comment === "string" ? args.comment.trim() : "";
         await updateTaskStatus({ status, comment });
         return { ok: true, status, comment };
+      },
+    });
+  }
+
+  const readWorkflowMemory = input.readWorkflowMemory;
+  if (readWorkflowMemory) {
+    tools[READ_WORKFLOW_MEMORY_TOOL_NAME] = tool<
+      ReadWorkflowMemoryToolInput,
+      ReadWorkflowMemoryToolOutput,
+      Record<string, unknown>
+    >({
+      description: READ_WORKFLOW_MEMORY_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<ReadWorkflowMemoryToolInput>({
+        type: "object",
+        additionalProperties: false,
+        properties: {},
+      }),
+      execute: async () => {
+        visibleToolActivity = true;
+        return readWorkflowMemory();
+      },
+    });
+  }
+
+  const updateWorkflowMemory = input.updateWorkflowMemory;
+  if (updateWorkflowMemory) {
+    tools[UPDATE_WORKFLOW_MEMORY_TOOL_NAME] = tool<
+      UpdateWorkflowMemoryToolInput,
+      UpdateWorkflowMemoryToolOutput,
+      Record<string, unknown>
+    >({
+      description: UPDATE_WORKFLOW_MEMORY_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<UpdateWorkflowMemoryToolInput>({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          content: {
+            type: "string",
+            description:
+              "The complete replacement memory, in markdown. Anything omitted is forgotten.",
+          },
+        },
+        required: ["content"],
+      }),
+      execute: async (args) => {
+        visibleToolActivity = true;
+        if (typeof args.content !== "string") {
+          throw new Error("update_workflow_memory content must be a string.");
+        }
+        return updateWorkflowMemory({ content: args.content });
       },
     });
   }

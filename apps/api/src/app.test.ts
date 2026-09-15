@@ -40,6 +40,7 @@ import {
   type WikiCommandRepository,
   type Workflow,
   WorkflowApplicationService,
+  type WorkflowMemory,
   type WorkflowRepository,
 } from "@opencompany/core";
 import { setExceptionReporter } from "@opencompany/observability";
@@ -493,6 +494,48 @@ describe("canonical Hono API", () => {
       },
       meta: { apiVersion: "v1", protocolVersion: expect.any(String) },
     });
+  });
+
+  it("reads, toggles, and clears Workflow memory without touching the definition", async () => {
+    const automations = populatedAutomationServices();
+    const app = testApp(fakeRepository(), automations);
+
+    const initial = await app.request("/v1/workflows/weekly-research/memory");
+    expect(initial.status).toBe(200);
+    await expect(initial.json()).resolves.toMatchObject({
+      data: {
+        workflowId: "workflow_1",
+        enabled: true,
+        content: "Last run found two pricing changes.",
+        updatedAt: createdAt.toISOString(),
+      },
+    });
+
+    const disabled = await app.request("/v1/workflows/weekly-research/memory", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: false }),
+    });
+    expect(disabled.status).toBe(200);
+    await expect(disabled.json()).resolves.toMatchObject({ data: { enabled: false } });
+
+    const cleared = await app.request("/v1/workflows/weekly-research/memory", {
+      method: "DELETE",
+    });
+    expect(cleared.status).toBe(200);
+    await expect(cleared.json()).resolves.toMatchObject({
+      data: { content: "", updatedAt: null },
+    });
+
+    // Toggling and clearing memory leaves the definition's optimistic version untouched.
+    const workflow = await app.request("/v1/workflows/weekly-research");
+    await expect(workflow.json()).resolves.toMatchObject({ data: { version: 1 } });
+  });
+
+  it("returns 404 for memory on a Workflow the actor cannot see", async () => {
+    const app = testApp(fakeRepository(), fakeAutomationServices());
+    const response = await app.request("/v1/workflows/workflow_missing/memory");
+    expect(response.status).toBe(404);
   });
 
   it("serves canonical Workflow and Recurring Task contracts through Core services", async () => {
@@ -6302,6 +6345,9 @@ function fakeAutomationServices() {
     updateWorkflow: async () => ({ status: "not_found" }),
     archiveWorkflow: async () => ({ status: "not_found" }),
     recordRunNow: async () => undefined,
+    getWorkflowMemory: async () => null,
+    setWorkflowMemoryEnabled: async () => null,
+    clearWorkflowMemory: async () => null,
   };
   const scheduleRepository: TaskScheduleRepository = {
     assertTaskScheduleWriteAllowed: async () => undefined,
@@ -6377,6 +6423,12 @@ function populatedAutomationServices() {
     createdAt,
     updatedAt: createdAt,
   };
+  let memory: WorkflowMemory = {
+    workflowId: "workflow_1",
+    enabled: true,
+    content: "Last run found two pricing changes.",
+    updatedAt: createdAt,
+  };
   const schedule: TaskSchedule = {
     id: "schedule_1",
     name: "Daily research",
@@ -6435,6 +6487,18 @@ function populatedAutomationServices() {
       transactionId: "53",
     }),
     recordRunNow: async () => undefined,
+    getWorkflowMemory: async ({ workflowId }) =>
+      workflowId === workflow.id || workflowId === workflow.slug ? memory : null,
+    setWorkflowMemoryEnabled: async ({ workflowId, enabled }) => {
+      if (workflowId !== workflow.id && workflowId !== workflow.slug) return null;
+      memory = { ...memory, enabled };
+      return memory;
+    },
+    clearWorkflowMemory: async ({ workflowId }) => {
+      if (workflowId !== workflow.id && workflowId !== workflow.slug) return null;
+      memory = { ...memory, content: "", updatedAt: null };
+      return memory;
+    },
   };
   const scheduleRepository: TaskScheduleRepository = {
     assertTaskScheduleWriteAllowed: async () => undefined,

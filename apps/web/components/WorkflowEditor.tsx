@@ -11,7 +11,7 @@ import {
   MAX_SLACK_DISPLAY_NAME_LENGTH,
   workflowActivationDisabledReason,
 } from "@opencompany/core/workflows";
-import type { PluginEventFilterDefinitionDto } from "@opencompany/protocol";
+import type { PluginEventFilterDefinitionDto, WorkflowMemoryDto } from "@opencompany/protocol";
 import { Button } from "@opencompany/ui/components/button";
 import { Input } from "@opencompany/ui/components/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
@@ -40,6 +40,7 @@ import { Markdown } from "@/components/Markdown";
 import { MarkdownBrainEditor } from "@/components/MarkdownBrainEditor";
 import { ScopePicker } from "@/components/ScopeControls";
 import { StatusDot } from "@/components/StatusDot";
+import { WorkflowMemoryPanel } from "@/components/WorkflowMemoryPanel";
 import {
   StepCloudRuntimeControls,
   StepRuntimePicker,
@@ -117,6 +118,7 @@ export function WorkflowEditor({
   skillCatalog,
   eventProviders = NO_EVENT_PROVIDERS,
   owner,
+  memory,
 }: {
   workflow: WorkflowDetail;
   workspaceId: string;
@@ -125,6 +127,7 @@ export function WorkflowEditor({
   skillCatalog: SkillCatalogItem[];
   eventProviders?: WorkflowEventProviderOption[];
   owner: { name: string; avatarUrl: string | null };
+  memory: WorkflowMemoryDto;
 }) {
   const router = useRouter();
   const [draft, setDraft] = useState<WorkflowDraft>(() => workflowDraft(workflow));
@@ -407,6 +410,11 @@ export function WorkflowEditor({
           />
 
           <WorkflowRunHistory workflowSlug={workflow.slug} />
+
+          <section className="flex flex-col gap-3">
+            <SectionLabel>Advanced</SectionLabel>
+            <WorkflowMemoryPanel workflowId={workflow.id} memory={memory} canEdit={canEdit} />
+          </section>
         </div>
       </div>
     </main>

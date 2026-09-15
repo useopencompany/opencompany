@@ -26,7 +26,7 @@ const migrationPaths = [
   "drizzle/0222_goat_workflow_event_triggers.sql",
   "drizzle/0275_workflow_personal_company_scope.sql",
   "drizzle/0277_workflow_multiple_triggers.sql",
-  "drizzle/0290_workflow_slack_channel.sql",
+  "drizzle/0291_workflow_slack_channel.sql",
 ].map((migration) => path.join(repositoryRoot, migration));
 const dialect = new PgDialect();
 const now = new Date("2026-08-12T08:00:00.000Z");

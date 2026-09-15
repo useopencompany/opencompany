@@ -157,6 +157,19 @@ export type WorkflowPage = {
   nextCursor: string | null;
 };
 
+// A workflow's single markdown memory. `updatedAt` is null until a run writes one.
+export type WorkflowMemory = {
+  workflowId: string;
+  enabled: boolean;
+  content: string;
+  updatedAt: Date | null;
+};
+
+// Memory is injected into every run's system context, so its size is a context-window cost paid on
+// each run rather than storage the workflow can grow without bound. Writes above the cap are
+// rejected with the limit in the message so the model can re-summarize and retry.
+export const WORKFLOW_MEMORY_MAX_CHARACTERS = 20_000;
+
 export type TaskSchedule = {
   id: string;
   name: string;
@@ -305,6 +318,13 @@ export interface WorkflowRepository {
     taskId: string;
     occurredAt: Date;
   }): Promise<void>;
+  getWorkflowMemory(input: { actor: Actor; workflowId: string }): Promise<WorkflowMemory | null>;
+  setWorkflowMemoryEnabled(input: {
+    actor: Actor;
+    workflowId: string;
+    enabled: boolean;
+  }): Promise<WorkflowMemory | null>;
+  clearWorkflowMemory(input: { actor: Actor; workflowId: string }): Promise<WorkflowMemory | null>;
 }
 
 export interface TaskScheduleRepository {
@@ -707,6 +727,43 @@ export class WorkflowApplicationService {
       ...(event ? { event } : {}),
     });
     return workflowVersionResult(result);
+  }
+
+  async getWorkflowMemory(actor: Actor, workflowId: string): Promise<WorkflowMemory> {
+    requirePermission(actor, WORKFLOW_READ_PERMISSION, "Workflows");
+    const memory = await this.repository.getWorkflowMemory({
+      actor,
+      workflowId: resourceId(workflowId, "workflowId"),
+    });
+    if (!memory) throw new CoreError("not_found", "Workflow not found.");
+    return memory;
+  }
+
+  // Memory is deliberately not part of the versioned definition: toggling it takes effect on the
+  // next run without bumping the workflow version or re-planning its triggers.
+  async setWorkflowMemoryEnabled(
+    actor: Actor,
+    workflowId: string,
+    enabled: boolean,
+  ): Promise<WorkflowMemory> {
+    requirePermission(actor, WORKFLOW_WRITE_PERMISSION, "Workflows");
+    const memory = await this.repository.setWorkflowMemoryEnabled({
+      actor,
+      workflowId: resourceId(workflowId, "workflowId"),
+      enabled,
+    });
+    if (!memory) throw new CoreError("not_found", "Workflow not found.");
+    return memory;
+  }
+
+  async clearWorkflowMemory(actor: Actor, workflowId: string): Promise<WorkflowMemory> {
+    requirePermission(actor, WORKFLOW_WRITE_PERMISSION, "Workflows");
+    const memory = await this.repository.clearWorkflowMemory({
+      actor,
+      workflowId: resourceId(workflowId, "workflowId"),
+    });
+    if (!memory) throw new CoreError("not_found", "Workflow not found.");
+    return memory;
   }
 
   async archiveWorkflow(

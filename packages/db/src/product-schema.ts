@@ -382,7 +382,9 @@ export type TaskToolName =
   | "list_actions"
   | "describe_actions"
   | "use_action"
-  | "update_task_status";
+  | "update_task_status"
+  | "read_workflow_memory"
+  | "update_workflow_memory";
 
 export type TaskSkillId = "first-principles" | "yc-office-hours";
 
@@ -4016,6 +4018,32 @@ export const taskScheduleRuns = productSchema.table(
   }),
 );
 
+// A workflow's single markdown memory: one document per workflow, carried between runs.
+// Kept out of `workflows` on purpose — a run rewriting its memory must not bump the definition's
+// version or `updated_at`, which drive optimistic concurrency in the editor and list ordering.
+// `enabled` lives here too, so toggling memory takes effect on the next run without re-saving
+// (and re-planning) the workflow definition.
+export const workflowMemories = productSchema.table(
+  "workflow_memories",
+  {
+    workflowId: text("workflow_id")
+      .primaryKey()
+      .references(() => workflows.id, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    enabled: boolean("enabled").notNull().default(false),
+    content: text("content").notNull().default(""),
+    // Null until a run writes memory for the first time; the editor uses it to say "never written".
+    contentUpdatedAt: timestamp("content_updated_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceIdx: index("opencompany_workflow_memories_workspace_idx").on(table.workspaceId),
+  }),
+);
+
 export const workflowScheduleRuns = productSchema.table(
   "workflow_schedule_runs",
   {
@@ -7474,6 +7502,7 @@ export type BrowserProfileSession = typeof browserProfileSessions.$inferSelect;
 export type ChatSessionSkillBundle = typeof chatSessionSkillBundles.$inferSelect;
 export type ChatSessionPlugin = typeof chatSessionPlugins.$inferSelect;
 export type Workflow = typeof workflows.$inferSelect;
+export type WorkflowMemoryRow = typeof workflowMemories.$inferSelect;
 export type SkillBundle = typeof skillBundles.$inferSelect;
 export type SkillBundleFile = typeof skillBundleFiles.$inferSelect;
 export type SkillInstallation = typeof skillInstallations.$inferSelect;

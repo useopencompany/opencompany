@@ -211,6 +211,7 @@ import {
   UpdateWikiBodySchema,
   UpdateWikiPageBodySchema,
   UpdateWorkflowBodySchema,
+  UpdateWorkflowMemoryBodySchema,
   UpdateWorkspaceSkillBodySchema,
   UpsertWikiSourceBodySchema,
   UserPreferencesEnvelopeSchema,
@@ -227,6 +228,7 @@ import {
   WikiTimelineMutationEnvelopeSchema,
   WorkflowArchiveEnvelopeSchema,
   WorkflowEnvelopeSchema,
+  WorkflowMemoryEnvelopeSchema,
   WorkflowMutationEnvelopeSchema,
   WorkflowPageSchema,
   WorkflowUpdateEnvelopeSchema,
@@ -505,6 +507,57 @@ export const runWorkflowNowRoute = createRoute({
     202: {
       description: "Scheduled Workflow run-now accepted as a canonical Task and Run.",
       content: { "application/json": { schema: CreateTaskEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getWorkflowMemoryRoute = createRoute({
+  method: "get",
+  path: "/v1/workflows/{workflowId}/memory",
+  tags: ["Workflows"],
+  security: actorSecurity,
+  request: { params: z.object({ workflowId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "The Workflow's single markdown memory and whether memory is enabled.",
+      content: { "application/json": { schema: WorkflowMemoryEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const updateWorkflowMemoryRoute = createRoute({
+  method: "patch",
+  path: "/v1/workflows/{workflowId}/memory",
+  tags: ["Workflows"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ workflowId: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: UpdateWorkflowMemoryBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Workflow memory enabled or disabled. Stored content is left untouched.",
+      content: { "application/json": { schema: WorkflowMemoryEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const clearWorkflowMemoryRoute = createRoute({
+  method: "delete",
+  path: "/v1/workflows/{workflowId}/memory",
+  tags: ["Workflows"],
+  security: actorSecurity,
+  request: { params: z.object({ workflowId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Workflow memory content cleared. The enabled toggle is left untouched.",
+      content: { "application/json": { schema: WorkflowMemoryEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -4216,6 +4269,9 @@ export type V1RouteHandlers = {
   archiveWorkflow: RouteHandler<typeof archiveWorkflowRoute>;
   invokeWorkflow: RouteHandler<typeof invokeWorkflowRoute>;
   runWorkflowNow: RouteHandler<typeof runWorkflowNowRoute>;
+  getWorkflowMemory: RouteHandler<typeof getWorkflowMemoryRoute>;
+  updateWorkflowMemory: RouteHandler<typeof updateWorkflowMemoryRoute>;
+  clearWorkflowMemory: RouteHandler<typeof clearWorkflowMemoryRoute>;
   listTaskSchedules: RouteHandler<typeof listTaskSchedulesRoute>;
   createTaskSchedule: RouteHandler<typeof createTaskScheduleRoute>;
   getTaskSchedule: RouteHandler<typeof getTaskScheduleRoute>;
@@ -4453,6 +4509,9 @@ export function createV1Router(
       .openapi(archiveWorkflowRoute, handlers.archiveWorkflow)
       .openapi(invokeWorkflowRoute, handlers.invokeWorkflow)
       .openapi(runWorkflowNowRoute, handlers.runWorkflowNow)
+      .openapi(getWorkflowMemoryRoute, handlers.getWorkflowMemory)
+      .openapi(updateWorkflowMemoryRoute, handlers.updateWorkflowMemory)
+      .openapi(clearWorkflowMemoryRoute, handlers.clearWorkflowMemory)
       .openapi(listTaskSchedulesRoute, handlers.listTaskSchedules)
       .openapi(createTaskScheduleRoute, handlers.createTaskSchedule)
       .openapi(getTaskScheduleRoute, handlers.getTaskSchedule)
@@ -4772,6 +4831,12 @@ const placeholderWorkflow = {
   createdAt: placeholderTime,
   updatedAt: placeholderTime,
 };
+const placeholderWorkflowMemory = {
+  workflowId: "workflow_contract",
+  enabled: false,
+  content: "",
+  updatedAt: null,
+};
 const placeholderTaskSchedule = {
   id: "schedule_contract",
   name: "Contract schedule",
@@ -5083,6 +5148,9 @@ const contractDocumentHandlers: V1RouteHandlers = {
     ),
   invokeWorkflow: (c) => c.json(placeholderAutomationTaskEnvelope(), 202),
   runWorkflowNow: (c) => c.json(placeholderAutomationTaskEnvelope(), 202),
+  getWorkflowMemory: (c) => c.json({ data: placeholderWorkflowMemory, meta }, 200),
+  updateWorkflowMemory: (c) => c.json({ data: placeholderWorkflowMemory, meta }, 200),
+  clearWorkflowMemory: (c) => c.json({ data: placeholderWorkflowMemory, meta }, 200),
   listTaskSchedules: (c) => c.json({ data: [], nextCursor: null, meta }, 200),
   createTaskSchedule: (c) =>
     c.json(

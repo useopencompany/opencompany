@@ -82,7 +82,7 @@ runner. Application rollback can retain these tables and their queued data. Roll
 API also restores legacy bot ingress behavior, so disable Slack event delivery during rollback
 if that behavior is unwanted. Do not drop the tables while subscriptions or deliveries are active.
 
-Migrations `0290_workflow_slack_channel` and `0291_channel_delivery_bot_identity` are additive and
+Migrations `0291_workflow_slack_channel` and `0292_channel_delivery_bot_identity` are additive and
 default every existing row to today's behavior: the Slack channel on, and the default bot identity.
 An application rollback can leave both columns deployed.
 

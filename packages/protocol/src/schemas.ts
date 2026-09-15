@@ -2881,6 +2881,27 @@ export const UpdateWorkflowBodySchema = z
   .strict()
   .openapi("UpdateWorkflowBody");
 
+// The workflow's single markdown memory. `updatedAt` is null until a run writes one.
+export const WorkflowMemorySchema = z
+  .object({
+    workflowId: ResourceIdSchema,
+    enabled: z.boolean(),
+    content: z.string(),
+    updatedAt: TimestampSchema.nullable(),
+  })
+  .strict()
+  .openapi("WorkflowMemory");
+
+export const WorkflowMemoryEnvelopeSchema = z
+  .object({ data: WorkflowMemorySchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("WorkflowMemoryEnvelope");
+
+export const UpdateWorkflowMemoryBodySchema = z
+  .object({ enabled: z.boolean() })
+  .strict()
+  .openapi("UpdateWorkflowMemoryBody");
+
 export const ArchiveVersionBodySchema = z
   .object({ expectedVersion: z.number().int().min(1) })
   .strict()
@@ -4828,6 +4849,7 @@ export type TaskActivityReadModel = z.infer<typeof TaskActivityReadModelSchema>;
 export type WorkflowDto = z.infer<typeof WorkflowSchema>;
 export type WorkflowScope = z.infer<typeof WorkflowScopeSchema>;
 export type WorkflowSlackChannel = z.infer<typeof WorkflowSlackChannelSchema>;
+export type WorkflowMemoryDto = z.infer<typeof WorkflowMemorySchema>;
 export type WorkflowReadModel = z.infer<typeof WorkflowReadModelSchema>;
 export type WorkflowScheduleReadModel = z.infer<typeof WorkflowScheduleReadModelSchema>;
 export type TaskScheduleDto = z.infer<typeof TaskScheduleSchema>;

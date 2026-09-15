@@ -2,7 +2,7 @@ import type { SkillCatalogItemDto } from "@opencompany/protocol";
 import Link from "next/link";
 import { WorkflowEditor } from "@/components/WorkflowEditor";
 import { currentUser } from "@/lib/auth";
-import { getHeadlessWorkflow } from "@/lib/headless-automation-server";
+import { getHeadlessWorkflow, getHeadlessWorkflowMemory } from "@/lib/headless-automation-server";
 import { canManageWorkflowScope } from "@/lib/headless-automation-types";
 import { listHeadlessPlugins, listHeadlessSkillCatalog } from "@/lib/headless-knowledge-server";
 import { getPersonalAccounts } from "@/lib/integrations/personal-accounts";
@@ -16,8 +16,9 @@ type WorkflowEditorPageProps = {
 export default async function WorkflowEditorPage({ params }: WorkflowEditorPageProps) {
   const { slug } = await params;
   const context = await currentUser();
-  const [workflow, skillCatalog, personalAccounts, plugins, members] = await Promise.all([
+  const [workflow, memory, skillCatalog, personalAccounts, plugins, members] = await Promise.all([
     getHeadlessWorkflow(slug),
+    getHeadlessWorkflowMemory(slug),
     listHeadlessSkillCatalog(),
     getPersonalAccounts(),
     listHeadlessPlugins(),
@@ -75,6 +76,7 @@ export default async function WorkflowEditorPage({ params }: WorkflowEditorPageP
       skillCatalog={skillCatalog.filter((skill: SkillCatalogItemDto) => skill.scope !== "personal")}
       eventProviders={eventProviders}
       owner={{ name: owner.name, avatarUrl: owner.avatarUrl }}
+      memory={memory ?? { workflowId: workflow.id, enabled: false, content: "", updatedAt: null }}
     />
   );
 }

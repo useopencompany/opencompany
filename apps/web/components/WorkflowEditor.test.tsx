@@ -14,6 +14,18 @@ const workflowActionsMock = vi.hoisted(() => ({
   }),
   archive: vi.fn(async () => ({ workflowId: "workflow_1", version: 2 })),
   runNow: vi.fn(async () => ({ task: { displayId: "TASK-42" } })),
+  setMemoryEnabled: vi.fn(async (workflowId: string, enabled: boolean) => ({
+    workflowId,
+    enabled,
+    content: "",
+    updatedAt: null,
+  })),
+  clearMemory: vi.fn(async (workflowId: string) => ({
+    workflowId,
+    enabled: true,
+    content: "",
+    updatedAt: null,
+  })),
 }));
 
 vi.mock("next/navigation", () => ({ useRouter: () => routerMock }));
@@ -21,6 +33,8 @@ vi.mock("@/lib/headless-automation-commands", () => ({
   updateHeadlessWorkflow: workflowActionsMock.update,
   archiveHeadlessWorkflow: workflowActionsMock.archive,
   runHeadlessWorkflowNow: workflowActionsMock.runNow,
+  setHeadlessWorkflowMemoryEnabled: workflowActionsMock.setMemoryEnabled,
+  clearHeadlessWorkflowMemory: workflowActionsMock.clearMemory,
 }));
 // Run history reads the live Task collection through AppDataProvider, which this editor-only
 // render tree does not set up. Its own suite covers the section.
@@ -50,12 +64,16 @@ vi.mock("@/components/MarkdownBrainEditor", () => ({
 function WorkflowEditor(
   props: Omit<
     ComponentProps<typeof WorkflowEditorComponent>,
-    "workspaceId" | "owner" | "canManageScope"
-  > & { canManageScope?: boolean },
+    "workspaceId" | "owner" | "canManageScope" | "memory"
+  > & {
+    canManageScope?: boolean;
+    memory?: ComponentProps<typeof WorkflowEditorComponent>["memory"];
+  },
 ) {
   return (
     <WorkflowEditorComponent
       canManageScope
+      memory={{ workflowId: "workflow_1", enabled: false, content: "", updatedAt: null }}
       {...props}
       workspaceId="workspace_1"
       owner={{ name: "Louis Morgner", avatarUrl: null }}
@@ -334,6 +352,84 @@ describe("WorkflowEditor", () => {
       scopeKey: "workspace_1",
     });
     expect(routerMock.push).toHaveBeenCalledWith("/tasks/TASK-42");
+  });
+
+  it("keeps memory off by default and hides the stored note until it is switched on", async () => {
+    render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
+
+    expect(screen.getByText("Advanced")).toBeInTheDocument();
+    const toggle = screen.getByRole("switch", { name: "Turn on memory" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(screen.queryByRole("button", { name: "Clear" })).not.toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    await act(async () => Promise.resolve());
+
+    expect(workflowActionsMock.setMemoryEnabled).toHaveBeenCalledWith("workflow_1", true);
+    expect(screen.getByRole("switch", { name: "Turn off memory" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(screen.getByText("Nothing remembered yet.")).toBeInTheDocument();
+    // Enabling memory must not rewrite the workflow definition.
+    expect(workflowActionsMock.update).not.toHaveBeenCalled();
+  });
+
+  it("shows what the workflow remembers and clears it on request", async () => {
+    render(
+      <WorkflowEditor
+        workflow={workflow}
+        canEdit
+        skillCatalog={[]}
+        memory={{
+          workflowId: "workflow_1",
+          enabled: true,
+          content: "Pricing changed on 2026-09-01.",
+          updatedAt: "2026-09-01T10:00:00.000Z",
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Pricing changed on 2026-09-01.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+    await act(async () => Promise.resolve());
+
+    expect(workflowActionsMock.clearMemory).toHaveBeenCalledWith("workflow_1");
+    expect(screen.queryByText("Pricing changed on 2026-09-01.")).not.toBeInTheDocument();
+    expect(screen.getByText("Nothing remembered yet.")).toBeInTheDocument();
+  });
+
+  it("treats a whitespace-only stored note as nothing remembered", async () => {
+    render(
+      <WorkflowEditor
+        workflow={workflow}
+        canEdit
+        skillCatalog={[]}
+        memory={{
+          workflowId: "workflow_1",
+          enabled: true,
+          content: "   \n  ",
+          updatedAt: "2026-09-01T10:00:00.000Z",
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Nothing remembered yet.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Clear" })).not.toBeInTheDocument();
+  });
+
+  it("restores the previous memory state when a command fails", async () => {
+    workflowActionsMock.setMemoryEnabled.mockRejectedValueOnce(new Error("Workspace is offline."));
+    render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
+
+    fireEvent.click(screen.getByRole("switch", { name: "Turn on memory" }));
+    await act(async () => Promise.resolve());
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Workspace is offline.");
+    expect(screen.getByRole("switch", { name: "Turn on memory" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
   });
 
   it("offers safe workflow actions from the overflow menu", async () => {
