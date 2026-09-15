@@ -414,6 +414,7 @@ describe("durable Slack subscriptions", () => {
     "UPDATE goat.session_subscriptions SET status = 'closed'",
     "UPDATE goat.tasks SET archived_at = now()",
     "UPDATE goat.chat_sessions SET closed_at = now()",
+    "UPDATE goat.workflows SET slack_channel_enabled = false",
     "DELETE FROM goat.workspace_members WHERE user_workos_id = 'owner'",
   ])("closes unavailable work without creating a Run: %s", async (change) => {
     await pg.exec(change);

@@ -268,7 +268,8 @@ export const WorkflowScopeSchema = z.enum(["personal", "company"]).openapi("Work
 export const WorkflowSlackChannelSchema = z
   .object({
     enabled: z.boolean(),
-    displayName: z.string().max(80),
+    // Trimmed before measuring, so this matches the Core rule the API delegates to.
+    displayName: z.string().trim().max(80),
   })
   .strict()
   .openapi("WorkflowSlackChannel");

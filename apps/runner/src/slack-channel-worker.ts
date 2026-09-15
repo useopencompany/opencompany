@@ -87,7 +87,11 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
       SELECT event.id, event.subscription_id AS "subscriptionId", subscription.workspace_id AS "workspaceId",
         subscription.session_id AS "sessionId", task.id AS "taskId", task.user_workos_id AS "ownerId", event.payload, event.status, event.run_id AS "runId",
         (subscription.status = 'closed' OR subscription.expires_at <= now() OR task.archived_at IS NOT NULL
-          OR conversation.closed_at IS NOT NULL) AS closed,
+          OR conversation.closed_at IS NOT NULL
+          -- Turning Slack off retires the workflow's open threads too. Without this the reply
+          -- would start a run that has no way to answer, and the person waiting in Slack would
+          -- get the generic "needs attention" notice instead of a closed thread.
+          OR workflow.slack_channel_enabled IS FALSE) AS closed,
         run.status AS "runStatus",
         COALESCE(workflow.slack_bot_display_name, '') AS "botDisplayName",
         jsonb_build_object('id', integration.id, 'workspaceId', integration.workspace_id,
