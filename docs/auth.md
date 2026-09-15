@@ -28,6 +28,13 @@ values live in Infisical `prod` `/web` and must match the WorkOS dashboard exact
 
 ## Browser/API session boundary
 
+The macOS desktop shell opens Google sign-in in the system browser and receives
+a short-lived, PKCE-bound `opencompany://auth/callback` handoff. The browser does
+not receive the desktop session. If a user closes the browser or does not finish
+sign-in, the desktop sign-in card offers **Didn't finish? Try again** to restore
+the Google button and start a fresh handoff. This UI ships with the web app,
+independently of signed desktop releases.
+
 Production scopes the encrypted WorkOS session cookie to
 `WORKOS_COOKIE_DOMAIN=opencompany.chat` so both web and API hosts receive it. A same-origin web
 bootstrap migrates an existing host-only session before the first direct API request, and sign-out

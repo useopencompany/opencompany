@@ -2,9 +2,14 @@ import todesktop from "@todesktop/runtime";
 
 // Must run before anything else in the app lifecycle so the runtime can wire up
 // auto-update and crash reporting.
-todesktop.init();
+todesktop.init({
+  updateReadyAction: {
+    showInstallAndRestartPrompt: "whenInForeground",
+    showNotification: "whenInBackground",
+  },
+});
 
-import { app, type BrowserWindow, dialog, Menu } from "electron";
+import { app, type BrowserWindow, Menu } from "electron";
 import { handleAuthDeepLink, registerDesktopAuth } from "./auth";
 import { buildApplicationMenu } from "./menu";
 import { registerDesktopNavigation } from "./navigation";
@@ -65,26 +70,6 @@ if (!app.requestSingleInstanceLock()) {
     if (bufferedDeepLink) {
       handleAuthDeepLink(bufferedDeepLink, mainWindow);
       bufferedDeepLink = null;
-    }
-
-    // autoUpdater is only populated by todesktop.init() in a packaged build.
-    const autoUpdater = todesktop.autoUpdater;
-    if (autoUpdater) {
-      autoUpdater.on("update-downloaded", () => {
-        void dialog
-          .showMessageBox({
-            type: "info",
-            buttons: ["Restart", "Later"],
-            defaultId: 0,
-            cancelId: 1,
-            title: "Update ready",
-            message: "A new version of opencompany is ready.",
-            detail: "Restart to install the latest version.",
-          })
-          .then(({ response }) => {
-            if (response === 0) autoUpdater.restartAndInstall();
-          });
-      });
     }
 
     app.on("activate", () => {

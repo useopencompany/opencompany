@@ -1,6 +1,6 @@
 {
   "name": "@opencompany/desktop",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "private": true,
   "description": "Thin Electron shell that wraps the production opencompany web app for macOS.",
   "homepage": "https://opencompany.ai",
@@ -13,7 +13,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "lint": "biome check src scripts",
-    "release": "bun run build:src && todesktop build"
+    "build:desktop": "bun run build:src && todesktop build",
+    "release": "bun run build:desktop"
   },
   "dependencies": {
     "@todesktop/runtime": "2.1.4"
