@@ -516,6 +516,7 @@ export const IntegrationAccountReadModelSchema = z
       "supabase",
       "resend",
       "x_account",
+      "custom_mcp",
     ]),
     workspaceId: z.string().min(1).max(128).nullable(),
     externalId: z.string().max(1_024),
