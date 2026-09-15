@@ -248,6 +248,10 @@ services:
         sync: false
       - key: OPENCOMPANY_OTEL_EXPORTER_OTLP_HEADERS
         sync: false
+      # Sentry-compatible Better Stack DSN. Without it API exceptions only reach
+      # platform logs, so the release preflight requires it.
+      - key: BETTER_STACK_ERRORS_DSN
+        sync: false
       - key: OBSERVABILITY_ENABLED
         sync: false
       - key: OBSERVABILITY_ENV

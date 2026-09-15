@@ -456,6 +456,81 @@ describe("task-turn SQL against real Postgres", () => {
     ]);
   });
 
+  it("keeps a Task running when the user's message is still queued behind the settled turn", async () => {
+    await seed({ taskStatus: "running", taskStage: "running", taskAttempts: 1 });
+    // A message the user sent while the turn worked. It is a Run of its own, waiting behind it.
+    await pg.exec(`
+      INSERT INTO goat.chat_messages (id, session_id, role, content)
+      VALUES
+        ('user_message_2', 'chat_task_1', 'user', 'Also mention the pricing change.'),
+        ('assistant_message_2', 'chat_task_1', 'assistant', '');
+      INSERT INTO goat.codex_chat_turns (
+        id, user_workos_id, codex_chat_session_id, chat_session_id, user_message_id,
+        assistant_message_id, status, prompt, attempts
+      )
+      VALUES (
+        'turn_2', 'user_1', 'runtime_1', 'chat_task_1', 'user_message_2',
+        'assistant_message_2', 'queued', 'Also mention the pricing change.', 0
+      );
+    `);
+    const spec = harnessSpec();
+
+    await expect(
+      settleDurableTurn({
+        target: {
+          userWorkosId: "user_1",
+          workspaceId: null,
+          codexChatSessionId: "runtime_1",
+          chatSessionId: "chat_task_1",
+          turnId: "turn_1",
+          leaseId: "lease_1",
+          leaseOwner: "runner_1",
+        },
+        turnStatus: "completed",
+        sessionStatus: "idle",
+        error: null,
+        completedAt: NOW,
+        taskCompletion: {
+          taskId: "task_1",
+          taskDisplayId: "TASK-1",
+          taskName: "Ship the change",
+          harnessSpec: spec,
+          result: "Shipped the change.",
+          disposition: null,
+          reportedOutcome: null,
+          outcomeComment: null,
+          nextTurn: null,
+        },
+      }),
+    ).resolves.toBeUndefined();
+
+    // The turn is done, the Task is not: it must not report an outcome or notify while the user's
+    // message is still waiting to run.
+    const task = await pg.query<{
+      status: string;
+      stage: string;
+      result: string | null;
+      reported_outcome: string | null;
+    }>("SELECT status, stage, result, reported_outcome FROM goat.tasks WHERE id = 'task_1'");
+    expect(task.rows[0]).toEqual({
+      status: "running",
+      stage: "queued",
+      result: null,
+      reported_outcome: null,
+    });
+    const runtime = await pg.query<{ status: string; active_turn_id: string | null }>(
+      "SELECT status, active_turn_id FROM goat.codex_chat_sessions WHERE id = 'runtime_1'",
+    );
+    expect(runtime.rows[0]).toEqual({ status: "queued", active_turn_id: "turn_2" });
+    expect(
+      (
+        await pg.query<{ status: string }>(
+          "SELECT status FROM goat.codex_chat_turns WHERE id = 'turn_1'",
+        )
+      ).rows[0],
+    ).toEqual({ status: "completed" });
+  });
+
   it("queues a retry turn with the retry activity when the orchestrator asks for one", async () => {
     await seed({ taskStatus: "running", taskStage: "running", taskAttempts: 1 });
     const spec = harnessSpec();
