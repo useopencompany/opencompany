@@ -911,6 +911,15 @@ describe("Postgres Task repository", () => {
     ).rejects.toMatchObject({ code: "idempotency_conflict" });
     // A Task that is already working takes the message as a queued Run behind the live one, the
     // same way a Chat does. The Task is not reopened and keeps the turn it is running.
+    // Bind the Session to a non-default backend: a queued Run that does not copy it is invisible
+    // to the claim, so the message would sit forever.
+    await database.query(
+      `UPDATE goat.codex_chat_sessions
+       SET execution_backend = 'sandbox_supervisor', execution_backend_version = 3,
+           supervisor_template_version = 'tpl_1'
+       WHERE chat_session_id = $1`,
+      [created.task.conversationId],
+    );
     const queued = await service.createComment(actor(), created.task.id, {
       id: "task_comment_2",
       body: "A second message while the run works.",
@@ -920,6 +929,7 @@ describe("Postgres Task repository", () => {
         `SELECT task.status, task.stage, task.attempts,
                 runtime.status AS runtime_status, runtime.active_turn_id,
                 run.status AS run_status, run.prompt AS run_prompt,
+                run.execution_backend, run.execution_backend_version,
                 (SELECT COUNT(*)::int FROM goat.task_activities
                   WHERE task_id = task.id AND kind = 'status_changed') AS status_activities
          FROM goat.tasks AS task
@@ -938,6 +948,8 @@ describe("Postgres Task repository", () => {
           active_turn_id: resumed.runId,
           run_status: "queued",
           run_prompt: "A second message while the run works.",
+          execution_backend: "sandbox_supervisor",
+          execution_backend_version: 3,
           status_activities: 1,
         },
       ],

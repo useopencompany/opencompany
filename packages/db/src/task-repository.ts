@@ -840,7 +840,11 @@ export class PostgresTaskRepository implements TaskRepository {
           conversation.engine,
           runtime.id AS runtime_id,
           runtime.model AS runtime_model,
-          runtime.status AS runtime_status
+          runtime.status AS runtime_status,
+          -- A Run copies its execution binding from the Session it will run on, whether it is
+          -- reopening the Task or queueing behind a turn that is already working.
+          runtime.execution_backend,
+          runtime.execution_backend_version
         FROM goat.tasks AS task
         JOIN goat.chat_sessions AS conversation
           ON conversation.id = task.session_id
@@ -973,8 +977,7 @@ export class PostgresTaskRepository implements TaskRepository {
           AND EXISTS (
             SELECT 1 FROM resumed_task_activity AS activity WHERE activity.task_id = task.id
           )
-        RETURNING runtime.id, runtime.chat_session_id,
-          runtime.execution_backend, runtime.execution_backend_version
+        RETURNING runtime.id, runtime.chat_session_id
       ),
       claimed_attachments AS MATERIALIZED (
         UPDATE goat.chat_attachment_uploads AS upload
@@ -1053,7 +1056,7 @@ export class PostgresTaskRepository implements TaskRepository {
             'goalMode', task.harness_spec #> '{codex,goalMode}',
             'taskResultMode', 'assistant_final'
           )),
-          runtime.execution_backend, runtime.execution_backend_version, 1, ${now}, ${now}
+          task.execution_backend, task.execution_backend_version, 1, ${now}, ${now}
         FROM eligible AS task
         JOIN inserted_user_message AS user_message ON user_message.id = ${messageId}
         JOIN inserted_assistant_message AS assistant_message
