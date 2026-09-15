@@ -62,6 +62,7 @@ const SCHEMA = `
     session_id text,
     status text NOT NULL DEFAULT 'queued',
     stage text NOT NULL DEFAULT 'queued',
+    result text,
     error text,
     updated_at timestamptz NOT NULL DEFAULT now()
   );
@@ -243,27 +244,29 @@ describe("durable worker claims and settlement against real Postgres", () => {
     ).toBeNull();
   });
 
-  it("claims an approved continuation left waiting by an older API, without waking other waiting or archived tasks", async () => {
+  it("resumes a settled Task holding a queued Run, but never an archived or canceled one", async () => {
     await prepareClaimSchema();
     await pg.exec(`
-      UPDATE goat.tasks SET status='waiting';
+      UPDATE goat.tasks SET status='succeeded', stage='completed', result='Done.';
       UPDATE goat.codex_chat_turns SET status='queued';
     `);
     const claim = () => claimNextCodexChatTurn({ leaseOwner: "new_worker", leaseTtlMs: 60_000 });
+    await pg.exec("UPDATE goat.tasks SET archived_at=now()");
     expect(await claim()).toBeNull();
-    await pg.exec(
-      `UPDATE goat.codex_chat_turns SET settings='{"approvalContinuation":true}'; UPDATE goat.tasks SET archived_at=now();`,
-    );
+    await pg.exec("UPDATE goat.tasks SET archived_at=NULL, status='canceled', stage='canceled'");
     expect(await claim()).toBeNull();
-    await pg.exec("UPDATE goat.tasks SET archived_at=NULL");
+    // A Run left queued behind a Task that has already settled is a message the user sent while it
+    // worked, or an approval continuation. Either way the claim resumes the Task rather than
+    // stranding the Run.
+    await pg.exec("UPDATE goat.tasks SET status='waiting', stage='completed'");
     expect(await claim()).toMatchObject({
       id: "turn_1",
       status: "running",
       leaseOwner: "new_worker",
     });
-    expect((await pg.query("SELECT status,stage FROM goat.tasks WHERE id='task_1'")).rows).toEqual([
-      { status: "queued", stage: "queued" },
-    ]);
+    expect(
+      (await pg.query("SELECT status,stage,result FROM goat.tasks WHERE id='task_1'")).rows,
+    ).toEqual([{ status: "queued", stage: "queued", result: null }]);
   });
 
   it("fails the turn, attempt, runtime, and task in one statement", async () => {
