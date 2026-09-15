@@ -364,7 +364,8 @@ export async function runProductChatTurn(input: {
     const messages = context.messages;
     // Steering rides alongside the turn that is already producing work. The product agent has no
     // adapter session to inject into, so a promoted message joins the next model step's message
-    // list instead; a step that is mid-tool-call finishes first.
+    // list instead; a step that is mid-tool-call finishes first. Polling once per step costs less
+    // than the ACP path's one-second timer and, like it, can never fail the turn it rides on.
     const steeringTrace = createSteeringTraceChannel();
     const steering = createProductSteeringChannel({
       runId: turn.id,

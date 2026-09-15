@@ -1825,7 +1825,8 @@ describe("Surface chat streaming UI", () => {
 
     expect(taskCommandMocks.cancel).toHaveBeenCalledWith("run_1");
     await waitFor(() => expect(chatMock.stop).toHaveBeenCalledTimes(1));
-    expect(screen.getByRole("button", { name: "Interrupt this task" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Stopping this task" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Interrupt this task" })).not.toBeInTheDocument();
 
     rerender(
       <Surface
@@ -1860,7 +1861,7 @@ describe("Surface chat streaming UI", () => {
     );
 
     await waitFor(() =>
-      expect(screen.queryByRole("button", { name: "Interrupt this task" })).not.toBeInTheDocument(),
+      expect(screen.queryByRole("button", { name: /this task/ })).not.toBeInTheDocument(),
     );
     expect(screen.getByRole("button", { name: "Send message" })).toBeInTheDocument();
   });

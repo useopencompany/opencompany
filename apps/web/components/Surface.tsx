@@ -900,9 +900,10 @@ export function Surface({
   // A running turn gates nothing: the message becomes a queued turn the user can steer into the
   // live one. A Task is a session like any other here -- viewing one shows the work, not a form to
   // leave a note on. Background sends keep their own dispatch rules.
+  const queuesRuns = Boolean(activeTaskConversation) || (isEngineChat && !activeTaskConversation);
   const canQueueWhileWorking = Boolean(
-    ((isEngineChat && persistedChatSessionId && !activeTaskConversation) ||
-      activeTaskConversation) &&
+    (activeTaskConversation || persistedChatSessionId) &&
+      queuesRuns &&
       !backgroundChatDirective &&
       !queuedMessageSubmitting &&
       !taskCommentSubmitting &&
@@ -1070,7 +1071,6 @@ export function Surface({
   // that actually happened. The card offers mutations and so follows the composer's read-only
   // rule; the transcript filter does not, because a Run that never executed has nothing to show a
   // read-only viewer either.
-  const queuesRuns = isEngineChat || Boolean(activeTaskConversation);
   const queuedMessages = useMemo(
     () =>
       queuesRuns && !readOnly
@@ -3463,7 +3463,7 @@ export function Surface({
                     isTaskConversationWorking || isTaskConversationStopping ? (
                       <EngineStopButton
                         label="this task"
-                        disabled={isTaskConversationStopping}
+                        stopping={isTaskConversationStopping}
                         onStop={stopGeneration}
                       />
                     ) : null
@@ -3500,7 +3500,6 @@ export function Surface({
                         ? false
                         : !isEngineChat && isForegroundTurnWorking
                     }
-                    isStopping={false}
                     startsTask={selectedAdHocTask || Boolean(selectedWorkflowMention)}
                     onStop={stopGeneration}
                   />
@@ -6504,30 +6503,14 @@ function modelProviderLabel(id: string) {
 function SubmitButton({
   disabled,
   isGenerating,
-  isStopping = false,
   startsTask = false,
   onStop,
 }: {
   disabled: boolean;
   isGenerating: boolean;
-  isStopping?: boolean;
   startsTask?: boolean;
   onStop: () => void;
 }) {
-  if (isStopping) {
-    return (
-      <button
-        type="button"
-        aria-label="Stopping task"
-        title="Stopping task"
-        disabled
-        className="mb-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-ink text-canvas opacity-60"
-      >
-        <LoaderCircle size={13} strokeWidth={2.2} className="animate-spin" />
-      </button>
-    );
-  }
-
   if (isGenerating) {
     return (
       <button
@@ -6559,25 +6542,32 @@ function SubmitButton({
   );
 }
 
+// Sits beside the composer so Send stays free to queue a message into the turn that is still
+// working. `stopping` covers the gap between asking to interrupt and the runner settling it.
 function EngineStopButton({
   label,
-  disabled = false,
+  stopping = false,
   onStop,
 }: {
   label: string;
-  disabled?: boolean;
+  stopping?: boolean;
   onStop: () => void;
 }) {
+  const action = stopping ? `Stopping ${label}` : `Interrupt ${label}`;
   return (
     <button
       type="button"
-      aria-label={`Interrupt ${label}`}
-      title={`Interrupt ${label}`}
-      disabled={disabled}
+      aria-label={action}
+      title={action}
+      disabled={stopping}
       onClick={onStop}
       className="mb-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-ink-muted transition-colors duration-150 hover:border-danger-border hover:bg-danger-bg hover:text-danger focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
     >
-      <Square size={11} strokeWidth={2.2} fill="currentColor" />
+      {stopping ? (
+        <LoaderCircle size={12} strokeWidth={2.2} className="animate-spin" />
+      ) : (
+        <Square size={11} strokeWidth={2.2} fill="currentColor" />
+      )}
     </button>
   );
 }

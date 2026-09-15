@@ -81,6 +81,31 @@ describe("createProductSteeringChannel", () => {
     ]);
   });
 
+  it("keeps the running turn alive when the steering poll fails", async () => {
+    // The turn this rides on has already produced work. A failed poll leaves the promotion queued,
+    // so the message runs as the next turn instead of taking the turn down with it.
+    const load = vi.fn().mockRejectedValue(new Error("connection terminated"));
+    const channel = createProductSteeringChannel({
+      ...lease,
+      load,
+      settle: vi.fn(),
+      onSteered: () => {},
+    });
+
+    await expect(channel.take()).resolves.toEqual([]);
+  });
+
+  it("keeps messages it already took when a later settlement fails", async () => {
+    const load = vi.fn().mockResolvedValue([message("turn_a"), message("turn_b")]);
+    const settle = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("lease lost"));
+    const channel = createProductSteeringChannel({ ...lease, load, settle, onSteered: () => {} });
+
+    expect(await channel.take()).toEqual(["steer turn_a"]);
+  });
+
   it("ignores a promoted message with nothing in it", async () => {
     const load = vi
       .fn()

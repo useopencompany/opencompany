@@ -179,30 +179,43 @@ export function createProductSteeringChannel(input: {
   // injection cannot hand the same message to the model twice.
   const taken = new Set<string>();
   return {
+    // Steering rides alongside a turn that is already producing work, so nothing on this leg may
+    // fail it: a poll or settlement that throws leaves the promotion queued, which is what the
+    // design already promises -- the message runs as the next turn instead of being lost.
     async take(): Promise<string[]> {
       const texts: string[] = [];
-      for (const message of await load(input)) {
-        if (taken.has(message.id)) continue;
-        const text = message.prompt
-          .flatMap((block) => (block.type === "text" ? [block.text] : []))
-          .join("\n");
-        if (!text.trim()) continue;
-        taken.add(message.id);
-        await settle({
-          steeredRunId: message.id,
-          runId: input.runId,
-          leaseId: input.leaseId,
-          leaseOwner: input.leaseOwner,
-          eventId: `run_event_${randomUUID()}`,
-        });
-        input.onSteered({ id: message.id, text });
-        texts.push(text);
-        logger.info("Steered a running opencompany turn", {
+      try {
+        for (const message of await load(input)) {
+          if (taken.has(message.id)) continue;
+          const text = message.prompt
+            .flatMap((block) => (block.type === "text" ? [block.text] : []))
+            .join("\n");
+          if (!text.trim()) continue;
+          taken.add(message.id);
+          await settle({
+            steeredRunId: message.id,
+            runId: input.runId,
+            leaseId: input.leaseId,
+            leaseOwner: input.leaseOwner,
+            eventId: `run_event_${randomUUID()}`,
+          });
+          input.onSteered({ id: message.id, text });
+          texts.push(text);
+          logger.info("Steered a running opencompany turn", {
+            event: "opencompany.coding_chat_steering_outcome",
+            engine: "opencompany",
+            run_id: input.runId,
+            steered_run_id: message.id,
+            outcome: "injected",
+          });
+        }
+      } catch (error) {
+        logger.warn("Steering an opencompany turn failed; leaving the message queued", {
           event: "opencompany.coding_chat_steering_outcome",
           engine: "opencompany",
           run_id: input.runId,
-          steered_run_id: message.id,
-          outcome: "injected",
+          outcome: "failed",
+          error: error instanceof Error ? error.message : String(error),
         });
       }
       return texts;
