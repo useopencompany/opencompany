@@ -333,6 +333,7 @@ export type PersonalAccountProvider =
   | "stripe"
   | "supabase"
   | "resend"
+  | "todoist"
   | "x_account";
 
 export type IntegrationState = {
@@ -433,6 +434,7 @@ export function personalAccountsFromRows(
     stripe: [],
     supabase: [],
     resend: [],
+    todoist: [],
     x_account: [],
   };
   for (const row of rows) {
@@ -506,6 +508,7 @@ export function personalAccountsFromRows(
       row.provider === "notion" ||
       row.provider === "supabase" ||
       row.provider === "resend" ||
+      row.provider === "todoist" ||
       row.provider === "x_account"
     ) {
       personalAccounts[row.provider].push(accountViewFromRow(row.provider, row));

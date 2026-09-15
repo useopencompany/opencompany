@@ -40,6 +40,7 @@ export function integrationConnectionError(provider: string | null, reason: stri
     case "posthog_denied":
     case "neon_denied":
     case "supabase_denied":
+    case "todoist_denied":
     case "resend_denied":
     case "betterstack_denied":
     case "fathom_denied":
@@ -102,6 +103,8 @@ function providerName(provider: string | null) {
       return "PostHog";
     case "supabase":
       return "Supabase";
+    case "todoist":
+      return "Todoist";
     case "resend":
       return "Resend";
     case "neon":

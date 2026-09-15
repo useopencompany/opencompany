@@ -35,6 +35,7 @@ import {
   SlackIcon,
   StripeIcon,
   SupabaseIcon,
+  TodoistIcon,
   VercelIcon,
   XIcon,
 } from "@opencompany/ui/icons";
@@ -256,6 +257,11 @@ export const OFFICIAL_MCP_PLUGINS = {
     ...OFFICIAL_MCP_PLUGIN_METADATA.supabase,
     Icon: SupabaseIcon,
     iconClassName: "bg-[#003D2B] text-[#3ECF8E]",
+  },
+  todoist: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.todoist,
+    Icon: TodoistIcon,
+    iconClassName: "bg-[#E44332] text-white",
   },
   resend: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.resend,

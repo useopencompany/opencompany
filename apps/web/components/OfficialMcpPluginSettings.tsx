@@ -473,6 +473,25 @@ export function SupabasePluginDetail({
   );
 }
 
+export function TodoistPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.todoist}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
 export function ResendPluginDetail({
   pluginState,
   canEdit,

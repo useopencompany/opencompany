@@ -181,6 +181,34 @@ export const PROVIDER_CAPABILITIES: Partial<
       defaultMode: "off",
     },
   ],
+  todoist: [
+    {
+      id: "read",
+      label: "Read tasks and projects",
+      description: "Search and read tasks, projects, sections, comments, reminders, and labels.",
+      defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Read activity history, analytics, and attachments",
+      description:
+        "Read activity history, productivity and workspace analytics, collaborator identities, and attachment contents.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Create and change Todoist items",
+      description:
+        "Add, edit, complete, reschedule, reorder, and assign tasks, projects, comments, reminders, labels, and filters.",
+      defaultMode: "ask",
+    },
+    {
+      id: "draft",
+      label: "Permanently delete Todoist items",
+      description: "Delete tasks, projects, sections, comments, labels, and filters for good.",
+      defaultMode: "off",
+    },
+  ],
   supabase: [
     {
       id: "read",

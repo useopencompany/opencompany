@@ -18,6 +18,7 @@ export type OfficialMcpPluginName =
   | "neon"
   | "notion"
   | "supabase"
+  | "todoist"
   | "resend"
   | "posthog"
   | "convex"
@@ -75,6 +76,7 @@ export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
     | "neon"
     | "notion"
     | "supabase"
+    | "todoist"
     | "resend"
     | "posthog"
     | "convex"
@@ -330,6 +332,18 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectionProvider: "notion",
     connectHref: "/api/integrations/notion/start?returnTo=/plugins/notion",
     accountDescription: "The Notion account opencompany uses when you work with workspace content.",
+  },
+  todoist: {
+    name: "todoist",
+    kind: "mcp",
+    label: "Todoist",
+    description: "Read tasks, projects, and comments, and make approved changes to your Todoist.",
+    category: "productivity",
+    source: OFFICIAL_PLUGIN_SOURCES["todoist"],
+    connectionProvider: "todoist",
+    connectHref: "/api/integrations/todoist/start?returnTo=/plugins/todoist",
+    accountDescription:
+      "The Todoist account opencompany uses when you work with your tasks. Changes and deletions need your approval.",
   },
   supabase: {
     name: "supabase",
