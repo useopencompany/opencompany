@@ -11,6 +11,9 @@ import type { HarnessNormalizedEvent } from "./harness-events";
 // engine persists the same normalized assistant-turn shape (reasoning parts,
 // codex_command tool parts, text parts) in chat_messages.debug_trace.uiMessageParts.
 
+// Steering renders as an AI SDK data part so it survives the persisted-transcript parser, which
+// drops any part shape the Chat UI message type does not declare.
+export const CHAT_STEERING_DATA_PART_TYPE = "data-steering" as const;
 export const CODEX_COMMAND_TOOL_NAME = "codex_command";
 export const CODEX_COMMAND_TOOL_PART_TYPE = `tool-${CODEX_COMMAND_TOOL_NAME}` as const;
 export const CODEX_COMMAND_OUTPUT_PREVIEW_LIMIT = 4_000;
@@ -34,6 +37,13 @@ export type CodexCommandToolOutput = {
 
 export type CodexUiTextPart = { type: "text"; text: string; itemId?: string };
 export type CodexUiReasoningPart = { type: "reasoning"; text: string; state: "done" };
+// A user message injected into this turn while it was already running (ACP steering). It renders
+// inline at the point the engine received it, so the transcript shows what the turn was told and
+// when, rather than attributing the redirection to nothing.
+export type CodexUiSteeringPart = {
+  type: typeof CHAT_STEERING_DATA_PART_TYPE;
+  data: { text: string; itemId?: string };
+};
 export type CodexUiArtifactPart = {
   type: typeof CHAT_ARTIFACT_DATA_PART_TYPE;
   data: PublishedChatArtifact;
@@ -97,6 +107,7 @@ export type CodexUiSubagentPart = {
 export type CodexUiMessagePart =
   | CodexUiTextPart
   | CodexUiReasoningPart
+  | CodexUiSteeringPart
   | CodexUiArtifactPart
   | CodexUiCommandPart
   | CodexUiStatusPart
@@ -171,6 +182,23 @@ export function applyCodexEventToUiMessageParts(
       const text = readString(event.payload.text);
       if (!text?.trim()) return unchanged(parts);
       return changed([...parts, { type: "reasoning", text, state: "done" }]);
+    }
+    case "steering.delivered": {
+      const text = readString(event.payload.text);
+      if (!text?.trim()) return unchanged(parts);
+      const itemId = readString(event.payload.itemId);
+      if (
+        itemId &&
+        parts.some(
+          (part) => part.type === CHAT_STEERING_DATA_PART_TYPE && part.data.itemId === itemId,
+        )
+      ) {
+        return unchanged(parts);
+      }
+      return changed([
+        ...parts,
+        { type: CHAT_STEERING_DATA_PART_TYPE, data: { text, ...(itemId ? { itemId } : {}) } },
+      ]);
     }
     case "command.started": {
       const toolCallId = commandToolCallId(event, parts);
@@ -452,6 +480,20 @@ export function parseCodexUiMessageParts(value: unknown): CodexUiMessagePart[] {
     }
     if (part.type === "reasoning" && typeof part.text === "string") {
       parts.push({ type: "reasoning", text: part.text, state: "done" });
+      continue;
+    }
+    if (part.type === CHAT_STEERING_DATA_PART_TYPE) {
+      const data = isRecord(part.data) ? part.data : {};
+      const text = readString(data.text);
+      if (text) {
+        parts.push({
+          type: CHAT_STEERING_DATA_PART_TYPE,
+          data: {
+            text,
+            ...(typeof data.itemId === "string" ? { itemId: data.itemId } : {}),
+          },
+        });
+      }
       continue;
     }
     if (part.type === CHAT_ARTIFACT_DATA_PART_TYPE) {

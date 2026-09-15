@@ -86,6 +86,20 @@ export function createAcpEventNormalizer(
       ];
     }
 
+    // Synthesised by the runner once the steering extension confirms the message joined the live
+    // turn. The adapters echo steered input as `user_message_chunk`, which opencompany does not
+    // project, so this is the only record of what the user injected mid-turn.
+    if (method === "session/steering_delivered") {
+      const text = readString(params.text);
+      if (!text) return [];
+      return [
+        normalized("steering.delivered", raw, {
+          itemId: readString(params.steeringMessageId) ?? `acp-steering-${attemptScopeId}`,
+          text,
+        }),
+      ];
+    }
+
     if (method === "session/request_permission") {
       const toolCall = readRecord(params.toolCall) ?? {};
       const toolCallId = readString(toolCall.toolCallId) ?? "acp-permission";

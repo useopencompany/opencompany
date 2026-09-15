@@ -3,7 +3,11 @@ import { PROTOCOL_VERSION, PROTOCOL_VERSION_HEADER } from "@opencompany/protocol
 import { readUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { awaitHeadlessChatTransaction } from "./headless-chat-collections";
-import { HeadlessChatTransport, startHeadlessBackgroundChat } from "./headless-chat-transport";
+import {
+  enqueueHeadlessChatMessage,
+  HeadlessChatTransport,
+  startHeadlessBackgroundChat,
+} from "./headless-chat-transport";
 
 vi.mock("./headless-chat-collections", () => ({
   awaitHeadlessChatTransaction: vi.fn(async () => undefined),
@@ -761,6 +765,60 @@ describe("canonical Chat transport", () => {
     ]);
     expect(chunks.at(-1)).toEqual(
       expect.objectContaining({ type: "finish", finishReason: "stop" }),
+    );
+  });
+
+  it("enqueues behind the foreground stream without replacing its reconnect checkpoint", async () => {
+    let createBody: Record<string, unknown> | null = null;
+    let idempotency = "";
+    const paths: string[] = [];
+    const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      const url = requestUrl(input);
+      paths.push(url.pathname);
+      createBody = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null;
+      idempotency = new Headers(init?.headers).get("idempotency-key") ?? "";
+      return Response.json(
+        {
+          data: {
+            conversationId: "conversation_active",
+            messageId: "message_queued",
+            assistantMessageId: "message_assistant_queued",
+            runId: "run_queued",
+            transactionId: "44",
+            replayed: false,
+          },
+          meta: { apiVersion: "v1", protocolVersion: "1.0.0" },
+        },
+        { status: 202 },
+      );
+    });
+
+    await expect(
+      enqueueHeadlessChatMessage(
+        {
+          content: "Also update the changelog.",
+          conversationId: "conversation_active",
+          clientMessageId: "message_queued",
+          model: "gpt-5.5-codex",
+          engine: { type: "codex", schemaVersion: 1, permissionMode: "default" },
+        },
+        { baseUrl: "https://app.example.test", fetch: fetchMock as typeof fetch },
+      ),
+    ).resolves.toMatchObject({ runId: "run_queued" });
+
+    expect(paths).toEqual(["/v1/messages"]);
+    expect(createBody).toMatchObject({
+      conversationId: "conversation_active",
+      clientMessageId: "message_queued",
+      content: "Also update the changelog.",
+    });
+    expect(idempotency).toBe("web-message:message_queued");
+    expect(sessionStorage.length).toBe(0);
+    await vi.waitFor(() =>
+      expect(awaitHeadlessChatTransaction).toHaveBeenCalledWith({
+        conversationId: "conversation_active",
+        transactionId: "44",
+      }),
     );
   });
 

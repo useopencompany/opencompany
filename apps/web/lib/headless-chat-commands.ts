@@ -62,6 +62,15 @@ export async function cancelHeadlessChatRun(
   return (await response.json()).data;
 }
 
+export async function steerHeadlessChatRun(
+  runId: string,
+  options: { baseUrl?: string; fetch?: typeof globalThis.fetch } = {},
+) {
+  const response = await clientFor(options).v1.runs[":runId"].steer.$post({ param: { runId } });
+  if (!response.ok) throw await responseError(response);
+  return (await response.json()).data;
+}
+
 export async function getEngineRuntimeStatus(
   conversationId: string,
   options: { baseUrl?: string; fetch?: typeof globalThis.fetch } = {},

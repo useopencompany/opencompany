@@ -125,6 +125,16 @@ const knowledgeCommandMocks = vi.hoisted(() => ({
 }));
 
 const headlessChatMocks = vi.hoisted(() => ({
+  enqueue: vi.fn(
+    async (input: { conversationId: string; content: string; clientMessageId: string }) => ({
+      conversationId: input.conversationId,
+      messageId: input.clientMessageId,
+      assistantMessageId: "message_assistant_queued",
+      runId: "run_queued",
+      transactionId: "42",
+      replayed: false,
+    }),
+  ),
   startBackground: vi.fn(
     async (input: {
       content: string;
@@ -142,6 +152,7 @@ const headlessChatMocks = vi.hoisted(() => ({
 
 const headlessChatCommandMocks = vi.hoisted(() => ({
   cancel: vi.fn(async () => ({})),
+  steer: vi.fn(async () => ({ runId: "run_queued", targetRunId: "run_active" })),
   getRuntimeStatus: vi.fn(async () => null),
   resolveQuestions: vi.fn(async () => ({})),
   updateConversation: vi.fn(async () => ({ transactionId: "1" })),
@@ -167,6 +178,7 @@ vi.mock("@/lib/chat-actions", () => ({
 
 vi.mock("@/lib/headless-chat-commands", () => ({
   cancelHeadlessChatRun: headlessChatCommandMocks.cancel,
+  steerHeadlessChatRun: headlessChatCommandMocks.steer,
   getEngineRuntimeStatus: headlessChatCommandMocks.getRuntimeStatus,
   resolveEngineQuestions: headlessChatCommandMocks.resolveQuestions,
   updateHeadlessChatConversation: headlessChatCommandMocks.updateConversation,
@@ -183,6 +195,7 @@ vi.mock("@/lib/headless-chat-attachment-upload", () => ({
 
 vi.mock("@/lib/headless-chat-transport", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/headless-chat-transport")>()),
+  enqueueHeadlessChatMessage: headlessChatMocks.enqueue,
   startHeadlessBackgroundChat: headlessChatMocks.startBackground,
 }));
 
@@ -450,6 +463,7 @@ describe("Surface chat streaming UI", () => {
     vi.spyOn(window.history, "replaceState").mockImplementation(historyMock.replaceState);
     vi.spyOn(HeadlessChatTransport.prototype, "setEventHandlers");
     headlessChatCommandMocks.cancel.mockClear();
+    headlessChatCommandMocks.steer.mockClear();
     headlessChatCommandMocks.getRuntimeStatus.mockClear();
     headlessChatCommandMocks.resolveQuestions.mockClear();
     headlessChatCommandMocks.updateConversation.mockClear();
@@ -466,6 +480,7 @@ describe("Surface chat streaming UI", () => {
     automationCommandMocks.updateSchedule.mockClear();
     knowledgeCommandMocks.listSkillCatalog.mockReset();
     knowledgeCommandMocks.listSkillCatalog.mockResolvedValue([]);
+    headlessChatMocks.enqueue.mockClear();
     headlessChatMocks.startBackground.mockClear();
     attachmentUploadMock.canonicalUpload.mockReset();
     attachmentUploadMock.canonicalUpload.mockResolvedValue({ id: "attachment_1" });
@@ -672,6 +687,97 @@ describe("Surface chat streaming UI", () => {
 
     expect(screen.getByLabelText("Claude Code status: Working")).toHaveTextContent("Working");
     expect(screen.getByRole("button", { name: "Interrupt Claude Code" })).toBeInTheDocument();
+  });
+
+  it("queues a coding message without replacing the running turn as the Interrupt target", async () => {
+    const user = userEvent.setup();
+    const conversationId = "goat_chat_codex_queueing";
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: conversationId,
+          title: "Active coding",
+          model: DEFAULT_MODEL,
+          engine: "codex",
+          runtime: {
+            status: "running",
+            activeRunId: "run_codex_active",
+            hasError: false,
+            updatedAt: currentTimestamp(),
+          },
+          activityState: "working",
+          hasUnseen: false,
+          messages: [],
+        }}
+        codexConnected
+      />,
+    );
+
+    // Interrupting stays a separate, explicit action; typing no longer has to wait for the turn.
+    expect(screen.getByRole("button", { name: "Interrupt Codex" })).toBeInTheDocument();
+    const send = screen.getByRole("button", { name: "Send message" });
+    expect(send).toBeDisabled();
+
+    await user.type(screen.getByRole("textbox", { name: "" }), "Also update the changelog.");
+
+    expect(send).toBeEnabled();
+    await user.click(send);
+
+    await waitFor(() =>
+      expect(headlessChatMocks.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          conversationId,
+          content: "Also update the changelog.",
+          engine: expect.objectContaining({ type: "codex" }),
+        }),
+      ),
+    );
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Interrupt Codex" }));
+
+    expect(headlessChatCommandMocks.cancel).toHaveBeenCalledWith("run_codex_active");
+    expect(chatMock.stop).toHaveBeenCalledOnce();
+  });
+
+  it("queues a coding message with Enter while the engine is still working", async () => {
+    const user = userEvent.setup();
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "conversation_codex_queue_enter",
+          title: "Active coding",
+          model: DEFAULT_MODEL,
+          engine: "codex",
+          runtime: {
+            status: "running",
+            activeRunId: "run_codex_active",
+            hasError: false,
+            updatedAt: currentTimestamp(),
+          },
+          activityState: "working",
+          hasUnseen: false,
+          messages: [],
+        }}
+        codexConnected
+      />,
+    );
+
+    await user.type(screen.getByRole("textbox", { name: "" }), "Also update the changelog.{Enter}");
+
+    await waitFor(() =>
+      expect(headlessChatMocks.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          conversationId: "conversation_codex_queue_enter",
+          content: "Also update the changelog.",
+        }),
+      ),
+    );
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
   });
 
   it("keeps a reloaded engine Conversation active while its Run id is still syncing", async () => {
@@ -1479,8 +1585,6 @@ describe("Surface chat streaming UI", () => {
     expect(screen.queryByText("TASK-1 · Done")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Share task run" })).toBeInTheDocument();
 
-    expect(screen.getByText("Sending a message resumes this task.")).toBeVisible();
-
     const body = "  Please check the afternoon too.\n  Preserve this indent.  ";
     fireEvent.change(screen.getByPlaceholderText("Reply..."), { target: { value: body } });
     await user.click(screen.getByRole("button", { name: "Send message" }));
@@ -1633,7 +1737,7 @@ describe("Surface chat streaming UI", () => {
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
   });
 
-  it("keeps the composer typeable but unsendable while the Task run is active", async () => {
+  it("queues a message sent while the Task run is still working", async () => {
     const user = userEvent.setup();
     render(
       <Surface
@@ -1664,14 +1768,18 @@ describe("Surface chat streaming UI", () => {
     expect(composer).toBeEnabled();
     await user.type(composer, "also check the staging deploy{Enter}");
 
-    expect(composer).toHaveValue("also check the staging deploy");
-    expect(
-      screen.getByText("Draft your reply now — you can send it when the current run finishes."),
-    ).toBeVisible();
+    // A working Task is a session, not a form: the message goes now and waits behind the live turn.
+    await waitFor(() =>
+      expect(taskCommandMocks.comment).toHaveBeenCalledWith(
+        "goat_task_1",
+        { id: "task_activity_comment_test", body: "also check the staging deploy" },
+        { scopeKey: "" },
+      ),
+    );
+    expect(composer).toHaveValue("");
     expect(screen.queryByTestId("ad-hoc-task-hint")).not.toBeInTheDocument();
     expect(taskCommandMocks.create).not.toHaveBeenCalled();
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
-    expect(taskCommandMocks.comment).not.toHaveBeenCalled();
   });
 
   it("uses the chat stop control for an active workflow task", async () => {
@@ -1710,13 +1818,15 @@ describe("Surface chat streaming UI", () => {
     );
 
     expect(screen.queryByRole("button", { name: "Interrupt Codex" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Stop response" }));
+    // The Task's stop control sits beside the composer, exactly like a coding chat's, so Send stays
+    // free to queue a message into the turn that is still working.
+    expect(screen.getByRole("button", { name: "Send message" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Interrupt this task" }));
 
     expect(taskCommandMocks.cancel).toHaveBeenCalledWith("run_1");
     await waitFor(() => expect(chatMock.stop).toHaveBeenCalledTimes(1));
-    expect(screen.getByRole("status", { name: "Stopping task…" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Stopping task" })).toBeDisabled();
-    expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stopping this task" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Interrupt this task" })).not.toBeInTheDocument();
 
     rerender(
       <Surface
@@ -1751,7 +1861,7 @@ describe("Surface chat streaming UI", () => {
     );
 
     await waitFor(() =>
-      expect(screen.queryByRole("status", { name: "Stopping task…" })).not.toBeInTheDocument(),
+      expect(screen.queryByRole("button", { name: /this task/ })).not.toBeInTheDocument(),
     );
     expect(screen.getByRole("button", { name: "Send message" })).toBeInTheDocument();
   });
@@ -1780,10 +1890,10 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Stop response" }));
+    await user.click(screen.getByRole("button", { name: "Interrupt this task" }));
 
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument(),
+      expect(screen.getByRole("button", { name: "Interrupt this task" })).toBeEnabled(),
     );
   });
 

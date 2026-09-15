@@ -376,6 +376,57 @@ export async function startHeadlessBackgroundChat(
   return { ...data, completion };
 }
 
+// Queueing behind an active foreground turn must not enter useChat again: that hook and this
+// transport deliberately own one foreground response stream per Conversation. Creating the
+// durable Run directly keeps the current stream, reconnect checkpoint, and Interrupt target
+// attached to the turn that is actually running. Postgres/Electric projects the queued Run and
+// its Messages into the mounted Conversation independently.
+export async function enqueueHeadlessChatMessage(
+  input: {
+    content: string;
+    conversationId: string;
+    clientMessageId: string;
+    model: string;
+    engine: MessageEngine;
+    attachmentIds?: string[];
+    mentions?: Array<{ kind: "skill"; id: string }>;
+  },
+  options: { baseUrl?: string; fetch?: typeof globalThis.fetch } = {},
+) {
+  const baseUrl = options.baseUrl ?? headlessChatApiBaseUrl();
+  const fetchImpl = bindFetchToRuntime(options.fetch);
+  const client = createApiClient(baseUrl, {
+    fetch: createHeadlessChatApiFetch({ baseUrl, fetch: fetchImpl }),
+  });
+  const response = await client.v1.messages.$post({
+    header: {
+      "idempotency-key": idempotencyKey(input.clientMessageId),
+      [PROTOCOL_VERSION_HEADER]: PROTOCOL_VERSION,
+    },
+    json: {
+      conversationId: input.conversationId,
+      clientMessageId: input.clientMessageId,
+      content: input.content,
+      engine: input.engine,
+      model: input.model,
+      ...(input.attachmentIds?.length ? { attachmentIds: input.attachmentIds } : {}),
+      ...(input.mentions?.length ? { mentions: input.mentions } : {}),
+    },
+  });
+  if (!response.ok) throw await responseError(response);
+  const data = (await response.json()).data;
+  const accepted = {
+    conversationId: data.conversationId,
+    runId: data.runId,
+    assistantMessageId: data.assistantMessageId,
+    transactionId: data.transactionId,
+  };
+  void reconcileAcceptedMessage(accepted).catch((error) =>
+    reportReconciliationFailure(error, accepted),
+  );
+  return data;
+}
+
 async function consumeBackgroundRunEvents(input: {
   baseUrl: string;
   runId: string;

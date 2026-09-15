@@ -91,6 +91,7 @@ import {
   loadCodingChatHistory,
 } from "./coding-chat-history";
 import { codingChatSkillPromptLines } from "./coding-chat-skills";
+import { createSteeringChannel } from "./coding-chat-steering";
 import {
   codingSandboxTemplate,
   settledCodingSandboxIdleTimeoutMs,
@@ -310,6 +311,10 @@ export async function runCodexChatTurn(input: {
         namespace: env.sandboxNamespace,
         ownerKind: "codex_chat_session",
         ownerId: session.id,
+        execution: {
+          backend: session.executionBackend,
+          version: session.executionBackendVersion,
+        },
         metadata: { user_id: turn.userWorkosId },
       }),
       network: CODING_WORKSPACE_SANDBOX_NETWORK,
@@ -869,6 +874,13 @@ export async function runCodexChatTurn(input: {
           timeoutMs: env.codexTimeoutMs,
           checkAbort,
         }),
+      ...createSteeringChannel({
+        engine: "codex",
+        runId: turn.id,
+        leaseId,
+        leaseOwner,
+        onRuntimeEvents: (events) => turnProjector.push(events),
+      }),
     });
     if (taskContext) await checkAbort(true);
     const acpSummary = acpNormalizer.summary();
@@ -1785,12 +1797,16 @@ export async function updateCodexChatSessionIfLeaseHeld(input: {
     SET ${input.setSql}
     WHERE session.id = ${input.turn.codexChatSessionId}
       AND session.user_workos_id = ${input.turn.userWorkosId}
+      AND session.execution_backend = 'runner_attached'
+      AND session.execution_backend_version = 1
       AND EXISTS (
         SELECT 1
         FROM goat.codex_chat_turns AS turn
         WHERE turn.id = ${input.turn.id}
           AND turn.user_workos_id = ${input.turn.userWorkosId}
           AND turn.codex_chat_session_id = session.id
+          AND turn.execution_backend = session.execution_backend
+          AND turn.execution_backend_version = session.execution_backend_version
           AND turn.lease_id = ${input.leaseId}
           AND turn.lease_owner = ${input.leaseOwner}
           AND turn.status = 'running'
@@ -1812,6 +1828,8 @@ export async function markCodexChatSandboxTimeoutArmed(input: {
     SET sandbox_timeout_armed_at = ${new Date()}
     WHERE id = ${input.sessionId}
       AND user_workos_id = ${input.userWorkosId}
+      AND execution_backend = 'runner_attached'
+      AND execution_backend_version = 1
       AND sandbox_id = ${input.sandboxId}
       AND status IN ('idle', 'failed', 'interrupted', 'closed')
   `);
@@ -1836,6 +1854,8 @@ export async function claimCodexChatRecovery(input: {
         updated_at = ${new Date()}
     WHERE turn.id = ${input.turn.id}
       AND turn.user_workos_id = ${input.turn.userWorkosId}
+      AND turn.execution_backend = 'runner_attached'
+      AND turn.execution_backend_version = 1
       AND turn.lease_id = ${input.leaseId}
       AND turn.lease_owner = ${input.leaseOwner}
       AND turn.status = 'running'

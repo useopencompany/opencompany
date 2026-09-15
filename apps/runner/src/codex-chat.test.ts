@@ -1460,7 +1460,10 @@ describe("claimCodexChatRecovery", () => {
       leaseOwner: "runner_1",
       maxRecoveryAttempts: 10,
     });
-    expect(sqlText(dbMocks.execute.mock.calls[0]?.[0])).toContain("recovery_attempts <");
+    const statement = sqlText(dbMocks.execute.mock.calls[0]?.[0]);
+    expect(statement).toContain("recovery_attempts <");
+    expect(statement).toContain("turn.execution_backend = 'runner_attached'");
+    expect(statement).toContain("turn.execution_backend_version = 1");
     expect(sqlNumbers(dbMocks.execute.mock.calls[0]?.[0])).toContain(10);
   });
 
@@ -1665,6 +1668,9 @@ function codexSession(overrides: Partial<CodexChatSession> = {}): CodexChatSessi
     brainRef: null,
     workspaceId: "workspace_1",
     hostToolContractVersion: null,
+    executionBackend: "runner_attached",
+    executionBackendVersion: 1,
+    supervisorTemplateVersion: null,
     sandboxSize: "standard",
     sandboxId: "sbx_existing",
     codexThreadId: "thread_existing",
@@ -1691,8 +1697,11 @@ function codexTurn(overrides: Partial<CodexChatTurn> = {}): CodexChatTurn {
     status: "running",
     prompt: "Continue the work.",
     settings: {},
+    executionBackend: "runner_attached",
+    executionBackendVersion: 1,
     error: null,
     interruptRequestedAt: null,
+    steerIntoRunId: null,
     attempts: 1,
     recoveryAttempts: 0,
     engineRecoveryRequired: false,
