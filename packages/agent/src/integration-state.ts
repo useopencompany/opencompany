@@ -127,6 +127,37 @@ export type JamieEventsProviderState = {
   lastDeliveryAt: string | null;
 };
 
+// Convex's MCP connector row is the plugin's tool connection; the settings card reads it from
+// here so `personalAccounts.convex` can hold the log-stream event connection a workflow trigger
+// binds to, the way Linear's, HubSpot's, Attio's, and Jamie's rows already split.
+export type ConvexMcpProviderState = {
+  provider: "convex";
+  connected: boolean;
+  status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
+  integrationId: string | null;
+  accountName: string | null;
+  statusReason: string | null;
+  capabilityModes: Record<string, unknown>;
+  toolModes: Record<string, unknown>;
+};
+
+// Convex's event connection is a webhook log stream opencompany provisions in Convex with the
+// plugin's deploy key, so nothing here is copied by hand. The state carries the deployment the
+// stream belongs to and the last signature-verified delivery, which is what confirms the stream is
+// actually reaching opencompany rather than only that Convex accepted the configuration.
+export type ConvexEventsProviderState = {
+  provider: "convex";
+  connected: boolean;
+  status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
+  integrationId: string | null;
+  statusReason: string | null;
+  deployment: string | null;
+  // Null in the row mapper, which has no app origin to build it from; the server loader that feeds
+  // the settings UI fills it in.
+  webhookUrl: string | null;
+  lastDeliveryAt: string | null;
+};
+
 // Granola connects with a personal API key minted in the Granola app; the
 // integration id is what the brain-source picker and save action key config
 // rows on.
@@ -313,6 +344,8 @@ export type IntegrationState = {
   posthog: PostHogProviderState;
   jamie: JamieProviderState;
   jamie_events: JamieEventsProviderState;
+  convex: ConvexMcpProviderState;
+  convex_events: ConvexEventsProviderState;
   slack: SlackProviderState;
   granola: GranolaProviderState;
   granola_mcp: GranolaMcpProviderState;
@@ -364,6 +397,9 @@ function isoTimestamp(value: Date | string | null | undefined) {
 
 const JAMIE_MCP_EXTERNAL_ID = "jamie_mcp";
 const FATHOM_MCP_EXTERNAL_ID = "fathom_mcp";
+
+// Convex names its deploy-key connector row after the credential it holds, not the provider.
+const CONVEX_MCP_EXTERNAL_ID = "convex_mcp_api_key";
 
 // Collects every personal (non-workspace) account row per provider. The
 // Linear, HubSpot, Attio, and Granola ingestion connections count as accounts;
@@ -426,6 +462,15 @@ export function personalAccountsFromRows(
       }
       continue;
     }
+    // Convex has two personal rows: the deploy-key MCP connector that powers the plugin's tools,
+    // and the log-stream event connection an event trigger binds to. Only the latter is an account
+    // the trigger picker may offer.
+    if (row.provider === "convex") {
+      if ((row.externalId ?? row.external_id) !== CONVEX_MCP_EXTERNAL_ID) {
+        personalAccounts.convex.push(accountViewFromRow("convex", row));
+      }
+      continue;
+    }
     if (row.provider === "granola") {
       if ((row.externalId ?? row.external_id) !== "granola_mcp") {
         personalAccounts.granola.push(accountViewFromRow("granola", row));
@@ -452,7 +497,6 @@ export function personalAccountsFromRows(
       row.provider === "github_user" ||
       row.provider === "slack" ||
       row.provider === "betterstack" ||
-      row.provider === "convex" ||
       row.provider === "render" ||
       row.provider === "vercel" ||
       row.provider === "signoz" ||
@@ -474,6 +518,8 @@ export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): 
   const byProvider = new Map<IntegrationProvider, IntegrationStateRow>();
   let granolaMcpRow: IntegrationStateRow | undefined;
   let jamieEventsRow: IntegrationStateRow | undefined;
+  let convexMcpRow: IntegrationStateRow | undefined;
+  let convexEventsRow: IntegrationStateRow | undefined;
   for (const row of rows) {
     if (row.status === "disconnected") continue;
     if (row.workspaceId ?? row.workspace_id) continue;
@@ -517,6 +563,12 @@ export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): 
         continue;
       }
     }
+    // Provider "convex" covers the deploy-key MCP connector and the log-stream event connection.
+    if (row.provider === "convex") {
+      if ((row.externalId ?? row.external_id) === CONVEX_MCP_EXTERNAL_ID) convexMcpRow = row;
+      else convexEventsRow = row;
+      continue;
+    }
     byProvider.set(row.provider, row);
   }
   const personalAccounts = personalAccountsFromRows(rows);
@@ -530,6 +582,8 @@ export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): 
     posthog: posthogProviderState(byProvider.get("posthog")),
     jamie: jamieProviderState(byProvider.get("jamie")),
     jamie_events: jamieEventsProviderState(jamieEventsRow),
+    convex: convexMcpProviderState(convexMcpRow),
+    convex_events: convexEventsProviderState(convexEventsRow),
     slack: slackProviderState(byProvider.get("slack")),
     granola: granolaProviderState(byProvider.get("granola")),
     granola_mcp: granolaMcpProviderState(granolaMcpRow),
@@ -794,6 +848,58 @@ function jamieEventsProviderState(row: IntegrationStateRow | undefined): JamieEv
     status: row.status,
     integrationId: row.id ?? null,
     statusReason: row.statusReason ?? row.status_reason ?? null,
+    webhookUrl: null,
+    lastDeliveryAt: isoTimestamp(row.lastSyncedAt ?? row.last_synced_at),
+  };
+}
+
+function convexMcpProviderState(row: IntegrationStateRow | undefined): ConvexMcpProviderState {
+  if (!row || row.status === "disconnected") {
+    return {
+      provider: "convex",
+      connected: false,
+      status: "not_connected",
+      integrationId: null,
+      accountName: null,
+      statusReason: null,
+      capabilityModes: {},
+      toolModes: {},
+    };
+  }
+  return {
+    provider: "convex",
+    connected: row.status === "connected",
+    status: row.status,
+    integrationId: row.id ?? null,
+    accountName: row.accountName ?? row.account_name ?? null,
+    statusReason: row.statusReason ?? row.status_reason ?? null,
+    capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
+    toolModes: row.toolModes ?? row.tool_modes ?? {},
+  };
+}
+
+function convexEventsProviderState(
+  row: IntegrationStateRow | undefined,
+): ConvexEventsProviderState {
+  if (!row || row.status === "disconnected") {
+    return {
+      provider: "convex",
+      connected: false,
+      status: "not_connected",
+      integrationId: null,
+      statusReason: null,
+      deployment: null,
+      webhookUrl: null,
+      lastDeliveryAt: null,
+    };
+  }
+  return {
+    provider: "convex",
+    connected: row.status === "connected",
+    status: row.status,
+    integrationId: row.id ?? null,
+    statusReason: row.statusReason ?? row.status_reason ?? null,
+    deployment: row.accountName ?? row.account_name ?? null,
     webhookUrl: null,
     lastDeliveryAt: isoTimestamp(row.lastSyncedAt ?? row.last_synced_at),
   };
