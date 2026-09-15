@@ -1,12 +1,7 @@
+import { actionSource, actionSourceLabel, actionVerb } from "@/lib/action-identity";
 import type { ChatUiMessage } from "@/lib/chat-ui";
 import { CODEX_APPROVAL_TOOL_NAME, USE_ACTION_TOOL_NAME } from "@/lib/chat-ui";
-import {
-  formatDebugValue,
-  isRecord,
-  isToolPartRecord,
-  toolLabel,
-  toolNameFromPart,
-} from "./assistant-items";
+import { formatDebugValue, isRecord, isToolPartRecord, toolNameFromPart } from "./assistant-items";
 
 // Every approval in the product — a coding engine asking to run a command, a connected
 // integration about to write to Linear or Gmail, a metered lookup that costs money — gets the
@@ -21,6 +16,8 @@ export type ApprovalPresentation = {
   kind: ApprovalKind;
   /** Where the request comes from, shown next to the icon: "Terminal", "Linear", "Files". */
   source: string;
+  /** The service slug behind an integration request ("linear"), so the card can show its mark. */
+  sourceSlug: string | null;
   /** The decision itself, phrased as a question. */
   question: string;
   /** The engine's own explanation, when it says more than the command or paths already do. */
@@ -101,6 +98,7 @@ function codingApprovalPresentation(input: Record<string, unknown>): ApprovalPre
   return {
     kind: CODING_KIND_PRESENTATION[kind].kind,
     source: CODING_KIND_PRESENTATION[kind].source,
+    sourceSlug: null,
     question: CODING_KIND_PRESENTATION[kind].question(paths.length),
     description: title && title !== command ? title : null,
     code,
@@ -166,7 +164,7 @@ function actionApprovalPresentation(input: unknown): ApprovalPresentation {
 
   if (action === "google_calendar.create_event") {
     return {
-      ...emptyActionPresentation(source),
+      ...emptyActionPresentation(action, source),
       question: "Add this event to your Google Calendar?",
       lines: calendarEventLines(params),
     };
@@ -175,21 +173,22 @@ function actionApprovalPresentation(input: unknown): ApprovalPresentation {
   if (action === "x_account.post_tweet") {
     const lines = tweetLines(params);
     if (lines.length > 0) {
-      return { ...emptyActionPresentation(source), question: "Post to X?", lines };
+      return { ...emptyActionPresentation(action, source), question: "Post to X?", lines };
     }
   }
 
   return {
-    ...emptyActionPresentation(source),
+    ...emptyActionPresentation(action, source),
     question: actionQuestion(action, source),
     lines: approvalParamLines(params),
   };
 }
 
-function emptyActionPresentation(source: string): ApprovalPresentation {
+function emptyActionPresentation(action: string, source: string): ApprovalPresentation {
   return {
     kind: "integration",
     source,
+    sourceSlug: actionSource(action) || null,
     question: "Run this action?",
     description: null,
     code: null,
@@ -198,27 +197,8 @@ function emptyActionPresentation(source: string): ApprovalPresentation {
   };
 }
 
-/** Reads "Linear" out of `plugin:linear:linear.create_issue` and "X" out of `x_account.post_tweet`. */
-function actionSourceLabel(action: string): string {
-  const slug = actionSourceSlug(action);
-  if (!slug) return "Action";
-  if (slug.startsWith("custom-")) return "Custom integration";
-  return toolLabel(slug.replace(/_account$/u, ""));
-}
-
-function actionSourceSlug(action: string): string {
-  const pluginMatch = /^plugin:([^:]+):/u.exec(action);
-  return pluginMatch?.[1] ?? action.split(".", 1)[0] ?? "";
-}
-
 function actionQuestion(action: string, source: string): string {
-  const name = action.includes(".") ? (action.split(".").at(-1) ?? "") : "";
-  const words = name.split("_").filter(Boolean);
-  // Gateways namespace their tools ("slack.slack_search_..."), and the header already names the
-  // integration, so repeating it in the question would only make it harder to read.
-  const slug = actionSourceSlug(action).replace(/_account$/u, "");
-  if (words[0]?.toLowerCase() === slug.toLowerCase()) words.shift();
-  const verb = words.join(" ");
+  const verb = actionVerb(action);
   if (!verb) return "Run this action?";
   return source === "Action" ? `Run ${verb}?` : `Run ${verb} in ${source}?`;
 }

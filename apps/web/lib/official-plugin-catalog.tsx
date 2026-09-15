@@ -7,36 +7,6 @@
 
 import type { PluginImportPreviewDto } from "@opencompany/protocol";
 import {
-  AttioIcon,
-  BetterStackIcon,
-  ConvexIcon,
-  Dash0Icon,
-  FathomIcon,
-  GitHubIcon,
-  GmailIcon,
-  GoogleAdminIcon,
-  GoogleCalendarIcon,
-  GoogleDriveIcon,
-  GranolaIcon,
-  HubSpotIcon,
-  InfisicalIcon,
-  JamieIcon,
-  LatitudeIcon,
-  LinearIcon,
-  NeonIcon,
-  NotionIcon,
-  PostHogIcon,
-  RenderIcon,
-  ResendIcon,
-  SigNozIcon,
-  SlackIcon,
-  StripeIcon,
-  SupabaseIcon,
-  VercelIcon,
-  XIcon,
-} from "@opencompany/ui/icons";
-import { Crosshair, KeyRound, Sparkles } from "lucide-react";
-import {
   importHeadlessPlugin,
   previewHeadlessPluginImport,
 } from "@/lib/headless-knowledge-commands";
@@ -53,173 +23,139 @@ import {
   type OfficialSkillPluginMetadata,
   type OfficialSkillPluginName,
 } from "@/lib/official-plugins";
+import { SERVICE_MARKS, type ServiceMark } from "@/lib/service-marks";
 
-type OfficialPluginAppearance = {
-  Icon: typeof LinearIcon;
-  iconClassName: string;
-};
-
-export type OfficialPluginConfig = OfficialPluginMetadata & OfficialPluginAppearance;
-export type OfficialMcpPluginConfig = OfficialMcpPluginMetadata & OfficialPluginAppearance;
-export type OfficialSkillPluginConfig = OfficialSkillPluginMetadata & OfficialPluginAppearance;
-export type OfficialManagedPluginConfig = OfficialManagedPluginMetadata & OfficialPluginAppearance;
+export type OfficialPluginConfig = OfficialPluginMetadata & ServiceMark;
+export type OfficialMcpPluginConfig = OfficialMcpPluginMetadata & ServiceMark;
+export type OfficialSkillPluginConfig = OfficialSkillPluginMetadata & ServiceMark;
+export type OfficialManagedPluginConfig = OfficialManagedPluginMetadata & ServiceMark;
 
 export const OFFICIAL_MCP_PLUGINS = {
   attio: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.attio,
-    Icon: AttioIcon,
-    iconClassName: "bg-[#111111] text-white",
+    ...SERVICE_MARKS.attio,
   },
   betterstack: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.betterstack,
-    Icon: BetterStackIcon,
-    iconClassName: "bg-[#1B1F23] text-white",
+    ...SERVICE_MARKS.betterstack,
   },
   fathom: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.fathom,
-    Icon: FathomIcon,
-    iconClassName: "bg-[#101820] text-white",
+    ...SERVICE_MARKS.fathom,
   },
   github: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.github,
-    Icon: GitHubIcon,
-    iconClassName: "bg-[#181717] text-white",
+    ...SERVICE_MARKS.github,
   },
   gmail: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.gmail,
-    Icon: GmailIcon,
-    iconClassName: "bg-white text-[#EA4335]",
+    ...SERVICE_MARKS.gmail,
   },
   granola: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.granola,
-    Icon: GranolaIcon,
-    iconClassName: "bg-[#F0EBE1] text-[#1A1714]",
+    ...SERVICE_MARKS.granola,
   },
   "google-admin": {
     ...OFFICIAL_MCP_PLUGIN_METADATA["google-admin"],
-    Icon: GoogleAdminIcon,
-    iconClassName: "bg-white",
+    ...SERVICE_MARKS["google-admin"],
   },
   "google-calendar": {
     ...OFFICIAL_MCP_PLUGIN_METADATA["google-calendar"],
-    Icon: GoogleCalendarIcon,
-    iconClassName: "bg-[#1A73E8] text-white",
+    ...SERVICE_MARKS["google-calendar"],
   },
   "google-drive": {
     ...OFFICIAL_MCP_PLUGIN_METADATA["google-drive"],
-    Icon: GoogleDriveIcon,
-    iconClassName: "bg-white text-[#1FA463]",
+    ...SERVICE_MARKS["google-drive"],
   },
   hubspot: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.hubspot,
-    Icon: HubSpotIcon,
-    iconClassName: "bg-[#FF7A59] text-white",
+    ...SERVICE_MARKS.hubspot,
   },
   infisical: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.infisical,
-    Icon: InfisicalIcon,
-    iconClassName: "bg-[#6C47FF] text-white",
+    ...SERVICE_MARKS.infisical,
   },
   jamie: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.jamie,
-    Icon: JamieIcon,
-    iconClassName: "bg-[#5B5BD6] text-white",
+    ...SERVICE_MARKS.jamie,
   },
   latitude: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.latitude,
-    Icon: LatitudeIcon,
-    iconClassName: "bg-[#171717] text-white",
+    ...SERVICE_MARKS.latitude,
   },
   linear: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.linear,
-    Icon: LinearIcon,
-    iconClassName: "bg-[#5E6AD2] text-white",
+    ...SERVICE_MARKS.linear,
   },
   neon: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.neon,
-    Icon: NeonIcon,
-    iconClassName: "bg-[#00E599] text-[#0B0F14]",
+    ...SERVICE_MARKS.neon,
   },
   notion: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.notion,
-    Icon: NotionIcon,
-    iconClassName: "bg-white text-black",
+    ...SERVICE_MARKS.notion,
   },
   posthog: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.posthog,
-    Icon: PostHogIcon,
-    iconClassName: "bg-[#F54E00] text-white",
+    ...SERVICE_MARKS.posthog,
   },
   convex: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.convex,
-    Icon: ConvexIcon,
-    iconClassName: "bg-surface-muted",
+    ...SERVICE_MARKS.convex,
   },
   render: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.render,
-    Icon: RenderIcon,
-    iconClassName: "bg-[#0B0D0E] text-white",
+    ...SERVICE_MARKS.render,
   },
   vercel: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.vercel,
-    Icon: VercelIcon,
-    iconClassName: "bg-black text-white",
+    ...SERVICE_MARKS.vercel,
   },
   supabase: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.supabase,
-    Icon: SupabaseIcon,
-    iconClassName: "bg-[#003D2B] text-[#3ECF8E]",
+    ...SERVICE_MARKS.supabase,
   },
   resend: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.resend,
-    Icon: ResendIcon,
-    iconClassName: "bg-black text-white",
+    ...SERVICE_MARKS.resend,
   },
   dash0: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.dash0,
-    Icon: Dash0Icon,
-    iconClassName: "bg-background",
+    ...SERVICE_MARKS.dash0,
   },
   signoz: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.signoz,
-    Icon: SigNozIcon,
-    iconClassName: "bg-[#0B0D0E] text-white",
+    ...SERVICE_MARKS.signoz,
   },
   slack: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.slack,
-    Icon: SlackIcon,
-    iconClassName: "bg-white text-[#4A154B]",
+    ...SERVICE_MARKS.slack,
   },
   stripe: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.stripe,
-    Icon: StripeIcon,
-    iconClassName: "bg-[#635BFF] text-white",
+    ...SERVICE_MARKS.stripe,
   },
   x: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.x,
-    Icon: XIcon,
-    iconClassName: "bg-black text-white",
+    ...SERVICE_MARKS.x,
   },
 } as const satisfies Record<OfficialMcpPluginName, OfficialMcpPluginConfig>;
 
 export const OFFICIAL_SKILL_PLUGINS = {
   doppler: {
     ...OFFICIAL_SKILL_PLUGIN_METADATA.doppler,
-    Icon: KeyRound,
-    iconClassName: "bg-[#FF6100] text-white",
+    ...SERVICE_MARKS.doppler,
   },
   "yc-advise": {
     ...OFFICIAL_SKILL_PLUGIN_METADATA["yc-advise"],
-    Icon: Sparkles,
-    iconClassName: "bg-[#F26522] text-white",
+    ...SERVICE_MARKS["yc-advise"],
   },
 } as const satisfies Record<OfficialSkillPluginName, OfficialSkillPluginConfig>;
 
 export const OFFICIAL_MANAGED_PLUGINS = {
   "lead-research": {
     ...OFFICIAL_MANAGED_PLUGIN_METADATA["lead-research"],
-    Icon: Crosshair,
-    iconClassName: "bg-[#1F6FEB] text-white",
+    ...SERVICE_MARKS["lead-research"],
   },
 } as const satisfies Record<OfficialManagedPluginName, OfficialManagedPluginConfig>;
 

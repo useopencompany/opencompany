@@ -1,5 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import {
+  ACP_TOOLS_MCP_SERVER_NAME,
   CODEX_APPROVAL_TOOL_NAME,
   CODEX_COMMAND_TOOL_NAME,
   CODEX_MCP_TOOL_NAME,
@@ -14,6 +15,7 @@ import {
   BRAIN_TOOL_NAME,
   BRAIN_TOOL_PART_TYPE,
   type ChatUiMessage,
+  USE_ACTION_TOOL_NAME,
   USE_ACTION_TOOL_PART_TYPE,
 } from "@/lib/chat-ui";
 import { getVisibleBrainCitationCount } from "./AssistantTextBubble";
@@ -883,7 +885,7 @@ describe("MessageBubble assistant errors", () => {
     render(<MessageBubble message={message} taskLookup={emptyTaskLookup} turnActive />);
 
     const toolCall = screen.getByTestId("chat-tool-call-use_action");
-    const disclosure = within(toolCall).getByRole("button", { name: /Linear List Issues/i });
+    const disclosure = within(toolCall).getByRole("button", { name: /Linear · List issues/u });
     expect(disclosure).toHaveAttribute("aria-expanded", "false");
     expect(within(toolCall).queryByText("Done")).not.toBeInTheDocument();
     expect(within(toolCall).queryByText("Input")).not.toBeInTheDocument();
@@ -1055,7 +1057,7 @@ describe("MessageBubble assistant errors", () => {
     render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
 
     const disclosure = screen.getByRole("button", {
-      name: /Linear · Save Comment.*Declined/u,
+      name: /Linear · Save comment.*Declined/u,
     });
     expect(disclosure).toBeVisible();
     expect(screen.queryByText("Approved")).not.toBeInTheDocument();
@@ -1936,9 +1938,9 @@ describe("MessageBubble Codex interactions", () => {
           toolCallId: "mcp_1",
           state: "output-available",
           input: {
-            title: "List available actions",
-            server: "opencompany",
-            tool: "list_actions",
+            title: "List open tickets",
+            server: "acme-desk",
+            tool: "list_tickets",
           },
           output: { status: "completed", result: "[]" },
         },
@@ -1949,9 +1951,52 @@ describe("MessageBubble Codex interactions", () => {
 
     expect(screen.getByText("Read 2 lines")).toBeVisible();
     expect(screen.getByText("chat-ui.ts")).toBeVisible();
-    expect(screen.getByText("List available actions")).toBeVisible();
-    expect(screen.getByText("opencompany · list_actions")).toBeVisible();
+    expect(screen.getByText("List open tickets")).toBeVisible();
+    expect(screen.getByText("acme-desk · list_tickets")).toBeVisible();
     expect(screen.queryByText(CODEX_MCP_TOOL_NAME)).not.toBeInTheDocument();
+  });
+
+  it("badges a coding session's connected action with the service it touched", () => {
+    const message: ChatUiMessage = {
+      id: "assistant_action",
+      role: "assistant",
+      parts: [
+        {
+          type: "dynamic-tool",
+          toolName: CODEX_MCP_TOOL_NAME,
+          toolCallId: "mcp_action",
+          state: "output-available",
+          input: {
+            server: ACP_TOOLS_MCP_SERVER_NAME,
+            tool: USE_ACTION_TOOL_NAME,
+            arguments: { action: "plugin:linear:linear.create_issue", params: { title: "Ship" } },
+          },
+          output: { status: "completed", result: '{"ok":true}' },
+        },
+        {
+          type: "dynamic-tool",
+          toolName: CODEX_MCP_TOOL_NAME,
+          toolCallId: "mcp_action_failed",
+          state: "output-available",
+          input: {
+            server: ACP_TOOLS_MCP_SERVER_NAME,
+            tool: USE_ACTION_TOOL_NAME,
+            arguments: { action: "gmail.send_email", params: {} },
+          },
+          output: { status: "failed", error: "Gmail is not connected." },
+        },
+      ] as ChatUiMessage["parts"],
+    };
+
+    const { container } = render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+    expect(screen.getByText("Linear · Create issue")).toBeVisible();
+    expect(container.querySelector("svg.lucide-circle-dot-dashed")).toBeNull();
+    // The service mark takes the status icon's place, so a failure has to stay spelled out.
+    expect(screen.getByText("Gmail · Send email")).toBeVisible();
+    expect(screen.getByText("Failed")).toBeVisible();
+    expect(screen.getByText("Gmail is not connected.")).toBeVisible();
+    expect(screen.queryByText(/opencompany · use_action/)).not.toBeInTheDocument();
   });
 
   it("shows a one-line Thinking preview and keeps the full reasoning expandable", async () => {
