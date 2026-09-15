@@ -15,6 +15,7 @@ import { electricCollectionOptions } from "@tanstack/electric-db-collection";
 import { createCollection } from "@tanstack/react-db";
 import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-chat-api";
 import { clearChatSyncError, recordChatSyncError } from "./headless-chat-sync-status";
+import { awaitCollectionTransaction } from "./headless-collection-reconciliation";
 
 function readModelUrl(readModel: ChatReadModel) {
   return `${headlessChatApiBaseUrl()}/v1/read-models/${readModel}`;
@@ -293,9 +294,9 @@ export async function awaitHeadlessChatTransaction(input: {
     const runs = getHeadlessChatRuns(input.conversationId);
     const conversations = getHeadlessChatConversations();
     await Promise.all([
-      conversations.utils.awaitTxId(transactionId, input.timeoutMs),
-      messages.utils.awaitTxId(transactionId, input.timeoutMs),
-      runs.utils.awaitTxId(transactionId, input.timeoutMs),
+      awaitCollectionTransaction(conversations, transactionId, input.timeoutMs),
+      awaitCollectionTransaction(messages, transactionId, input.timeoutMs),
+      awaitCollectionTransaction(runs, transactionId, input.timeoutMs),
     ]);
   } finally {
     const remaining = (pendingMessageTransactionWaits.get(input.conversationId) ?? 1) - 1;
@@ -313,7 +314,7 @@ export async function awaitHeadlessConversationTransaction(
   if (!Number.isSafeInteger(transactionId) || transactionId < 1) {
     throw new Error("The API returned an invalid Electric transaction identifier.");
   }
-  await getHeadlessChatConversations().utils.awaitTxId(transactionId, timeoutMs);
+  await awaitCollectionTransaction(getHeadlessChatConversations(), transactionId, timeoutMs);
 }
 
 export type HeadlessChatMessageReadModel = MessageSummaryReadModel;
