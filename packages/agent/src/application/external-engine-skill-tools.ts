@@ -1,4 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { mcpInvocationId } from "../mcp-invocation";
 import {
   WORKSPACE_SKILL_TOOL_CONTRACTS,
   type WorkspaceSkillToolName,
@@ -31,7 +32,7 @@ export function registerExternalEngineSkillTools(
           const result = await execute({
             tool: contract.name,
             args,
-            invocationId: JSON.stringify([extra.sessionId ?? "http", extra.requestId]),
+            invocationId: mcpInvocationId("workspace-skills", extra.sessionId, extra.requestId),
           });
           return { content: [{ type: "text", text: JSON.stringify(result) }] };
         } catch (error) {

@@ -9,6 +9,7 @@ import {
 import { electricCollectionOptions } from "@tanstack/electric-db-collection";
 import { createCollection } from "@tanstack/react-db";
 import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-chat-api";
+import { awaitCollectionTransaction } from "./headless-collection-reconciliation";
 
 const workflowsByScope = new Map<string, ReturnType<typeof createWorkflows>>();
 const taskSchedulesByScope = new Map<string, ReturnType<typeof createTaskSchedules>>();
@@ -62,7 +63,8 @@ export async function awaitHeadlessTaskScheduleTransaction(
   transactionIdValue: string,
   options: { scopeKey: string; timeoutMs?: number },
 ) {
-  await getHeadlessTaskSchedules(options.scopeKey).utils.awaitTxId(
+  await awaitCollectionTransaction(
+    getHeadlessTaskSchedules(options.scopeKey),
     transactionIdFromApi(transactionIdValue),
     options.timeoutMs,
   );

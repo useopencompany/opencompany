@@ -80,6 +80,24 @@ describe("headless Task presentation adapters", () => {
     }
   });
 
+  it("does not wait on an activity shape that no view has started syncing", async () => {
+    const activities = getHeadlessTaskActivities("task/idle-activities") as unknown as {
+      status?: string;
+      utils: { awaitTxId: ReturnType<typeof vi.fn> };
+    };
+    activities.status = "idle";
+
+    await awaitHeadlessTaskCommentTransaction("task/idle-activities", "43", {
+      scopeKey: "workspace_idle_activities",
+    });
+
+    expect(activities.utils.awaitTxId).not.toHaveBeenCalled();
+    const tasks = vi.mocked(createCollection).mock.results.at(-1)?.value as {
+      utils: { awaitTxId: ReturnType<typeof vi.fn> };
+    };
+    expect(tasks.utils.awaitTxId).toHaveBeenCalledWith(43, undefined);
+  });
+
   it("projects canonical metadata without exposing execution persistence", () => {
     expect(taskReadModelToRow(canonicalTask)).toMatchObject({
       id: "task_1",
