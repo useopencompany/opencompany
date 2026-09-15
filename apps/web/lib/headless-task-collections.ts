@@ -10,6 +10,7 @@ import {
 import { electricCollectionOptions } from "@tanstack/electric-db-collection";
 import { createCollection } from "@tanstack/react-db";
 import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-chat-api";
+import { awaitCollectionTransaction } from "./headless-collection-reconciliation";
 import type { TaskRow } from "./task-collections";
 
 const tasksByScope = new Map<string, ReturnType<typeof createTasks>>();
@@ -64,7 +65,11 @@ export async function awaitHeadlessTaskTransaction(
   options: { scopeKey: string; timeoutMs?: number },
 ) {
   const transactionId = electricTransactionId(transactionIdValue);
-  await getHeadlessTasks(options.scopeKey).utils.awaitTxId(transactionId, options.timeoutMs);
+  await awaitCollectionTransaction(
+    getHeadlessTasks(options.scopeKey),
+    transactionId,
+    options.timeoutMs,
+  );
 }
 
 export async function awaitHeadlessTaskCommentTransaction(
@@ -74,8 +79,12 @@ export async function awaitHeadlessTaskCommentTransaction(
 ) {
   const transactionId = electricTransactionId(transactionIdValue);
   await Promise.all([
-    getHeadlessTasks(options.scopeKey).utils.awaitTxId(transactionId, options.timeoutMs),
-    getHeadlessTaskActivities(taskId).utils.awaitTxId(transactionId, options.timeoutMs),
+    awaitCollectionTransaction(
+      getHeadlessTasks(options.scopeKey),
+      transactionId,
+      options.timeoutMs,
+    ),
+    awaitCollectionTransaction(getHeadlessTaskActivities(taskId), transactionId, options.timeoutMs),
   ]);
 }
 
