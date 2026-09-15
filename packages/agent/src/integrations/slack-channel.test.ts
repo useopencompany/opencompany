@@ -35,13 +35,13 @@ describe("Slack Channel boundary", () => {
   it("bounds messages and requires a stable idempotency key", async () => {
     const execute = vi.fn();
     for (const post of [
-      { channel: "", text: "Result", messageKey: "summary" },
+      { channel: "C123", text: "", messageKey: "summary" },
       { channel: "C123", text: "x".repeat(3501), messageKey: "summary" },
       { channel: "C123", text: "Result", messageKey: "" },
     ])
       await expect(
         postWorkflowSlackMessage({ runId: "run", actorId: "member", post }, execute),
-      ).rejects.toThrow("Provide channel");
+      ).rejects.toThrow("Provide text");
     expect(execute).not.toHaveBeenCalled();
   });
 });
