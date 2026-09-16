@@ -3957,6 +3957,7 @@ describe("canonical Hono API", () => {
       status: "connected" as const,
       needsScopeUpgrade: false,
       canCustomizeIdentity: true,
+      canReact: true,
       teamName: "Acme",
       statusReason: null,
       destinationCount: 1,
