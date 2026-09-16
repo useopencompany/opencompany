@@ -151,10 +151,8 @@ export class RedisChatPresentationStream
   ): Promise<T | null> {
     if (this.closed || this.now() < this.unavailableUntil) return null;
     try {
-      const result = await withTimeout(
-        (async () => command(await this.client()))(),
-        this.options.commandTimeoutMs ?? 250,
-      );
+      const client = await this.client();
+      const result = await withTimeout(command(client), this.options.commandTimeoutMs ?? 250);
       this.outageReported = false;
       return result;
     } catch (error) {
@@ -239,14 +237,18 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T
     return await Promise.race([
       promise,
       new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(
-          () => reject(new Error("Redis presentation command timed out.")),
-          timeoutMs,
-        );
+        timer = setTimeout(() => reject(new RedisPresentationCommandTimeoutError()), timeoutMs);
         timer.unref?.();
       }),
     ]);
   } finally {
     if (timer) clearTimeout(timer);
+  }
+}
+
+class RedisPresentationCommandTimeoutError extends Error {
+  constructor() {
+    super("Redis presentation command timed out.");
+    this.name = "RedisPresentationCommandTimeoutError";
   }
 }
