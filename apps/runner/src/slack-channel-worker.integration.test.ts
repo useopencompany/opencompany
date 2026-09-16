@@ -65,7 +65,13 @@ beforeAll(async () => {
     }
     await db.exec(`ALTER TABLE goat.users ADD COLUMN email text;
       CREATE TABLE goat.integrations (id text PRIMARY KEY, workspace_id text, user_workos_id text, provider text, external_id text, status text, scopes jsonb);
-      CREATE TABLE goat.workflows (id text PRIMARY KEY, workspace_id text);
+      CREATE TABLE goat.workflows (
+        id text PRIMARY KEY,
+        workspace_id text,
+        slug text,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        archived_at timestamptz
+      );
     `);
     await db.exec(
       await readFile(
@@ -126,9 +132,9 @@ beforeEach(async () => {
     INSERT INTO goat.workspace_members (id, workspace_id, user_workos_id, role) VALUES ('m1', 'workspace', 'member', 'member'), ('m2', 'workspace', 'owner', 'admin');
     INSERT INTO goat.chat_sessions (id, user_workos_id, title, model, engine, kind) VALUES ('session', 'owner', 'Investigation', 'test/model', 'codex', 'task');
     INSERT INTO goat.codex_chat_sessions (id, user_workos_id, chat_session_id, workspace_id, engine, model, status) VALUES ('runtime', 'owner', 'session', 'workspace', 'codex', 'test/model', 'idle');
+    INSERT INTO goat.workflows (id, workspace_id, slug, slack_bot_display_name, created_at) VALUES ('workflow-id', 'workspace', 'workflow', 'James', now() - interval '1 minute');
     INSERT INTO goat.tasks (id, user_workos_id, workspace_id, prompt, model, session_id, source, workflow_id, status, harness_spec, sandbox_id) VALUES ('task', 'owner', 'workspace', 'Investigate the bug', 'test/model', 'session', 'workflow', 'workflow', 'succeeded', '{"engine":"codex","model":"test/model","systemPrompt":"Original workflow instructions","workflow":{"stepIndex":0,"steps":[{"instructions":"Investigate"}]}}', 'saved-sandbox');
     INSERT INTO goat.integrations VALUES ('install', 'workspace', 'owner', 'slack_bot', 'T1', 'connected', '[]');
-    INSERT INTO goat.workflows (id, workspace_id, slack_bot_display_name) VALUES ('workflow', 'workspace', 'James');
     INSERT INTO goat.channel_deliveries (id, workspace_id, session_id, integration_id, team_id, channel_id, text, status) VALUES ('root', 'workspace', 'session', 'install', 'T1', 'C1', 'Investigation result', 'sending');
   `);
   await completeChannelDelivery(execute, {
@@ -215,6 +221,28 @@ describe("durable Slack subscriptions", () => {
         execute,
       ),
     ).rejects.toThrow("Slack channel enabled");
+    expect((await pg.query("SELECT id FROM goat.channel_deliveries")).rows).toHaveLength(1);
+  });
+  it("does not bind an old task to a later workflow that reuses its slug", async () => {
+    await pg.exec(`
+      UPDATE goat.integrations SET scopes = '["chat:write","channels:read","channels:history","users:read","users:read.email"]';
+      UPDATE goat.workflows SET archived_at = now() WHERE id = 'workflow-id';
+      INSERT INTO goat.workflows (id, workspace_id, slug, slack_bot_display_name, created_at)
+        VALUES ('replacement-workflow-id', 'workspace', 'workflow', 'Replacement', now() + interval '1 minute');
+      INSERT INTO goat.chat_messages (id, session_id, role, content, task_id) VALUES ('initial_user','session','user','Investigate','task'), ('initial_assistant','session','assistant','','task');
+      INSERT INTO goat.codex_chat_turns (id,user_workos_id,codex_chat_session_id,chat_session_id,user_message_id,assistant_message_id,status,prompt,lease_id,lease_expires_at)
+        VALUES ('initial_run','owner','runtime','session','initial_user','initial_assistant','running','Investigate','lease',now() + interval '1 minute');
+    `);
+    await expect(
+      postWorkflowSlackMessage(
+        {
+          runId: "initial_run",
+          actorId: "owner",
+          post: { channel: "C1", text: "Investigation summary", messageKey: "summary" },
+        },
+        execute,
+      ),
+    ).rejects.toThrow("active workflow session");
     expect((await pg.query("SELECT id FROM goat.channel_deliveries")).rows).toHaveLength(1);
   });
   it("creates exactly one subscription and deduplicates retries without accepting untracked threads", async () => {

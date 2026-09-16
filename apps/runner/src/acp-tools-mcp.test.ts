@@ -41,6 +41,7 @@ const capability = {
 const apps: ReturnType<typeof Fastify>[] = [];
 const authorized = {
   skillToolsEnabled: false,
+  slackChannelEnabled: false,
   actorId: "user_1",
   workspaceId: "workspace_1",
   workspaceName: "Acme",
@@ -61,6 +62,61 @@ afterEach(async () => {
 });
 
 describe("runner ACP tools MCP", () => {
+  it.each(["codex", "claude_code"] as const)(
+    "exposes the Slack bot to %s only when the workflow channel is enabled",
+    async (engine) => {
+      const authorize = vi.fn(async () => ({
+        ...authorized,
+        engine,
+        taskConversation: true,
+        slackChannelEnabled: true,
+      }));
+      const app = Fastify();
+      apps.push(app);
+      registerAcpToolsMcpRoute(app, env, { authorize });
+      await app.listen({ host: "127.0.0.1", port: 0 });
+      const address = app.server.address();
+      if (!address || typeof address === "string") throw new Error("Expected a TCP test server.");
+      const ticket = createExternalEngineGatewayTicket({
+        ...capability,
+        secret: env.internalToken,
+      }).ticket;
+      const client = new Client({ name: "slack-channel-test", version: "1" });
+      const transport = new StreamableHTTPClientTransport(
+        new URL(`http://127.0.0.1:${address.port}/internal/goat/acp-tools`),
+        { requestInit: { headers: { "x-opencompany-tool-ticket": ticket } } },
+      );
+      try {
+        await client.connect(transport as Parameters<typeof client.connect>[0]);
+        expect((await client.listTools()).tools.map(({ name }) => name)).toContain(
+          "opencompany_slack_bot_send_message",
+        );
+      } finally {
+        await client.close();
+      }
+
+      authorize.mockResolvedValue({
+        ...authorized,
+        engine,
+        taskConversation: true,
+        slackChannelEnabled: false,
+      });
+      const disabledClient = new Client({ name: "slack-channel-disabled-test", version: "1" });
+      const disabledTransport = new StreamableHTTPClientTransport(
+        new URL(`http://127.0.0.1:${address.port}/internal/goat/acp-tools`),
+        { requestInit: { headers: { "x-opencompany-tool-ticket": ticket } } },
+      );
+      try {
+        await disabledClient.connect(disabledTransport as Parameters<typeof client.connect>[0]);
+        expect((await disabledClient.listTools()).tools.map(({ name }) => name)).not.toContain(
+          "opencompany_slack_bot_send_message",
+        );
+      } finally {
+        await disabledClient.close();
+      }
+    },
+  );
+
   it.each(["codex", "claude_code"] as const)(
     "admits fresh %s clients in one run without losing duplicate-write protection",
     async (engine) => {

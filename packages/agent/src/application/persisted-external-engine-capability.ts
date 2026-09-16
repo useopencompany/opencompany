@@ -4,10 +4,12 @@ import {
   codexChatSessions,
   codexChatTurns,
   runAttempts,
+  tasks,
+  workflows,
   workspaceMembers,
   workspaces,
 } from "@opencompany/db/product-schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull, lte } from "drizzle-orm";
 import {
   authorizeExternalEngineToolCapability,
   type ExternalEngineToolAuthorityState,
@@ -36,6 +38,7 @@ async function loadPersistedAuthorityState(
   const [row] = await getDb()
     .select({
       conversationKind: chatSessions.kind,
+      slackChannelEnabled: workflows.slackChannelEnabled,
       sessionId: codexChatSessions.id,
       turnId: codexChatTurns.id,
       attemptId: runAttempts.id,
@@ -87,6 +90,18 @@ async function loadPersistedAuthorityState(
       ),
     )
     .innerJoin(workspaces, eq(workspaces.id, codexChatSessions.workspaceId))
+    // Tasks store the workflow slug. The live-row and creation-time fences keep a historical Task
+    // from receiving capabilities from a later workflow that reused that slug.
+    .leftJoin(tasks, eq(tasks.sessionId, codexChatSessions.chatSessionId))
+    .leftJoin(
+      workflows,
+      and(
+        eq(workflows.workspaceId, tasks.workspaceId),
+        eq(workflows.slug, tasks.workflowId),
+        isNull(workflows.archivedAt),
+        lte(workflows.createdAt, tasks.createdAt),
+      ),
+    )
     .where(eq(codexChatSessions.id, capability.codexChatSessionId))
     .limit(1);
   return row ?? null;
