@@ -101,7 +101,9 @@ export async function postWorkflowSlackMessage(
     throw new Error("Provide text (1–3500 characters) and a stable messageKey (1–100 characters).");
   }
   // workflow_id is the workspace-scoped slug. Match the live workflow that existed when this Task
-  // was created so an archived Task cannot inherit a replacement workflow's Slack authority.
+  // was created so an archived Task cannot inherit a replacement workflow's Slack authority. A
+  // Task opened from a Slack direct message has no workflow; its open thread subscription is what
+  // carries the same authority.
   const target = subscriptionRows<
     ChannelInstallation & {
       sessionId: string;
@@ -116,12 +118,12 @@ export async function postWorkflowSlackMessage(
     await execute(sql`
     SELECT integration.id, integration.user_workos_id AS "userWorkosId", integration.workspace_id AS "workspaceId",
       integration.external_id AS "teamId", integration.scopes, task.session_id AS "sessionId", run.lease_id AS "leaseId",
-      workflow.slack_bot_display_name AS "botDisplayName",
-      workflow.slack_bot_avatar_url AS "botAvatarUrl",
+      COALESCE(workflow.slack_bot_display_name, '') AS "botDisplayName",
+      COALESCE(workflow.slack_bot_avatar_url, '') AS "botAvatarUrl",
       event.id AS "subscriptionEventId", subscription.source_key->>'channelId' AS "followUpChannelId",
       subscription.source_key->>'threadTs' AS "followUpThreadTs"
     FROM goat.codex_chat_turns run JOIN goat.tasks task ON task.session_id = run.chat_session_id
-    JOIN goat.workflows workflow ON workflow.workspace_id = task.workspace_id
+    LEFT JOIN goat.workflows workflow ON workflow.workspace_id = task.workspace_id
       AND workflow.slug = task.workflow_id AND workflow.archived_at IS NULL
       AND workflow.created_at <= task.created_at
     JOIN goat.chat_sessions conversation ON conversation.id = task.session_id
@@ -131,13 +133,17 @@ export async function postWorkflowSlackMessage(
       AND subscription.integration_id = integration.id AND subscription.source = 'slack_thread'
     WHERE run.id = ${input.runId} AND run.user_workos_id = ${input.actorId} AND run.status = 'running'
       AND run.lease_expires_at > now() AND task.archived_at IS NULL
-      AND workflow.slack_channel_enabled AND conversation.closed_at IS NULL AND integration.status = 'connected'
+      AND (workflow.slack_channel_enabled OR (task.workflow_id IS NULL AND EXISTS (
+        SELECT 1 FROM goat.session_subscriptions thread
+        WHERE thread.session_id = task.session_id AND thread.integration_id = integration.id
+          AND thread.source = 'slack_thread' AND thread.status = 'waiting' AND thread.expires_at > now())))
+      AND conversation.closed_at IS NULL AND integration.status = 'connected'
       AND EXISTS (SELECT 1 FROM goat.workspace_members member WHERE member.workspace_id = task.workspace_id AND member.user_workos_id = ${input.actorId})
   `),
   )[0];
   if (!target)
     throw new Error(
-      "An active workflow session with its Slack channel enabled and a connected workspace Slack Channel are required.",
+      "An active session with Slack posting enabled and a connected workspace Slack Channel are required.",
     );
   if (!slackBotDeliveryScopesSatisfied(target.scopes))
     throw new Error("Reconnect Slack in Channels settings to grant required scopes.");

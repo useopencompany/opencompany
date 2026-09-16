@@ -16,7 +16,7 @@ import {
   workspaces,
 } from "@opencompany/db/product-schema";
 import { createLogger } from "@opencompany/observability";
-import { and, eq, inArray, isNull, lte } from "drizzle-orm";
+import { and, eq, inArray, isNull, lte, sql } from "drizzle-orm";
 import {
   browserProfilesAvailable,
   createAgentSession,
@@ -238,6 +238,15 @@ async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostCo
       workspaceName: workspaces.name,
       workspaceRole: workspaceMembers.role,
       slackChannelEnabled: workflows.slackChannelEnabled,
+      // A Task opened from a Slack direct message has no workflow to read the toggle from. Its
+      // open thread subscription is the equivalent grant: the Task exists to answer that thread.
+      // A workflow Task keeps reading the toggle, so retiring a workflow still withholds the tool
+      // from a Task whose Slack thread is still open.
+      slackThreadSubscribed: sql<boolean>`${tasks.workflowId} IS NULL AND EXISTS (
+        SELECT 1 FROM goat.session_subscriptions subscription
+        WHERE subscription.session_id = ${codexChatSessions.chatSessionId}
+          AND subscription.source = 'slack_thread' AND subscription.status = 'waiting'
+          AND subscription.expires_at > now())`,
     })
     .from(codexChatSessions)
     .innerJoin(chatSessions, eq(chatSessions.id, codexChatSessions.chatSessionId))
@@ -292,7 +301,7 @@ async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostCo
     firstName: row.firstName,
     lastName: row.lastName,
     timezone: row.timezone,
-    slackChannelEnabled: row.slackChannelEnabled === true,
+    slackChannelEnabled: row.slackChannelEnabled === true || row.slackThreadSubscribed === true,
     automationToolsEnabled: row.workspaceRole === "admin",
     // Read-only and personal, so unlike the automation tools this needs no admin role.
     subagentsEnabled: row.subagentsEnabled,
