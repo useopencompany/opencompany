@@ -7,7 +7,6 @@ import type {
 } from "@opencompany/agent-runtime";
 import { isBrowserToolName } from "@opencompany/browser-tools";
 import { type Actor, SKILL_READ_PERMISSION, SKILL_WRITE_PERMISSION } from "@opencompany/core";
-import type { DeleteTaskScheduleToolOutput, EditTaskScheduleToolOutput } from "../chat-ui";
 
 export type ChatHostContext = {
   taskConversation: boolean;
@@ -66,17 +65,6 @@ type ActiveSkill = {
   name: string;
   description: string;
   instructions: string;
-};
-
-type ScheduleView = {
-  id: string;
-  name: string;
-  cron: string;
-  timezone: string;
-  enabled: boolean;
-  nextRunAt: string;
-  prompt: string;
-  sourceDescription: string;
 };
 
 type TaskResult = { id: string; displayId: string; name: string; prompt: string };
@@ -156,50 +144,6 @@ export type ChatHostToolServiceDependencies = {
       expectedBundleId?: string;
     };
   }) => Promise<{ updated: true; name: string; command: string; bundleId: string }>;
-  listSchedules: (actorId: string) => Promise<ScheduleView[]>;
-  createSchedule: (input: {
-    actorId: string;
-    workspaceId: string;
-    name: string;
-    sourceDescription: string;
-    cron: string;
-    timezone: string;
-    prompt: string;
-  }) => Promise<{
-    id: string;
-    name: string;
-    cron: string;
-    timezone: string;
-    nextRunAt: Date;
-    prompt: string;
-  }>;
-  updateSchedule: (
-    actorId: string,
-    scheduleId: string,
-    input: {
-      name: string;
-      prompt: string;
-      cron: string;
-      timezone: string;
-      sourceDescription: string;
-    },
-  ) => Promise<
-    | {
-        ok: true;
-        schedule: {
-          id: string;
-          name: string;
-          cron: string;
-          timezone: string;
-          nextRunAt: Date;
-        };
-      }
-    | { ok: false; error: string }
-  >;
-  deleteSchedule: (
-    actorId: string,
-    scheduleId: string,
-  ) => Promise<{ ok: true } | { ok: false; error: string }>;
   createWorkflowTask: (input: {
     actorId: string;
     workspaceId: string;
@@ -392,84 +336,6 @@ async function executeOperation(
         },
       });
     }
-    case "schedule_task": {
-      assertAutomationTools(context);
-      const created = await dependencies.createSchedule({
-        actorId: context.actorId,
-        workspaceId: context.workspaceId,
-        name: requiredString(toolInput.name, "name"),
-        sourceDescription:
-          optionalString(toolInput.sourceDescription) ?? optionalString(toolInput.reason) ?? "",
-        cron: requiredString(toolInput.cron, "cron"),
-        timezone: optionalString(toolInput.timezone) ?? context.timezone,
-        prompt: requiredString(toolInput.prompt, "prompt"),
-      });
-      return {
-        scheduleId: created.id,
-        scheduleName: created.name,
-        cron: created.cron,
-        timezone: created.timezone,
-        nextRunAt: created.nextRunAt.toISOString(),
-        prompt: created.prompt,
-        status: "scheduled",
-      };
-    }
-    case "edit_task_schedule": {
-      assertAutomationTools(context);
-      const schedules = await dependencies.listSchedules(context.actorId);
-      const target = resolveScheduleTarget(schedules, toolInput);
-      if (!target.ok) return target;
-      const cron = optionalString(toolInput.cron) ?? target.schedule.cron;
-      const timezone = optionalString(toolInput.timezone) ?? target.schedule.timezone;
-      const timingChanged = Boolean(
-        optionalString(toolInput.cron) || optionalString(toolInput.timezone),
-      );
-      const result = await dependencies.updateSchedule(context.actorId, target.schedule.id, {
-        name: optionalString(toolInput.name) ?? target.schedule.name,
-        prompt: optionalString(toolInput.prompt) ?? target.schedule.prompt,
-        cron,
-        timezone,
-        sourceDescription:
-          optionalString(toolInput.sourceDescription) ??
-          ((!timingChanged ? target.schedule.sourceDescription : "") || `${cron} - ${timezone}`),
-      });
-      if (!result.ok) {
-        return {
-          ok: false,
-          status: "invalid",
-          error: result.error,
-        } satisfies EditTaskScheduleToolOutput;
-      }
-      return {
-        ok: true,
-        scheduleId: result.schedule.id,
-        scheduleName: result.schedule.name,
-        cron: result.schedule.cron,
-        timezone: result.schedule.timezone,
-        nextRunAt: result.schedule.nextRunAt.toISOString(),
-        status: "updated",
-      } satisfies EditTaskScheduleToolOutput;
-    }
-    case "delete_task_schedule": {
-      assertAutomationTools(context);
-      const schedules = await dependencies.listSchedules(context.actorId);
-      const target = resolveScheduleTarget(schedules, toolInput);
-      if (!target.ok) return target;
-      const result = await dependencies.deleteSchedule(context.actorId, target.schedule.id);
-      if (!result.ok) {
-        return {
-          ok: false,
-          status: "invalid",
-          error: result.error,
-        } satisfies DeleteTaskScheduleToolOutput;
-      }
-      return {
-        ok: true,
-        scheduleId: target.schedule.id,
-        scheduleName: target.schedule.name,
-        status: "deleted",
-      } satisfies DeleteTaskScheduleToolOutput;
-    }
     case "start_workflow": {
       assertAutomationTools(context);
       const created = await dependencies.createWorkflowTask({
@@ -578,29 +444,27 @@ async function bootstrap(
 ): Promise<ChatHostBootstrap> {
   const automationToolsEnabled = context.automationToolsEnabled && !context.taskConversation;
   const mentionedSkillIds = stringArray(input.mentionedSkillIds);
-  const [mentionedSkills, skills, workflows, recurringSchedules, browserProfiles] =
-    await Promise.all([
-      mentionedSkillIds.length
-        ? dependencies.resolveSkillMentions({
-            workspaceId: context.workspaceId,
-            userId: context.actorId,
-            ...(context.taskConversation ? { skillAccess: "company" as const } : {}),
-            mentions: mentionedSkillIds.map((id) => ({ id })),
-          })
-        : Promise.resolve([]),
-      dependencies.listSkillCatalog(
-        context.workspaceId,
-        context.actorId,
-        context.taskConversation ? "company" : undefined,
-      ),
-      automationToolsEnabled
-        ? dependencies.listWorkflowCatalog(context.workspaceId, context.actorId)
-        : Promise.resolve([]),
-      automationToolsEnabled ? dependencies.listSchedules(context.actorId) : Promise.resolve([]),
-      dependencies.browserProfilesAvailable()
-        ? dependencies.listBrowserProfiles(context.actorId)
-        : Promise.resolve([]),
-    ]);
+  const [mentionedSkills, skills, workflows, browserProfiles] = await Promise.all([
+    mentionedSkillIds.length
+      ? dependencies.resolveSkillMentions({
+          workspaceId: context.workspaceId,
+          userId: context.actorId,
+          ...(context.taskConversation ? { skillAccess: "company" as const } : {}),
+          mentions: mentionedSkillIds.map((id) => ({ id })),
+        })
+      : Promise.resolve([]),
+    dependencies.listSkillCatalog(
+      context.workspaceId,
+      context.actorId,
+      context.taskConversation ? "company" : undefined,
+    ),
+    automationToolsEnabled
+      ? dependencies.listWorkflowCatalog(context.workspaceId, context.actorId)
+      : Promise.resolve([]),
+    dependencies.browserProfilesAvailable()
+      ? dependencies.listBrowserProfiles(context.actorId)
+      : Promise.resolve([]),
+  ]);
   const sessionSkills = await dependencies.activateAndListSkills({
     conversationId: context.conversationId,
     messageId: context.messageId,
@@ -634,7 +498,6 @@ async function bootstrap(
       instructions: skill.instructions,
     })),
     workflows,
-    recurringSchedules,
   };
 }
 
@@ -673,9 +536,7 @@ function browserProfileResult(session: BrowserProfileSession) {
 
 function assertAutomationTools(context: ChatHostContext) {
   if (context.taskConversation) {
-    throw new Error(
-      "Tasks cannot start workflows or manage task schedules. Use a main chat instead.",
-    );
+    throw new Error("Tasks cannot start workflows. Use a main chat instead.");
   }
   if (!context.automationToolsEnabled) {
     throw new Error("Workflows and recurring tasks are not enabled for this user.");
@@ -727,40 +588,6 @@ function stringArray(value: unknown) {
         ),
       ]
     : [];
-}
-
-function resolveScheduleTarget(
-  schedules: ScheduleView[],
-  input: Record<string, unknown>,
-):
-  | { ok: true; schedule: ScheduleView }
-  | { ok: false; error: string; status: "not_found" | "ambiguous" | "invalid" } {
-  const scheduleId = optionalString(input.scheduleId);
-  if (scheduleId) {
-    const schedule = schedules.find((candidate) => candidate.id === scheduleId);
-    return schedule
-      ? { ok: true, schedule }
-      : { ok: false, status: "not_found", error: "Recurring task not found." };
-  }
-  const scheduleName = optionalString(input.scheduleName);
-  if (!scheduleName) {
-    return { ok: false, status: "invalid", error: "Specify which recurring task to change." };
-  }
-  const normalized = normalizeLookup(scheduleName);
-  const matches = schedules.filter((schedule) => normalizeLookup(schedule.name) === normalized);
-  if (matches.length === 1 && matches[0]) return { ok: true, schedule: matches[0] };
-  if (matches.length > 1) {
-    return {
-      ok: false,
-      status: "ambiguous",
-      error: "Multiple recurring tasks matched that name. Ask which one to change.",
-    };
-  }
-  return { ok: false, status: "not_found", error: "Recurring task not found." };
-}
-
-function normalizeLookup(value: string) {
-  return value.trim().toLocaleLowerCase().replace(/\s+/gu, " ");
 }
 
 function failure(error: string): ChatHostToolGatewayResponse {

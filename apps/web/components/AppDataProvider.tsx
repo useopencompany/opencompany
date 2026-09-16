@@ -17,11 +17,6 @@ import type { TaskView } from "@/components/Surface";
 import type { ChatSummaryView } from "@/lib/chat-ui";
 import type { FeatureFlags } from "@/lib/feature-flags";
 import {
-  getHeadlessTaskSchedules,
-  type HeadlessTaskScheduleReadModel,
-} from "@/lib/headless-automation-collections";
-import type { TaskScheduleView } from "@/lib/headless-automation-types";
-import {
   getHeadlessChatConversations,
   type HeadlessChatConversationReadModel,
   preloadHeadlessChatMessages,
@@ -99,7 +94,6 @@ export type AppInitialData = {
   brains: BrainSummaryView[];
   activeBrain: BrainSummaryView | null;
   tasks: TaskView[];
-  schedules: TaskScheduleView[];
   recentChats: ChatSummaryView[];
   integrations: IntegrationState;
   featureFlags: FeatureFlags;
@@ -230,10 +224,6 @@ function AppLiveDataSubscriptions({
     () => getHeadlessTasks(initialData.workspace.id),
     [initialData.workspace.id],
   );
-  const taskSchedulesCollection = useMemo(
-    () => getHeadlessTaskSchedules(initialData.workspace.id),
-    [initialData.workspace.id],
-  );
   const { data: taskRows, isLoading: tasksLoading } = useLiveQuery(
     (q) => q.from({ task: tasksCollection }),
     [tasksCollection],
@@ -265,10 +255,6 @@ function AppLiveDataSubscriptions({
     ],
     [legacyTaskRows, taskRows],
   );
-  const { data: scheduleRows, isLoading: schedulesLoading } = useLiveQuery(
-    (q) => q.from({ schedule: taskSchedulesCollection }),
-    [taskSchedulesCollection],
-  );
   const conversationsCollection = useMemo(() => getHeadlessChatConversations(), []);
   const integrationAccountsCollection = useMemo(
     () => getHeadlessIntegrationAccounts(initialData.workspace.id),
@@ -295,13 +281,6 @@ function AppLiveDataSubscriptions({
       .filter((task) => !task.archivedAt)
       .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
   }, [allTasks]);
-
-  const schedules = useMemo(() => {
-    if (schedulesLoading && !scheduleRows?.length) return initialData.schedules;
-    return ((scheduleRows ?? []) as HeadlessTaskScheduleReadModel[])
-      .map(taskScheduleReadModelToView)
-      .toSorted((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [initialData.schedules, scheduleRows, schedulesLoading]);
 
   // An archive the user just clicked applies to every list built from the conversation projection,
   // so the row leaves the sidebar and the review queue on the click rather than a beat later when
@@ -479,7 +458,6 @@ function AppLiveDataSubscriptions({
       ...initialData,
       tasks,
       allTasks,
-      schedules,
       recentChats,
       archivedChats,
       reviewItems,
@@ -500,7 +478,6 @@ function AppLiveDataSubscriptions({
       recentChats,
       reviewCount,
       reviewItems,
-      schedules,
       sidebarTasks,
       openChats,
       openSidebarTasks,
@@ -594,8 +571,4 @@ export function taskRowToView(row: TaskRow): TaskView {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
-}
-
-function taskScheduleReadModelToView(schedule: HeadlessTaskScheduleReadModel): TaskScheduleView {
-  return schedule;
 }

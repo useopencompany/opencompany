@@ -30,8 +30,9 @@ const allowedStandaloneFiles = new Set([
 // merge. Comparing with origin/main plus a PR-specific delta makes the check
 // self-invalidating once origin/main advances to that merged tree.
 const protectedCompatibilityTokens = [
-  // 1192 = 1188 + the four physical constraint and index names on goat.session_pull_requests.
-  ["physical and stored quoted goat_* identifiers", /["'`]goat_[a-z0-9_]*["'`]/gu, 1192],
+  // 1180 = 1192 - the twelve Recurring Task fixture ids that left with those tests. The physical
+  // goat.task_schedules and goat.task_schedule_runs identifiers stay until their own drop migration.
+  ["physical and stored quoted goat_* identifiers", /["'`]goat_[a-z0-9_]*["'`]/gu, 1180],
   ["quoted sandbox runtime roots", /["'`]opencompany-goat[a-z0-9_./${}:*-]*["'`]/gu, 26],
   ["chat source-provider values", /["']goat-chat["']/gu, 28],
   ["import source-provider values", /["']goat-import["']/gu, 13],

@@ -567,7 +567,7 @@ export class PostgresTaskRepository implements TaskRepository {
           SELECT
             winner.task_id, ${input.command.name}, ${input.actor.userId},
             ${input.actor.workspaceId}, ${input.command.goal}, ${input.command.source},
-            ${model}, conversation.id, ${input.command.scheduleId ?? null},
+            ${model}, conversation.id, NULL,
             ${input.command.scheduledFor ?? null}, ${input.command.workflowId ?? null},
             ${this.options.compatibility?.workflowBrainRef ?? null},
             'queued', 'queued', ${now},
@@ -1629,7 +1629,9 @@ function hashTaskCommand(command: CreateTaskCommand) {
         attachmentIds: command.attachmentIds ?? [],
         source: command.source,
         workflowId: command.workflowId ?? null,
-        scheduleId: command.scheduleId ?? null,
+        // Always null since Recurring Tasks were removed. Kept in the hash so keys minted by a
+        // pre-removal deploy still replay to the same Task instead of creating a duplicate.
+        scheduleId: null,
         scheduledFor: command.scheduledFor?.toISOString() ?? null,
       }),
     )

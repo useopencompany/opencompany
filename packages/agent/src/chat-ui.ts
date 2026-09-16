@@ -59,13 +59,6 @@ export const START_TASK_TOOL_NAME = "start_task";
 export const START_TASK_TOOL_PART_TYPE = `tool-${START_TASK_TOOL_NAME}` as const;
 export const START_WORKFLOW_TOOL_NAME = "start_workflow";
 export const START_WORKFLOW_TOOL_PART_TYPE = `tool-${START_WORKFLOW_TOOL_NAME}` as const;
-export const SCHEDULE_TASK_TOOL_NAME = "schedule_task";
-export const SCHEDULE_TASK_TOOL_PART_TYPE = `tool-${SCHEDULE_TASK_TOOL_NAME}` as const;
-export const EDIT_TASK_SCHEDULE_TOOL_NAME = "edit_task_schedule";
-export const EDIT_TASK_SCHEDULE_TOOL_PART_TYPE = `tool-${EDIT_TASK_SCHEDULE_TOOL_NAME}` as const;
-export const DELETE_TASK_SCHEDULE_TOOL_NAME = "delete_task_schedule";
-export const DELETE_TASK_SCHEDULE_TOOL_PART_TYPE =
-  `tool-${DELETE_TASK_SCHEDULE_TOOL_NAME}` as const;
 // Named for how people ask for it: workflow instructions say "send this with the
 // opencompany Slack bot", and the model has to pick this over a member's personal
 // Slack plugin action, which can also post messages.
@@ -242,71 +235,6 @@ export type StartWorkflowToolInput = {
 };
 
 export type StartWorkflowToolOutput = StartTaskToolOutput;
-
-export type ScheduleTaskToolInput = {
-  prompt: string;
-  name: string;
-  cron: string;
-  timezone?: string;
-  sourceDescription?: string;
-  reason?: string;
-};
-
-export type ScheduleTaskToolOutput = {
-  scheduleId: string;
-  scheduleName: string;
-  cron: string;
-  timezone: string;
-  nextRunAt: string;
-  prompt: string;
-  status: "scheduled";
-};
-
-export type EditTaskScheduleToolInput = {
-  scheduleId?: string;
-  scheduleName?: string;
-  name?: string;
-  prompt?: string;
-  cron?: string;
-  timezone?: string;
-  sourceDescription?: string;
-  reason?: string;
-};
-
-export type EditTaskScheduleToolOutput =
-  | {
-      ok: true;
-      scheduleId: string;
-      scheduleName: string;
-      cron: string;
-      timezone: string;
-      nextRunAt: string;
-      status: "updated";
-    }
-  | {
-      ok: false;
-      error: string;
-      status: "not_found" | "ambiguous" | "invalid";
-    };
-
-export type DeleteTaskScheduleToolInput = {
-  scheduleId?: string;
-  scheduleName?: string;
-  reason?: string;
-};
-
-export type DeleteTaskScheduleToolOutput =
-  | {
-      ok: true;
-      scheduleId: string;
-      scheduleName: string;
-      status: "deleted";
-    }
-  | {
-      ok: false;
-      error: string;
-      status: "not_found" | "ambiguous" | "invalid";
-    };
 
 export type BrainCliCommand =
   | "help"
@@ -579,18 +507,6 @@ export type ChatTools = {
   start_workflow: {
     input: StartWorkflowToolInput;
     output: StartWorkflowToolOutput;
-  };
-  schedule_task: {
-    input: ScheduleTaskToolInput;
-    output: ScheduleTaskToolOutput;
-  };
-  edit_task_schedule: {
-    input: EditTaskScheduleToolInput;
-    output: EditTaskScheduleToolOutput;
-  };
-  delete_task_schedule: {
-    input: DeleteTaskScheduleToolInput;
-    output: DeleteTaskScheduleToolOutput;
   };
   goat_brain: {
     input: BrainToolInput;

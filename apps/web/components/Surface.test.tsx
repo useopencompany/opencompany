@@ -1305,6 +1305,16 @@ describe("Surface chat streaming UI", () => {
               id: "ship-feature",
               name: "Ship feature",
               description: "Use this to ship features.",
+              steps: [
+                {
+                  id: "build",
+                  title: "Build",
+                  model: "codex",
+                  runtimeModel: CODEX_CHAT_DEFAULT_MODEL_ID,
+                  reasoningEffort: "high",
+                  instructions: "Build the requested feature.",
+                },
+              ],
             },
           ],
         });
@@ -1346,6 +1356,9 @@ describe("Surface chat streaming UI", () => {
     expect(screen.getByTestId("workflow-task-hint")).toHaveTextContent(
       "Sending runs workflow Ship feature as a background task.",
     );
+    expect(
+      screen.getByRole("button", { name: "Runs in an isolated cloud sandbox" }),
+    ).toBeInTheDocument();
     const submit = screen.getByRole("button", { name: "Start task" });
     expect(submit).toBeEnabled();
 
@@ -3819,7 +3832,7 @@ describe("Surface chat streaming UI", () => {
         : screen.getByRole("textbox");
       await user.type(textarea, "#");
       await user.click(await screen.findByRole("option", { name: /Ship feature/i }));
-      expect(screen.getByRole("button", { name: "Runtime: Codex" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Runtime: Codex (sandbox)" })).toBeEnabled();
       expect(screen.getByRole("button", { name: /Codex model:/ })).toHaveTextContent("GPT 5.6 Sol");
       fireEvent.drop(window, {
         dataTransfer: {
@@ -3828,8 +3841,9 @@ describe("Surface chat streaming UI", () => {
         },
       });
       await waitFor(() => expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledTimes(1));
-      await user.click(screen.getByRole("button", { name: "Runtime: Codex" }));
-      await user.click(screen.getByRole("button", { name: /GPT 5.5.*Coding and sharp analysis/ }));
+      await user.click(screen.getByRole("button", { name: "Runtime: Codex (sandbox)" }));
+      await user.click(screen.getByRole("button", { name: "Models" }));
+      await user.click(screen.getByRole("option", { name: /GPT 5.5.*OpenAI/ }));
       expect(screen.getByText("This run only")).toBeInTheDocument();
       await user.type(textarea, "fix this");
       await user.click(screen.getByRole("button", { name: "Start task" }));

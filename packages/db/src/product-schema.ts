@@ -3259,6 +3259,10 @@ export const googleDriveFileStates = productSchema.table(
   }),
 );
 
+// RETIRED: the Recurring Tasks ("Routines") feature was removed. Nothing reads or writes these
+// two tables or `tasks.schedule_id` any more; they are retained only because dropping them is an
+// explicitly destructive migration that needs its own plan and production verification. See
+// PRO-307.
 export const taskSchedules = productSchema.table(
   "task_schedules",
   {
@@ -4004,6 +4008,7 @@ export const tasks = productSchema.table(
   }),
 );
 
+// RETIRED with `taskSchedules` above.
 export const taskScheduleRuns = productSchema.table(
   "task_schedule_runs",
   {

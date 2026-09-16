@@ -169,8 +169,6 @@ describe("API authentication", () => {
           "brain:write",
           "workflow:read",
           "workflow:write",
-          "schedule:read",
-          "schedule:write",
         ],
       },
     });
@@ -202,7 +200,7 @@ describe("API authentication", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it("grants Workflow and schedule permissions to every workspace member", async () => {
+  it("grants Workflow permissions to every workspace member", async () => {
     const execute = vi.fn(async (_query: SQL) => ({
       rows: [
         {
@@ -238,8 +236,6 @@ describe("API authentication", () => {
       "skill:write",
       "workflow:read",
       "workflow:write",
-      "schedule:read",
-      "schedule:write",
     ]);
   });
 
