@@ -171,7 +171,9 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
           await tx.execute(
             sql`UPDATE goat.subscription_events SET status = 'done' WHERE id = ${event.id} AND status = 'running'`,
           );
-          reaction = REACTION_ANSWERED;
+          // The run succeeded but never called the Slack tool, so this thread is getting no reply
+          // at all. From the asker's side that is the silence the mark exists to break, not an answer.
+          reaction = REACTION_ATTENTION;
           return true;
         }
         await queueReply(tx.execute.bind(tx), event, deliveryId, UNANSWERED_REPLY);
@@ -256,8 +258,9 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
     throw error;
   }
 }
-// The check mark has to be worth trusting, so anything that leaves work for a person - a failed or
-// interrupted run, a closed thread, a reply Slack never took - gets the attention mark instead.
+// The check mark only means "this message got its reply". Anything else - a failed or interrupted
+// run, a closed thread, a run that never answered, a reply Slack never took - leaves work for a
+// person and gets the attention mark instead.
 function runEndedCleanly(event: Event) {
   return Boolean(event.runId) && event.runStatus !== "failed" && event.runStatus !== "interrupted";
 }
@@ -292,11 +295,11 @@ async function reactToSlackMessage(
           error_message: error instanceof Error ? error.message : "Unknown error",
         }),
       );
-  // Slack has no replace, and the working mark only ever went on when a Run was created for this
-  // reply, so a reply that never got one has nothing to clear.
+  // Slack has no replace. Add before removing so a swap that only half succeeds leaves the message
+  // over-marked rather than unmarked, and only clear a working mark a Run actually put there.
+  await attempt("reactions.add", emoji);
   if (emoji !== REACTION_WORKING && event.runId)
     await attempt("reactions.remove", REACTION_WORKING);
-  await attempt("reactions.add", emoji);
 }
 
 async function readSlackThread(input: {

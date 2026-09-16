@@ -770,31 +770,68 @@ describe("Slack thread progress reactions", () => {
   const REACTING_INSTALL = `UPDATE goat.integrations SET scopes = '["chat:write","channels:read","channels:history","users:read","users:read.email","reactions:write"]';`;
   const onMessage = (name: string) => ({ form: { channel: "C1", timestamp: "100.002", name } });
 
-  it("acks the reply it picked up, then marks it finished without posting in the thread", async () => {
+  it("acks the reply it picked up, then checks it off once the answer lands in the thread", async () => {
     await pg.exec(REACTING_INSTALL);
     await enqueueSlackThreadReply(execute, reply);
     expect(await processNextSubscriptionEvent(deps)).toBe(true);
     expect(deps.request).toHaveBeenCalledWith(
       expect.objectContaining({ method: "reactions.add", ...onMessage("eyes") }),
     );
+    // The whole point of the mark: the thread gains no extra post to carry progress.
+    expect(
+      (await pg.query("SELECT id FROM goat.channel_deliveries WHERE id <> 'root'")).rows,
+    ).toEqual([]);
+
+    const [followUp] = (
+      await pg.query<{ id: string }>("SELECT run_id AS id FROM goat.subscription_events")
+    ).rows;
+    await pg.exec(
+      `UPDATE goat.codex_chat_turns SET status = 'running', lease_id = 'reply-lease', lease_expires_at = now() + interval '1 minute';`,
+    );
+    await postWorkflowSlackMessage(
+      {
+        runId: followUp?.id ?? "",
+        actorId: "owner",
+        post: { text: "One additive column.", messageKey: "slack-follow-up-1" },
+      },
+      execute,
+    );
+    await pg.exec(
+      `UPDATE goat.channel_deliveries SET status = 'sent' WHERE id <> 'root';
+       UPDATE goat.codex_chat_turns SET status = 'completed';
+       UPDATE goat.codex_chat_sessions SET status = 'idle';
+       UPDATE goat.tasks SET status = 'succeeded';`,
+    );
 
     vi.mocked(deps.request).mockClear();
+    expect(await processNextSubscriptionEvent(deps)).toBe(true);
+    expect(deps.request).toHaveBeenCalledWith(
+      expect.objectContaining({ method: "reactions.add", ...onMessage("white_check_mark") }),
+    );
+    expect(deps.request).toHaveBeenCalledWith(
+      expect.objectContaining({ method: "reactions.remove", ...onMessage("eyes") }),
+    );
+  });
+
+  it("flags a run that finished without ever answering the thread", async () => {
+    await pg.exec(REACTING_INSTALL);
+    await enqueueSlackThreadReply(execute, reply);
+    await processNextSubscriptionEvent(deps);
     await pg.exec(
       `UPDATE goat.codex_chat_turns SET status = 'completed';
        UPDATE goat.codex_chat_sessions SET status = 'idle';
        UPDATE goat.tasks SET status = 'succeeded';`,
     );
+
+    vi.mocked(deps.request).mockClear();
     expect(await processNextSubscriptionEvent(deps)).toBe(true);
-    expect(deps.request).toHaveBeenCalledWith(
-      expect.objectContaining({ method: "reactions.remove", ...onMessage("eyes") }),
-    );
-    expect(deps.request).toHaveBeenCalledWith(
-      expect.objectContaining({ method: "reactions.add", ...onMessage("white_check_mark") }),
-    );
-    // The whole point of the reaction: the thread gains no extra post to carry progress.
+    // Nothing was posted back, so a check mark would tell the asker their question was answered.
     expect(
       (await pg.query("SELECT id FROM goat.channel_deliveries WHERE id <> 'root'")).rows,
     ).toEqual([]);
+    expect(deps.request).toHaveBeenCalledWith(
+      expect.objectContaining({ method: "reactions.add", ...onMessage("warning") }),
+    );
   });
 
   it("keeps the working mark until a failed run's notice actually lands, then flags attention", async () => {

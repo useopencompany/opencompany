@@ -53,10 +53,12 @@ reconnecting enables new workflow posts.
 ## Thread progress reactions
 
 A reply can wait minutes for its answer, so the worker marks the inbound message itself: 👀 when it
-starts a Run for that reply, then ✅ once the Run finishes, or ⚠️ if the Run failed, the thread was
-closed, or Slack never took the reply. The mark lands on the person's own message, so a thread
-never gains an extra post just to say "working on it", and the check mark stays worth trusting
-because every outcome that leaves work for a human shows the attention mark instead.
+starts a Run for that reply, then ✅ once that Run's reply lands in the thread. Everything else is
+⚠️: a failed or interrupted Run, a closed thread, a Run that finished without ever calling the
+Slack tool, or a reply Slack never took. The mark lands on the person's own message, so a thread
+never gains an extra post just to say "working on it", and the check mark only ever means "this
+message got its reply". Slack has no replace, so the swap adds the new mark before clearing 👀 and a
+half-failed swap leaves the message over-marked rather than unmarked.
 
 This is deliberately not a tool the Run calls. Progress is worker state, and a tool would need its
 own harness instructions, would only fire once the model chose to call it, and would go silent in
