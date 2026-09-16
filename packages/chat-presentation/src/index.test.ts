@@ -74,6 +74,28 @@ describe("Redis Chat presentation stream", () => {
     await stream.close();
   });
 
+  it("fails open when a connection never finishes its handshake", async () => {
+    const onError = vi.fn();
+    const stream = new RedisChatPresentationStream({
+      url: "redis://wedged",
+      createClient: () => fakeClient({ connect: vi.fn(() => new Promise<never>(() => undefined)) }),
+      connectTimeoutMs: 5,
+      onError,
+    });
+
+    await expect(stream.read({ runId: "run_1" })).resolves.toMatchObject({
+      status: "unavailable",
+      entries: [],
+    });
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: "read",
+        error: expect.objectContaining({ name: "RedisPresentationConnectTimeoutError" }),
+      }),
+    );
+    await stream.close();
+  });
+
   it("coalesces queued deltas and recovers after a mid-stream failure", async () => {
     let clock = 0;
     const onError = vi.fn();
