@@ -5865,6 +5865,8 @@ export const workflowScheduleReadModelV1 = productSchema.table(
     id: text("id").primaryKey(),
     workflowId: text("workflow_id").notNull(),
     workspaceId: text("workspace_id").notNull(),
+    scope: text("scope").$type<WorkflowScope>().notNull(),
+    createdByWorkosId: text("created_by_workos_id"),
     workflowSlug: text("workflow_slug").notNull(),
     name: text("name").notNull(),
     cron: text("cron").notNull(),

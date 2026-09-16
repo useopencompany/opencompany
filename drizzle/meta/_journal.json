@@ -2066,6 +2066,13 @@
       "when": 1790100400015,
       "tag": "0294_workflow_slack_avatar",
       "breakpoints": true
+    },
+    {
+      "idx": 295,
+      "version": "7",
+      "when": 1790100400016,
+      "tag": "0295_workflow_schedule_authorization",
+      "breakpoints": true
     }
   ]
 }
