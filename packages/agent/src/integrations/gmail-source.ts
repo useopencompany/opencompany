@@ -5,7 +5,8 @@ import { googleApiCall } from "./google-access-token";
 // Reads the connected Gmail account's own labels. Labels back the `email.received` event filter,
 // which is the whole reason a workflow author can narrow an arriving email without opencompany
 // re-implementing Gmail's matching rules.
-const GMAIL_LABELS_URL = new URL("https://gmail.googleapis.com/gmail/v1/users/me/labels");
+
+const GMAIL_LABELS_URL = "https://gmail.googleapis.com/gmail/v1/users/me/labels";
 
 export type GmailLabel = { id: string; name: string; type: string | null };
 
@@ -46,7 +47,7 @@ export async function listGmailLabels(input: {
   const response = await googleApiCall(
     { ...input.account, provider: "gmail" },
     "GET",
-    GMAIL_LABELS_URL,
+    new URL(GMAIL_LABELS_URL),
     input.signal ? { signal: input.signal } : undefined,
   );
   const labels = isRecord(response) && Array.isArray(response.labels) ? response.labels : [];
