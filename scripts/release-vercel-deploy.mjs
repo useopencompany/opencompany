@@ -7,6 +7,7 @@ import {
   cleanVercelWorkDirectory,
   restorePreparedVercelDirectory,
   vercelCurlArgs,
+  vercelDeployArgs,
 } from "./lib/release-vercel.mjs";
 
 const TERMINAL_FAILURE_STATES = new Set(["ERROR", "CANCELED"]);
@@ -37,30 +38,10 @@ async function deployPreparedOutput(options, { token, teamId, projectId }) {
   const deployTimeoutMs = Number(process.env.VERCEL_DEPLOY_TIMEOUT_MS ?? 10 * 60 * 1000);
   const readyTimeoutMs = Number(process.env.VERCEL_READY_TIMEOUT_MS ?? 10 * 60 * 1000);
   const pollDelayMs = Number(process.env.VERCEL_READY_POLL_MS ?? 2 * 1000);
-  const deployOutput = await runCommand(
-    "bunx",
-    [
-      "vercel",
-      "deploy",
-      "--prebuilt",
-      "--prod",
-      "--no-wait",
-      "--skip-domain",
-      "--yes",
-      "--format",
-      "json",
-      "--token",
-      token,
-      "--scope",
-      teamId,
-      "--project",
-      projectId,
-    ],
-    {
-      env: { ...process.env, VERCEL_PROJECT_ID: projectId },
-      timeoutMs: deployTimeoutMs,
-    },
-  );
+  const deployOutput = await runCommand("bunx", vercelDeployArgs({ token, teamId, projectId }), {
+    env: { ...process.env, VERCEL_PROJECT_ID: projectId },
+    timeoutMs: deployTimeoutMs,
+  });
 
   const deployment = await resolveDeploymentFromOutput(deployOutput, projectId, {
     token,
