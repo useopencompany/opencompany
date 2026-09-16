@@ -4,12 +4,17 @@ const actionMocks = vi.hoisted(() => ({
   listGmailLabels: vi.fn(),
   listGranolaFolders: vi.fn(),
   listLinearTeams: vi.fn(),
+  listPostHogEvents: vi.fn(),
 }));
 
 vi.mock("@/lib/brain-source-actions", () => ({
   listGmailLabelsAction: actionMocks.listGmailLabels,
   listGranolaFoldersAction: actionMocks.listGranolaFolders,
   listLinearTeamsAction: actionMocks.listLinearTeams,
+}));
+
+vi.mock("@/lib/integrations/posthog-events-actions", () => ({
+  listPostHogEventDefinitionsAction: actionMocks.listPostHogEvents,
 }));
 
 import {
@@ -81,5 +86,34 @@ describe("Gmail label filter options", () => {
 
   it("keys the registry by provider and resource type", () => {
     expect(workflowEventFilterLoaderKey("gmail", "label")).toBe("gmail:label");
+  });
+});
+
+describe("PostHog event filter options", () => {
+  it("offers event names from the connected project", async () => {
+    actionMocks.listPostHogEvents.mockResolvedValue({
+      ok: true,
+      events: [
+        { id: "signup", name: "signup" },
+        { id: "subscription_started", name: "subscription_started" },
+      ],
+      partial: false,
+    });
+
+    await expect(
+      loadWorkflowEventFilterOptions({
+        provider: "posthog",
+        resourceType: "event",
+        integrationId: "gint_posthog_events",
+        event: "event.captured",
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      options: [
+        { id: "signup", name: "signup" },
+        { id: "subscription_started", name: "subscription_started" },
+      ],
+    });
+    expect(actionMocks.listPostHogEvents).toHaveBeenCalledWith("gint_posthog_events");
   });
 });

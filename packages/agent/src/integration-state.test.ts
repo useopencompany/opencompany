@@ -543,6 +543,39 @@ describe("Granola integration state", () => {
   });
 });
 
+describe("PostHog integration state", () => {
+  it("keeps MCP tools separate from the analytics event connection", () => {
+    const state = integrationStateFromRows([
+      {
+        id: "gint_posthog_mcp",
+        provider: "posthog",
+        externalId: "posthog_mcp",
+        accountName: "Product team",
+        status: "connected",
+      },
+      {
+        id: "gint_posthog_events",
+        provider: "posthog",
+        externalId: "posthog_events",
+        connectionLabel: "Project 12345 · EU",
+        status: "connected",
+      },
+    ]);
+
+    expect(state.posthog).toMatchObject({
+      integrationId: "gint_posthog_mcp",
+      connected: true,
+    });
+    expect(state.personalAccounts.posthog).toEqual([
+      expect.objectContaining({
+        integrationId: "gint_posthog_events",
+        connectionLabel: "Project 12345 · EU",
+        connected: true,
+      }),
+    ]);
+  });
+});
+
 it("exposes personal Stripe MCP OAuth and excludes retired workspace keys", () => {
   const state = integrationStateFromRows([
     {
