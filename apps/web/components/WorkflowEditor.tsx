@@ -11,7 +11,11 @@ import {
   MAX_SLACK_DISPLAY_NAME_LENGTH,
   workflowActivationDisabledReason,
 } from "@opencompany/core/workflows";
-import type { PluginEventFilterDefinitionDto, WorkflowMemoryDto } from "@opencompany/protocol";
+import type {
+  PluginEventFilterDefinitionDto,
+  SlackBotWorkspaceSettingsDto,
+  WorkflowMemoryDto,
+} from "@opencompany/protocol";
 import { Button } from "@opencompany/ui/components/button";
 import { Input } from "@opencompany/ui/components/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
@@ -117,6 +121,7 @@ export function WorkflowEditor({
   canManageScope,
   skillCatalog,
   eventProviders = NO_EVENT_PROVIDERS,
+  slackBotSettings,
   owner,
   memory,
 }: {
@@ -126,6 +131,7 @@ export function WorkflowEditor({
   canManageScope: boolean;
   skillCatalog: SkillCatalogItem[];
   eventProviders?: WorkflowEventProviderOption[];
+  slackBotSettings: SlackBotWorkspaceSettingsDto;
   owner: { name: string; avatarUrl: string | null };
   memory: WorkflowMemoryDto;
 }) {
@@ -405,6 +411,7 @@ export function WorkflowEditor({
 
           <ChannelSection
             slackChannel={draft.slackChannel}
+            slackBotSettings={slackBotSettings}
             canEdit={canEdit}
             onChange={(slackChannel) => patch({ slackChannel })}
           />
@@ -1573,10 +1580,12 @@ function EditorMoreMenu({
 
 function ChannelSection({
   slackChannel,
+  slackBotSettings,
   canEdit,
   onChange,
 }: {
   slackChannel: WorkflowDetail["slackChannel"];
+  slackBotSettings: SlackBotWorkspaceSettingsDto;
   canEdit: boolean;
   onChange: (slackChannel: WorkflowDetail["slackChannel"]) => void;
 }) {
@@ -1605,7 +1614,7 @@ function ChannelSection({
               htmlFor="workflow-slack-display-name"
               className="text-[12px] font-medium text-ink"
             >
-              Posts as
+              Identity
             </label>
             <Input
               id="workflow-slack-display-name"
@@ -1616,22 +1625,58 @@ function ChannelSection({
               placeholder="opencompany"
               className="max-w-[280px]"
             />
-            <p className="text-[12px] leading-4 text-ink-subtle">
-              Cosmetic only: the post still comes from the single opencompany bot, keeps its APP
-              badge, and cannot be mentioned by this name. Posting needs the{" "}
-              <Link
-                href="/settings/workspace/slack"
-                prefetch
-                className="text-ink underline underline-offset-2"
-              >
-                workspace Slack connection
-              </Link>
-              .
-            </p>
+            <SlackIdentityStatus
+              displayName={slackChannel.displayName}
+              settings={slackBotSettings}
+            />
           </div>
         ) : null}
       </div>
     </section>
+  );
+}
+
+function SlackIdentityStatus({
+  displayName,
+  settings,
+}: {
+  displayName: string;
+  settings: SlackBotWorkspaceSettingsDto;
+}) {
+  const settingsLink = (
+    <Link
+      href="/settings/workspace/slack"
+      prefetch
+      className="text-ink underline underline-offset-2"
+    >
+      workspace Slack connection
+    </Link>
+  );
+
+  if (settings.needsScopeUpgrade) {
+    return (
+      <p role="alert" className="text-[12px] leading-4 text-ink-subtle">
+        This connection cannot apply custom identities yet.{" "}
+        {settings.isAdmin ? "Reconnect" : "Ask a workspace admin to reconnect"} Slack from the{" "}
+        {settingsLink}; until then messages post as opencompany.
+      </p>
+    );
+  }
+
+  if (!settings.installed || settings.status !== "connected") {
+    return (
+      <p role="alert" className="text-[12px] leading-4 text-ink-subtle">
+        {settings.isAdmin ? "Connect" : "Ask a workspace admin to connect"} Slack from the{" "}
+        {settingsLink} before this workflow can post.
+      </p>
+    );
+  }
+
+  return (
+    <p className="text-[12px] leading-4 text-ink-subtle">
+      Messages post as {displayName.trim() || "opencompany"}. The identity is cosmetic: it keeps the
+      APP badge and cannot be mentioned by this name.
+    </p>
   );
 }
 

@@ -71,19 +71,22 @@ describe("Slack bot settings service", () => {
     });
   });
 
-  it("does not expose workspace integration metadata to non-admins", async () => {
+  it("exposes Slack capabilities without workspace integration metadata to non-admins", async () => {
     const service = createSlackBotSettingsService({ db: unusedDb() });
     await expect(service.getWorkspaceSettings(member)).resolves.toEqual({
       isAdmin: false,
       configured: true,
-      installed: false,
-      status: "not_connected",
+      installed: true,
+      status: "connected",
       needsScopeUpgrade: false,
       teamName: null,
       statusReason: null,
       destinationCount: 0,
     });
-    expect(getSlackBotIntegrationForWorkspace).not.toHaveBeenCalled();
+    expect(getSlackBotIntegrationForWorkspace).toHaveBeenCalledWith(
+      "workspace_1",
+      expect.anything(),
+    );
   });
 
   it("admin-gates channel listing before loading the bot credential", async () => {

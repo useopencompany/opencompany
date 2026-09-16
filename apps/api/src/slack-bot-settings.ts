@@ -97,10 +97,12 @@ export function createSlackBotSettingsService(input: {
 
   return {
     async getWorkspaceSettings(actor) {
-      const integration = actor.role === "admin" ? await integrationFor(actor) : null;
+      // Workflow authors need to know whether a custom identity can actually be delivered. Keep
+      // connection metadata admin-only, but expose the workspace-level capability to every member.
+      const integration = await integrationFor(actor);
       const installed = Boolean(integration && integration.status !== "disconnected");
       let destinationCount = 0;
-      if (integration && installed) {
+      if (actor.role === "admin" && integration && installed) {
         const [row] = await db
           .select({ value: count() })
           .from(brainSources)
@@ -113,11 +115,12 @@ export function createSlackBotSettingsService(input: {
           );
         destinationCount = Number(row?.value ?? 0);
       }
-      const deliveries = integration
-        ? await db.execute(
-            sql`SELECT id FROM goat.channel_deliveries WHERE integration_id = ${integration.id} AND status IN ('uncertain', 'failed') LIMIT 1`,
-          )
-        : [];
+      const deliveries =
+        actor.role === "admin" && integration
+          ? await db.execute(
+              sql`SELECT id FROM goat.channel_deliveries WHERE integration_id = ${integration.id} AND status IN ('uncertain', 'failed') LIMIT 1`,
+            )
+          : [];
       const deliveryNeedsAttention =
         (Array.isArray(deliveries) ? deliveries : (deliveries.rows ?? [])).length > 0;
       return {
@@ -136,10 +139,13 @@ export function createSlackBotSettingsService(input: {
             integration.status === "connected" &&
             !slackBotScopesSatisfied(integration.scopes),
         ),
-        teamName: integration?.connectionLabel ?? null,
-        statusReason: deliveryNeedsAttention
-          ? "A Slack delivery could not be confirmed. It has not been reposted to avoid duplicates."
-          : (integration?.statusReason ?? null),
+        teamName: actor.role === "admin" ? (integration?.connectionLabel ?? null) : null,
+        statusReason:
+          actor.role !== "admin"
+            ? null
+            : deliveryNeedsAttention
+              ? "A Slack delivery could not be confirmed. It has not been reposted to avoid duplicates."
+              : (integration?.statusReason ?? null),
         destinationCount,
       };
     },

@@ -64,19 +64,34 @@ vi.mock("@/components/MarkdownBrainEditor", () => ({
 function WorkflowEditor(
   props: Omit<
     ComponentProps<typeof WorkflowEditorComponent>,
-    "workspaceId" | "owner" | "canManageScope" | "memory"
+    "workspaceId" | "owner" | "canManageScope" | "memory" | "slackBotSettings"
   > & {
     canManageScope?: boolean;
     memory?: ComponentProps<typeof WorkflowEditorComponent>["memory"];
+    slackBotSettings?: ComponentProps<typeof WorkflowEditorComponent>["slackBotSettings"];
   },
 ) {
+  const {
+    slackBotSettings = {
+      isAdmin: true,
+      configured: true,
+      installed: true,
+      status: "connected",
+      needsScopeUpgrade: false,
+      teamName: "Acme",
+      statusReason: null,
+      destinationCount: 0,
+    },
+    ...editorProps
+  } = props;
   return (
     <WorkflowEditorComponent
       canManageScope
       memory={{ workflowId: "workflow_1", enabled: false, content: "", updatedAt: null }}
-      {...props}
+      {...editorProps}
       workspaceId="workspace_1"
       owner={{ name: "Louis Morgner", avatarUrl: null }}
+      slackBotSettings={slackBotSettings}
     />
   );
 }
@@ -155,7 +170,7 @@ describe("WorkflowEditor", () => {
     render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
 
     expect(screen.getByText("Channels")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Posts as"), { target: { value: "James" } });
+    fireEvent.change(screen.getByLabelText("Identity"), { target: { value: "James" } });
     await advanceAutosave();
     expect(workflowActionsMock.update.mock.calls.at(-1)?.[1].slackChannel).toEqual({
       enabled: true,
@@ -164,12 +179,40 @@ describe("WorkflowEditor", () => {
 
     fireEvent.click(screen.getByRole("switch", { name: "Turn off Slack" }));
     // The name field belongs to an enabled channel; turning Slack off retires it from the form.
-    expect(screen.queryByLabelText("Posts as")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Identity")).not.toBeInTheDocument();
     await advanceAutosave();
     expect(workflowActionsMock.update.mock.calls.at(-1)?.[1].slackChannel).toEqual({
       enabled: false,
       displayName: "James",
     });
+  });
+
+  it("shows the required Slack reconnect beside an unsupported custom identity", () => {
+    render(
+      <WorkflowEditor
+        workflow={{ ...workflow, slackChannel: { enabled: true, displayName: "James" } }}
+        canEdit
+        skillCatalog={[]}
+        slackBotSettings={{
+          isAdmin: true,
+          configured: true,
+          installed: true,
+          status: "connected",
+          needsScopeUpgrade: true,
+          teamName: "Acme",
+          statusReason: null,
+          destinationCount: 0,
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "This connection cannot apply custom identities yet. Reconnect Slack",
+    );
+    expect(screen.getByRole("link", { name: "workspace Slack connection" })).toHaveAttribute(
+      "href",
+      "/settings/workspace/slack",
+    );
   });
 
   it("adds multiple scheduled triggers from the searchable trigger menu", async () => {

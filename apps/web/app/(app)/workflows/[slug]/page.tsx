@@ -6,6 +6,7 @@ import { getHeadlessWorkflow, getHeadlessWorkflowMemory } from "@/lib/headless-a
 import { canManageWorkflowScope } from "@/lib/headless-automation-types";
 import { listHeadlessPlugins, listHeadlessSkillCatalog } from "@/lib/headless-knowledge-server";
 import { getPersonalAccounts } from "@/lib/integrations/personal-accounts";
+import { getSlackBotWorkspaceSettingsAction } from "@/lib/slack-bot-actions";
 import { workflowEventProviderOptions } from "@/lib/workflow-event-triggers";
 import { listWorkspaceMembersAction, type WorkspaceMemberView } from "@/lib/workspace-actions";
 
@@ -16,14 +17,16 @@ type WorkflowEditorPageProps = {
 export default async function WorkflowEditorPage({ params }: WorkflowEditorPageProps) {
   const { slug } = await params;
   const context = await currentUser();
-  const [workflow, memory, skillCatalog, personalAccounts, plugins, members] = await Promise.all([
-    getHeadlessWorkflow(slug),
-    getHeadlessWorkflowMemory(slug),
-    listHeadlessSkillCatalog(),
-    getPersonalAccounts(),
-    listHeadlessPlugins(),
-    listWorkspaceMembersAction(),
-  ]);
+  const [workflow, memory, skillCatalog, personalAccounts, plugins, members, slackBotSettings] =
+    await Promise.all([
+      getHeadlessWorkflow(slug),
+      getHeadlessWorkflowMemory(slug),
+      listHeadlessSkillCatalog(),
+      getPersonalAccounts(),
+      listHeadlessPlugins(),
+      listWorkspaceMembersAction(),
+      getSlackBotWorkspaceSettingsAction(),
+    ]);
 
   if (!workflow) {
     return (
@@ -75,6 +78,7 @@ export default async function WorkflowEditorPage({ params }: WorkflowEditorPageP
       // A workflow can be run by anyone who can see it, so it never carries a personal Skill.
       skillCatalog={skillCatalog.filter((skill: SkillCatalogItemDto) => skill.scope !== "personal")}
       eventProviders={eventProviders}
+      slackBotSettings={slackBotSettings}
       owner={{ name: owner.name, avatarUrl: owner.avatarUrl }}
       memory={memory ?? { workflowId: workflow.id, enabled: false, content: "", updatedAt: null }}
     />
