@@ -8,7 +8,6 @@ import { listCurrentUserRecentChats } from "@/lib/chat";
 import { loadCurrentClaudeCodeAuthSettings } from "@/lib/claude-code-auth";
 import { loadCurrentCodexAuthSettings } from "@/lib/codex-auth";
 import { featureFlagsFromUser } from "@/lib/feature-flags";
-import { listHeadlessTaskSchedules } from "@/lib/headless-automation-server";
 import { loadCurrentInfisicalAuthSettings } from "@/lib/infisical-auth";
 import {
   type ClaudeCodeProviderState,
@@ -42,7 +41,6 @@ export async function AppShell({ children }: { children: ReactNode }) {
   });
   const emptyIntegrations = integrationStateFromRows([]);
   const [
-    schedules,
     recentChats,
     googleIntegrations,
     linear,
@@ -64,7 +62,6 @@ export async function AppShell({ children }: { children: ReactNode }) {
     workspaceSettings,
     personalAccounts,
   ] = await Promise.all([
-    loadOptionalAppShellData("schedules", listHeadlessTaskSchedules, []),
     loadOptionalAppShellData("recent_chats", listCurrentUserRecentChats, []),
     loadOptionalAppShellData(
       "google_integrations",
@@ -195,7 +192,6 @@ export async function AppShell({ children }: { children: ReactNode }) {
     // Task metadata hydrates from the API-owned Electric read model. Keeping the server snapshot
     // empty prevents the Next.js composition root from regaining a direct Task database reader.
     tasks: [],
-    schedules,
     recentChats,
     integrations: buildIntegrationState({
       googleIntegrations,

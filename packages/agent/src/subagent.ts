@@ -19,15 +19,12 @@ import {
   BRAIN_TOOL_NAME,
   BROWSER_USE_PROFILE_TOOL_NAME,
   CREATE_WORKSPACE_SKILL_TOOL_NAME,
-  DELETE_TASK_SCHEDULE_TOOL_NAME,
   DESCRIBE_ACTIONS_TOOL_NAME,
-  EDIT_TASK_SCHEDULE_TOOL_NAME,
   EDIT_WORKSPACE_SKILL_TOOL_NAME,
   LIST_ACTIONS_TOOL_NAME,
   LIST_SKILLS_TOOL_NAME,
   READ_SKILL_FILE_TOOL_NAME,
   SAVE_TO_BRAIN_TOOL_NAME,
-  SCHEDULE_TASK_TOOL_NAME,
   START_WORKFLOW_TOOL_NAME,
   USE_ACTION_TOOL_NAME,
   USE_SKILL_TOOL_NAME,
@@ -165,11 +162,8 @@ export const SUBAGENT_WITHHELD_TOOL_NAMES: readonly string[] = [
   CREATE_WORKSPACE_SKILL_TOOL_NAME,
   EDIT_WORKSPACE_SKILL_TOOL_NAME,
   WORKSPACE_SKILLS_TOOL_NAME,
-  // Spawning and scheduling durable work, which would escape the turn that authorized it.
+  // Spawning durable work, which would escape the turn that authorized it.
   START_WORKFLOW_TOOL_NAME,
-  SCHEDULE_TASK_TOOL_NAME,
-  EDIT_TASK_SCHEDULE_TOOL_NAME,
-  DELETE_TASK_SCHEDULE_TOOL_NAME,
   // Reports the status of the parent task run, which is not the subagent's to report. Spelled out
   // because it is declared in chat-agent.ts, which imports this module.
   "update_task_status",

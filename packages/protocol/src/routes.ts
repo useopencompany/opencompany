@@ -72,7 +72,6 @@ import {
   CreateTaskCommentBodySchema,
   CreateTaskCommentEnvelopeSchema,
   CreateTaskEnvelopeSchema,
-  CreateTaskScheduleBodySchema,
   CreateWikiBodySchema,
   CreateWikiPageBodySchema,
   CreateWorkflowBodySchema,
@@ -193,11 +192,6 @@ import {
   SubscriptionUsageEnvelopeSchema,
   TaskEnvelopeSchema,
   TaskPageSchema,
-  TaskScheduleArchiveEnvelopeSchema,
-  TaskScheduleEnvelopeSchema,
-  TaskScheduleMutationEnvelopeSchema,
-  TaskSchedulePageSchema,
-  TaskScheduleUpdateEnvelopeSchema,
   TaskSummaryEnvelopeSchema,
   UpdateBillingAutoRefillBodySchema,
   UpdateBrainDocumentBodySchema,
@@ -207,7 +201,6 @@ import {
   UpdateMcpSetupBodySchema,
   UpdateTaskBodySchema,
   UpdateTaskEnvelopeSchema,
-  UpdateTaskScheduleCommandSchema,
   UpdateUserPreferencesBodySchema,
   UpdateWikiBodySchema,
   UpdateWikiPageBodySchema,
@@ -589,119 +582,6 @@ export const uploadWorkflowSlackAvatarRoute = createRoute({
     201: {
       description: "Avatar stored and addressable by an unguessable public URL.",
       content: { "application/json": { schema: WorkflowSlackAvatarUploadEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const listTaskSchedulesRoute = createRoute({
-  method: "get",
-  path: "/v1/schedules",
-  tags: ["Schedules"],
-  security: actorSecurity,
-  request: {
-    query: z.object({
-      cursor: z.string().optional(),
-      limit: z.coerce.number().int().min(1).max(100).optional(),
-    }),
-  },
-  responses: {
-    200: {
-      description: "Actor-owned Recurring Task schedules.",
-      content: { "application/json": { schema: TaskSchedulePageSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const createTaskScheduleRoute = createRoute({
-  method: "post",
-  path: "/v1/schedules",
-  tags: ["Schedules"],
-  security: actorSecurity,
-  request: {
-    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
-    body: {
-      required: true,
-      content: { "application/json": { schema: CreateTaskScheduleBodySchema } },
-    },
-  },
-  responses: {
-    201: {
-      description: "Recurring Task schedule created.",
-      content: { "application/json": { schema: TaskScheduleMutationEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const getTaskScheduleRoute = createRoute({
-  method: "get",
-  path: "/v1/schedules/{scheduleId}",
-  tags: ["Schedules"],
-  security: actorSecurity,
-  request: { params: z.object({ scheduleId: ResourceIdSchema }) },
-  responses: {
-    200: {
-      description: "An actor-owned Recurring Task schedule.",
-      content: { "application/json": { schema: TaskScheduleEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const updateTaskScheduleRoute = createRoute({
-  method: "patch",
-  path: "/v1/schedules/{scheduleId}",
-  tags: ["Schedules"],
-  security: actorSecurity,
-  request: {
-    params: z.object({ scheduleId: ResourceIdSchema }),
-    body: {
-      required: true,
-      content: { "application/json": { schema: UpdateTaskScheduleCommandSchema } },
-    },
-  },
-  responses: {
-    200: {
-      description: "Recurring Task schedule updated or paused after an optimistic version check.",
-      content: { "application/json": { schema: TaskScheduleUpdateEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const archiveTaskScheduleRoute = createRoute({
-  method: "post",
-  path: "/v1/schedules/{scheduleId}/archive",
-  tags: ["Schedules"],
-  security: actorSecurity,
-  request: {
-    params: z.object({ scheduleId: ResourceIdSchema }),
-    body: { required: true, content: { "application/json": { schema: ArchiveVersionBodySchema } } },
-  },
-  responses: {
-    200: {
-      description: "Recurring Task schedule archived after an optimistic version check.",
-      content: { "application/json": { schema: TaskScheduleArchiveEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const runTaskScheduleNowRoute = createRoute({
-  method: "post",
-  path: "/v1/schedules/{scheduleId}/run-now",
-  tags: ["Schedules"],
-  security: actorSecurity,
-  request: {
-    params: z.object({ scheduleId: ResourceIdSchema }),
-    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
-  },
-  responses: {
-    202: {
-      description: "Recurring Task run-now accepted as a canonical Task and Run.",
-      content: { "application/json": { schema: CreateTaskEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -4329,12 +4209,6 @@ export type V1RouteHandlers = {
   updateWorkflowMemory: RouteHandler<typeof updateWorkflowMemoryRoute>;
   clearWorkflowMemory: RouteHandler<typeof clearWorkflowMemoryRoute>;
   uploadWorkflowSlackAvatar: RouteHandler<typeof uploadWorkflowSlackAvatarRoute>;
-  listTaskSchedules: RouteHandler<typeof listTaskSchedulesRoute>;
-  createTaskSchedule: RouteHandler<typeof createTaskScheduleRoute>;
-  getTaskSchedule: RouteHandler<typeof getTaskScheduleRoute>;
-  updateTaskSchedule: RouteHandler<typeof updateTaskScheduleRoute>;
-  archiveTaskSchedule: RouteHandler<typeof archiveTaskScheduleRoute>;
-  runTaskScheduleNow: RouteHandler<typeof runTaskScheduleNowRoute>;
   getBrainSnapshot: RouteHandler<typeof getBrainSnapshotRoute>;
   getBrainOverview: RouteHandler<typeof getBrainOverviewRoute>;
   listBrainSourceItems: RouteHandler<typeof listBrainSourceItemsRoute>;
@@ -4572,12 +4446,6 @@ export function createV1Router(
       .openapi(updateWorkflowMemoryRoute, handlers.updateWorkflowMemory)
       .openapi(clearWorkflowMemoryRoute, handlers.clearWorkflowMemory)
       .openapi(uploadWorkflowSlackAvatarRoute, handlers.uploadWorkflowSlackAvatar)
-      .openapi(listTaskSchedulesRoute, handlers.listTaskSchedules)
-      .openapi(createTaskScheduleRoute, handlers.createTaskSchedule)
-      .openapi(getTaskScheduleRoute, handlers.getTaskSchedule)
-      .openapi(updateTaskScheduleRoute, handlers.updateTaskSchedule)
-      .openapi(archiveTaskScheduleRoute, handlers.archiveTaskSchedule)
-      .openapi(runTaskScheduleNowRoute, handlers.runTaskScheduleNow)
       .openapi(getBrainSnapshotRoute, handlers.getBrainSnapshot)
       .openapi(getBrainOverviewRoute, handlers.getBrainOverview)
       .openapi(listBrainSourceItemsRoute, handlers.listBrainSourceItems)
@@ -4899,20 +4767,6 @@ const placeholderWorkflowMemory = {
   content: "",
   updatedAt: null,
 };
-const placeholderTaskSchedule = {
-  id: "schedule_contract",
-  name: "Contract schedule",
-  sourceDescription: "daily",
-  cron: "0 9 * * *",
-  timezone: "UTC",
-  prompt: "Complete the contract placeholder.",
-  enabled: true,
-  lastRunAt: null,
-  nextRunAt: placeholderTime,
-  version: 1,
-  createdAt: placeholderTime,
-  updatedAt: placeholderTime,
-};
 const placeholderBrowserProfile = {
   id: "profile_contract",
   name: "Contract profile",
@@ -5224,27 +5078,6 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       201,
     ),
-  listTaskSchedules: (c) => c.json({ data: [], nextCursor: null, meta }, 200),
-  createTaskSchedule: (c) =>
-    c.json(
-      {
-        data: { schedule: placeholderTaskSchedule, transactionId: "1", replayed: false },
-        meta,
-      },
-      201,
-    ),
-  getTaskSchedule: (c) => c.json({ data: placeholderTaskSchedule, meta }, 200),
-  updateTaskSchedule: (c) =>
-    c.json({ data: { schedule: placeholderTaskSchedule, transactionId: "1" }, meta }, 200),
-  archiveTaskSchedule: (c) =>
-    c.json(
-      {
-        data: { scheduleId: placeholderTaskSchedule.id, version: 2, transactionId: "1" },
-        meta,
-      },
-      200,
-    ),
-  runTaskScheduleNow: (c) => c.json(placeholderAutomationTaskEnvelope(), 202),
   getBrainSnapshot: (c) =>
     c.json(
       { data: { folders: [placeholderBrainFolder], documents: [placeholderBrainDocument] }, meta },

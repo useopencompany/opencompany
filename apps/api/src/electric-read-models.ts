@@ -21,7 +21,6 @@ import {
   TaskActivityReadModelSchema,
   TaskOutcomeSchema,
   TaskReadModelSchema,
-  TaskScheduleReadModelSchema,
   WikiPageReadModelSchema,
   WikiTimelineReadModelSchema,
   WorkflowReadModelSchema,
@@ -435,26 +434,6 @@ function readModelShape(input: {
         where: `"workspace_id" = $1 AND ("scope" = 'company' OR "created_by_workos_id" = $2)`,
         params: [input.actor.workspaceId, input.actor.userId],
       };
-    case "task-schedules-v1":
-      return {
-        table: "goat.task_schedule_read_model_v1",
-        columns: [
-          "id",
-          "name",
-          "source_description",
-          "cron",
-          "timezone",
-          "prompt",
-          "enabled",
-          "last_run_at",
-          "next_run_at",
-          "version",
-          "created_at",
-          "updated_at",
-        ],
-        where: `"actor_id" = $1 AND ("workspace_id" = $2 OR "workspace_id" IS NULL)`,
-        params: [input.actor.userId, input.actor.workspaceId],
-      };
     case "integration-accounts-v1":
       return {
         table: "goat.integrations",
@@ -822,10 +801,6 @@ function projectReadModelValue(
       return (
         partial ? WorkflowScheduleReadModelSchema.partial() : WorkflowScheduleReadModelSchema
       ).parse(projected);
-    case "task-schedules-v1":
-      return (partial ? TaskScheduleReadModelSchema.partial() : TaskScheduleReadModelSchema).parse(
-        projected,
-      );
     case "task-activities-v1":
       return (partial ? TaskActivityReadModelSchema.partial() : TaskActivityReadModelSchema).parse(
         projected,
@@ -1263,20 +1238,6 @@ const READ_MODEL_COLUMN_NAMES = {
     workflow_id: "workflowId",
     workflow_slug: "workflowSlug",
     name: "name",
-    cron: "cron",
-    timezone: "timezone",
-    prompt: "prompt",
-    enabled: "enabled",
-    last_run_at: "lastRunAt",
-    next_run_at: "nextRunAt",
-    version: "version",
-    created_at: "createdAt",
-    updated_at: "updatedAt",
-  },
-  "task-schedules-v1": {
-    id: "id",
-    name: "name",
-    source_description: "sourceDescription",
     cron: "cron",
     timezone: "timezone",
     prompt: "prompt",

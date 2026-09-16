@@ -208,10 +208,6 @@ describe("v1 protocol contract", () => {
       "/v1/workflows/{workflowId}/run-now",
       "/v1/workflows/{workflowId}/memory",
       "/v1/workflows/{workflowId}/slack-avatar",
-      "/v1/schedules",
-      "/v1/schedules/{scheduleId}",
-      "/v1/schedules/{scheduleId}/archive",
-      "/v1/schedules/{scheduleId}/run-now",
       "/v1/brains/{brainId}",
       "/v1/brains/{brainId}/overview",
       "/v1/brains/{brainId}/source-items",
@@ -433,8 +429,5 @@ describe("v1 protocol contract", () => {
         param: { actionId: "gmail.send_email" },
       }).pathname,
     ).toBe("/v1/actions/gmail.send_email/permissions/always-allow");
-    expect(
-      client.v1.schedules[":scheduleId"].$url({ param: { scheduleId: "schedule_1" } }).pathname,
-    ).toBe("/v1/schedules/schedule_1");
   });
 });

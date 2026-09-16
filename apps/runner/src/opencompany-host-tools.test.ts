@@ -29,7 +29,6 @@ const bootstrap: ChatHostBootstrap = {
     },
   ],
   workflows: [{ id: "research", name: "Research", description: "Research a market." }],
-  recurringSchedules: [],
 };
 
 describe("loadHostTools", () => {
@@ -70,7 +69,6 @@ describe("loadHostTools", () => {
           ...bootstrap,
           automationToolsEnabled: false,
           workflows: [],
-          recurringSchedules: [],
         },
       }),
     });
@@ -80,21 +78,13 @@ describe("loadHostTools", () => {
       ...hostTools,
       runWiki: hostTools.runWiki as never,
     });
-    for (const name of [
-      "start_workflow",
-      "schedule_task",
-      "edit_task_schedule",
-      "delete_task_schedule",
-    ]) {
-      expect(tools).not.toHaveProperty(name);
-    }
+    expect(tools).not.toHaveProperty("start_workflow");
     expect(tools).toHaveProperty("wiki");
     expect(tools).toHaveProperty("write_artifact");
     expect(tools).toHaveProperty("list_skills");
 
     const prompt = createProductChatSystemPrompt({
       automationToolsEnabled: hostTools.bootstrap.automationToolsEnabled,
-      scheduleToolsEnabled: hostTools.bootstrap.automationToolsEnabled,
       workflows: hostTools.bootstrap.workflows,
     });
     expect(prompt).not.toContain("start_workflow");
@@ -112,18 +102,10 @@ describe("loadHostTools", () => {
     });
 
     expect(tools).not.toHaveProperty("start_task");
-    for (const name of [
-      "start_workflow",
-      "schedule_task",
-      "edit_task_schedule",
-      "delete_task_schedule",
-    ]) {
-      expect(tools).toHaveProperty(name);
-    }
+    expect(tools).toHaveProperty("start_workflow");
 
     const prompt = createProductChatSystemPrompt({
       automationToolsEnabled: hostTools.bootstrap.automationToolsEnabled,
-      scheduleToolsEnabled: hostTools.bootstrap.automationToolsEnabled,
       workflows: hostTools.bootstrap.workflows,
     });
     expect(prompt).not.toContain("start_task");

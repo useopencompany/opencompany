@@ -33,9 +33,6 @@ import {
   type Task,
   TaskApplicationService,
   type TaskRepository,
-  type TaskSchedule,
-  TaskScheduleApplicationService,
-  type TaskScheduleRepository,
   WikiCommandApplicationService,
   type WikiCommandRepository,
   type Workflow,
@@ -75,8 +72,6 @@ const actor: Actor = {
     "task:write",
     "workflow:read",
     "workflow:write",
-    "schedule:read",
-    "schedule:write",
     "brain:read",
     "brain:write",
     "wiki:read",
@@ -630,27 +625,6 @@ describe("canonical Hono API", () => {
         }),
       }),
     );
-
-    const createdSchedule = await app.request("/v1/schedules", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Idempotency-Key": "schedule-create-1" },
-      body: JSON.stringify({
-        name: "Daily research",
-        cron: "0 9 * * *",
-        timezone: "UTC",
-        prompt: "Research market changes.",
-      }),
-    });
-    expect(createdSchedule.status).toBe(201);
-    const scheduleBody = await createdSchedule.json();
-    expect(scheduleBody).toMatchObject({
-      data: {
-        schedule: { id: "schedule_1", name: "Daily research", version: 1 },
-        transactionId: "61",
-        replayed: false,
-      },
-    });
-    expect(JSON.stringify(scheduleBody)).not.toMatch(/workos|workspace_id|harness|goat_/iu);
   });
 
   it("previews metadata only and installs an immutable Skill through the API boundary", async () => {
@@ -6374,20 +6348,6 @@ function fakeAutomationServices() {
     setWorkflowMemoryEnabled: async () => null,
     clearWorkflowMemory: async () => null,
   };
-  const scheduleRepository: TaskScheduleRepository = {
-    assertTaskScheduleWriteAllowed: async () => undefined,
-    replayTaskScheduleCreate: async () => null,
-    listTaskSchedules: async () => ({ schedules: [], nextCursor: null }),
-    getTaskSchedule: async () => null,
-    createTaskSchedule: async () => {
-      throw new Error("Unexpected Task schedule creation.");
-    },
-    updateTaskSchedule: async () => ({ status: "not_found" }),
-    setTaskScheduleEnabled: async () => ({ status: "not_found" }),
-    archiveTaskSchedule: async () => ({ status: "not_found" }),
-    loadTaskScheduleExecution: async () => null,
-    recordRunNow: async () => undefined,
-  };
   const options = {
     scheduleRules: {
       normalize: ({
@@ -6408,9 +6368,6 @@ function fakeAutomationServices() {
       prepareWorkflow: async () => {
         throw new Error("Unexpected Workflow planning.");
       },
-      prepareTaskSchedule: async () => {
-        throw new Error("Unexpected Task schedule planning.");
-      },
     },
     taskCreator: {
       create: async () => {
@@ -6420,7 +6377,6 @@ function fakeAutomationServices() {
   };
   return {
     workflows: new WorkflowApplicationService(workflowRepository, options),
-    schedules: new TaskScheduleApplicationService(scheduleRepository, options),
   };
 }
 
@@ -6452,20 +6408,6 @@ function populatedAutomationServices() {
     workflowId: "workflow_1",
     enabled: true,
     content: "Last run found two pricing changes.",
-    updatedAt: createdAt,
-  };
-  const schedule: TaskSchedule = {
-    id: "schedule_1",
-    name: "Daily research",
-    sourceDescription: "",
-    cron: "0 9 * * *",
-    timezone: "UTC",
-    prompt: "Research market changes.",
-    enabled: true,
-    lastRunAt: null,
-    nextRunAt: createdAt,
-    version: 1,
-    createdAt,
     updatedAt: createdAt,
   };
   const workflowRepository: WorkflowRepository = {
@@ -6525,44 +6467,6 @@ function populatedAutomationServices() {
       return memory;
     },
   };
-  const scheduleRepository: TaskScheduleRepository = {
-    assertTaskScheduleWriteAllowed: async () => undefined,
-    replayTaskScheduleCreate: async () => null,
-    listTaskSchedules: async () => ({ schedules: [schedule], nextCursor: null }),
-    getTaskSchedule: async ({ scheduleId }) => (scheduleId === schedule.id ? schedule : null),
-    createTaskSchedule: async () => ({
-      schedule,
-      transactionId: "61",
-      idempotentReplay: false,
-    }),
-    updateTaskSchedule: async () => ({
-      status: "updated",
-      value: { ...schedule, version: 2 },
-      transactionId: "62",
-    }),
-    setTaskScheduleEnabled: async ({ enabled }) => ({
-      status: "updated",
-      value: { ...schedule, enabled, version: 2 },
-      transactionId: "63",
-    }),
-    archiveTaskSchedule: async () => ({
-      status: "updated",
-      value: { scheduleId: schedule.id, version: 2 },
-      transactionId: "64",
-    }),
-    loadTaskScheduleExecution: async ({ scheduleId }) =>
-      scheduleId === schedule.id
-        ? {
-            schedule,
-            execution: {
-              engine: "opencompany",
-              model: "provider/model",
-              payload: { engine: "opencompany", model: "provider/model" },
-            },
-          }
-        : null,
-    recordRunNow: async () => undefined,
-  };
   const prepareWorkflow = vi.fn(async () => ({
     engine: "opencompany" as const,
     model: "provider/model",
@@ -6578,11 +6482,6 @@ function populatedAutomationServices() {
     },
     planner: {
       prepareWorkflow,
-      prepareTaskSchedule: async () => ({
-        engine: "opencompany" as const,
-        model: "provider/model",
-        payload: { engine: "opencompany", model: "provider/model" },
-      }),
     },
     taskCreator: {
       create: async ({ source }: { source: "workflow" | "schedule" }) => ({
@@ -6601,7 +6500,6 @@ function populatedAutomationServices() {
   };
   return {
     workflows: new WorkflowApplicationService(workflowRepository, options),
-    schedules: new TaskScheduleApplicationService(scheduleRepository, options),
     prepareWorkflow,
   };
 }

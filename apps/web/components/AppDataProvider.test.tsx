@@ -26,7 +26,6 @@ const mocks = vi.hoisted(() => {
     }),
     syncHeadlessChatMessageShapeEpochs: vi.fn(async () => {}),
     getHeadlessIntegrationAccounts: vi.fn(() => ({})),
-    getHeadlessTaskSchedules: vi.fn(() => ({})),
     getHeadlessTasks: vi.fn(() => ({})),
     listLegacyTaskCompatibility: vi.fn(async () => []),
     useLiveQuery: vi.fn(() => liveQueryResult),
@@ -47,10 +46,6 @@ vi.mock("@/lib/headless-integration-collections", () => ({
   getHeadlessIntegrationAccounts: mocks.getHeadlessIntegrationAccounts,
 }));
 
-vi.mock("@/lib/headless-automation-collections", () => ({
-  getHeadlessTaskSchedules: mocks.getHeadlessTaskSchedules,
-}));
-
 vi.mock("@/lib/headless-task-collections", () => ({
   getHeadlessTasks: mocks.getHeadlessTasks,
   legacyTaskDtoToRow: vi.fn((task) => task),
@@ -64,7 +59,6 @@ vi.mock("@/lib/headless-task-commands", () => ({
 describe("AppDataProvider", () => {
   beforeEach(() => {
     mocks.getHeadlessTasks.mockClear();
-    mocks.getHeadlessTaskSchedules.mockClear();
     mocks.getHeadlessIntegrationAccounts.mockClear();
     mocks.preloadHeadlessChatMessages.mockClear();
     mocks.syncHeadlessChatMessageShapeEpochs.mockClear();
@@ -97,7 +91,7 @@ describe("AppDataProvider", () => {
     );
 
     expect(mocks.useLiveQuery).toHaveBeenCalled();
-    expect(mocks.getHeadlessTaskSchedules).toHaveBeenCalledWith("workspace_1");
+    expect(mocks.getHeadlessTasks).toHaveBeenCalledWith("workspace_1");
   });
 
   it("preserves the server-selected Gmail account while live accounts hydrate", async () => {
@@ -112,7 +106,6 @@ describe("AppDataProvider", () => {
       },
     ]);
     const perCollection = [
-      { data: [], isLoading: false },
       { data: [], isLoading: false },
       { data: [], isLoading: false },
       {
@@ -163,7 +156,6 @@ describe("AppDataProvider", () => {
       updatedAt: new Date(now - index * 1_000).toISOString(),
     }));
     const perCollection = [
-      { data: [], isLoading: true },
       { data: [], isLoading: true },
       { data: chatRows, isLoading: false },
       { data: [], isLoading: true },
@@ -235,7 +227,6 @@ describe("AppDataProvider", () => {
     );
 
     expect(mocks.getHeadlessTasks).toHaveBeenCalledWith("workspace_1");
-    expect(mocks.getHeadlessTaskSchedules).toHaveBeenCalledWith("workspace_1");
     expect(mocks.getHeadlessIntegrationAccounts).toHaveBeenCalledWith("workspace_1");
     await waitFor(() => expect(mocks.listLegacyTaskCompatibility).toHaveBeenCalledTimes(1));
 
@@ -251,7 +242,6 @@ describe("AppDataProvider", () => {
     );
 
     expect(mocks.getHeadlessTasks).toHaveBeenCalledWith("workspace_2");
-    expect(mocks.getHeadlessTaskSchedules).toHaveBeenCalledWith("workspace_2");
     expect(mocks.getHeadlessIntegrationAccounts).toHaveBeenCalledWith("workspace_2");
     await waitFor(() => expect(mocks.listLegacyTaskCompatibility).toHaveBeenCalledTimes(2));
   });
@@ -300,11 +290,10 @@ describe("AppDataProvider", () => {
       updatedAt: now,
     };
     // useLiveQuery is called once per collection per render, in a fixed order:
-    // tasks, schedules, conversations, integrations. Only the Conversation
-    // collection carries live data here; the rest stay loading so their memos
-    // fall back to (empty) initial data instead of dereferencing it.
+    // tasks, conversations, integrations. Only the Conversation collection
+    // carries live data here; the rest stay loading so their memos fall back to
+    // (empty) initial data instead of dereferencing it.
     const perCollection = [
-      { data: [], isLoading: true },
       { data: [], isLoading: true },
       { data: [chatRow], isLoading: false },
       { data: [], isLoading: true },
@@ -347,7 +336,6 @@ describe("AppDataProvider", () => {
     ];
     const perCollection = [
       { data: taskRows, isLoading: false },
-      { data: [], isLoading: false },
       { data: [], isLoading: false },
       { data: [], isLoading: true },
     ];
@@ -414,7 +402,6 @@ describe("AppDataProvider", () => {
     };
     const perCollection = [
       { data: [], isLoading: false },
-      { data: [], isLoading: false },
       { data: [chatRow, newerChatRow], isLoading: false },
       { data: [], isLoading: true },
     ];
@@ -455,7 +442,6 @@ describe("AppDataProvider", () => {
       updatedAt: new Date(now - ageInDays * 24 * 60 * 60 * 1_000).toISOString(),
     });
     const perCollection = [
-      { data: [], isLoading: false },
       { data: [], isLoading: false },
       { data: [chatRow("six-days-old", 6), chatRow("eight-days-old", 8)], isLoading: false },
       { data: [], isLoading: true },
@@ -538,7 +524,6 @@ describe("AppDataProvider", () => {
       updatedAt: now,
     };
     const perCollection = [
-      { data: [], isLoading: false },
       { data: [], isLoading: false },
       { data: [chatRow], isLoading: false },
       { data: [], isLoading: true },
@@ -736,7 +721,6 @@ function reviewChatRow(id: string, overrides: Record<string, unknown> = {}) {
 function mockLiveQueryRows(rows: { chats?: unknown[]; tasks?: unknown[] }) {
   const perCollection = [
     { data: rows.tasks ?? [], isLoading: false },
-    { data: [], isLoading: false },
     { data: rows.chats ?? [], isLoading: false },
     { data: [], isLoading: false },
   ];
@@ -843,7 +827,6 @@ function initialData(): AppInitialData {
     brains: [],
     activeBrain: null,
     tasks: [],
-    schedules: [],
     recentChats: [],
     integrations: integrationStateFromRows([]),
     featureFlags: {

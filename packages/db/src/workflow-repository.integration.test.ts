@@ -7,9 +7,6 @@ import {
   type AutomationExecutionPlanner,
   type AutomationTaskCreator,
   type CreateTaskResult,
-  SCHEDULE_READ_PERMISSION,
-  SCHEDULE_WRITE_PERMISSION,
-  TaskScheduleApplicationService,
   WORKFLOW_READ_PERMISSION,
   WORKFLOW_WRITE_PERMISSION,
   WorkflowApplicationService,
@@ -18,7 +15,7 @@ import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { snapshotPGliteSchema } from "./test-schema-snapshot";
-import { PostgresTaskScheduleRepository, PostgresWorkflowRepository } from "./workflow-repository";
+import { PostgresWorkflowRepository } from "./workflow-repository";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const migrationPaths = [
@@ -37,7 +34,6 @@ const nextRunAt = new Date("2026-08-13T09:00:00.000Z");
 describe("Postgres Workflow and Recurring Task repositories", () => {
   let database: PGlite;
   let workflows: WorkflowApplicationService;
-  let schedules: TaskScheduleApplicationService;
   let migrationEvidence: {
     workflowVersion: number;
     workflowStepInstructions: string;
@@ -237,10 +233,6 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
       ...options,
       newStepId: () => "step_new",
     });
-    schedules = new TaskScheduleApplicationService(
-      new PostgresTaskScheduleRepository(execute, { ids }),
-      options,
-    );
   });
 
   afterEach(async () => {
@@ -573,28 +565,6 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
     await expect(
       workflows.listWorkflows(actor(), { cursor: "missing_workflow", limit: 1 }),
     ).resolves.toEqual({ workflows: [], nextCursor: null });
-
-    const scheduleCommand = {
-      name: "Recurring research",
-      cron: "0 9 * * *",
-      prompt: "Research changes.",
-    };
-    const firstSchedule = await schedules.createTaskSchedule(actor(), {
-      ...scheduleCommand,
-      idempotencyKey: "schedule-page-1",
-    });
-    const secondSchedule = await schedules.createTaskSchedule(actor(), {
-      ...scheduleCommand,
-      idempotencyKey: "schedule-page-2",
-    });
-    const schedulePage = await schedules.listTaskSchedules(actor(), { limit: 1 });
-    expect(schedulePage).toMatchObject({
-      schedules: [{ id: secondSchedule.schedule.id }],
-      nextCursor: secondSchedule.schedule.id,
-    });
-    await expect(
-      schedules.listTaskSchedules(actor(), { cursor: schedulePage.nextCursor!, limit: 1 }),
-    ).resolves.toMatchObject({ schedules: [{ id: firstSchedule.schedule.id }], nextCursor: null });
   });
 
   it("updates and archives a Workflow with optimistic concurrency and synchronized projections", async () => {
@@ -909,100 +879,6 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
     clock = new Date(clock.getTime() + 60_000);
     expect(await save(changedRoute)).toEqual(clock);
   });
-
-  it("keeps Recurring Tasks actor-owned, idempotent, and versioned", async () => {
-    const command = {
-      idempotencyKey: "schedule-create-1",
-      name: "Weekly research",
-      sourceDescription: "Tasks page",
-      cron: "0 9 * * 1",
-      timezone: "Europe/Berlin",
-      prompt: "Research market changes.",
-    };
-    const first = await schedules.createTaskSchedule(actor(), command);
-    const replay = await schedules.createTaskSchedule(actor(), command);
-
-    expect(first).toMatchObject({
-      schedule: {
-        id: "schedule_2",
-        name: "Weekly research",
-        version: 1,
-      },
-      idempotentReplay: false,
-    });
-    expect(replay).toMatchObject({
-      schedule: { id: first.schedule.id },
-      transactionId: first.transactionId,
-      idempotentReplay: true,
-    });
-    await expect(
-      schedules.getTaskSchedule(
-        actor({ userId: "user_2", workspaceId: "workspace_2" }),
-        first.schedule.id,
-      ),
-    ).rejects.toMatchObject({ code: "not_found" });
-    await expect(
-      schedules.createTaskSchedule(actor({ userId: "user_2" }), {
-        ...command,
-        idempotencyKey: "outside-workspace-schedule",
-      }),
-    ).rejects.toMatchObject({ code: "not_found" });
-
-    await database.exec(`
-      INSERT INTO goat.task_schedules (
-        id, user_workos_id, workspace_id, name, source_description, cron, timezone,
-        prompt, planned_harness_spec, enabled, next_run_at, version, created_at, updated_at
-      ) VALUES (
-        'legacy_personal_schedule', 'user_1', NULL, 'Legacy personal schedule', '',
-        '0 8 * * *', 'UTC', 'Preserve this recurring Task.',
-        '{"engine":"opencompany","model":"provider/model"}'::jsonb,
-        true, '2026-08-13T08:00:00.000Z', 1, now(), now()
-      )
-    `);
-    await expect(schedules.listTaskSchedules(actor())).resolves.toMatchObject({
-      schedules: expect.arrayContaining([
-        expect.objectContaining({ id: "legacy_personal_schedule", version: 1 }),
-      ]),
-    });
-    await schedules.updateTaskSchedule(actor(), "legacy_personal_schedule", {
-      expectedVersion: 1,
-      name: "Legacy schedule retained",
-      cron: "0 8 * * *",
-      timezone: "UTC",
-      prompt: "Preserve this recurring Task.",
-    });
-    await expect(
-      database.query<{ workspace_id: string }>(
-        "SELECT workspace_id FROM goat.task_schedules WHERE id = $1",
-        ["legacy_personal_schedule"],
-      ),
-    ).resolves.toMatchObject({ rows: [{ workspace_id: "workspace_1" }] });
-
-    const paused = await schedules.setTaskScheduleEnabled(actor(), first.schedule.id, {
-      expectedVersion: 1,
-      enabled: false,
-    });
-    expect(paused.schedule).toMatchObject({ enabled: false, version: 2 });
-    await expect(
-      schedules.setTaskScheduleEnabled(actor(), first.schedule.id, {
-        expectedVersion: 1,
-        enabled: true,
-      }),
-    ).rejects.toMatchObject({ code: "conflict" });
-    await expect(
-      database.query<{ enabled: boolean; version: number }>(
-        "SELECT enabled, version FROM goat.task_schedule_read_model_v1 WHERE id = $1",
-        [first.schedule.id],
-      ),
-    ).resolves.toMatchObject({ rows: [{ enabled: false, version: 2 }] });
-
-    await schedules.archiveTaskSchedule(actor(), first.schedule.id, 2);
-    await expect(schedules.createTaskSchedule(actor(), command)).resolves.toMatchObject({
-      schedule: { id: first.schedule.id, enabled: false, version: 3 },
-      transactionId: first.transactionId,
-      idempotentReplay: true,
-    });
-  });
 });
 
 function actor(overrides: Partial<Actor> = {}): Actor {
@@ -1010,12 +886,7 @@ function actor(overrides: Partial<Actor> = {}): Actor {
     userId: "user_1",
     workspaceId: "workspace_1",
     role: "admin",
-    permissions: [
-      WORKFLOW_READ_PERMISSION,
-      WORKFLOW_WRITE_PERMISSION,
-      SCHEDULE_READ_PERMISSION,
-      SCHEDULE_WRITE_PERMISSION,
-    ],
+    permissions: [WORKFLOW_READ_PERMISSION, WORKFLOW_WRITE_PERMISSION],
     authenticationMethod: "session",
     ...overrides,
   };
@@ -1027,15 +898,13 @@ function deterministicIds() {
   return {
     command: () => next("command"),
     workflow: () => next("workflow"),
-    taskSchedule: () => next("schedule"),
-    scheduleRun: (kind: "workflow" | "task") => next(`${kind}_run`),
+    scheduleRun: (kind: "workflow") => next(`${kind}_run`),
   };
 }
 
 function fakePlanner(): AutomationExecutionPlanner {
   return {
     prepareWorkflow: vi.fn(async () => executionPlan()),
-    prepareTaskSchedule: vi.fn(async () => executionPlan()),
   };
 }
 

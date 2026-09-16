@@ -74,16 +74,10 @@ import {
   CREATE_WORKSPACE_SKILL_TOOL_NAME,
   type CreateWorkspaceSkillToolInput,
   type CreateWorkspaceSkillToolOutput,
-  DELETE_TASK_SCHEDULE_TOOL_NAME,
   DESCRIBE_ACTIONS_TOOL_NAME,
-  type DeleteTaskScheduleToolInput,
-  type DeleteTaskScheduleToolOutput,
   type DescribeActionsToolInput,
   type DescribeActionsToolOutput,
-  EDIT_TASK_SCHEDULE_TOOL_NAME,
   EDIT_WORKSPACE_SKILL_TOOL_NAME,
-  type EditTaskScheduleToolInput,
-  type EditTaskScheduleToolOutput,
   type EditWorkspaceSkillToolInput,
   type EditWorkspaceSkillToolOutput,
   LIST_ACTIONS_TOOL_NAME,
@@ -98,9 +92,6 @@ import {
   SAVE_TO_BRAIN_TOOL_NAME,
   type SaveToBrainToolInput,
   type SaveToBrainToolOutput,
-  SCHEDULE_TASK_TOOL_NAME,
-  type ScheduleTaskToolInput,
-  type ScheduleTaskToolOutput,
   SLACK_BOT_TOOL_NAME,
   START_WORKFLOW_TOOL_NAME,
   type StartTaskToolOutput,
@@ -136,8 +127,6 @@ import {
   BROWSER_USE_PROFILE_TOOL_DESCRIPTION,
   CREATE_WORKSPACE_SKILL_TOOL_DESCRIPTION,
   createProductChatSystemPrompt,
-  DELETE_TASK_SCHEDULE_TOOL_DESCRIPTION,
-  EDIT_TASK_SCHEDULE_TOOL_DESCRIPTION,
   EDIT_WORKSPACE_SKILL_TOOL_DESCRIPTION,
   LIST_ACTIONS_TOOL_DESCRIPTION,
   LIST_SKILLS_QUERY_DESCRIPTION,
@@ -152,18 +141,9 @@ import {
   SAVE_TO_BRAIN_SOURCE_REF_DESCRIPTION,
   SAVE_TO_BRAIN_TITLE_DESCRIPTION,
   SAVE_TO_BRAIN_TOOL_DESCRIPTION,
-  SCHEDULE_TASK_CRON_DESCRIPTION,
-  SCHEDULE_TASK_NAME_DESCRIPTION,
-  SCHEDULE_TASK_PROMPT_DESCRIPTION,
-  SCHEDULE_TASK_REASON_DESCRIPTION,
-  SCHEDULE_TASK_SOURCE_DESCRIPTION,
-  SCHEDULE_TASK_TIMEZONE_DESCRIPTION,
-  SCHEDULE_TASK_TOOL_DESCRIPTION,
   START_WORKFLOW_ID_DESCRIPTION,
   START_WORKFLOW_PROMPT_DESCRIPTION,
   START_WORKFLOW_TOOL_DESCRIPTION,
-  TASK_SCHEDULE_IDENTIFIER_DESCRIPTION,
-  TASK_SCHEDULE_NAME_LOOKUP_DESCRIPTION,
   USE_ACTION_TOOL_DESCRIPTION,
   USE_SKILL_ID_DESCRIPTION,
   USE_SKILL_TOOL_DESCRIPTION,
@@ -306,13 +286,6 @@ export type BrowserToolRunner = (input: {
   name: BrowserToolName;
   args: unknown;
 }) => Promise<BrowserToolOutput>;
-type ScheduleTaskRunner = (input: ScheduleTaskToolInput) => Promise<ScheduleTaskToolOutput>;
-type EditTaskScheduleRunner = (
-  input: EditTaskScheduleToolInput,
-) => Promise<EditTaskScheduleToolOutput>;
-type DeleteTaskScheduleRunner = (
-  input: DeleteTaskScheduleToolInput,
-) => Promise<DeleteTaskScheduleToolOutput>;
 export type WorkspaceSkillsRunner = (input: WorkspaceSkillsInput) => Promise<unknown>;
 export type CreateWorkspaceSkillRunner = (
   input: CreateWorkspaceSkillToolInput,
@@ -400,9 +373,6 @@ export async function runProductChatAgent(input: {
   gatewayApiKey: string;
   workspaceId?: string;
   modelResolution?: ProductLanguageModelResolution;
-  scheduleTask?: ScheduleTaskRunner;
-  editTaskSchedule?: EditTaskScheduleRunner;
-  deleteTaskSchedule?: DeleteTaskScheduleRunner;
   workspaceSkills?: WorkspaceSkillsRunner;
   createWorkspaceSkill?: CreateWorkspaceSkillRunner;
   editWorkspaceSkill?: EditWorkspaceSkillRunner;
@@ -432,7 +402,6 @@ export async function runProductChatAgent(input: {
   brainMultiBrain?: { targets: readonly BrainMultiBrainTarget[] };
   currentDate?: Date | string;
   userContext?: ProductChatSystemPromptInput["userContext"];
-  recurringSchedules?: ProductChatSystemPromptInput["recurringSchedules"];
   automationToolsEnabled?: boolean;
   wikiToolReadOnly?: boolean;
   activeBrain?: ProductChatSystemPromptInput["activeBrain"];
@@ -461,9 +430,6 @@ export async function runProductChatAgent(input: {
   });
   const toolContext = createProductChatToolContext({
     model: input.model,
-    ...(input.scheduleTask ? { scheduleTask: input.scheduleTask } : {}),
-    ...(input.editTaskSchedule ? { editTaskSchedule: input.editTaskSchedule } : {}),
-    ...(input.deleteTaskSchedule ? { deleteTaskSchedule: input.deleteTaskSchedule } : {}),
     ...(input.workspaceSkills ? { workspaceSkills: input.workspaceSkills } : {}),
     ...(input.createWorkspaceSkill ? { createWorkspaceSkill: input.createWorkspaceSkill } : {}),
     ...(input.editWorkspaceSkill ? { editWorkspaceSkill: input.editWorkspaceSkill } : {}),
@@ -493,7 +459,6 @@ export async function runProductChatAgent(input: {
     browserToolsEnabled: Boolean(input.browserTools),
     ...(input.currentDate ? { currentDate: input.currentDate } : {}),
     ...(input.userContext ? { userContext: input.userContext } : {}),
-    ...(input.recurringSchedules ? { recurringSchedules: input.recurringSchedules } : {}),
     ...(input.automationToolsEnabled !== undefined
       ? { automationToolsEnabled: input.automationToolsEnabled }
       : {}),
@@ -613,9 +578,6 @@ export async function runProductChatAgent(input: {
 
 export function createProductChatToolContext(input: {
   model: AgentModelId;
-  scheduleTask?: ScheduleTaskRunner;
-  editTaskSchedule?: EditTaskScheduleRunner;
-  deleteTaskSchedule?: DeleteTaskScheduleRunner;
   workspaceSkills?: WorkspaceSkillsRunner;
   createWorkspaceSkill?: CreateWorkspaceSkillRunner;
   editWorkspaceSkill?: EditWorkspaceSkillRunner;
@@ -667,8 +629,6 @@ export function createProductChatToolContext(input: {
   let startedTask: StartedTask | null = null;
   let startedTaskInFlight: Promise<StartedTask> | null = null;
   let startedWorkflowId: string | null = null;
-  let scheduledTask: ScheduleTaskToolOutput | null = null;
-  let scheduleTaskInFlight: Promise<ScheduleTaskToolOutput> | null = null;
   let visibleToolActivity = false;
   let webFetchCallCount = 0;
   let webSearchCallCount = 0;
@@ -1004,149 +964,6 @@ export function createProductChatToolContext(input: {
         });
         if (output.ok) capturedByKey.set(key, output);
         return output;
-      },
-    });
-  }
-
-  if (input.scheduleTask) {
-    tools[SCHEDULE_TASK_TOOL_NAME] = tool<
-      ScheduleTaskToolInput,
-      ScheduleTaskToolOutput,
-      Record<string, unknown>
-    >({
-      description: SCHEDULE_TASK_TOOL_DESCRIPTION,
-      inputSchema: jsonSchema<ScheduleTaskToolInput>({
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          prompt: {
-            type: "string",
-            description: SCHEDULE_TASK_PROMPT_DESCRIPTION,
-          },
-          name: {
-            type: "string",
-            description: SCHEDULE_TASK_NAME_DESCRIPTION,
-          },
-          cron: {
-            type: "string",
-            description: SCHEDULE_TASK_CRON_DESCRIPTION,
-          },
-          timezone: {
-            type: "string",
-            description: SCHEDULE_TASK_TIMEZONE_DESCRIPTION,
-          },
-          sourceDescription: {
-            type: "string",
-            description: SCHEDULE_TASK_SOURCE_DESCRIPTION,
-          },
-          reason: {
-            type: "string",
-            description: SCHEDULE_TASK_REASON_DESCRIPTION,
-          },
-        },
-        required: ["prompt", "name", "cron"],
-      }),
-      execute: async (args) => {
-        visibleToolActivity = true;
-        if (scheduledTask) return scheduledTask;
-        if (scheduleTaskInFlight) {
-          scheduledTask = await scheduleTaskInFlight;
-          return scheduledTask;
-        }
-
-        scheduleTaskInFlight = input.scheduleTask!(args);
-        try {
-          scheduledTask = await scheduleTaskInFlight;
-          return scheduledTask;
-        } finally {
-          scheduleTaskInFlight = null;
-        }
-      },
-    });
-  }
-
-  if (input.editTaskSchedule) {
-    tools[EDIT_TASK_SCHEDULE_TOOL_NAME] = tool<
-      EditTaskScheduleToolInput,
-      EditTaskScheduleToolOutput,
-      Record<string, unknown>
-    >({
-      description: EDIT_TASK_SCHEDULE_TOOL_DESCRIPTION,
-      inputSchema: jsonSchema<EditTaskScheduleToolInput>({
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          scheduleId: {
-            type: "string",
-            description: TASK_SCHEDULE_IDENTIFIER_DESCRIPTION,
-          },
-          scheduleName: {
-            type: "string",
-            description: TASK_SCHEDULE_NAME_LOOKUP_DESCRIPTION,
-          },
-          name: {
-            type: "string",
-            description: SCHEDULE_TASK_NAME_DESCRIPTION,
-          },
-          prompt: {
-            type: "string",
-            description: SCHEDULE_TASK_PROMPT_DESCRIPTION,
-          },
-          cron: {
-            type: "string",
-            description: SCHEDULE_TASK_CRON_DESCRIPTION,
-          },
-          timezone: {
-            type: "string",
-            description: SCHEDULE_TASK_TIMEZONE_DESCRIPTION,
-          },
-          sourceDescription: {
-            type: "string",
-            description: SCHEDULE_TASK_SOURCE_DESCRIPTION,
-          },
-          reason: {
-            type: "string",
-            description: SCHEDULE_TASK_REASON_DESCRIPTION,
-          },
-        },
-        required: [],
-      }),
-      execute: async (args) => {
-        visibleToolActivity = true;
-        return input.editTaskSchedule!(args);
-      },
-    });
-  }
-
-  if (input.deleteTaskSchedule) {
-    tools[DELETE_TASK_SCHEDULE_TOOL_NAME] = tool<
-      DeleteTaskScheduleToolInput,
-      DeleteTaskScheduleToolOutput,
-      Record<string, unknown>
-    >({
-      description: DELETE_TASK_SCHEDULE_TOOL_DESCRIPTION,
-      inputSchema: jsonSchema<DeleteTaskScheduleToolInput>({
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          scheduleId: {
-            type: "string",
-            description: TASK_SCHEDULE_IDENTIFIER_DESCRIPTION,
-          },
-          scheduleName: {
-            type: "string",
-            description: TASK_SCHEDULE_NAME_LOOKUP_DESCRIPTION,
-          },
-          reason: {
-            type: "string",
-            description: SCHEDULE_TASK_REASON_DESCRIPTION,
-          },
-        },
-        required: [],
-      }),
-      execute: async (args) => {
-        visibleToolActivity = true;
-        return input.deleteTaskSchedule!(args);
       },
     });
   }
