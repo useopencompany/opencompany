@@ -158,6 +158,19 @@ export async function listGranolaFoldersAction(
   return { ok: true, folders: result.data.folders, partial: result.data.partial };
 }
 
+export type GmailLabelListResult =
+  | (Omit<Extract<BrainSourceOptions, { provider: "gmail" }>, "provider"> & { ok: true })
+  | { ok: false; error: string };
+
+export async function listGmailLabelsAction(integrationId: string): Promise<GmailLabelListResult> {
+  const result = await listSourceOptions(integrationId, { provider: "gmail" });
+  if (!result.ok) return result;
+  if (result.data.provider !== "gmail") {
+    return { ok: false, error: "Gmail returned an invalid source-option response." };
+  }
+  return { ok: true, labels: result.data.labels };
+}
+
 export type GoogleDriveResourceListResult =
   | (Omit<Extract<BrainSourceOptions, { provider: "google_drive" }>, "provider"> & {
       ok: true;

@@ -1187,6 +1187,7 @@ export const BrainSourceOptionsBodySchema = z.discriminatedUnion("provider", [
     })
     .strict(),
   z.object({ provider: z.literal("granola") }).strict(),
+  z.object({ provider: z.literal("gmail") }).strict(),
   z
     .object({
       provider: z.literal("google_drive"),
@@ -1228,6 +1229,12 @@ export const BrainSourceOptionsSchema = z
         provider: z.literal("granola"),
         folders: z.array(GranolaFolderRefSchema),
         partial: z.boolean(),
+      })
+      .strict(),
+    z
+      .object({
+        provider: z.literal("gmail"),
+        labels: z.array(NamedSourceRefSchema),
       })
       .strict(),
     z

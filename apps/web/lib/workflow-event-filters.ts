@@ -1,6 +1,8 @@
 import {
+  type GmailLabelListResult,
   type GranolaFolderListResult,
   type LinearTeamListResult,
+  listGmailLabelsAction,
   listGranolaFoldersAction,
   listLinearTeamsAction,
 } from "@/lib/brain-source-actions";
@@ -49,6 +51,11 @@ const WORKFLOW_EVENT_FILTER_LOADERS: Record<string, WorkflowEventFilterLoader> =
       ];
     });
     return { ok: true, options, ...(result.partial ? { partial: true } : {}) };
+  },
+  "gmail:label": async ({ integrationId }) => {
+    const result: GmailLabelListResult = await listGmailLabelsAction(integrationId);
+    if (!result.ok) return result;
+    return { ok: true, options: result.labels };
   },
   "granola:folder": async ({ integrationId }) => {
     const result: GranolaFolderListResult = await listGranolaFoldersAction(integrationId);

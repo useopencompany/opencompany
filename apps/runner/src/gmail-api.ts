@@ -144,6 +144,32 @@ export async function fetchGmailMessageMetadata(
   };
 }
 
+// Event context needs the message a workflow was triggered by, not the whole thread the ingestion
+// snapshot builds. `format=metadata` cannot carry a body, so a routed message is re-read once in
+// full — only after a route matched it, which the per-pass cap keeps bounded.
+export async function fetchGmailMessageBodyText(
+  call: GmailApiCaller,
+  messageId: string,
+  options: { maxBodyChars?: number } = {},
+): Promise<string | null> {
+  const url = new URL(`${GMAIL_BASE}/messages/${encodeURIComponent(messageId)}`);
+  url.searchParams.set("format", "full");
+
+  let message: Record<string, unknown>;
+  try {
+    message = asRecord(await call("GET", url.toString()));
+  } catch (error) {
+    // Deleted between the history listing and this read. The metadata already in hand is enough
+    // to start the workflow, so fall back to it rather than dropping the event.
+    if (error instanceof GoogleApiRequestError && error.status === 404) return null;
+    throw error;
+  }
+
+  const raw = collectTextParts(asRecord(message.payload)).join("\n\n").trim();
+  if (!raw) return null;
+  return truncate(stripQuotedReply(raw), options.maxBodyChars ?? MAX_BODY_CHARS);
+}
+
 export async function fetchGmailThreadSnapshot(
   call: GmailApiCaller,
   threadId: string,
