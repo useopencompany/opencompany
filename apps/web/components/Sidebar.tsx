@@ -566,11 +566,6 @@ function SidebarWorkList() {
   const rowDragProps = (conversationId: string): SidebarRowDragProps =>
     projects.enabled ? conversationDragProps(conversationId) : {};
 
-  // One decision for the whole list, so a section's rows never align differently from the section
-  // above it. The map only holds links for sessions the sidebar can still show, so "any link at
-  // all" and "any row with a badge" are the same question in all but the rarest case.
-  const reservePullRequestColumn = pullRequests.size > 0;
-
   const renderChatRow = (chat: ChatSummaryView) => {
     const href = chatHref(chat.id);
     const pinned = isPinned(chat);
@@ -592,7 +587,6 @@ function SidebarWorkList() {
         optimistic={optimistic}
         localState={localChatStates.get(chat.id) ?? null}
         pullRequest={pullRequests.get(chat.id) ?? null}
-        reservePullRequestColumn={reservePullRequestColumn}
         pinned={pinned}
         pinning={pinningIds.has(chat.id)}
         dragProps={optimistic ? {} : rowDragProps(chat.id)}
@@ -614,7 +608,6 @@ function SidebarWorkList() {
         state={item.state}
         href={href}
         pullRequest={pullRequests.get(item.task.conversationId) ?? null}
-        reservePullRequestColumn={reservePullRequestColumn}
         active={isTaskRouteActive(pathname, href)}
         dragProps={rowDragProps(item.task.conversationId)}
         onArchive={() => archiveTask(item.task, href)}
@@ -742,7 +735,6 @@ function SidebarChatRow({
   optimistic,
   localState,
   pullRequest,
-  reservePullRequestColumn,
   pinned,
   pinning,
   dragProps,
@@ -758,8 +750,6 @@ function SidebarChatRow({
   localState: ReturnType<typeof chatSummaryState> | null;
   /** The PR this chat's coding agent opened, when it opened one. */
   pullRequest: SessionPullRequest | null;
-  /** Whether the list reserves the leading PR column on every row. See `SidebarPullRequestColumn`. */
-  reservePullRequestColumn: boolean;
   pinned: boolean;
   pinning: boolean;
   // Lets the row be dragged into a sidebar Project. Empty when Projects are off, and for a chat
@@ -781,11 +771,10 @@ function SidebarChatRow({
         active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
       }`}
     >
-      <SidebarSessionStatusColumn
+      <SidebarSessionStatus
         state={state}
         runStateDescriptionId={runStateDescriptionId}
         pullRequest={pullRequest}
-        reservePullRequestSlot={reservePullRequestColumn}
         className={contentPadding}
       />
       {optimistic ? (
@@ -855,63 +844,50 @@ function SidebarChatRow({
 }
 
 /**
- * The leading column that carries a session's state, to the left of its name: how the run is
- * doing, then the pull request it opened.
+ * The marker at a session row's left edge follows the session lifecycle: a live run owns that
+ * position, then an unread result, then its pull request after the result is seen.
  *
  * It leads the row rather than trailing it because the state of the work an agent left behind is
  * something the reader scans a column for, the way they scan the row's own title — not a control
  * they reach for. Trailing, it also had to share the pin's column and disappear on hover.
  *
- * Both slots are a fixed width and both are held open on every row in the list, because either
- * glyph is absent more often than it is present: a settled, seen session has no run-state
- * indicator and most sessions have no pull request. Rendered only when they apply, each one
- * stepped the title right by its own width and back again — so a list of otherwise identical rows
- * had its names on three different left edges, and a run finishing shifted the whole list.
- *
  * It sits beside the row's link rather than inside it: the badge is itself a link, to the PR on
- * GitHub, and an anchor inside an anchor is invalid HTML that the browser's parser silently
- * rewrites. So the column carries the row's own left padding, and the link beside it drops to
- * `SIDEBAR_ROW_LINK_PADDING`, the gap between them.
+ * GitHub, and an anchor inside an anchor is invalid HTML. The marker carries the row's left
+ * padding. Its single 18px slot is always present, even when empty, so every title begins on the
+ * same edge while the session moves through differently sized status glyphs.
  */
-function SidebarSessionStatusColumn({
+function SidebarSessionStatus({
   state,
   runStateDescriptionId,
   pullRequest,
-  reservePullRequestSlot,
   className,
 }: {
   state: ReturnType<typeof chatSummaryState>;
-  /** Set by `useRunStateDescription` when the row's link describes itself with this slot. */
+  /** Set by `useRunStateDescription` when the row's link describes itself with this marker. */
   runStateDescriptionId: string | undefined;
   pullRequest: SessionPullRequest | null;
-  /** Whether the list reserves the pull-request slot. See `reservePullRequestColumn`. */
-  reservePullRequestSlot: boolean;
   className?: string;
 }) {
   return (
-    <span className={`flex shrink-0 items-center gap-1 ${className ?? ""}`}>
-      {/* The run state reads as the row's unread rail, so it takes the outer slot and the pull
-          request — the marker tied to what the session produced — sits against the name. The slot
-          is a fixed width so that an absent indicator cannot move the name: it matches the widest
-          glyph `ChatStateIndicator` draws on this surface, its 11px spinner. */}
-      <span className="flex w-[11px] shrink-0 items-center">
-        <ChatStateIndicator state={state} surface="sidebar" id={runStateDescriptionId} />
-      </span>
-      {reservePullRequestSlot ? (
+    <span className={`flex shrink-0 items-center ${className ?? ""}`}>
+      {state === "done_seen" ? (
         pullRequest ? (
           <PullRequestBadge pullRequest={pullRequest} />
         ) : (
           <span aria-hidden="true" className="size-[18px]" />
         )
-      ) : null}
+      ) : (
+        <span className="flex size-[18px] shrink-0 items-center justify-center">
+          <ChatStateIndicator state={state} surface="sidebar" id={runStateDescriptionId} />
+        </span>
+      )}
     </span>
   );
 }
 
 /**
- * The left padding a row's link takes. The status column in front of it has already carried the
- * row's own padding, so the link only needs the gap that separates the two; `gap-2` between them
- * would double-count that space.
+ * The marker before the row link carries the row's own padding. The link only needs the compact
+ * gap from that fixed-width slot to the title.
  */
 const SIDEBAR_ROW_LINK_PADDING = "pl-1.5";
 
@@ -955,7 +931,6 @@ function SidebarTaskRow({
   href,
   active,
   pullRequest,
-  reservePullRequestColumn,
   dragProps,
   onArchive,
 }: {
@@ -965,8 +940,6 @@ function SidebarTaskRow({
   active: boolean;
   /** The PR this Task's coding agent opened, when it opened one. */
   pullRequest: SessionPullRequest | null;
-  /** Whether the list reserves the leading PR column on every row. See `SidebarPullRequestColumn`. */
-  reservePullRequestColumn: boolean;
   // Keyed by the conversation behind the Task, the same key a Project stores for a chat.
   dragProps: SidebarRowDragProps;
   onArchive: () => void;
@@ -981,11 +954,10 @@ function SidebarTaskRow({
         active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
       }`}
     >
-      <SidebarSessionStatusColumn
+      <SidebarSessionStatus
         state={state}
         runStateDescriptionId={runStateDescriptionId}
         pullRequest={pullRequest}
-        reservePullRequestSlot={reservePullRequestColumn}
         // A Task row is two lines tall. Centred across both, the column would sit at a different
         // height from the row's own text and from every one-line chat row above it.
         className={`mt-[6px] self-start ${contentPadding}`}
