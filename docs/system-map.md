@@ -148,6 +148,20 @@ the client uses bounded, backoff polling with ordinary access reads instead of d
 GitHub's setup redirect, which can omit OAuth state for an existing installation. An explicit
 re-check may refresh the expiring user token once per install attempt.
 
+Sandbox `gh` and HTTPS Git requests use an attempt-scoped GitHub broker. A private Unix
+socket carries `gh` HTTP traffic; a Git HTTPS remote helper carries Git traffic through an
+authenticated loopback relay without changing repository remotes. The runner checks the active
+attempt, lease, and workspace membership on every request, then resolves the current personal
+credential. Provider tokens stay in the runner. A GitHub 401 gets one conditional refresh and
+one replay of that rejected HTTP request; transport errors, 403s, and server errors do not
+replay mutations. This allows overlapping runs to survive shared OAuth rotation, including
+rotation in the middle of a CLI command. GitHub requests have a 128 MiB body limit.
+
+`GH_TOKEN` inside these sandboxes authenticates the local relay, not GitHub directly. Agents
+use `gh api` for authenticated API requests. Download redirects to other hosts travel directly
+from the sandbox over HTTPS without broker or GitHub credentials. The broker uses the existing
+runner public URL and internal signing secret; it requires no new deployed environment variables.
+
 ## Ownership rules
 
 - Public contracts and the typed client: `packages/protocol`. The barrel and `/client` both pull
