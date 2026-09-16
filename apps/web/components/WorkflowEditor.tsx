@@ -8,6 +8,7 @@ import {
   scheduleSummary,
 } from "@opencompany/agent-runtime";
 import {
+  MAX_SLACK_AVATAR_URL_LENGTH,
   MAX_SLACK_DISPLAY_NAME_LENGTH,
   workflowActivationDisabledReason,
 } from "@opencompany/core/workflows";
@@ -1589,6 +1590,7 @@ function ChannelSection({
   canEdit: boolean;
   onChange: (slackChannel: WorkflowDetail["slackChannel"]) => void;
 }) {
+  const avatarPreviewUrl = slackAvatarPreviewUrl(slackChannel.avatarUrl);
   return (
     <section className="flex flex-col gap-3">
       <SectionLabel>Channels</SectionLabel>
@@ -1625,6 +1627,33 @@ function ChannelSection({
               placeholder="opencompany"
               className="max-w-[280px]"
             />
+            <label
+              htmlFor="workflow-slack-avatar-url"
+              className="mt-1 text-[12px] font-medium text-ink"
+            >
+              Avatar URL
+            </label>
+            <div className="flex items-center gap-2">
+              <div
+                aria-hidden="true"
+                className="h-9 w-9 shrink-0 rounded-lg border border-border bg-surface-muted bg-cover bg-center"
+                style={
+                  avatarPreviewUrl
+                    ? { backgroundImage: `url(${JSON.stringify(avatarPreviewUrl)})` }
+                    : undefined
+                }
+              />
+              <Input
+                id="workflow-slack-avatar-url"
+                type="url"
+                value={slackChannel.avatarUrl}
+                onChange={(event) => onChange({ ...slackChannel, avatarUrl: event.target.value })}
+                disabled={!canEdit}
+                maxLength={MAX_SLACK_AVATAR_URL_LENGTH}
+                placeholder="https://example.com/avatar.png"
+                className="max-w-[420px]"
+              />
+            </div>
             <SlackIdentityStatus
               displayName={slackChannel.displayName}
               settings={slackBotSettings}
@@ -1674,10 +1703,19 @@ function SlackIdentityStatus({
 
   return (
     <p className="text-[12px] leading-4 text-ink-subtle">
-      Messages post as {displayName.trim() || "opencompany"}. The identity is cosmetic: it keeps the
-      APP badge and cannot be mentioned by this name.
+      Messages post as {displayName.trim() || "opencompany"}. The avatar must be a public HTTPS
+      image. The identity is cosmetic: it keeps the APP badge and cannot be mentioned by this name.
     </p>
   );
+}
+
+function slackAvatarPreviewUrl(value: string) {
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "https:" && Boolean(url.hostname) ? url.href : null;
+  } catch {
+    return null;
+  }
 }
 
 function SectionLabel({ children }: { children: ReactNode }) {

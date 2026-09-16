@@ -1260,7 +1260,7 @@ function workflowListItem(overrides: Record<string, unknown> & { model?: string 
     ],
     status: "draft" as const,
     scope: "company" as const,
-    slackChannel: { enabled: true, displayName: "" },
+    slackChannel: { enabled: true, displayName: "", avatarUrl: "" },
     createdByUserId: "user_1",
     trigger: { type: "manual" as const },
     version: 1,

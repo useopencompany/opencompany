@@ -1111,6 +1111,11 @@
           "displayName": {
             "type": "string",
             "maxLength": 80
+          },
+          "avatarUrl": {
+            "type": "string",
+            "maxLength": 2048,
+            "default": ""
           }
         },
         "required": [

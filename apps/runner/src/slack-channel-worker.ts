@@ -40,6 +40,7 @@ type Event = {
   closed: boolean;
   runStatus: string | null;
   botDisplayName: string;
+  botAvatarUrl: string;
   installation: ChannelInstallation;
 };
 type SlackUser = {
@@ -94,6 +95,7 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
           OR workflow.id IS NULL OR workflow.slack_channel_enabled IS FALSE) AS closed,
         run.status AS "runStatus",
         COALESCE(workflow.slack_bot_display_name, '') AS "botDisplayName",
+        COALESCE(workflow.slack_bot_avatar_url, '') AS "botAvatarUrl",
         jsonb_build_object('id', integration.id, 'workspaceId', integration.workspace_id,
           'userWorkosId', integration.user_workos_id, 'teamId', integration.external_id, 'scopes', integration.scopes) AS installation
       FROM goat.subscription_events event
@@ -329,8 +331,8 @@ async function queueReply(execute: SubscriptionExecute, event: Event, id: string
     text.length > 3500
       ? `${text.slice(0, 3450)}\n\nFull result is available in the opencompany task.`
       : text;
-  await execute(sql`INSERT INTO goat.channel_deliveries (id, workspace_id, session_id, integration_id, team_id, channel_id, thread_ts, text, bot_display_name)
-    VALUES (${id}, ${event.workspaceId}, ${event.sessionId}, ${event.installation.id}, ${event.payload.teamId}, ${event.payload.channelId}, ${event.payload.threadTs}, ${concise}, ${event.botDisplayName}) ON CONFLICT DO NOTHING`);
+  await execute(sql`INSERT INTO goat.channel_deliveries (id, workspace_id, session_id, integration_id, team_id, channel_id, thread_ts, text, bot_display_name, bot_avatar_url)
+    VALUES (${id}, ${event.workspaceId}, ${event.sessionId}, ${event.installation.id}, ${event.payload.teamId}, ${event.payload.channelId}, ${event.payload.threadTs}, ${concise}, ${event.botDisplayName}, ${event.botAvatarUrl}) ON CONFLICT DO NOTHING`);
   await execute(
     sql`UPDATE goat.subscription_events SET status = 'delivering' WHERE id = ${event.id}`,
   );
@@ -342,6 +344,7 @@ type Delivery = {
   threadTs: string | null;
   text: string;
   botDisplayName: string;
+  botAvatarUrl: string;
   status: string;
   createdAt: Date;
   leaseId: string;
@@ -360,7 +363,8 @@ export async function processNextChannelDelivery(deps = defaults()): Promise<boo
     const row = subscriptionRows<Delivery>(
       await tx.execute(sql`
       SELECT delivery.id, delivery.channel_id AS "channelId", delivery.thread_ts AS "threadTs", delivery.text,
-        delivery.bot_display_name AS "botDisplayName", delivery.status, delivery.created_at AS "createdAt",
+        delivery.bot_display_name AS "botDisplayName", delivery.bot_avatar_url AS "botAvatarUrl",
+        delivery.status, delivery.created_at AS "createdAt",
         jsonb_build_object('id', integration.id, 'workspaceId', integration.workspace_id,
           'userWorkosId', integration.user_workos_id, 'teamId', integration.external_id, 'scopes', integration.scopes) AS installation
       FROM goat.channel_deliveries delivery JOIN goat.integrations integration ON integration.id = delivery.integration_id AND integration.external_id = delivery.team_id
@@ -395,8 +399,11 @@ export async function processNextChannelDelivery(deps = defaults()): Promise<boo
           ...(delivery.threadTs ? { thread_ts: delivery.threadTs } : {}),
           // An install that predates chat:write.customize keeps posting under the default bot
           // identity: a cosmetic name is never worth failing the delivery over.
-          ...(delivery.botDisplayName && canCustomizeIdentity
-            ? { username: delivery.botDisplayName }
+          ...(canCustomizeIdentity
+            ? {
+                ...(delivery.botDisplayName ? { username: delivery.botDisplayName } : {}),
+                ...(delivery.botAvatarUrl ? { icon_url: delivery.botAvatarUrl } : {}),
+              }
             : {}),
           metadata: JSON.stringify({
             event_type: "opencompany_delivery",

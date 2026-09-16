@@ -3337,6 +3337,8 @@ export const workflows = productSchema.table(
     // Cosmetic per-workflow Slack identity. One Slack app has one bot user, so this only overrides
     // the display name on the post; empty means the default @opencompany identity.
     slackBotDisplayName: text("slack_bot_display_name").notNull().default(""),
+    // Public HTTPS image Slack downloads for the cosmetic per-message avatar.
+    slackBotAvatarUrl: text("slack_bot_avatar_url").notNull().default(""),
     createdByWorkosId: text("created_by_workos_id").references(() => users.workosUserId, {
       onDelete: "set null",
     }),
@@ -7646,9 +7648,10 @@ export const channelDeliveries = productSchema.table(
     channelId: text("channel_id").notNull(),
     threadTs: text("thread_ts"),
     text: text("text").notNull(),
-    // Snapshot of the workflow's cosmetic Slack name at enqueue time, so a later edit to the
-    // workflow cannot retroactively change the identity of a queued post. Empty is the default bot.
+    // Snapshot the workflow's cosmetic Slack identity at enqueue time, so a later edit cannot
+    // retroactively change a queued post. Empty values keep the default bot identity.
     botDisplayName: text("bot_display_name").notNull().default(""),
+    botAvatarUrl: text("bot_avatar_url").notNull().default(""),
     status: text("status").notNull().default("pending"),
     messageTs: text("message_ts"),
     leaseId: text("lease_id"),

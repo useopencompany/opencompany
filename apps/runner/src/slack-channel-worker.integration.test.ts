@@ -97,6 +97,12 @@ beforeAll(async () => {
         "utf8",
       ),
     );
+    await db.exec(
+      await readFile(
+        new URL("../../../drizzle/0294_workflow_slack_avatar.sql", import.meta.url),
+        "utf8",
+      ),
+    );
   });
 }, 60_000);
 beforeEach(async () => {
@@ -132,7 +138,7 @@ beforeEach(async () => {
     INSERT INTO goat.workspace_members (id, workspace_id, user_workos_id, role) VALUES ('m1', 'workspace', 'member', 'member'), ('m2', 'workspace', 'owner', 'admin');
     INSERT INTO goat.chat_sessions (id, user_workos_id, title, model, engine, kind) VALUES ('session', 'owner', 'Investigation', 'test/model', 'codex', 'task');
     INSERT INTO goat.codex_chat_sessions (id, user_workos_id, chat_session_id, workspace_id, engine, model, status) VALUES ('runtime', 'owner', 'session', 'workspace', 'codex', 'test/model', 'idle');
-    INSERT INTO goat.workflows (id, workspace_id, slug, slack_bot_display_name, created_at) VALUES ('workflow-id', 'workspace', 'workflow', 'James', now() - interval '1 minute');
+    INSERT INTO goat.workflows (id, workspace_id, slug, slack_bot_display_name, slack_bot_avatar_url, created_at) VALUES ('workflow-id', 'workspace', 'workflow', 'James', 'https://example.com/james.png', now() - interval '1 minute');
     INSERT INTO goat.tasks (id, user_workos_id, workspace_id, prompt, model, session_id, source, workflow_id, status, harness_spec, sandbox_id) VALUES ('task', 'owner', 'workspace', 'Investigate the bug', 'test/model', 'session', 'workflow', 'workflow', 'succeeded', '{"engine":"codex","model":"test/model","systemPrompt":"Original workflow instructions","workflow":{"stepIndex":0,"steps":[{"instructions":"Investigate"}]}}', 'saved-sandbox');
     INSERT INTO goat.integrations VALUES ('install', 'workspace', 'owner', 'slack_bot', 'T1', 'connected', '[]');
     INSERT INTO goat.channel_deliveries (id, workspace_id, session_id, integration_id, team_id, channel_id, text, status) VALUES ('root', 'workspace', 'session', 'install', 'T1', 'C1', 'Investigation result', 'sending');
@@ -199,9 +205,12 @@ describe("durable Slack subscriptions", () => {
       ),
     ).rejects.toThrow("messageKey");
     expect(
-      (await pg.query("SELECT bot_display_name FROM goat.channel_deliveries WHERE id <> 'root'"))
-        .rows,
-    ).toEqual([{ bot_display_name: "James" }]);
+      (
+        await pg.query(
+          "SELECT bot_display_name, bot_avatar_url FROM goat.channel_deliveries WHERE id <> 'root'",
+        )
+      ).rows,
+    ).toEqual([{ bot_display_name: "James", bot_avatar_url: "https://example.com/james.png" }]);
   });
   it("refuses to post for a workflow whose Slack channel is turned off", async () => {
     await pg.exec(`
@@ -476,8 +485,8 @@ describe("durable Slack subscriptions", () => {
     ]);
     expect((await pg.query("SELECT id FROM goat.session_subscriptions")).rows).toHaveLength(1);
   });
-  it("posts under the workflow's display name only once the install can customize identity", async () => {
-    await pg.exec(`UPDATE goat.channel_deliveries SET status = 'pending', message_ts = NULL, bot_display_name = 'James';
+  it("posts under the workflow's name and avatar only once the install can customize identity", async () => {
+    await pg.exec(`UPDATE goat.channel_deliveries SET status = 'pending', message_ts = NULL, bot_display_name = 'James', bot_avatar_url = 'https://example.com/james.png';
       DELETE FROM goat.session_subscriptions;`);
     deps.request = vi.fn(async () => ({
       ts: "200.001",
@@ -486,7 +495,10 @@ describe("durable Slack subscriptions", () => {
     expect(deps.request).toHaveBeenCalledWith(
       expect.objectContaining({
         method: "chat.postMessage",
-        form: expect.not.objectContaining({ username: expect.anything() }),
+        form: expect.not.objectContaining({
+          username: expect.anything(),
+          icon_url: expect.anything(),
+        }),
       }),
     );
 
@@ -496,7 +508,10 @@ describe("durable Slack subscriptions", () => {
     expect(deps.request).toHaveBeenLastCalledWith(
       expect.objectContaining({
         method: "chat.postMessage",
-        form: expect.objectContaining({ username: "James" }),
+        form: expect.objectContaining({
+          username: "James",
+          icon_url: "https://example.com/james.png",
+        }),
       }),
     );
   });

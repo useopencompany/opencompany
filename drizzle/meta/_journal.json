@@ -2059,6 +2059,13 @@
       "when": 1790100400014,
       "tag": "0293_session_pull_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 294,
+      "version": "7",
+      "when": 1790100400015,
+      "tag": "0294_workflow_slack_avatar",
+      "breakpoints": true
     }
   ]
 }

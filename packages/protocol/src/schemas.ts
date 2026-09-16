@@ -263,13 +263,14 @@ export const WorkflowStatusSchema = z.enum(["draft", "active"]);
 export const WorkflowScopeSchema = z.enum(["personal", "company"]).openapi("WorkflowScope");
 
 // Slack is the only workflow channel today. `enabled` decides whether a run is given the Slack
-// send tool at all; `displayName` is a cosmetic chat.postMessage username override and is empty
-// when the workflow posts under the default bot identity.
+// send tool at all; `displayName` and `avatarUrl` are cosmetic chat.postMessage identity overrides
+// and are empty when the workflow posts under the default bot identity.
 export const WorkflowSlackChannelSchema = z
   .object({
     enabled: z.boolean(),
     // Trimmed before measuring, so this matches the Core rule the API delegates to.
     displayName: z.string().trim().max(80),
+    avatarUrl: z.string().trim().max(2_048).default(""),
   })
   .strict()
   .openapi("WorkflowSlackChannel");
