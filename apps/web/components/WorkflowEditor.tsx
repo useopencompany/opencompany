@@ -1466,6 +1466,7 @@ function StepCard({
             compact
             placeholder="Describe what this step should do..."
             skillMentions={skillCatalog}
+            contextMentions
           />
         ) : step.instructions.trim() ? (
           <Markdown content={step.instructions} className="text-[13.5px] leading-6 text-ink" />

@@ -551,3 +551,35 @@ html[data-opencompany-desktop="true"] .desktop-standalone-title-bar button {
   border-style: dashed;
   background: transparent;
 }
+
+/* Shared inline references preserve ordinary Markdown links in storage. */
+.context-reference {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  max-width: 100%;
+  padding: 0 0.3em;
+  border-radius: 0.3em;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  color: inherit;
+  font-weight: 500;
+  text-decoration: none;
+  vertical-align: baseline;
+  white-space: nowrap;
+}
+.context-reference > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.context-reference:hover {
+  background: color-mix(in srgb, currentColor 13%, transparent);
+}
+.context-reference.ProseMirror-selectednode {
+  outline: 2px solid currentColor;
+}
+.reference-composer[data-empty="true"]::before {
+  content: attr(data-placeholder);
+  color: var(--color-ink-subtle);
+  pointer-events: none;
+  position: absolute;
+}
