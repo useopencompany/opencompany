@@ -145,6 +145,12 @@ export async function postWorkflowSlackMessage(
     if (!target.followUpChannelId || !target.followUpThreadTs) {
       throw new Error("The originating Slack thread is unavailable.");
     }
+    // This run owes the originating thread exactly one reply, and that is where this message is
+    // going. Honouring replyToMessageKey here would silently redirect it, so say so instead.
+    if (typeof post.replyToMessageKey === "string" && post.replyToMessageKey.trim())
+      throw new Error(
+        "This run answers the Slack thread it was started from. Omit replyToMessageKey; the message goes to that thread.",
+      );
     const deliveryId = `subscription_reply_${target.subscriptionEventId}`;
     const result = subscriptionRows<{ id: string; status: string }>(
       await execute(sql`

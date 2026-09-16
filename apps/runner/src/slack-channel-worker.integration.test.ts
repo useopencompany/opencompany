@@ -333,6 +333,32 @@ describe("durable Slack subscriptions", () => {
       ).rows,
     ).toEqual([{ status: "canceled" }]);
   });
+  it("refuses to redirect a Slack follow-up reply away from the thread it answers", async () => {
+    await enqueueSlackThreadReply(execute, reply);
+    await processNextSubscriptionEvent(deps);
+    await pg.exec(
+      `UPDATE goat.integrations SET scopes = '["chat:write","channels:read","channels:history","users:read","users:read.email"]';
+       UPDATE goat.codex_chat_turns SET status = 'running', lease_id = 'reply-lease', lease_expires_at = now() + interval '1 minute';`,
+    );
+    const [followUpRun] = (await pg.query<{ id: string }>("SELECT id FROM goat.codex_chat_turns"))
+      .rows;
+    expect(followUpRun).toBeDefined();
+    const runId = followUpRun?.id ?? "";
+    await expect(
+      postWorkflowSlackMessage(
+        {
+          runId,
+          actorId: "owner",
+          post: {
+            text: "Detail",
+            messageKey: "slack-follow-up-1",
+            replyToMessageKey: "somewhere-else",
+          },
+        },
+        execute,
+      ),
+    ).rejects.toThrow("Omit replyToMessageKey");
+  });
   it("rejects a reply to a messageKey this workflow never posted", async () => {
     await pg.exec(ACTIVE_RUN);
     await expect(
