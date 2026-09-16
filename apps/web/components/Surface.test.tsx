@@ -3819,7 +3819,7 @@ describe("Surface chat streaming UI", () => {
         : screen.getByRole("textbox");
       await user.type(textarea, "#");
       await user.click(await screen.findByRole("option", { name: /Ship feature/i }));
-      expect(screen.getByRole("button", { name: "Runtime: Codex" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Runtime: Codex (sandbox)" })).toBeEnabled();
       expect(screen.getByRole("button", { name: /Codex model:/ })).toHaveTextContent("GPT 5.6 Sol");
       fireEvent.drop(window, {
         dataTransfer: {
@@ -3828,8 +3828,9 @@ describe("Surface chat streaming UI", () => {
         },
       });
       await waitFor(() => expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledTimes(1));
-      await user.click(screen.getByRole("button", { name: "Runtime: Codex" }));
-      await user.click(screen.getByRole("button", { name: /GPT 5.5.*Coding and sharp analysis/ }));
+      await user.click(screen.getByRole("button", { name: "Runtime: Codex (sandbox)" }));
+      await user.click(screen.getByRole("button", { name: "Models" }));
+      await user.click(screen.getByRole("option", { name: /GPT 5.5.*OpenAI/ }));
       expect(screen.getByText("This run only")).toBeInTheDocument();
       await user.type(textarea, "fix this");
       await user.click(screen.getByRole("button", { name: "Start task" }));
