@@ -54,6 +54,22 @@ describe("WorkflowApplicationService", () => {
     ).rejects.toThrow("The actor is not allowed to access Workflows.");
   });
 
+  it("authorizes a side-channel workflow write only for a visible workflow and a write permission", async () => {
+    const service = workflowService(fakeWorkflowRepository());
+
+    await expect(service.authorizeWorkflowWrite(actor(), " workflow_1 ")).resolves.toBe(
+      "workflow_1",
+    );
+
+    await expect(service.authorizeWorkflowWrite(actor(), "workflow_missing")).rejects.toThrow(
+      "Workflow not found.",
+    );
+
+    await expect(
+      service.authorizeWorkflowWrite(actor({ permissions: [] }), "workflow_1"),
+    ).rejects.toThrow("The actor is not allowed to access Workflows.");
+  });
+
   it("reports a missing or invisible workflow when reading memory", async () => {
     const service = workflowService(fakeWorkflowRepository());
     await expect(service.getWorkflowMemory(actor(), "workflow_missing")).rejects.toThrow(

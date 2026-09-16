@@ -2000,6 +2000,46 @@
         ],
         "additionalProperties": false
       },
+      "WorkflowSlackAvatarUploadEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "avatarUrl": {
+                "type": "string",
+                "maxLength": 2048,
+                "format": "uri"
+              }
+            },
+            "required": [
+              "avatarUrl"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "WorkflowSlackAvatarUploadBody": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "additionalProperties": false
+      },
       "TaskSchedulePage": {
         "type": "object",
         "properties": {
@@ -9224,6 +9264,10 @@
           "engine"
         ],
         "additionalProperties": false
+      },
+      "WorkflowAvatarAssetId": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.(?:png|jpg|webp)$/u"
       },
       "EngineRuntimeStatusEnvelope": {
         "type": "object",
@@ -16765,6 +16809,66 @@
         }
       }
     },
+    "/v1/workflows/{workflowId}/slack-avatar": {
+      "post": {
+        "tags": [
+          "Workflows"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "workflowId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkflowSlackAvatarUploadBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Avatar stored and addressable by an unguessable public URL.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowSlackAvatarUploadEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/schedules": {
       "get": {
         "tags": [
@@ -23881,6 +23985,57 @@
             "required": false,
             "name": "download",
             "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized private bytes.",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/public/workflow-avatars/{workflowId}/{assetId}": {
+      "get": {
+        "tags": [
+          "Public Workflow avatars"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "workflowId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "$ref": "#/components/schemas/WorkflowAvatarAssetId"
+            },
+            "required": true,
+            "name": "assetId",
+            "in": "path"
           }
         ],
         "responses": {
