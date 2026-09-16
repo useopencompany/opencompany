@@ -1,7 +1,7 @@
 "use client";
 
 import type { ImessageSettingsDto } from "@opencompany/protocol";
-import { Button } from "@opencompany/ui/components/button";
+import { Button, buttonVariants } from "@opencompany/ui/components/button";
 import { Check, Copy, MessageCircle, Smartphone } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -82,12 +82,13 @@ function ImessagePanel({ data }: { data: ImessageSettingsDto }) {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {binding.conversationId ? (
-              <Button asChild variant="outline" size="sm">
-                <Link href={`/chat/${binding.conversationId}`}>
-                  <MessageCircle size={14} strokeWidth={1.75} />
-                  Open conversation
-                </Link>
-              </Button>
+              <Link
+                href={`/chat/${binding.conversationId}`}
+                className={buttonVariants({ variant: "outline", size: "sm" })}
+              >
+                <MessageCircle size={14} strokeWidth={1.75} />
+                Open conversation
+              </Link>
             ) : null}
             <Button
               variant="ghost"
@@ -198,12 +199,10 @@ function LinkCodeCard({
           {copied ? <Check size={14} strokeWidth={2} /> : <Copy size={14} strokeWidth={1.75} />}
           {copied ? "Copied" : "Copy code"}
         </Button>
-        <Button asChild size="sm">
-          <a href={smsHref}>
-            <MessageCircle size={14} strokeWidth={1.75} />
-            Open Messages
-          </a>
-        </Button>
+        <a href={smsHref} className={buttonVariants({ size: "sm" })}>
+          <MessageCircle size={14} strokeWidth={1.75} />
+          Open Messages
+        </a>
       </div>
       <div className="flex items-center gap-2 text-[12px] text-ink-subtle">
         <span className="size-1.5 animate-pulse rounded-full bg-ink/50" aria-hidden />
