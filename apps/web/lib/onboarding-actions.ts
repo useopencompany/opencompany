@@ -15,7 +15,7 @@ import { activateWorkspace } from "@/lib/workspace-session";
 
 export type OnboardingActionResult = { ok: true } | { ok: false; error: string };
 export type OnboardingWorkspaceActionResult =
-  | { ok: true; workspaceId: string; brainRef: string | null }
+  | { ok: true; workspaceId: string }
   | { ok: false; error: string };
 
 const WORKSPACE_SAVE_ERROR = "Could not save your workspace. Please try again.";
@@ -62,13 +62,11 @@ export async function saveOnboardingWorkspaceAction(input: {
     await activateWorkspace({
       workspaceId: activation.workspaceId,
       workosOrganizationId: activation.organizationId,
-      brainId: activation.brainId,
     });
     revalidatePath("/", "layout");
     return {
       ok: true,
       workspaceId: activation.workspaceId,
-      brainRef: activation.brainId,
     };
   } catch (error) {
     unstable_rethrow(error);

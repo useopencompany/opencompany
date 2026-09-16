@@ -3,40 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { serverApiClient, serverApiErrorMessage } from "@/lib/server-api-client";
 
-export type IntegrationAccountUsage = {
-  ok: true;
-  // brain_sources rows fed by this account (across all brains).
-  affectedBrainSourceCount: number;
-};
-
-// Pre-disconnect check so the UI can warn before removing an account that
-// still feeds brains.
-export async function getIntegrationAccountUsageAction(
-  integrationId: string,
-): Promise<IntegrationAccountUsage | { ok: false; error: string }> {
-  try {
-    const response = await (await serverApiClient()).v1["integration-accounts"][
-      ":integrationId"
-    ].usage.$get({ param: { integrationId } });
-    if (!response.ok) {
-      return {
-        ok: false,
-        error: await serverApiErrorMessage(response, "Could not check account usage."),
-      };
-    }
-    const data = (await response.json()).data as { affectedBrainSourceCount: number };
-    return { ok: true, affectedBrainSourceCount: data.affectedBrainSourceCount };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error.message : "Could not check account usage.",
-    };
-  }
-}
-
-// Hard-deletes a personal integration account. Credentials, synced resources,
-// brain sources, and buffered events cascade away; already-ingested brain
-// content stays (pointer/copy rule) and event claims survive via SET NULL.
 export async function disconnectIntegrationAccountAction(
   integrationId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {

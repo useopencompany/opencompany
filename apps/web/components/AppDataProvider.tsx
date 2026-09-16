@@ -60,7 +60,7 @@ type UserView = {
   avatarUrl: string | null;
 };
 
-// Directory of workspace members used to render attribution (brain document
+// Directory of workspace members used to render attribution (wiki page
 // "created by", etc.) from a workos user id.
 export type WorkspaceMemberView = {
   workosUserId: string;
@@ -76,14 +76,6 @@ export type WorkspaceView = {
   role: "admin" | "member";
 };
 
-export type BrainSummaryView = {
-  id: string;
-  name: string;
-  slug: string;
-  description: string | null;
-  visibility: "workspace" | "restricted";
-};
-
 export type AppInitialData = {
   user: UserView;
   workspace: WorkspaceView;
@@ -91,8 +83,6 @@ export type AppInitialData = {
   plan: "hobby" | "pro";
   workspaces: WorkspaceView[];
   workspaceMembers: WorkspaceMemberView[];
-  brains: BrainSummaryView[];
-  activeBrain: BrainSummaryView | null;
   tasks: TaskView[];
   recentChats: ChatSummaryView[];
   integrations: IntegrationState;

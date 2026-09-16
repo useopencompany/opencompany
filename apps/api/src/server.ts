@@ -1,10 +1,9 @@
 import { serve } from "@hono/node-server";
 import { getAppUrl } from "@opencompany/agent/app-url";
 import { resolvePersistedAutoModelRouting } from "@opencompany/agent/application/persisted-auto-model-routing";
-import { BrainImportApplicationService } from "@opencompany/agent/brain-imports";
-import { BrainSourceApplicationService } from "@opencompany/agent/brain-sources";
 import { BrowserProfileApplicationService } from "@opencompany/agent/browser-profiles/service";
 import { createCustomMcpService } from "@opencompany/agent/custom-mcp";
+import { IntegrationResourceOptionsService } from "@opencompany/agent/integration-resource-options";
 import { createConvexMcpService } from "@opencompany/agent/integrations/convex-mcp-server";
 import { createGmailMcpService } from "@opencompany/agent/integrations/gmail-mcp-server";
 import { createGoogleAdminMcpService } from "@opencompany/agent/integrations/google-admin-mcp-server";
@@ -49,7 +48,6 @@ import { registerNodeObservability, shutdownNodeObservability } from "@opencompa
 import { WorkOS } from "@workos-inc/node";
 import { createApiApp } from "./app";
 import { createAttachmentUploadService } from "./attachments";
-import { createAttioIngress } from "./attio-ingress";
 import {
   createWorkOsApiAuthenticator,
   createWorkOsApiIdentityVerifier,
@@ -58,8 +56,6 @@ import {
 import { createAutomationServices } from "./automations";
 import { createBillingReconcileService } from "./billing-reconcile";
 import { createBotService } from "./bots";
-import { createBrainAssetService } from "./brain-assets";
-import { createBrainControlService } from "./brain-control";
 import { parseBrowserOrigins } from "./browser-origins";
 import { createChatResourceService } from "./chat-resources";
 import { createChatTitleService } from "./chat-title";
@@ -70,7 +66,6 @@ import { createEngineSessionService } from "./engine-sessions";
 import { createFeedbackService } from "./feedback";
 import { createGitHubUserIngress } from "./github-user-ingress";
 import { createGoogleIngress } from "./google-ingress";
-import { createHubspotIngress } from "./hubspot-ingress";
 import { createIdentityService } from "./identity";
 import { createImessageIngress } from "./imessage-ingress";
 import { createImessageSettingsService } from "./imessage-settings";
@@ -142,8 +137,6 @@ const wikiCommands = new WikiCommandApplicationService(
   new PostgresWikiCommandRepository(database.db),
 );
 const wikiControl = createWikiControlService({ db: database.db });
-const brainSources = new BrainSourceApplicationService(database.db);
-const brainImports = new BrainImportApplicationService(database.db, brainSources);
 const browserProfiles = new BrowserProfileApplicationService(database.db);
 const skillImports = new SkillImportApplicationService(
   new PostgresSkillBundleRepository(database.db),
@@ -174,13 +167,10 @@ const app = createApiApp({
     ? { wikiCommandsInternalSecret: process.env.API_INTERNAL_TOKEN.trim() }
     : {}),
   wikiControl,
-  brainSources,
-  brainImports,
   browserProfiles,
   skillImports,
   pluginImports,
   customMcp: createCustomMcpService(database.db),
-  brainAssets: createBrainAssetService({ db: database.db, knowledge }),
   workflowAvatars: createWorkflowAvatarService({ workflows: automations.workflows }),
   chatResources: createChatResourceService({ db: database.db }),
   messagePresentations: new PostgresMessagePresentationService(execute),
@@ -214,7 +204,6 @@ const app = createApiApp({
       },
       { workspaceId: event.actor.workspaceId },
     ),
-  brainControl: createBrainControlService({ db: database.db }),
   attachments: createAttachmentUploadService({ repository: attachmentRepository }),
   bots: createBotService({
     db: database.db,
@@ -225,6 +214,7 @@ const app = createApiApp({
   feedback: createFeedbackService({ db: database.db }),
   repoConfigs: createRepoConfigService({ db: database.db }),
   sessionPullRequests: (actor) => listSessionPullRequestStatuses({ userWorkosId: actor.userId }),
+  integrationResourceOptions: new IntegrationResourceOptionsService(database.db),
   integrationAccounts: createIntegrationAccountService({
     db: database.db,
     runner: runnerClient,
@@ -365,8 +355,6 @@ const app = createApiApp({
       }),
   }),
   linearIngress: createLinearIngress({ db: database.db, identify: identityVerifier }),
-  hubspotIngress: createHubspotIngress({ db: database.db, identify: identityVerifier }),
-  attioIngress: createAttioIngress({ db: database.db }),
   jamieIngress: createJamieIngress({ db: database.db }),
   convexIngress: createConvexIngress({ db: database.db }),
   mcpOAuthIngress: createMcpOAuthIngress({

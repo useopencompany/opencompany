@@ -1,7 +1,6 @@
 "use client";
 
 import { Check } from "lucide-react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { disconnectIntegrationAccountAction } from "@/lib/integration-account-actions";
@@ -10,12 +9,10 @@ import { saveGranolaApiKeyAction } from "@/lib/integrations/granola-actions";
 
 export function GranolaIntegrationSetup({
   initialState,
-  brainSourcesHref = null,
   variant = "settings",
   onSaved,
 }: {
   initialState: GranolaProviderState;
-  brainSourcesHref?: string | null;
   // "modal" embeds the form in a dialog or the plugin Events section.
   variant?: "settings" | "modal";
   onSaved?: () => void;
@@ -82,17 +79,6 @@ export function GranolaIntegrationSetup({
               {status.badge}
             </span>
           </div>
-          {state.connected && brainSourcesHref ? (
-            <div className="px-2 pt-1">
-              <Link
-                href={brainSourcesHref}
-                prefetch
-                className="inline-flex items-center rounded-md border border-ink/15 px-2.5 py-1.5 text-[12px] font-medium text-ink transition-colors hover:bg-surface-hover"
-              >
-                Open Brain sources
-              </Link>
-            </div>
-          ) : null}
         </section>
       )}
 

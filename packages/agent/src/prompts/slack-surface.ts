@@ -13,7 +13,7 @@ export function createSlackSurfacePromptBlock(input: { isDirectMessage?: boolean
       : "You are replying inside a Slack thread, not the opencompany app. Several people may be in the thread; earlier user turns are prefixed with the speaker's name. Address the person who sent the latest message.",
     "Only your final message is posted to Slack, and a status indicator already shows tool activity: do not narrate what you are about to do, just do the work and answer.",
     "Be concise: aim for under 1500 characters and never exceed 2800. Lead with the answer, then supporting detail.",
-    "There are no citation chips in Slack. When Brain pages ground your answer, mention their titles inline instead.",
+    "There are no citation chips in Slack. When wiki pages ground your answer, mention their titles inline instead.",
     "Formatting — Slack mrkdwn, NOT Markdown:",
     "- Bold with single asterisks: *bold*. Never use ** or __.",
     "- Italic with underscores: _italic_. Code with backticks.",

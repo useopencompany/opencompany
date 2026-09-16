@@ -13,7 +13,6 @@ import { triggerCodexChatWake } from "@/lib/task-runner";
 export async function createTaskForUser(input: {
   userWorkosId: string;
   workspaceId?: string | null;
-  brainRef?: string | null;
   prompt: string;
   model: AgentModelId;
   name?: string;
@@ -22,7 +21,6 @@ export async function createTaskForUser(input: {
   scheduleId?: string;
   scheduledFor?: Date;
   workflowId?: string;
-  workflowBrainRef?: string;
   attachments?: ChatMessageAttachment[];
   attachmentTexts?: Record<string, string> | null;
   source?: TaskSource;

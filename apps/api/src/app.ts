@@ -3,9 +3,8 @@ import {
   AutoModelRoutingError,
   type AutoModelRoutingResolution,
 } from "@opencompany/agent/application/auto-model-routing";
-import type { BrainImportApplicationService } from "@opencompany/agent/brain-imports";
-import type { BrainSourceApplicationService } from "@opencompany/agent/brain-sources";
 import type { BrowserProfileApplicationService } from "@opencompany/agent/browser-profiles/service";
+import type { IntegrationResourceOptionsService } from "@opencompany/agent/integration-resource-options";
 import type {
   AttioProviderState,
   ConvexEventsProviderState,
@@ -36,10 +35,6 @@ import type {
 } from "@opencompany/core";
 import {
   type Actor,
-  type BrainDocument,
-  type BrainFolder,
-  type BrainOverview,
-  type BrainSourceItem,
   CHAT_ATTACHMENT_MAX_BYTES,
   type ChatApplicationService,
   CoreError,
@@ -89,12 +84,9 @@ import { requestId } from "hono/request-id";
 import { secureHeaders } from "hono/secure-headers";
 import { stream as streamResponse } from "hono/streaming";
 import type { AttachmentUploadService } from "./attachments";
-import type { AttioIngressService } from "./attio-ingress";
 import type { ApiAuthenticator, ApiIdentity, ApiIdentityVerifier } from "./auth";
 import type { BillingReconcileService } from "./billing-reconcile";
 import type { BotService } from "./bots";
-import type { BrainAssetService } from "./brain-assets";
-import type { BrainControlService } from "./brain-control";
 import type { ChatResourceDownload, ChatResourceService } from "./chat-resources";
 import type { ChatTitleService } from "./chat-title";
 import type { ConvexIngressService } from "./convex-ingress";
@@ -106,7 +98,6 @@ import { ApiError, errorResponse } from "./errors";
 import type { FeedbackService } from "./feedback";
 import type { GitHubUserIngressService } from "./github-user-ingress";
 import type { GoogleIngressService } from "./google-ingress";
-import type { HubspotIngressService } from "./hubspot-ingress";
 import type { IdentityService } from "./identity";
 import type { ImessageIngressService } from "./imessage-ingress";
 import type { ImessageSettingsService } from "./imessage-settings";
@@ -174,8 +165,6 @@ export type CreateApiAppInput = {
   // Bearer secret for POST /internal/wiki/commands (runner→API). Distinct from
   // the runner's own internal token so the two directions rotate independently.
   wikiCommandsInternalSecret?: string;
-  brainSources: Pick<BrainSourceApplicationService, "list" | "set" | "remove" | "listOptions">;
-  brainImports: Pick<BrainImportApplicationService, "start" | "confirm" | "cancel" | "retry">;
   browserProfiles: Pick<
     BrowserProfileApplicationService,
     | "list"
@@ -188,7 +177,6 @@ export type CreateApiAppInput = {
   skillImports: SkillImportApplicationService;
   pluginImports: PluginImportApplicationService;
   customMcp?: CustomMcpApplicationService;
-  brainAssets: BrainAssetService;
   workflowAvatars: WorkflowAvatarService;
   chatResources?: ChatResourceService;
   messagePresentations?: MessagePresentationService;
@@ -208,7 +196,6 @@ export type CreateApiAppInput = {
       durationMs: number;
     };
   }) => Promise<unknown> | unknown;
-  brainControl: BrainControlService;
   wikiControl: WikiControlService;
   attachments: AttachmentUploadService;
   bots?: BotService;
@@ -219,6 +206,7 @@ export type CreateApiAppInput = {
   /** Pull requests opened by the actor's own coding sessions, with each state read from GitHub. */
   sessionPullRequests: (actor: Actor) => Promise<SessionPullRequestDto[]>;
   integrationAccounts: IntegrationAccountService;
+  integrationResourceOptions: Pick<IntegrationResourceOptionsService, "listOptions">;
   slackBotSettings: SlackBotSettingsService;
   imessageSettings?: ImessageSettingsService;
   mcp?: McpService;
@@ -244,8 +232,6 @@ export type CreateApiAppInput = {
   googleIngress?: GoogleIngressService;
   slackIngress?: SlackIngressService;
   linearIngress?: LinearIngressService;
-  hubspotIngress?: HubspotIngressService;
-  attioIngress?: AttioIngressService;
   jamieIngress?: JamieIngressService;
   convexIngress?: ConvexIngressService;
   mcpOAuthIngress?: McpOAuthIngressService;
@@ -565,85 +551,6 @@ export function createApiApp(input: CreateApiAppInput) {
       });
       return c.json({ data: result, meta }, 201);
     },
-    getBrainSnapshot: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "read", 300);
-      const snapshot = await input.knowledge.getBrainSnapshot(actor, c.req.valid("param").brainId);
-      return c.json(
-        {
-          data: {
-            folders: snapshot.folders.map(brainFolderDto),
-            documents: snapshot.documents.map(brainDocumentDto),
-          },
-          meta,
-        },
-        200,
-      );
-    },
-    getBrainOverview: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "read", 300);
-      const overview = await input.knowledge.getBrainOverview(actor, c.req.valid("param").brainId);
-      return c.json({ data: brainOverviewDto(overview), meta }, 200);
-    },
-    listBrainSourceItems: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "read", 300);
-      const sourceItems = await input.knowledge.listBrainSourceItems(
-        actor,
-        c.req.valid("param").brainId,
-        c.req.valid("query").ids,
-      );
-      return c.json({ data: sourceItems.map(brainSourceItemDto), meta }, 200);
-    },
-    listBrainSources: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "read", 300);
-      const details = await input.brainSources.list(actor, c.req.valid("param").brainId);
-      return c.json({ data: details, meta }, 200);
-    },
-    setBrainSource: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const params = c.req.valid("param");
-      const command = c.req.valid("json");
-      await input.brainSources.set(actor, params.brainId, params.integrationId, command);
-      return c.json(
-        {
-          data: {
-            brainId: params.brainId,
-            integrationId: params.integrationId,
-            provider: command.provider,
-            enabled: command.enabled,
-          },
-          meta,
-        },
-        200,
-      );
-    },
-    deleteBrainSource: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const params = c.req.valid("param");
-      await input.brainSources.remove(actor, params.brainId, params.integrationId);
-      return c.json(
-        {
-          data: { brainId: params.brainId, integrationId: params.integrationId, deleted: true },
-          meta,
-        },
-        200,
-      );
-    },
-    listBrainSourceOptions: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "integration-source-options", 120);
-      const options = await input.brainSources.listOptions(
-        actor,
-        c.req.valid("param").integrationId,
-        c.req.valid("json"),
-      );
-      return c.json({ data: options, meta }, 200);
-    },
     listBrowserProfiles: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);
@@ -740,58 +647,6 @@ export function createApiApp(input: CreateApiAppInput) {
       );
       return c.json({ data: capabilityApprovalDto(approval), meta }, 200);
     },
-    createBrain: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const result = await input.brainControl.createBrain(actor, c.req.valid("json"));
-      return c.json({ data: result, meta }, 201);
-    },
-    switchBrain: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const result = await input.brainControl.switchBrain(actor, c.req.valid("param").brainId);
-      return c.json({ data: result, meta }, 200);
-    },
-    getBrainAccess: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "read", 300);
-      const access = await input.brainControl.getAccess(actor, c.req.valid("param").brainId);
-      return c.json({ data: access, meta }, 200);
-    },
-    setBrainAccess: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      await input.brainControl.setAccess(actor, c.req.valid("param").brainId, c.req.valid("json"));
-      return c.json({ data: { updated: true as const }, meta }, 200);
-    },
-    getBrainEnrichment: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "read", 300);
-      const setting = await input.brainControl.getEnrichment(actor, c.req.valid("param").brainId);
-      return c.json({ data: setting, meta }, 200);
-    },
-    setBrainEnrichment: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const { brainId } = c.req.valid("param");
-      const { enabled } = c.req.valid("json");
-      await input.brainControl.setEnrichment(actor, brainId, enabled);
-      return c.json({ data: { enabled }, meta }, 200);
-    },
-    getBrainIntelligence: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "read", 300);
-      const setting = await input.brainControl.getIntelligence(actor, c.req.valid("param").brainId);
-      return c.json({ data: setting, meta }, 200);
-    },
-    setBrainIntelligence: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const { brainId } = c.req.valid("param");
-      const { intelligence } = c.req.valid("json");
-      await input.brainControl.setIntelligence(actor, brainId, intelligence);
-      return c.json({ data: { intelligence }, meta }, 200);
-    },
     getIdentity: async (c) => {
       const identity = identityFrom(c);
       await enforceIdentityRateLimit(rateLimiter, identity, "identity-read", 300);
@@ -885,247 +740,6 @@ export function createApiApp(input: CreateApiAppInput) {
       await enforceIdentityRateLimit(rateLimiter, identity, "onboarding-write", 30);
       await input.onboarding.finish(identity, c.req.valid("json").referralSource);
       return c.json({ data: { completed: true as const }, meta }, 200);
-    },
-    startBrainImport: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 10);
-      const result = await input.brainImports.start(actor, c.req.valid("param").brainId, {
-        idempotencyKey: c.req.valid("header")["idempotency-key"],
-        ...c.req.valid("json"),
-      });
-      return c.json(
-        {
-          data: {
-            importRunId: result.importRunId,
-            status: result.status,
-            replayed: result.replayed,
-          },
-          meta,
-        },
-        201,
-      );
-    },
-    confirmBrainImport: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const params = c.req.valid("param");
-      const result = await input.brainImports.confirm(
-        actor,
-        params.brainId,
-        params.importRunId,
-        c.req.valid("json").enabledProviders,
-      );
-      return c.json(
-        {
-          data: {
-            importRunId: result.importRunId,
-            status: result.status,
-            replayed: result.replayed,
-          },
-          meta,
-        },
-        200,
-      );
-    },
-    cancelBrainImport: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const params = c.req.valid("param");
-      const result = await input.brainImports.cancel(actor, params.brainId, params.importRunId);
-      return c.json(
-        {
-          data: {
-            importRunId: result.importRunId,
-            status: result.status,
-            replayed: result.replayed,
-          },
-          meta,
-        },
-        200,
-      );
-    },
-    retryBrainImport: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const params = c.req.valid("param");
-      const result = await input.brainImports.retry(actor, params.brainId, params.importRunId);
-      return c.json(
-        {
-          data: {
-            importRunId: result.importRunId,
-            status: result.status,
-            replayed: result.replayed,
-          },
-          meta,
-        },
-        200,
-      );
-    },
-    startWikiImport: async () => {
-      throw new ApiError(
-        410,
-        "invalid_request",
-        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
-      );
-    },
-    confirmWikiImport: async () => {
-      throw new ApiError(
-        410,
-        "invalid_request",
-        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
-      );
-    },
-    cancelWikiImport: async () => {
-      throw new ApiError(
-        410,
-        "invalid_request",
-        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
-      );
-    },
-    retryWikiImport: async () => {
-      throw new ApiError(
-        410,
-        "invalid_request",
-        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
-      );
-    },
-    createBrainDocument: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const document = await input.knowledge.createBrainDocument(
-        actor,
-        c.req.valid("param").brainId,
-        {
-          idempotencyKey: c.req.valid("header")["idempotency-key"],
-          ...c.req.valid("json"),
-        },
-      );
-      return c.json({ data: brainDocumentDto(document), meta }, 201);
-    },
-    uploadBrainAsset: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 30);
-      const params = c.req.valid("param");
-      const form = c.req.valid("form");
-      const result = await input.brainAssets.upload({
-        actor,
-        brainId: params.brainId,
-        folderPath: form.folderPath,
-        idempotencyKey: c.req.valid("header")["idempotency-key"],
-        file: form.file,
-      });
-      return c.json(
-        {
-          data: {
-            document: brainDocumentDto(result.document),
-            quotaPaused: result.quotaPaused,
-            replayed: result.replayed,
-          },
-          meta,
-        },
-        201,
-      );
-    },
-    replaceBrainAsset: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 30);
-      const params = c.req.valid("param");
-      const result = await input.brainAssets.replace({
-        actor,
-        brainId: params.brainId,
-        documentId: params.documentId,
-        idempotencyKey: c.req.valid("header")["idempotency-key"],
-        file: c.req.valid("form").file,
-      });
-      return c.json(
-        {
-          data: {
-            document: brainDocumentDto(result.document),
-            quotaPaused: result.quotaPaused,
-            replayed: result.replayed,
-          },
-          meta,
-        },
-        200,
-      );
-    },
-    downloadBrainAsset: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "read", 300);
-      const asset = await input.brainAssets.download({
-        actor,
-        documentId: c.req.valid("param").documentId,
-      });
-      const headers = new Headers({
-        "Content-Type": asset.mediaType,
-        "Content-Disposition": contentDisposition(asset.filename),
-        "Cache-Control": "private, no-store",
-        "X-Content-Type-Options": "nosniff",
-      });
-      if (asset.sizeBytes !== null) headers.set("Content-Length", String(asset.sizeBytes));
-      return new Response(asset.stream, {
-        status: 200,
-        headers,
-      }) as never;
-    },
-    updateBrainDocument: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const params = c.req.valid("param");
-      const document = await input.knowledge.updateBrainDocument(
-        actor,
-        params.brainId,
-        params.documentId,
-        c.req.valid("json"),
-      );
-      return c.json({ data: brainDocumentDto(document), meta }, 200);
-    },
-    renameBrainDocument: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const params = c.req.valid("param");
-      const document = await input.knowledge.renameBrainDocument(
-        actor,
-        params.brainId,
-        params.documentId,
-        c.req.valid("json"),
-      );
-      return c.json({ data: brainDocumentDto(document), meta }, 200);
-    },
-    deleteBrainDocument: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const params = c.req.valid("param");
-      await input.knowledge.deleteBrainDocument(actor, params.brainId, params.documentId);
-      return c.json({ data: { documentId: params.documentId }, meta }, 200);
-    },
-    createBrainFolder: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const folder = await input.knowledge.createBrainFolder(
-        actor,
-        c.req.valid("param").brainId,
-        c.req.valid("json"),
-      );
-      return c.json({ data: brainFolderDto(folder), meta }, 201);
-    },
-    renameBrainFolder: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const result = await input.knowledge.renameBrainFolder(
-        actor,
-        c.req.valid("param").brainId,
-        c.req.valid("json"),
-      );
-      return c.json({ data: result, meta }, 200);
-    },
-    deleteBrainFolder: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const params = c.req.valid("param");
-      const body = c.req.valid("json");
-      await input.knowledge.deleteBrainFolder(actor, params.brainId, body);
-      return c.json({ data: { path: body.path }, meta }, 200);
     },
     listWikis: async (c) => {
       const actor = actorFrom(c);
@@ -1228,6 +842,34 @@ export function createApiApp(input: CreateApiAppInput) {
           meta,
         },
         201,
+      );
+    },
+    startWikiImport: async () => {
+      throw new ApiError(
+        410,
+        "invalid_request",
+        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
+      );
+    },
+    confirmWikiImport: async () => {
+      throw new ApiError(
+        410,
+        "invalid_request",
+        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
+      );
+    },
+    cancelWikiImport: async () => {
+      throw new ApiError(
+        410,
+        "invalid_request",
+        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
+      );
+    },
+    retryWikiImport: async () => {
+      throw new ApiError(
+        410,
+        "invalid_request",
+        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
       );
     },
     listWikiSources: async () => {
@@ -2293,7 +1935,7 @@ export function createApiApp(input: CreateApiAppInput) {
       // authorized for — never echoed straight back from the query.
       let readModelWikiId: string | undefined;
       if (params.readModel === "task-activities-v1") {
-        if (!query.taskId || query.conversationId || query.brainId) {
+        if (!query.taskId || query.conversationId) {
           throw new ApiError(
             400,
             "invalid_request",
@@ -2301,25 +1943,14 @@ export function createApiApp(input: CreateApiAppInput) {
           );
         }
         await input.tasks.getTask(actor, query.taskId);
-      } else if (params.readModel.startsWith("brain-")) {
-        if (query.conversationId || !query.brainId) {
-          throw new ApiError(
-            400,
-            "invalid_request",
-            "brainId is required and conversationId is not valid for this read model.",
-          );
-        }
-        await input.knowledge.authorizeBrainRead(actor, query.brainId);
       } else if (params.readModel.startsWith("wiki-")) {
-        if (query.conversationId || query.brainId) {
+        if (query.conversationId) {
           throw new ApiError(
             400,
             "invalid_request",
-            "conversationId and brainId are not valid for this read model.",
+            "conversationId is not valid for this read model.",
           );
         }
-        // The page and timeline shapes stream one wiki; import runs stay
-        // workspace-scoped because they live on goat.brain_import_runs.
         const perWikiShape =
           params.readModel === "wiki-pages-v2" || params.readModel === "wiki-timeline-v1";
         if (!perWikiShape && query.wikiId) {
@@ -2331,16 +1962,16 @@ export function createApiApp(input: CreateApiAppInput) {
         const wikiId = await input.knowledge.authorizeWikiRead(actor, query.wikiId);
         if (perWikiShape) readModelWikiId = wikiId;
       } else if (params.readModel === "tasks-v1") {
-        if (query.conversationId || query.brainId) {
+        if (query.conversationId) {
           throw new ApiError(
             400,
             "invalid_request",
-            "conversationId and brainId are not valid for this read model.",
+            "conversationId is not valid for this read model.",
           );
         }
         await input.tasks.listTasks(actor, { limit: 1 });
       } else if (params.readModel === "workflows-v1") {
-        if (query.conversationId || query.brainId) {
+        if (query.conversationId) {
           throw new ApiError(
             400,
             "invalid_request",
@@ -2349,7 +1980,7 @@ export function createApiApp(input: CreateApiAppInput) {
         }
         await input.workflows.listWorkflows(actor, { limit: 1 });
       } else if (params.readModel === "workflow-schedules-v1") {
-        if (query.conversationId || query.brainId) {
+        if (query.conversationId) {
           throw new ApiError(
             400,
             "invalid_request",
@@ -2358,31 +1989,25 @@ export function createApiApp(input: CreateApiAppInput) {
         }
         await input.workflows.listWorkflows(actor, { limit: 1 });
       } else if (params.readModel === "integration-accounts-v1") {
-        if (query.conversationId || query.brainId) {
+        if (query.conversationId) {
           throw new ApiError(
             400,
             "invalid_request",
-            "conversationId and brainId are not valid for this read model.",
+            "conversationId is not valid for this read model.",
           );
         }
       } else if (params.readModel === "chat-conversations-v2") {
-        if (query.brainId) {
-          throw new ApiError(400, "invalid_request", "brainId is not valid for this read model.");
-        }
         if (query.conversationId) {
           await input.chat.getConversation(actor, query.conversationId);
         }
       } else if (params.readModel === "engine-sessions-v1") {
-        if (query.brainId) {
-          throw new ApiError(400, "invalid_request", "brainId is not valid for this read model.");
-        }
         // Task Conversations resolve through the Task boundary, so the chat-only lookup is not
         // enough here.
         if (query.conversationId) {
           await authorizeConversationRead(input, actor, query.conversationId);
         }
       } else if (params.readModel !== "chat-conversations-v1") {
-        if (!query.conversationId || query.brainId) {
+        if (!query.conversationId) {
           throw new ApiError(
             400,
             "invalid_request",
@@ -2396,7 +2021,7 @@ export function createApiApp(input: CreateApiAppInput) {
         ) {
           messageShapeEpoch = resource.messageShapeEpoch;
         }
-      } else if (query.conversationId || query.brainId) {
+      } else if (query.conversationId) {
         throw new ApiError(
           400,
           "invalid_request",
@@ -2407,7 +2032,6 @@ export function createApiApp(input: CreateApiAppInput) {
         actor,
         readModel: params.readModel,
         ...(query.conversationId ? { conversationId: query.conversationId } : {}),
-        ...(query.brainId ? { brainId: query.brainId } : {}),
         ...(readModelWikiId ? { wikiId: readModelWikiId } : {}),
         ...(query.taskId ? { taskId: query.taskId } : {}),
         ...(messageShapeEpoch !== undefined ? { messageShapeEpoch } : {}),
@@ -2624,39 +2248,15 @@ export function createApiApp(input: CreateApiAppInput) {
       await input.slackBotSettings.disconnect(actor);
       return c.json({ data: { updated: true as const }, meta }, 200);
     },
-    getSlackBotDestination: async (c) => {
+    listIntegrationResourceOptions: async (c) => {
       const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "read", 300);
-      const destination = await input.slackBotSettings.getDestination(
-        actor,
-        c.req.valid("param").brainId,
-      );
-      return c.json({ data: destination, meta }, 200);
-    },
-    setSlackBotDestination: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      await input.slackBotSettings.setDestination(
-        actor,
-        c.req.valid("param").brainId,
-        c.req.valid("json"),
-      );
-      return c.json({ data: { updated: true as const }, meta }, 200);
-    },
-    listSlackBotChannels: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "read", 300);
-      const result = await input.slackBotSettings.listChannels(actor, c.req.valid("param").brainId);
-      return c.json({ data: result, meta }, 200);
-    },
-    getIntegrationAccountUsage: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "read", 300);
-      const usage = await input.integrationAccounts.getUsage(
+      await enforceRateLimit(rateLimiter, actor, "read", 60);
+      const options = await input.integrationResourceOptions.listOptions(
         actor,
         c.req.valid("param").integrationId,
+        c.req.valid("json"),
       );
-      return c.json({ data: usage, meta }, 200);
+      return c.json({ data: options, meta }, 200);
     },
     setIntegrationCapabilityMode: async (c) => {
       const actor = actorFrom(c);
@@ -3008,28 +2608,6 @@ export function createApiApp(input: CreateApiAppInput) {
             ),
         }),
       );
-      router.use(
-        "/v1/brains/:brainId/assets",
-        bodyLimit({
-          maxSize: 20 * 1024 * 1024 + MULTIPART_ENVELOPE_BYTES,
-          onError: (c) =>
-            apiErrorResponse(
-              c,
-              new ApiError(413, "invalid_request", "The Brain asset upload is too large."),
-            ),
-        }),
-      );
-      router.use(
-        "/v1/brains/:brainId/assets/:documentId/replace",
-        bodyLimit({
-          maxSize: 20 * 1024 * 1024 + MULTIPART_ENVELOPE_BYTES,
-          onError: (c) =>
-            apiErrorResponse(
-              c,
-              new ApiError(413, "invalid_request", "The Brain asset upload is too large."),
-            ),
-        }),
-      );
     },
     defaultHook(result, c) {
       if (result.success) return;
@@ -3227,7 +2805,6 @@ export function createApiApp(input: CreateApiAppInput) {
     app.get("/integrations/google-drive/callback", (c) =>
       ingress.callback("google_drive", c.req.raw),
     );
-    app.post("/webhooks/google-drive", (c) => ingress.driveWebhook(c.req.raw));
   }
   if (input.slackIngress) {
     const ingress = input.slackIngress;
@@ -3240,18 +2817,6 @@ export function createApiApp(input: CreateApiAppInput) {
     app.get("/integrations/linear-ingest/callback", (c) => ingress.callback(c.req.raw));
     app.use("/webhooks/linear/events", ingressBodyLimit(5 * 1024 * 1024));
     app.post("/webhooks/linear/events", (c) => ingress.webhook(c.req.raw));
-  }
-  if (input.hubspotIngress) {
-    const ingress = input.hubspotIngress;
-    app.get("/integrations/hubspot/start", (c) => ingress.start(c.req.raw));
-    app.get("/integrations/hubspot/callback", (c) => ingress.callback(c.req.raw));
-    app.use("/webhooks/hubspot/events", ingressBodyLimit(5 * 1024 * 1024));
-    app.post("/webhooks/hubspot/events", (c) => ingress.webhook(c.req.raw));
-  }
-  if (input.attioIngress) {
-    const ingress = input.attioIngress;
-    app.use("/webhooks/attio/events", ingressBodyLimit(5 * 1024 * 1024));
-    app.post("/webhooks/attio/events", (c) => ingress.webhook(c.req.raw));
   }
   if (input.jamieIngress) {
     const ingress = input.jamieIngress;
@@ -3764,38 +3329,6 @@ function workflowDto(workflow: Workflow) {
 
 function workflowMemoryDto(memory: WorkflowMemory) {
   return { ...memory, updatedAt: memory.updatedAt?.toISOString() ?? null };
-}
-
-function brainFolderDto(folder: BrainFolder) {
-  return {
-    ...folder,
-    createdAt: folder.createdAt.toISOString(),
-    updatedAt: folder.updatedAt.toISOString(),
-  };
-}
-
-function brainDocumentDto(document: BrainDocument) {
-  return {
-    ...document,
-    createdAt: document.createdAt.toISOString(),
-    updatedAt: document.updatedAt.toISOString(),
-  };
-}
-
-function brainOverviewDto(overview: BrainOverview) {
-  return { ...overview, windowStartedAt: overview.windowStartedAt.toISOString() };
-}
-
-function brainSourceItemDto(item: BrainSourceItem) {
-  return {
-    id: item.id,
-    sourceProvider: item.sourceProvider,
-    sourceType: item.sourceType,
-    externalId: item.externalId.slice(0, 4_096),
-    title: item.title?.slice(0, 512) ?? null,
-    lastIngestError: item.lastIngestError?.slice(0, 2_000) ?? null,
-    createdAt: item.createdAt.toISOString(),
-  };
 }
 
 function wikiDto(wiki: WikiControlView) {

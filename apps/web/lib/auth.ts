@@ -7,13 +7,9 @@ import type { NextRequest } from "next/server";
 import { cache } from "react";
 import { recordLastAuthMethod } from "@/lib/auth-methods";
 import { serverApiClient, serverApiError } from "@/lib/server-api-client";
-import {
-  ACTIVE_BRAIN_COOKIE,
-  ACTIVE_WORKSPACE_COOKIE,
-  rememberActiveWorkspace,
-} from "@/lib/workspace-session";
+import { ACTIVE_WORKSPACE_COOKIE, rememberActiveWorkspace } from "@/lib/workspace-session";
 
-export { ACTIVE_BRAIN_COOKIE, ACTIVE_WORKSPACE_COOKIE };
+export { ACTIVE_WORKSPACE_COOKIE };
 
 export type IdentityUser = {
   workosUserId: string;
@@ -45,15 +41,12 @@ export type IdentityWorkspace = {
   id: string;
   name: string;
   slug: string | null;
-  legacyBrainEnabled: boolean;
 };
 
 export type WorkspaceWithRole = {
   workspace: IdentityWorkspace;
   role: "admin" | "member";
 };
-
-export type IdentityBrain = IdentityDto["brains"][number];
 
 export type IdentityContext = {
   authUser: WorkOSUser;
@@ -69,8 +62,6 @@ export type AuthContext = {
   workspace: IdentityWorkspace;
   role: "admin" | "member";
   workspaces: WorkspaceWithRole[];
-  brains: IdentityBrain[];
-  activeBrain: IdentityBrain | null;
 };
 
 // Shared by both custom sign-in surfaces. WorkOS session sealing and browser
@@ -103,7 +94,6 @@ export async function completeAuthentication(
     try {
       await rememberActiveWorkspace({
         workspaceId: data.activeWorkspaceId,
-        brainId: data.activeBrainId,
       });
     } catch (error) {
       console.error("[opencompany] Failed to activate the authenticated workspace", error);
@@ -144,7 +134,6 @@ const resolveIdentity = cache(async (): Promise<IdentityContext | null> => {
         id: entry.id,
         name: entry.name,
         slug: entry.slug,
-        legacyBrainEnabled: entry.legacyBrainEnabled,
       },
       role: entry.role,
     })),
@@ -162,11 +151,6 @@ const resolveAuthContext = cache(async (): Promise<AuthContext | null> => {
     ...identity,
     workspace: active.workspace,
     role: active.role,
-    brains: session.data.brains,
-    activeBrain:
-      session.data.brains.find(
-        (brain: IdentityDto["brains"][number]) => brain.id === session.data.activeBrainId,
-      ) ?? null,
   };
 });
 
@@ -195,30 +179,6 @@ export async function currentUser(options: { optional?: boolean } = {}) {
     redirect("/onboarding");
   }
   return context;
-}
-
-export async function currentBrain(): Promise<{
-  context: AuthContext;
-  brain: IdentityBrain;
-}> {
-  const context = await currentUser();
-  if (!context.activeBrain) {
-    throw new Error("You do not have access to any brain in this workspace.");
-  }
-  return { context, brain: context.activeBrain };
-}
-
-export async function currentBrainByRef(
-  brainRef: string,
-): Promise<{ context: AuthContext; brain: IdentityBrain }> {
-  const context = await currentUser();
-  const brain = context.brains.find(
-    (candidate) => candidate.id === brainRef || candidate.slug === brainRef,
-  );
-  if (!brain || brain.workspaceId !== context.workspace.id) {
-    throw new Error("You do not have access to that brain.");
-  }
-  return { context, brain };
 }
 
 function identityUser(user: IdentityDto["user"]): IdentityUser {

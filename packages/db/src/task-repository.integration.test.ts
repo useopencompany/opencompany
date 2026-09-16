@@ -311,7 +311,6 @@ describe("Postgres Task repository", () => {
       DELETE FROM goat.chat_messages;
       DELETE FROM goat.tasks;
       DELETE FROM goat.chat_sessions;
-      DELETE FROM goat.brains;
       DELETE FROM goat.workspace_members;
       DELETE FROM goat.users;
       DELETE FROM goat.workspaces;
@@ -324,10 +323,6 @@ describe("Postgres Task repository", () => {
         ('member_1', 'workspace_1', 'user_1', 'admin'),
         ('member_2', 'workspace_2', 'user_2', 'admin'),
         ('member_3', 'workspace_1', 'user_3', 'member');
-      INSERT INTO goat.brains (id, workspace_id, slug)
-      VALUES
-        ('brain_1', 'workspace_1', 'general'),
-        ('brain_2', 'workspace_2', 'general');
     `);
       await database.exec(
         `ALTER TABLE goat.plugins ADD COLUMN owner_user_id text DEFAULT 'user_1';`,
@@ -1267,8 +1262,6 @@ describe("Postgres Task repository", () => {
         ids: deterministicTaskIds(),
         now: () => new Date("2026-08-11T10:00:00.000Z"),
         compatibility: {
-          brainRef: "brain_1",
-          workflowBrainRef: "workflow_brain_1",
           resolvedAttachments: {
             attachments: [
               {
@@ -1310,14 +1303,10 @@ describe("Postgres Task repository", () => {
 
     expect(
       await database.query<{
-        brain_ref: string;
-        workflow_brain_ref: string;
         attachment_id: string;
         has_task_id: boolean;
       }>(
         `SELECT
-           runtime.brain_ref,
-           task.workflow_brain_ref,
            message.attachments->0->>'id' AS attachment_id,
            event.payload ? 'taskId' AS has_task_id
          FROM goat.tasks AS task
@@ -1332,8 +1321,6 @@ describe("Postgres Task repository", () => {
     ).toMatchObject({
       rows: [
         {
-          brain_ref: "brain_1",
-          workflow_brain_ref: "workflow_brain_1",
           attachment_id: "legacy_attachment_1",
           has_task_id: false,
         },

@@ -87,10 +87,7 @@ export function WorkspaceSettingsPanel({ initial }: { initial: WorkspaceSettings
   };
 
   return (
-    <PageContent
-      title="Members"
-      description="Manage the people who share this workspace and its brains."
-    >
+    <PageContent title="Members" description="Manage the people who share this workspace.">
       <div
         className={`rounded-lg border px-3 py-2 text-[12.5px] leading-5 ${
           overCap
@@ -173,7 +170,7 @@ export function WorkspaceSettingsPanel({ initial }: { initial: WorkspaceSettings
               </div>
               <p className="text-[11.5px] leading-4 text-ink-subtle">
                 Invited people get an email and join this workspace when they sign up. They see
-                every brain that is open to the workspace.
+                every wiki that is open to the workspace.
               </p>
             </>
           )}

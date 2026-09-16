@@ -53,7 +53,6 @@ async function loadPersistedAuthorityState(
       workspaceId: codexChatSessions.workspaceId,
       workspaceName: workspaces.name,
       workspaceSlug: workspaces.slug,
-      legacyBrainEnabled: workspaces.legacyBrainEnabled,
       actorId: codexChatSessions.userWorkosId,
       conversationId: codexChatSessions.chatSessionId,
       sandboxId: codexChatSessions.sandboxId,
@@ -64,7 +63,6 @@ async function loadPersistedAuthorityState(
       interruptRequestedAt: codexChatTurns.interruptRequestedAt,
       membershipId: workspaceMembers.id,
       workspaceRole: workspaceMembers.role,
-      brainRef: codexChatSessions.brainRef,
       userMessageId: codexChatTurns.userMessageId,
       assistantMessageId: codexChatTurns.assistantMessageId,
     })

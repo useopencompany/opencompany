@@ -286,7 +286,7 @@ export function WikiSettings({
 }
 
 /**
- * Local rather than shared with Brain's `VisibilityOption`: Brain is being retired, and coupling a
+ * Local to the Wiki so its access vocabulary can change without coordinating with another surface. Coupling a
  * surface we are building to one we are removing would only have to be undone.
  */
 function AccessOption({

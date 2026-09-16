@@ -2,9 +2,6 @@ import { randomUUID } from "node:crypto";
 import { and, desc, eq, gte, isNotNull, isNull, lt } from "drizzle-orm";
 import { getDb } from "./client";
 import {
-  type BrainVisibility,
-  brainSources,
-  brains,
   type IntegrationStatus,
   integrations,
   slackBotEventClaims,
@@ -56,18 +53,6 @@ export type SlackBotIntegrationForWorkspace = SlackBotIntegrationForTeam & {
   updatedAt: Date;
 };
 
-// A brain the bot is allowed to answer from, with its channel scoping.
-export type SlackBotBrainRoute = {
-  brainRef: string;
-  brainName: string;
-  visibility: BrainVisibility;
-  config: SlackBotSourceConfig;
-};
-
-// All workspace installs of the bot for a Slack team. Normally one row, but
-// two opencompany workspaces installing the same Slack team is possible (the unique
-// index is per-workspace); callers process every match — channel scoping
-// keeps double-answers unlikely, an accepted beta caveat.
 export async function listSlackBotIntegrationsForTeam(
   teamId: string,
   db: DbLike = getDb(),
@@ -112,42 +97,6 @@ export async function getSlackBotIntegrationForWorkspace(
     .orderBy(desc(integrations.updatedAt))
     .limit(1);
   return (row as SlackBotIntegrationForWorkspace | undefined) ?? null;
-}
-
-export async function listEnabledSlackBotBrainRoutes(
-  integrationId: string,
-  db: DbLike = getDb(),
-): Promise<SlackBotBrainRoute[]> {
-  const rows = await db
-    .select({
-      brainRef: brainSources.brainId,
-      brainName: brains.name,
-      visibility: brains.visibility,
-      config: brainSources.config,
-    })
-    .from(brainSources)
-    .innerJoin(brains, eq(brains.id, brainSources.brainId))
-    .where(
-      and(
-        eq(brainSources.provider, "slack_bot"),
-        eq(brainSources.enabled, true),
-        eq(brainSources.integrationId, integrationId),
-      ),
-    );
-
-  return rows.map(
-    (row: {
-      brainRef: string;
-      brainName: string;
-      visibility: BrainVisibility;
-      config: unknown;
-    }) => ({
-      brainRef: row.brainRef,
-      brainName: row.brainName,
-      visibility: row.visibility,
-      config: parseSlackBotSourceConfig(row.config),
-    }),
-  );
 }
 
 export async function markSlackBotIntegrationStatusForTeam(

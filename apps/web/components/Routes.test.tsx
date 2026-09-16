@@ -3,9 +3,7 @@ import type { SkillImportPreviewDto } from "@opencompany/protocol";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { BrainView } from "@/components/BrainView";
 import {
-  BrainRoute,
   HomeRoute,
   InferenceSettingsRoute,
   McpSettingsRoute,
@@ -37,7 +35,6 @@ const appDataMock = vi.hoisted(() => ({
     featureFlags: {
       bots: false,
       autoModelRouting: false,
-      legacyBrain: true,
       reviewInbox: false,
       sidebarProjects: false,
       subagents: false,
@@ -132,14 +129,6 @@ vi.mock("@/lib/headless-automation-collections", () => ({
   getHeadlessWorkflows: vi.fn(() => ({})),
 }));
 
-vi.mock("@/components/BrainView", () => ({
-  BrainView: vi.fn(() => <div data-testid="brain-view" />),
-}));
-
-vi.mock("@/components/BrainSettings", () => ({
-  BrainSettings: () => null,
-}));
-
 vi.mock("@/components/Surface", () => ({
   Surface: (props: Record<string, unknown>) => {
     surfaceMock.props = props;
@@ -218,7 +207,6 @@ vi.mock("@/components/ThemeProvider", () => ({
 describe("HomeRoute", () => {
   it("does not let a sidebar runtime row control the active Conversation", () => {
     Object.assign(appDataMock.value, {
-      activeBrain: null,
       tasks: [],
       schedules: [],
       recentChats: [
@@ -254,7 +242,6 @@ describe("HomeRoute", () => {
 
   it("hands the composer the project a new chat was started from", () => {
     Object.assign(appDataMock.value, {
-      activeBrain: null,
       tasks: [],
       schedules: [],
       recentChats: [],
@@ -761,91 +748,6 @@ describe("SettingsRoute", () => {
   });
 });
 
-describe("BrainRoute", () => {
-  beforeEach(() => {
-    vi.mocked(BrainView).mockClear();
-  });
-
-  it("passes an explicit route brain id through to the Brain view", () => {
-    render(
-      <BrainRoute
-        path={["people", "ada-lovelace"]}
-        routeBrainId="goat_brain_team"
-        selectedBrain={teamBrain}
-        initialBrainSnapshot={brainSnapshot}
-      />,
-    );
-
-    expect(screen.getByTestId("brain-view")).toBeInTheDocument();
-    expect(vi.mocked(BrainView)).toHaveBeenCalledWith(
-      expect.objectContaining({
-        brainRef: "goat_brain_team",
-        brain: teamBrain,
-        folders: brainSnapshot.folders,
-        documents: brainSnapshot.documents,
-        initialFolderPath: "people",
-        initialBrainId: "ada-lovelace",
-        routeBrainId: "goat_brain_team",
-      }),
-      undefined,
-    );
-  });
-
-  it("uses the selected active brain for default /brain routes without URL prefixing", () => {
-    render(
-      <BrainRoute
-        path={["people", "ada-lovelace"]}
-        routeBrainId={null}
-        selectedBrain={defaultBrain}
-        initialBrainSnapshot={brainSnapshot}
-      />,
-    );
-
-    expect(vi.mocked(BrainView)).toHaveBeenCalledWith(
-      expect.objectContaining({
-        brainRef: "goat_brain_default",
-        brain: defaultBrain,
-        initialFolderPath: "people",
-        initialBrainId: "ada-lovelace",
-        routeBrainId: null,
-      }),
-      undefined,
-    );
-  });
-
-  it.each([
-    { label: "the root", path: [] },
-    { label: "the named route", path: ["overview"] },
-  ])("uses Overview for $label", ({ path }) => {
-    const overviewStats = {
-      windowStartedAt: "2026-07-08T09:00:00.000Z",
-      itemsAddedLast7Days: 5,
-      retrievalsLast7Days: 12,
-      activeSources: 3,
-    };
-    render(
-      <BrainRoute
-        path={path}
-        routeBrainId="goat_brain_team"
-        selectedBrain={teamBrain}
-        initialBrainSnapshot={null}
-        initialOverviewStats={overviewStats}
-      />,
-    );
-
-    expect(vi.mocked(BrainView)).toHaveBeenCalledWith(
-      expect.objectContaining({
-        initialOverview: true,
-        initialFolderPath: null,
-        initialBrainId: null,
-        overviewStats,
-        initialDataLoaded: false,
-      }),
-      undefined,
-    );
-  });
-});
-
 const workspaceSkillFixture: import("@opencompany/protocol").SkillInstallationDto = {
   id: "installation_1",
   scope: "company",
@@ -1186,62 +1088,6 @@ describe("SkillsRoute", () => {
     expect(screen.getByRole("combobox", { name: "Visibility" })).toHaveValue("company");
   });
 });
-
-const defaultBrain = {
-  id: "goat_brain_default",
-  name: "Default",
-  slug: "default",
-  description: null,
-  visibility: "workspace" as const,
-};
-
-const teamBrain = {
-  id: "goat_brain_team",
-  name: "Team",
-  slug: "team",
-  description: null,
-  visibility: "workspace" as const,
-};
-
-const brainSnapshot = {
-  folders: [
-    {
-      id: "folder_people",
-      path: "people",
-      name: "People",
-      source: "system" as const,
-      createdAt: "2026-07-06T12:00:00.000Z",
-      updatedAt: "2026-07-06T12:00:00.000Z",
-    },
-  ],
-  documents: [
-    {
-      id: "doc_ada",
-      brainId: "ada-lovelace",
-      folderPath: "people",
-      path: "people/ada-lovelace.md",
-      title: "Ada Lovelace",
-      content: "",
-      body: "Compiler and collaborator.",
-      timeline: [],
-      format: "markdown" as const,
-      mimeType: "text/markdown",
-      originalFileName: null,
-      assetStorageKey: null,
-      assetSizeBytes: null,
-      relations: [],
-      sources: [],
-      kind: "page" as const,
-      type: "person" as const,
-      status: "draft" as const,
-      aliases: [],
-      contentHash: "hash",
-      sizeBytes: 128,
-      createdAt: "2026-07-06T12:00:00.000Z",
-      updatedAt: "2026-07-06T12:00:00.000Z",
-    },
-  ],
-};
 
 const WORKFLOW_OWNER_NAMES = { user_1: "Louis Morgner" };
 

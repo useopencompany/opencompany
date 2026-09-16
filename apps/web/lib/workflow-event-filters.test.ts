@@ -7,7 +7,7 @@ const actionMocks = vi.hoisted(() => ({
   listPostHogEvents: vi.fn(),
 }));
 
-vi.mock("@/lib/brain-source-actions", () => ({
+vi.mock("@/lib/integration-resource-actions", () => ({
   listGmailLabelsAction: actionMocks.listGmailLabels,
   listGranolaFoldersAction: actionMocks.listGranolaFolders,
   listLinearTeamsAction: actionMocks.listLinearTeams,

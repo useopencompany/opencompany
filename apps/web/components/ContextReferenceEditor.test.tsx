@@ -4,7 +4,7 @@ import type { Editor } from "@tiptap/core";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { ContextReferenceText } from "./ContextReference";
 import { Markdown } from "./Markdown";
-import { MarkdownBrainEditor } from "./MarkdownBrainEditor";
+import { MarkdownEditor } from "./MarkdownEditor";
 
 let captured: Editor | null = null;
 vi.mock("@tiptap/react", async (original) => {
@@ -53,9 +53,7 @@ afterEach(() => {
 describe("workflow and message references", () => {
   it("selects a plugin alongside existing skills and saves ordinary Markdown", async () => {
     const changed = vi.fn();
-    render(
-      <MarkdownBrainEditor content="" onChange={changed} skillMentions={[]} contextMentions />,
-    );
+    render(<MarkdownEditor content="" onChange={changed} skillMentions={[]} contextMentions />);
     await waitFor(() => expect(captured).not.toBeNull());
     act(() => {
       captured!.commands.insertContent("Use @sla");
@@ -72,12 +70,7 @@ describe("workflow and message references", () => {
     cleanup();
     captured = null;
     render(
-      <MarkdownBrainEditor
-        content={saved}
-        onChange={() => {}}
-        skillMentions={[]}
-        contextMentions
-      />,
+      <MarkdownEditor content={saved} onChange={() => {}} skillMentions={[]} contextMentions />,
     );
     await waitFor(() =>
       expect(

@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { Editor } from "@tiptap/core";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { MarkdownBrainEditor } from "./MarkdownBrainEditor";
+import { MarkdownEditor } from "./MarkdownEditor";
 
 const SKILL = {
   scope: "company" as const,
@@ -45,7 +45,7 @@ describe("workflow skill mentions in the real markdown editor", () => {
   it.each(["click", "Tab"])(
     "selects a skill with %s and can delete the whole mention",
     async (method) => {
-      render(<MarkdownBrainEditor content="" onChange={vi.fn()} skillMentions={[SKILL]} />);
+      render(<MarkdownEditor content="" onChange={vi.fn()} skillMentions={[SKILL]} />);
       await waitFor(() => expect(capturedEditor).not.toBeNull());
       const editor = capturedEditor as Editor;
       act(() => {
@@ -64,7 +64,7 @@ describe("workflow skill mentions in the real markdown editor", () => {
   );
 
   it("shows the empty result without creating a reference", async () => {
-    render(<MarkdownBrainEditor content="" onChange={vi.fn()} skillMentions={[]} />);
+    render(<MarkdownEditor content="" onChange={vi.fn()} skillMentions={[]} />);
     await waitFor(() => expect(capturedEditor).not.toBeNull());
     const editor = capturedEditor as Editor;
     act(() => {
@@ -78,7 +78,7 @@ describe("workflow skill mentions in the real markdown editor", () => {
   it("displays saved mentions in read-only workflows without emitting an edit", async () => {
     const onChange = vi.fn();
     render(
-      <MarkdownBrainEditor
+      <MarkdownEditor
         content={`@skill/${SKILL.id}`}
         onChange={onChange}
         skillMentions={[SKILL]}
@@ -92,7 +92,7 @@ describe("workflow skill mentions in the real markdown editor", () => {
 
   it("keeps the selected skill name visible after Enter while saving its stable ID", async () => {
     const onChange = vi.fn();
-    render(<MarkdownBrainEditor content="" onChange={onChange} skillMentions={[SKILL]} />);
+    render(<MarkdownEditor content="" onChange={onChange} skillMentions={[SKILL]} />);
     await waitFor(() => expect(capturedEditor).not.toBeNull());
     const editor = capturedEditor as Editor;
     act(() => {

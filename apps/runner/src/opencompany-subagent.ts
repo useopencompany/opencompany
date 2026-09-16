@@ -132,7 +132,6 @@ export function createSubagentActionDispatcher(parent: ActionDispatcher): Action
 }
 
 type SubagentToolContextRunners = {
-  runBrainCli?: Parameters<typeof runProductChatAgent>[0]["runBrainCli"];
   runWiki?: Parameters<typeof runProductChatAgent>[0]["runWiki"];
   webSearch?: Parameters<typeof runProductChatAgent>[0]["webSearch"];
   webFetch?: Parameters<typeof runProductChatAgent>[0]["webFetch"];
@@ -146,7 +145,6 @@ export function createSubagentRunner(input: {
   workspaceId: string;
   userWorkosId: string;
   chatSessionId: string | null;
-  brainRef?: string | null;
   currentDate: Date;
   signal: AbortSignal;
   budget: SubagentBudget;
@@ -197,8 +195,6 @@ export function createSubagentRunner(input: {
         // MAX_SUBAGENT_DEPTH, so handing the runner down is safe at every level.
         runSubagent,
         wikiToolReadOnly: true,
-        ...(input.brainRef ? { brainRef: input.brainRef } : {}),
-        ...(input.runners.runBrainCli ? { runBrainCli: input.runners.runBrainCli } : {}),
         ...(input.runners.runWiki ? { runWiki: input.runners.runWiki } : {}),
         ...(input.runners.webSearch ? { webSearch: input.runners.webSearch } : {}),
         ...(input.runners.webFetch ? { webFetch: input.runners.webFetch } : {}),

@@ -1,6 +1,6 @@
-import { ADJUSTABLE_DEFAULT_BRAIN_FOLDERS } from "@opencompany/brain/schema";
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_ONBOARDING_FOLDERS,
   normalizeOnboardingCompanyUrl,
   ONBOARDING_COMPANY_URL_MAX_LENGTH,
   onboardingFoldersForRole,
@@ -21,7 +21,7 @@ describe("onboardingFoldersForRole", () => {
     ]);
     founderFolders.pop();
     expect(onboardingFoldersForRole("founder")).toHaveLength(7);
-    expect(onboardingFoldersForRole("unknown")).toEqual([...ADJUSTABLE_DEFAULT_BRAIN_FOLDERS]);
+    expect(onboardingFoldersForRole("unknown")).toEqual([...DEFAULT_ONBOARDING_FOLDERS]);
   });
 });
 

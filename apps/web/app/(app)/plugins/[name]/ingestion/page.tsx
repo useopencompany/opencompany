@@ -4,7 +4,7 @@ import { FathomIngestionRoute } from "@/components/Routes";
 import { currentUser } from "@/lib/auth";
 import { getAttioIntegrationState } from "@/lib/integrations/attio";
 
-// Attio and Fathom each expose an API-key connection that feeds Brain ingestion, separate from the
+// Attio and Fathom each expose an API-key connection, separate from the
 // MCP account their plugin page connects. They hang off the plugin they belong to so the whole
 // plugin surface stays in the main view.
 export default async function PluginIngestionPage({
@@ -37,7 +37,7 @@ async function AttioIngestion() {
   return (
     <PageContent
       title="Attio ingestion"
-      description="API-key ingestion for Brain"
+      description="API-key connection"
       backLink={{ href: "/plugins/attio", label: "Attio plugin" }}
     >
       <AttioIntegrationSetup initialState={state} />

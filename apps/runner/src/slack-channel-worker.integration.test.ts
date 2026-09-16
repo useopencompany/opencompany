@@ -939,9 +939,6 @@ describe("Slack direct message sessions", () => {
       harnessTools: vi.fn(async () => ["exa_search" as const]),
       now: () => new Date(),
     };
-    await pg.exec(
-      "INSERT INTO goat.brains (id, workspace_id, slug) VALUES ('brain', 'workspace', 'general')",
-    );
   });
 
   it("opens a task on the sender's own account and subscribes the message's thread", async () => {

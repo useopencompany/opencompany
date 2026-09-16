@@ -4,7 +4,6 @@ import {
   addHeadlessWikiTimelineEntry,
   approveHeadlessPluginMcp,
   archiveHeadlessPlugin,
-  createHeadlessBrainDocument,
   createHeadlessWorkspaceSkill,
   deleteHeadlessPluginData,
   disableHeadlessPlugin,
@@ -13,7 +12,6 @@ import {
   enableHeadlessSkill,
   importHeadlessPlugin,
   importHeadlessSkill,
-  listHeadlessBrainSourceItems,
   previewHeadlessPluginImport,
   previewHeadlessSkillImport,
   readHeadlessSkillFile,
@@ -33,29 +31,6 @@ const skillDescription = "Review visual artifacts.";
 
 describe("headless knowledge commands", () => {
   beforeEach(() => vi.clearAllMocks());
-
-  it("creates Brain documents through the typed resource with an idempotency key", async () => {
-    let upstream: Request | null = null;
-    const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
-      upstream = input instanceof Request ? input : new Request(input, init);
-      return Response.json({ data: brainDocument(), meta }, { status: 201 });
-    });
-
-    await createHeadlessBrainDocument(
-      "brain_alpha",
-      { folderPath: "Projects", fileName: "Launch.md" },
-      { baseUrl: "https://api.example.test", fetch: fetchMock as typeof fetch },
-    );
-
-    const sent = upstream as unknown as Request;
-    expect(sent.method).toBe("POST");
-    expect(new URL(sent.url).pathname).toBe("/v1/brains/brain_alpha/documents");
-    expect(sent.headers.get("idempotency-key")).toMatch(/^web-brain-document:/u);
-    await expect(sent.json()).resolves.toEqual({
-      folderPath: "Projects",
-      fileName: "Launch.md",
-    });
-  });
 
   it("reconciles Wiki timeline writes against the fixed timeline projection", async () => {
     let upstream: Request | null = null;
@@ -93,30 +68,6 @@ describe("headless knowledge commands", () => {
       wikiId: "goat_wiki_1",
       target: "timeline",
     });
-  });
-
-  it("loads bounded source metadata through the selected Brain resource", async () => {
-    let upstream: Request | null = null;
-    const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
-      upstream = input instanceof Request ? input : new Request(input, init);
-      return Response.json({ data: [], meta });
-    });
-
-    await listHeadlessBrainSourceItems("brain_alpha", ["source_1", "source_2"], {
-      baseUrl: "https://api.example.test",
-      fetch: fetchMock as typeof fetch,
-    });
-
-    const url = new URL((upstream as unknown as Request).url);
-    expect(url.pathname).toBe("/v1/brains/brain_alpha/source-items");
-    expect(url.searchParams.get("ids")).toBe("source_1,source_2");
-
-    await expect(
-      listHeadlessBrainSourceItems(
-        "brain_alpha",
-        Array.from({ length: 101 }, (_, i) => `s_${i}`),
-      ),
-    ).rejects.toThrow("limited to 100 ids");
   });
 
   it("previews and imports external Skills through the typed resources", async () => {
@@ -312,31 +263,3 @@ describe("headless knowledge commands", () => {
     ).rejects.toThrow("The Skill is imported and immutable. (request request_1)");
   });
 });
-
-function brainDocument() {
-  return {
-    id: "brain_document_1",
-    brainId: "brain_alpha",
-    folderPath: "Projects",
-    path: "Projects/Launch.md",
-    title: "Launch",
-    content: "",
-    body: "",
-    timeline: [],
-    format: "markdown",
-    mimeType: "text/markdown",
-    originalFileName: null,
-    assetSizeBytes: null,
-    relations: [],
-    sources: [],
-    kind: "page",
-    type: "note",
-    status: "active",
-    aliases: [],
-    contentHash: "a".repeat(64),
-    sizeBytes: 0,
-    createdByActorId: "actor_1",
-    createdAt,
-    updatedAt: createdAt,
-  };
-}

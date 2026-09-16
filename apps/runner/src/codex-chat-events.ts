@@ -780,7 +780,7 @@ export function createExternalEngineProjector(input: {
         await reconcilePublishedArtifacts();
         if (summary.status === "success") {
           const settledResult = options.settledResultContent?.trim();
-          // A rewritten task result (e.g. the Brain report pointer) becomes the turn's final
+          // A rewritten task result becomes the turn's final
           // message. Append it instead of replacing the streamed text parts so the trace keeps
           // its chronological text/tool interleaving; the stable itemId keeps it a distinct
           // message boundary and dedupes a finalize replay after crash recovery.

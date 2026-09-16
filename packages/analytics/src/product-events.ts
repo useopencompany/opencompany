@@ -160,17 +160,6 @@ export type ProductAnalyticsEventPropertiesByName = {
     provider: string;
     connection_id?: string;
   };
-  brain_source_added: {
-    workspace_id: string;
-    brain_id: string;
-    provider: string;
-  };
-  brain_ingestion_completed: {
-    workspace_id: string;
-    brain_id: string;
-    provider: string;
-    source_type: string;
-  };
   billing_topup_completed: {
     workspace_id: string;
     topup_type: "manual" | "auto_refill";
@@ -182,7 +171,7 @@ export type ProductAnalyticsEventPropertiesByName = {
     user_id: string;
     workspace_id?: string;
     billing_source: "chat_model_usage" | "ingest_model_usage" | "task_model_usage";
-    surface: "chat" | "task" | "slack_bot" | "brain_ingest";
+    surface: "chat" | "task" | "slack_bot";
     model: string;
     stage?: string;
     engine?: ProductAnalyticsEngine;
@@ -381,16 +370,6 @@ export const productAnalyticsEvents = {
     name: "connection_removed",
     description: "A user successfully disconnected an account.",
     safeProperties: ["workspace_id", "provider", "connection_id"],
-  },
-  brain_source_added: {
-    name: "brain_source_added",
-    description: "A user added an enabled integration source to a Brain.",
-    safeProperties: ["workspace_id", "brain_id", "provider"],
-  },
-  brain_ingestion_completed: {
-    name: "brain_ingestion_completed",
-    description: "A full Brain ingestion job completed successfully.",
-    safeProperties: ["workspace_id", "brain_id", "provider", "source_type"],
   },
   billing_topup_completed: {
     name: "billing_topup_completed",

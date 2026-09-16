@@ -149,7 +149,6 @@ function mockCanonicalTaskCreation(
     result: null,
     error: null,
     workflowId,
-    workflowBrainRef: null,
     reportedOutcome: null,
     outcomeComment: null,
     harnessSpec: {

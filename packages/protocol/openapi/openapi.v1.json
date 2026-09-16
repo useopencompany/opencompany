@@ -2040,1593 +2040,6 @@
         ],
         "additionalProperties": false
       },
-      "BrainSnapshotEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/BrainSnapshot"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/ProtocolMetadata"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "BrainSnapshot": {
-        "type": "object",
-        "properties": {
-          "folders": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BrainFolder"
-            }
-          },
-          "documents": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BrainDocument"
-            }
-          }
-        },
-        "required": [
-          "folders",
-          "documents"
-        ],
-        "additionalProperties": false
-      },
-      "BrainFolder": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256,
-            "example": "run_019fed53"
-          },
-          "path": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 512
-          },
-          "source": {
-            "type": "string",
-            "enum": [
-              "system",
-              "custom"
-            ]
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "id",
-          "path",
-          "source",
-          "createdAt",
-          "updatedAt"
-        ],
-        "additionalProperties": false
-      },
-      "BrainDocument": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256,
-            "example": "run_019fed53"
-          },
-          "brainId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 80
-          },
-          "folderPath": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 512
-          },
-          "path": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 640
-          },
-          "title": {
-            "type": "string",
-            "maxLength": 160
-          },
-          "description": {
-            "type": "string",
-            "maxLength": 1024
-          },
-          "content": {
-            "type": "string"
-          },
-          "body": {
-            "type": "string"
-          },
-          "timeline": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BrainTimelineEntry"
-            }
-          },
-          "format": {
-            "type": "string",
-            "enum": [
-              "markdown",
-              "pdf",
-              "docx",
-              "xlsx",
-              "srt",
-              "csv",
-              "tsv",
-              "json",
-              "text",
-              "image"
-            ]
-          },
-          "mimeType": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 255
-          },
-          "originalFileName": {
-            "type": "string",
-            "nullable": true,
-            "maxLength": 512
-          },
-          "assetSizeBytes": {
-            "type": "integer",
-            "nullable": true,
-            "minimum": 0
-          },
-          "relations": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BrainRelation"
-            }
-          },
-          "sources": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BrainSource"
-            }
-          },
-          "kind": {
-            "type": "string",
-            "enum": [
-              "page",
-              "evidence"
-            ]
-          },
-          "type": {
-            "type": "string",
-            "enum": [
-              "person",
-              "company",
-              "project",
-              "meeting",
-              "concept",
-              "source",
-              "analysis",
-              "note"
-            ]
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "draft",
-              "active",
-              "archived",
-              "merged"
-            ]
-          },
-          "aliases": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "maxLength": 512
-            }
-          },
-          "contentHash": {
-            "type": "string",
-            "pattern": "^[0-9a-f]{64}$/u"
-          },
-          "sizeBytes": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "createdByActorId": {
-            "type": "string",
-            "nullable": true,
-            "minLength": 1,
-            "maxLength": 256,
-            "example": "run_019fed53"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "id",
-          "brainId",
-          "folderPath",
-          "path",
-          "title",
-          "content",
-          "body",
-          "timeline",
-          "format",
-          "mimeType",
-          "originalFileName",
-          "assetSizeBytes",
-          "relations",
-          "sources",
-          "kind",
-          "type",
-          "status",
-          "aliases",
-          "contentHash",
-          "sizeBytes",
-          "createdByActorId",
-          "createdAt",
-          "updatedAt"
-        ],
-        "additionalProperties": false
-      },
-      "BrainTimelineEntry": {
-        "type": "object",
-        "properties": {
-          "evidenceId": {
-            "type": "string",
-            "maxLength": 80
-          },
-          "at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "body": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "evidenceId",
-          "at",
-          "body"
-        ],
-        "additionalProperties": false
-      },
-      "BrainRelation": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 64
-          },
-          "to": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 80
-          }
-        },
-        "required": [
-          "type",
-          "to"
-        ],
-        "additionalProperties": false
-      },
-      "BrainSource": {
-        "type": "object",
-        "properties": {
-          "ref": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "capturedAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "title": {
-            "type": "string",
-            "maxLength": 512
-          }
-        },
-        "required": [
-          "ref"
-        ],
-        "additionalProperties": false
-      },
-      "BrainOverviewEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/BrainOverview"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/ProtocolMetadata"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "BrainOverview": {
-        "type": "object",
-        "properties": {
-          "windowStartedAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "itemsAddedLast7Days": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "retrievalsLast7Days": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "activeSources": {
-            "type": "integer",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "windowStartedAt",
-          "itemsAddedLast7Days",
-          "retrievalsLast7Days",
-          "activeSources"
-        ],
-        "additionalProperties": false
-      },
-      "BrainSourceItemListEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BrainSourceItem"
-            }
-          },
-          "meta": {
-            "$ref": "#/components/schemas/ProtocolMetadata"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "BrainSourceItem": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256,
-            "example": "run_019fed53"
-          },
-          "sourceProvider": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 64
-          },
-          "sourceType": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 64
-          },
-          "externalId": {
-            "type": "string",
-            "maxLength": 4096
-          },
-          "title": {
-            "type": "string",
-            "nullable": true,
-            "maxLength": 512
-          },
-          "lastIngestError": {
-            "type": "string",
-            "nullable": true,
-            "maxLength": 2000
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "id",
-          "sourceProvider",
-          "sourceType",
-          "externalId",
-          "title",
-          "lastIngestError",
-          "createdAt"
-        ],
-        "additionalProperties": false
-      },
-      "BrainSourceDetailsEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/BrainSourceDetails"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/ProtocolMetadata"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "BrainSourceDetails": {
-        "type": "object",
-        "properties": {
-          "viewer": {
-            "type": "object",
-            "properties": {
-              "actorId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256,
-                "example": "run_019fed53"
-              },
-              "isAdmin": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "actorId",
-              "isAdmin"
-            ],
-            "additionalProperties": false
-          },
-          "sources": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BrainSourceView"
-            }
-          },
-          "ownAccounts": {
-            "type": "object",
-            "properties": {
-              "linear": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/BrainSourceAccount"
-                }
-              },
-              "gmail": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/BrainSourceAccount"
-                }
-              },
-              "google_drive": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/BrainSourceAccount"
-                }
-              },
-              "hubspot": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/BrainSourceAccount"
-                }
-              },
-              "granola": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/BrainSourceAccount"
-                }
-              },
-              "fathom": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/BrainSourceAccount"
-                }
-              },
-              "attio": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/BrainSourceAccount"
-                }
-              }
-            },
-            "required": [
-              "linear",
-              "gmail",
-              "google_drive",
-              "hubspot",
-              "granola",
-              "fathom",
-              "attio"
-            ],
-            "additionalProperties": false
-          },
-          "linear": {
-            "type": "object",
-            "properties": {
-              "integration": {
-                "type": "object",
-                "properties": {
-                  "provider": {
-                    "type": "string",
-                    "enum": [
-                      "linear"
-                    ]
-                  },
-                  "connected": {
-                    "type": "boolean"
-                  },
-                  "status": {
-                    "type": "string",
-                    "enum": [
-                      "connected",
-                      "needs_reauth",
-                      "sync_failed",
-                      "disconnected",
-                      "not_connected"
-                    ]
-                  },
-                  "integrationId": {
-                    "type": "string",
-                    "nullable": true,
-                    "minLength": 1,
-                    "maxLength": 256,
-                    "example": "run_019fed53"
-                  },
-                  "statusReason": {
-                    "type": "string",
-                    "nullable": true,
-                    "maxLength": 2000
-                  },
-                  "accountName": {
-                    "type": "string",
-                    "nullable": true,
-                    "maxLength": 512
-                  },
-                  "organizationName": {
-                    "type": "string",
-                    "nullable": true,
-                    "maxLength": 512
-                  }
-                },
-                "required": [
-                  "provider",
-                  "connected",
-                  "status",
-                  "integrationId",
-                  "statusReason",
-                  "accountName",
-                  "organizationName"
-                ],
-                "additionalProperties": false
-              }
-            },
-            "required": [
-              "integration"
-            ],
-            "additionalProperties": false
-          },
-          "gmail": {
-            "type": "object",
-            "properties": {
-              "integration": {
-                "type": "object",
-                "properties": {
-                  "provider": {
-                    "type": "string",
-                    "enum": [
-                      "gmail"
-                    ]
-                  },
-                  "connected": {
-                    "type": "boolean"
-                  },
-                  "status": {
-                    "type": "string",
-                    "enum": [
-                      "connected",
-                      "needs_reauth",
-                      "sync_failed",
-                      "disconnected",
-                      "not_connected"
-                    ]
-                  },
-                  "integrationId": {
-                    "type": "string",
-                    "nullable": true,
-                    "minLength": 1,
-                    "maxLength": 256,
-                    "example": "run_019fed53"
-                  },
-                  "statusReason": {
-                    "type": "string",
-                    "nullable": true,
-                    "maxLength": 2000
-                  },
-                  "accountEmail": {
-                    "type": "string",
-                    "nullable": true,
-                    "maxLength": 512
-                  }
-                },
-                "required": [
-                  "provider",
-                  "connected",
-                  "status",
-                  "integrationId",
-                  "statusReason",
-                  "accountEmail"
-                ],
-                "additionalProperties": false
-              }
-            },
-            "required": [
-              "integration"
-            ],
-            "additionalProperties": false
-          },
-          "googleDrive": {
-            "type": "object",
-            "properties": {
-              "integration": {
-                "type": "object",
-                "properties": {
-                  "provider": {
-                    "type": "string",
-                    "enum": [
-                      "google_drive"
-                    ]
-                  },
-                  "connected": {
-                    "type": "boolean"
-                  },
-                  "status": {
-                    "type": "string",
-                    "enum": [
-                      "connected",
-                      "needs_reauth",
-                      "sync_failed",
-                      "disconnected",
-                      "not_connected"
-                    ]
-                  },
-                  "integrationId": {
-                    "type": "string",
-                    "nullable": true,
-                    "minLength": 1,
-                    "maxLength": 256,
-                    "example": "run_019fed53"
-                  },
-                  "statusReason": {
-                    "type": "string",
-                    "nullable": true,
-                    "maxLength": 2000
-                  },
-                  "accountEmail": {
-                    "type": "string",
-                    "nullable": true,
-                    "maxLength": 512
-                  }
-                },
-                "required": [
-                  "provider",
-                  "connected",
-                  "status",
-                  "integrationId",
-                  "statusReason",
-                  "accountEmail"
-                ],
-                "additionalProperties": false
-              }
-            },
-            "required": [
-              "integration"
-            ],
-            "additionalProperties": false
-          },
-          "hubspot": {
-            "type": "object",
-            "properties": {
-              "integration": {
-                "type": "object",
-                "properties": {
-                  "provider": {
-                    "type": "string",
-                    "enum": [
-                      "hubspot"
-                    ]
-                  },
-                  "connected": {
-                    "type": "boolean"
-                  },
-                  "status": {
-                    "type": "string",
-                    "enum": [
-                      "connected",
-                      "needs_reauth",
-                      "sync_failed",
-                      "disconnected",
-                      "not_connected"
-                    ]
-                  },
-                  "integrationId": {
-                    "type": "string",
-                    "nullable": true,
-                    "minLength": 1,
-                    "maxLength": 256,
-                    "example": "run_019fed53"
-                  },
-                  "statusReason": {
-                    "type": "string",
-                    "nullable": true,
-                    "maxLength": 2000
-                  },
-                  "accountEmail": {
-                    "type": "string",
-                    "nullable": true,
-                    "maxLength": 512
-                  },
-                  "hubDomain": {
-                    "type": "string",
-                    "nullable": true,
-                    "maxLength": 512
-                  }
-                },
-                "required": [
-                  "provider",
-                  "connected",
-                  "status",
-                  "integrationId",
-                  "statusReason",
-                  "accountEmail",
-                  "hubDomain"
-                ],
-                "additionalProperties": false
-              }
-            },
-            "required": [
-              "integration"
-            ],
-            "additionalProperties": false
-          },
-          "granola": {
-            "type": "object",
-            "properties": {
-              "integration": {
-                "type": "object",
-                "properties": {
-                  "provider": {
-                    "type": "string",
-                    "enum": [
-                      "granola"
-                    ]
-                  },
-                  "connected": {
-                    "type": "boolean"
-                  },
-                  "status": {
-                    "type": "string",
-                    "enum": [
-                      "connected",
-                      "needs_reauth",
-                      "sync_failed",
-                      "disconnected",
-                      "not_connected"
-                    ]
-                  },
-                  "integrationId": {
-                    "type": "string",
-                    "nullable": true,
-                    "minLength": 1,
-                    "maxLength": 256,
-                    "example": "run_019fed53"
-                  },
-                  "statusReason": {
-                    "type": "string",
-                    "nullable": true,
-                    "maxLength": 2000
-                  },
-                  "accountEmail": {
-                    "type": "string",
-                    "nullable": true,
-                    "maxLength": 512
-                  },
-                  "accountName": {
-                    "type": "string",
-                    "nullable": true,
-                    "maxLength": 512
-                  }
-                },
-                "required": [
-                  "provider",
-                  "connected",
-                  "status",
-                  "integrationId",
-                  "statusReason",
-                  "accountEmail",
-                  "accountName"
-                ],
-                "additionalProperties": false
-              }
-            },
-            "required": [
-              "integration"
-            ],
-            "additionalProperties": false
-          },
-          "fathom": {
-            "type": "object",
-            "properties": {
-              "integration": {
-                "type": "object",
-                "properties": {
-                  "provider": {
-                    "type": "string",
-                    "enum": [
-                      "fathom"
-                    ]
-                  },
-                  "connected": {
-                    "type": "boolean"
-                  },
-                  "status": {
-                    "type": "string",
-                    "enum": [
-                      "connected",
-                      "needs_reauth",
-                      "sync_failed",
-                      "disconnected",
-                      "not_connected"
-                    ]
-                  },
-                  "integrationId": {
-                    "type": "string",
-                    "nullable": true,
-                    "minLength": 1,
-                    "maxLength": 256,
-                    "example": "run_019fed53"
-                  },
-                  "statusReason": {
-                    "type": "string",
-                    "nullable": true,
-                    "maxLength": 2000
-                  },
-                  "accountEmail": {
-                    "type": "string",
-                    "nullable": true,
-                    "maxLength": 512
-                  },
-                  "accountName": {
-                    "type": "string",
-                    "nullable": true,
-                    "maxLength": 512
-                  }
-                },
-                "required": [
-                  "provider",
-                  "connected",
-                  "status",
-                  "integrationId",
-                  "statusReason",
-                  "accountEmail",
-                  "accountName"
-                ],
-                "additionalProperties": false
-              }
-            },
-            "required": [
-              "integration"
-            ],
-            "additionalProperties": false
-          },
-          "attio": {
-            "type": "object",
-            "properties": {
-              "integration": {
-                "type": "object",
-                "properties": {
-                  "provider": {
-                    "type": "string",
-                    "enum": [
-                      "attio"
-                    ]
-                  },
-                  "connected": {
-                    "type": "boolean"
-                  },
-                  "status": {
-                    "type": "string",
-                    "enum": [
-                      "connected",
-                      "needs_reauth",
-                      "sync_failed",
-                      "disconnected",
-                      "not_connected"
-                    ]
-                  },
-                  "integrationId": {
-                    "type": "string",
-                    "nullable": true,
-                    "minLength": 1,
-                    "maxLength": 256,
-                    "example": "run_019fed53"
-                  },
-                  "statusReason": {
-                    "type": "string",
-                    "nullable": true,
-                    "maxLength": 2000
-                  },
-                  "workspaceName": {
-                    "type": "string",
-                    "nullable": true,
-                    "maxLength": 512
-                  }
-                },
-                "required": [
-                  "provider",
-                  "connected",
-                  "status",
-                  "integrationId",
-                  "statusReason",
-                  "workspaceName"
-                ],
-                "additionalProperties": false
-              }
-            },
-            "required": [
-              "integration"
-            ],
-            "additionalProperties": false
-          }
-        },
-        "required": [
-          "viewer",
-          "sources",
-          "ownAccounts",
-          "linear",
-          "gmail",
-          "googleDrive",
-          "hubspot",
-          "granola",
-          "fathom",
-          "attio"
-        ],
-        "additionalProperties": false
-      },
-      "BrainSourceView": {
-        "type": "object",
-        "properties": {
-          "sourceId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256,
-            "example": "run_019fed53"
-          },
-          "provider": {
-            "type": "string",
-            "enum": [
-              "gmail",
-              "google_drive",
-              "linear",
-              "slack_bot",
-              "hubspot",
-              "granola",
-              "fathom",
-              "attio"
-            ]
-          },
-          "integrationId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256,
-            "example": "run_019fed53"
-          },
-          "enabled": {
-            "type": "boolean"
-          },
-          "connectedByName": {
-            "type": "string",
-            "maxLength": 512
-          },
-          "ownerEmail": {
-            "type": "string",
-            "nullable": true,
-            "maxLength": 512
-          },
-          "ownerAvatarUrl": {
-            "type": "string",
-            "nullable": true,
-            "maxLength": 4096
-          },
-          "accountEmail": {
-            "type": "string",
-            "nullable": true,
-            "maxLength": 512
-          },
-          "accountName": {
-            "type": "string",
-            "nullable": true,
-            "maxLength": 512
-          },
-          "connectionLabel": {
-            "type": "string",
-            "nullable": true,
-            "maxLength": 512
-          },
-          "ownerKind": {
-            "type": "string",
-            "enum": [
-              "workspace",
-              "user"
-            ]
-          },
-          "isOwn": {
-            "type": "boolean"
-          },
-          "canConfigure": {
-            "type": "boolean"
-          },
-          "canToggle": {
-            "type": "boolean"
-          },
-          "canRemove": {
-            "type": "boolean"
-          },
-          "integrationStatus": {
-            "type": "string",
-            "enum": [
-              "connected",
-              "needs_reauth",
-              "sync_failed",
-              "disconnected"
-            ]
-          },
-          "config": {
-            "type": "object",
-            "additionalProperties": {
-              "nullable": true
-            }
-          }
-        },
-        "required": [
-          "sourceId",
-          "provider",
-          "integrationId",
-          "enabled",
-          "connectedByName",
-          "ownerEmail",
-          "ownerAvatarUrl",
-          "accountEmail",
-          "accountName",
-          "connectionLabel",
-          "ownerKind",
-          "isOwn",
-          "canConfigure",
-          "canToggle",
-          "canRemove",
-          "integrationStatus",
-          "config"
-        ],
-        "additionalProperties": false
-      },
-      "BrainSourceAccount": {
-        "type": "object",
-        "properties": {
-          "integrationId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256,
-            "example": "run_019fed53"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "connected",
-              "needs_reauth",
-              "sync_failed",
-              "disconnected"
-            ]
-          },
-          "accountEmail": {
-            "type": "string",
-            "nullable": true,
-            "maxLength": 512
-          },
-          "accountName": {
-            "type": "string",
-            "nullable": true,
-            "maxLength": 512
-          },
-          "connectionLabel": {
-            "type": "string",
-            "nullable": true,
-            "maxLength": 512
-          }
-        },
-        "required": [
-          "integrationId",
-          "status",
-          "accountEmail",
-          "accountName",
-          "connectionLabel"
-        ],
-        "additionalProperties": false
-      },
-      "BrainSourceMutationEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "type": "object",
-            "properties": {
-              "brainId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256,
-                "example": "run_019fed53"
-              },
-              "integrationId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256,
-                "example": "run_019fed53"
-              },
-              "provider": {
-                "type": "string",
-                "enum": [
-                  "gmail",
-                  "google_drive",
-                  "linear",
-                  "slack_bot",
-                  "hubspot",
-                  "granola",
-                  "fathom",
-                  "attio"
-                ]
-              },
-              "enabled": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "brainId",
-              "integrationId",
-              "provider",
-              "enabled"
-            ],
-            "additionalProperties": false
-          },
-          "meta": {
-            "$ref": "#/components/schemas/ProtocolMetadata"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "SetBrainSourceBody": {
-        "anyOf": [
-          {
-            "type": "object",
-            "properties": {
-              "operation": {
-                "type": "string",
-                "enum": [
-                  "set_enabled"
-                ]
-              },
-              "provider": {
-                "type": "string",
-                "enum": [
-                  "gmail",
-                  "google_drive",
-                  "linear",
-                  "slack_bot",
-                  "hubspot",
-                  "granola",
-                  "fathom",
-                  "attio"
-                ]
-              },
-              "enabled": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "operation",
-              "provider",
-              "enabled"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "operation": {
-                "type": "string",
-                "enum": [
-                  "configure"
-                ]
-              },
-              "provider": {
-                "type": "string",
-                "enum": [
-                  "linear"
-                ]
-              },
-              "enabled": {
-                "type": "boolean"
-              },
-              "teams": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    },
-                    "name": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    },
-                    "key": {
-                      "type": "string",
-                      "maxLength": 128
-                    },
-                    "triageStateId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "name"
-                  ],
-                  "additionalProperties": false
-                },
-                "maxItems": 500
-              },
-              "events": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "enum": [
-                        "issue_created",
-                        "issue_updated",
-                        "issue_status_changed",
-                        "issue_removed",
-                        "comment_created",
-                        "comment_updated",
-                        "comment_removed"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "id"
-                  ],
-                  "additionalProperties": false
-                },
-                "maxItems": 50
-              }
-            },
-            "required": [
-              "operation",
-              "provider",
-              "enabled",
-              "teams",
-              "events"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "operation": {
-                "type": "string",
-                "enum": [
-                  "configure"
-                ]
-              },
-              "provider": {
-                "type": "string",
-                "enum": [
-                  "hubspot"
-                ]
-              },
-              "enabled": {
-                "type": "boolean"
-              },
-              "objectTypes": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "enum": [
-                        "contact",
-                        "company",
-                        "deal"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "id"
-                  ],
-                  "additionalProperties": false
-                },
-                "maxItems": 50
-              },
-              "events": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "enum": [
-                        "object_created",
-                        "object_updated",
-                        "object_stage_changed"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "id"
-                  ],
-                  "additionalProperties": false
-                },
-                "maxItems": 50
-              }
-            },
-            "required": [
-              "operation",
-              "provider",
-              "enabled",
-              "objectTypes",
-              "events"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "operation": {
-                "type": "string",
-                "enum": [
-                  "configure"
-                ]
-              },
-              "provider": {
-                "type": "string",
-                "enum": [
-                  "attio"
-                ]
-              },
-              "enabled": {
-                "type": "boolean"
-              },
-              "objectTypes": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "enum": [
-                        "person",
-                        "company",
-                        "deal"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "id"
-                  ],
-                  "additionalProperties": false
-                },
-                "maxItems": 50
-              },
-              "events": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "enum": [
-                        "object_created",
-                        "object_updated",
-                        "note_added"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "id"
-                  ],
-                  "additionalProperties": false
-                },
-                "maxItems": 50
-              }
-            },
-            "required": [
-              "operation",
-              "provider",
-              "enabled",
-              "objectTypes",
-              "events"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "operation": {
-                "type": "string",
-                "enum": [
-                  "configure"
-                ]
-              },
-              "provider": {
-                "type": "string",
-                "enum": [
-                  "gmail"
-                ]
-              },
-              "enabled": {
-                "type": "boolean"
-              },
-              "events": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "enum": [
-                        "email_received",
-                        "email_sent"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "id"
-                  ],
-                  "additionalProperties": false
-                },
-                "maxItems": 50
-              },
-              "instructions": {
-                "type": "string",
-                "maxLength": 2000
-              }
-            },
-            "required": [
-              "operation",
-              "provider",
-              "enabled",
-              "events",
-              "instructions"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "operation": {
-                "type": "string",
-                "enum": [
-                  "configure"
-                ]
-              },
-              "provider": {
-                "type": "string",
-                "enum": [
-                  "google_drive"
-                ]
-              },
-              "enabled": {
-                "type": "boolean"
-              },
-              "allFiles": {
-                "type": "boolean"
-              },
-              "resourceIds": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 512
-                },
-                "maxItems": 100
-              }
-            },
-            "required": [
-              "operation",
-              "provider",
-              "enabled",
-              "resourceIds"
-            ],
-            "additionalProperties": false
-          }
-        ]
-      },
-      "BrainSourceDeleteEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "type": "object",
-            "properties": {
-              "brainId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256,
-                "example": "run_019fed53"
-              },
-              "integrationId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256,
-                "example": "run_019fed53"
-              },
-              "deleted": {
-                "type": "boolean",
-                "enum": [
-                  true
-                ]
-              }
-            },
-            "required": [
-              "brainId",
-              "integrationId",
-              "deleted"
-            ],
-            "additionalProperties": false
-          },
-          "meta": {
-            "$ref": "#/components/schemas/ProtocolMetadata"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
       "BrowserProfileListEnvelope": {
         "type": "object",
         "properties": {
@@ -4110,301 +2523,6 @@
         ],
         "additionalProperties": false
       },
-      "BrainControlMutationEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "type": "object",
-            "properties": {
-              "brainId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256,
-                "example": "run_019fed53"
-              }
-            },
-            "required": [
-              "brainId"
-            ],
-            "additionalProperties": false
-          },
-          "meta": {
-            "$ref": "#/components/schemas/ProtocolMetadata"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "CreateBrainBody": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 80
-          },
-          "visibility": {
-            "type": "string",
-            "enum": [
-              "workspace",
-              "restricted"
-            ]
-          },
-          "description": {
-            "type": "string",
-            "maxLength": 1024
-          }
-        },
-        "required": [
-          "name",
-          "visibility"
-        ],
-        "additionalProperties": false
-      },
-      "BrainAccessEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/BrainAccess"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/ProtocolMetadata"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "BrainAccess": {
-        "type": "object",
-        "properties": {
-          "visibility": {
-            "type": "string",
-            "enum": [
-              "workspace",
-              "restricted"
-            ]
-          },
-          "memberIds": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "maxItems": 1000
-          },
-          "workspaceMembers": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/WorkspaceMember"
-            },
-            "maxItems": 1000
-          }
-        },
-        "required": [
-          "visibility",
-          "memberIds",
-          "workspaceMembers"
-        ],
-        "additionalProperties": false
-      },
-      "WorkspaceMember": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256,
-            "example": "run_019fed53"
-          },
-          "email": {
-            "type": "string",
-            "maxLength": 320,
-            "format": "email"
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 512
-          },
-          "firstName": {
-            "type": "string",
-            "nullable": true,
-            "maxLength": 256
-          },
-          "lastName": {
-            "type": "string",
-            "nullable": true,
-            "maxLength": 256
-          },
-          "avatarUrl": {
-            "type": "string",
-            "nullable": true,
-            "maxLength": 4096
-          },
-          "role": {
-            "type": "string",
-            "enum": [
-              "admin",
-              "member"
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "email",
-          "name",
-          "firstName",
-          "lastName",
-          "avatarUrl",
-          "role"
-        ],
-        "additionalProperties": false
-      },
-      "BrainAccessMutationEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "type": "object",
-            "properties": {
-              "updated": {
-                "type": "boolean",
-                "enum": [
-                  true
-                ]
-              }
-            },
-            "required": [
-              "updated"
-            ],
-            "additionalProperties": false
-          },
-          "meta": {
-            "$ref": "#/components/schemas/ProtocolMetadata"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "SetBrainAccessBody": {
-        "type": "object",
-        "properties": {
-          "visibility": {
-            "type": "string",
-            "enum": [
-              "workspace",
-              "restricted"
-            ]
-          },
-          "memberIds": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "maxItems": 1000
-          }
-        },
-        "required": [
-          "visibility",
-          "memberIds"
-        ],
-        "additionalProperties": false
-      },
-      "BrainEnrichmentEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "type": "object",
-            "properties": {
-              "enabled": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "enabled"
-            ],
-            "additionalProperties": false
-          },
-          "meta": {
-            "$ref": "#/components/schemas/ProtocolMetadata"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "SetBrainEnrichmentBody": {
-        "type": "object",
-        "properties": {
-          "enabled": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "enabled"
-        ],
-        "additionalProperties": false
-      },
-      "BrainIntelligenceEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "type": "object",
-            "properties": {
-              "intelligence": {
-                "type": "string",
-                "enum": [
-                  "basic",
-                  "frontier"
-                ]
-              }
-            },
-            "required": [
-              "intelligence"
-            ],
-            "additionalProperties": false
-          },
-          "meta": {
-            "$ref": "#/components/schemas/ProtocolMetadata"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "SetBrainIntelligenceBody": {
-        "type": "object",
-        "properties": {
-          "intelligence": {
-            "type": "string",
-            "enum": [
-              "basic",
-              "frontier"
-            ]
-          }
-        },
-        "required": [
-          "intelligence"
-        ],
-        "additionalProperties": false
-      },
       "IdentityEnvelope": {
         "type": "object",
         "properties": {
@@ -4440,28 +2558,12 @@
             "minLength": 1,
             "maxLength": 256,
             "example": "run_019fed53"
-          },
-          "brains": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/IdentityBrain"
-            },
-            "maxItems": 1000
-          },
-          "activeBrainId": {
-            "type": "string",
-            "nullable": true,
-            "minLength": 1,
-            "maxLength": 256,
-            "example": "run_019fed53"
           }
         },
         "required": [
           "user",
           "workspaces",
-          "activeWorkspaceId",
-          "brains",
-          "activeBrainId"
+          "activeWorkspaceId"
         ],
         "additionalProperties": false
       },
@@ -4633,76 +2735,13 @@
               "admin",
               "member"
             ]
-          },
-          "legacyBrainEnabled": {
-            "type": "boolean"
           }
         },
         "required": [
           "id",
           "name",
           "slug",
-          "role",
-          "legacyBrainEnabled"
-        ],
-        "additionalProperties": false
-      },
-      "IdentityBrain": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256,
-            "example": "run_019fed53"
-          },
-          "workspaceId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256,
-            "example": "run_019fed53"
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 80
-          },
-          "slug": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "description": {
-            "type": "string",
-            "nullable": true
-          },
-          "visibility": {
-            "type": "string",
-            "enum": [
-              "workspace",
-              "restricted"
-            ]
-          },
-          "enrichmentEnabled": {
-            "type": "boolean"
-          },
-          "intelligence": {
-            "type": "string",
-            "enum": [
-              "basic",
-              "frontier"
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "workspaceId",
-          "name",
-          "slug",
-          "description",
-          "visibility",
-          "enrichmentEnabled",
-          "intelligence"
+          "role"
         ],
         "additionalProperties": false
       },
@@ -4786,6 +2825,59 @@
           "memberCap",
           "members",
           "invitations"
+        ],
+        "additionalProperties": false
+      },
+      "WorkspaceMember": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "email": {
+            "type": "string",
+            "maxLength": 320,
+            "format": "email"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "firstName": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 256
+          },
+          "lastName": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 256
+          },
+          "avatarUrl": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 4096
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "member"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "name",
+          "firstName",
+          "lastName",
+          "avatarUrl",
+          "role"
         ],
         "additionalProperties": false
       },
@@ -4989,19 +3081,11 @@
             "minLength": 1,
             "maxLength": 256,
             "example": "run_019fed53"
-          },
-          "brainId": {
-            "type": "string",
-            "nullable": true,
-            "minLength": 1,
-            "maxLength": 256,
-            "example": "run_019fed53"
           }
         },
         "required": [
           "workspaceId",
-          "organizationId",
-          "brainId"
+          "organizationId"
         ],
         "additionalProperties": false
       },
@@ -5111,19 +3195,11 @@
               "createdByCaller"
             ],
             "additionalProperties": false
-          },
-          "activeBrainId": {
-            "type": "string",
-            "nullable": true,
-            "minLength": 1,
-            "maxLength": 256,
-            "example": "run_019fed53"
           }
         },
         "required": [
           "onboarding",
-          "workspace",
-          "activeBrainId"
+          "workspace"
         ],
         "additionalProperties": false
       },
@@ -5201,13 +3277,6 @@
                 "maxLength": 256,
                 "example": "run_019fed53"
               },
-              "brainId": {
-                "type": "string",
-                "nullable": true,
-                "minLength": 1,
-                "maxLength": 256,
-                "example": "run_019fed53"
-              },
               "createdByCaller": {
                 "type": "boolean"
               }
@@ -5215,7 +3284,6 @@
             "required": [
               "workspaceId",
               "organizationId",
-              "brainId",
               "createdByCaller"
             ],
             "additionalProperties": false
@@ -5263,599 +3331,6 @@
         },
         "required": [
           "referralSource"
-        ],
-        "additionalProperties": false
-      },
-      "BrainSourceOptionsEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/BrainSourceOptions"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/ProtocolMetadata"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "BrainSourceOptions": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "provider": {
-                "type": "string",
-                "enum": [
-                  "linear"
-                ]
-              },
-              "teams": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    },
-                    "name": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    },
-                    "key": {
-                      "type": "string",
-                      "maxLength": 128
-                    },
-                    "triageStateId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "name"
-                  ],
-                  "additionalProperties": false
-                }
-              },
-              "partial": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "provider",
-              "teams",
-              "partial"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "provider": {
-                "type": "string",
-                "enum": [
-                  "granola"
-                ]
-              },
-              "folders": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    },
-                    "name": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    },
-                    "parentFolderId": {
-                      "type": "string",
-                      "nullable": true,
-                      "minLength": 1,
-                      "maxLength": 512
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "name",
-                    "parentFolderId"
-                  ],
-                  "additionalProperties": false
-                }
-              },
-              "partial": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "provider",
-              "folders",
-              "partial"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "provider": {
-                "type": "string",
-                "enum": [
-                  "gmail"
-                ]
-              },
-              "labels": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    },
-                    "name": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "name"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            },
-            "required": [
-              "provider",
-              "labels"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "provider": {
-                "type": "string",
-                "enum": [
-                  "google_drive"
-                ]
-              },
-              "files": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    },
-                    "name": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    },
-                    "kind": {
-                      "type": "string",
-                      "enum": [
-                        "file",
-                        "folder"
-                      ]
-                    },
-                    "mimeType": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    },
-                    "driveId": {
-                      "type": "string",
-                      "nullable": true,
-                      "maxLength": 512
-                    },
-                    "webViewLink": {
-                      "type": "string",
-                      "nullable": true,
-                      "maxLength": 4096,
-                      "format": "uri"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "name",
-                    "kind",
-                    "mimeType",
-                    "driveId",
-                    "webViewLink"
-                  ],
-                  "additionalProperties": false
-                }
-              },
-              "nextPageToken": {
-                "type": "string",
-                "nullable": true,
-                "maxLength": 4096
-              }
-            },
-            "required": [
-              "provider",
-              "files",
-              "nextPageToken"
-            ],
-            "additionalProperties": false
-          }
-        ]
-      },
-      "BrainImportRunCommandEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "type": "object",
-            "properties": {
-              "importRunId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256,
-                "example": "run_019fed53"
-              },
-              "status": {
-                "type": "string",
-                "enum": [
-                  "discovering",
-                  "awaiting_confirmation",
-                  "ingesting",
-                  "finalizing",
-                  "succeeded",
-                  "partial",
-                  "failed",
-                  "canceled"
-                ]
-              },
-              "replayed": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "importRunId",
-              "status",
-              "replayed"
-            ],
-            "additionalProperties": false
-          },
-          "meta": {
-            "$ref": "#/components/schemas/ProtocolMetadata"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "StartBrainImportBody": {
-        "type": "object",
-        "properties": {
-          "companyUrl": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 2048
-          },
-          "focus": {
-            "type": "string",
-            "maxLength": 2000
-          },
-          "sourceSelection": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "object",
-              "properties": {
-                "enabled": {
-                  "type": "boolean"
-                },
-                "integrationId": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 256,
-                  "example": "run_019fed53"
-                }
-              },
-              "required": [
-                "enabled"
-              ],
-              "additionalProperties": false
-            }
-          }
-        },
-        "required": [
-          "companyUrl",
-          "sourceSelection"
-        ],
-        "additionalProperties": false
-      },
-      "ConfirmBrainImportBody": {
-        "type": "object",
-        "properties": {
-          "enabledProviders": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "enum": [
-                "public_web",
-                "granola",
-                "fathom",
-                "gmail",
-                "linear"
-              ]
-            },
-            "maxItems": 8
-          }
-        },
-        "required": [
-          "enabledProviders"
-        ],
-        "additionalProperties": false
-      },
-      "BrainDocumentEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/BrainDocument"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/ProtocolMetadata"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "CreateBrainDocumentBody": {
-        "type": "object",
-        "properties": {
-          "folderPath": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 512
-          },
-          "fileName": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 160
-          }
-        },
-        "required": [
-          "folderPath",
-          "fileName"
-        ],
-        "additionalProperties": false
-      },
-      "BrainAssetMutationEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "type": "object",
-            "properties": {
-              "document": {
-                "$ref": "#/components/schemas/BrainDocument"
-              },
-              "quotaPaused": {
-                "type": "boolean"
-              },
-              "replayed": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "document",
-              "quotaPaused",
-              "replayed"
-            ],
-            "additionalProperties": false
-          },
-          "meta": {
-            "$ref": "#/components/schemas/ProtocolMetadata"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "BrainAssetUploadBody": {
-        "type": "object",
-        "properties": {
-          "folderPath": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 512
-          },
-          "file": {
-            "type": "string",
-            "format": "binary"
-          }
-        },
-        "required": [
-          "folderPath",
-          "file"
-        ],
-        "additionalProperties": false
-      },
-      "BrainAssetReplaceBody": {
-        "type": "object",
-        "properties": {
-          "file": {
-            "type": "string",
-            "format": "binary"
-          }
-        },
-        "required": [
-          "file"
-        ],
-        "additionalProperties": false
-      },
-      "UpdateBrainDocumentBody": {
-        "type": "object",
-        "properties": {
-          "body": {
-            "type": "string",
-            "maxLength": 1000000
-          },
-          "expectedContentHash": {
-            "type": "string",
-            "pattern": "^[0-9a-f]{64}$/u"
-          }
-        },
-        "required": [
-          "body"
-        ],
-        "additionalProperties": false
-      },
-      "RenameBrainDocumentBody": {
-        "type": "object",
-        "properties": {
-          "title": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 160
-          }
-        },
-        "required": [
-          "title"
-        ],
-        "additionalProperties": false
-      },
-      "BrainDocumentDeleteEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "type": "object",
-            "properties": {
-              "documentId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256,
-                "example": "run_019fed53"
-              }
-            },
-            "required": [
-              "documentId"
-            ],
-            "additionalProperties": false
-          },
-          "meta": {
-            "$ref": "#/components/schemas/ProtocolMetadata"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "BrainFolderEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/BrainFolder"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/ProtocolMetadata"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "CreateBrainFolderBody": {
-        "type": "object",
-        "properties": {
-          "path": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 512
-          }
-        },
-        "required": [
-          "path"
-        ],
-        "additionalProperties": false
-      },
-      "BrainFolderPathEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "type": "object",
-            "properties": {
-              "path": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 512
-              }
-            },
-            "required": [
-              "path"
-            ],
-            "additionalProperties": false
-          },
-          "meta": {
-            "$ref": "#/components/schemas/ProtocolMetadata"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "RenameBrainFolderBody": {
-        "type": "object",
-        "properties": {
-          "fromPath": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 512
-          },
-          "toPath": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 512
-          }
-        },
-        "required": [
-          "fromPath",
-          "toPath"
-        ],
-        "additionalProperties": false
-      },
-      "DeleteBrainFolderBody": {
-        "type": "object",
-        "properties": {
-          "path": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 512
-          }
-        },
-        "required": [
-          "path"
         ],
         "additionalProperties": false
       },
@@ -6482,6 +3957,13 @@
           "text"
         ],
         "additionalProperties": false
+      },
+      "RetiredWikiImportBody": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": {
+          "nullable": true
+        }
       },
       "WikiSourceListEnvelope": {
         "type": "object",
@@ -12234,10 +9716,6 @@
             "type": "string",
             "nullable": true,
             "maxLength": 2000
-          },
-          "destinationCount": {
-            "type": "integer",
-            "minimum": 0
           }
         },
         "required": [
@@ -12248,8 +9726,7 @@
           "needsScopeUpgrade",
           "canCustomizeIdentity",
           "teamName",
-          "statusReason",
-          "destinationCount"
+          "statusReason"
         ],
         "additionalProperties": false
       },
@@ -12281,11 +9758,11 @@
         ],
         "additionalProperties": false
       },
-      "SlackBotDestinationEnvelope": {
+      "IntegrationResourceOptionsEnvelope": {
         "type": "object",
         "properties": {
           "data": {
-            "$ref": "#/components/schemas/SlackBotDestination"
+            "$ref": "#/components/schemas/IntegrationResourceOptions"
           },
           "meta": {
             "$ref": "#/components/schemas/ProtocolMetadata"
@@ -12297,182 +9774,205 @@
         ],
         "additionalProperties": false
       },
-      "SlackBotDestination": {
-        "type": "object",
-        "properties": {
-          "installed": {
-            "type": "boolean"
-          },
-          "botConnected": {
-            "type": "boolean"
-          },
-          "isAdmin": {
-            "type": "boolean"
-          },
-          "brainVisibility": {
-            "type": "string",
-            "enum": [
-              "workspace",
-              "restricted"
-            ]
-          },
-          "source": {
+      "IntegrationResourceOptions": {
+        "oneOf": [
+          {
             "type": "object",
-            "nullable": true,
             "properties": {
-              "enabled": {
-                "type": "boolean"
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "linear"
+                ]
               },
-              "channels": {
+              "teams": {
                 "type": "array",
                 "items": {
-                  "$ref": "#/components/schemas/SlackBotChannelRef"
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "key": {
+                      "type": "string",
+                      "maxLength": 40
+                    },
+                    "triageStateId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "additionalProperties": false
                 },
-                "maxItems": 500
-              }
-            },
-            "required": [
-              "enabled",
-              "channels"
-            ],
-            "additionalProperties": false
-          }
-        },
-        "required": [
-          "installed",
-          "botConnected",
-          "isAdmin",
-          "brainVisibility",
-          "source"
-        ],
-        "additionalProperties": false
-      },
-      "SlackBotChannelRef": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 512
-          }
-        },
-        "required": [
-          "id",
-          "name"
-        ],
-        "additionalProperties": false
-      },
-      "SetSlackBotDestinationBody": {
-        "type": "object",
-        "properties": {
-          "enabled": {
-            "type": "boolean"
-          },
-          "channels": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SlackBotChannelRef"
-            },
-            "maxItems": 500
-          }
-        },
-        "required": [
-          "enabled",
-          "channels"
-        ],
-        "additionalProperties": false
-      },
-      "SlackBotChannelListEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "type": "object",
-            "properties": {
-              "channels": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/SlackBotChannel"
-                },
-                "maxItems": 5000
+                "maxItems": 2000
               },
               "partial": {
                 "type": "boolean"
               }
             },
             "required": [
-              "channels",
+              "provider",
+              "teams",
               "partial"
             ],
             "additionalProperties": false
           },
-          "meta": {
-            "$ref": "#/components/schemas/ProtocolMetadata"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "SlackBotChannel": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 512
-          },
-          "isPrivate": {
-            "type": "boolean"
-          },
-          "isMember": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "isPrivate",
-          "isMember"
-        ],
-        "additionalProperties": false
-      },
-      "IntegrationAccountUsageEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
+          {
             "type": "object",
             "properties": {
-              "affectedBrainSourceCount": {
-                "type": "integer",
-                "minimum": 0
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "granola"
+                ]
+              },
+              "folders": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "parentFolderId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1,
+                      "maxLength": 256
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "parentFolderId"
+                  ],
+                  "additionalProperties": false
+                },
+                "maxItems": 2000
+              },
+              "partial": {
+                "type": "boolean"
               }
             },
             "required": [
-              "affectedBrainSourceCount"
+              "provider",
+              "folders",
+              "partial"
             ],
             "additionalProperties": false
           },
-          "meta": {
-            "$ref": "#/components/schemas/ProtocolMetadata"
+          {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "gmail"
+                ]
+              },
+              "labels": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "additionalProperties": false
+                },
+                "maxItems": 2000
+              }
+            },
+            "required": [
+              "provider",
+              "labels"
+            ],
+            "additionalProperties": false
           }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
+        ]
+      },
+      "IntegrationResourceOptionsBody": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "linear"
+                ]
+              },
+              "includeTriageStateIds": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "provider"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "granola"
+                ]
+              }
+            },
+            "required": [
+              "provider"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "gmail"
+                ]
+              }
+            },
+            "required": [
+              "provider"
+            ],
+            "additionalProperties": false
+          }
+        ]
       },
       "IntegrationCapabilityModeEnvelope": {
         "type": "object",
@@ -16810,346 +14310,6 @@
         }
       }
     },
-    "/v1/brains/{brainId}": {
-      "get": {
-        "tags": [
-          "Brain"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "brainId",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "An authorized Brain document and folder snapshot.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrainSnapshotEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/brains/{brainId}/overview": {
-      "get": {
-        "tags": [
-          "Brain"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "brainId",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Aggregate activity for an authorized Brain.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrainOverviewEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/brains/{brainId}/source-items": {
-      "get": {
-        "tags": [
-          "Brain"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "brainId",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 25699
-            },
-            "required": true,
-            "name": "ids",
-            "in": "query"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Bounded public metadata for source items referenced by an authorized Brain.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrainSourceItemListEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/brains/{brainId}/sources": {
-      "get": {
-        "tags": [
-          "Brain"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "brainId",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Source configuration and connection state for an authorized Brain.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrainSourceDetailsEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/brains/{brainId}/sources/{integrationId}": {
-      "put": {
-        "tags": [
-          "Brain"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "brainId",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "integrationId",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SetBrainSourceBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Brain source configured or enabled state updated.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrainSourceMutationEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "Brain"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "brainId",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "integrationId",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Brain source removed, including an idempotent replay.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrainSourceDeleteEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/v1/browser-profiles": {
       "get": {
         "tags": [
@@ -17703,427 +14863,6 @@
         }
       }
     },
-    "/v1/brains": {
-      "post": {
-        "tags": [
-          "Brains"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateBrainBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Brain created in the active workspace. Admin only.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrainControlMutationEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/brains/{brainId}/switch": {
-      "post": {
-        "tags": [
-          "Brains"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "brainId",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Brain access authorized for the active workspace; clients may activate it.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrainControlMutationEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/brains/{brainId}/access": {
-      "get": {
-        "tags": [
-          "Brains"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "brainId",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Brain visibility, selected members, and workspace member choices. Admin only.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrainAccessEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      },
-      "put": {
-        "tags": [
-          "Brains"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "brainId",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SetBrainAccessBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Brain visibility and restricted member set updated. Admin only.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrainAccessMutationEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/brains/{brainId}/enrichment": {
-      "get": {
-        "tags": [
-          "Brains"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "brainId",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Brain enrichment setting. Admin only.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrainEnrichmentEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      },
-      "put": {
-        "tags": [
-          "Brains"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "brainId",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SetBrainEnrichmentBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Brain enrichment setting updated. Admin only.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrainEnrichmentEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/brains/{brainId}/intelligence": {
-      "get": {
-        "tags": [
-          "Brains"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "brainId",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Brain intelligence tier. Admin only.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrainIntelligenceEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      },
-      "put": {
-        "tags": [
-          "Brains"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "brainId",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SetBrainIntelligenceBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Brain intelligence tier updated. Admin only.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrainIntelligenceEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/v1/identity": {
       "get": {
         "tags": [
@@ -18139,7 +14878,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Authenticated identity, accessible workspaces, and the selected workspace Brain list.",
+            "description": "Authenticated identity and accessible workspaces.",
             "content": {
               "application/json": {
                 "schema": {
@@ -18784,1282 +15523,6 @@
         }
       }
     },
-    "/v1/integrations/{integrationId}/brain-source-options": {
-      "post": {
-        "tags": [
-          "Brain"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "integrationId",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "oneOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "provider": {
-                        "type": "string",
-                        "enum": [
-                          "linear"
-                        ]
-                      },
-                      "includeTriageStateIds": {
-                        "type": "boolean"
-                      }
-                    },
-                    "required": [
-                      "provider"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "provider": {
-                        "type": "string",
-                        "enum": [
-                          "granola"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "provider"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "provider": {
-                        "type": "string",
-                        "enum": [
-                          "gmail"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "provider"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "provider": {
-                        "type": "string",
-                        "enum": [
-                          "google_drive"
-                        ]
-                      },
-                      "parentId": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 512
-                      },
-                      "query": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 200
-                      },
-                      "pageToken": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 4096
-                      }
-                    },
-                    "required": [
-                      "provider"
-                    ],
-                    "additionalProperties": false
-                  }
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Provider resources the acting user may select for a Brain source.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrainSourceOptionsEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/brains/{brainId}/imports": {
-      "post": {
-        "tags": [
-          "Brain"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "brainId",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 200
-            },
-            "required": true,
-            "name": "idempotency-key",
-            "in": "header"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/StartBrainImportBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Company-context import discovery started or replayed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrainImportRunCommandEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/brains/{brainId}/imports/{importRunId}/confirm": {
-      "post": {
-        "tags": [
-          "Brain"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "brainId",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "importRunId",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ConfirmBrainImportBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Discovered import confirmed; ingestion begins for the enabled providers.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrainImportRunCommandEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/brains/{brainId}/imports/{importRunId}/cancel": {
-      "post": {
-        "tags": [
-          "Brain"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "brainId",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "importRunId",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Active import canceled; queued ingestion jobs are skipped.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrainImportRunCommandEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/brains/{brainId}/imports/{importRunId}/retry": {
-      "post": {
-        "tags": [
-          "Brain"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "brainId",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "importRunId",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Failed pre-confirmation discovery reset and started again.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrainImportRunCommandEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/wiki/imports": {
-      "post": {
-        "tags": [
-          "Wiki"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 200
-            },
-            "required": true,
-            "name": "idempotency-key",
-            "in": "header"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/StartBrainImportBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Workspace Wiki company-context discovery started or replayed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrainImportRunCommandEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/wiki/imports/{importRunId}/confirm": {
-      "post": {
-        "tags": [
-          "Wiki"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "importRunId",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ConfirmBrainImportBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Discovered Wiki import confirmed; ingestion begins.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrainImportRunCommandEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/wiki/imports/{importRunId}/cancel": {
-      "post": {
-        "tags": [
-          "Wiki"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "importRunId",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Active Wiki import canceled; queued ingestion jobs are skipped.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrainImportRunCommandEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/wiki/imports/{importRunId}/retry": {
-      "post": {
-        "tags": [
-          "Wiki"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "importRunId",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Failed Wiki discovery reset and started again.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrainImportRunCommandEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/brains/{brainId}/documents": {
-      "post": {
-        "tags": [
-          "Brain"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "brainId",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 200
-            },
-            "required": true,
-            "name": "idempotency-key",
-            "in": "header"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateBrainDocumentBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Brain document created or replayed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrainDocumentEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/brains/{brainId}/assets": {
-      "post": {
-        "tags": [
-          "Brain"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "brainId",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 200
-            },
-            "required": true,
-            "name": "idempotency-key",
-            "in": "header"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "$ref": "#/components/schemas/BrainAssetUploadBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Private Brain asset uploaded and registered, or replayed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrainAssetMutationEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/brains/{brainId}/assets/{documentId}/replace": {
-      "post": {
-        "tags": [
-          "Brain"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "brainId",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "documentId",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 200
-            },
-            "required": true,
-            "name": "idempotency-key",
-            "in": "header"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "$ref": "#/components/schemas/BrainAssetReplaceBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Private Brain asset bytes replaced, or replayed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrainAssetMutationEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/brain-assets/{documentId}": {
-      "get": {
-        "tags": [
-          "Brain"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "documentId",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Authorized private Brain asset bytes.",
-            "content": {
-              "application/octet-stream": {
-                "schema": {
-                  "type": "string",
-                  "format": "binary"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/brains/{brainId}/documents/{documentId}": {
-      "patch": {
-        "tags": [
-          "Brain"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "brainId",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "documentId",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateBrainDocumentBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Brain document body updated with optional hash concurrency.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrainDocumentEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/brains/{brainId}/documents/{documentId}/rename": {
-      "post": {
-        "tags": [
-          "Brain"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "brainId",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "documentId",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RenameBrainDocumentBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Brain document title updated.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrainDocumentEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/brains/{brainId}/documents/{documentId}/delete": {
-      "post": {
-        "tags": [
-          "Brain"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "brainId",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "documentId",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Brain document deleted.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrainDocumentDeleteEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/brains/{brainId}/folders": {
-      "post": {
-        "tags": [
-          "Brain"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "brainId",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateBrainFolderBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Brain folder created.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrainFolderEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/brains/{brainId}/folders/rename": {
-      "post": {
-        "tags": [
-          "Brain"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "brainId",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RenameBrainFolderBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Brain folder and descendants renamed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrainFolderPathEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/brains/{brainId}/folders/delete": {
-      "post": {
-        "tags": [
-          "Brain"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "brainId",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DeleteBrainFolderBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Empty custom Brain folder deleted.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrainFolderPathEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/v1/wikis": {
       "get": {
         "tags": [
@@ -20594,6 +16057,173 @@
               }
             }
           },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/wiki/imports": {
+      "post": {
+        "tags": [
+          "Wiki"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetiredWikiImportBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/wiki/imports/{importRunId}/confirm": {
+      "post": {
+        "tags": [
+          "Wiki"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "importRunId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetiredWikiImportBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/wiki/imports/{importRunId}/cancel": {
+      "post": {
+        "tags": [
+          "Wiki"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "importRunId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/wiki/imports/{importRunId}/retry": {
+      "post": {
+        "tags": [
+          "Wiki"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "importRunId",
+            "in": "path"
+          }
+        ],
+        "responses": {
           "default": {
             "description": "A structured protocol error.",
             "content": {
@@ -24097,13 +19727,6 @@
                 "task-activities-v1",
                 "workflows-v1",
                 "workflow-schedules-v1",
-                "brain-folders-v1",
-                "brain-documents-v1",
-                "brain-timeline-v1",
-                "brain-edges-v1",
-                "brain-ingest-jobs-v1",
-                "brain-import-runs-v1",
-                "wiki-import-runs-v1",
                 "wiki-pages-v2",
                 "wiki-timeline-v1",
                 "integration-accounts-v1"
@@ -24122,17 +19745,6 @@
             },
             "required": false,
             "name": "conversationId",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": false,
-            "name": "brainId",
             "in": "query"
           },
           {
@@ -25501,8 +21113,8 @@
         }
       }
     },
-    "/v1/brains/{brainId}/slack-bot": {
-      "get": {
+    "/v1/integrations/{integrationId}/resource-options": {
+      "post": {
         "tags": [
           "Integrations"
         ],
@@ -25523,55 +21135,7 @@
               "example": "run_019fed53"
             },
             "required": true,
-            "name": "brainId",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Authorized Slack answer-bot destination settings for one Brain.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SlackBotDestinationEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      },
-      "put": {
-        "tags": [
-          "Integrations"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "brainId",
+            "name": "integrationId",
             "in": "path"
           }
         ],
@@ -25580,120 +21144,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SetSlackBotDestinationBody"
+                "$ref": "#/components/schemas/IntegrationResourceOptionsBody"
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Slack answer-bot channel scope saved by a workspace administrator.",
+            "description": "Provider resources the acting user may pick as a workflow event filter.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SlackBotMutationEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/brains/{brainId}/slack-bot/channels": {
-      "get": {
-        "tags": [
-          "Integrations"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "brainId",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Channels visible to the workspace Slack bot; administrator only.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SlackBotChannelListEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/integration-accounts/{integrationId}/usage": {
-      "get": {
-        "tags": [
-          "Integrations"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 128,
-              "example": "gint_0f8e7d6c5b4a",
-              "description": "Integration connection id."
-            },
-            "required": true,
-            "description": "Integration connection id.",
-            "name": "integrationId",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Pre-disconnect usage so the UI can warn before removing an account that still feeds brains. Owner only.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IntegrationAccountUsageEnvelope"
+                  "$ref": "#/components/schemas/IntegrationResourceOptionsEnvelope"
                 }
               }
             }
@@ -25934,7 +21396,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Personal integration account hard-deleted. Owner only. Credentials, synced resources, brain sources, and buffered events cascade away; already-ingested brain content stays.",
+            "description": "Personal integration account hard-deleted. Owner only. Credentials, synced resources, and buffered events cascade away.",
             "content": {
               "application/json": {
                 "schema": {

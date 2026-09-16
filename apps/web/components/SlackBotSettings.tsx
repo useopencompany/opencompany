@@ -18,7 +18,6 @@ export type SlackBotSettingsData = {
   canReadDirectMessages: boolean;
   teamName: string | null;
   statusReason: string | null;
-  destinationCount: number;
   setup: "connected" | "error" | null;
   setupReason: string | null;
 };

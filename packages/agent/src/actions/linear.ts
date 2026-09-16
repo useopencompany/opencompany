@@ -1,5 +1,5 @@
 import { createMCPClient } from "@ai-sdk/mcp";
-import { isValidBrainSourceRef } from "@opencompany/brain";
+import { isValidWikiSourceRef } from "@opencompany/wiki";
 import type { JSONSchema7, ToolExecutionOptions, ToolSet } from "ai";
 import {
   getLinearIntegrationState,
@@ -599,8 +599,8 @@ function addLinearIssueSource(value: unknown, integrationId: string): unknown {
   const identifier = typeof value.identifier === "string" ? value.identifier.trim() : "";
   if (!identifier) return { ...value, integrationId };
   const sourceRef = `linear:issue:${identifier}`;
-  if (!isValidBrainSourceRef(sourceRef)) {
-    throw new Error("Linear returned an identifier that cannot form a Brain source reference.");
+  if (!isValidWikiSourceRef(sourceRef)) {
+    throw new Error("Linear returned an identifier that cannot form a source reference.");
   }
   return { ...value, sourceRef, integrationId };
 }

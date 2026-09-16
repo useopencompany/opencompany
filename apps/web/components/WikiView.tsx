@@ -42,7 +42,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { MarkdownBrainEditor } from "@/components/MarkdownBrainEditor";
+import { MarkdownEditor } from "@/components/MarkdownEditor";
 import {
   asHeadlessWikiPageWriteMutations,
   getHeadlessWikiCollections,
@@ -164,7 +164,7 @@ function WikiStaticFrame({
               className="mt-3 w-full bg-transparent text-[26px] font-semibold leading-8 text-ink outline-none placeholder:text-ink-subtle/50"
             />
             <div className="mt-4 flex-1">
-              <MarkdownBrainEditor content={page.body} onChange={noop} readOnly />
+              <MarkdownEditor content={page.body} onChange={noop} readOnly />
             </div>
           </div>
         ) : (
@@ -1021,11 +1021,11 @@ function WikiPageEditor({
 
       {/* Body */}
       <div className="mt-4 flex-1">
-        <MarkdownBrainEditor
+        <MarkdownEditor
           content={page.body}
           readOnly={!editable}
           onChange={(content) => queueSave({ content })}
-          brainLinks={wikiLinks}
+          pageLinks={wikiLinks}
           pageTitles={pageTitles}
           onNavigateInternal={(href) => {
             onNavigate(href.replace(/^\/wiki\//, ""));

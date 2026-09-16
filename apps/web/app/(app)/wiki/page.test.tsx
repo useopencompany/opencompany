@@ -55,7 +55,7 @@ describe("/wiki", () => {
 
   it("activates the reader's workspace before asking for wikis", async () => {
     // Without this the API is asked for wikis with no workspace selected and refuses, which 404s
-    // the one URL the sidebar, Slack settings, and the legacy Brain redirect all point at.
+    // the one URL the sidebar and Slack settings point at.
     const order: string[] = [];
     currentUserMock.mockImplementation(async () => {
       order.push("currentUser");

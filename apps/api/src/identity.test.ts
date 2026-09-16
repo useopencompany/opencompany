@@ -3,7 +3,6 @@ import { captureProductServerEvent } from "@opencompany/analytics/product/server
 import { syncStripeSeatQuantityForWorkspace } from "@opencompany/billing/seats";
 import {
   adoptWorkspaceMembershipsFromOrgs,
-  listAccessibleBrains,
   listWorkspacesForUser,
 } from "@opencompany/db/workspaces";
 import { IdentitySchema } from "@opencompany/protocol";
@@ -17,8 +16,6 @@ vi.mock("@opencompany/billing/seats", () => ({
 }));
 vi.mock("@opencompany/db/workspaces", () => ({
   adoptWorkspaceMembershipsFromOrgs: vi.fn(),
-  DEFAULT_BRAIN_SLUG: "general",
-  listAccessibleBrains: vi.fn(),
   listWorkspacesForUser: vi.fn(),
 }));
 vi.mock("@opencompany/agent/workspaces/organizations", () => ({
@@ -63,7 +60,6 @@ const identity = {
   userId: authUser.id,
   organizationId: "org_company",
   activeWorkspaceId: null,
-  activeBrainId: null,
   method: "session" as const,
   credentialKind: "browser_cookie" as const,
 };
@@ -94,7 +90,6 @@ describe("identity service", () => {
           workosOrganizationId: "org_company",
           name: "Company",
           slug: "company",
-          legacyBrainEnabled: true,
         },
         role: "admin",
       },
@@ -102,18 +97,6 @@ describe("identity service", () => {
     vi.mocked(ensureWorkspaceOrganizationsForEntries).mockImplementation(
       async (entries) => entries,
     );
-    vi.mocked(listAccessibleBrains).mockResolvedValue([
-      {
-        id: "brain_general",
-        workspaceId: "goat_ws_company",
-        name: "General",
-        slug: "general",
-        description: null,
-        visibility: "workspace",
-        enrichmentEnabled: true,
-        intelligence: "basic",
-      },
-    ] as never);
   });
 
   it("synchronizes the verified WorkOS profile and returns only the authorized identity view", async () => {
@@ -141,7 +124,6 @@ describe("identity service", () => {
         wikiEnabled: true,
       },
       activeWorkspaceId: "goat_ws_company",
-      activeBrainId: "brain_general",
     });
     expect(result.user).not.toHaveProperty("workosUserId");
     expect(result.workspaces[0]).not.toHaveProperty("workosOrganizationId");
@@ -154,34 +136,6 @@ describe("identity service", () => {
       },
       { db },
     );
-  });
-
-  it("withholds legacy Brain identity data when the workspace flag is off", async () => {
-    vi.mocked(listWorkspacesForUser).mockResolvedValue([
-      {
-        workspace: {
-          id: "workspace_company",
-          workosOrganizationId: "org_company",
-          name: "Company",
-          slug: "company",
-          legacyBrainEnabled: false,
-        },
-        role: "admin",
-      },
-    ] as never);
-    const service = createIdentityService({
-      db: dbWith({ selected: [localUser] }),
-      workos: {
-        userManagement: { getUser: vi.fn(), listOrganizationMemberships: vi.fn() },
-      } as never,
-    });
-
-    await expect(service.get(identity)).resolves.toMatchObject({
-      activeWorkspaceId: "workspace_company",
-      activeBrainId: null,
-      brains: [],
-    });
-    expect(listAccessibleBrains).not.toHaveBeenCalled();
   });
 
   it("retries membership adoption on a workspace-free identity read without blocking sign-in", async () => {
@@ -203,7 +157,6 @@ describe("identity service", () => {
     await expect(service.get(identity)).resolves.toMatchObject({
       workspaces: [],
       activeWorkspaceId: null,
-      brains: [],
     });
     expect(syncStripeSeatQuantityForWorkspace).not.toHaveBeenCalled();
   });
@@ -227,16 +180,12 @@ describe("identity service", () => {
         organizationId: null,
         credentialKind: "authkit_bearer",
         activeWorkspaceId: null,
-        activeBrainId: null,
       }),
     ).resolves.toMatchObject({
       user: { id: "user_1", onboardedAt: null },
       workspaces: [{ name: "Company" }],
       activeWorkspaceId: null,
-      brains: [],
-      activeBrainId: null,
     });
-    expect(listAccessibleBrains).not.toHaveBeenCalled();
     expect(recordSignup).toHaveBeenCalledWith({ source: "user_sync" });
   });
 });

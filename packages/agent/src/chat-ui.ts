@@ -65,10 +65,6 @@ export const START_WORKFLOW_TOOL_PART_TYPE = `tool-${START_WORKFLOW_TOOL_NAME}` 
 export const SLACK_BOT_TOOL_NAME = "opencompany_slack_bot_send_message";
 /** Model-facing name before the tool was renamed; kept so old transcripts still label correctly. */
 export const LEGACY_SLACK_BOT_TOOL_NAME = "post_slack_message";
-export const BRAIN_TOOL_NAME = "goat_brain";
-export const BRAIN_TOOL_PART_TYPE = `tool-${BRAIN_TOOL_NAME}` as const;
-export const SAVE_TO_BRAIN_TOOL_NAME = "save_to_brain";
-export const SAVE_TO_BRAIN_TOOL_PART_TYPE = `tool-${SAVE_TO_BRAIN_TOOL_NAME}` as const;
 export const WEB_FETCH_TOOL_NAME = "web_fetch";
 export const WEB_FETCH_TOOL_PART_TYPE = `tool-${WEB_FETCH_TOOL_NAME}` as const;
 export const WEB_SEARCH_TOOL_NAME = "web_search";
@@ -235,78 +231,6 @@ export type StartWorkflowToolInput = {
 };
 
 export type StartWorkflowToolOutput = StartTaskToolOutput;
-
-export type BrainCliCommand =
-  | "help"
-  | "create"
-  | "list"
-  | "get"
-  | "timeline"
-  | "query"
-  | "append-evidence"
-  | "rewrite"
-  | "set"
-  | "alias"
-  | "timeline-add"
-  | "append-timeline"
-  | "link"
-  | "merge"
-  | "move"
-  | "delete"
-  | "folder"
-  | "doctor";
-
-export type BrainToolFlagValue = string | number | boolean | string[];
-
-export type BrainToolInput = {
-  command: BrainCliCommand;
-  flags?: Record<string, BrainToolFlagValue>;
-  stdin?: string;
-};
-
-export type BrainToolOutput = {
-  ok: boolean;
-  brainRef?: string;
-  exitCode: number | null;
-  stdout?: string;
-  stderr: string;
-  command?: string;
-  argv?: string[];
-  parsed?: unknown;
-  error?: string;
-  traceId?: string;
-  tracePath?: string;
-  durationMs?: number;
-};
-
-export type SaveToBrainToolInput = {
-  // Text to capture; optional when attachmentIds carry the payload.
-  content?: string;
-  title?: string;
-  intent?: string;
-  sourceRef?: string;
-  integrationId?: string;
-  fallbackContent?: string;
-  // Ids of files attached in this conversation to file as brain assets.
-  attachmentIds?: string[];
-};
-
-export type SaveToBrainToolOutput =
-  | {
-      ok: true;
-      status: "captured" | "already_captured" | "paused_by_plan";
-      message?: string;
-      // Text capture result (absent for attachment-only saves).
-      draftId?: string;
-      path?: string;
-      title?: string;
-      // Attachment capture results (absent for text-only saves).
-      assets?: Array<{ documentId: string; path: string; title: string }>;
-    }
-  | {
-      ok: false;
-      error: string;
-    };
 
 export type WebSearchToolInput = {
   query: string;
@@ -507,14 +431,6 @@ export type ChatTools = {
   start_workflow: {
     input: StartWorkflowToolInput;
     output: StartWorkflowToolOutput;
-  };
-  goat_brain: {
-    input: BrainToolInput;
-    output: BrainToolOutput;
-  };
-  save_to_brain: {
-    input: SaveToBrainToolInput;
-    output: SaveToBrainToolOutput;
   };
   web_fetch: {
     input: WebFetchToolInput;

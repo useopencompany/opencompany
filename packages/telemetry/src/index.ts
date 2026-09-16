@@ -24,9 +24,6 @@ export const SPANS = {
   taskToolCall: "goat.task.tool_call",
   taskComplete: "goat.task.complete",
   taskFail: "goat.task.fail",
-  brainIngestRun: "goat.brain_ingest.run",
-  brainIngestComplete: "goat.brain_ingest.complete",
-  brainIngestFail: "goat.brain_ingest.fail",
   wikiIngestRun: "goat.wiki_ingest.run",
   wikiIngestComplete: "goat.wiki_ingest.complete",
   wikiIngestFail: "goat.wiki_ingest.fail",
@@ -66,17 +63,13 @@ export const METRICS = {
   taskRunsTotal: "goat.task_runs_total",
   taskRunDurationMs: "goat.task_run_duration_ms",
   taskStageDurationMs: "goat.task_stage_duration_ms",
-  brainIngestRunsTotal: "goat.brain_ingest_runs_total",
-  brainIngestRunDurationMs: "goat.brain_ingest_run_duration_ms",
-  brainIngestSpendUsdMicros: "goat.brain_ingest_spend_usd_micros",
-  brainIngestBudgetExhaustionsTotal: "goat.brain_ingest_budget_exhaustions_total",
   toolCallsTotal: "goat.tool_calls_total",
   toolCallDurationMs: "goat.tool_call_duration_ms",
   modelUsageTokens: "goat.model_usage_tokens",
   modelCostUsdMicros: "goat.model_cost_usd_micros",
 } as const;
 
-export type RunSurface = "chat" | "task" | "brain_ingest";
+export type RunSurface = "chat" | "task";
 export type SignupSource = "user_sync";
 export type Outcome = "success" | "failure" | "skipped" | "aborted";
 
@@ -102,8 +95,6 @@ export type GatewayFeature =
   | "chat-title"
   | "capability"
   | "task"
-  | "brain-ingest"
-  | "brain-query"
   | "wiki-ingest"
   | "slack-bot";
 
@@ -129,7 +120,6 @@ export type GatewayAttributionInput = {
   chatSessionId?: string | null | undefined;
   taskId?: string | null | undefined;
   ingestJobId?: string | null | undefined;
-  brainRef?: string | null | undefined;
   tags?: readonly string[];
 };
 
@@ -230,7 +220,6 @@ export function createGatewayAttribution(input: GatewayAttributionInput): Gatewa
       ...(input.chatSessionId ? [contextTag("chat", input.chatSessionId)] : []),
       ...(input.taskId ? [contextTag("task", input.taskId)] : []),
       ...(input.ingestJobId ? [contextTag("ingest", input.ingestJobId)] : []),
-      ...(input.brainRef ? [contextTag("brain", input.brainRef)] : []),
       ...(input.tags ?? []),
     ]),
   };
@@ -475,14 +464,8 @@ export function recordRunOutcome(input: {
     return;
   }
 
-  if (input.surface === "task") {
-    recordCounter(METRICS.taskRunsTotal, 1, attributes);
-    recordHistogram(METRICS.taskRunDurationMs, input.durationMs, attributes);
-    return;
-  }
-
-  recordCounter(METRICS.brainIngestRunsTotal, 1, attributes);
-  recordHistogram(METRICS.brainIngestRunDurationMs, input.durationMs, attributes);
+  recordCounter(METRICS.taskRunsTotal, 1, attributes);
+  recordHistogram(METRICS.taskRunDurationMs, input.durationMs, attributes);
 }
 
 export function recordSignup(
@@ -522,35 +505,6 @@ export function recordTaskRun(input: {
   attributes?: TelemetryAttributes;
 }) {
   recordRunOutcome({ ...input, surface: "task" });
-}
-
-export function recordBrainIngestRun(input: {
-  durationMs: number;
-  outcome: Outcome;
-  attributes?: TelemetryAttributes;
-}) {
-  recordRunOutcome({ ...input, surface: "brain_ingest" });
-}
-
-export function recordBrainIngestSpend(input: {
-  costUsdMicros: number;
-  source: "model" | "brain_query" | "web_search";
-  attributes?: TelemetryAttributes;
-}) {
-  if (!Number.isFinite(input.costUsdMicros) || input.costUsdMicros <= 0) return;
-  recordCounter(METRICS.brainIngestSpendUsdMicros, Math.round(input.costUsdMicros), {
-    ...input.attributes,
-    "goat.surface": "brain_ingest",
-    "goat.cost_source": input.source,
-  });
-}
-
-export function recordBrainIngestBudgetExhausted(attributes?: TelemetryAttributes) {
-  recordCounter(METRICS.brainIngestBudgetExhaustionsTotal, 1, {
-    ...attributes,
-    "goat.surface": "brain_ingest",
-    "goat.budget_exhausted": true,
-  });
 }
 
 export function recordToolCall(input: {

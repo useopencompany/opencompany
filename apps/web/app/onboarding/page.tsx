@@ -37,8 +37,6 @@ export default async function OnboardingPage({
           ? "member"
           : "owner";
 
-  const legacyBrainEnabled = context?.workspace.legacyBrainEnabled === true;
-
   const stepCookie = Number.parseInt(cookieStore.get(ONBOARDING_STEP_COOKIE)?.value ?? "", 10);
   const requestedStep = Number.isNaN(stepCookie) ? 0 : stepCookie;
   // A stale onboarding cookie must never skip past workspace creation.
@@ -53,7 +51,6 @@ export default async function OnboardingPage({
         avatarUrl: identity.user.avatarUrl,
       }}
       currentWorkspaceName={context?.workspace.name ?? ""}
-      legacyBrainEnabled={legacyBrainEnabled}
       variant={variant}
       initialStep={initialStep}
       initialWorkspaceId={context?.workspace.id ?? null}

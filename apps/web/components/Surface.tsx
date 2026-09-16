@@ -1029,12 +1029,12 @@ export function Surface({
     const controller = new AbortController();
     const timer = setTimeout(() => {
       if (skillCommandMenuOpen) {
-        void fetchBrainSkillCatalog(controller.signal)
+        void fetchSkillCatalog(controller.signal)
           .then(setSkillCatalog)
           .catch(() => {});
       }
       if (workflowMentionMenuOpen || (selectedWorkflowMentionId && !selectedWorkflow)) {
-        void fetchBrainWorkflowCatalog(controller.signal)
+        void fetchWorkflowCatalog(controller.signal)
           .then(setWorkflowCatalog)
           .catch(() => {});
       }
@@ -2778,7 +2778,7 @@ export function Surface({
 
     // Native textarea paste cannot carry our structured mention metadata. Insert the same text
     // ourselves, then resolve only exact skill tokens from the pasted fragment against the active
-    // Brain catalog. Manually typed lookalikes continue to stay plain text.
+    // Mention catalog. Manually typed lookalikes continue to stay plain text.
     event.preventDefault();
     const composer = inputRef.current;
     if (!composer) return;
@@ -2830,8 +2830,8 @@ export function Surface({
     // Each catalog falls back to what is already loaded, so one failing request still lets the
     // other resolve its half of the pasted mentions.
     void Promise.all([
-      fetchBrainSkillCatalog().catch(() => skillCatalog),
-      workflowMentionsEnabled ? fetchBrainWorkflowCatalog().catch(() => workflowCatalog) : [],
+      fetchSkillCatalog().catch(() => skillCatalog),
+      workflowMentionsEnabled ? fetchWorkflowCatalog().catch(() => workflowCatalog) : [],
     ])
       .then(([skills, workflows]) => {
         if (!mountedRef.current) return;
@@ -3918,12 +3918,12 @@ export function QuickChatComposer({
     const controller = new AbortController();
     const timer = setTimeout(() => {
       if (skillCommandMenuOpen) {
-        void fetchBrainSkillCatalog(controller.signal)
+        void fetchSkillCatalog(controller.signal)
           .then(setSkillCatalog)
           .catch(() => {});
       }
       if (workflowMentionMenuOpen || (selectedWorkflowMentionId && !selectedWorkflow)) {
-        void fetchBrainWorkflowCatalog(controller.signal)
+        void fetchWorkflowCatalog(controller.signal)
           .then(setWorkflowCatalog)
           .catch(() => {});
       }
@@ -4096,8 +4096,8 @@ export function QuickChatComposer({
     // Each catalog falls back to what is already loaded, so one failing request still lets the
     // other resolve its half of the pasted mentions.
     void Promise.all([
-      fetchBrainSkillCatalog().catch(() => skillCatalog),
-      fetchBrainWorkflowCatalog().catch(() => workflowCatalog),
+      fetchSkillCatalog().catch(() => skillCatalog),
+      fetchWorkflowCatalog().catch(() => workflowCatalog),
     ])
       .then(([skills, workflows]) => {
         if (!mountedRef.current) return;
@@ -5544,14 +5544,14 @@ function isSkillCatalogItem(value: unknown): value is SkillCatalogItem {
   );
 }
 
-async function fetchBrainSkillCatalog(signal?: AbortSignal) {
+async function fetchSkillCatalog(signal?: AbortSignal) {
   const skills = await listHeadlessSkillCatalog({
     ...(signal ? { fetch: (input, init) => fetch(input, { ...init, signal }) } : {}),
   });
   return skills.filter(isSkillCatalogItem);
 }
 
-async function fetchBrainWorkflowCatalog(signal?: AbortSignal) {
+async function fetchWorkflowCatalog(signal?: AbortSignal) {
   return listHeadlessWorkflowCatalog({
     ...(signal ? { fetch: (input, init) => fetch(input, { ...init, signal }) } : {}),
   });

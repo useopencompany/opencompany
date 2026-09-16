@@ -7,20 +7,13 @@ import type {
   UpdateWikiPageBody,
 } from "@opencompany/protocol";
 import {
-  type BrainSourceItemDto,
-  type CreateBrainDocumentBody,
-  type CreateBrainFolderBody,
   type CreateWorkspaceSkillBody,
   createApiClient,
-  type DeleteBrainFolderBody,
   type ImportSkillBody,
   type InstallPluginBody,
   type PluginImportPreviewBody,
-  type RenameBrainDocumentBody,
-  type RenameBrainFolderBody,
   type SetSkillScopeBody,
   type SkillImportPreviewBody,
-  type UpdateBrainDocumentBody,
   type UpdateWorkspaceSkillBody,
 } from "@opencompany/protocol";
 import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-chat-api";
@@ -37,104 +30,6 @@ type ClientOptions = {
   fetch?: typeof globalThis.fetch;
 };
 type ScopedClientOptions = ClientOptions & { wikiId: string };
-
-export async function createHeadlessBrainDocument(
-  brainId: string,
-  command: CreateBrainDocumentBody,
-  options: ClientOptions = {},
-) {
-  const response = await knowledgeClient(options).v1.brains[":brainId"].documents.$post({
-    param: { brainId },
-    header: { "idempotency-key": `web-brain-document:${crypto.randomUUID()}` },
-    json: command,
-  });
-  return responseData(response, "Brain document creation failed");
-}
-
-export async function listHeadlessBrainSourceItems(
-  brainId: string,
-  ids: string[],
-  options: ClientOptions = {},
-): Promise<BrainSourceItemDto[]> {
-  if (ids.length === 0) return [];
-  if (ids.length > 100) throw new Error("Brain source-item lookups are limited to 100 ids.");
-  const response = await knowledgeClient(options).v1.brains[":brainId"]["source-items"].$get({
-    param: { brainId },
-    query: { ids: ids.join(",") },
-  });
-  return responseData(response, "Brain activity metadata loading failed");
-}
-
-export async function updateHeadlessBrainDocument(
-  brainId: string,
-  documentId: string,
-  command: UpdateBrainDocumentBody,
-  options: ClientOptions = {},
-) {
-  const response = await knowledgeClient(options).v1.brains[":brainId"].documents[
-    ":documentId"
-  ].$patch({ param: { brainId, documentId }, json: command });
-  return responseData(response, "Brain document update failed");
-}
-
-export async function renameHeadlessBrainDocument(
-  brainId: string,
-  documentId: string,
-  command: RenameBrainDocumentBody,
-  options: ClientOptions = {},
-) {
-  const response = await knowledgeClient(options).v1.brains[":brainId"].documents[
-    ":documentId"
-  ].rename.$post({ param: { brainId, documentId }, json: command });
-  return responseData(response, "Brain document rename failed");
-}
-
-export async function deleteHeadlessBrainDocument(
-  brainId: string,
-  documentId: string,
-  options: ClientOptions = {},
-) {
-  const response = await knowledgeClient(options).v1.brains[":brainId"].documents[
-    ":documentId"
-  ].delete.$post({ param: { brainId, documentId } });
-  return responseData(response, "Brain document deletion failed");
-}
-
-export async function createHeadlessBrainFolder(
-  brainId: string,
-  command: CreateBrainFolderBody,
-  options: ClientOptions = {},
-) {
-  const response = await knowledgeClient(options).v1.brains[":brainId"].folders.$post({
-    param: { brainId },
-    json: command,
-  });
-  return responseData(response, "Brain folder creation failed");
-}
-
-export async function renameHeadlessBrainFolder(
-  brainId: string,
-  command: RenameBrainFolderBody,
-  options: ClientOptions = {},
-) {
-  const response = await knowledgeClient(options).v1.brains[":brainId"].folders.rename.$post({
-    param: { brainId },
-    json: command,
-  });
-  return responseData(response, "Brain folder rename failed");
-}
-
-export async function deleteHeadlessBrainFolder(
-  brainId: string,
-  command: DeleteBrainFolderBody,
-  options: ClientOptions = {},
-) {
-  const response = await knowledgeClient(options).v1.brains[":brainId"].folders.delete.$post({
-    param: { brainId },
-    json: command,
-  });
-  return responseData(response, "Brain folder deletion failed");
-}
 
 export async function createHeadlessWikiPage(
   command: CreateWikiPageBody,

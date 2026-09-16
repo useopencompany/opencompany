@@ -1,13 +1,6 @@
 import type { Actor } from "@opencompany/core";
-import { normalizeBrainIngestTrace } from "@opencompany/db/brain-ingest-trace";
 import { createLogger } from "@opencompany/observability";
 import {
-  BrainDocumentReadModelSchema,
-  BrainEdgeReadModelSchema,
-  BrainFolderReadModelSchema,
-  BrainImportRunReadModelSchema,
-  BrainIngestJobReadModelSchema,
-  BrainTimelineReadModelSchema,
   ConversationReadModelSchema,
   ConversationReadModelV1Schema,
   ConversationRuntimeSchema,
@@ -89,7 +82,6 @@ export interface ReadModelService {
     actor: Actor;
     readModel: ReadModel;
     conversationId?: string;
-    brainId?: string;
     wikiId?: string;
     taskId?: string;
     messageShapeEpoch?: number;
@@ -134,7 +126,6 @@ export class ElectricReadModelProxy implements ReadModelService {
     actor: Actor;
     readModel: ReadModel;
     conversationId?: string;
-    brainId?: string;
     wikiId?: string;
     taskId?: string;
     messageShapeEpoch?: number;
@@ -220,7 +211,6 @@ function readModelShape(input: {
   actor: Actor;
   readModel: ReadModel;
   conversationId?: string;
-  brainId?: string;
   wikiId?: string;
   taskId?: string;
   messageShapeEpoch?: number;
@@ -461,113 +451,6 @@ function readModelShape(input: {
           INTEGRATION_ACCOUNT_PROVIDER_CONTRACT,
         ],
       };
-    case "brain-folders-v1":
-      return brainShape(input, "goat.brain_folders", [
-        "id",
-        "path",
-        "source",
-        "created_at",
-        "updated_at",
-      ]);
-    case "brain-documents-v1":
-      return brainShape(input, "goat.brain_documents", [
-        "id",
-        "brain_id",
-        "folder_path",
-        "title",
-        "content",
-        "body",
-        "timeline",
-        "format",
-        "mime_type",
-        "original_file_name",
-        "asset_size_bytes",
-        "relations",
-        "sources",
-        "kind",
-        "entity_type",
-        "status",
-        "aliases",
-        "content_hash",
-        "size_bytes",
-        "created_by_workos_id",
-        "created_at",
-        "updated_at",
-      ]);
-    case "brain-timeline-v1":
-      return brainShape(input, "goat.brain_timeline_entries", [
-        "id",
-        "document_id",
-        "brain_id",
-        "evidence_id",
-        "at",
-        "source_ref",
-        "source_title",
-        "summary",
-        "detail",
-        "created_at",
-      ]);
-    case "brain-edges-v1":
-      return brainShape(input, "goat.brain_edges", [
-        "id",
-        "document_id",
-        "from_brain_id",
-        "to_brain_id",
-        "relation_type",
-        "source_kind",
-        "created_at",
-        "updated_at",
-      ]);
-    case "brain-ingest-jobs-v1":
-      return brainShape(input, "goat.brain_ingest_jobs", [
-        "id",
-        "source_item_id",
-        "source_provider",
-        "kind",
-        "status",
-        "plan_paused",
-        "attempts",
-        "last_error",
-        "result",
-        "completed_at",
-        "created_at",
-        "updated_at",
-      ]);
-    case "brain-import-runs-v1":
-      return brainShape(input, "goat.brain_import_runs", [
-        "id",
-        "status",
-        "company_url",
-        "company_name",
-        "focus",
-        "source_selection",
-        "discovery_summary",
-        "last_error",
-        "confirmed_at",
-        "completed_at",
-        "created_at",
-        "updated_at",
-      ]);
-    case "wiki-import-runs-v1":
-      return {
-        table: "goat.brain_import_runs",
-        columns: [
-          "id",
-          "status",
-          "company_url",
-          "company_name",
-          "focus",
-          "source_selection",
-          "discovery_summary",
-          "last_error",
-          "confirmed_at",
-          "completed_at",
-          "created_at",
-          "updated_at",
-        ],
-        where: `"workspace_id" = $1`,
-        params: [input.actor.workspaceId],
-      };
     case "wiki-pages-v2":
       return wikiShape(input, "goat.wiki_pages", [
         "id",
@@ -607,13 +490,6 @@ function wikiShape(input: { wikiId?: string }, table: string, columns: string[])
     throw new ApiError(400, "invalid_request", "wikiId is required for this read model.");
   }
   return { table, columns, where: `"wiki_id" = $1`, params: [input.wikiId] };
-}
-
-function brainShape(input: { brainId?: string }, table: string, columns: string[]) {
-  if (!input.brainId) {
-    throw new ApiError(400, "invalid_request", "brainId is required for this read model.");
-  }
-  return { table, columns, where: `"brain_ref" = $1`, params: [input.brainId] };
 }
 
 function conversationShape(
@@ -717,14 +593,6 @@ function projectReadModelValue(
       : ConversationReadModelSchema;
     return schema.parse(projected);
   }
-  if (readModel === "brain-documents-v1") {
-    if (typeof projected.folderPath === "string" && typeof projected.brainId === "string") {
-      projected.path = `${projected.folderPath}/${projected.brainId}.md`;
-    }
-    if (projected.title === null && typeof projected.brainId === "string") {
-      projected.title = projected.brainId;
-    }
-  }
   if (readModel === "tasks-v1") {
     const outcome = Object.fromEntries(
       Object.entries(TASK_OUTCOME_COLUMN_NAMES).flatMap(([physicalName, publicName]) =>
@@ -740,32 +608,6 @@ function projectReadModelValue(
   if (readModel === "workflows-v1") {
     const schema = partial ? WorkflowReadModelSchema.partial() : WorkflowReadModelSchema;
     return schema.parse(projected);
-  }
-  if (readModel === "brain-ingest-jobs-v1" && Object.hasOwn(projected, "result")) {
-    projected.result = publicBrainIngestJobResult(projected.result);
-  }
-  if (readModel === "brain-ingest-jobs-v1" && Object.hasOwn(projected, "lastError")) {
-    projected.lastError = boundedNullableString(projected.lastError, 2_000);
-  }
-  if (readModel === "brain-import-runs-v1" || readModel === "wiki-import-runs-v1") {
-    if (Object.hasOwn(projected, "sourceSelection")) {
-      projected.sourceSelection = publicBrainImportSourceSelection(projected.sourceSelection);
-    }
-    if (Object.hasOwn(projected, "discoverySummary")) {
-      projected.discoverySummary = publicBrainImportDiscoverySummary(projected.discoverySummary);
-    }
-    if (Object.hasOwn(projected, "lastError")) {
-      projected.lastError = boundedNullableString(projected.lastError, 2_000);
-    }
-    if (Object.hasOwn(projected, "companyUrl")) {
-      projected.companyUrl = boundedNullableString(projected.companyUrl, 2_048);
-    }
-    if (Object.hasOwn(projected, "companyName")) {
-      projected.companyName = boundedNullableString(projected.companyName, 512);
-    }
-    if (Object.hasOwn(projected, "focus")) {
-      projected.focus = boundedNullableString(projected.focus, 2_000);
-    }
   }
   if (readModel === "engine-sessions-v1" && typeof projected.error === "string") {
     const originalLength = projected.error.length;
@@ -809,31 +651,6 @@ function projectReadModelValue(
       return (
         partial ? IntegrationAccountReadModelSchema.partial() : IntegrationAccountReadModelSchema
       ).parse(projected);
-    case "brain-folders-v1":
-      return (partial ? BrainFolderReadModelSchema.partial() : BrainFolderReadModelSchema).parse(
-        projected,
-      );
-    case "brain-documents-v1":
-      return (
-        partial ? BrainDocumentReadModelSchema.partial() : BrainDocumentReadModelSchema
-      ).parse(projected);
-    case "brain-timeline-v1":
-      return (
-        partial ? BrainTimelineReadModelSchema.partial() : BrainTimelineReadModelSchema
-      ).parse(projected);
-    case "brain-edges-v1":
-      return (partial ? BrainEdgeReadModelSchema.partial() : BrainEdgeReadModelSchema).parse(
-        projected,
-      );
-    case "brain-ingest-jobs-v1":
-      return (
-        partial ? BrainIngestJobReadModelSchema.partial() : BrainIngestJobReadModelSchema
-      ).parse(projected);
-    case "brain-import-runs-v1":
-    case "wiki-import-runs-v1":
-      return (
-        partial ? BrainImportRunReadModelSchema.partial() : BrainImportRunReadModelSchema
-      ).parse(projected);
     case "wiki-pages-v2":
       return (partial ? WikiPageReadModelSchema.partial() : WikiPageReadModelSchema).parse(
         projected,
@@ -863,8 +680,7 @@ function readModelFieldValue(readModel: ReadModel, name: string, value: unknown)
     name === "version" ||
     name === "attempts" ||
     name === "sizeBytes" ||
-    name === "assetSizeBytes" ||
-    (readModel === "brain-timeline-v1" && name === "id")
+    name === "assetSizeBytes"
   ) {
     return value === null ? null : numberValue(value);
   }
@@ -906,98 +722,9 @@ function publicAttachment(value: unknown) {
   };
 }
 
-const BRAIN_IMPORT_PROVIDERS = new Set([
-  "public_web",
-  "github",
-  "granola",
-  "fathom",
-  "gmail",
-  "linear",
-]);
-const BRAIN_IMPORT_SUMMARY_STATUSES = new Set(["pending", "ready", "failed", "unavailable"]);
-
-// Import-run source selection stores integration IDs and provider configuration. Only the
-// per-provider enabled flag is a public field; everything else stays behind the API boundary.
-function publicBrainImportSourceSelection(value: unknown) {
-  const record = jsonValue(value);
-  if (!isRecord(record)) return {};
-  const selection: Record<string, { enabled: boolean }> = {};
-  for (const [provider, entry] of Object.entries(record)) {
-    if (!BRAIN_IMPORT_PROVIDERS.has(provider) || !isRecord(entry)) continue;
-    selection[provider] = { enabled: entry.enabled === true };
-  }
-  return selection;
-}
-
-function publicBrainImportDiscoverySummary(value: unknown) {
-  const record = jsonValue(value);
-  if (!isRecord(record)) return {};
-  const summary: Record<string, unknown> = {};
-  for (const [provider, entry] of Object.entries(record)) {
-    if (!BRAIN_IMPORT_PROVIDERS.has(provider) || !isRecord(entry)) continue;
-    const status =
-      typeof entry.status === "string" && BRAIN_IMPORT_SUMMARY_STATUSES.has(entry.status)
-        ? entry.status
-        : "pending";
-    summary[provider] = {
-      status,
-      discoveredEntries: boundedCount(entry.discoveredEntries),
-      eligibleEntries: boundedCount(entry.eligibleEntries),
-      alreadyKnownEntries: boundedCount(entry.alreadyKnownEntries),
-      selectedEntries: boundedCount(entry.selectedEntries),
-      plannedRuns: boundedCount(entry.plannedRuns),
-      ...(typeof entry.error === "string" && entry.error
-        ? { error: entry.error.slice(0, 2_000) }
-        : {}),
-    };
-  }
-  return summary;
-}
-
 function boundedCount(value: unknown) {
   const number = typeof value === "number" ? value : Number(value);
   return Number.isInteger(number) && number >= 0 ? number : 0;
-}
-
-function publicBrainIngestJobResult(value: unknown) {
-  const result = jsonValue(value);
-  if (!isRecord(result)) return {};
-
-  const pages = Array.isArray(result.pages)
-    ? result.pages.slice(0, 20).flatMap((page) => {
-        if (!isRecord(page)) return [];
-        const brainId = limitedString(page.brainId, 80);
-        const folderPath = limitedString(page.folderPath, 512);
-        const title = limitedString(page.title, 160);
-        const action = page.action;
-        if (
-          !brainId ||
-          !folderPath ||
-          (action !== "created" && action !== "updated" && action !== "conflict_created")
-        ) {
-          return [];
-        }
-        return [{ brainId, folderPath, title, action }];
-      })
-    : undefined;
-  const trace = normalizeBrainIngestTrace(result.trace);
-  const durationMs = typeof result.durationMs === "number" ? result.durationMs : null;
-
-  return {
-    ...(typeof result.summary === "string" ? { summary: result.summary.slice(0, 2_000) } : {}),
-    ...(limitedString(result.draftBrainId, 80)
-      ? { draftBrainId: limitedString(result.draftBrainId, 80) }
-      : {}),
-    ...(limitedString(result.meetingBrainId, 80)
-      ? { meetingBrainId: limitedString(result.meetingBrainId, 80) }
-      : {}),
-    ...(pages ? { pages } : {}),
-    ...(typeof result.skipped === "boolean" ? { skipped: result.skipped } : {}),
-    ...(durationMs !== null && Number.isFinite(durationMs) && durationMs >= 0
-      ? { durationMs }
-      : {}),
-    ...(trace ? { trace } : {}),
-  };
 }
 
 function limitedString(value: unknown, limit: number) {
@@ -1262,101 +989,6 @@ const READ_MODEL_COLUMN_NAMES = {
     scopes: "scopes",
     capability_modes: "capabilityModes",
     tool_modes: "toolModes",
-  },
-  "brain-folders-v1": {
-    id: "id",
-    path: "path",
-    source: "source",
-    created_at: "createdAt",
-    updated_at: "updatedAt",
-  },
-  "brain-documents-v1": {
-    id: "id",
-    brain_id: "brainId",
-    folder_path: "folderPath",
-    title: "title",
-    content: "content",
-    body: "body",
-    timeline: "timeline",
-    format: "format",
-    mime_type: "mimeType",
-    original_file_name: "originalFileName",
-    asset_size_bytes: "assetSizeBytes",
-    relations: "relations",
-    sources: "sources",
-    kind: "kind",
-    entity_type: "type",
-    status: "status",
-    aliases: "aliases",
-    content_hash: "contentHash",
-    size_bytes: "sizeBytes",
-    created_by_workos_id: "createdByActorId",
-    created_at: "createdAt",
-    updated_at: "updatedAt",
-  },
-  "brain-timeline-v1": {
-    id: "id",
-    document_id: "documentId",
-    brain_id: "brainId",
-    evidence_id: "evidenceId",
-    at: "at",
-    source_ref: "sourceRef",
-    source_title: "sourceTitle",
-    summary: "summary",
-    detail: "detail",
-    created_at: "createdAt",
-  },
-  "brain-edges-v1": {
-    id: "id",
-    document_id: "documentId",
-    from_brain_id: "fromBrainId",
-    to_brain_id: "toBrainId",
-    relation_type: "relationType",
-    source_kind: "sourceKind",
-    created_at: "createdAt",
-    updated_at: "updatedAt",
-  },
-  "brain-ingest-jobs-v1": {
-    id: "id",
-    source_item_id: "sourceItemId",
-    source_provider: "sourceProvider",
-    kind: "kind",
-    status: "status",
-    plan_paused: "planPaused",
-    attempts: "attempts",
-    last_error: "lastError",
-    result: "result",
-    completed_at: "completedAt",
-    created_at: "createdAt",
-    updated_at: "updatedAt",
-  },
-  "brain-import-runs-v1": {
-    id: "id",
-    status: "status",
-    company_url: "companyUrl",
-    company_name: "companyName",
-    focus: "focus",
-    source_selection: "sourceSelection",
-    discovery_summary: "discoverySummary",
-    last_error: "lastError",
-    confirmed_at: "confirmedAt",
-    completed_at: "completedAt",
-    created_at: "createdAt",
-    updated_at: "updatedAt",
-  },
-  "wiki-import-runs-v1": {
-    id: "id",
-    status: "status",
-    company_url: "companyUrl",
-    company_name: "companyName",
-    focus: "focus",
-    source_selection: "sourceSelection",
-    discovery_summary: "discoverySummary",
-    last_error: "lastError",
-    confirmed_at: "confirmedAt",
-    completed_at: "completedAt",
-    created_at: "createdAt",
-    updated_at: "updatedAt",
   },
   "wiki-pages-v2": {
     id: "id",

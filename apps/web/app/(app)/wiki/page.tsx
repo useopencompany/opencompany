@@ -8,7 +8,7 @@ import { wikiHref } from "@/lib/wiki-routes";
 export default async function WikiIndexPage() {
   // Resolving the reader also activates their workspace. Without it this route asks the API for
   // wikis before a workspace is selected and is refused, which 404s the one URL the sidebar,
-  // Slack settings, and the legacy Brain redirect all point at.
+  // and Slack settings all point at.
   await currentUser();
   const wikis = await listHeadlessWikis();
   const wiki = wikis.find((entry) => entry.isDefault) ?? wikis[0];

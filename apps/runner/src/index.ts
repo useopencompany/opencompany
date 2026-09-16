@@ -8,10 +8,6 @@ import { installBunExceptionReporter } from "@opencompany/observability/sentry-b
 import { METRICS, recordCounter } from "@opencompany/telemetry";
 import { flushLatitude } from "@opencompany/telemetry/latitude";
 import { registerNodeObservability, shutdownNodeObservability } from "@opencompany/telemetry/node";
-import { startAttioFlushWorker } from "./attio-flush-worker";
-import { setBrainImportWakeup, startBrainImportWorker } from "./brain-import-worker";
-import { setBrainIngestWakeup, startBrainIngestWorker } from "./brain-ingest-worker";
-import { startBrainWorkerAdmissionListener } from "./brain-worker-admission";
 import { startBrowserProfileReconciler } from "./browser-profile-reconciler";
 import {
   requireChatAttachmentCleanupToken,
@@ -25,13 +21,8 @@ import {
 } from "./codex-chat-worker";
 import { assertRunnerDbConfig, closeDb, getDbPool } from "./db";
 import { loadEnv } from "./env";
-import { startFathomPollWorker } from "./fathom-poll-worker";
-import { startGmailFlushWorker } from "./gmail-flush-worker";
 import { startGmailPollWorker } from "./gmail-poll-worker";
-import { setGoogleDriveSyncWakeup, startGoogleDriveSyncWorker } from "./google-drive-sync-worker";
 import { startGranolaPollWorker } from "./granola-poll-worker";
-import { startHubspotFlushWorker } from "./hubspot-flush-worker";
-import { startLinearFlushWorker } from "./linear-flush-worker";
 import { settleExpiredBrokerTokens } from "./llm-broker-tokens";
 import { startPostHogPollWorker } from "./posthog-poll-worker";
 import { drainRunnerTasks, type RunnerDrainTask, settlesWithin } from "./runner-shutdown";
@@ -96,17 +87,9 @@ const codexChatWorker = env.taskWorkerEnabled
       ...(chatPresentation ? { presentationPublisher: chatPresentation } : {}),
     })
   : null;
-const brainIngestWorker = env.taskWorkerEnabled ? startBrainIngestWorker(env) : null;
-const brainImportWorker = env.taskWorkerEnabled ? startBrainImportWorker(env) : null;
-const linearFlushWorker = env.taskWorkerEnabled ? startLinearFlushWorker() : null;
-const hubspotFlushWorker = env.taskWorkerEnabled ? startHubspotFlushWorker(env) : null;
-const attioFlushWorker = env.taskWorkerEnabled ? startAttioFlushWorker() : null;
 const gmailPollWorker = env.taskWorkerEnabled ? startGmailPollWorker(env) : null;
-const gmailFlushWorker = env.taskWorkerEnabled ? startGmailFlushWorker(env) : null;
 const granolaPollWorker = env.taskWorkerEnabled ? startGranolaPollWorker() : null;
 const posthogPollWorker = env.taskWorkerEnabled ? startPostHogPollWorker() : null;
-const fathomPollWorker = env.taskWorkerEnabled ? startFathomPollWorker() : null;
-const googleDriveSyncWorker = env.taskWorkerEnabled ? startGoogleDriveSyncWorker(env) : null;
 const chatAttachmentCleanupWorker = env.taskWorkerEnabled
   ? startChatAttachmentCleanupWorker(env, { pool: getDbPool() })
   : null;
@@ -149,28 +132,9 @@ if (!codexChatWorker) {
     event: "opencompany.goat_task_worker_disabled",
   });
 }
-setBrainIngestWakeup(() => {
-  brainIngestWorker?.notify();
-});
-setGoogleDriveSyncWakeup(() => {
-  googleDriveSyncWorker?.notify();
-});
-setBrainImportWakeup(() => {
-  brainImportWorker?.notify();
-});
 setCodexChatWakeup(() => {
   codexChatWorker?.notify();
 });
-const brainWorkerAdmissionListener = env.taskWorkerEnabled
-  ? startBrainWorkerAdmissionListener({
-      pool: getDbPool(),
-      callbacks: {
-        brain_import: () => brainImportWorker?.notify(),
-        brain_ingest: () => brainIngestWorker?.notify(),
-        google_drive_sync: () => googleDriveSyncWorker?.notify(),
-      },
-    })
-  : null;
 const server = createServer(env);
 
 let shutdownStarted = false;
@@ -181,15 +145,9 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     logger.info("Runner shutdown started", {
       event: "opencompany.runner_shutdown_started",
       signal,
-      active_goat_brain_ingest_count: brainIngestWorker?.activeCount() ?? 0,
-      active_goat_google_drive_sync_count: googleDriveSyncWorker?.activeCount() ?? 0,
-      active_goat_brain_import_count: brainImportWorker?.activeCount() ?? 0,
       active_goat_codex_chat_count: codexChatWorker?.activeCount() ?? 0,
     });
     clearInterval(llmBrokerSweepTimer);
-    setBrainIngestWakeup(null);
-    setGoogleDriveSyncWakeup(null);
-    setBrainImportWakeup(null);
     setCodexChatWakeup(null);
     void shutdownRunner(signal);
   });
@@ -217,25 +175,16 @@ async function shutdownRunner(signal: "SIGINT" | "SIGTERM") {
             }),
         }
       : null,
-    runnerDrainTask("brain_ingest", brainIngestWorker),
-    runnerDrainTask("brain_import", brainImportWorker),
-    runnerDrainTask("linear_flush", linearFlushWorker),
-    runnerDrainTask("hubspot_flush", hubspotFlushWorker),
-    runnerDrainTask("attio_flush", attioFlushWorker),
     runnerDrainTask("gmail_poll", gmailPollWorker),
-    runnerDrainTask("gmail_flush", gmailFlushWorker),
     runnerDrainTask("granola_poll", granolaPollWorker),
     runnerDrainTask("posthog_poll", posthogPollWorker),
-    runnerDrainTask("fathom_poll", fathomPollWorker),
     runnerDrainTask("slack_channel", slackChannelWorker),
-    runnerDrainTask("google_drive_sync", googleDriveSyncWorker),
     runnerDrainTask("chat_attachment_cleanup", chatAttachmentCleanupWorker),
     runnerDrainTask("stuck_work_monitor", stuckWorkMonitor),
     runnerDrainTask("codex_chat_self_heal", codexChatSelfHealSweeper),
     runnerDrainTask("sandbox_reconciler", sandboxReconciler),
     runnerDrainTask("sandbox_billing", sandboxBillingWorker),
     runnerDrainTask("browser_profile_reconciler", browserProfileReconciler),
-    runnerDrainTask("brain_worker_admission", brainWorkerAdmissionListener),
     { name: "http_server", stop: async () => server.close() },
     chatPresentation
       ? { name: "chat_presentation", stop: async () => chatPresentation.close() }

@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { Editor } from "@tiptap/core";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { MarkdownBrainEditor } from "./MarkdownBrainEditor";
+import { MarkdownEditor } from "./MarkdownEditor";
 
 // jsdom has no layout; ProseMirror's post-dispatch scrollIntoView asks ranges
 // for client rects, and cmdk needs ResizeObserver + element scrollIntoView.
@@ -38,17 +38,17 @@ beforeEach(() => {
   capturedEditor = null;
 });
 
-describe("wiki slash command inside MarkdownBrainEditor", () => {
+describe("wiki slash command inside MarkdownEditor", () => {
   it("selects the /page entry with Enter and with a click", async () => {
     const createPage = vi
       .fn()
       .mockReturnValue({ id: "page-1", slug: "untitled", path: "untitled", title: "" });
     const onPageCreated = vi.fn();
     render(
-      <MarkdownBrainEditor
+      <MarkdownEditor
         content=""
         onChange={vi.fn()}
-        brainLinks={{}}
+        pageLinks={{}}
         pageTitles={{}}
         wikiSlashCommands={{ createPage, onPageCreated }}
         placeholder="Write, or type / for commands…"
@@ -77,10 +77,10 @@ describe("wiki slash command inside MarkdownBrainEditor", () => {
 
   it("opens the existing-page picker and inserts the selected wiki link", async () => {
     const view = render(
-      <MarkdownBrainEditor
+      <MarkdownEditor
         content=""
         onChange={vi.fn()}
-        brainLinks={{ "company/roadmap": "/wiki/company/roadmap" }}
+        pageLinks={{ "company/roadmap": "/wiki/company/roadmap" }}
         pageTitles={{ "company/roadmap": "Company Roadmap" }}
         readOnly
         wikiSlashCommands={{ createPage: vi.fn().mockReturnValue(null) }}
@@ -91,10 +91,10 @@ describe("wiki slash command inside MarkdownBrainEditor", () => {
     await waitFor(() => expect(capturedEditor).not.toBeNull());
     const editor = capturedEditor as Editor;
     view.rerender(
-      <MarkdownBrainEditor
+      <MarkdownEditor
         content=""
         onChange={vi.fn()}
-        brainLinks={{ "company/roadmap": "/wiki/company/roadmap" }}
+        pageLinks={{ "company/roadmap": "/wiki/company/roadmap" }}
         pageTitles={{ "company/roadmap": "Company Roadmap" }}
         wikiSlashCommands={{ createPage: vi.fn().mockReturnValue(null) }}
         placeholder="Write, or type / for commands…"

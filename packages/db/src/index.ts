@@ -1,8 +1,4 @@
 export * from "./action-governance";
-export * from "./brain-files";
-export * from "./brain-import";
-export * from "./brain-ingest";
-export * from "./brain-ingest-trace";
 export * from "./capabilities";
 export * from "./chat-model-routing";
 export * from "./chat-repository";
@@ -22,5 +18,4 @@ export * from "./repo-configs";
 export * from "./session-pull-requests";
 export * from "./skill-bundle-repository";
 export * from "./task-repository";
-export * from "./worker-admission";
 export * from "./workflow-repository";

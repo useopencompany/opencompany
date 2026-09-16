@@ -2,23 +2,17 @@ import { createHash, randomUUID } from "node:crypto";
 import { newResourceId } from "@opencompany/core/resource-ids";
 import { DEFAULT_SANDBOX_SIZE, type SandboxSize } from "@opencompany/core/sandbox-sizes";
 import { and, asc, eq, isNull, or, sql } from "drizzle-orm";
-import { normalizeBrainId } from "../../brain/src/index";
 import { calendarMonthWindow, PRO_STRIPE_PRODUCT_KEY } from "./billing-constants";
-import { seedDefaultBrainFolders } from "./brain-files";
 import { getDb } from "./client";
 import { grantMonthlyIncludedUsage } from "./credits";
 import {
-  type Brain,
-  type BrainIntelligence,
-  type BrainVisibility,
-  brainMembers,
-  brains,
   type Onboarding,
   onboarding,
   type User,
   users,
   type Workspace,
   type WorkspaceRole,
+  wikiMembers,
   wikis,
   workspaceBilling,
   workspaceMembers,
@@ -28,19 +22,9 @@ import { DEFAULT_WIKI_NAME, DEFAULT_WIKI_SLUG, newWikiId } from "./wikis";
 
 type DbClient = any;
 
-export const DEFAULT_BRAIN_NAME = "General";
-export const DEFAULT_BRAIN_SLUG = "general";
-const BRAIN_ID_SUFFIX_LENGTH = 12;
-const BRAIN_ID_MAX_LENGTH = 80;
-
 export type WorkspaceWithRole = {
   workspace: Workspace;
   role: WorkspaceRole;
-};
-
-export type BrainAccess = {
-  brain: Brain;
-  workspaceRole: WorkspaceRole;
 };
 
 export type WorkspaceMemberWithUser = {
@@ -50,55 +34,6 @@ export type WorkspaceMemberWithUser = {
 
 export function newWorkspaceId() {
   return newResourceId("workspace");
-}
-
-export function newBrainId(name = "brain") {
-  return readableBrainId(name, randomUUID());
-}
-
-function readableBrainId(name: string, entropy: string) {
-  const suffix = createHash("sha256")
-    .update(entropy)
-    .digest("hex")
-    .slice(0, BRAIN_ID_SUFFIX_LENGTH);
-  const base = normalizeBrainId(name) || "brain";
-  const baseMaxLength = BRAIN_ID_MAX_LENGTH - suffix.length - 1;
-  return `${base.slice(0, baseMaxLength).replace(/-+$/g, "")}-${suffix}`;
-}
-
-// Canonical brain access predicate: a brain is readable/writable when it is
-// workspace-visible and the user is a workspace member, or restricted and the
-// user is on the brain's member list. Reused by the Electric shape authorizer.
-function brainAccessCondition(userWorkosId: string) {
-  return sql`(
-    EXISTS (
-      SELECT 1
-      FROM "goat"."workspaces" access_workspace
-      LEFT JOIN "goat"."workspace_billing" access_billing
-        ON access_billing."workspace_id" = access_workspace."id"
-      WHERE access_workspace."id" = ${brains.workspaceId}
-        AND (
-          access_workspace."created_by_workos_id" = ${userWorkosId}
-          OR (
-            access_billing."plan" = 'pro'
-            AND access_billing."stripe_product_key" = ${PRO_STRIPE_PRODUCT_KEY}
-          )
-        )
-    )
-    AND (
-      (${brains.visibility} = 'workspace' AND EXISTS (
-      SELECT 1 FROM "goat"."workspace_members" wm
-      WHERE wm."workspace_id" = ${brains.workspaceId}
-        AND wm."user_workos_id" = ${userWorkosId}
-    ))
-    OR
-    (${brains.visibility} = 'restricted' AND EXISTS (
-      SELECT 1 FROM "goat"."brain_members" bm
-      WHERE bm."brain_id" = ${brains.id}
-        AND bm."user_workos_id" = ${userWorkosId}
-    ))
-    )
-  )`;
 }
 
 export async function listWorkspacesForUser(
@@ -146,89 +81,6 @@ export async function hasOwnedHobbyWorkspace(
   return rows.length > 0;
 }
 
-export async function listAccessibleBrains(
-  input: { userWorkosId: string; workspaceId: string },
-  options: { db?: DbClient } = {},
-): Promise<Brain[]> {
-  const db = options.db ?? getDb();
-  return db
-    .select()
-    .from(brains)
-    .where(and(eq(brains.workspaceId, input.workspaceId), brainAccessCondition(input.userWorkosId)))
-    .orderBy(asc(brains.createdAt));
-}
-
-export type BrainWithWorkspace = {
-  brain: Brain;
-  workspace: { id: string; name: string; workosOrganizationId: string | null };
-  workspaceRole: WorkspaceRole;
-};
-
-// Every brain the user can read, across all their workspaces. Used by the
-// user-level MCP connector to enumerate and resolve brains for one token.
-export async function listAccessibleBrainsForUser(
-  userWorkosId: string,
-  options: { db?: DbClient } = {},
-): Promise<BrainWithWorkspace[]> {
-  const db = options.db ?? getDb();
-  const rows: Array<{
-    brain: Brain;
-    workspace: BrainWithWorkspace["workspace"];
-    workspaceRole: WorkspaceRole | null;
-  }> = await db
-    .select({
-      brain: brains,
-      workspace: {
-        id: workspaces.id,
-        name: workspaces.name,
-        workosOrganizationId: workspaces.workosOrganizationId,
-      },
-      workspaceRole: workspaceMembers.role,
-    })
-    .from(brains)
-    .innerJoin(workspaces, eq(workspaces.id, brains.workspaceId))
-    .leftJoin(
-      workspaceMembers,
-      and(
-        eq(workspaceMembers.workspaceId, brains.workspaceId),
-        eq(workspaceMembers.userWorkosId, userWorkosId),
-      ),
-    )
-    .where(and(eq(workspaces.legacyBrainEnabled, true), brainAccessCondition(userWorkosId)))
-    .orderBy(asc(workspaces.createdAt), asc(brains.createdAt));
-  return rows.map((row) => ({
-    ...row,
-    workspaceRole: row.workspaceRole ?? "member",
-  }));
-}
-
-export async function getLegacyBrainAccessForUser(
-  userWorkosId: string,
-  options: { db?: DbClient } = {},
-) {
-  const memberships = await listWorkspacesForUser(userWorkosId, options);
-  return memberships
-    .filter(({ workspace }) => workspace.legacyBrainEnabled)
-    .map(({ workspace }) => ({
-      id: workspace.id,
-      name: workspace.name,
-      slug: workspace.slug,
-    }));
-}
-
-export async function isLegacyBrainEnabledForWorkspace(
-  workspaceId: string,
-  options: { db?: DbClient } = {},
-) {
-  const db = options.db ?? getDb();
-  const [workspace] = await db
-    .select({ enabled: workspaces.legacyBrainEnabled })
-    .from(workspaces)
-    .where(eq(workspaces.id, workspaceId))
-    .limit(1);
-  return workspace?.enabled === true;
-}
-
 export async function markMcpSetupCompletedForUser(
   userWorkosId: string,
   options: { db?: DbClient; completedAt?: Date } = {},
@@ -239,37 +91,6 @@ export async function markMcpSetupCompletedForUser(
     .update(users)
     .set({ mcpSetupCompletedAt: completedAt, updatedAt: completedAt })
     .where(and(eq(users.workosUserId, userWorkosId), isNull(users.mcpSetupCompletedAt)));
-}
-
-export async function getBrainAccess(
-  input: { userWorkosId: string; brainRef: string },
-  options: { db?: DbClient } = {},
-): Promise<BrainAccess | null> {
-  const db = options.db ?? getDb();
-  const rows = await db
-    .select({ brain: brains, role: workspaceMembers.role })
-    .from(brains)
-    .leftJoin(
-      workspaceMembers,
-      and(
-        eq(workspaceMembers.workspaceId, brains.workspaceId),
-        eq(workspaceMembers.userWorkosId, input.userWorkosId),
-      ),
-    )
-    .where(and(eq(brains.id, input.brainRef), brainAccessCondition(input.userWorkosId)))
-    .limit(1);
-  const row = rows[0];
-  if (!row) return null;
-  return { brain: row.brain, workspaceRole: row.role ?? "member" };
-}
-
-export async function requireBrainAccess(
-  input: { userWorkosId: string; brainRef: string },
-  options: { db?: DbClient } = {},
-): Promise<BrainAccess> {
-  const access = await getBrainAccess(input, options);
-  if (!access) throw new Error("You do not have access to this brain.");
-  return access;
 }
 
 export async function getWorkspaceRole(
@@ -326,24 +147,8 @@ export async function getUserDisplayName(
   return name || null;
 }
 
-export async function getDefaultBrainForUser(
-  userWorkosId: string,
-  options: { db?: DbClient } = {},
-): Promise<Brain | null> {
-  const db = options.db ?? getDb();
-  const workspaces = await listWorkspacesForUser(userWorkosId, { db });
-  const first = workspaces[0];
-  if (!first) return null;
-  const brains = await listAccessibleBrains(
-    { userWorkosId, workspaceId: first.workspace.id },
-    { db },
-  );
-  return brains.find((brain) => brain.slug === DEFAULT_BRAIN_SLUG) ?? brains[0] ?? null;
-}
-
-// Creates the local resources for a user-created WorkOS organization. Wiki is
-// the default knowledge system, so new workspaces intentionally have no Brain.
-// Existing legacy-enabled workspaces and explicit Brain creation are untouched.
+// Creates the local resources for a user-created WorkOS organization: the
+// workspace row, its creator membership, and the workspace's default wiki.
 export async function createWorkspaceForUser(
   input: {
     workspaceId: string;
@@ -353,7 +158,7 @@ export async function createWorkspaceForUser(
     slug?: string | null;
   },
   options: { db?: DbClient } = {},
-): Promise<{ workspace: Workspace; brain: null }> {
+): Promise<{ workspace: Workspace }> {
   const db = options.db ?? getDb();
   const name = input.name.trim();
   if (!name) throw new Error("Workspace name cannot be empty.");
@@ -427,7 +232,7 @@ export async function createWorkspaceForUser(
     );
   }
 
-  return { workspace, brain: null };
+  return { workspace };
 }
 
 // Adopts local memberships for WorkOS organizations the user already belongs
@@ -474,204 +279,6 @@ export async function adoptWorkspaceMembershipsFromOrgs(
   return adopted;
 }
 
-export async function createBrain(
-  input: {
-    workspaceId: string;
-    name: string;
-    description?: string | null;
-    visibility: BrainVisibility;
-    createdByWorkosId: string;
-  },
-  options: { db?: DbClient } = {},
-): Promise<Brain> {
-  const db = options.db ?? getDb();
-  const name = input.name.trim();
-  if (!name) throw new Error("Brain name cannot be empty.");
-  const baseSlug = normalizeBrainId(name) || "brain";
-  const existing = await db
-    .select({ slug: brains.slug })
-    .from(brains)
-    .where(eq(brains.workspaceId, input.workspaceId));
-  const used = new Set(existing.map((row: { slug: string }) => row.slug));
-  let slug = baseSlug;
-  for (let i = 2; used.has(slug); i++) {
-    slug = `${baseSlug}-${i}`;
-    if (i > 1000) throw new Error("Could not allocate a unique brain slug.");
-  }
-
-  const rows = await db
-    .insert(brains)
-    .values({
-      id: newBrainId(slug),
-      workspaceId: input.workspaceId,
-      name,
-      slug,
-      description: input.description?.trim() || null,
-      visibility: input.visibility,
-      createdByWorkosId: input.createdByWorkosId,
-    })
-    .returning();
-  const brain = rows[0];
-  if (!brain) throw new Error("Failed to create brain.");
-  await seedDefaultBrainFolders(
-    { brainRef: brain.id, userWorkosId: input.createdByWorkosId },
-    { db },
-  );
-  if (input.visibility === "restricted") {
-    await db
-      .insert(brainMembers)
-      .values({
-        id: `goat_brm_${randomUUID()}`,
-        brainId: brain.id,
-        userWorkosId: input.createdByWorkosId,
-        addedByWorkosId: input.createdByWorkosId,
-      })
-      .onConflictDoNothing();
-  }
-  return brain;
-}
-
-export async function updateBrainVisibility(
-  input: { brainRef: string; visibility: BrainVisibility; actingUserWorkosId: string },
-  options: { db?: DbClient } = {},
-): Promise<void> {
-  const db = options.db ?? getDb();
-  await db
-    .update(brains)
-    .set({ visibility: input.visibility, updatedAt: new Date() })
-    .where(eq(brains.id, input.brainRef));
-  if (input.visibility === "restricted") {
-    // The acting admin keeps access so the brain never becomes orphaned.
-    await db
-      .insert(brainMembers)
-      .values({
-        id: `goat_brm_${randomUUID()}`,
-        brainId: input.brainRef,
-        userWorkosId: input.actingUserWorkosId,
-        addedByWorkosId: input.actingUserWorkosId,
-      })
-      .onConflictDoNothing();
-  }
-}
-
-// Read live at ingest time so an owner toggling enrichment off applies to
-// already-queued jobs. Missing rows fail closed.
-export async function getBrainEnrichmentEnabled(
-  brainRef: string,
-  db: DbClient = getDb(),
-): Promise<boolean> {
-  const rows = await db
-    .select({ enrichmentEnabled: brains.enrichmentEnabled })
-    .from(brains)
-    .where(eq(brains.id, brainRef))
-    .limit(1);
-  return rows[0]?.enrichmentEnabled ?? false;
-}
-
-export async function updateBrainEnrichmentEnabled(
-  input: { brainRef: string; enabled: boolean },
-  options: { db?: DbClient } = {},
-): Promise<void> {
-  const db = options.db ?? getDb();
-  const rows = await db
-    .update(brains)
-    .set({ enrichmentEnabled: input.enabled, updatedAt: new Date() })
-    .where(eq(brains.id, input.brainRef))
-    .returning({ id: brains.id });
-  if (rows.length === 0) throw new Error("Brain not found.");
-}
-
-// Read live at ingest time (like enrichment) so switching a brain's tier
-// applies to already-queued jobs. Missing rows fail to the included tier.
-export async function getBrainIntelligence(
-  brainRef: string,
-  db: DbClient = getDb(),
-): Promise<BrainIntelligence> {
-  const rows = await db
-    .select({ intelligence: brains.intelligence })
-    .from(brains)
-    .where(eq(brains.id, brainRef))
-    .limit(1);
-  return rows[0]?.intelligence ?? "basic";
-}
-
-export async function updateBrainIntelligence(
-  input: { brainRef: string; intelligence: BrainIntelligence },
-  options: { db?: DbClient } = {},
-): Promise<void> {
-  const db = options.db ?? getDb();
-  const rows = await db
-    .update(brains)
-    .set({ intelligence: input.intelligence, updatedAt: new Date() })
-    .where(eq(brains.id, input.brainRef))
-    .returning({ id: brains.id });
-  if (rows.length === 0) throw new Error("Brain not found.");
-}
-
-export async function replaceBrainMembers(
-  input: { brainRef: string; userWorkosIds: string[]; addedByWorkosId: string },
-  options: { db?: DbClient } = {},
-): Promise<void> {
-  const db = options.db ?? getDb();
-  const desired = new Set(input.userWorkosIds);
-  const desiredRows = [...desired].map((userWorkosId) => ({
-    id: `goat_brm_${randomUUID()}`,
-    userWorkosId,
-  }));
-  const desiredMembers =
-    desiredRows.length > 0
-      ? sql`SELECT * FROM (VALUES ${sql.join(
-          desiredRows.map((row) => sql`(${row.userWorkosId}, ${row.id})`),
-          sql`, `,
-        )}) AS desired(user_workos_id, id)`
-      : sql`SELECT NULL::text AS user_workos_id, NULL::text AS id WHERE false`;
-
-  // One statement keeps access changes and personal-source cleanup atomic on
-  // both pooled Postgres and the neon-http web client. A member who is removed
-  // from a restricted brain must not keep feeding it through a personal
-  // integration they attached while they still had access.
-  await db.execute(sql`
-    WITH desired_members AS (${desiredMembers}),
-    deleted_members AS (
-      DELETE FROM goat.brain_members bm
-      WHERE bm.brain_id = ${input.brainRef}
-        AND NOT EXISTS (
-          SELECT 1 FROM desired_members desired
-          WHERE desired.user_workos_id = bm.user_workos_id
-        )
-      RETURNING bm.id
-    ),
-    inserted_members AS (
-      INSERT INTO goat.brain_members (id, brain_id, user_workos_id, added_by_workos_id)
-      SELECT desired.id, ${input.brainRef}, desired.user_workos_id, ${input.addedByWorkosId}
-      FROM desired_members desired
-      ON CONFLICT DO NOTHING
-      RETURNING id
-    )
-    DELETE FROM goat.brain_sources bs
-    USING goat.integrations integration
-    WHERE bs.brain_id = ${input.brainRef}
-      AND bs.integration_id = integration.id
-      AND integration.workspace_id IS NULL
-      AND NOT EXISTS (
-        SELECT 1 FROM desired_members desired
-        WHERE desired.user_workos_id = bs.user_workos_id
-      )
-  `);
-}
-
-export async function listBrainMemberIds(
-  brainRef: string,
-  options: { db?: DbClient } = {},
-): Promise<string[]> {
-  const db = options.db ?? getDb();
-  const rows = await db
-    .select({ userWorkosId: brainMembers.userWorkosId })
-    .from(brainMembers)
-    .where(eq(brainMembers.brainId, brainRef));
-  return rows.map((row: { userWorkosId: string }) => row.userWorkosId);
-}
-
 export async function listWorkspaceMembers(
   workspaceId: string,
   options: { db?: DbClient } = {},
@@ -710,31 +317,14 @@ export async function removeWorkspaceMember(
   options: { db?: DbClient } = {},
 ): Promise<void> {
   const db = options.db ?? getDb();
-  // Drop the member's restricted-brain access in this workspace first.
-  const workspaceBrainRows = await db
-    .select({ id: brains.id })
-    .from(brains)
-    .where(eq(brains.workspaceId, input.workspaceId));
-  for (const brain of workspaceBrainRows) {
-    await db
-      .delete(brainMembers)
-      .where(
-        and(eq(brainMembers.brainId, brain.id), eq(brainMembers.userWorkosId, input.userWorkosId)),
-      );
-  }
-  // Detach the member's personal-integration brain sources in this workspace:
-  // new content stops flowing, already-ingested brain content stays (the
-  // pointer/copy rule). Workspace-owned integrations (github, jamie) keep the
-  // leaving member as user_workos_id attribution and must NOT be touched —
-  // the workspace_id IS NULL filter guarantees that.
+  // Drop the member's restricted-wiki access in this workspace first, so
+  // removal from the workspace cannot leave a readable wiki behind.
   await db.execute(sql`
-    DELETE FROM goat.brain_sources bs
-    USING goat.brains b, goat.integrations i
-    WHERE bs.brain_id = b.id
-      AND b.workspace_id = ${input.workspaceId}
-      AND bs.integration_id = i.id
-      AND i.user_workos_id = ${input.userWorkosId}
-      AND i.workspace_id IS NULL
+    DELETE FROM goat.wiki_members wm
+    USING goat.wikis w
+    WHERE wm.wiki_id = w.id
+      AND w.workspace_id = ${input.workspaceId}
+      AND wm.user_workos_id = ${input.userWorkosId}
   `);
   await db
     .delete(workspaceMembers)

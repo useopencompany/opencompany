@@ -2101,6 +2101,13 @@
       "when": 1790100400020,
       "tag": "0299_imessage_personal_agent",
       "breakpoints": true
+    },
+    {
+      "idx": 300,
+      "version": "7",
+      "when": 1790100400021,
+      "tag": "0300_retire_legacy_brain",
+      "breakpoints": true
     }
   ]
 }

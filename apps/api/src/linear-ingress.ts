@@ -12,14 +12,9 @@ import {
 import { verifyLinearWebhookSignature } from "@opencompany/agent/integrations/linear-signature";
 import { connectLinearIngestIntegration } from "@opencompany/db/integrations";
 import {
-  insertLinearIssueEvents,
-  type LinearIssueEventInsert,
   linearEventTypeFor,
-  linearRouteMatchesEvent,
-  linearSelectedTeamIds,
   linearWorkflowEventContext,
   linearWorkflowRouteMatchesEvent,
-  listEnabledLinearBrainSourceRoutes,
   listLinearIntegrationsForOrganization,
 } from "@opencompany/db/linear";
 import type { LinearEventAction, LinearEventEntityType } from "@opencompany/db/product-schema";
@@ -35,10 +30,10 @@ const logger = createLogger({ service: "opencompany-api", runtime: "linear-ingre
 
 type DbLike = any;
 
-// Provider ingress composition for the Linear Brain-ingestion connection: the
-// OAuth connect flow and the webhook that buffers issue/comment events for the
-// runner's flush worker. The Linear MCP connector shares provider "linear" but
-// keys on the linear_mcp sentinel and remains with the remote-MCP slice.
+// Provider ingress composition for the Linear connection: the OAuth connect
+// flow and the webhook that routes issue/comment events to workflow triggers.
+// The Linear MCP connector shares provider "linear" but keys on the linear_mcp
+// sentinel and remains with the remote-MCP slice.
 export type LinearIngressService = {
   start(request: Request): Promise<Response>;
   callback(request: Request): Promise<Response>;
@@ -277,52 +272,7 @@ async function handleLinearEvent(
     );
   }
 
-  const integrationIds = connected.map((integration) => integration.id);
-  const brainRoutes = await listEnabledLinearBrainSourceRoutes(integrationIds, db);
-  // With a known team the selection is exact; comment events may not carry the
-  // team, so any integration with a selection buffers and the flush worker
-  // re-filters against the live issue's team.
-  const matchedIntegrationIds = new Set(
-    brainRoutes
-      .filter((route) => {
-        const selected = linearSelectedTeamIds(route.config);
-        if (selected.size === 0) return false;
-        if (!linearRouteMatchesEvent(route.config, eventType)) return false;
-        return teamId ? selected.has(teamId) : true;
-      })
-      .map((route) => route.integrationId),
-  );
-  if (matchedIntegrationIds.size === 0) {
-    return workflowRuns > 0 ? { ok: true, buffered: 0, workflowRuns } : { ok: true, dropped: true };
-  }
-
-  const inserts: LinearIssueEventInsert[] = connected
-    .filter((integration) => matchedIntegrationIds.has(integration.id))
-    .map((integration) => ({
-      integrationId: integration.id,
-      userWorkosId: integration.userWorkosId,
-      organizationId,
-      teamId: teamId ?? null,
-      issueId,
-      deliveryId,
-      entityType,
-      action,
-      issueTitle: issueTitle ?? null,
-      actorName: envelope.actor?.name?.trim() || null,
-      payload: {
-        action: envelope.action,
-        type: envelope.type,
-        createdAt: envelope.createdAt,
-        url: envelope.url,
-        actor: envelope.actor,
-        data,
-        ...(envelope.updatedFrom ? { updatedFrom: envelope.updatedFrom } : {}),
-      },
-      eventTime: normalizedEventTime,
-    }));
-
-  const buffered = await insertLinearIssueEvents(inserts, db);
-  return { ok: true, buffered, workflowRuns };
+  return workflowRuns > 0 ? { ok: true, workflowRuns } : { ok: true, dropped: true };
 }
 
 function linearEntityType(type: string | undefined): LinearEventEntityType | null {

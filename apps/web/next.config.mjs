@@ -107,7 +107,6 @@ const nextConfig = {
     "@opencompany/analytics",
     "@opencompany/browser-tools",
     "@opencompany/db",
-    "@opencompany/brain",
     "@opencompany/ui",
   ],
 };

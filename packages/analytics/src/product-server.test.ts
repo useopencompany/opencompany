@@ -272,7 +272,7 @@ describe("PostHog server analytics", () => {
     await captureProductModelSpendRecorded({
       userWorkosId: "user_123",
       billingSource: "ingest_model_usage",
-      surface: "brain_ingest",
+      surface: "task",
       model: "anthropic/claude-sonnet-5",
       providerCostUsdMicros: 1_000,
       platformFeeUsdMicros: 200,

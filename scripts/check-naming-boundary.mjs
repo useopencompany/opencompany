@@ -9,7 +9,6 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 const historicalRoots = ["drizzle/", "docs/adr/"];
 const expectedPackages = new Map([
   ["packages/agent/package.json", "@opencompany/agent"],
-  ["packages/brain/package.json", "@opencompany/brain"],
   ["packages/telemetry/package.json", "@opencompany/telemetry"],
   ["packages/wiki/package.json", "@opencompany/wiki"],
 ]);
@@ -30,18 +29,19 @@ const allowedStandaloneFiles = new Set([
 // merge. Comparing with origin/main plus a PR-specific delta makes the check
 // self-invalidating once origin/main advances to that merged tree.
 const protectedCompatibilityTokens = [
-  // 1180 = 1192 - the twelve Recurring Task fixture ids that left with those tests. The physical
-  // goat.task_schedules and goat.task_schedule_runs identifiers stay until their own drop migration.
-  // 1185 = 1180 + the harness check on goat.codex_chat_sessions and the four constraint and index
-  // names on goat.imessage_bindings.
-  ["physical and stored quoted goat_* identifiers", /["'`]goat_[a-z0-9_]*["'`]/gu, 1185],
+  // 870 = 1185 - the goat_brain_*, goat_gmail_message_events, goat_linear_issue_events,
+  // goat_hubspot_object_events, goat_attio_object_events, goat_slack_message_events,
+  // goat_github_pull_request_events, goat_fathom_* and goat_google_drive_* identifiers that left
+  // with the legacy Brain and its ingestion spine (drizzle/0300_retire_legacy_brain.sql).
+  ["physical and stored quoted goat_* identifiers", /["'`]goat_[a-z0-9_]*["'`]/gu, 870],
   ["quoted sandbox runtime roots", /["'`]opencompany-goat[a-z0-9_./${}:*-]*["'`]/gu, 26],
-  ["chat source-provider values", /["']goat-chat["']/gu, 28],
-  ["import source-provider values", /["']goat-import["']/gu, 13],
+  // 4 = the retained source-provider check constraint plus its three stored-value call sites; the
+  // rest were Brain capture and import paths.
+  ["chat source-provider values", /["']goat-chat["']/gu, 4],
+  ["import source-provider values", /["']goat-import["']/gu, 1],
 ];
 const requiredCompatibilityFragments = new Map([
   ["packages/db/src/product-schema.ts", ['pgSchema("goat")', "'goat-chat', 'goat-import'"]],
-  ["packages/agent/src/brain-capture.ts", ['"goat-chat"']],
   ["packages/agent/src/browser-profiles/index.ts", ['surface: "goat-browser-profile"']],
   ["packages/agent-runtime/src/cloud-coding-engines.ts", ["/home/user/opencompany-goat/"]],
   ["apps/runner/src/chat-artifacts.ts", ['"goat-chat-artifacts"']],
@@ -218,6 +218,14 @@ const addedEnvKeys = [
   "WORKOS_MOBILE_CLIENT_ID",
 ];
 const retiredEnvKeys = new Set([
+  // Retired with the legacy Brain: its retrieval gateway and embedding tuning.
+  "OPENCOMPANY_BRAIN_GATEWAY_BASE_URL",
+  "OPENCOMPANY_BRAIN_EMBEDDING_MODEL",
+  "OPENCOMPANY_BRAIN_VECTOR_MAX_DISTANCE",
+  // The legacy Brain HubSpot ingestion OAuth app; the HubSpot plugin uses the MCP app.
+  "OPENCOMPANY_HUBSPOT_CLIENT_ID",
+  "OPENCOMPANY_HUBSPOT_CLIENT_SECRET",
+  "OPENCOMPANY_HUBSPOT_STATE_SECRET",
   // Replaced by the per-member users.subagents_enabled preference before it was ever enabled.
   "RUNNER_OPENCOMPANY_SUBAGENTS_ENABLED",
   // Split into one template alias per user-selectable sandbox size (PRO-197).

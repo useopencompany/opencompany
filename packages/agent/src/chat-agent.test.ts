@@ -11,7 +11,6 @@ import {
   UPDATE_TASK_STATUS_TOOL_NAME,
 } from "./chat-agent";
 import {
-  BRAIN_TOOL_NAME,
   CREATE_WORKSPACE_SKILL_TOOL_NAME,
   EDIT_WORKSPACE_SKILL_TOOL_NAME,
   LIST_SKILLS_TOOL_NAME,
@@ -22,17 +21,12 @@ import {
 const model = "moonshotai/kimi-k2.6" as never;
 
 describe("knowledge tools", () => {
-  it("injects Wiki and legacy Brain tools only when their runners are available", () => {
+  it("injects the Wiki tool only when its runner is available", () => {
     const noKnowledge = createProductChatToolContext({ model }).tools;
     const wikiOnly = createProductChatToolContext({ model, runWiki: vi.fn() }).tools;
-    const legacyBrainOnly = createProductChatToolContext({ model, runBrainCli: vi.fn() }).tools;
 
     expect(WIKI_TOOL_NAME in noKnowledge).toBe(false);
-    expect(BRAIN_TOOL_NAME in noKnowledge).toBe(false);
     expect(WIKI_TOOL_NAME in wikiOnly).toBe(true);
-    expect(BRAIN_TOOL_NAME in wikiOnly).toBe(false);
-    expect(WIKI_TOOL_NAME in legacyBrainOnly).toBe(false);
-    expect(BRAIN_TOOL_NAME in legacyBrainOnly).toBe(true);
   });
 
   it("advertises only read commands for a read-only Wiki runner", () => {

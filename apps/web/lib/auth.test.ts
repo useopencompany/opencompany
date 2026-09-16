@@ -3,12 +3,7 @@ import { saveSession, withAuth } from "@workos-inc/authkit-nextjs";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  completeAuthentication,
-  currentBrainByRef,
-  currentIdentity,
-  currentUser,
-} from "@/lib/auth";
+import { completeAuthentication, currentIdentity, currentUser } from "@/lib/auth";
 import { recordLastAuthMethod } from "@/lib/auth-methods";
 import { serverApiClient } from "@/lib/server-api-client";
 import { rememberActiveWorkspace } from "@/lib/workspace-session";
@@ -71,7 +66,6 @@ const identity = {
       id: "goat_ws_company",
       name: "Analytical Co",
       slug: "analytical-co",
-      legacyBrainEnabled: true,
       role: "member" as const,
     },
   ],
@@ -88,7 +82,6 @@ const identity = {
       intelligence: "basic" as const,
     },
   ],
-  activeBrainId: "brain_company",
 } satisfies IdentityDto;
 
 const serverApiClientMock = vi.mocked(serverApiClient);
@@ -133,7 +126,6 @@ describe("completeAuthentication", () => {
     });
     expect(rememberActiveWorkspace).toHaveBeenCalledWith({
       workspaceId: "goat_ws_company",
-      brainId: "brain_company",
     });
   });
 
@@ -143,8 +135,6 @@ describe("completeAuthentication", () => {
         ...identity,
         workspaces: [],
         activeWorkspaceId: null,
-        brains: [],
-        activeBrainId: null,
       }),
     );
     await completeAuthentication(
@@ -184,47 +174,18 @@ describe("request-cached identity adapter", () => {
     serverApiClientMock.mockResolvedValue(apiClient());
   });
 
-  it("maps the narrow identity DTO onto the established currentUser shape", async () => {
-    const context = await currentUser();
-
-    expect(context.user).toMatchObject({
-      workosUserId: authUser.id,
-      email: authUser.email,
-      preferredMcpClient: "claude",
-    });
-    expect(context.user.mcpSetupCompletedAt).toEqual(new Date("2026-08-13T12:00:00.000Z"));
-    expect(context.workspace).toEqual({
-      id: "goat_ws_company",
-      name: "Analytical Co",
-      slug: "analytical-co",
-      legacyBrainEnabled: true,
-    });
-    expect(context.activeBrain?.id).toBe("brain_company");
-  });
-
   it("keeps authenticated users without a workspace in the identity tier", async () => {
     serverApiClientMock.mockResolvedValue(
       apiClient({
         ...identity,
         workspaces: [],
         activeWorkspaceId: null,
-        brains: [],
-        activeBrainId: null,
       }),
     );
 
     await expect(currentIdentity()).resolves.toMatchObject({ workspaces: [] });
     await currentUser();
     expect(redirectMock).toHaveBeenCalledWith("/onboarding");
-  });
-
-  it("resolves an accessible Brain by id or slug without a persistence call", async () => {
-    await expect(currentBrainByRef("general")).resolves.toMatchObject({
-      brain: { id: "brain_company" },
-    });
-    await expect(currentBrainByRef("missing")).rejects.toThrow(
-      "You do not have access to that brain.",
-    );
   });
 
   it("redirects anonymous browsers to sign in", async () => {

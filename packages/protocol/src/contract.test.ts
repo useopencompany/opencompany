@@ -8,7 +8,6 @@ import {
 } from "./client";
 import { createOpenApiDocument } from "./routes";
 import {
-  BrainDocumentSchema,
   ConversationReadModelSchema,
   ConversationReadModelV1Schema,
   ConversationSchema,
@@ -61,11 +60,6 @@ describe("v1 protocol contract", () => {
         meta: { apiVersion: "v1", protocolVersion: "1.0.0" },
       }),
     ).toMatchObject({ error: { code: "idempotency_conflict" } });
-  });
-
-  it("preserves bounded historical Brain aliases", () => {
-    expect(BrainDocumentSchema.shape.aliases.parse(["a".repeat(113)])).toEqual(["a".repeat(113)]);
-    expect(() => BrainDocumentSchema.shape.aliases.parse(["a".repeat(513)])).toThrow();
   });
 
   it("bounds the public engine-session error contract", () => {
@@ -208,11 +202,6 @@ describe("v1 protocol contract", () => {
       "/v1/workflows/{workflowId}/run-now",
       "/v1/workflows/{workflowId}/memory",
       "/v1/workflows/{workflowId}/slack-avatar",
-      "/v1/brains/{brainId}",
-      "/v1/brains/{brainId}/overview",
-      "/v1/brains/{brainId}/source-items",
-      "/v1/brains/{brainId}/sources",
-      "/v1/brains/{brainId}/sources/{integrationId}",
       "/v1/browser-profiles",
       "/v1/browser-profiles/{profileId}",
       "/v1/browser-profiles/{profileId}/login-sessions",
@@ -223,11 +212,6 @@ describe("v1 protocol contract", () => {
       "/v1/capabilities/{source}",
       "/v1/capability-approvals/by-tool-call/{toolCallId}",
       "/v1/capability-approvals/{runId}",
-      "/v1/brains",
-      "/v1/brains/{brainId}/switch",
-      "/v1/brains/{brainId}/access",
-      "/v1/brains/{brainId}/enrichment",
-      "/v1/brains/{brainId}/intelligence",
       "/v1/identity",
       "/v1/identity/sync",
       "/v1/workspace",
@@ -241,25 +225,6 @@ describe("v1 protocol contract", () => {
       "/v1/onboarding/profile",
       "/v1/onboarding/workspace",
       "/v1/onboarding/complete",
-      "/v1/integrations/{integrationId}/brain-source-options",
-      "/v1/brains/{brainId}/imports",
-      "/v1/brains/{brainId}/imports/{importRunId}/confirm",
-      "/v1/brains/{brainId}/imports/{importRunId}/cancel",
-      "/v1/brains/{brainId}/imports/{importRunId}/retry",
-      "/v1/wiki/imports",
-      "/v1/wiki/imports/{importRunId}/confirm",
-      "/v1/wiki/imports/{importRunId}/cancel",
-      "/v1/wiki/imports/{importRunId}/retry",
-      "/v1/brains/{brainId}/documents",
-      "/v1/brains/{brainId}/assets",
-      "/v1/brains/{brainId}/assets/{documentId}/replace",
-      "/v1/brain-assets/{documentId}",
-      "/v1/brains/{brainId}/documents/{documentId}",
-      "/v1/brains/{brainId}/documents/{documentId}/rename",
-      "/v1/brains/{brainId}/documents/{documentId}/delete",
-      "/v1/brains/{brainId}/folders",
-      "/v1/brains/{brainId}/folders/rename",
-      "/v1/brains/{brainId}/folders/delete",
       "/v1/wikis",
       "/v1/wikis/{wikiId}",
       "/v1/wikis/{wikiId}/access",
@@ -267,6 +232,10 @@ describe("v1 protocol contract", () => {
       "/v1/wiki/pages/{id}",
       "/v1/wiki/pages/{id}/delete",
       "/v1/wiki/pages/{id}/timeline",
+      "/v1/wiki/imports",
+      "/v1/wiki/imports/{importRunId}/confirm",
+      "/v1/wiki/imports/{importRunId}/cancel",
+      "/v1/wiki/imports/{importRunId}/retry",
       "/v1/wiki/sources",
       "/v1/wiki/sources/activity",
       "/v1/wiki/sources/{sourceId}",
@@ -337,9 +306,7 @@ describe("v1 protocol contract", () => {
       "/v1/integration-accounts/stripe",
       "/v1/integration-accounts",
       "/v1/workspace/slack-bot",
-      "/v1/brains/{brainId}/slack-bot",
-      "/v1/brains/{brainId}/slack-bot/channels",
-      "/v1/integration-accounts/{integrationId}/usage",
+      "/v1/integrations/{integrationId}/resource-options",
       "/v1/integration-accounts/{integrationId}/capability-modes/{capabilityId}",
       "/v1/integration-accounts/{integrationId}/tool-modes/{toolId}",
       "/v1/actions/{actionId}/permissions/always-allow",

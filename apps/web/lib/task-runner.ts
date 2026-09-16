@@ -303,6 +303,6 @@ function isHarnessSpec(value: unknown): value is HarnessSpec {
     typeof record.initialUserMessage === "string" &&
     Array.isArray(record.tools) &&
     typeof record.maxModelSteps === "number" &&
-    (record.resultMode === "assistant_final" || record.resultMode === "brain_markdown_report")
+    record.resultMode === "assistant_final"
   );
 }

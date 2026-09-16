@@ -273,33 +273,6 @@ describe("integration account service", () => {
     ]);
   });
 
-  it("gates usage reads to the personal connection owner", async () => {
-    const service = createIntegrationAccountService({ db: fakeDb([[]]) });
-    await expect(service.getUsage(member, "gint_x")).rejects.toMatchObject({
-      status: 404,
-      code: "not_found",
-      message: "Only the connection owner can manage this account.",
-    });
-  });
-
-  it("counts affected brain sources for the owner", async () => {
-    const db = fakeDb([[{ id: "gint_x" }], [{ count: 4 }]]);
-    const service = createIntegrationAccountService({ db });
-    await expect(service.getUsage(member, "gint_x")).resolves.toEqual({
-      affectedBrainSourceCount: 4,
-    });
-  });
-
-  it("does not report retired Slack source rows as active account usage", async () => {
-    const service = createIntegrationAccountService({
-      db: fakeDb([[{ id: "gint_slack", provider: "slack" }]]),
-    });
-
-    await expect(service.getUsage(member, "gint_slack")).resolves.toEqual({
-      affectedBrainSourceCount: 0,
-    });
-  });
-
   it("reports a non-owned disconnect with the retired owner-only copy", async () => {
     vi.mocked(disconnectPersonalIntegration).mockResolvedValueOnce(false);
     const service = createIntegrationAccountService({

@@ -9,10 +9,8 @@ import { isSandboxSize, type SandboxSize } from "@opencompany/core/sandbox-sizes
 import { getWorkspacePlan, workspaceMemberCap } from "@opencompany/db/billing";
 import { users, workspaces } from "@opencompany/db/product-schema";
 import {
-  DEFAULT_BRAIN_SLUG,
   getWorkspaceSandboxSize,
   hasOwnedHobbyWorkspace,
-  listAccessibleBrains,
   listWorkspaceMembers,
   listWorkspacesForUser,
   removeWorkspaceMember,
@@ -59,7 +57,6 @@ export type WorkspaceSettingsView = {
 export type WorkspaceActivationView = {
   workspaceId: string;
   organizationId: string;
-  brainId: string | null;
 };
 
 export type WorkspaceControlService = {
@@ -289,7 +286,6 @@ export function createWorkspaceControlService(input: {
       return {
         workspaceId: created.workspace.id,
         organizationId,
-        brainId: created.brain?.id ?? null,
       };
     },
 
@@ -337,14 +333,7 @@ async function findWorkspaceActivation(
   const target = memberships.find((entry) => entry.workspace.id === workspaceId);
   if (!target) return null;
   const organizationId = await ensureWorkspaceOrganization(target.workspace, { workos, db });
-  const brains = await listAccessibleBrains({ userWorkosId: userId, workspaceId }, { db });
-  const activeBrain =
-    brains.find((brain) => brain.slug === DEFAULT_BRAIN_SLUG) ?? brains[0] ?? null;
-  return {
-    workspaceId,
-    organizationId,
-    brainId: activeBrain?.id ?? null,
-  };
+  return { workspaceId, organizationId };
 }
 
 function workspaceMemberView(entry: {

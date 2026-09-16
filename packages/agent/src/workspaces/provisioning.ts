@@ -1,8 +1,6 @@
 import { getDb } from "@opencompany/db/client";
 import {
   createWorkspaceForUser,
-  DEFAULT_BRAIN_SLUG,
-  listAccessibleBrains,
   listWorkspacesForUser,
   newWorkspaceId,
 } from "@opencompany/db/workspaces";
@@ -130,10 +128,5 @@ async function findProvisionedWorkspace(workspaceId: string, userWorkosId: strin
   const existing = memberships.find((entry) => entry.workspace.id === workspaceId);
   const workosOrganizationId = existing?.workspace.workosOrganizationId;
   if (!existing || !workosOrganizationId) return null;
-  const brains = await listAccessibleBrains({ userWorkosId, workspaceId }, { db });
-  const brain = brains.find((entry) => entry.slug === DEFAULT_BRAIN_SLUG) ?? brains[0] ?? null;
-  return {
-    workspace: { ...existing.workspace, workosOrganizationId },
-    brain,
-  };
+  return { workspace: { ...existing.workspace, workosOrganizationId } };
 }

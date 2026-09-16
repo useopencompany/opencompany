@@ -6,88 +6,11 @@ const actor: Actor = {
   userId: "user_1",
   workspaceId: "workspace_1",
   role: "admin",
-  permissions: [
-    "brain:read",
-    "brain:write",
-    "wiki:read",
-    "wiki:write",
-    "skill:read",
-    "skill:write",
-  ],
+  permissions: ["wiki:read", "wiki:write", "skill:read", "skill:write"],
   authenticationMethod: "session",
 };
 
 describe("KnowledgeApplicationService", () => {
-  it("authorizes the selected Brain before forwarding a normalized read", async () => {
-    const assertBrainAccess = vi.fn(async () => undefined);
-    const getBrainSnapshot = vi.fn(async () => ({ folders: [], documents: [] }));
-    const service = new KnowledgeApplicationService(
-      repository({ assertBrainAccess, getBrainSnapshot }),
-    );
-
-    await expect(service.getBrainSnapshot(actor, " brain_1 ")).resolves.toEqual({
-      folders: [],
-      documents: [],
-    });
-    expect(assertBrainAccess).toHaveBeenCalledWith({ actor, brainId: "brain_1" });
-    expect(getBrainSnapshot).toHaveBeenCalledWith({ actor, brainId: "brain_1" });
-  });
-
-  it("rejects Brain writes without permission before the repository is reached", async () => {
-    const assertBrainAccess = vi.fn(async () => undefined);
-    const service = new KnowledgeApplicationService(repository({ assertBrainAccess }));
-
-    await expect(
-      service.createBrainDocument({ ...actor, permissions: ["brain:read"] }, "brain_1", {
-        idempotencyKey: "create-1",
-        folderPath: "inbox",
-        fileName: "Note.md",
-      }),
-    ).rejects.toMatchObject({ code: "forbidden" });
-    expect(assertBrainAccess).not.toHaveBeenCalled();
-  });
-
-  it("exposes the same normalized Brain write gate to canonical asset services", async () => {
-    const assertBrainAccess = vi.fn(async () => undefined);
-    const service = new KnowledgeApplicationService(repository({ assertBrainAccess }));
-
-    await expect(service.authorizeBrainWrite(actor, " brain_1 ")).resolves.toBe("brain_1");
-    expect(assertBrainAccess).toHaveBeenCalledWith({ actor, brainId: "brain_1" });
-  });
-
-  it("authorizes and bounds Brain source-item metadata lookups", async () => {
-    const assertBrainAccess = vi.fn(async () => undefined);
-    const listBrainSourceItems = vi.fn(async () => []);
-    const service = new KnowledgeApplicationService(
-      repository({ assertBrainAccess, listBrainSourceItems }),
-    );
-
-    await expect(
-      service.listBrainSourceItems(actor, " brain_1 ", [" item_1 ", "item_1", "item_2"]),
-    ).resolves.toEqual([]);
-    expect(assertBrainAccess).toHaveBeenCalledWith({ actor, brainId: "brain_1" });
-    expect(listBrainSourceItems).toHaveBeenCalledWith({
-      actor,
-      brainId: "brain_1",
-      ids: ["item_1", "item_2"],
-    });
-
-    await expect(service.listBrainSourceItems(actor, "brain_1", [])).rejects.toMatchObject({
-      code: "invalid_argument",
-    });
-    await expect(
-      service.listBrainSourceItems(
-        actor,
-        "brain_1",
-        Array.from({ length: 101 }, (_, index) => `item_${index}`),
-      ),
-    ).rejects.toMatchObject({ code: "invalid_argument" });
-
-    await expect(
-      service.listBrainSourceItems({ ...actor, permissions: [] }, "brain_1", ["item_1"]),
-    ).rejects.toMatchObject({ code: "forbidden" });
-  });
-
   it("uses the route id for Wiki updates and preserves empty titles", async () => {
     const updateWikiPage = vi.fn(async () => {
       throw new Error("stop after capture");

@@ -24,7 +24,6 @@ export type ExternalEngineToolAuthorityState = {
   workspaceId: string | null;
   workspaceName: string;
   workspaceSlug: string | null;
-  legacyBrainEnabled: boolean;
   actorId: string;
   conversationId: string;
   sandboxId: string | null;
@@ -35,7 +34,6 @@ export type ExternalEngineToolAuthorityState = {
   interruptRequestedAt: Date | null;
   membershipId: string;
   workspaceRole: string;
-  brainRef: string | null;
   userMessageId: string;
   assistantMessageId: string;
 };
@@ -48,11 +46,9 @@ export type ExternalEngineToolAuthorizedContext = {
   workspaceId: string;
   workspaceName: string;
   workspaceSlug: string | null;
-  legacyBrainEnabled: boolean;
   conversationId: string;
   sandboxId: string;
   engine: "codex" | "claude_code";
-  brainRef: string | null;
   userMessageId: string;
   assistantMessageId: string;
   hostToolContractVersion: string;
@@ -100,11 +96,9 @@ export function authorizeExternalEngineToolCapability(input: {
     workspaceId: state.workspaceId,
     workspaceName: state.workspaceName,
     workspaceSlug: state.workspaceSlug,
-    legacyBrainEnabled: state.legacyBrainEnabled,
     conversationId: state.conversationId,
     sandboxId: state.sandboxId,
     engine: state.engine,
-    brainRef: state.legacyBrainEnabled ? state.brainRef : null,
     userMessageId: state.userMessageId,
     assistantMessageId: state.assistantMessageId,
     hostToolContractVersion: state.hostToolContractVersion as string,

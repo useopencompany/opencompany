@@ -41,7 +41,6 @@ function ingress(
         method: "session",
         credentialKind: "browser_cookie",
         activeWorkspaceId: null,
-        activeBrainId: null,
       };
     },
     ...(overrides.refresh ? { refreshPluginRegistrations: overrides.refresh } : {}),

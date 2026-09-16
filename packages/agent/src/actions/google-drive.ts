@@ -1,6 +1,6 @@
-import { isValidBrainSourceRef } from "@opencompany/brain";
 import { getDb } from "@opencompany/db/client";
 import { integrations } from "@opencompany/db/product-schema";
+import { isValidWikiSourceRef } from "@opencompany/wiki";
 import type { JSONSchema7 } from "ai";
 import { and, desc, eq, ne } from "drizzle-orm";
 import {
@@ -1443,8 +1443,8 @@ function collectTextRuns(value: unknown, depth = 0): string {
 
 function driveFileSourceRef(fileId: string) {
   const sourceRef = `google-drive:file:${fileId}`;
-  if (!isValidBrainSourceRef(sourceRef)) {
-    throw new Error("Google Drive returned a file id that cannot form a Brain source reference.");
+  if (!isValidWikiSourceRef(sourceRef)) {
+    throw new Error("Google Drive returned a file id that cannot form a source reference.");
   }
   return sourceRef;
 }

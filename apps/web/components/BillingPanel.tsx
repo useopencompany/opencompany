@@ -290,7 +290,7 @@ export function BillingPanel({
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
           {[
             ["Chat", data.spendThisMonthByCategory.chat],
-            ["Brain ingestion", data.spendThisMonthByCategory.ingestion],
+            ["Ingestion", data.spendThisMonthByCategory.ingestion],
             ["Paid capabilities", data.spendThisMonthByCategory.capabilities],
             ["Sandbox usage", data.spendThisMonthByCategory.sandbox],
           ].map(([label, amount]) => (
@@ -369,14 +369,14 @@ export function BillingPanel({
             after that.
           </li>
           <li>
-            Brain ingestion: model, capability, and sandbox COGS at cost. There is no platform fee
-            on usage.
+            Ingestion: model, capability, and sandbox COGS at cost. There is no platform fee on
+            usage.
           </li>
           <li>
             Included usage expires monthly. Top-up funds stay in one workspace pool that all members
             draw from.
           </li>
-          <li>Brain retrieval and browsing are free.</li>
+          <li>Wiki retrieval and browsing are free.</li>
         </ul>
       </section>
 
@@ -470,7 +470,7 @@ function billingActivityLabel(
     source === "frontier_ingest" ||
     source === "ingest_overage"
   ) {
-    return "Brain ingestion";
+    return "Ingestion";
   }
   if (source === "capability_usage") {
     return capabilityAction ? `Paid capability · ${capabilityAction}` : "Paid capability";

@@ -201,25 +201,11 @@ export type HarnessRunViewModel = {
   userMessage: RunMessage | null;
   assistantMessages: RunMessage[];
   toolCalls: HarnessRunToolCall[];
-  artifacts: RunArtifact[];
-  resultArtifact: RunArtifact | null;
   events: RunEvent[];
   models: RunModelSummary[];
   harnessConfig: RunHarnessConfig | null;
   chat: ChatSessionView | null;
   cost: RunCostSummary;
-};
-
-export type RunArtifact = {
-  type: "brain_markdown_report";
-  title: string;
-  url: string;
-  brainPath: string;
-  documentId: string;
-  brainId: string;
-  folderPath: string;
-  mimeType: string;
-  createdAt: string;
 };
 
 export type RunModelSummary = {
@@ -336,7 +322,6 @@ export function buildHarnessRun(input: {
   const userMessage = messages.find((message) => message.role === "user") ?? null;
   const assistantMessages = messages.filter((message) => message.role === "assistant");
   const toolCalls = buildToolCalls(events);
-  const artifacts = buildArtifacts(events);
   const models = buildModelSummary(task.model, input.modelUsage ?? []);
   const harnessConfig = buildHarnessConfig(readTaskHarnessSpec(input.task), task.model);
 
@@ -348,8 +333,6 @@ export function buildHarnessRun(input: {
     userMessage,
     assistantMessages,
     toolCalls,
-    artifacts,
-    resultArtifact: artifacts.at(-1) ?? null,
     events,
     models,
     harnessConfig,
@@ -615,46 +598,6 @@ function buildToolCalls(events: readonly RunEvent[]) {
   }
 
   return Array.from(byCallId.values()).toSorted(compareCreatedAt);
-}
-
-function buildArtifacts(events: readonly RunEvent[]): RunArtifact[] {
-  return events
-    .flatMap((event): RunArtifact[] => {
-      if (event.type !== "artifact.created") return [];
-      const artifact = parseArtifact(event.payload.artifact);
-      return artifact ? [{ ...artifact, createdAt: event.createdAt }] : [];
-    })
-    .toSorted(compareCreatedAt);
-}
-
-function parseArtifact(value: unknown): Omit<RunArtifact, "createdAt"> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const record = value as Record<string, unknown>;
-  if (record.type !== "brain_markdown_report") return null;
-  const title = readString(record.title).trim();
-  const url = readString(record.url).trim();
-  const brainPath = readString(record.brainPath).trim();
-  const documentId = readString(record.documentId).trim();
-  const brainId = readString(record.brainId).trim();
-  const folderPath = readString(record.folderPath).trim();
-  const mimeType = readString(record.mimeType).trim() || "text/markdown";
-  if (!title || !isInternalBrainUrl(url) || !brainPath || !documentId || !brainId || !folderPath) {
-    return null;
-  }
-  return {
-    type: "brain_markdown_report",
-    title,
-    url,
-    brainPath,
-    documentId,
-    brainId,
-    folderPath,
-    mimeType,
-  };
-}
-
-function isInternalBrainUrl(url: string) {
-  return url.startsWith("/brain/") && !url.startsWith("//");
 }
 
 function makeToolCall(input: {

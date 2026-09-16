@@ -234,7 +234,7 @@ describe("createExternalEngineProjector", () => {
       redact: (value) => value,
       normalizeEvent: acpNormalizer(),
     });
-    const settledResult = "Research report saved to Brain: [Launch](https://example.com/launch).";
+    const settledResult = "Research report: [Launch](https://example.com/launch).";
     const summary = {
       sessionId: "codex_thread_1",
       status: "success" as const,

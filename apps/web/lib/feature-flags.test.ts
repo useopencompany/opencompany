@@ -27,11 +27,4 @@ describe("featureFlagsFromUser", () => {
     expect(featureFlagsFromUser({ subagentsEnabled: true }).subagents).toBe(true);
     expect(featureFlagsFromUser({ subagentsEnabled: false }).subagents).toBe(false);
   });
-
-  it("keeps legacy Brain off unless the workspace explicitly enables it", () => {
-    expect(featureFlagsFromUser({}).legacyBrain).toBe(false);
-    expect(featureFlagsFromUser({ legacyBrainEnabled: null }).legacyBrain).toBe(false);
-    expect(featureFlagsFromUser({ legacyBrainEnabled: true }).legacyBrain).toBe(true);
-    expect(featureFlagsFromUser({ legacyBrainEnabled: false }).legacyBrain).toBe(false);
-  });
 });

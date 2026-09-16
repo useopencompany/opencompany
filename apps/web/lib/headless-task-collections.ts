@@ -122,7 +122,6 @@ function taskDtoToRow(task: LegacyTaskDto, conversationId: string | null): TaskR
     schedule_id: task.scheduleId,
     scheduled_for: task.scheduledFor,
     workflow_id: task.workflowId,
-    workflow_brain_ref: null,
     status,
     stage:
       status === "queued"

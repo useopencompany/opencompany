@@ -19,8 +19,6 @@ Start with:
   inheritance rules, and its limits.
 - [opencompany context compaction](./context-compaction.md) — long-chat checkpoint behavior,
   safety boundaries, and reviewed reference implementations.
-- [Brain engineering documentation](./brain/README.md) — data model, ingestion, tools, and
-  provenance rules.
 - [Electric read models](./electric-sync.md) — authorized live-read architecture and local setup.
 - [Environment variables](./env-vars.md) and [secret management](./secret-management.md).
 - [Git contributor email privacy](./contributor-email-privacy.md) — commit identity guidance and the

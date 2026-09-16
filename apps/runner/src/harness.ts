@@ -161,7 +161,7 @@ function harnessSpecResponseSchema(
         uniqueItems: true,
       },
       maxModelSteps: { type: "integer", minimum: 1, maximum: MAX_MODEL_STEPS },
-      resultMode: { type: "string", enum: ["assistant_final", "brain_markdown_report"] },
+      resultMode: { type: "string", enum: ["assistant_final"] },
       codex: {
         type: "object",
         additionalProperties: false,
@@ -225,19 +225,16 @@ function normalizeHarnessSpec(
     : 1;
   const maxModelSteps = Math.max(requestedMaxModelSteps, minModelSteps);
 
-  const resultMode =
-    record.resultMode === "brain_markdown_report" ? "brain_markdown_report" : "assistant_final";
-
   return {
     schemaVersion: "goat.harness.v1",
     engine,
     model,
-    systemPrompt: augmentSystemPrompt(systemPrompt, resultMode, selectedSkills),
+    systemPrompt: augmentSystemPrompt(systemPrompt, selectedSkills),
     initialUserMessage,
     tools,
     skills: selectedSkills,
     maxModelSteps,
-    resultMode,
+    resultMode: "assistant_final",
     ...(engine === "codex"
       ? { codex: readCodexHarnessConfig(record.codex, fallback.prompt, githubRepositories) }
       : {}),
@@ -387,15 +384,11 @@ function readPullRequestIntent(prompt: string) {
     : null;
 }
 
-function augmentSystemPrompt(
-  systemPrompt: string,
-  resultMode: HarnessSpec["resultMode"],
-  skillIds: readonly TaskSkillId[],
-) {
+function augmentSystemPrompt(systemPrompt: string, skillIds: readonly TaskSkillId[]) {
   const sections = [withTaskSafetyPromptText(systemPrompt)];
   const skillPrompt = buildHarnessSkillSystemPrompt(skillIds);
   if (skillPrompt) sections.push(skillPrompt);
-  return systemPromptForTaskResultMode(sections.join("\n\n"), resultMode);
+  return systemPromptForTaskResultMode(sections.join("\n\n"));
 }
 
 function withTaskSafetyPromptText(systemPrompt: string) {

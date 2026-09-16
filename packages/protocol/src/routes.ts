@@ -17,27 +17,6 @@ import {
   BotEnvelopeSchema,
   BotListEnvelopeSchema,
   BotSchema,
-  BrainAccessEnvelopeSchema,
-  BrainAccessMutationEnvelopeSchema,
-  BrainAssetMutationEnvelopeSchema,
-  BrainAssetReplaceBodySchema,
-  BrainAssetUploadBodySchema,
-  BrainControlMutationEnvelopeSchema,
-  BrainDocumentDeleteEnvelopeSchema,
-  BrainDocumentEnvelopeSchema,
-  BrainEnrichmentEnvelopeSchema,
-  BrainFolderEnvelopeSchema,
-  BrainFolderPathEnvelopeSchema,
-  BrainImportRunCommandEnvelopeSchema,
-  BrainIntelligenceEnvelopeSchema,
-  BrainOverviewEnvelopeSchema,
-  BrainSnapshotEnvelopeSchema,
-  BrainSourceDeleteEnvelopeSchema,
-  BrainSourceDetailsEnvelopeSchema,
-  BrainSourceItemListEnvelopeSchema,
-  BrainSourceMutationEnvelopeSchema,
-  BrainSourceOptionsBodySchema,
-  BrainSourceOptionsEnvelopeSchema,
   BrowserProfileDeleteEnvelopeSchema,
   BrowserProfileEnvelopeSchema,
   BrowserProfileListEnvelopeSchema,
@@ -54,16 +33,12 @@ import {
   CodexAuthStatusEnvelopeSchema,
   CodexDeviceAuthFlowEnvelopeSchema,
   CompleteInfisicalAuthBodySchema,
-  ConfirmBrainImportBodySchema,
   ConversationEnvelopeSchema,
   ConversationPageSchema,
   ConversationShareEnvelopeSchema,
   ConvexAccountStateEnvelopeSchema,
   ConvexEventsAccountStateEnvelopeSchema,
   CreateBillingTopUpBodySchema,
-  CreateBrainBodySchema,
-  CreateBrainDocumentBodySchema,
-  CreateBrainFolderBodySchema,
   CreateBrowserProfileBodySchema,
   CreateMessageBodySchema,
   CreateMessageEnvelopeSchema,
@@ -84,7 +59,6 @@ import {
   CustomMcpPermissionBodySchema,
   CustomMcpProbeEnvelopeSchema,
   CustomMcpStatusEnvelopeSchema,
-  DeleteBrainFolderBodySchema,
   DeleteWikiPageBodySchema,
   DopplerAuthFlowEnvelopeSchema,
   DopplerAuthStatusEnvelopeSchema,
@@ -108,9 +82,10 @@ import {
   IntegrationAccountDeleteEnvelopeSchema,
   IntegrationAccountIdSchema,
   IntegrationAccountListEnvelopeSchema,
-  IntegrationAccountUsageEnvelopeSchema,
   IntegrationApiKeyBodySchema,
   IntegrationCapabilityModeEnvelopeSchema,
+  IntegrationResourceOptionsBodySchema,
+  IntegrationResourceOptionsEnvelopeSchema,
   IntegrationToolModeEnvelopeSchema,
   InviteWorkspaceMemberBodySchema,
   InvokeWorkflowBodySchema,
@@ -142,8 +117,6 @@ import {
   PublicChatShareEnvelopeSchema,
   PublicChatShareMetadataEnvelopeSchema,
   ReadModelSchema,
-  RenameBrainDocumentBodySchema,
-  RenameBrainFolderBodySchema,
   RenameWorkspaceBodySchema,
   RenderAccountStateEnvelopeSchema,
   RepoConfigDeleteEnvelopeSchema,
@@ -153,15 +126,12 @@ import {
   ResolveApprovalBodySchema,
   ResolveApprovalEnvelopeSchema,
   ResourceIdSchema,
+  RetiredWikiImportBodySchema,
   RunEnvelopeSchema,
   SaveClaudeCodeTokenBodySchema,
   SaveOnboardingProfileBodySchema,
   SaveOnboardingWorkspaceBodySchema,
   SessionPullRequestListSchema,
-  SetBrainAccessBodySchema,
-  SetBrainEnrichmentBodySchema,
-  SetBrainIntelligenceBodySchema,
-  SetBrainSourceBodySchema,
   SetCapabilitySessionBudgetBodySchema,
   SetIntegrationCapabilityModeBodySchema,
   SetIntegrationToolModeBodySchema,
@@ -170,7 +140,6 @@ import {
   SetRepoConfigEnvBodySchema,
   SetRepoConfigSetupBodySchema,
   SetSkillScopeBodySchema,
-  SetSlackBotDestinationBodySchema,
   SetWikiAccessBodySchema,
   SetWikiSourceEnabledBodySchema,
   SetWorkspaceCapabilityBodySchema,
@@ -183,11 +152,8 @@ import {
   SkillImportPreviewEnvelopeSchema,
   SkillInstallationEnvelopeSchema,
   SkillListEnvelopeSchema,
-  SlackBotChannelListEnvelopeSchema,
-  SlackBotDestinationEnvelopeSchema,
   SlackBotMutationEnvelopeSchema,
   SlackBotWorkspaceSettingsEnvelopeSchema,
-  StartBrainImportBodySchema,
   StartInfisicalAuthBodySchema,
   SteerRunEnvelopeSchema,
   StripeAccountDeleteEnvelopeSchema,
@@ -198,7 +164,6 @@ import {
   TaskPageSchema,
   TaskSummaryEnvelopeSchema,
   UpdateBillingAutoRefillBodySchema,
-  UpdateBrainDocumentBodySchema,
   UpdateCodexWorkspaceEngineBodySchema,
   UpdateConversationBodySchema,
   UpdateConversationEnvelopeSchema,
@@ -591,498 +556,6 @@ export const uploadWorkflowSlackAvatarRoute = createRoute({
   },
 });
 
-export const getBrainSnapshotRoute = createRoute({
-  method: "get",
-  path: "/v1/brains/{brainId}",
-  tags: ["Brain"],
-  security: actorSecurity,
-  request: { params: z.object({ brainId: ResourceIdSchema }) },
-  responses: {
-    200: {
-      description: "An authorized Brain document and folder snapshot.",
-      content: { "application/json": { schema: BrainSnapshotEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const getBrainOverviewRoute = createRoute({
-  method: "get",
-  path: "/v1/brains/{brainId}/overview",
-  tags: ["Brain"],
-  security: actorSecurity,
-  request: { params: z.object({ brainId: ResourceIdSchema }) },
-  responses: {
-    200: {
-      description: "Aggregate activity for an authorized Brain.",
-      content: { "application/json": { schema: BrainOverviewEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const listBrainSourceItemsRoute = createRoute({
-  method: "get",
-  path: "/v1/brains/{brainId}/source-items",
-  tags: ["Brain"],
-  security: actorSecurity,
-  request: {
-    params: z.object({ brainId: ResourceIdSchema }),
-    query: z.object({
-      ids: z
-        .string()
-        .min(1)
-        .max(25_699)
-        .transform((value: string) =>
-          Array.from(
-            new Set(
-              value
-                .split(",")
-                .map((item: string) => item.trim())
-                .filter(Boolean),
-            ),
-          ),
-        )
-        .pipe(z.array(ResourceIdSchema).min(1).max(100)),
-    }),
-  },
-  responses: {
-    200: {
-      description: "Bounded public metadata for source items referenced by an authorized Brain.",
-      content: { "application/json": { schema: BrainSourceItemListEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const listBrainSourcesRoute = createRoute({
-  method: "get",
-  path: "/v1/brains/{brainId}/sources",
-  tags: ["Brain"],
-  security: actorSecurity,
-  request: { params: z.object({ brainId: ResourceIdSchema }) },
-  responses: {
-    200: {
-      description: "Source configuration and connection state for an authorized Brain.",
-      content: { "application/json": { schema: BrainSourceDetailsEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const setBrainSourceRoute = createRoute({
-  method: "put",
-  path: "/v1/brains/{brainId}/sources/{integrationId}",
-  tags: ["Brain"],
-  security: actorSecurity,
-  request: {
-    params: z.object({ brainId: ResourceIdSchema, integrationId: ResourceIdSchema }),
-    body: {
-      required: true,
-      content: { "application/json": { schema: SetBrainSourceBodySchema } },
-    },
-  },
-  responses: {
-    200: {
-      description: "Brain source configured or enabled state updated.",
-      content: { "application/json": { schema: BrainSourceMutationEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const deleteBrainSourceRoute = createRoute({
-  method: "delete",
-  path: "/v1/brains/{brainId}/sources/{integrationId}",
-  tags: ["Brain"],
-  security: actorSecurity,
-  request: {
-    params: z.object({ brainId: ResourceIdSchema, integrationId: ResourceIdSchema }),
-  },
-  responses: {
-    200: {
-      description: "Brain source removed, including an idempotent replay.",
-      content: { "application/json": { schema: BrainSourceDeleteEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const listBrainSourceOptionsRoute = createRoute({
-  method: "post",
-  path: "/v1/integrations/{integrationId}/brain-source-options",
-  tags: ["Brain"],
-  security: actorSecurity,
-  request: {
-    params: z.object({ integrationId: ResourceIdSchema }),
-    body: {
-      required: true,
-      content: { "application/json": { schema: BrainSourceOptionsBodySchema } },
-    },
-  },
-  responses: {
-    200: {
-      description: "Provider resources the acting user may select for a Brain source.",
-      content: { "application/json": { schema: BrainSourceOptionsEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const startBrainImportRoute = createRoute({
-  method: "post",
-  path: "/v1/brains/{brainId}/imports",
-  tags: ["Brain"],
-  security: actorSecurity,
-  request: {
-    params: z.object({ brainId: ResourceIdSchema }),
-    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
-    body: {
-      required: true,
-      content: { "application/json": { schema: StartBrainImportBodySchema } },
-    },
-  },
-  responses: {
-    201: {
-      description: "Company-context import discovery started or replayed.",
-      content: { "application/json": { schema: BrainImportRunCommandEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const confirmBrainImportRoute = createRoute({
-  method: "post",
-  path: "/v1/brains/{brainId}/imports/{importRunId}/confirm",
-  tags: ["Brain"],
-  security: actorSecurity,
-  request: {
-    params: z.object({ brainId: ResourceIdSchema, importRunId: ResourceIdSchema }),
-    body: {
-      required: true,
-      content: { "application/json": { schema: ConfirmBrainImportBodySchema } },
-    },
-  },
-  responses: {
-    200: {
-      description: "Discovered import confirmed; ingestion begins for the enabled providers.",
-      content: { "application/json": { schema: BrainImportRunCommandEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const cancelBrainImportRoute = createRoute({
-  method: "post",
-  path: "/v1/brains/{brainId}/imports/{importRunId}/cancel",
-  tags: ["Brain"],
-  security: actorSecurity,
-  request: {
-    params: z.object({ brainId: ResourceIdSchema, importRunId: ResourceIdSchema }),
-  },
-  responses: {
-    200: {
-      description: "Active import canceled; queued ingestion jobs are skipped.",
-      content: { "application/json": { schema: BrainImportRunCommandEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const retryBrainImportRoute = createRoute({
-  method: "post",
-  path: "/v1/brains/{brainId}/imports/{importRunId}/retry",
-  tags: ["Brain"],
-  security: actorSecurity,
-  request: {
-    params: z.object({ brainId: ResourceIdSchema, importRunId: ResourceIdSchema }),
-  },
-  responses: {
-    200: {
-      description: "Failed pre-confirmation discovery reset and started again.",
-      content: { "application/json": { schema: BrainImportRunCommandEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const startWikiImportRoute = createRoute({
-  method: "post",
-  path: "/v1/wiki/imports",
-  tags: ["Wiki"],
-  security: actorSecurity,
-  request: {
-    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
-    body: {
-      required: true,
-      content: { "application/json": { schema: StartBrainImportBodySchema } },
-    },
-  },
-  responses: {
-    201: {
-      description: "Workspace Wiki company-context discovery started or replayed.",
-      content: { "application/json": { schema: BrainImportRunCommandEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const confirmWikiImportRoute = createRoute({
-  method: "post",
-  path: "/v1/wiki/imports/{importRunId}/confirm",
-  tags: ["Wiki"],
-  security: actorSecurity,
-  request: {
-    params: z.object({ importRunId: ResourceIdSchema }),
-    body: {
-      required: true,
-      content: { "application/json": { schema: ConfirmBrainImportBodySchema } },
-    },
-  },
-  responses: {
-    200: {
-      description: "Discovered Wiki import confirmed; ingestion begins.",
-      content: { "application/json": { schema: BrainImportRunCommandEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const cancelWikiImportRoute = createRoute({
-  method: "post",
-  path: "/v1/wiki/imports/{importRunId}/cancel",
-  tags: ["Wiki"],
-  security: actorSecurity,
-  request: { params: z.object({ importRunId: ResourceIdSchema }) },
-  responses: {
-    200: {
-      description: "Active Wiki import canceled; queued ingestion jobs are skipped.",
-      content: { "application/json": { schema: BrainImportRunCommandEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const retryWikiImportRoute = createRoute({
-  method: "post",
-  path: "/v1/wiki/imports/{importRunId}/retry",
-  tags: ["Wiki"],
-  security: actorSecurity,
-  request: { params: z.object({ importRunId: ResourceIdSchema }) },
-  responses: {
-    200: {
-      description: "Failed Wiki discovery reset and started again.",
-      content: { "application/json": { schema: BrainImportRunCommandEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const createBrainDocumentRoute = createRoute({
-  method: "post",
-  path: "/v1/brains/{brainId}/documents",
-  tags: ["Brain"],
-  security: actorSecurity,
-  request: {
-    params: z.object({ brainId: ResourceIdSchema }),
-    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
-    body: {
-      required: true,
-      content: { "application/json": { schema: CreateBrainDocumentBodySchema } },
-    },
-  },
-  responses: {
-    201: {
-      description: "Brain document created or replayed.",
-      content: { "application/json": { schema: BrainDocumentEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const uploadBrainAssetRoute = createRoute({
-  method: "post",
-  path: "/v1/brains/{brainId}/assets",
-  tags: ["Brain"],
-  security: actorSecurity,
-  request: {
-    params: z.object({ brainId: ResourceIdSchema }),
-    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
-    body: {
-      required: true,
-      content: { "multipart/form-data": { schema: BrainAssetUploadBodySchema } },
-    },
-  },
-  responses: {
-    201: {
-      description: "Private Brain asset uploaded and registered, or replayed.",
-      content: { "application/json": { schema: BrainAssetMutationEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const replaceBrainAssetRoute = createRoute({
-  method: "post",
-  path: "/v1/brains/{brainId}/assets/{documentId}/replace",
-  tags: ["Brain"],
-  security: actorSecurity,
-  request: {
-    params: z.object({ brainId: ResourceIdSchema, documentId: ResourceIdSchema }),
-    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
-    body: {
-      required: true,
-      content: { "multipart/form-data": { schema: BrainAssetReplaceBodySchema } },
-    },
-  },
-  responses: {
-    200: {
-      description: "Private Brain asset bytes replaced, or replayed.",
-      content: { "application/json": { schema: BrainAssetMutationEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const downloadBrainAssetRoute = createRoute({
-  method: "get",
-  path: "/v1/brain-assets/{documentId}",
-  tags: ["Brain"],
-  security: actorSecurity,
-  request: { params: z.object({ documentId: ResourceIdSchema }) },
-  responses: {
-    200: {
-      description: "Authorized private Brain asset bytes.",
-      content: {
-        "application/octet-stream": {
-          schema: z.string().openapi({ type: "string", format: "binary" }),
-        },
-      },
-    },
-    default: errorResponse,
-  },
-});
-
-export const updateBrainDocumentRoute = createRoute({
-  method: "patch",
-  path: "/v1/brains/{brainId}/documents/{documentId}",
-  tags: ["Brain"],
-  security: actorSecurity,
-  request: {
-    params: z.object({ brainId: ResourceIdSchema, documentId: ResourceIdSchema }),
-    body: {
-      required: true,
-      content: { "application/json": { schema: UpdateBrainDocumentBodySchema } },
-    },
-  },
-  responses: {
-    200: {
-      description: "Brain document body updated with optional hash concurrency.",
-      content: { "application/json": { schema: BrainDocumentEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const renameBrainDocumentRoute = createRoute({
-  method: "post",
-  path: "/v1/brains/{brainId}/documents/{documentId}/rename",
-  tags: ["Brain"],
-  security: actorSecurity,
-  request: {
-    params: z.object({ brainId: ResourceIdSchema, documentId: ResourceIdSchema }),
-    body: {
-      required: true,
-      content: { "application/json": { schema: RenameBrainDocumentBodySchema } },
-    },
-  },
-  responses: {
-    200: {
-      description: "Brain document title updated.",
-      content: { "application/json": { schema: BrainDocumentEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const deleteBrainDocumentRoute = createRoute({
-  method: "post",
-  path: "/v1/brains/{brainId}/documents/{documentId}/delete",
-  tags: ["Brain"],
-  security: actorSecurity,
-  request: { params: z.object({ brainId: ResourceIdSchema, documentId: ResourceIdSchema }) },
-  responses: {
-    200: {
-      description: "Brain document deleted.",
-      content: { "application/json": { schema: BrainDocumentDeleteEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const createBrainFolderRoute = createRoute({
-  method: "post",
-  path: "/v1/brains/{brainId}/folders",
-  tags: ["Brain"],
-  security: actorSecurity,
-  request: {
-    params: z.object({ brainId: ResourceIdSchema }),
-    body: {
-      required: true,
-      content: { "application/json": { schema: CreateBrainFolderBodySchema } },
-    },
-  },
-  responses: {
-    201: {
-      description: "Brain folder created.",
-      content: { "application/json": { schema: BrainFolderEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const renameBrainFolderRoute = createRoute({
-  method: "post",
-  path: "/v1/brains/{brainId}/folders/rename",
-  tags: ["Brain"],
-  security: actorSecurity,
-  request: {
-    params: z.object({ brainId: ResourceIdSchema }),
-    body: {
-      required: true,
-      content: { "application/json": { schema: RenameBrainFolderBodySchema } },
-    },
-  },
-  responses: {
-    200: {
-      description: "Brain folder and descendants renamed.",
-      content: { "application/json": { schema: BrainFolderPathEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const deleteBrainFolderRoute = createRoute({
-  method: "post",
-  path: "/v1/brains/{brainId}/folders/delete",
-  tags: ["Brain"],
-  security: actorSecurity,
-  request: {
-    params: z.object({ brainId: ResourceIdSchema }),
-    body: {
-      required: true,
-      content: { "application/json": { schema: DeleteBrainFolderBodySchema } },
-    },
-  },
-  responses: {
-    200: {
-      description: "Empty custom Brain folder deleted.",
-      content: { "application/json": { schema: BrainFolderPathEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
 export const listWikisRoute = createRoute({
   method: "get",
   path: "/v1/wikis",
@@ -1254,6 +727,53 @@ export const addWikiTimelineEntryRoute = createRoute({
     },
     default: errorResponse,
   },
+});
+
+export const startWikiImportRoute = createRoute({
+  method: "post",
+  path: "/v1/wiki/imports",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: false,
+      content: { "application/json": { schema: RetiredWikiImportBodySchema } },
+    },
+  },
+  responses: { default: errorResponse },
+});
+
+export const confirmWikiImportRoute = createRoute({
+  method: "post",
+  path: "/v1/wiki/imports/{importRunId}/confirm",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ importRunId: ResourceIdSchema }),
+    body: {
+      required: false,
+      content: { "application/json": { schema: RetiredWikiImportBodySchema } },
+    },
+  },
+  responses: { default: errorResponse },
+});
+
+export const cancelWikiImportRoute = createRoute({
+  method: "post",
+  path: "/v1/wiki/imports/{importRunId}/cancel",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  request: { params: z.object({ importRunId: ResourceIdSchema }) },
+  responses: { default: errorResponse },
+});
+
+export const retryWikiImportRoute = createRoute({
+  method: "post",
+  path: "/v1/wiki/imports/{importRunId}/retry",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  request: { params: z.object({ importRunId: ResourceIdSchema }) },
+  responses: { default: errorResponse },
 });
 
 export const listWikiSourcesRoute = createRoute({
@@ -2606,7 +2126,6 @@ export const streamReadModelRoute = createRoute({
     params: z.object({ readModel: ReadModelSchema }),
     query: z.object({
       conversationId: ResourceIdSchema.optional(),
-      brainId: ResourceIdSchema.optional(),
       wikiId: ResourceIdSchema.optional(),
       taskId: ResourceIdSchema.optional(),
       messageShapeEpoch: z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
@@ -2816,143 +2335,6 @@ export const getCapabilityApprovalRoute = createRoute({
   },
 });
 
-export const createBrainRoute = createRoute({
-  method: "post",
-  path: "/v1/brains",
-  tags: ["Brains"],
-  security: actorSecurity,
-  request: {
-    body: { required: true, content: { "application/json": { schema: CreateBrainBodySchema } } },
-  },
-  responses: {
-    201: {
-      description: "Brain created in the active workspace. Admin only.",
-      content: { "application/json": { schema: BrainControlMutationEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const switchBrainRoute = createRoute({
-  method: "post",
-  path: "/v1/brains/{brainId}/switch",
-  tags: ["Brains"],
-  security: actorSecurity,
-  request: { params: z.object({ brainId: ResourceIdSchema }) },
-  responses: {
-    200: {
-      description: "Brain access authorized for the active workspace; clients may activate it.",
-      content: { "application/json": { schema: BrainControlMutationEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const getBrainAccessRoute = createRoute({
-  method: "get",
-  path: "/v1/brains/{brainId}/access",
-  tags: ["Brains"],
-  security: actorSecurity,
-  request: { params: z.object({ brainId: ResourceIdSchema }) },
-  responses: {
-    200: {
-      description: "Brain visibility, selected members, and workspace member choices. Admin only.",
-      content: { "application/json": { schema: BrainAccessEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const setBrainAccessRoute = createRoute({
-  method: "put",
-  path: "/v1/brains/{brainId}/access",
-  tags: ["Brains"],
-  security: actorSecurity,
-  request: {
-    params: z.object({ brainId: ResourceIdSchema }),
-    body: { required: true, content: { "application/json": { schema: SetBrainAccessBodySchema } } },
-  },
-  responses: {
-    200: {
-      description: "Brain visibility and restricted member set updated. Admin only.",
-      content: { "application/json": { schema: BrainAccessMutationEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const getBrainEnrichmentRoute = createRoute({
-  method: "get",
-  path: "/v1/brains/{brainId}/enrichment",
-  tags: ["Brains"],
-  security: actorSecurity,
-  request: { params: z.object({ brainId: ResourceIdSchema }) },
-  responses: {
-    200: {
-      description: "Brain enrichment setting. Admin only.",
-      content: { "application/json": { schema: BrainEnrichmentEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const setBrainEnrichmentRoute = createRoute({
-  method: "put",
-  path: "/v1/brains/{brainId}/enrichment",
-  tags: ["Brains"],
-  security: actorSecurity,
-  request: {
-    params: z.object({ brainId: ResourceIdSchema }),
-    body: {
-      required: true,
-      content: { "application/json": { schema: SetBrainEnrichmentBodySchema } },
-    },
-  },
-  responses: {
-    200: {
-      description: "Brain enrichment setting updated. Admin only.",
-      content: { "application/json": { schema: BrainEnrichmentEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const getBrainIntelligenceRoute = createRoute({
-  method: "get",
-  path: "/v1/brains/{brainId}/intelligence",
-  tags: ["Brains"],
-  security: actorSecurity,
-  request: { params: z.object({ brainId: ResourceIdSchema }) },
-  responses: {
-    200: {
-      description: "Brain intelligence tier. Admin only.",
-      content: { "application/json": { schema: BrainIntelligenceEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const setBrainIntelligenceRoute = createRoute({
-  method: "put",
-  path: "/v1/brains/{brainId}/intelligence",
-  tags: ["Brains"],
-  security: actorSecurity,
-  request: {
-    params: z.object({ brainId: ResourceIdSchema }),
-    body: {
-      required: true,
-      content: { "application/json": { schema: SetBrainIntelligenceBodySchema } },
-    },
-  },
-  responses: {
-    200: {
-      description: "Brain intelligence tier updated. Admin only.",
-      content: { "application/json": { schema: BrainIntelligenceEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
 export const getIdentityRoute = createRoute({
   method: "get",
   path: "/v1/identity",
@@ -2960,8 +2342,7 @@ export const getIdentityRoute = createRoute({
   security: actorSecurity,
   responses: {
     200: {
-      description:
-        "Authenticated identity, accessible workspaces, and the selected workspace Brain list.",
+      description: "Authenticated identity and accessible workspaces.",
       content: { "application/json": { schema: IdentityEnvelopeSchema } },
     },
     default: errorResponse,
@@ -3658,22 +3039,6 @@ export const disconnectStripeAccountRoute = createRoute({
   },
 });
 
-export const getIntegrationAccountUsageRoute = createRoute({
-  method: "get",
-  path: "/v1/integration-accounts/{integrationId}/usage",
-  tags: ["Integrations"],
-  security: actorSecurity,
-  request: { params: z.object({ integrationId: IntegrationAccountIdSchema }) },
-  responses: {
-    200: {
-      description:
-        "Pre-disconnect usage so the UI can warn before removing an account that still feeds brains. Owner only.",
-      content: { "application/json": { schema: IntegrationAccountUsageEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
 export const listIntegrationAccountsRoute = createRoute({
   method: "get",
   path: "/v1/integration-accounts",
@@ -3716,52 +3081,22 @@ export const disconnectSlackBotRoute = createRoute({
   },
 });
 
-export const getSlackBotDestinationRoute = createRoute({
-  method: "get",
-  path: "/v1/brains/{brainId}/slack-bot",
-  tags: ["Integrations"],
-  security: actorSecurity,
-  request: { params: z.object({ brainId: ResourceIdSchema }) },
-  responses: {
-    200: {
-      description: "Authorized Slack answer-bot destination settings for one Brain.",
-      content: { "application/json": { schema: SlackBotDestinationEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const setSlackBotDestinationRoute = createRoute({
-  method: "put",
-  path: "/v1/brains/{brainId}/slack-bot",
+export const listIntegrationResourceOptionsRoute = createRoute({
+  method: "post",
+  path: "/v1/integrations/{integrationId}/resource-options",
   tags: ["Integrations"],
   security: actorSecurity,
   request: {
-    params: z.object({ brainId: ResourceIdSchema }),
+    params: z.object({ integrationId: ResourceIdSchema }),
     body: {
       required: true,
-      content: { "application/json": { schema: SetSlackBotDestinationBodySchema } },
+      content: { "application/json": { schema: IntegrationResourceOptionsBodySchema } },
     },
   },
   responses: {
     200: {
-      description: "Slack answer-bot channel scope saved by a workspace administrator.",
-      content: { "application/json": { schema: SlackBotMutationEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const listSlackBotChannelsRoute = createRoute({
-  method: "get",
-  path: "/v1/brains/{brainId}/slack-bot/channels",
-  tags: ["Integrations"],
-  security: actorSecurity,
-  request: { params: z.object({ brainId: ResourceIdSchema }) },
-  responses: {
-    200: {
-      description: "Channels visible to the workspace Slack bot; administrator only.",
-      content: { "application/json": { schema: SlackBotChannelListEnvelopeSchema } },
+      description: "Provider resources the acting user may pick as a workflow event filter.",
+      content: { "application/json": { schema: IntegrationResourceOptionsEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -3841,7 +3176,7 @@ export const deleteIntegrationAccountRoute = createRoute({
   responses: {
     200: {
       description:
-        "Personal integration account hard-deleted. Owner only. Credentials, synced resources, brain sources, and buffered events cascade away; already-ingested brain content stays.",
+        "Personal integration account hard-deleted. Owner only. Credentials, synced resources, and buffered events cascade away.",
       content: { "application/json": { schema: IntegrationAccountDeleteEnvelopeSchema } },
     },
     default: errorResponse,
@@ -4290,12 +3625,6 @@ export type V1RouteHandlers = {
   updateWorkflowMemory: RouteHandler<typeof updateWorkflowMemoryRoute>;
   clearWorkflowMemory: RouteHandler<typeof clearWorkflowMemoryRoute>;
   uploadWorkflowSlackAvatar: RouteHandler<typeof uploadWorkflowSlackAvatarRoute>;
-  getBrainSnapshot: RouteHandler<typeof getBrainSnapshotRoute>;
-  getBrainOverview: RouteHandler<typeof getBrainOverviewRoute>;
-  listBrainSourceItems: RouteHandler<typeof listBrainSourceItemsRoute>;
-  listBrainSources: RouteHandler<typeof listBrainSourcesRoute>;
-  setBrainSource: RouteHandler<typeof setBrainSourceRoute>;
-  deleteBrainSource: RouteHandler<typeof deleteBrainSourceRoute>;
   listBrowserProfiles: RouteHandler<typeof listBrowserProfilesRoute>;
   createBrowserProfile: RouteHandler<typeof createBrowserProfileRoute>;
   deleteBrowserProfile: RouteHandler<typeof deleteBrowserProfileRoute>;
@@ -4307,14 +3636,6 @@ export type V1RouteHandlers = {
   setWorkspaceCapability: RouteHandler<typeof setWorkspaceCapabilityRoute>;
   getCapabilityApprovalByToolCall: RouteHandler<typeof getCapabilityApprovalByToolCallRoute>;
   getCapabilityApproval: RouteHandler<typeof getCapabilityApprovalRoute>;
-  createBrain: RouteHandler<typeof createBrainRoute>;
-  switchBrain: RouteHandler<typeof switchBrainRoute>;
-  getBrainAccess: RouteHandler<typeof getBrainAccessRoute>;
-  setBrainAccess: RouteHandler<typeof setBrainAccessRoute>;
-  getBrainEnrichment: RouteHandler<typeof getBrainEnrichmentRoute>;
-  setBrainEnrichment: RouteHandler<typeof setBrainEnrichmentRoute>;
-  getBrainIntelligence: RouteHandler<typeof getBrainIntelligenceRoute>;
-  setBrainIntelligence: RouteHandler<typeof setBrainIntelligenceRoute>;
   getIdentity: RouteHandler<typeof getIdentityRoute>;
   syncIdentity: RouteHandler<typeof syncIdentityRoute>;
   getWorkspaceSettings: RouteHandler<typeof getWorkspaceSettingsRoute>;
@@ -4330,25 +3651,6 @@ export type V1RouteHandlers = {
   saveOnboardingProfile: RouteHandler<typeof saveOnboardingProfileRoute>;
   saveOnboardingWorkspace: RouteHandler<typeof saveOnboardingWorkspaceRoute>;
   finishOnboarding: RouteHandler<typeof finishOnboardingRoute>;
-  listBrainSourceOptions: RouteHandler<typeof listBrainSourceOptionsRoute>;
-  startBrainImport: RouteHandler<typeof startBrainImportRoute>;
-  confirmBrainImport: RouteHandler<typeof confirmBrainImportRoute>;
-  cancelBrainImport: RouteHandler<typeof cancelBrainImportRoute>;
-  retryBrainImport: RouteHandler<typeof retryBrainImportRoute>;
-  startWikiImport: RouteHandler<typeof startWikiImportRoute>;
-  confirmWikiImport: RouteHandler<typeof confirmWikiImportRoute>;
-  cancelWikiImport: RouteHandler<typeof cancelWikiImportRoute>;
-  retryWikiImport: RouteHandler<typeof retryWikiImportRoute>;
-  createBrainDocument: RouteHandler<typeof createBrainDocumentRoute>;
-  uploadBrainAsset: RouteHandler<typeof uploadBrainAssetRoute>;
-  replaceBrainAsset: RouteHandler<typeof replaceBrainAssetRoute>;
-  downloadBrainAsset: RouteHandler<typeof downloadBrainAssetRoute>;
-  updateBrainDocument: RouteHandler<typeof updateBrainDocumentRoute>;
-  renameBrainDocument: RouteHandler<typeof renameBrainDocumentRoute>;
-  deleteBrainDocument: RouteHandler<typeof deleteBrainDocumentRoute>;
-  createBrainFolder: RouteHandler<typeof createBrainFolderRoute>;
-  renameBrainFolder: RouteHandler<typeof renameBrainFolderRoute>;
-  deleteBrainFolder: RouteHandler<typeof deleteBrainFolderRoute>;
   listWikis: RouteHandler<typeof listWikisRoute>;
   createWiki: RouteHandler<typeof createWikiRoute>;
   updateWiki: RouteHandler<typeof updateWikiRoute>;
@@ -4359,6 +3661,10 @@ export type V1RouteHandlers = {
   updateWikiPage: RouteHandler<typeof updateWikiPageRoute>;
   deleteWikiPage: RouteHandler<typeof deleteWikiPageRoute>;
   addWikiTimelineEntry: RouteHandler<typeof addWikiTimelineEntryRoute>;
+  startWikiImport: RouteHandler<typeof startWikiImportRoute>;
+  confirmWikiImport: RouteHandler<typeof confirmWikiImportRoute>;
+  cancelWikiImport: RouteHandler<typeof cancelWikiImportRoute>;
+  retryWikiImport: RouteHandler<typeof retryWikiImportRoute>;
   listWikiSources: RouteHandler<typeof listWikiSourcesRoute>;
   listWikiIngestActivity: RouteHandler<typeof listWikiIngestActivityRoute>;
   upsertWikiSource: RouteHandler<typeof upsertWikiSourceRoute>;
@@ -4466,10 +3772,7 @@ export type V1RouteHandlers = {
   listIntegrationAccounts: RouteHandler<typeof listIntegrationAccountsRoute>;
   getSlackBotWorkspaceSettings: RouteHandler<typeof getSlackBotWorkspaceSettingsRoute>;
   disconnectSlackBot: RouteHandler<typeof disconnectSlackBotRoute>;
-  getSlackBotDestination: RouteHandler<typeof getSlackBotDestinationRoute>;
-  setSlackBotDestination: RouteHandler<typeof setSlackBotDestinationRoute>;
-  listSlackBotChannels: RouteHandler<typeof listSlackBotChannelsRoute>;
-  getIntegrationAccountUsage: RouteHandler<typeof getIntegrationAccountUsageRoute>;
+  listIntegrationResourceOptions: RouteHandler<typeof listIntegrationResourceOptionsRoute>;
   setIntegrationCapabilityMode: RouteHandler<typeof setIntegrationCapabilityModeRoute>;
   setIntegrationToolMode: RouteHandler<typeof setIntegrationToolModeRoute>;
   alwaysAllowAction: RouteHandler<typeof alwaysAllowActionRoute>;
@@ -4532,12 +3835,6 @@ export function createV1Router(
       .openapi(updateWorkflowMemoryRoute, handlers.updateWorkflowMemory)
       .openapi(clearWorkflowMemoryRoute, handlers.clearWorkflowMemory)
       .openapi(uploadWorkflowSlackAvatarRoute, handlers.uploadWorkflowSlackAvatar)
-      .openapi(getBrainSnapshotRoute, handlers.getBrainSnapshot)
-      .openapi(getBrainOverviewRoute, handlers.getBrainOverview)
-      .openapi(listBrainSourceItemsRoute, handlers.listBrainSourceItems)
-      .openapi(listBrainSourcesRoute, handlers.listBrainSources)
-      .openapi(setBrainSourceRoute, handlers.setBrainSource)
-      .openapi(deleteBrainSourceRoute, handlers.deleteBrainSource)
       .openapi(listBrowserProfilesRoute, handlers.listBrowserProfiles)
       .openapi(createBrowserProfileRoute, handlers.createBrowserProfile)
       .openapi(deleteBrowserProfileRoute, handlers.deleteBrowserProfile)
@@ -4551,14 +3848,6 @@ export function createV1Router(
       .openapi(setWorkspaceCapabilityRoute, handlers.setWorkspaceCapability)
       .openapi(getCapabilityApprovalByToolCallRoute, handlers.getCapabilityApprovalByToolCall)
       .openapi(getCapabilityApprovalRoute, handlers.getCapabilityApproval)
-      .openapi(createBrainRoute, handlers.createBrain)
-      .openapi(switchBrainRoute, handlers.switchBrain)
-      .openapi(getBrainAccessRoute, handlers.getBrainAccess)
-      .openapi(setBrainAccessRoute, handlers.setBrainAccess)
-      .openapi(getBrainEnrichmentRoute, handlers.getBrainEnrichment)
-      .openapi(setBrainEnrichmentRoute, handlers.setBrainEnrichment)
-      .openapi(getBrainIntelligenceRoute, handlers.getBrainIntelligence)
-      .openapi(setBrainIntelligenceRoute, handlers.setBrainIntelligence)
       .openapi(getIdentityRoute, handlers.getIdentity)
       .openapi(syncIdentityRoute, handlers.syncIdentity)
       .openapi(getWorkspaceSettingsRoute, handlers.getWorkspaceSettings)
@@ -4574,25 +3863,6 @@ export function createV1Router(
       .openapi(saveOnboardingProfileRoute, handlers.saveOnboardingProfile)
       .openapi(saveOnboardingWorkspaceRoute, handlers.saveOnboardingWorkspace)
       .openapi(finishOnboardingRoute, handlers.finishOnboarding)
-      .openapi(listBrainSourceOptionsRoute, handlers.listBrainSourceOptions)
-      .openapi(startBrainImportRoute, handlers.startBrainImport)
-      .openapi(confirmBrainImportRoute, handlers.confirmBrainImport)
-      .openapi(cancelBrainImportRoute, handlers.cancelBrainImport)
-      .openapi(retryBrainImportRoute, handlers.retryBrainImport)
-      .openapi(startWikiImportRoute, handlers.startWikiImport)
-      .openapi(confirmWikiImportRoute, handlers.confirmWikiImport)
-      .openapi(cancelWikiImportRoute, handlers.cancelWikiImport)
-      .openapi(retryWikiImportRoute, handlers.retryWikiImport)
-      .openapi(createBrainDocumentRoute, handlers.createBrainDocument)
-      .openapi(uploadBrainAssetRoute, handlers.uploadBrainAsset)
-      .openapi(replaceBrainAssetRoute, handlers.replaceBrainAsset)
-      .openapi(downloadBrainAssetRoute, handlers.downloadBrainAsset)
-      .openapi(updateBrainDocumentRoute, handlers.updateBrainDocument)
-      .openapi(renameBrainDocumentRoute, handlers.renameBrainDocument)
-      .openapi(deleteBrainDocumentRoute, handlers.deleteBrainDocument)
-      .openapi(createBrainFolderRoute, handlers.createBrainFolder)
-      .openapi(renameBrainFolderRoute, handlers.renameBrainFolder)
-      .openapi(deleteBrainFolderRoute, handlers.deleteBrainFolder)
       .openapi(listWikisRoute, handlers.listWikis)
       .openapi(createWikiRoute, handlers.createWiki)
       .openapi(updateWikiRoute, handlers.updateWiki)
@@ -4603,6 +3873,10 @@ export function createV1Router(
       .openapi(updateWikiPageRoute, handlers.updateWikiPage)
       .openapi(deleteWikiPageRoute, handlers.deleteWikiPage)
       .openapi(addWikiTimelineEntryRoute, handlers.addWikiTimelineEntry)
+      .openapi(startWikiImportRoute, handlers.startWikiImport)
+      .openapi(confirmWikiImportRoute, handlers.confirmWikiImport)
+      .openapi(cancelWikiImportRoute, handlers.cancelWikiImport)
+      .openapi(retryWikiImportRoute, handlers.retryWikiImport)
       .openapi(listWikiSourcesRoute, handlers.listWikiSources)
       .openapi(listWikiIngestActivityRoute, handlers.listWikiIngestActivity)
       .openapi(upsertWikiSourceRoute, handlers.upsertWikiSource)
@@ -4692,10 +3966,7 @@ export function createV1Router(
       .openapi(listIntegrationAccountsRoute, handlers.listIntegrationAccounts)
       .openapi(getSlackBotWorkspaceSettingsRoute, handlers.getSlackBotWorkspaceSettings)
       .openapi(disconnectSlackBotRoute, handlers.disconnectSlackBot)
-      .openapi(getSlackBotDestinationRoute, handlers.getSlackBotDestination)
-      .openapi(setSlackBotDestinationRoute, handlers.setSlackBotDestination)
-      .openapi(listSlackBotChannelsRoute, handlers.listSlackBotChannels)
-      .openapi(getIntegrationAccountUsageRoute, handlers.getIntegrationAccountUsage)
+      .openapi(listIntegrationResourceOptionsRoute, handlers.listIntegrationResourceOptions)
       .openapi(setIntegrationCapabilityModeRoute, handlers.setIntegrationCapabilityMode)
       .openapi(setIntegrationToolModeRoute, handlers.setIntegrationToolMode)
       .openapi(alwaysAllowActionRoute, handlers.alwaysAllowAction)
@@ -4869,38 +4140,14 @@ const placeholderBrowserProfile = {
   createdAt: placeholderTime,
   updatedAt: placeholderTime,
 };
-const placeholderBrainFolder = {
-  id: "brain_folder_contract",
-  path: "inbox",
-  source: "system" as const,
-  createdAt: placeholderTime,
-  updatedAt: placeholderTime,
+const retiredWikiIngestionError = {
+  error: {
+    code: "invalid_request" as const,
+    message: "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
+  },
+  meta,
 };
-const placeholderBrainDocument = {
-  id: "brain_document_contract",
-  brainId: "contract-note",
-  folderPath: "inbox",
-  path: "inbox/contract-note.md",
-  title: "Contract note",
-  content: "# Contract note",
-  body: "Contract note",
-  timeline: [],
-  format: "markdown" as const,
-  mimeType: "text/markdown",
-  originalFileName: null,
-  assetSizeBytes: null,
-  relations: [],
-  sources: [],
-  kind: "page" as const,
-  type: "note" as const,
-  status: "draft" as const,
-  aliases: [],
-  contentHash: "0".repeat(64),
-  sizeBytes: 15,
-  createdByActorId: "actor_contract",
-  createdAt: placeholderTime,
-  updatedAt: placeholderTime,
-};
+
 const placeholderWiki = {
   id: "wiki_contract",
   name: "Wiki",
@@ -5169,146 +4416,6 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       201,
     ),
-  getBrainSnapshot: (c) =>
-    c.json(
-      { data: { folders: [placeholderBrainFolder], documents: [placeholderBrainDocument] }, meta },
-      200,
-    ),
-  getBrainOverview: (c) =>
-    c.json(
-      {
-        data: {
-          windowStartedAt: placeholderTime,
-          itemsAddedLast7Days: 0,
-          retrievalsLast7Days: 0,
-          activeSources: 0,
-        },
-        meta,
-      },
-      200,
-    ),
-  listBrainSourceItems: (c) => c.json({ data: [], meta }, 200),
-  listBrainSources: (c) =>
-    c.json(
-      {
-        data: {
-          viewer: { actorId: "user_contract", isAdmin: true },
-          sources: [],
-          ownAccounts: {
-            linear: [],
-            gmail: [],
-            google_drive: [],
-            hubspot: [],
-            granola: [],
-            fathom: [],
-            attio: [],
-          },
-          linear: {
-            integration: {
-              provider: "linear",
-              connected: false,
-              status: "not_connected",
-              integrationId: null,
-              accountName: null,
-              organizationName: null,
-              statusReason: null,
-            },
-          },
-          gmail: {
-            integration: {
-              provider: "gmail",
-              connected: false,
-              status: "not_connected",
-              integrationId: null,
-              accountEmail: null,
-              statusReason: null,
-            },
-          },
-          googleDrive: {
-            integration: {
-              provider: "google_drive",
-              connected: false,
-              status: "not_connected",
-              integrationId: null,
-              accountEmail: null,
-              statusReason: null,
-            },
-          },
-          hubspot: {
-            integration: {
-              provider: "hubspot",
-              connected: false,
-              status: "not_connected",
-              integrationId: null,
-              accountEmail: null,
-              hubDomain: null,
-              statusReason: null,
-            },
-          },
-          granola: {
-            integration: {
-              provider: "granola",
-              connected: false,
-              status: "not_connected",
-              integrationId: null,
-              accountEmail: null,
-              accountName: null,
-              statusReason: null,
-            },
-          },
-          fathom: {
-            integration: {
-              provider: "fathom",
-              connected: false,
-              status: "not_connected",
-              integrationId: null,
-              accountEmail: null,
-              accountName: null,
-              statusReason: null,
-            },
-          },
-          attio: {
-            integration: {
-              provider: "attio",
-              connected: false,
-              status: "not_connected",
-              integrationId: null,
-              workspaceName: null,
-              statusReason: null,
-            },
-          },
-        },
-        meta,
-      },
-      200,
-    ),
-  setBrainSource: (c) =>
-    c.json(
-      {
-        data: {
-          brainId: "brain_contract",
-          integrationId: "integration_contract",
-          provider: "gmail",
-          enabled: true,
-        },
-        meta,
-      },
-      200,
-    ),
-  deleteBrainSource: (c) =>
-    c.json(
-      {
-        data: {
-          brainId: "brain_contract",
-          integrationId: "integration_contract",
-          deleted: true as const,
-        },
-        meta,
-      },
-      200,
-    ),
-  listBrainSourceOptions: (c) =>
-    c.json({ data: { provider: "linear", teams: [], partial: false }, meta }, 200),
   listBrowserProfiles: (c) => c.json({ data: [], meta }, 200),
   createBrowserProfile: (c) => c.json({ data: placeholderBrowserProfile, meta }, 201),
   deleteBrowserProfile: (c) =>
@@ -5387,25 +4494,6 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       200,
     ),
-  createBrain: (c) => c.json({ data: { brainId: "brain_contract" }, meta }, 201),
-  switchBrain: (c) => c.json({ data: { brainId: "brain_contract" }, meta }, 200),
-  getBrainAccess: (c) =>
-    c.json(
-      {
-        data: {
-          visibility: "workspace" as const,
-          memberIds: [],
-          workspaceMembers: [],
-        },
-        meta,
-      },
-      200,
-    ),
-  setBrainAccess: (c) => c.json({ data: { updated: true as const }, meta }, 200),
-  getBrainEnrichment: (c) => c.json({ data: { enabled: true }, meta }, 200),
-  setBrainEnrichment: (c) => c.json({ data: { enabled: true }, meta }, 200),
-  getBrainIntelligence: (c) => c.json({ data: { intelligence: "basic" as const }, meta }, 200),
-  setBrainIntelligence: (c) => c.json({ data: { intelligence: "basic" as const }, meta }, 200),
   getIdentity: (c) => c.json({ data: contractIdentity(), meta }, 200),
   syncIdentity: (c) => c.json({ data: contractIdentity(), meta }, 200),
   getWorkspaceSettings: (c) =>
@@ -5436,7 +4524,6 @@ const contractDocumentHandlers: V1RouteHandlers = {
         data: {
           workspaceId: "workspace_contract",
           organizationId: "org_contract",
-          brainId: "brain_contract",
         },
         meta,
       },
@@ -5448,7 +4535,6 @@ const contractDocumentHandlers: V1RouteHandlers = {
         data: {
           workspaceId: "workspace_contract",
           organizationId: "org_contract",
-          brainId: "brain_contract",
         },
         meta,
       },
@@ -5460,7 +4546,6 @@ const contractDocumentHandlers: V1RouteHandlers = {
         data: {
           onboarding: null,
           workspace: null,
-          activeBrainId: null,
         },
         meta,
       },
@@ -5473,7 +4558,6 @@ const contractDocumentHandlers: V1RouteHandlers = {
         data: {
           workspaceId: "workspace_contract",
           organizationId: "org_contract",
-          brainId: "brain_contract",
           createdByCaller: true,
         },
         meta,
@@ -5481,100 +4565,6 @@ const contractDocumentHandlers: V1RouteHandlers = {
       200,
     ),
   finishOnboarding: (c) => c.json({ data: { completed: true as const }, meta }, 200),
-  startBrainImport: (c) =>
-    c.json(
-      {
-        data: {
-          importRunId: "gbimp_contract",
-          status: "discovering" as const,
-          replayed: false,
-        },
-        meta,
-      },
-      201,
-    ),
-  confirmBrainImport: (c) =>
-    c.json(
-      {
-        data: { importRunId: "gbimp_contract", status: "ingesting" as const, replayed: false },
-        meta,
-      },
-      200,
-    ),
-  cancelBrainImport: (c) =>
-    c.json(
-      {
-        data: { importRunId: "gbimp_contract", status: "canceled" as const, replayed: false },
-        meta,
-      },
-      200,
-    ),
-  retryBrainImport: (c) =>
-    c.json(
-      {
-        data: { importRunId: "gbimp_contract", status: "discovering" as const, replayed: false },
-        meta,
-      },
-      200,
-    ),
-  startWikiImport: (c) =>
-    c.json(
-      {
-        data: { importRunId: "gbimp_contract", status: "discovering" as const, replayed: false },
-        meta,
-      },
-      201,
-    ),
-  confirmWikiImport: (c) =>
-    c.json(
-      {
-        data: { importRunId: "gbimp_contract", status: "ingesting" as const, replayed: false },
-        meta,
-      },
-      200,
-    ),
-  cancelWikiImport: (c) =>
-    c.json(
-      {
-        data: { importRunId: "gbimp_contract", status: "canceled" as const, replayed: false },
-        meta,
-      },
-      200,
-    ),
-  retryWikiImport: (c) =>
-    c.json(
-      {
-        data: { importRunId: "gbimp_contract", status: "discovering" as const, replayed: false },
-        meta,
-      },
-      200,
-    ),
-  createBrainDocument: (c) => c.json({ data: placeholderBrainDocument, meta }, 201),
-  uploadBrainAsset: (c) =>
-    c.json(
-      {
-        data: { document: placeholderBrainDocument, quotaPaused: false, replayed: false },
-        meta,
-      },
-      201,
-    ),
-  replaceBrainAsset: (c) =>
-    c.json(
-      {
-        data: { document: placeholderBrainDocument, quotaPaused: false, replayed: false },
-        meta,
-      },
-      200,
-    ),
-  downloadBrainAsset: (c) =>
-    c.body("contract", 200, { "Content-Type": "application/octet-stream" }),
-  updateBrainDocument: (c) => c.json({ data: placeholderBrainDocument, meta }, 200),
-  renameBrainDocument: (c) => c.json({ data: placeholderBrainDocument, meta }, 200),
-  deleteBrainDocument: (c) =>
-    c.json({ data: { documentId: placeholderBrainDocument.id }, meta }, 200),
-  createBrainFolder: (c) => c.json({ data: placeholderBrainFolder, meta }, 201),
-  renameBrainFolder: (c) => c.json({ data: { path: placeholderBrainFolder.path }, meta }, 200),
-  deleteBrainFolder: (c) => c.json({ data: { path: placeholderBrainFolder.path }, meta }, 200),
   listWikis: (c) => c.json({ data: [placeholderWiki], meta }, 200),
   createWiki: (c) => c.json({ data: placeholderWiki, meta }, 201),
   updateWiki: (c) => c.json({ data: placeholderWiki, meta }, 200),
@@ -5604,6 +4594,10 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       201,
     ),
+  startWikiImport: (c) => c.json(retiredWikiIngestionError, 410),
+  confirmWikiImport: (c) => c.json(retiredWikiIngestionError, 410),
+  cancelWikiImport: (c) => c.json(retiredWikiIngestionError, 410),
+  retryWikiImport: (c) => c.json(retiredWikiIngestionError, 410),
   listWikiSources: (c) => c.json({ data: [placeholderWikiSource], meta }, 200),
   listWikiIngestActivity: (c) => c.json({ data: { items: [], nextCursor: null }, meta }, 200),
   upsertWikiSource: (c) => c.json({ data: placeholderWikiSource, meta }, 200),
@@ -6280,23 +5274,8 @@ const contractDocumentHandlers: V1RouteHandlers = {
       200,
     ),
   disconnectSlackBot: (c) => c.json({ data: { updated: true as const }, meta }, 200),
-  getSlackBotDestination: (c) =>
-    c.json(
-      {
-        data: {
-          installed: false,
-          botConnected: false,
-          isAdmin: true,
-          brainVisibility: "workspace" as const,
-          source: null,
-        },
-        meta,
-      },
-      200,
-    ),
-  setSlackBotDestination: (c) => c.json({ data: { updated: true as const }, meta }, 200),
-  listSlackBotChannels: (c) => c.json({ data: { channels: [], partial: false }, meta }, 200),
-  getIntegrationAccountUsage: (c) => c.json({ data: { affectedBrainSourceCount: 0 }, meta }, 200),
+  listIntegrationResourceOptions: (c) =>
+    c.json({ data: { provider: "gmail" as const, labels: [] }, meta }, 200),
   setIntegrationCapabilityMode: (c) =>
     c.json(
       {
@@ -6629,22 +5608,8 @@ function contractIdentity() {
         name: "Contract Workspace",
         slug: "contract-workspace",
         role: "admin" as const,
-        legacyBrainEnabled: false,
       },
     ],
     activeWorkspaceId: "workspace_contract",
-    brains: [
-      {
-        id: "brain_contract",
-        workspaceId: "workspace_contract",
-        name: "General",
-        slug: "general",
-        description: null,
-        visibility: "workspace" as const,
-        enrichmentEnabled: true,
-        intelligence: "basic" as const,
-      },
-    ],
-    activeBrainId: "brain_contract",
   };
 }

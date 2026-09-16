@@ -14,13 +14,12 @@ const importPatterns = {
     /(?:\bfrom\s*|\bimport\s*(?:\(\s*)?|\brequire\s*\(\s*)["']drizzle-orm(?:\/[^"']*)?["']/u,
 };
 const forbiddenPatterns = {
-  brainWorkerControl:
-    /\btrigger(?:BrainIngestWake|BrainImportWake|GoogleDriveSyncWake)\b|\/internal\/goat\/(?:brain-ingest\/wake|brain-import\/wake|google-drive\/sync)/u,
+  syncWorkerControl: /\btriggerGoogleDriveSyncWake\b|\/internal\/goat\/google-drive\/sync/u,
 };
 
 const sourceFiles = await listSourceFiles(webRoot);
 const actual = { dbImports: [], drizzleImports: [] };
-const forbidden = { brainWorkerControl: [] };
+const forbidden = { syncWorkerControl: [] };
 
 for (const absolutePath of sourceFiles) {
   const source = await readFile(absolutePath, "utf8");
@@ -52,7 +51,7 @@ if (failed) {
   process.exitCode = 1;
 } else {
   console.log("Web domain boundary final rule satisfied (0 @opencompany/db, 0 drizzle-orm).");
-  console.log("Web Brain import, ingestion, and Google Drive worker-control callers: 0.");
+  console.log("Web Google Drive worker-control callers: 0.");
 }
 
 async function listSourceFiles(directory) {

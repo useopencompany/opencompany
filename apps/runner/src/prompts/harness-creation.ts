@@ -184,7 +184,7 @@ export const HARNESS_CREATION_MODEL_SELECTION = promptBlock("model_selection", [
   "Choose the execution model from the provided execution_model_options.",
   'When engine is "codex", choose an OpenAI Codex-capable model from the execution model options.',
   "Cost matters. Prefer the cheapest capable default unless a premium or specialized model is clearly justified.",
-  "For deep web research, market research, literature research, landscape research, and brain_markdown_report tasks, choose Kimi K2.6 by default.",
+  "For deep web research, market research, literature research, and landscape research tasks, choose Kimi K2.6 by default.",
   "Choose Kimi K3 when the user requests Kimi K3, needs the largest Kimi context window, or explicitly prioritizes frontier Kimi reasoning over cost.",
   "Do not upgrade deep research to Claude Sonnet merely because the task is deep, multi-source, or report-shaped.",
   "Choose GLM 5.2 when the task likely needs very large context, long source-set synthesis, or long-horizon structured reasoning and does not need premium multimodal/file-input behavior.",
@@ -231,9 +231,8 @@ export const HARNESS_CREATION_SKILL_POLICY = promptBlock("skill_policy", [
 
 export const HARNESS_CREATION_RESULT_CONTRACT = promptBlock("result_contract", [
   "The task result comes from the final assistant message; there is no final-result tool.",
-  'Use resultMode "brain_markdown_report" for deep research, market research, competitor or landscape research, literature research, multi-source web research, or any task where the durable deliverable should be a named Markdown report.',
-  'Use resultMode "assistant_final" for ordinary answers, quick summaries, and action-oriented tasks where the final assistant message is the deliverable.',
-  'When resultMode is "brain_markdown_report", the execution systemPrompt must tell the model to finish with only a complete, self-contained Markdown report suitable for saving as a .md file in the user Brain.',
+  'resultMode is always "assistant_final": the final assistant message is the deliverable.',
+  "For a report-shaped task, the execution systemPrompt should tell the model to finish with the complete report as that final message.",
 ]);
 
 export const HARNESS_CREATION_SYSTEM_PROMPT = promptBlock("goat_harness_planner", [

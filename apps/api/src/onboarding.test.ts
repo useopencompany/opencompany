@@ -1,11 +1,9 @@
 import { ensureWorkspaceOrganization } from "@opencompany/agent/workspaces/organizations";
 import { provisionWorkspace } from "@opencompany/agent/workspaces/provisioning";
-import { createBrainFolderRow, deleteBrainFolderRow } from "@opencompany/db/brain-files";
 import {
   getOnboarding,
   hasOwnedHobbyWorkspace,
   isWorkspaceSlugAvailable,
-  listAccessibleBrains,
   listWorkspacesForUser,
   markUserOnboarded,
   updateWorkspaceNameAndSlug,
@@ -15,17 +13,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiIdentity } from "./auth";
 import { createOnboardingService } from "./onboarding";
 
-vi.mock("@opencompany/db/brain-files", () => ({
-  createBrainFolderRow: vi.fn(async () => undefined),
-  deleteBrainFolderRow: vi.fn(async () => undefined),
-}));
-
 vi.mock("@opencompany/db/workspaces", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getOnboarding: vi.fn(),
   hasOwnedHobbyWorkspace: vi.fn(async () => false),
   isWorkspaceSlugAvailable: vi.fn(async () => true),
-  listAccessibleBrains: vi.fn(),
   listWorkspacesForUser: vi.fn(),
   markUserOnboarded: vi.fn(async () => undefined),
   updateWorkspaceNameAndSlug: vi.fn(async () => undefined),
@@ -45,7 +37,6 @@ const identity: ApiIdentity = {
   userId: "user_1",
   organizationId: null,
   activeWorkspaceId: null,
-  activeBrainId: null,
   method: "session",
   credentialKind: "browser_cookie",
 };
@@ -56,7 +47,6 @@ const workspace = {
   slug: "current-organization",
   workosOrganizationId: "org_current",
   createdByWorkosId: "user_1",
-  legacyBrainEnabled: false,
 };
 
 const workos = {
@@ -72,16 +62,12 @@ describe("onboarding service", () => {
     vi.mocked(hasOwnedHobbyWorkspace).mockResolvedValue(false);
     vi.mocked(isWorkspaceSlugAvailable).mockResolvedValue(true);
     vi.mocked(listWorkspacesForUser).mockResolvedValue([] as never);
-    vi.mocked(listAccessibleBrains).mockResolvedValue([
-      { id: "brain_general", slug: "general" },
-    ] as never);
     vi.mocked(provisionWorkspace).mockResolvedValue({
       workspace: {
         ...workspace,
         id: "goat_ws_new",
         workosOrganizationId: "org_new",
       },
-      brain: null,
     } as never);
   });
 
@@ -115,7 +101,6 @@ describe("onboarding service", () => {
     ).resolves.toEqual({
       workspaceId: "goat_ws_new",
       organizationId: "org_new",
-      brainId: null,
       createdByCaller: true,
     });
     expect(provisionWorkspace).toHaveBeenCalledWith(
@@ -184,7 +169,6 @@ describe("onboarding service", () => {
     ).resolves.toEqual({
       workspaceId: "goat_ws_current",
       organizationId: "org_current",
-      brainId: null,
       createdByCaller: true,
     });
     expect(workos.organizations.updateOrganization).toHaveBeenCalledWith({
@@ -213,22 +197,5 @@ describe("onboarding service", () => {
       { db },
     );
     expect(markUserOnboarded).toHaveBeenCalledWith("user_1", { db });
-  });
-
-  it("keeps optional Brain folder tailoring for an existing legacy workspace", async () => {
-    vi.mocked(listWorkspacesForUser).mockResolvedValue([
-      { workspace: { ...workspace, legacyBrainEnabled: true }, role: "admin" },
-    ] as never);
-    vi.mocked(createBrainFolderRow).mockRejectedValueOnce(new Error("folder conflict"));
-    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const service = createOnboardingService({ db: {}, workos: workos as never });
-    await expect(
-      service.saveWorkspace(identity, {
-        workspaceId: "goat_ws_ignored",
-        name: "Analytical Co",
-      }),
-    ).resolves.toMatchObject({ workspaceId: "goat_ws_current", brainId: "brain_general" });
-    expect(deleteBrainFolderRow).toHaveBeenCalled();
-    warning.mockRestore();
   });
 });

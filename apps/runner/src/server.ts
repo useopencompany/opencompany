@@ -3,8 +3,6 @@ import { createLogger } from "@opencompany/observability";
 import Fastify from "fastify";
 import { registerAcpToolsMcpRoute } from "./acp-tools-mcp";
 import { alwaysAllowAction } from "./action-permissions";
-import { wakeBrainImportWorker } from "./brain-import-worker";
-import { wakeBrainIngestWorker } from "./brain-ingest-worker";
 import { pollCodexDeviceAuthFlow, startCodexDeviceAuthFlow } from "./codex-auth";
 import { wakeCodexChatWorker } from "./codex-chat-worker";
 import { CodingWorkspaceAccessError, mintCodingWorkspaceAccess } from "./coding-workspace-runtime";
@@ -12,7 +10,6 @@ import { createCodingWorkspaceTransport } from "./coding-workspace-runtime-trans
 import { createDictationTicket } from "./dictation-auth";
 import { cancelDopplerAuth, pollDopplerAuthFlow, startDopplerAuthFlow } from "./doppler-auth";
 import type { RunnerEnv } from "./env";
-import { wakeGoogleDriveSyncWorker } from "./google-drive-sync-worker";
 import { planHarnessForTask } from "./harness";
 import { getHarnessPlannerContextForRunner } from "./harness-planner";
 import { completeInfisicalAuthFlow, startInfisicalAuthFlow } from "./infisical-auth";
@@ -67,7 +64,6 @@ export function createServer(
     service: "opencompany-runner",
     capabilities: {
       acpToolsMcp: "v3",
-      brainWorkerAdmission: "postgres-v1",
       personalSkillsAuthorization: "v1",
       personalPluginsAuthorization: "v1",
     },
@@ -157,12 +153,7 @@ export function createServer(
 
   app.post("/internal/goat/brain-ingest/wake", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
-    if (!env.taskWorkerEnabled) {
-      reply.status(503).send({ error: "opencompany workers are disabled." });
-      return;
-    }
-    wakeBrainIngestWorker();
-    reply.status(202).send({ ok: true });
+    return reply.code(410).send({ error: "Legacy Brain ingestion has been retired." });
   });
 
   app.post("/internal/goat/wiki-ingest/wake", async (request, reply) => {
@@ -202,22 +193,12 @@ export function createServer(
 
   app.post("/internal/goat/google-drive/sync", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
-    if (!env.taskWorkerEnabled) {
-      reply.status(503).send({ error: "opencompany workers are disabled." });
-      return;
-    }
-    wakeGoogleDriveSyncWorker();
-    reply.status(202).send({ ok: true });
+    return reply.code(410).send({ error: "Google Drive ingestion has been retired." });
   });
 
   app.post("/internal/goat/brain-import/wake", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
-    if (!env.taskWorkerEnabled) {
-      reply.status(503).send({ error: "opencompany workers are disabled." });
-      return;
-    }
-    wakeBrainImportWorker();
-    reply.status(202).send({ ok: true });
+    return reply.code(410).send({ error: "Legacy Brain import has been retired." });
   });
 
   app.post("/internal/goat/task-harness/plan", async (request, reply) => {

@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   alwaysAllowChatActionAction,
   disconnectIntegrationAccountAction,
-  getIntegrationAccountUsageAction,
   setIntegrationCapabilityModeAction,
 } from "./integration-account-actions";
 
@@ -37,19 +36,6 @@ describe("integration account adapters", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
-  });
-
-  it("reads account usage through the typed usage query", async () => {
-    const requests = stubApi(() => Response.json({ data: { affectedBrainSourceCount: 2 }, meta }));
-
-    await expect(getIntegrationAccountUsageAction("gint_abc")).resolves.toEqual({
-      ok: true,
-      affectedBrainSourceCount: 2,
-    });
-    const request = requests[0] as Request;
-    expect(request.method).toBe("GET");
-    expect(new URL(request.url).pathname).toBe("/v1/integration-accounts/gint_abc/usage");
-    expect(request.headers.get("cookie")).toBe("wos-session=sealed");
   });
 
   it("keeps the retired owner-only copy on non-owned disconnects", async () => {

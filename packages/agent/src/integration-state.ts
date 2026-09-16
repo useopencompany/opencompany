@@ -30,8 +30,7 @@ export type GoogleDriveSourceProviderState = {
   statusReason: string | null;
 };
 
-// The Gmail brain-source connection view adds ingestion-specific status detail
-// used by the brain-source picker and save action.
+// The Gmail connection view adds status detail used by the plugin settings page.
 export type GmailSourceProviderState = {
   provider: "gmail";
   connected: boolean;
@@ -85,7 +84,7 @@ export type HubSpotProviderState = {
   toolModes: Record<string, unknown>;
 };
 
-// The Linear brain-source connection (a Linear OAuth app with webhooks), as
+// The Linear connection (a Linear OAuth app with webhooks), as
 // opposed to LinearProviderState which describes the MCP connector. Both
 // share provider "linear"; rows are told apart by external_id ("linear_mcp"
 // for MCP, the Linear organization id for the source connection).
@@ -99,7 +98,7 @@ export type LinearSourceProviderState = {
   statusReason: string | null;
 };
 
-// The HubSpot brain-source connection (a HubSpot OAuth app with webhooks).
+// The HubSpot connection.
 // Rows key external_id on the HubSpot portal id.
 export type HubspotSourceProviderState = {
   provider: "hubspot";
@@ -170,7 +169,7 @@ export type ConvexEventsProviderState = {
 };
 
 // Granola connects with a personal API key minted in the Granola app; the
-// integration id is what the brain-source picker and save action key config
+// integration id is what the plugin settings page and save action key config
 // rows on.
 export type GranolaProviderState = {
   provider: "granola";
@@ -193,7 +192,7 @@ export type GranolaMcpProviderState = {
   toolModes: Record<string, unknown>;
 };
 // Fathom connects with a personal API key minted in Fathom's user settings;
-// the integration id is what the brain-source picker and save action key
+// the integration id is what the plugin settings page and save action key
 // config rows on.
 export type FathomProviderState = {
   provider: "fathom";
@@ -547,7 +546,7 @@ export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): 
     if (row.workspaceId ?? row.workspace_id) continue;
     // Provider "linear" covers two kinds of rows; the MCP card must only ever
     // reflect the MCP connector row (external_id "linear_mcp"). Linear
-    // brain-source rows are surfaced through the brain settings page instead.
+    // plugin connections are surfaced through the Plugins page instead.
     if (row.provider === "linear" && (row.externalId ?? row.external_id) !== "linear_mcp") {
       continue;
     }

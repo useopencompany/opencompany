@@ -4,11 +4,8 @@ import {
   GMAIL_EMAIL_RECEIVED_EVENT,
   GMAIL_LABEL_FILTER_ID,
   GMAIL_PROVIDER,
-  type GmailMessageEventInsert,
   gmailWorkflowEventContext,
   gmailWorkflowEventDeliveryId,
-  insertGmailMessageEvents,
-  listEnabledGmailBrainSourceRoutes,
   updateGmailSyncCursor,
 } from "@opencompany/db/gmail";
 import {
@@ -47,15 +44,12 @@ export const GMAIL_POLL_INTERVAL_MS = 5 * 60_000;
 // absorb any residual double-poll race.
 export const GMAIL_POLL_COOLDOWN_MS = 4 * 60_000;
 
-// Deterministic noise floor only: everything else (promotions, notifications,
-// transactional mail) buffers and is judged by the ingest agent under the
-// brain owner's instructions.
+// Deterministic noise floor: these labels never start a workflow.
 const SKIPPED_LABEL_IDS = new Set(["DRAFT", "SPAM", "TRASH", "CHAT"]);
 
 // How stale an arriving message may be and still start a workflow. A cursor that sat frozen — an
-// ingestion source switched off, an event trigger added long after the account was connected —
-// would otherwise replay a mailbox's backlog as agent tasks. Older mail still buffers for
-// ingestion; it just never fires.
+// event trigger added long after the account was connected — would otherwise replay a mailbox's
+// backlog as agent tasks.
 const GMAIL_EVENT_MAX_MESSAGE_AGE_MS = 24 * 60 * 60_000;
 
 // How many messages in one pass may start workflow runs. Meetings are low volume and Granola
@@ -87,12 +81,6 @@ export async function listGmailPollCandidates(
       AND i.status = 'connected'
       AND (
         EXISTS (
-          SELECT 1 FROM goat.brain_sources bs
-          WHERE bs.integration_id = i.id
-            AND bs.provider = 'gmail'
-            AND bs.enabled = true
-        )
-        OR EXISTS (
           SELECT 1
           FROM goat.workflows w
           JOIN goat.plugins p
@@ -141,7 +129,7 @@ export async function pollGmailIntegration(input: {
   signal: AbortSignal;
   cooldownMs?: number;
   now?: Date;
-}): Promise<{ buffered: number; workflowRuns: number } | null> {
+}): Promise<{ workflowRuns: number } | null> {
   const { candidate } = input;
   const db = getDb();
   await ensureGmailSyncState(
@@ -186,7 +174,7 @@ export async function pollGmailIntegration(input: {
       },
       db,
     );
-    return { buffered: 0, workflowRuns: 0 };
+    return { workflowRuns: 0 };
   }
 
   const history = await listGmailHistoryMessagesAdded(call, state.historyId);
@@ -208,32 +196,24 @@ export async function pollGmailIntegration(input: {
       event: "opencompany.goat_gmail_history_reset",
       integration_id: candidate.integrationId,
     });
-    return { buffered: 0, workflowRuns: 0 };
+    return { workflowRuns: 0 };
   }
 
-  // Both consumers are authorized per pass, not per message: an ingestion source can be switched
-  // off and a workflow, its event opt-in, or the connection can all change between polls. An
-  // event-only account has no brain source to buffer for, and a buffered row nothing will ever
-  // flush is waste, so the two are resolved independently. Most passes see no new mail at all,
-  // which is why neither read happens before the history listing has something to route.
-  const [brainRoutes, workflowRoutes] =
-    history.messages.length === 0
-      ? [[], []]
-      : await Promise.all([
-          listEnabledGmailBrainSourceRoutes([candidate.integrationId], db),
-          listGmailWorkflowEventRoutes(candidate, db),
-        ]);
+  // Routes are authorized per pass, not per message: a workflow, its event opt-in, or the
+  // connection can change between polls. Most passes see no new mail at all, which is why the
+  // read does not happen before the history listing has something to route.
+  const workflowRoutes =
+    history.messages.length === 0 ? [] : await listGmailWorkflowEventRoutes(candidate, db);
 
   const now = input.now ?? new Date();
-  const inserts: GmailMessageEventInsert[] = [];
   let routedMessages = 0;
   let workflowRuns = 0;
   let cappedMessages = 0;
-  // The candidate query ran a pass ago, so the ingestion source or the event trigger it matched on
-  // may already be gone. Nothing downstream wants these messages, and reading each one's metadata
-  // to discover that would cost an API call per arriving message. The cursor still advances, or the
-  // next pass would re-read the same window forever.
-  const messages = brainRoutes.length === 0 && workflowRoutes.length === 0 ? [] : history.messages;
+  // The candidate query ran a pass ago, so the event trigger it matched on may already be gone.
+  // Nothing downstream wants these messages, and reading each one's metadata to discover that
+  // would cost an API call per arriving message. The cursor still advances, or the next pass would
+  // re-read the same window forever.
+  const messages = workflowRoutes.length === 0 ? [] : history.messages;
   for (const discovered of messages) {
     if (discovered.labelIds.some((label) => SKIPPED_LABEL_IDS.has(label))) continue;
     const metadata = await fetchGmailMessageMetadata(call, discovered.id);
@@ -271,25 +251,6 @@ export async function pollGmailIntegration(input: {
         });
       }
     }
-
-    if (brainRoutes.length === 0) continue;
-    inserts.push({
-      integrationId: candidate.integrationId,
-      userWorkosId: candidate.userWorkosId,
-      threadId,
-      messageId: metadata.id,
-      rfc822MessageId: metadata.rfc822MessageId,
-      direction,
-      subject: metadata.subject,
-      fromHeader: metadata.from,
-      payload: {
-        labelIds,
-        ...(metadata.to ? { to: metadata.to } : {}),
-        ...(metadata.cc ? { cc: metadata.cc } : {}),
-        ...(metadata.snippet ? { snippet: metadata.snippet } : {}),
-      },
-      eventTime,
-    });
   }
 
   if (cappedMessages > 0) {
@@ -301,7 +262,6 @@ export async function pollGmailIntegration(input: {
     });
   }
 
-  const buffered = await insertGmailMessageEvents(inserts, db);
   if (history.latestHistoryId) {
     await updateGmailSyncCursor(
       {
@@ -311,7 +271,7 @@ export async function pollGmailIntegration(input: {
       db,
     );
   }
-  return { buffered, workflowRuns };
+  return { workflowRuns };
 }
 
 async function listGmailWorkflowEventRoutes(
@@ -403,11 +363,10 @@ export function startGmailPollWorker(env: RunnerEnv, options: { pollIntervalMs?:
           });
           return null;
         });
-        if (polled && (polled.buffered > 0 || polled.workflowRuns > 0)) {
-          logger.info("opencompany Gmail poll buffered messages or started workflow runs", {
-            event: "opencompany.goat_gmail_messages_buffered",
+        if (polled && polled.workflowRuns > 0) {
+          logger.info("opencompany Gmail poll started workflow runs", {
+            event: "opencompany.goat_gmail_workflow_runs_started",
             integration_id: candidate.integrationId,
-            buffered_count: polled.buffered,
             workflow_run_count: polled.workflowRuns,
           });
         }

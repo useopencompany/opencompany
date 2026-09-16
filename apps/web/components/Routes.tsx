@@ -60,9 +60,7 @@ import {
   useState,
   useTransition,
 } from "react";
-import { type BrainSummaryView, useAppData } from "@/components/AppDataProvider";
-import { BrainSettings } from "@/components/BrainSettings";
-import { BrainView } from "@/components/BrainView";
+import { useAppData } from "@/components/AppDataProvider";
 import { BrowserProfilesSettings } from "@/components/BrowserProfilesSettings";
 import { FathomIntegrationSetup } from "@/components/FathomIntegrationSetup";
 import { InferenceSettingsPanel } from "@/components/InferenceSettingsPanel";
@@ -109,7 +107,6 @@ import {
   setHeadlessSkillScope,
   updateHeadlessWorkspaceSkill,
 } from "@/lib/headless-knowledge-commands";
-import type { BrainOverviewStats, BrainSnapshot } from "@/lib/headless-knowledge-types";
 import { DEFAULT_MODEL } from "@/lib/model-options";
 import type { RepoConfigView, WorkspaceRepository } from "@/lib/repo-config-actions";
 import type { WorkspaceSandboxSizeResult } from "@/lib/sandbox-size";
@@ -164,7 +161,6 @@ export function HomeRoute({
   return (
     <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
       <Surface
-        key={data.activeBrain?.id ?? "no-brain"}
         tasks={data.tasks}
         allTasks={data.allTasks}
         defaultModel={DEFAULT_MODEL}
@@ -465,90 +461,16 @@ function AppearanceSection() {
 }
 
 export function FathomIngestionRoute() {
-  const { activeBrain, featureFlags, integrations } = useAppData();
-  const brainSourcesHref =
-    featureFlags.legacyBrain && activeBrain
-      ? `/brain/${encodeURIComponent(activeBrain.id)}/settings`
-      : null;
+  const { integrations } = useAppData();
 
   return (
     <PageContent
-      title="Fathom ingestion"
-      description="Legacy API-key ingestion for Brain"
+      title="Fathom"
+      description="API-key connection for the Fathom plugin"
       backLink={{ href: "/plugins/fathom", label: "Fathom plugin" }}
     >
-      <FathomIntegrationSetup
-        initialState={integrations.fathom}
-        brainSourcesHref={brainSourcesHref}
-      />
+      <FathomIntegrationSetup initialState={integrations.fathom} />
     </PageContent>
-  );
-}
-
-export function BrainRoute({
-  path,
-  routeBrainId,
-  selectedBrain,
-  initialBrainSnapshot,
-  initialOverviewStats,
-}: {
-  path: string[];
-  routeBrainId: string | null;
-  selectedBrain: BrainSummaryView | null;
-  initialBrainSnapshot: BrainSnapshot | null;
-  initialOverviewStats?: BrainOverviewStats | null;
-}) {
-  // "settings" is a reserved segment directly after an explicit brain id.
-  if (routeBrainId && selectedBrain && path[0] === "settings") {
-    return <BrainSettingsRoute brain={selectedBrain} />;
-  }
-  const brain = initialBrainSnapshot ?? { folders: [], documents: [] };
-  const isOverviewRoute = path.length === 0 || (path.length === 1 && path[0] === "overview");
-  const requestedPath = path.join("/");
-  const requestedFolderExists = brain.folders.some((folder) => folder.path === requestedPath);
-  const initialBrainId = path.length > 1 && !requestedFolderExists ? (path.at(-1) ?? null) : null;
-  const initialFolderPath = isOverviewRoute
-    ? null
-    : path.length > 0
-      ? initialBrainId
-        ? path.slice(0, -1).join("/")
-        : requestedPath
-      : (brain.folders[0]?.path ?? null);
-
-  return (
-    <BrainView
-      brainRef={selectedBrain?.id ?? null}
-      brain={selectedBrain}
-      folders={brain.folders}
-      documents={brain.documents}
-      initialFolderPath={initialFolderPath || null}
-      initialBrainId={initialBrainId}
-      routeBrainId={routeBrainId}
-      initialOverview={isOverviewRoute}
-      overviewStats={initialOverviewStats ?? null}
-      initialDataLoaded={initialBrainSnapshot !== null || !selectedBrain}
-    />
-  );
-}
-
-function BrainSettingsRoute({ brain }: { brain: BrainSummaryView }) {
-  const { workspace } = useAppData();
-
-  return (
-    <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
-      <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
-        <div className="flex w-full max-w-[960px] flex-col gap-6 pb-24 pt-16 sm:pt-24">
-          <BackLink href={`/brain/${encodeURIComponent(brain.id)}`} label={brain.name} />
-          {workspace.role === "admin" ? (
-            <BrainSettings brain={brain} workspace={workspace} />
-          ) : (
-            <p className="text-[13px] leading-5 text-ink-subtle">
-              Only workspace admins can manage brain settings.
-            </p>
-          )}
-        </div>
-      </div>
-    </main>
   );
 }
 

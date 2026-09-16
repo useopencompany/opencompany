@@ -459,12 +459,6 @@ export const TaskReadModelNameSchema = z.literal("tasks-v1");
 export const TaskActivityReadModelNameSchema = z.literal("task-activities-v1");
 export const WorkflowReadModelNameSchema = z.literal("workflows-v1");
 export const WorkflowScheduleReadModelNameSchema = z.literal("workflow-schedules-v1");
-export const BrainFolderReadModelNameSchema = z.literal("brain-folders-v1");
-export const BrainDocumentReadModelNameSchema = z.literal("brain-documents-v1");
-export const BrainTimelineReadModelNameSchema = z.literal("brain-timeline-v1");
-export const BrainEdgeReadModelNameSchema = z.literal("brain-edges-v1");
-export const BrainIngestJobReadModelNameSchema = z.literal("brain-ingest-jobs-v1");
-export const BrainImportRunReadModelNameSchema = z.literal("brain-import-runs-v1");
 export const WikiImportRunReadModelNameSchema = z.literal("wiki-import-runs-v1");
 export const WikiPageReadModelNameSchema = z.literal("wiki-pages-v2");
 export const WikiTimelineReadModelNameSchema = z.literal("wiki-timeline-v1");
@@ -475,13 +469,6 @@ export const ReadModelSchema = z.enum([
   TaskActivityReadModelNameSchema.value,
   WorkflowReadModelNameSchema.value,
   WorkflowScheduleReadModelNameSchema.value,
-  BrainFolderReadModelNameSchema.value,
-  BrainDocumentReadModelNameSchema.value,
-  BrainTimelineReadModelNameSchema.value,
-  BrainEdgeReadModelNameSchema.value,
-  BrainIngestJobReadModelNameSchema.value,
-  BrainImportRunReadModelNameSchema.value,
-  WikiImportRunReadModelNameSchema.value,
   WikiPageReadModelNameSchema.value,
   WikiTimelineReadModelNameSchema.value,
   IntegrationAccountReadModelNameSchema.value,
@@ -698,623 +685,6 @@ export const TaskActivityReadModelSchema = z
 export const WorkflowReadModelSchema = WorkflowSchema.omit({ slackChannel: true }).openapi(
   "WorkflowReadModelV1",
 );
-
-export const BrainTimelineEntrySchema = z
-  .object({
-    evidenceId: z.string().max(80),
-    at: TimestampSchema,
-    body: z.string(),
-  })
-  .strict()
-  .openapi("BrainTimelineEntry");
-
-export const BrainRelationSchema = z
-  .object({ type: z.string().min(1).max(64), to: z.string().min(1).max(80) })
-  .strict()
-  .openapi("BrainRelation");
-
-export const BrainSourceSchema = z
-  .object({
-    ref: z.string().min(1).max(256),
-    capturedAt: TimestampSchema.optional(),
-    title: z.string().max(512).optional(),
-  })
-  .strict()
-  .openapi("BrainSource");
-
-export const BrainFolderSchema = z
-  .object({
-    id: ResourceIdSchema,
-    path: z.string().min(1).max(512),
-    source: z.enum(["system", "custom"]),
-    createdAt: TimestampSchema,
-    updatedAt: TimestampSchema,
-  })
-  .strict()
-  .openapi("BrainFolder");
-
-export const BrainDocumentSchema = z
-  .object({
-    id: ResourceIdSchema,
-    brainId: z.string().min(1).max(80),
-    folderPath: z.string().min(1).max(512),
-    path: z.string().min(1).max(640),
-    title: z.string().max(160),
-    description: z.string().max(1_024).optional(),
-    content: z.string(),
-    body: z.string(),
-    timeline: z.array(BrainTimelineEntrySchema),
-    format: z.enum([
-      "markdown",
-      "pdf",
-      "docx",
-      "xlsx",
-      "srt",
-      "csv",
-      "tsv",
-      "json",
-      "text",
-      "image",
-    ]),
-    mimeType: z.string().min(1).max(255),
-    originalFileName: z.string().max(512).nullable(),
-    assetSizeBytes: z.number().int().min(0).nullable(),
-    relations: z.array(BrainRelationSchema),
-    sources: z.array(BrainSourceSchema),
-    kind: z.enum(["page", "evidence"]),
-    type: z.enum([
-      "person",
-      "company",
-      "project",
-      "meeting",
-      "concept",
-      "source",
-      "analysis",
-      "note",
-    ]),
-    status: z.enum(["draft", "active", "archived", "merged"]),
-    aliases: z.array(z.string().max(512)),
-    contentHash: z.string().regex(/^[0-9a-f]{64}$/u),
-    sizeBytes: z.number().int().min(0),
-    createdByActorId: ResourceIdSchema.nullable(),
-    createdAt: TimestampSchema,
-    updatedAt: TimestampSchema,
-  })
-  .strict()
-  .openapi("BrainDocument");
-
-export const BrainSnapshotSchema = z
-  .object({ folders: z.array(BrainFolderSchema), documents: z.array(BrainDocumentSchema) })
-  .strict()
-  .openapi("BrainSnapshot");
-
-export const BrainOverviewSchema = z
-  .object({
-    windowStartedAt: TimestampSchema,
-    itemsAddedLast7Days: z.number().int().min(0),
-    retrievalsLast7Days: z.number().int().min(0),
-    activeSources: z.number().int().min(0),
-  })
-  .strict()
-  .openapi("BrainOverview");
-
-export const BrainFolderReadModelSchema = BrainFolderSchema.openapi("BrainFolderReadModelV1");
-export const BrainDocumentReadModelSchema = BrainDocumentSchema.openapi("BrainDocumentReadModelV1");
-
-export const BrainTimelineReadModelSchema = z
-  .object({
-    id: z.number().int().min(1),
-    documentId: ResourceIdSchema,
-    brainId: z.string().min(1).max(80),
-    evidenceId: z.string().max(80),
-    at: TimestampSchema,
-    sourceRef: z.string().max(256),
-    sourceTitle: z.string().max(512).nullable(),
-    summary: z.string(),
-    detail: z.string(),
-    createdAt: TimestampSchema,
-  })
-  .strict()
-  .openapi("BrainTimelineReadModelV1");
-
-export const BrainEdgeReadModelSchema = z
-  .object({
-    id: ResourceIdSchema,
-    documentId: ResourceIdSchema,
-    fromBrainId: z.string().min(1).max(80),
-    toBrainId: z.string().min(1).max(80),
-    relationType: z.string().min(1).max(64),
-    sourceKind: z.enum(["relation", "wiki_link"]),
-    createdAt: TimestampSchema,
-    updatedAt: TimestampSchema,
-  })
-  .strict()
-  .openapi("BrainEdgeReadModelV1");
-
-export const BrainIngestJobResultPageSchema = z
-  .object({
-    brainId: z.string().min(1).max(80),
-    folderPath: z.string().min(1).max(512),
-    title: z.string().max(160),
-    action: z.enum(["created", "updated", "conflict_created"]),
-  })
-  .strict()
-  .openapi("BrainIngestJobResultPage");
-
-export const BrainIngestJobResultSchema = z
-  .object({
-    summary: z.string().max(2_000).optional(),
-    draftBrainId: z.string().min(1).max(80).optional(),
-    meetingBrainId: z.string().min(1).max(80).optional(),
-    pages: z.array(BrainIngestJobResultPageSchema).max(20).optional(),
-    skipped: z.boolean().optional(),
-    durationMs: z.number().finite().min(0).optional(),
-    // The API normalizes this bounded diagnostic trace before it crosses the read-model boundary.
-    trace: z.record(z.string(), z.unknown()).optional(),
-  })
-  .strict()
-  .openapi("BrainIngestJobResult");
-
-export const BrainIngestJobReadModelSchema = z
-  .object({
-    id: ResourceIdSchema,
-    sourceItemId: ResourceIdSchema,
-    sourceProvider: z.string().min(1).max(64),
-    kind: z.string().min(1).max(64),
-    status: z.enum(["queued", "running", "succeeded", "failed", "skipped"]),
-    planPaused: z.boolean(),
-    attempts: z.number().int().min(0),
-    lastError: z.string().max(2_000).nullable(),
-    result: BrainIngestJobResultSchema,
-    completedAt: TimestampSchema.nullable(),
-    createdAt: TimestampSchema,
-    updatedAt: TimestampSchema,
-  })
-  .strict()
-  .openapi("BrainIngestJobReadModelV1");
-
-export const BrainSourceItemSchema = z
-  .object({
-    id: ResourceIdSchema,
-    sourceProvider: z.string().min(1).max(64),
-    sourceType: z.string().min(1).max(64),
-    externalId: z.string().max(4_096),
-    title: z.string().max(512).nullable(),
-    lastIngestError: z.string().max(2_000).nullable(),
-    createdAt: TimestampSchema,
-  })
-  .strict()
-  .openapi("BrainSourceItem");
-
-export const BrainSourceItemListEnvelopeSchema = z
-  .object({ data: z.array(BrainSourceItemSchema), meta: ProtocolMetadataSchema })
-  .strict()
-  .openapi("BrainSourceItemListEnvelope");
-
-export const BrainSourceConfigProviderSchema = z.enum([
-  "gmail",
-  "google_drive",
-  "linear",
-  "slack_bot",
-  "hubspot",
-  "granola",
-  "fathom",
-  "attio",
-]);
-export const BrainSourceIntegrationStatusSchema = z.enum([
-  "connected",
-  "needs_reauth",
-  "sync_failed",
-  "disconnected",
-]);
-const BrainSourceProviderStatusSchema = z.enum([
-  "connected",
-  "needs_reauth",
-  "sync_failed",
-  "disconnected",
-  "not_connected",
-]);
-const NullableLabelSchema = z.string().max(512).nullable();
-const BrainSourceProviderBaseShape = {
-  connected: z.boolean(),
-  status: BrainSourceProviderStatusSchema,
-  integrationId: ResourceIdSchema.nullable(),
-  statusReason: z.string().max(2_000).nullable(),
-};
-
-export const BrainSourceViewSchema = z
-  .object({
-    sourceId: ResourceIdSchema,
-    provider: BrainSourceConfigProviderSchema,
-    integrationId: ResourceIdSchema,
-    enabled: z.boolean(),
-    connectedByName: z.string().max(512),
-    ownerEmail: z.string().max(512).nullable(),
-    ownerAvatarUrl: z.string().max(4_096).nullable(),
-    accountEmail: z.string().max(512).nullable(),
-    accountName: NullableLabelSchema,
-    connectionLabel: NullableLabelSchema,
-    ownerKind: z.enum(["workspace", "user"]),
-    isOwn: z.boolean(),
-    canConfigure: z.boolean(),
-    canToggle: z.boolean(),
-    canRemove: z.boolean(),
-    integrationStatus: BrainSourceIntegrationStatusSchema,
-    config: z.record(z.string(), z.unknown()),
-  })
-  .strict()
-  .openapi("BrainSourceView");
-
-export const BrainSourceAccountSchema = z
-  .object({
-    integrationId: ResourceIdSchema,
-    status: BrainSourceIntegrationStatusSchema,
-    accountEmail: z.string().max(512).nullable(),
-    accountName: NullableLabelSchema,
-    connectionLabel: NullableLabelSchema,
-  })
-  .strict()
-  .openapi("BrainSourceAccount");
-
-const LinearSourceProviderStateSchema = z
-  .object({
-    provider: z.literal("linear"),
-    ...BrainSourceProviderBaseShape,
-    accountName: NullableLabelSchema,
-    organizationName: NullableLabelSchema,
-  })
-  .strict();
-const GmailSourceProviderStateSchema = z
-  .object({
-    provider: z.literal("gmail"),
-    ...BrainSourceProviderBaseShape,
-    accountEmail: z.string().max(512).nullable(),
-  })
-  .strict();
-const GoogleDriveSourceProviderStateSchema = z
-  .object({
-    provider: z.literal("google_drive"),
-    ...BrainSourceProviderBaseShape,
-    accountEmail: z.string().max(512).nullable(),
-  })
-  .strict();
-const HubspotSourceProviderStateSchema = z
-  .object({
-    provider: z.literal("hubspot"),
-    ...BrainSourceProviderBaseShape,
-    accountEmail: z.string().max(512).nullable(),
-    hubDomain: NullableLabelSchema,
-  })
-  .strict();
-const GranolaSourceProviderStateSchema = z
-  .object({
-    provider: z.literal("granola"),
-    ...BrainSourceProviderBaseShape,
-    accountEmail: z.string().max(512).nullable(),
-    accountName: NullableLabelSchema,
-  })
-  .strict();
-const FathomSourceProviderStateSchema = z
-  .object({
-    provider: z.literal("fathom"),
-    ...BrainSourceProviderBaseShape,
-    accountEmail: z.string().max(512).nullable(),
-    accountName: NullableLabelSchema,
-  })
-  .strict();
-const AttioSourceProviderStateSchema = z
-  .object({
-    provider: z.literal("attio"),
-    ...BrainSourceProviderBaseShape,
-    workspaceName: NullableLabelSchema,
-  })
-  .strict();
-
-export const BrainSourceDetailsSchema = z
-  .object({
-    viewer: z.object({ actorId: ResourceIdSchema, isAdmin: z.boolean() }).strict(),
-    sources: z.array(BrainSourceViewSchema),
-    ownAccounts: z
-      .object({
-        linear: z.array(BrainSourceAccountSchema),
-        gmail: z.array(BrainSourceAccountSchema),
-        google_drive: z.array(BrainSourceAccountSchema),
-        hubspot: z.array(BrainSourceAccountSchema),
-        granola: z.array(BrainSourceAccountSchema),
-        fathom: z.array(BrainSourceAccountSchema),
-        attio: z.array(BrainSourceAccountSchema),
-      })
-      .strict(),
-    linear: z.object({ integration: LinearSourceProviderStateSchema }).strict(),
-    gmail: z.object({ integration: GmailSourceProviderStateSchema }).strict(),
-    googleDrive: z.object({ integration: GoogleDriveSourceProviderStateSchema }).strict(),
-    hubspot: z.object({ integration: HubspotSourceProviderStateSchema }).strict(),
-    granola: z.object({ integration: GranolaSourceProviderStateSchema }).strict(),
-    fathom: z.object({ integration: FathomSourceProviderStateSchema }).strict(),
-    attio: z.object({ integration: AttioSourceProviderStateSchema }).strict(),
-  })
-  .strict()
-  .openapi("BrainSourceDetails");
-
-export const BrainSourceDetailsEnvelopeSchema = z
-  .object({ data: BrainSourceDetailsSchema, meta: ProtocolMetadataSchema })
-  .strict()
-  .openapi("BrainSourceDetailsEnvelope");
-
-const NamedSourceRefSchema = z
-  .object({ id: z.string().min(1).max(512), name: z.string().min(1).max(512) })
-  .strict();
-const LinearTeamRefSchema = NamedSourceRefSchema.extend({
-  key: z.string().max(128).optional(),
-  triageStateId: z.string().min(1).max(256).optional(),
-}).strict();
-const GmailEventRefSchema = z.object({ id: z.enum(["email_received", "email_sent"]) }).strict();
-const LinearEventRefSchema = z
-  .object({
-    id: z.enum([
-      "issue_created",
-      "issue_updated",
-      "issue_status_changed",
-      "issue_removed",
-      "comment_created",
-      "comment_updated",
-      "comment_removed",
-    ]),
-  })
-  .strict();
-const HubspotObjectTypeRefSchema = z
-  .object({ id: z.enum(["contact", "company", "deal"]) })
-  .strict();
-const HubspotEventRefSchema = z
-  .object({ id: z.enum(["object_created", "object_updated", "object_stage_changed"]) })
-  .strict();
-const AttioObjectTypeRefSchema = z.object({ id: z.enum(["person", "company", "deal"]) }).strict();
-const AttioEventRefSchema = z
-  .object({ id: z.enum(["object_created", "object_updated", "note_added"]) })
-  .strict();
-export const SetBrainSourceBodySchema = z
-  .union([
-    z
-      .object({
-        operation: z.literal("set_enabled"),
-        provider: BrainSourceConfigProviderSchema,
-        enabled: z.boolean(),
-      })
-      .strict(),
-    z
-      .object({
-        operation: z.literal("configure"),
-        provider: z.literal("linear"),
-        enabled: z.boolean(),
-        teams: z.array(LinearTeamRefSchema).max(500),
-        events: z.array(LinearEventRefSchema).max(50),
-      })
-      .strict(),
-    z
-      .object({
-        operation: z.literal("configure"),
-        provider: z.literal("hubspot"),
-        enabled: z.boolean(),
-        objectTypes: z.array(HubspotObjectTypeRefSchema).max(50),
-        events: z.array(HubspotEventRefSchema).max(50),
-      })
-      .strict(),
-    z
-      .object({
-        operation: z.literal("configure"),
-        provider: z.literal("attio"),
-        enabled: z.boolean(),
-        objectTypes: z.array(AttioObjectTypeRefSchema).max(50),
-        events: z.array(AttioEventRefSchema).max(50),
-      })
-      .strict(),
-    z
-      .object({
-        operation: z.literal("configure"),
-        provider: z.literal("gmail"),
-        enabled: z.boolean(),
-        events: z.array(GmailEventRefSchema).max(50),
-        instructions: z.string().max(2_000),
-      })
-      .strict(),
-    z
-      .object({
-        operation: z.literal("configure"),
-        provider: z.literal("google_drive"),
-        enabled: z.boolean(),
-        allFiles: z.boolean().optional(),
-        resourceIds: z.array(z.string().min(1).max(512)).max(100),
-      })
-      .strict(),
-  ])
-  .openapi("SetBrainSourceBody");
-
-export const BrainSourceMutationEnvelopeSchema = z
-  .object({
-    data: z
-      .object({
-        brainId: ResourceIdSchema,
-        integrationId: ResourceIdSchema,
-        provider: BrainSourceConfigProviderSchema,
-        enabled: z.boolean(),
-      })
-      .strict(),
-    meta: ProtocolMetadataSchema,
-  })
-  .strict()
-  .openapi("BrainSourceMutationEnvelope");
-
-export const BrainSourceDeleteEnvelopeSchema = z
-  .object({
-    data: z
-      .object({
-        brainId: ResourceIdSchema,
-        integrationId: ResourceIdSchema,
-        deleted: z.literal(true),
-      })
-      .strict(),
-    meta: ProtocolMetadataSchema,
-  })
-  .strict()
-  .openapi("BrainSourceDeleteEnvelope");
-
-export const BrainSourceOptionsBodySchema = z.discriminatedUnion("provider", [
-  z
-    .object({
-      provider: z.literal("linear"),
-      includeTriageStateIds: z.boolean().optional(),
-    })
-    .strict(),
-  z.object({ provider: z.literal("granola") }).strict(),
-  z.object({ provider: z.literal("gmail") }).strict(),
-  z
-    .object({
-      provider: z.literal("google_drive"),
-      parentId: z.string().min(1).max(512).optional(),
-      query: z.string().min(1).max(200).optional(),
-      pageToken: z.string().min(1).max(4_096).optional(),
-    })
-    .strict(),
-]);
-
-// Granola folders scope the `meeting.notes_ready` event filter. The parent id travels with each
-// folder so a picker can show where a folder sits without a second read.
-const GranolaFolderRefSchema = NamedSourceRefSchema.extend({
-  parentFolderId: z.string().min(1).max(512).nullable(),
-}).strict();
-
-const GoogleDriveOptionSchema = z
-  .object({
-    id: z.string().min(1).max(512),
-    name: z.string().min(1).max(512),
-    kind: z.enum(["file", "folder"]),
-    mimeType: z.string().min(1).max(512),
-    driveId: z.string().max(512).nullable(),
-    webViewLink: z.url().max(4_096).nullable(),
-  })
-  .strict();
-
-export const BrainSourceOptionsSchema = z
-  .discriminatedUnion("provider", [
-    z
-      .object({
-        provider: z.literal("linear"),
-        teams: z.array(LinearTeamRefSchema),
-        partial: z.boolean(),
-      })
-      .strict(),
-    z
-      .object({
-        provider: z.literal("granola"),
-        folders: z.array(GranolaFolderRefSchema),
-        partial: z.boolean(),
-      })
-      .strict(),
-    z
-      .object({
-        provider: z.literal("gmail"),
-        labels: z.array(NamedSourceRefSchema),
-      })
-      .strict(),
-    z
-      .object({
-        provider: z.literal("google_drive"),
-        files: z.array(GoogleDriveOptionSchema),
-        nextPageToken: z.string().max(4_096).nullable(),
-      })
-      .strict(),
-  ])
-  .openapi("BrainSourceOptions");
-
-export const BrainSourceOptionsEnvelopeSchema = z
-  .object({ data: BrainSourceOptionsSchema, meta: ProtocolMetadataSchema })
-  .strict()
-  .openapi("BrainSourceOptionsEnvelope");
-
-export const BrainImportProviderSchema = z.enum([
-  "public_web",
-  "granola",
-  "fathom",
-  "gmail",
-  "linear",
-]);
-
-export const BrainImportRunStatusSchema = z.enum([
-  "discovering",
-  "awaiting_confirmation",
-  "ingesting",
-  "finalizing",
-  "succeeded",
-  "partial",
-  "failed",
-  "canceled",
-]);
-
-const BrainImportSourceSelectionEntrySchema = z
-  .object({
-    enabled: z.boolean(),
-    integrationId: ResourceIdSchema.optional(),
-  })
-  .strict();
-
-export const StartBrainImportBodySchema = z
-  .object({
-    companyUrl: z.string().min(1).max(2_048),
-    focus: z.string().max(2_000).optional(),
-    sourceSelection: z.record(z.string().max(32), BrainImportSourceSelectionEntrySchema),
-  })
-  .strict()
-  .openapi("StartBrainImportBody");
-
-export const ConfirmBrainImportBodySchema = z
-  .object({ enabledProviders: z.array(BrainImportProviderSchema).max(8) })
-  .strict()
-  .openapi("ConfirmBrainImportBody");
-
-export const BrainImportRunCommandEnvelopeSchema = z
-  .object({
-    data: z
-      .object({
-        importRunId: ResourceIdSchema,
-        status: BrainImportRunStatusSchema,
-        replayed: z.boolean(),
-      })
-      .strict(),
-    meta: ProtocolMetadataSchema,
-  })
-  .strict()
-  .openapi("BrainImportRunCommandEnvelope");
-
-export const BrainImportProviderSummarySchema = z
-  .object({
-    status: z.enum(["pending", "ready", "failed", "unavailable"]),
-    discoveredEntries: z.number().int().min(0),
-    eligibleEntries: z.number().int().min(0),
-    alreadyKnownEntries: z.number().int().min(0),
-    selectedEntries: z.number().int().min(0),
-    plannedRuns: z.number().int().min(0),
-    error: z.string().max(2_000).optional(),
-  })
-  .strict()
-  .openapi("BrainImportProviderSummaryV1");
-
-export const BrainImportRunReadModelSchema = z
-  .object({
-    id: ResourceIdSchema,
-    status: BrainImportRunStatusSchema,
-    companyUrl: z.string().max(2_048),
-    companyName: z.string().max(512).nullable(),
-    focus: z.string().max(2_000).nullable(),
-    sourceSelection: z.record(z.string().max(32), z.object({ enabled: z.boolean() }).strict()),
-    discoverySummary: z.record(z.string().max(32), BrainImportProviderSummarySchema),
-    lastError: z.string().max(2_000).nullable(),
-    confirmedAt: TimestampSchema.nullable(),
-    completedAt: TimestampSchema.nullable(),
-    createdAt: TimestampSchema,
-    updatedAt: TimestampSchema,
-  })
-  .strict()
-  .openapi("BrainImportRunReadModelV1");
 
 export const WikiKindSchema = z.enum([
   "person",
@@ -2020,106 +1390,6 @@ export const PluginImportPreviewSchema = z
   .strict()
   .openapi("PluginImportPreview");
 
-export const BrainSnapshotEnvelopeSchema = z
-  .object({ data: BrainSnapshotSchema, meta: ProtocolMetadataSchema })
-  .strict()
-  .openapi("BrainSnapshotEnvelope");
-export const BrainOverviewEnvelopeSchema = z
-  .object({ data: BrainOverviewSchema, meta: ProtocolMetadataSchema })
-  .strict()
-  .openapi("BrainOverviewEnvelope");
-export const BrainDocumentEnvelopeSchema = z
-  .object({ data: BrainDocumentSchema, meta: ProtocolMetadataSchema })
-  .strict()
-  .openapi("BrainDocumentEnvelope");
-export const BrainAssetMutationEnvelopeSchema = z
-  .object({
-    data: z
-      .object({
-        document: BrainDocumentSchema,
-        quotaPaused: z.boolean(),
-        replayed: z.boolean(),
-      })
-      .strict(),
-    meta: ProtocolMetadataSchema,
-  })
-  .strict()
-  .openapi("BrainAssetMutationEnvelope");
-export const BrainFolderEnvelopeSchema = z
-  .object({ data: BrainFolderSchema, meta: ProtocolMetadataSchema })
-  .strict()
-  .openapi("BrainFolderEnvelope");
-
-export const CreateBrainDocumentBodySchema = z
-  .object({
-    folderPath: z.string().min(1).max(512),
-    fileName: z.string().min(1).max(160),
-  })
-  .strict()
-  .openapi("CreateBrainDocumentBody");
-export const BrainAssetUploadBodySchema = z
-  .object({
-    folderPath: z.string().min(1).max(512),
-    file: z
-      .file()
-      .max(20 * 1024 * 1024)
-      .openapi({ type: "string", format: "binary" }),
-  })
-  .strict()
-  .openapi("BrainAssetUploadBody");
-export const BrainAssetReplaceBodySchema = z
-  .object({
-    file: z
-      .file()
-      .max(20 * 1024 * 1024)
-      .openapi({ type: "string", format: "binary" }),
-  })
-  .strict()
-  .openapi("BrainAssetReplaceBody");
-export const UpdateBrainDocumentBodySchema = z
-  .object({
-    body: z.string().max(1_000_000),
-    expectedContentHash: z
-      .string()
-      .regex(/^[0-9a-f]{64}$/u)
-      .optional(),
-  })
-  .strict()
-  .openapi("UpdateBrainDocumentBody");
-export const RenameBrainDocumentBodySchema = z
-  .object({ title: z.string().min(1).max(160) })
-  .strict()
-  .openapi("RenameBrainDocumentBody");
-export const CreateBrainFolderBodySchema = z
-  .object({ path: z.string().min(1).max(512) })
-  .strict()
-  .openapi("CreateBrainFolderBody");
-export const RenameBrainFolderBodySchema = z
-  .object({ fromPath: z.string().min(1).max(512), toPath: z.string().min(1).max(512) })
-  .strict()
-  .openapi("RenameBrainFolderBody");
-export const DeleteBrainFolderBodySchema = z
-  .object({ path: z.string().min(1).max(512) })
-  .strict()
-  .openapi("DeleteBrainFolderBody");
-export const BrainDocumentDeleteEnvelopeSchema = z
-  .object({
-    data: z.object({ documentId: ResourceIdSchema }).strict(),
-    meta: ProtocolMetadataSchema,
-  })
-  .strict()
-  .openapi("BrainDocumentDeleteEnvelope");
-export const BrainFolderPathEnvelopeSchema = z
-  .object({
-    data: z.object({ path: z.string().min(1).max(512) }).strict(),
-    meta: ProtocolMetadataSchema,
-  })
-  .strict()
-  .openapi("BrainFolderPathEnvelope");
-
-// A wiki's access has two stored states. The UI shows three: "workspace",
-// "shared" (restricted with invites) and "private" (restricted with none), which
-// it derives from `access` plus `memberIds`.
 export const WikiAccessSchema = z.enum(["workspace", "restricted"]).openapi("WikiAccess");
 export const WikiSchema = z
   .object({
@@ -3606,28 +2876,6 @@ export const CapabilityApprovalEnvelopeSchema = z
   .strict()
   .openapi("CapabilityApprovalEnvelope");
 
-// Brain admin/switch control plane (#1203 5a4c). The active-Brain cookie is
-// intentionally absent: the web adapter owns that browser preference.
-export const BrainVisibilitySchema = z.enum(["workspace", "restricted"]);
-export const BrainIntelligenceSchema = z.enum(["basic", "frontier"]);
-
-export const CreateBrainBodySchema = z
-  .object({
-    name: z.string().trim().min(1).max(80),
-    visibility: BrainVisibilitySchema,
-    description: z.string().trim().max(1_024).optional(),
-  })
-  .strict()
-  .openapi("CreateBrainBody");
-
-export const BrainControlMutationEnvelopeSchema = z
-  .object({
-    data: z.object({ brainId: ResourceIdSchema }).strict(),
-    meta: ProtocolMetadataSchema,
-  })
-  .strict()
-  .openapi("BrainControlMutationEnvelope");
-
 export const WorkspaceMemberSchema = z
   .object({
     id: ResourceIdSchema,
@@ -3641,64 +2889,6 @@ export const WorkspaceMemberSchema = z
   .strict()
   .openapi("WorkspaceMember");
 
-export const BrainAccessSchema = z
-  .object({
-    visibility: BrainVisibilitySchema,
-    memberIds: z.array(ResourceIdSchema).max(1_000),
-    workspaceMembers: z.array(WorkspaceMemberSchema).max(1_000),
-  })
-  .strict()
-  .openapi("BrainAccess");
-
-export const BrainAccessEnvelopeSchema = z
-  .object({ data: BrainAccessSchema, meta: ProtocolMetadataSchema })
-  .strict()
-  .openapi("BrainAccessEnvelope");
-
-export const SetBrainAccessBodySchema = z
-  .object({
-    visibility: BrainVisibilitySchema,
-    memberIds: z.array(ResourceIdSchema).max(1_000),
-  })
-  .strict()
-  .openapi("SetBrainAccessBody");
-
-export const BrainAccessMutationEnvelopeSchema = z
-  .object({
-    data: z.object({ updated: z.literal(true) }).strict(),
-    meta: ProtocolMetadataSchema,
-  })
-  .strict()
-  .openapi("BrainAccessMutationEnvelope");
-
-export const BrainEnrichmentEnvelopeSchema = z
-  .object({
-    data: z.object({ enabled: z.boolean() }).strict(),
-    meta: ProtocolMetadataSchema,
-  })
-  .strict()
-  .openapi("BrainEnrichmentEnvelope");
-
-export const SetBrainEnrichmentBodySchema = z
-  .object({ enabled: z.boolean() })
-  .strict()
-  .openapi("SetBrainEnrichmentBody");
-
-export const BrainIntelligenceEnvelopeSchema = z
-  .object({
-    data: z.object({ intelligence: BrainIntelligenceSchema }).strict(),
-    meta: ProtocolMetadataSchema,
-  })
-  .strict()
-  .openapi("BrainIntelligenceEnvelope");
-
-export const SetBrainIntelligenceBodySchema = z
-  .object({ intelligence: BrainIntelligenceSchema })
-  .strict()
-  .openapi("SetBrainIntelligenceBody");
-
-// Active workspace administration and WorkOS-backed provisioning (#1203
-// 5a4d-5a4e). AuthKit session activation remains a web responsibility.
 export const WorkspaceInvitationSchema = z
   .object({
     id: ResourceIdSchema,
@@ -3787,7 +2977,6 @@ export const WorkspaceActivationSchema = z
   .object({
     workspaceId: ResourceIdSchema,
     organizationId: ResourceIdSchema,
-    brainId: ResourceIdSchema.nullable(),
   })
   .strict()
   .openapi("WorkspaceActivation");
@@ -3828,7 +3017,6 @@ export const OnboardingStateSchema = z
       })
       .strict()
       .nullable(),
-    activeBrainId: ResourceIdSchema.nullable(),
   })
   .strict()
   .openapi("OnboardingState");
@@ -3858,7 +3046,6 @@ export const OnboardingWorkspaceEnvelopeSchema = z
       .object({
         workspaceId: ResourceIdSchema,
         organizationId: ResourceIdSchema,
-        brainId: ResourceIdSchema.nullable(),
         createdByCaller: z.boolean(),
       })
       .strict(),
@@ -3949,32 +3136,15 @@ export const IdentityWorkspaceSchema = z
     name: z.string().min(1).max(80),
     slug: z.string().max(40).nullable(),
     role: z.enum(["admin", "member"]),
-    legacyBrainEnabled: z.boolean(),
   })
   .strict()
   .openapi("IdentityWorkspace");
-
-export const IdentityBrainSchema = z
-  .object({
-    id: ResourceIdSchema,
-    workspaceId: ResourceIdSchema,
-    name: z.string().min(1).max(80),
-    slug: z.string().min(1).max(256),
-    description: z.string().nullable(),
-    visibility: BrainVisibilitySchema,
-    enrichmentEnabled: z.boolean(),
-    intelligence: BrainIntelligenceSchema,
-  })
-  .strict()
-  .openapi("IdentityBrain");
 
 export const IdentitySchema = z
   .object({
     user: IdentityUserSchema,
     workspaces: z.array(IdentityWorkspaceSchema).max(1_000),
     activeWorkspaceId: ResourceIdSchema.nullable(),
-    brains: z.array(IdentityBrainSchema).max(1_000),
-    activeBrainId: ResourceIdSchema.nullable(),
   })
   .strict()
   .openapi("Identity");
@@ -4231,7 +3401,6 @@ export const SlackBotWorkspaceSettingsSchema = z
     canCustomizeIdentity: z.boolean(),
     teamName: z.string().max(512).nullable(),
     statusReason: z.string().max(2_000).nullable(),
-    destinationCount: z.number().int().min(0),
   })
   .strict()
   .openapi("SlackBotWorkspaceSettings");
@@ -4267,64 +3436,81 @@ export const ImessageSettingsEnvelopeSchema = z
   .strict()
   .openapi("ImessageSettingsEnvelope");
 
-export const SlackBotDestinationSchema = z
-  .object({
-    installed: z.boolean(),
-    botConnected: z.boolean(),
-    isAdmin: z.boolean(),
-    brainVisibility: BrainVisibilitySchema,
-    source: z
-      .object({ enabled: z.boolean(), channels: z.array(SlackBotChannelRefSchema).max(500) })
-      .strict()
-      .nullable(),
-  })
-  .strict()
-  .openapi("SlackBotDestination");
-
-export const SlackBotDestinationEnvelopeSchema = z
-  .object({ data: SlackBotDestinationSchema, meta: ProtocolMetadataSchema })
-  .strict()
-  .openapi("SlackBotDestinationEnvelope");
-
-export const SlackBotChannelSchema = SlackBotChannelRefSchema.extend({
-  isPrivate: z.boolean(),
-  isMember: z.boolean(),
-})
-  .strict()
-  .openapi("SlackBotChannel");
-
-export const SlackBotChannelListEnvelopeSchema = z
-  .object({
-    data: z
-      .object({ channels: z.array(SlackBotChannelSchema).max(5_000), partial: z.boolean() })
-      .strict(),
-    meta: ProtocolMetadataSchema,
-  })
-  .strict()
-  .openapi("SlackBotChannelListEnvelope");
-
-export const SetSlackBotDestinationBodySchema = z
-  .object({ enabled: z.boolean(), channels: z.array(SlackBotChannelRefSchema).max(500) })
-  .strict()
-  .openapi("SetSlackBotDestinationBody");
-
 export const SlackBotMutationEnvelopeSchema = z
   .object({ data: z.object({ updated: z.literal(true) }).strict(), meta: ProtocolMetadataSchema })
   .strict()
   .openapi("SlackBotMutationEnvelope");
 
-export const IntegrationAccountUsageEnvelopeSchema = z
-  .object({
-    data: z
+// Workflow event triggers offer real filter options (a Linear team, a Gmail
+// label, a Granola folder) from the author's connected account.
+// Wiki company imports are retired; the routes stay mounted so a stale client
+// gets an explicit 410 instead of a 404.
+export const RetiredWikiImportBodySchema = z.looseObject({}).openapi("RetiredWikiImportBody");
+
+export const IntegrationResourceOptionsBodySchema = z
+  .discriminatedUnion("provider", [
+    z
+      .object({ provider: z.literal("linear"), includeTriageStateIds: z.boolean().optional() })
+      .strict(),
+    z.object({ provider: z.literal("granola") }).strict(),
+    z.object({ provider: z.literal("gmail") }).strict(),
+  ])
+  .openapi("IntegrationResourceOptionsBody");
+
+export const IntegrationResourceOptionsSchema = z
+  .discriminatedUnion("provider", [
+    z
       .object({
-        // brain_sources rows fed by this connection (across all brains).
-        affectedBrainSourceCount: z.number().int().min(0),
+        provider: z.literal("linear"),
+        teams: z
+          .array(
+            z
+              .object({
+                id: z.string().min(1).max(256),
+                name: z.string().min(1).max(200),
+                key: z.string().max(40).optional(),
+                triageStateId: z.string().min(1).max(256).optional(),
+              })
+              .strict(),
+          )
+          .max(2_000),
+        partial: z.boolean(),
       })
       .strict(),
-    meta: ProtocolMetadataSchema,
-  })
+    z
+      .object({
+        provider: z.literal("granola"),
+        folders: z
+          .array(
+            z
+              .object({
+                id: z.string().min(1).max(256),
+                name: z.string().min(1).max(200),
+                parentFolderId: z.string().min(1).max(256).nullable(),
+              })
+              .strict(),
+          )
+          .max(2_000),
+        partial: z.boolean(),
+      })
+      .strict(),
+    z
+      .object({
+        provider: z.literal("gmail"),
+        labels: z
+          .array(
+            z.object({ id: z.string().min(1).max(256), name: z.string().min(1).max(200) }).strict(),
+          )
+          .max(2_000),
+      })
+      .strict(),
+  ])
+  .openapi("IntegrationResourceOptions");
+
+export const IntegrationResourceOptionsEnvelopeSchema = z
+  .object({ data: IntegrationResourceOptionsSchema, meta: ProtocolMetadataSchema })
   .strict()
-  .openapi("IntegrationAccountUsageEnvelope");
+  .openapi("IntegrationResourceOptionsEnvelope");
 
 export const IntegrationAccountDeleteEnvelopeSchema = z
   .object({
@@ -4871,34 +4057,6 @@ export type WorkflowMemoryDto = z.infer<typeof WorkflowMemorySchema>;
 export type WorkflowReadModel = z.infer<typeof WorkflowReadModelSchema>;
 export type WorkflowScheduleReadModel = z.infer<typeof WorkflowScheduleReadModelSchema>;
 export type IntegrationAccountReadModel = z.infer<typeof IntegrationAccountReadModelSchema>;
-export type BrainSnapshotDto = z.infer<typeof BrainSnapshotSchema>;
-export type BrainOverviewDto = z.infer<typeof BrainOverviewSchema>;
-export type BrainDocumentDto = z.infer<typeof BrainDocumentSchema>;
-export type BrainFolderDto = z.infer<typeof BrainFolderSchema>;
-export type BrainDocumentReadModel = z.infer<typeof BrainDocumentReadModelSchema>;
-export type BrainFolderReadModel = z.infer<typeof BrainFolderReadModelSchema>;
-export type BrainTimelineReadModel = z.infer<typeof BrainTimelineReadModelSchema>;
-export type BrainEdgeReadModel = z.infer<typeof BrainEdgeReadModelSchema>;
-export type BrainIngestJobReadModel = z.infer<typeof BrainIngestJobReadModelSchema>;
-export type BrainSourceItemDto = z.infer<typeof BrainSourceItemSchema>;
-export type BrainSourceConfigProvider = z.infer<typeof BrainSourceConfigProviderSchema>;
-export type BrainImportProvider = z.infer<typeof BrainImportProviderSchema>;
-export type BrainImportRunStatus = z.infer<typeof BrainImportRunStatusSchema>;
-export type StartBrainImportBody = z.infer<typeof StartBrainImportBodySchema>;
-export type ConfirmBrainImportBody = z.infer<typeof ConfirmBrainImportBodySchema>;
-export type BrainImportRunCommandDto = z.infer<typeof BrainImportRunCommandEnvelopeSchema>["data"];
-export type BrainImportProviderSummary = z.infer<typeof BrainImportProviderSummarySchema>;
-export type BrainImportRunReadModel = z.infer<typeof BrainImportRunReadModelSchema>;
-export type BrainSourceDetailsDto = z.infer<typeof BrainSourceDetailsSchema>;
-export type SetBrainSourceBody = z.infer<typeof SetBrainSourceBodySchema>;
-export type BrainSourceOptionsBody = z.infer<typeof BrainSourceOptionsBodySchema>;
-export type BrainSourceOptionsDto = z.infer<typeof BrainSourceOptionsSchema>;
-export type CreateBrainDocumentBody = z.infer<typeof CreateBrainDocumentBodySchema>;
-export type UpdateBrainDocumentBody = z.infer<typeof UpdateBrainDocumentBodySchema>;
-export type RenameBrainDocumentBody = z.infer<typeof RenameBrainDocumentBodySchema>;
-export type CreateBrainFolderBody = z.infer<typeof CreateBrainFolderBodySchema>;
-export type RenameBrainFolderBody = z.infer<typeof RenameBrainFolderBodySchema>;
-export type DeleteBrainFolderBody = z.infer<typeof DeleteBrainFolderBodySchema>;
 export type WikiPageDto = z.infer<typeof WikiPageSchema>;
 export type WikiPageReadModel = z.infer<typeof WikiPageReadModelSchema>;
 export type WikiTimelineReadModel = z.infer<typeof WikiTimelineReadModelSchema>;
@@ -5014,10 +4172,7 @@ export type WorkspaceCapabilitySettingsDto = z.infer<
   typeof WorkspaceCapabilitySettingsEnvelopeSchema
 >["data"];
 export type CapabilityApprovalDto = z.infer<typeof CapabilityApprovalSchema>;
-export type BrainVisibility = z.infer<typeof BrainVisibilitySchema>;
-export type BrainIntelligence = z.infer<typeof BrainIntelligenceSchema>;
 export type WorkspaceMemberDto = z.infer<typeof WorkspaceMemberSchema>;
-export type BrainAccessDto = z.infer<typeof BrainAccessSchema>;
 export type WorkspaceInvitationDto = z.infer<typeof WorkspaceInvitationSchema>;
 export type WorkspaceSettingsDto = z.infer<typeof WorkspaceSettingsSchema>;
 export type WorkspaceActivationDto = z.infer<typeof WorkspaceActivationSchema>;
@@ -5125,9 +4280,6 @@ export type IntegrationAccountStatus = z.infer<typeof IntegrationAccountStatusSc
 export type PersonalIntegrationProvider = z.infer<typeof PersonalIntegrationProviderSchema>;
 export type IntegrationAccountDto = z.infer<typeof IntegrationAccountSchema>;
 export type SlackBotWorkspaceSettingsDto = z.infer<typeof SlackBotWorkspaceSettingsSchema>;
-export type SlackBotDestinationDto = z.infer<typeof SlackBotDestinationSchema>;
-export type SlackBotChannelDto = z.infer<typeof SlackBotChannelSchema>;
-export type SetSlackBotDestinationBody = z.infer<typeof SetSlackBotDestinationBodySchema>;
 export type AttioAccountStateDto = z.infer<typeof AttioAccountStateSchema>;
 export type FathomAccountStateDto = z.infer<typeof FathomAccountStateSchema>;
 export type GranolaAccountStateDto = z.infer<typeof GranolaAccountStateSchema>;
@@ -5170,3 +4322,5 @@ export const ProjectConversationBodySchema = z
   .object({ conversationId: ResourceIdSchema })
   .strict();
 export type ProjectDto = z.infer<typeof ProjectSchema>;
+export type IntegrationResourceOptionsBody = z.infer<typeof IntegrationResourceOptionsBodySchema>;
+export type IntegrationResourceOptionsDto = z.infer<typeof IntegrationResourceOptionsSchema>;

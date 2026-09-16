@@ -11,8 +11,6 @@ import { isBrowserToolName } from "@opencompany/browser-tools";
 import type { TaskView } from "@/components/Surface";
 import { actionRowLabel, actionSource } from "@/lib/action-identity";
 import {
-  BRAIN_TOOL_NAME,
-  type BrainToolOutput,
   type ChatUiMessage,
   CODEX_APPROVAL_TOOL_NAME,
   CODEX_COMMAND_TOOL_NAME,
@@ -47,7 +45,7 @@ const RETIRED_EDIT_TASK_SCHEDULE_TOOL_NAME = "edit_task_schedule";
 const RETIRED_DELETE_TASK_SCHEDULE_TOOL_NAME = "delete_task_schedule";
 
 export type AssistantRenderItem =
-  | { type: "text"; key: string; text: string; citations: BrainCitation[] }
+  | { type: "text"; key: string; text: string }
   | { type: "reasoning"; key: string; text: string }
   | { type: "steering"; key: string; text: string }
   | { type: "task"; key: string; task: ChatTaskCardView }
@@ -67,16 +65,6 @@ export type SubagentRenderView = {
 };
 
 type RenderablePart = Record<string, unknown> & { type: string };
-
-export type BrainCitation = {
-  key: string;
-  label: string;
-  title: string;
-  href: string;
-  // External chips open provider URLs in a new tab; internal chips stay
-  // next/link Brain navigations.
-  external?: boolean;
-};
 
 export type ChatTaskCardView = {
   id: string;
@@ -163,15 +151,13 @@ function collectRenderItems(
   const items: AssistantRenderItem[] = [];
   let textBuffer = "";
   let textBufferItemId: string | null = null;
-  let pendingCitations: BrainCitation[] = [];
 
   const flushText = (key: string) => {
     const text = textBuffer.trim();
     textBuffer = "";
     textBufferItemId = null;
     if (!text) return;
-    items.push({ type: "text", key, text, citations: pendingCitations });
-    pendingCitations = [];
+    items.push({ type: "text", key, text });
   };
 
   for (const [index, part] of parts.entries()) {
@@ -213,12 +199,6 @@ function collectRenderItems(
     const tool = toolCallViewFromPart(part, stopped);
     if (!tool) continue;
     flushText(`${keyPrefix}text-${index}`);
-    if (tool.name === BRAIN_TOOL_NAME && tool.status === "completed") {
-      pendingCitations = mergeBrainCitations(
-        pendingCitations,
-        brainCitationsFromToolOutput(tool.output),
-      );
-    }
     if (tool.name === CODEX_SUBAGENT_TOOL_NAME || tool.name === SUBAGENT_TOOL_NAME) {
       const childParts = Array.isArray(part.children) ? (part.children as RenderablePart[]) : [];
       items.push({
@@ -291,10 +271,6 @@ export function toolCallViewFromPart(
     name === CODEX_WEB_SEARCH_TOOL_NAME;
   const state = typeof part.state === "string" ? part.state : "";
   const output = part.output;
-  const failedBrain =
-    name === BRAIN_TOOL_NAME && state === "output-available" && isBrainToolOutput(output)
-      ? !brainToolOutputSucceeded(output)
-      : false;
   // use_action reports failures inside its structured output, not via the
   // part state: completed-with-ok=false renders as failed.
   const failedAction =
@@ -331,23 +307,21 @@ export function toolCallViewFromPart(
       : null;
   const status = approvalDeclined
     ? "failed"
-    : failedBrain
+    : failedAction
       ? "failed"
-      : failedAction
+      : failedSkill
         ? "failed"
-        : failedSkill
-          ? "failed"
-          : awaitingCapabilityApproval
-            ? "waiting"
-            : failedPublicWebTool
+        : awaitingCapabilityApproval
+          ? "waiting"
+          : failedPublicWebTool
+            ? "failed"
+            : failedBrowserTool
               ? "failed"
-              : failedBrowserTool
+              : codexItemOutcome === "failed"
                 ? "failed"
-                : codexItemOutcome === "failed"
-                  ? "failed"
-                  : codexItemOutcome === "interrupted"
-                    ? "stopped"
-                    : toolStatusFromState(state, stopped);
+                : codexItemOutcome === "interrupted"
+                  ? "stopped"
+                  : toolStatusFromState(state, stopped);
   const codexPromptOutcome =
     (name === CODEX_QUESTION_TOOL_NAME || name === CODEX_APPROVAL_TOOL_NAME) &&
     state === "output-available" &&
@@ -382,7 +356,7 @@ export function toolCallViewFromPart(
                 : toolStatusText(status, state),
     detail: presentationOwnsDetail
       ? (presentation?.detail ?? null)
-      : (presentation?.detail ?? toolDetail(name, part, status)),
+      : (presentation?.detail ?? toolDetail(name, part)),
     detailChips: presentation?.detailChips ?? [],
     input: part.input,
     output: part.output,
@@ -442,7 +416,6 @@ export function toolStatusText(status: ToolCallView["status"], state: string) {
 }
 
 export function toolLabel(name: string) {
-  if (name === BRAIN_TOOL_NAME) return "Brain";
   if (name === CODEX_COMMAND_TOOL_NAME) return "Command";
   if (name === CODEX_PLAN_TOOL_NAME) return "Plan";
   if (name === CODEX_GOAL_TOOL_NAME) return "Goal";
@@ -480,11 +453,7 @@ export function toolLabel(name: string) {
     .join(" ");
 }
 
-export function toolDetail(
-  name: string,
-  part: Record<string, unknown> & { type: string },
-  status: ToolCallView["status"],
-) {
+export function toolDetail(name: string, part: Record<string, unknown> & { type: string }) {
   if (name === CODEX_COMMAND_TOOL_NAME) {
     return isRecord(part.input) && typeof part.input.command === "string"
       ? part.input.command
@@ -503,10 +472,6 @@ export function toolDetail(
 
   if (part.state === "output-error" && typeof part.errorText === "string") {
     return truncateToolPreview(part.errorText);
-  }
-
-  if (name === BRAIN_TOOL_NAME) {
-    return brainToolDetail(part, status);
   }
 
   if (name === START_TASK_TOOL_NAME || name === START_WORKFLOW_TOOL_NAME) {
@@ -698,31 +663,6 @@ export function isUseSkillToolOutput(value: unknown): value is UseSkillToolOutpu
   );
 }
 
-function brainToolDetail(
-  part: Record<string, unknown> & { type: string },
-  status: ToolCallView["status"],
-) {
-  if (part.state === "output-available" && isBrainToolOutput(part.output)) {
-    if (!brainToolOutputSucceeded(part.output)) {
-      return truncateToolPreview(
-        firstNonEmptyLine(part.output.error, part.output.stderr, part.output.stdout) ??
-          formatToolInput(part.input),
-      );
-    }
-    return truncateToolPreview(
-      firstNonEmptyLine(
-        brainCliSuccessSummary(part.output.stdout),
-        part.output.stdout,
-        part.output.stderr,
-      ) ?? formatToolInput(part.input),
-    );
-  }
-
-  const inputPreview = formatToolInput(part.input);
-  if (inputPreview) return inputPreview;
-  return status === "running" ? "Running brain" : null;
-}
-
 function startTaskToolDetail(part: Record<string, unknown>) {
   if (isRecord(part.input)) {
     const name = typeof part.input.name === "string" ? part.input.name : null;
@@ -830,10 +770,7 @@ function codexFileChangePaths(value: unknown): string[] | null {
 function formatToolInput(value: unknown) {
   if (typeof value === "string") return truncateToolPreview(value);
   if (!isRecord(value)) return null;
-  if (typeof value.args === "string") return truncateToolPreview(`brain ${value.args}`);
-  if (typeof value.command === "string") {
-    return truncateToolPreview(`brain ${formatBrainCommandInput(value)}`);
-  }
+  if (typeof value.command === "string") return truncateToolPreview(value.command);
   if (typeof value.action === "string") {
     const detail =
       typeof value.text === "string"
@@ -850,175 +787,6 @@ function formatToolInput(value: unknown) {
   } catch {
     return null;
   }
-}
-
-function formatBrainCommandInput(input: Record<string, unknown>) {
-  const command = input.command;
-  const flags = isRecord(input.flags) ? input.flags : {};
-  const parts = [String(command)];
-  for (const [rawName, value] of Object.entries(flags)) {
-    const name = rawName
-      .replace(/_/g, "-")
-      .replace(/[A-Z]/g, (char) => `-${char.toLowerCase()}`)
-      .replace(/^-+/, "")
-      .replace(/-+/g, "-");
-    if (typeof value === "boolean") {
-      if (value) parts.push(`--${name}`);
-      continue;
-    }
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        if (typeof item === "string") parts.push(`--${name}`, formatToolArg(item));
-      }
-      continue;
-    }
-    if (typeof value === "string" || typeof value === "number") {
-      parts.push(`--${name}`, formatToolArg(String(value)));
-    }
-  }
-  return parts.join(" ");
-}
-
-function formatToolArg(value: string) {
-  if (/^[a-zA-Z0-9._/:=@,+-]+$/.test(value)) return value;
-  return `"${value.replace(/["\\]/g, "\\$&")}"`;
-}
-
-export function isBrainToolOutput(value: unknown): value is BrainToolOutput {
-  if (!isRecord(value)) return false;
-  return (
-    typeof value.ok === "boolean" &&
-    (typeof value.brainRef === "string" || value.brainRef === undefined) &&
-    (typeof value.stdout === "string" || value.stdout === undefined) &&
-    (typeof value.stderr === "string" || value.stderr === undefined) &&
-    (typeof value.error === "string" || value.error === undefined)
-  );
-}
-
-const MAX_BRAIN_CITATIONS_PER_TEXT = 6;
-
-export function brainCitationsFromToolOutput(output: unknown): BrainCitation[] {
-  if (!isBrainToolOutput(output) || !output.ok) return [];
-  const parsed = isRecord(output.parsed) ? output.parsed : null;
-  if (!parsed) return [];
-
-  const brainRef = readString(output.brainRef);
-  const citations: BrainCitation[] = [];
-  if (Array.isArray(parsed.hits)) {
-    for (const hit of parsed.hits) addBrainDocumentCitation(citations, hit, brainRef);
-  }
-  if (Array.isArray(parsed.documents)) {
-    for (const document of parsed.documents) {
-      addBrainDocumentCitation(citations, document, brainRef);
-    }
-  }
-  if (Array.isArray(parsed.entries)) {
-    addTimelineDocumentCitation(citations, parsed, brainRef);
-  }
-
-  return mergeBrainCitations([], citations);
-}
-
-function addTimelineDocumentCitation(
-  citations: BrainCitation[],
-  value: Record<string, unknown>,
-  brainRef: string | null,
-) {
-  const id = readString(value.id);
-  if (!id) return;
-  addUniqueBrainCitation(citations, {
-    key: `brain:${brainRef ?? ""}:${id}`,
-    label: id,
-    title: `Brain document ${id}`,
-    href: brainRef ? brainRootHref(brainRef) : "/brain",
-  });
-}
-
-function addBrainDocumentCitation(
-  citations: BrainCitation[],
-  value: unknown,
-  brainRef: string | null,
-) {
-  if (!isRecord(value)) return;
-  if (readString(value.kind) === "evidence") return;
-  const id = readString(value.id) ?? readString(value.brainId) ?? readString(value.requestedId);
-  const title = readString(value.title) ?? id;
-  if (!id || !title) return;
-
-  const folder = readString(value.folder) ?? readString(value.folderPath);
-  const href = folder ? brainDocumentHref(brainRef, folder, id) : brainRootHref(brainRef);
-  addUniqueBrainCitation(citations, {
-    key: `brain:${brainRef ?? ""}:${folder ?? ""}:${id}`,
-    label: title,
-    title: folder ? `${title} (${folder}/${id})` : `${title} (${id})`,
-    href,
-  });
-}
-
-function mergeBrainCitations(
-  existing: readonly BrainCitation[],
-  additions: readonly BrainCitation[],
-): BrainCitation[] {
-  const citations: BrainCitation[] = [];
-  for (const citation of [...existing, ...additions]) {
-    addUniqueBrainCitation(citations, citation);
-    if (citations.length >= MAX_BRAIN_CITATIONS_PER_TEXT) break;
-  }
-  return citations;
-}
-
-function addUniqueBrainCitation(citations: BrainCitation[], citation: BrainCitation) {
-  if (citations.some((current) => current.key === citation.key)) return;
-  citations.push(citation);
-}
-
-function brainDocumentHref(brainRef: string | null, folder: string, id: string) {
-  return brainPathHref([...(brainRef ? [brainRef] : []), ...folder.split("/").filter(Boolean), id]);
-}
-
-function brainRootHref(brainRef: string | null) {
-  return brainPathHref(brainRef ? [brainRef] : []);
-}
-
-function brainPathHref(segments: string[]) {
-  return `/brain${segments.length ? `/${segments.map((segment) => encodeURIComponent(segment)).join("/")}` : ""}`;
-}
-
-function brainToolOutputSucceeded(output: BrainToolOutput) {
-  if (output.ok) return true;
-  return parseBrainCliJson(output.stdout)?.ok === true;
-}
-
-function brainCliSuccessSummary(stdout: string | undefined) {
-  const parsed = parseBrainCliJson(stdout);
-  if (!parsed || parsed.ok !== true) return null;
-  const appliedCount = Array.isArray(parsed.applied) ? parsed.applied.length : null;
-  if (typeof appliedCount === "number" && appliedCount > 0) {
-    return `Ingested ${appliedCount} brain change${appliedCount === 1 ? "" : "s"}.`;
-  }
-  const planCount = Array.isArray(parsed.plan) ? parsed.plan.length : null;
-  if (parsed.dryRun === true && typeof planCount === "number") {
-    return `Dry run planned ${planCount} brain change${planCount === 1 ? "" : "s"}.`;
-  }
-  return null;
-}
-
-function parseBrainCliJson(stdout: string | undefined): Record<string, unknown> | null {
-  if (!stdout?.trim()) return null;
-  try {
-    const parsed = JSON.parse(stdout.trim());
-    return isRecord(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-function firstNonEmptyLine(...values: Array<string | null | undefined>) {
-  for (const value of values) {
-    const line = value?.trim().split(/\r?\n/, 1)[0]?.trim();
-    if (line) return line;
-  }
-  return null;
 }
 
 export function truncateToolPreview(value: string | null | undefined) {

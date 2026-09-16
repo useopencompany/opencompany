@@ -1,7 +1,6 @@
 import { headers } from "next/headers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  getHeadlessBrainSnapshot,
   getHeadlessPlugin,
   getHeadlessSkill,
   listHeadlessWikiPages,
@@ -12,8 +11,6 @@ vi.mock("server-only", () => ({}));
 vi.mock("next/headers", () => ({
   headers: vi.fn(),
 }));
-
-const meta = { apiVersion: "v1", protocolVersion: "1.0.0" };
 
 describe("server knowledge reads", () => {
   beforeEach(() => {
@@ -27,31 +24,6 @@ describe("server knowledge reads", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
-  });
-
-  it("forwards actor credentials and disables caching for typed Brain reads", async () => {
-    let upstream: { request: Request; init?: RequestInit } | null = null;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
-        upstream = {
-          request: input instanceof Request ? input : new Request(input, init),
-          ...(init ? { init } : {}),
-        };
-        return Response.json({ data: { folders: [], documents: [] }, meta });
-      }),
-    );
-
-    await expect(getHeadlessBrainSnapshot("brain_alpha")).resolves.toEqual({
-      folders: [],
-      documents: [],
-    });
-
-    const sent = (upstream as unknown as { request: Request; init?: RequestInit }).request;
-    expect(new URL(sent.url).pathname).toBe("/v1/brains/brain_alpha");
-    expect(sent.headers.get("cookie")).toBe("wos-session=session");
-    expect(sent.headers.get("authorization")).toBe("Bearer token");
-    expect((upstream as unknown as { init?: RequestInit }).init?.cache).toBe("no-store");
   });
 
   it("returns null only for a canonical missing Skill", async () => {

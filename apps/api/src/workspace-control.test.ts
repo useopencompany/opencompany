@@ -6,7 +6,6 @@ import { getWorkspacePlan } from "@opencompany/db/billing";
 import {
   getWorkspaceSandboxSize,
   hasOwnedHobbyWorkspace,
-  listAccessibleBrains,
   listWorkspaceMembers,
   listWorkspacesForUser,
   removeWorkspaceMember,
@@ -30,7 +29,6 @@ vi.mock("@opencompany/db/workspaces", async (importOriginal) => ({
   getWorkspaceSandboxSize: vi.fn(async () => "standard"),
   updateWorkspaceSandboxSize: vi.fn(async () => "small"),
   hasOwnedHobbyWorkspace: vi.fn(async () => false),
-  listAccessibleBrains: vi.fn(async () => [{ id: "brain_general", slug: "general" }]),
   listWorkspaceMembers: vi.fn(),
   listWorkspacesForUser: vi.fn(),
   removeWorkspaceMember: vi.fn(async () => undefined),
@@ -58,7 +56,6 @@ const identity = {
   userId: "user_1",
   organizationId: null,
   activeWorkspaceId: null,
-  activeBrainId: null,
   method: "session" as const,
   credentialKind: "authkit_bearer" as const,
 };
@@ -89,12 +86,8 @@ describe("workspace control service", () => {
     vi.mocked(hasOwnedHobbyWorkspace).mockResolvedValue(false);
     vi.mocked(listWorkspaceMembers).mockResolvedValue(workspaceMembers() as never);
     vi.mocked(listWorkspacesForUser).mockResolvedValue([{ workspace, role: "admin" }] as never);
-    vi.mocked(listAccessibleBrains).mockResolvedValue([
-      { id: "brain_general", slug: "general" },
-    ] as never);
     vi.mocked(provisionWorkspace).mockResolvedValue({
       workspace: { ...workspace, id: "goat_ws_new", workosOrganizationId: "org_new" },
-      brain: null,
     } as never);
     workos.userManagement.listInvitations.mockResolvedValue({ data: [] });
     workos.userManagement.listOrganizationMemberships.mockResolvedValue({ data: [] });
@@ -227,7 +220,6 @@ describe("workspace control service", () => {
     ).resolves.toEqual({
       workspaceId: "goat_ws_new",
       organizationId: "org_new",
-      brainId: null,
     });
     expect(provisionWorkspace).toHaveBeenCalledWith(
       {
@@ -248,7 +240,6 @@ describe("workspace control service", () => {
     await expect(service.switch(identity, "goat_ws_current")).resolves.toEqual({
       workspaceId: "goat_ws_current",
       organizationId: "org_current",
-      brainId: "brain_general",
     });
     await expect(service.switch(identity, "goat_ws_foreign")).rejects.toMatchObject({
       status: 404,

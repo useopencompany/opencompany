@@ -37,7 +37,6 @@ const workspacesMock = vi.hoisted(() => ({
 const mcpSetupMock = vi.hoisted(() => ({ completedAt: null as string | null }));
 const featureFlagsMock = vi.hoisted(() => ({
   autoModelRouting: false,
-  legacyBrain: true,
   reviewInbox: false,
   sidebarProjects: false,
 }));
@@ -133,12 +132,8 @@ vi.mock("@/lib/wikis", async (importOriginal) => ({
 }));
 
 const workspaceActionsMock = vi.hoisted(() => ({
-  switchBrainAction: vi.fn(),
   switchWorkspaceAction: vi.fn(),
-  createBrainAction: vi.fn(),
   createWorkspaceAction: vi.fn(),
-  setBrainAccessAction: vi.fn(),
-  getBrainAccessDetailsAction: vi.fn(),
 }));
 
 vi.mock("@/lib/workspace-actions", () => workspaceActionsMock);
@@ -222,22 +217,6 @@ vi.mock("@/components/AppDataProvider", async () => {
         plan: "hobby",
         workspaces: workspacesMock.value,
         workspaceMembers: [],
-        brains: [
-          {
-            id: "goat_brain_1",
-            name: "General",
-            slug: "general",
-            description: null,
-            visibility: "workspace",
-          },
-        ],
-        activeBrain: {
-          id: "goat_brain_1",
-          name: "General",
-          slug: "general",
-          description: null,
-          visibility: "workspace",
-        },
         tasks: tasksMock.value,
         sidebarTasks,
         openSidebarTasks: sidebarTasks,
@@ -245,7 +224,6 @@ vi.mock("@/components/AppDataProvider", async () => {
         openChats: recentChats,
         featureFlags: {
           autoModelRouting: featureFlagsMock.autoModelRouting,
-          legacyBrain: featureFlagsMock.legacyBrain,
           reviewInbox: featureFlagsMock.reviewInbox,
           sidebarProjects: featureFlagsMock.sidebarProjects,
         },
@@ -302,7 +280,6 @@ describe("Sidebar", () => {
     workspaceRoleMock.value = "admin";
     workspacesMock.value = [{ id: "goat_ws_1", name: "Ada's Workspace", role: "admin" }];
     mcpSetupMock.completedAt = null;
-    featureFlagsMock.legacyBrain = true;
     featureFlagsMock.reviewInbox = false;
     featureFlagsMock.sidebarProjects = false;
     searchParamsMock.value = new URLSearchParams();
@@ -320,7 +297,7 @@ describe("Sidebar", () => {
     window.localStorage.clear();
   });
 
-  it("renders home, the brain list, and footer links", () => {
+  it("renders home, navigation, and footer links", () => {
     pathnameMock.value = "/";
     const { container } = render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
@@ -339,13 +316,7 @@ describe("Sidebar", () => {
     );
     expect(within(nav).queryByRole("link", { name: "Brain" })).not.toBeInTheDocument();
     expect(within(nav).queryByRole("link", { name: "Wiki" })).not.toBeInTheDocument();
-    expect(screen.getByText("Brains")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "General" })).not.toHaveAttribute("aria-current");
-    expect(screen.getByRole("button", { name: "New brain" })).toHaveClass("opacity-0");
-    expect(screen.queryByText("New brain")).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Manage access to General" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Brains")).not.toBeInTheDocument();
 
     const account = screen.getByRole("button", { name: "Account menu for Ada Lovelace" });
     expect(account).toBeInTheDocument();
@@ -687,8 +658,7 @@ describe("Sidebar", () => {
     expect(screen.getByRole("link", { name: "Plugins" })).not.toHaveAttribute("aria-current");
   });
 
-  it("keeps the wiki visible and hides legacy Brain navigation by default", async () => {
-    featureFlagsMock.legacyBrain = false;
+  it("keeps the wiki visible in the sidebar", async () => {
     render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
     expect(await screen.findByRole("link", { name: "Company" })).toHaveAttribute(
@@ -696,7 +666,6 @@ describe("Sidebar", () => {
       "/wiki/company",
     );
     expect(screen.queryByText("Brains")).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "General" })).not.toBeInTheDocument();
   });
 
   it("opens the account menu with settings, changelog, docs, and sign out", async () => {
@@ -819,13 +788,12 @@ describe("Sidebar", () => {
     window.removeEventListener(HOME_NAVIGATION_EVENT, homeNavigation);
   });
 
-  it("does not mark home active on nested brain routes", () => {
-    pathnameMock.value = "/brain/people/ada-lovelace";
+  it("does not mark home active on nested wiki routes", () => {
+    pathnameMock.value = "/wiki/company/people/ada-lovelace";
     render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
     const nav = screen.getByRole("navigation", { name: "opencompany primary" });
     expect(within(nav).getByRole("link", { name: "New Chat" })).not.toHaveAttribute("aria-current");
-    expect(screen.getByRole("link", { name: "General" })).toHaveAttribute("aria-current", "page");
   });
 
   it("shows MCP setup until the first successful query is verified", () => {
@@ -864,16 +832,6 @@ describe("Sidebar", () => {
     expect(within(nav).getByRole("link", { name: "Workflows" })).toHaveAttribute(
       "href",
       "/workflows",
-    );
-  });
-
-  it("exposes the active brain as a prefetchable route", () => {
-    pathnameMock.value = "/";
-    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
-
-    expect(screen.getByRole("link", { name: "General" })).toHaveAttribute(
-      "href",
-      "/brain/goat_brain_1",
     );
   });
 
@@ -916,17 +874,6 @@ describe("Sidebar", () => {
     expect(screen.queryByRole("navigation", { name: "Workflow tasks" })).not.toBeInTheDocument();
     expect(screen.queryByText("Prepare launch brief")).not.toBeInTheDocument();
     expect(screen.queryByText("Research competitors")).not.toBeInTheDocument();
-  });
-
-  it("does not show brain creation to workspace members", () => {
-    workspaceRoleMock.value = "member";
-    pathnameMock.value = "/";
-
-    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
-
-    expect(screen.getByRole("link", { name: "General" })).toBeInTheDocument();
-    expect(screen.queryByText("member")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "New brain" })).not.toBeInTheDocument();
   });
 
   it("splits pinned chats into their own section above recent chats", () => {

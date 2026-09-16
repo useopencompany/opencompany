@@ -21,7 +21,7 @@ export function filterSkillMentionItems(
 
 // `skills` is captured once (the workflow editor passes a static server-fetched
 // catalog for the lifetime of the page), so no ref/live-update plumbing is
-// needed here — unlike `brainLinks` in MarkdownBrainEditor, which changes
+// needed here — unlike `pageLinks` in MarkdownEditor, which changes
 // while a Brain document stays mounted.
 export function createSkillMentionSuggestion(
   skills: SkillCatalogItem[],

@@ -460,7 +460,7 @@ export async function connectSlackBotIntegration(input: {
     target: [integrations.workspaceId, integrations.provider],
     targetWhere: sql`${integrations.workspaceId} IS NOT NULL AND ${integrations.provider} = 'slack_bot'`,
     // On reconnect (possibly by a different admin) user_workos_id stays as
-    // the original connector: credential AAD and brain_sources FKs use it.
+    // the original connector: the credential AAD uses it.
     set: {
       externalId: input.teamId,
       connectionLabel,
@@ -1046,14 +1046,7 @@ export async function markIntegrationStatus(input: {
 }
 
 // Hard-deletes a personal integration account. Credentials, synced resources,
-// brain sources, and buffered events cascade away; already-ingested brain
-// content stays (pointer/copy rule) and event claims survive via SET NULL.
-//
-// Claims are created when work is enqueued, before the ingest job reaches
-// a terminal state. Hard-deleting an integration cascades its source items
-// and jobs, so release claims whose matching brain job never succeeded;
-// otherwise another member's copy could be suppressed forever. Keep claims
-// backed by successful jobs so completed ingestion remains deduplicated.
+// and buffered events cascade away.
 //
 // Returns false when no personal integration owned by the acting user matched.
 export async function disconnectPersonalIntegration(input: {
@@ -1065,41 +1058,11 @@ export async function disconnectPersonalIntegration(input: {
 }): Promise<boolean> {
   const db = input.db ?? getDb();
   const result = await db.execute(sql`
-    WITH owned_integration AS (
-      SELECT integration.id
-      FROM goat.integrations integration
-      WHERE integration.id = ${input.integrationId}
-        AND integration.user_workos_id = ${input.userWorkosId}
-        AND integration.workspace_id IS NULL
-    ),
-    source_items AS MATERIALIZED (
-      SELECT source.id
-      FROM goat.brain_source_items source
-      JOIN owned_integration integration ON integration.id = source.integration_id
-    ),
-    released_claims AS (
-      DELETE FROM goat.brain_source_event_claims claim
-      USING source_items source
-      WHERE claim.source_item_id = source.id
-        AND NOT EXISTS (
-          SELECT 1
-          FROM goat.brain_ingest_jobs job
-          WHERE job.source_item_id = source.id
-            AND job.brain_ref = claim.brain_id
-            AND job.status = 'succeeded'
-        )
-      RETURNING claim.id
-    ),
-    release_guard AS (
-      SELECT count(*) AS released_count FROM released_claims
-    ),
-    deleted_integration AS (
-      DELETE FROM goat.integrations integration
-      USING owned_integration owned, release_guard
-      WHERE integration.id = owned.id
-      RETURNING integration.id
-    )
-    SELECT id FROM deleted_integration
+    DELETE FROM goat.integrations integration
+    WHERE integration.id = ${input.integrationId}
+      AND integration.user_workos_id = ${input.userWorkosId}
+      AND integration.workspace_id IS NULL
+    RETURNING integration.id
   `);
   return rowsFromExecute<{ id: string }>(result).length > 0;
 }

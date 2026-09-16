@@ -68,8 +68,6 @@ type PostgresTaskRepositoryOptions = {
   }) => Promise<HarnessSpec>;
   compatibility?: {
     resolvedAttachments?: ResolvedChatAttachments;
-    brainRef?: string | null;
-    workflowBrainRef?: string | null;
     initialMessageContent?: string;
   };
   now?: () => Date;
@@ -531,22 +529,6 @@ export class PostgresTaskRepository implements TaskRepository {
         winner AS MATERIALIZED (
           SELECT * FROM reservation WHERE command_id = ${commandId}
         ),
-        resolved_brain AS MATERIALIZED (
-          SELECT brain.id
-          FROM goat.brains AS brain
-          WHERE brain.workspace_id = ${input.actor.workspaceId}
-            AND (
-              ${this.options.compatibility?.brainRef ?? null}::text IS NULL
-              OR brain.id = ${this.options.compatibility?.brainRef ?? null}
-            )
-            AND EXISTS (SELECT 1 FROM winner)
-          ORDER BY
-            CASE WHEN brain.id = ${this.options.compatibility?.brainRef ?? null} THEN 0 ELSE 1 END,
-            CASE WHEN brain.slug = 'general' THEN 0 ELSE 1 END,
-            brain.created_at ASC,
-            brain.id ASC
-          LIMIT 1
-        ),
         created_conversation AS MATERIALIZED (
           INSERT INTO goat.chat_sessions (
             id, user_workos_id, title, model, engine, kind, created_at, updated_at
@@ -560,7 +542,7 @@ export class PostgresTaskRepository implements TaskRepository {
         created_task AS MATERIALIZED (
           INSERT INTO goat.tasks (
             id, name, user_workos_id, workspace_id, prompt, source, model, session_id,
-            schedule_id, scheduled_for, workflow_id, workflow_brain_ref,
+            schedule_id, scheduled_for, workflow_id,
             status, stage, next_run_at,
             harness_spec, created_at, updated_at
           )
@@ -569,7 +551,6 @@ export class PostgresTaskRepository implements TaskRepository {
             ${input.actor.workspaceId}, ${input.command.goal}, ${input.command.source},
             ${model}, conversation.id, NULL,
             ${input.command.scheduledFor ?? null}, ${input.command.workflowId ?? null},
-            ${this.options.compatibility?.workflowBrainRef ?? null},
             'queued', 'queued', ${now},
             CASE WHEN ${stringifyPostgresJson(harness)}::jsonb ? 'workflow'
               THEN jsonb_set(
@@ -659,12 +640,12 @@ export class PostgresTaskRepository implements TaskRepository {
         ),
         inserted_runtime AS MATERIALIZED (
           INSERT INTO goat.codex_chat_sessions (
-            id, user_workos_id, chat_session_id, engine, model, brain_ref, workspace_id,
+            id, user_workos_id, chat_session_id, engine, model, workspace_id,
             host_tool_contract_version, active_turn_id, status, created_at, updated_at
           )
           SELECT
             winner.runtime_id, ${input.actor.userId}, task.session_id, ${input.command.engine},
-            ${runtimeModel}, (SELECT id FROM resolved_brain), ${input.actor.workspaceId},
+            ${runtimeModel}, ${input.actor.workspaceId},
             ${hostToolContractVersionForEngine(input.command.engine)},
             winner.run_id, 'queued', ${now}, ${now}
           FROM winner

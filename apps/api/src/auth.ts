@@ -1,7 +1,5 @@
 import {
   type Actor,
-  BRAIN_READ_PERMISSION,
-  BRAIN_WRITE_PERMISSION,
   CHAT_READ_PERMISSION,
   CHAT_WRITE_PERMISSION,
   SKILL_READ_PERMISSION,
@@ -20,7 +18,6 @@ import { createRemoteJWKSet, decodeJwt, type JWTPayload, jwtVerify } from "jose"
 import { ApiError } from "./errors";
 
 const ACTIVE_WORKSPACE_COOKIE = "goat-active-workspace";
-const ACTIVE_BRAIN_COOKIE = "goat-active-brain";
 const DEFAULT_SESSION_COOKIE = "wos-session";
 const CODEX_DEVICE_POLL_PATH = /^\/v1\/engine-auth\/codex\/device\/[^/]+\/poll$/u;
 const SESSION_MAX_AGE_SECONDS = 400 * 24 * 60 * 60;
@@ -47,7 +44,6 @@ type VerifiedIdentity = {
 // retired web routes' currentUser() semantics.
 export type ApiIdentity = VerifiedIdentity & {
   activeWorkspaceId: string | null;
-  activeBrainId: string | null;
 };
 
 export type ApiIdentityVerifier = (request: Request) => Promise<ApiIdentity>;
@@ -139,7 +135,6 @@ export function createWorkOsApiIdentityVerifier(
     return {
       ...identity,
       activeWorkspaceId: cookies?.get(ACTIVE_WORKSPACE_COOKIE) ?? null,
-      activeBrainId: cookies?.get(ACTIVE_BRAIN_COOKIE) ?? null,
     };
   };
 }
@@ -286,8 +281,7 @@ async function resolveLocalActor(
   const result = await execute(sql`
     SELECT
       member.workspace_id AS "workspaceId",
-      member.role,
-      workspace.legacy_brain_enabled AS "legacyBrainEnabled"
+      member.role
     FROM goat.users AS actor_user
     JOIN goat.workspace_members AS member
       ON member.user_workos_id = actor_user.workos_user_id
@@ -314,7 +308,6 @@ async function resolveLocalActor(
   const row = rowsFromExecute<{
     workspaceId: string;
     role: string;
-    legacyBrainEnabled: boolean;
   }>(result)[0];
   if (!row) {
     throw new ApiError(
@@ -339,7 +332,7 @@ async function resolveLocalActor(
 
 // Role-derived permission set, the single source of truth shared by the request
 // authenticator and the internal service-actor resolver.
-function actorPermissions(row: { role: string; legacyBrainEnabled: boolean }): string[] {
+function actorPermissions(row: { role: string }): string[] {
   return [
     CHAT_READ_PERMISSION,
     CHAT_WRITE_PERMISSION,
@@ -348,9 +341,7 @@ function actorPermissions(row: { role: string; legacyBrainEnabled: boolean }): s
     SKILL_READ_PERMISSION,
     WIKI_READ_PERMISSION,
     WIKI_WRITE_PERMISSION,
-    ...(row.legacyBrainEnabled ? [BRAIN_READ_PERMISSION] : []),
     SKILL_WRITE_PERMISSION,
-    ...(row.role === "admin" && row.legacyBrainEnabled ? [BRAIN_WRITE_PERMISSION] : []),
     WORKFLOW_READ_PERMISSION,
     WORKFLOW_WRITE_PERMISSION,
   ];
@@ -369,8 +360,7 @@ export async function resolveWikiServiceActor(
   const result = await execute(sql`
     SELECT
       member.workspace_id AS "workspaceId",
-      member.role,
-      workspace.legacy_brain_enabled AS "legacyBrainEnabled"
+      member.role
     FROM goat.users AS actor_user
     JOIN goat.workspace_members AS member
       ON member.user_workos_id = actor_user.workos_user_id
@@ -383,7 +373,6 @@ export async function resolveWikiServiceActor(
   const row = rowsFromExecute<{
     workspaceId: string;
     role: string;
-    legacyBrainEnabled: boolean;
   }>(result)[0];
   if (!row) {
     throw new ApiError(403, "forbidden", "The user cannot access the wiki in this workspace.");

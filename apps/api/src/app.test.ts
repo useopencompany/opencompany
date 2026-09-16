@@ -51,7 +51,6 @@ import { describe, expect, it, vi } from "vitest";
 import { createApiApp } from "./app";
 import type { AttachmentUploadService } from "./attachments";
 import { createWorkOsApiAuthenticator } from "./auth";
-import type { BrainAssetService } from "./brain-assets";
 import type { ChatResourceService } from "./chat-resources";
 import { ApiError } from "./errors";
 import { type ApiRateLimiter, InMemoryApiRateLimiter } from "./rate-limit";
@@ -72,8 +71,6 @@ const actor: Actor = {
     "task:write",
     "workflow:read",
     "workflow:write",
-    "brain:read",
-    "brain:write",
     "wiki:read",
     "wiki:write",
     "skill:read",
@@ -321,14 +318,10 @@ describe("canonical Hono API", () => {
       knowledge: fakeKnowledgeService(),
       wikiCommands: fakeWikiCommandsService(),
       resolveWikiServiceActor: async () => actor,
-      brainSources: fakeBrainSources(),
-      brainImports: fakeBrainImports(),
       browserProfiles: fakeBrowserProfiles(),
       skillImports: fakeSkillImportService(),
       pluginImports: fakePluginImportService(),
-      brainAssets: fakeBrainAssets(),
       workflowAvatars: fakeWorkflowAvatars(),
-      brainControl: fakeBrainControl(),
       wikiControl: fakeWikiControl(),
       attachments: fakeAttachments(),
       projects: fakeProjects(),
@@ -336,6 +329,7 @@ describe("canonical Hono API", () => {
       feedback: fakeFeedback(),
       repoConfigs: fakeRepoConfigs(),
       sessionPullRequests: async () => [],
+      integrationResourceOptions: fakeIntegrationResourceOptions(),
       integrationAccounts: fakeIntegrationAccounts(),
       slackBotSettings: fakeSlackBotSettings(),
       engineAuth: fakeEngineAuth(),
@@ -1370,282 +1364,6 @@ describe("canonical Hono API", () => {
     expect(archive).toHaveBeenCalledWith({ actor, name: "quality-tools" });
   });
 
-  it("serves and mutates Brain sources through the authenticated provider boundary", async () => {
-    const list = vi.fn(async () => brainSourceDetails());
-    const set = vi.fn(async () => undefined);
-    const remove = vi.fn(async () => undefined);
-    const listOptions = vi.fn(async () => ({
-      provider: "linear" as const,
-      teams: [{ id: "team_1", name: "Engineering", key: "ENG" }],
-      partial: false,
-    }));
-    const app = testApp(fakeRepository(), {
-      brainSources: brainSourceService({ list, set, remove, listOptions }),
-    });
-
-    const listed = await app.request("/v1/brains/brain_1/sources");
-    expect(listed.status).toBe(200);
-    const listedBody = await listed.json();
-    expect(listedBody).toMatchObject({
-      data: { viewer: { actorId: actor.userId, isAdmin: true }, sources: [] },
-    });
-    expect(JSON.stringify(listedBody)).not.toMatch(/workos|workspace_id|credential|access_token/iu);
-    expect(list).toHaveBeenCalledWith(actor, "brain_1");
-
-    const updated = await app.request("/v1/brains/brain_1/sources/integration_1", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        operation: "configure",
-        provider: "linear",
-        enabled: true,
-        teams: [{ id: "team_1", name: "Engineering", key: "ENG" }],
-        events: [{ id: "issue_created" }],
-      }),
-    });
-    expect(updated.status).toBe(200);
-    expect(set).toHaveBeenCalledWith(
-      actor,
-      "brain_1",
-      "integration_1",
-      expect.objectContaining({ provider: "linear", enabled: true }),
-    );
-
-    const options = await app.request("/v1/integrations/integration_1/brain-source-options", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider: "linear" }),
-    });
-    expect(options.status).toBe(200);
-    await expect(options.json()).resolves.toMatchObject({
-      data: {
-        provider: "linear",
-        teams: [{ id: "team_1", name: "Engineering", key: "ENG" }],
-        partial: false,
-      },
-    });
-    expect(listOptions).toHaveBeenCalledWith(actor, "integration_1", { provider: "linear" });
-
-    const removed = await app.request("/v1/brains/brain_1/sources/integration_1", {
-      method: "DELETE",
-    });
-    expect(removed.status).toBe(200);
-    expect(remove).toHaveBeenCalledWith(actor, "brain_1", "integration_1");
-  });
-
-  it("returns Granola folders for a workflow event filter", async () => {
-    const listOptions = vi.fn(async () => ({
-      provider: "granola" as const,
-      folders: [
-        { id: "fol_customers", name: "Customers", parentFolderId: null },
-        { id: "fol_acme", name: "Acme", parentFolderId: "fol_customers" },
-      ],
-      partial: false,
-    }));
-    const app = testApp(fakeRepository(), { brainSources: brainSourceService({ listOptions }) });
-
-    const options = await app.request("/v1/integrations/integration_1/brain-source-options", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider: "granola" }),
-    });
-    expect(options.status).toBe(200);
-    await expect(options.json()).resolves.toMatchObject({
-      data: {
-        provider: "granola",
-        folders: [
-          { id: "fol_customers", name: "Customers", parentFolderId: null },
-          { id: "fol_acme", name: "Acme", parentFolderId: "fol_customers" },
-        ],
-        partial: false,
-      },
-    });
-    expect(listOptions).toHaveBeenCalledWith(actor, "integration_1", { provider: "granola" });
-  });
-
-  it("rejects invalid source configuration before invoking provider logic", async () => {
-    const set = vi.fn(async () => undefined);
-    const listOptions = vi.fn(async () => ({
-      provider: "linear" as const,
-      teams: [],
-      partial: false,
-    }));
-    const app = testApp(fakeRepository(), {
-      brainSources: brainSourceService({ set, listOptions }),
-    });
-
-    const invalidMutation = await app.request("/v1/brains/brain_1/sources/integration_1", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        operation: "configure",
-        provider: "google_drive",
-        enabled: true,
-        resourceIds: Array.from({ length: 101 }, (_, index) => `file_${index}`),
-      }),
-    });
-    expect(invalidMutation.status).toBe(400);
-    expect(set).not.toHaveBeenCalled();
-
-    const invalidOptions = await app.request(
-      "/v1/integrations/integration_1/brain-source-options",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider: "google_drive", query: "x".repeat(201) }),
-      },
-    );
-    expect(invalidOptions.status).toBe(400);
-    expect(listOptions).not.toHaveBeenCalled();
-  });
-
-  it("maps Brain source capability denial to a typed forbidden response", async () => {
-    const app = testApp(fakeRepository(), {
-      brainSources: brainSourceService({
-        remove: async () => {
-          throw new CoreError("forbidden", "Only the source owner may remove this source.");
-        },
-      }),
-    });
-    const response = await app.request("/v1/brains/brain_1/sources/integration_1", {
-      method: "DELETE",
-    });
-    expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toMatchObject({ error: { code: "forbidden" } });
-  });
-
-  it("drives the company-context import lifecycle through typed commands", async () => {
-    const start = vi.fn(async () => ({
-      importRunId: "gbimp_1",
-      status: "discovering" as const,
-      replayed: false,
-    }));
-    const confirm = vi.fn(async () => ({
-      importRunId: "gbimp_1",
-      status: "ingesting" as const,
-      replayed: false,
-    }));
-    const cancel = vi.fn(async () => ({
-      importRunId: "gbimp_1",
-      status: "canceled" as const,
-      replayed: false,
-    }));
-    const retry = vi.fn(async () => ({
-      importRunId: "gbimp_1",
-      status: "discovering" as const,
-      replayed: false,
-    }));
-    const app = testApp(fakeRepository(), {
-      brainImports: brainImportService({ start, confirm, cancel, retry }),
-    });
-
-    const started = await app.request("/v1/brains/brain_1/imports", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Idempotency-Key": "import-key-1" },
-      body: JSON.stringify({
-        companyUrl: "acme.com",
-        focus: "Product architecture",
-        sourceSelection: {
-          public_web: { enabled: true },
-          linear: {
-            enabled: true,
-            integrationId: "integration_1",
-          },
-        },
-      }),
-    });
-    expect(started.status).toBe(201);
-    await expect(started.json()).resolves.toMatchObject({
-      data: { importRunId: "gbimp_1", status: "discovering", replayed: false },
-    });
-    expect(start).toHaveBeenCalledWith(actor, "brain_1", {
-      idempotencyKey: "import-key-1",
-      companyUrl: "acme.com",
-      focus: "Product architecture",
-      sourceSelection: {
-        public_web: { enabled: true },
-        linear: {
-          enabled: true,
-          integrationId: "integration_1",
-        },
-      },
-    });
-
-    const confirmed = await app.request("/v1/brains/brain_1/imports/gbimp_1/confirm", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabledProviders: ["public_web", "linear"] }),
-    });
-    expect(confirmed.status).toBe(200);
-    await expect(confirmed.json()).resolves.toMatchObject({
-      data: { importRunId: "gbimp_1", status: "ingesting" },
-    });
-    expect(confirm).toHaveBeenCalledWith(actor, "brain_1", "gbimp_1", ["public_web", "linear"]);
-
-    const canceled = await app.request("/v1/brains/brain_1/imports/gbimp_1/cancel", {
-      method: "POST",
-    });
-    expect(canceled.status).toBe(200);
-    expect(cancel).toHaveBeenCalledWith(actor, "brain_1", "gbimp_1");
-
-    const retried = await app.request("/v1/brains/brain_1/imports/gbimp_1/retry", {
-      method: "POST",
-    });
-    expect(retried.status).toBe(200);
-    expect(retry).toHaveBeenCalledWith(actor, "brain_1", "gbimp_1");
-  });
-
-  it("requires an Idempotency-Key and a valid selection to start an import", async () => {
-    const start = vi.fn(async () => ({
-      importRunId: "gbimp_1",
-      status: "discovering" as const,
-      replayed: false,
-    }));
-    const app = testApp(fakeRepository(), {
-      brainImports: brainImportService({ start }),
-    });
-
-    const missingKey = await app.request("/v1/brains/brain_1/imports", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ companyUrl: "acme.com", sourceSelection: {} }),
-    });
-    expect(missingKey.status).toBe(400);
-
-    const unknownConfig = await app.request("/v1/brains/brain_1/imports", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Idempotency-Key": "import-key-2" },
-      body: JSON.stringify({
-        companyUrl: "acme.com",
-        sourceSelection: {
-          slack: { enabled: true, integrationId: "integration_2", config: { channels: [] } },
-        },
-      }),
-    });
-    expect(unknownConfig.status).toBe(400);
-    expect(start).not.toHaveBeenCalled();
-  });
-
-  it("maps import state conflicts to typed conflict responses", async () => {
-    const app = testApp(fakeRepository(), {
-      brainImports: brainImportService({
-        confirm: async () => {
-          throw new CoreError(
-            "conflict",
-            "This company-context scan is no longer awaiting confirmation.",
-          );
-        },
-      }),
-    });
-    const response = await app.request("/v1/brains/brain_1/imports/gbimp_1/confirm", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabledProviders: [] }),
-    });
-    expect(response.status).toBe(409);
-    await expect(response.json()).resolves.toMatchObject({ error: { code: "conflict" } });
-  });
-
   it("returns a retryable typed error when external Skill resolution is unavailable", async () => {
     const upstreamError = Object.assign(new Error("GitHub artifact request was rate limited."), {
       upstreamService: "github",
@@ -1919,7 +1637,6 @@ describe("canonical Hono API", () => {
       googleIngress: {
         start: record("google.start", calls),
         callback: record("google.callback", calls),
-        driveWebhook: record("google.driveWebhook", calls),
       },
       slackIngress: {
         start: record("slack.start", calls),
@@ -1929,14 +1646,6 @@ describe("canonical Hono API", () => {
         start: record("linear.start", calls),
         callback: record("linear.callback", calls),
         webhook: record("linear.webhook", calls),
-      },
-      hubspotIngress: {
-        start: record("hubspot.start", calls),
-        callback: record("hubspot.callback", calls),
-        webhook: record("hubspot.webhook", calls),
-      },
-      attioIngress: {
-        webhook: record("attio.webhook", calls),
       },
       mcpOAuthIngress: {
         start: recordMcp("mcp.start", calls),
@@ -1964,16 +1673,11 @@ describe("canonical Hono API", () => {
       ["GET", "/integrations/google-calendar/callback", "google.callback"],
       ["GET", "/integrations/google-drive/start", "google.start"],
       ["GET", "/integrations/google-drive/callback", "google.callback"],
-      ["POST", "/webhooks/google-drive", "google.driveWebhook"],
       ["GET", "/integrations/slack/start", "slack.start"],
       ["GET", "/integrations/slack/callback", "slack.callback"],
       ["GET", "/integrations/linear-ingest/start", "linear.start"],
       ["GET", "/integrations/linear-ingest/callback", "linear.callback"],
       ["POST", "/webhooks/linear/events", "linear.webhook"],
-      ["GET", "/integrations/hubspot/start", "hubspot.start"],
-      ["GET", "/integrations/hubspot/callback", "hubspot.callback"],
-      ["POST", "/webhooks/hubspot/events", "hubspot.webhook"],
-      ["POST", "/webhooks/attio/events", "attio.webhook"],
       ["GET", "/integrations/attio-mcp/start", "mcp.start.attio"],
       ["GET", "/integrations/attio-mcp/callback", "mcp.callback.attio"],
       ["GET", "/integrations/stripe/start", "mcp.start.stripe"],
@@ -2737,7 +2441,6 @@ describe("canonical Hono API", () => {
           workspaceId: actor.workspaceId,
           role: actor.role,
           taskSpawningEnabled: true,
-          legacyBrainEnabled: true,
         },
       ],
     }));
@@ -2950,29 +2653,6 @@ describe("canonical Hono API", () => {
     expect(unscoped.status).toBe(400);
     const misplacedScope = await app.request("/v1/read-models/tasks-v1?taskId=task_1");
     expect(misplacedScope.status).toBe(400);
-  });
-
-  it("authorizes Brain read models before forwarding the fixed Brain scope", async () => {
-    const assertBrainAccess = vi.fn(async () => undefined);
-    const stream = vi.fn(async () => Response.json([]));
-    const app = testApp(fakeRepository(), {
-      knowledge: knowledgeService({ assertBrainAccess }),
-      readModels: { stream },
-    });
-
-    const response = await app.request(
-      "/v1/read-models/brain-ingest-jobs-v1?brainId=brain_1&table=goat.users&where=true",
-    );
-
-    expect(response.status).toBe(200);
-    expect(assertBrainAccess).toHaveBeenCalledWith({ actor, brainId: "brain_1" });
-    expect(stream).toHaveBeenCalledWith(
-      expect.objectContaining({
-        actor,
-        readModel: "brain-ingest-jobs-v1",
-        brainId: "brain_1",
-      }),
-    );
   });
 
   it("streams the authenticated integration-account read model without client-selected scope", async () => {
@@ -3274,97 +2954,6 @@ describe("canonical Hono API", () => {
     expect(response.headers.get("content-disposition")).toContain("inline");
   });
 
-  it("uploads and replaces private Brain assets through typed multipart operations", async () => {
-    const upload = vi.fn(async () => ({
-      document: fakeBrainDocument(),
-      quotaPaused: true,
-      replayed: false,
-    }));
-    const replace = vi.fn(async () => ({
-      document: fakeBrainDocument(),
-      quotaPaused: false,
-      replayed: true,
-    }));
-    const app = testApp(fakeRepository(), {
-      brainAssets: brainAssetService({ upload, replace }),
-      workflowAvatars: fakeWorkflowAvatars(),
-    });
-    const file = new File(["private bytes"], "plan.pdf", { type: "application/pdf" });
-    const createForm = new FormData();
-    createForm.set("folderPath", "projects");
-    createForm.set("file", file);
-
-    const created = await app.request("/v1/brains/brain_1/assets", {
-      method: "POST",
-      headers: { "Idempotency-Key": "asset-create-1" },
-      body: createForm,
-    });
-
-    expect(created.status).toBe(201);
-    await expect(created.json()).resolves.toMatchObject({
-      data: { document: { id: "document_1" }, quotaPaused: true, replayed: false },
-    });
-    expect(upload).toHaveBeenCalledWith({
-      actor,
-      brainId: "brain_1",
-      folderPath: "projects",
-      idempotencyKey: "asset-create-1",
-      file: expect.objectContaining({
-        name: "plan.pdf",
-        size: 13,
-        type: "application/pdf",
-      }),
-    });
-
-    const replaceForm = new FormData();
-    replaceForm.set("file", file);
-    const replaced = await app.request("/v1/brains/brain_1/assets/document_1/replace", {
-      method: "POST",
-      headers: { "Idempotency-Key": "asset-replace-1" },
-      body: replaceForm,
-    });
-
-    expect(replaced.status).toBe(200);
-    await expect(replaced.json()).resolves.toMatchObject({
-      data: { document: { id: "document_1" }, quotaPaused: false, replayed: true },
-    });
-    expect(replace).toHaveBeenCalledWith({
-      actor,
-      brainId: "brain_1",
-      documentId: "document_1",
-      idempotencyKey: "asset-replace-1",
-      file: expect.objectContaining({
-        name: "plan.pdf",
-        size: 13,
-        type: "application/pdf",
-      }),
-    });
-  });
-
-  it("streams authorized Brain asset bytes without exposing a storage locator", async () => {
-    const download = vi.fn(async () => ({
-      stream: new Response("private bytes").body as ReadableStream<Uint8Array>,
-      mediaType: "application/pdf",
-      filename: 'plan "final".pdf',
-      sizeBytes: 13,
-    }));
-    const app = testApp(fakeRepository(), {
-      brainAssets: brainAssetService({ download }),
-      workflowAvatars: fakeWorkflowAvatars(),
-    });
-
-    const response = await app.request("/v1/brain-assets/document_1");
-
-    expect(response.status).toBe(200);
-    expect(await response.text()).toBe("private bytes");
-    expect(response.headers.get("content-type")).toBe("application/pdf");
-    expect(response.headers.get("cache-control")).toBe("private, no-store");
-    expect(response.headers.get("content-disposition")).toBe(
-      `inline; filename="plan _final_.pdf"; filename*=UTF-8''plan%20_final_.pdf`,
-    );
-    expect(download).toHaveBeenCalledWith({ actor, documentId: "document_1" });
-  });
-
   it("rejects oversized multipart bodies before buffering the upload", async () => {
     let uploadCalled = false;
     const app = testApp(fakeRepository(), {
@@ -3393,26 +2982,6 @@ describe("canonical Hono API", () => {
     expect(uploadCalled).toBe(false);
   });
 
-  it("rejects oversized Brain assets before the canonical service buffers them", async () => {
-    const upload = vi.fn();
-    const app = testApp(fakeRepository(), {
-      brainAssets: brainAssetService({ upload }),
-      workflowAvatars: fakeWorkflowAvatars(),
-    });
-    const response = await app.request("/v1/brains/brain_1/assets", {
-      method: "POST",
-      headers: {
-        "Content-Length": String(21 * 1024 * 1024),
-        "Content-Type": "multipart/form-data; boundary=test",
-        "Idempotency-Key": "oversized-asset-1",
-      },
-      body: "--test--\r\n",
-    });
-
-    expect(response.status).toBe(413);
-    expect(upload).not.toHaveBeenCalled();
-  });
-
   it("enforces rate limits without making them a durability dependency", async () => {
     const limiter: ApiRateLimiter = {
       consume: () => ({ allowed: false, retryAfterSeconds: 7 }),
@@ -3421,39 +2990,6 @@ describe("canonical Hono API", () => {
     const response = await app.request("/v1/conversations");
     expect(response.status).toBe(429);
     expect(response.headers.get("retry-after")).toBe("7");
-  });
-
-  it("keeps lower-limit provider reads independent of ordinary API reads", async () => {
-    const listOptions = vi.fn(async () => ({
-      provider: "linear" as const,
-      teams: [{ id: "team_1", name: "Engineering", key: "ENG" }],
-      partial: false,
-    }));
-    const resolveLiveViewUrl = vi.fn(async () => "https://live.example.com/session_1");
-    const app = testApp(fakeRepository(), {
-      rateLimiter: new InMemoryApiRateLimiter(() => 0),
-      brainSources: brainSourceService({ listOptions }),
-      browserProfiles: browserProfileService({ resolveLiveViewUrl }),
-    });
-
-    for (let index = 0; index < 120; index += 1) {
-      expect((await app.request("/v1/conversations")).status).toBe(200);
-    }
-
-    const response = await app.request("/v1/integrations/integration_1/brain-source-options", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider: "linear" }),
-    });
-
-    expect(response.status).toBe(200);
-    expect(listOptions).toHaveBeenCalledWith(actor, "integration_1", { provider: "linear" });
-
-    const liveView = await app.request(
-      "/v1/browser-profiles/profile_1/live-view?sessionId=session_1",
-    );
-    expect(liveView.status).toBe(200);
-    expect(resolveLiveViewUrl).toHaveBeenCalledWith(actor, "profile_1", "session_1");
   });
 
   it.each(["plugins", "skills"] as const)(
@@ -3860,124 +3396,6 @@ describe("canonical Hono API", () => {
         code: "forbidden",
         message: "Only workspace admins can configure repository environments.",
       },
-    });
-  });
-
-  it("serves the integration account control plane through typed commands", async () => {
-    const list = vi.fn(async () => [
-      {
-        integrationId: "gint_abc123",
-        provider: "gmail" as const,
-        status: "connected" as const,
-        connected: true,
-        accountEmail: "owner@example.com",
-        accountName: "Owner",
-        connectionLabel: null,
-        statusReason: null,
-        scopes: ["gmail.readonly"],
-        capabilityModes: {},
-      },
-    ]);
-    const getUsage = vi.fn(async () => ({ affectedBrainSourceCount: 3 }));
-    const disconnect = vi.fn(async () => undefined);
-    const setCapabilityMode = vi.fn(async () => undefined);
-    const app = testApp(fakeRepository(), {
-      integrationAccounts: integrationAccountService({
-        list,
-        getUsage,
-        disconnect,
-        setCapabilityMode,
-      }),
-    });
-
-    const listed = await app.request("/v1/integration-accounts");
-    expect(listed.status).toBe(200);
-    await expect(listed.json()).resolves.toMatchObject({
-      data: [{ integrationId: "gint_abc123", provider: "gmail" }],
-    });
-    expect(list).toHaveBeenCalledWith(actor);
-
-    const usage = await app.request("/v1/integration-accounts/gint_abc123/usage");
-    expect(usage.status).toBe(200);
-    await expect(usage.json()).resolves.toMatchObject({
-      data: { affectedBrainSourceCount: 3 },
-      meta: { apiVersion: "v1" },
-    });
-    expect(getUsage).toHaveBeenCalledWith(actor, "gint_abc123");
-
-    const mode = await app.request("/v1/integration-accounts/gint_abc123/capability-modes/write", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: "ask" }),
-    });
-    expect(mode.status).toBe(200);
-    await expect(mode.json()).resolves.toMatchObject({
-      data: { integrationId: "gint_abc123", capabilityId: "write", mode: "ask" },
-    });
-    expect(setCapabilityMode).toHaveBeenCalledWith(actor, "gint_abc123", "write", "ask");
-
-    const removed = await app.request("/v1/integration-accounts/gint_abc123", {
-      method: "DELETE",
-    });
-    expect(removed.status).toBe(200);
-    await expect(removed.json()).resolves.toMatchObject({
-      data: { integrationId: "gint_abc123", deleted: true },
-    });
-    expect(disconnect).toHaveBeenCalledWith(actor, "gint_abc123");
-  });
-
-  it("serves authenticated Slack bot settings and destination resources", async () => {
-    const getWorkspaceSettings = vi.fn(async () => ({
-      isAdmin: true,
-      configured: true,
-      installed: true,
-      status: "connected" as const,
-      needsScopeUpgrade: false,
-      canCustomizeIdentity: true,
-      canReact: true,
-      canReadDirectMessages: true,
-      teamName: "Acme",
-      statusReason: null,
-      destinationCount: 1,
-    }));
-    const getDestination = vi.fn(async () => ({
-      installed: true,
-      botConnected: true,
-      isAdmin: true,
-      brainVisibility: "workspace" as const,
-      source: { enabled: true, channels: [{ id: "C1", name: "general" }] },
-    }));
-    const setDestination = vi.fn(async () => undefined);
-    const app = testApp(fakeRepository(), {
-      slackBotSettings: {
-        ...fakeSlackBotSettings(),
-        getWorkspaceSettings,
-        getDestination,
-        setDestination,
-      },
-    });
-
-    const workspace = await app.request("/v1/workspace/slack-bot");
-    expect(workspace.status).toBe(200);
-    await expect(workspace.json()).resolves.toMatchObject({
-      data: { installed: true, teamName: "Acme", destinationCount: 1 },
-    });
-
-    const destination = await app.request("/v1/brains/brain_1/slack-bot");
-    expect(destination.status).toBe(200);
-    await expect(destination.json()).resolves.toMatchObject({
-      data: { source: { channels: [{ id: "C1", name: "general" }] } },
-    });
-
-    const updated = await app.request("/v1/brains/brain_1/slack-bot", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled: true, channels: [{ id: "C2", name: "product" }] }),
-    });
-    expect(updated.status).toBe(200);
-    expect(setDestination).toHaveBeenCalledWith(actor, "brain_1", {
-      enabled: true,
-      channels: [{ id: "C2", name: "product" }],
     });
   });
 
@@ -4724,73 +4142,6 @@ describe("canonical Hono API", () => {
     expect(createCreditTopUp).toHaveBeenCalledTimes(1);
   });
 
-  it("routes capabilities and Brain controls through their authorized services", async () => {
-    const getSettings = vi.fn(async () => ({
-      capabilities: [{ source: "x" as const, enabled: true }],
-      sessionBudgetUsdMicros: 5_000_000,
-    }));
-    const setCapability = vi.fn(async () => ({ source: "x" as const, enabled: false }));
-    const getApproval = vi.fn(async () => ({
-      runId: "gcr_1",
-      source: "lead" as const,
-      action: "lead.find_person_email",
-      status: "awaiting_approval" as const,
-      maxCostUsdMicros: 360_000,
-      expiresAt: new Date("2026-08-13T16:00:00.000Z"),
-      settledCostUsdMicros: null,
-    }));
-    const createBrain = vi.fn(async () => ({ brainId: "brain_new" }));
-    const getAccess = vi.fn(async () => ({
-      visibility: "restricted" as const,
-      memberIds: ["user_1"],
-      workspaceMembers: [],
-    }));
-    const app = testApp(fakeRepository(), {
-      workspaceCapabilities: {
-        ...fakeWorkspaceCapabilities(),
-        getSettings,
-        setCapability,
-        getApproval,
-      },
-      brainControl: { ...fakeBrainControl(), createBrain, getAccess },
-    });
-
-    const settings = await app.request("/v1/capabilities");
-    expect(settings.status).toBe(200);
-    await expect(settings.json()).resolves.toMatchObject({
-      data: { capabilities: [{ source: "x", enabled: true }] },
-    });
-
-    const toggled = await app.request("/v1/capabilities/x", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled: false }),
-    });
-    expect(toggled.status).toBe(200);
-    expect(setCapability).toHaveBeenCalledWith(actor, "x", false);
-
-    const approval = await app.request("/v1/capability-approvals/gcr_1");
-    expect(approval.status).toBe(200);
-    await expect(approval.json()).resolves.toMatchObject({
-      data: { expiresAt: "2026-08-13T16:00:00.000Z" },
-    });
-
-    const created = await app.request("/v1/brains", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "Research", visibility: "workspace" }),
-    });
-    expect(created.status).toBe(201);
-    expect(createBrain).toHaveBeenCalledWith(actor, {
-      name: "Research",
-      visibility: "workspace",
-    });
-
-    const access = await app.request("/v1/brains/brain_new/access");
-    expect(access.status).toBe(200);
-    expect(getAccess).toHaveBeenCalledWith(actor, "brain_new");
-  });
-
   it("routes workspace settings, membership, provisioning, and switch commands", async () => {
     const getSettings = vi.fn(async () => ({
       workspace: { id: "goat_ws_current", name: "Current Organization" },
@@ -4806,12 +4157,10 @@ describe("canonical Hono API", () => {
     const create = vi.fn(async () => ({
       workspaceId: "goat_ws_new",
       organizationId: "org_new",
-      brainId: "brain_new",
     }));
     const switchWorkspace = vi.fn(async () => ({
       workspaceId: "goat_ws_next",
       organizationId: "org_next",
-      brainId: null,
     }));
     const app = testApp(fakeRepository(), {
       workspaceControl: {
@@ -4875,7 +4224,6 @@ describe("canonical Hono API", () => {
       userId: "user_mid_onboarding",
       organizationId: null,
       activeWorkspaceId: null,
-      activeBrainId: null,
       method: "session" as const,
       credentialKind: "browser_cookie" as const,
     };
@@ -4901,7 +4249,6 @@ describe("canonical Hono API", () => {
       userId: "user_mobile",
       organizationId: null,
       activeWorkspaceId: null,
-      activeBrainId: null,
       method: "session" as const,
       credentialKind: "authkit_bearer" as const,
     };
@@ -4912,7 +4259,6 @@ describe("canonical Hono API", () => {
     const switchWorkspace = vi.fn(async () => ({
       workspaceId,
       organizationId: "org_next",
-      brainId: "brain_general",
     }));
     const consume = vi.fn(async () => ({ allowed: true, retryAfterSeconds: 0 }));
     const app = testApp(fakeRepository(), {
@@ -4944,7 +4290,6 @@ describe("canonical Hono API", () => {
       userId: "user_mid_onboarding",
       organizationId: null,
       activeWorkspaceId: null,
-      activeBrainId: null,
       method: "session" as const,
       credentialKind: "browser_cookie" as const,
       refreshedSessionCookie: "wos-session=refreshed; Path=/; HttpOnly",
@@ -4956,13 +4301,11 @@ describe("canonical Hono API", () => {
     const getState = vi.fn(async () => ({
       onboarding: null,
       workspace: null,
-      activeBrainId: null,
     }));
     const saveProfile = vi.fn(async () => undefined);
     const saveWorkspace = vi.fn(async () => ({
       workspaceId: "goat_ws_new",
       organizationId: "org_new",
-      brainId: "brain_general",
       createdByCaller: true,
     }));
     const finish = vi.fn(async () => undefined);
@@ -5273,14 +4616,10 @@ function testApp(
     knowledge: fakeKnowledgeService(),
     wikiCommands: fakeWikiCommandsService(),
     resolveWikiServiceActor: async () => actor,
-    brainSources: fakeBrainSources(),
-    brainImports: fakeBrainImports(),
     browserProfiles: fakeBrowserProfiles(),
     skillImports: fakeSkillImportService(),
     pluginImports: fakePluginImportService(),
-    brainAssets: fakeBrainAssets(),
     workflowAvatars: fakeWorkflowAvatars(),
-    brainControl: fakeBrainControl(),
     wikiControl: fakeWikiControl(),
     attachments: fakeAttachments(),
     projects: fakeProjects(),
@@ -5288,6 +4627,7 @@ function testApp(
     feedback: fakeFeedback(),
     repoConfigs: fakeRepoConfigs(),
     sessionPullRequests: async () => [],
+    integrationResourceOptions: fakeIntegrationResourceOptions(),
     integrationAccounts: fakeIntegrationAccounts(),
     slackBotSettings: fakeSlackBotSettings(),
     engineAuth: fakeEngineAuth(),
@@ -5304,7 +4644,6 @@ function testApp(
       userId: actor.userId,
       organizationId: null,
       activeWorkspaceId: actor.workspaceId,
-      activeBrainId: null,
       method: actor.authenticationMethod,
       credentialKind: "browser_cookie" as const,
     }),
@@ -5357,49 +4696,6 @@ function fakeWorkflowAvatars(): WorkflowAvatarService {
     },
     download: async () => {
       throw new Error("Unexpected workflow avatar download.");
-    },
-  };
-}
-
-function fakeBrainAssets(): BrainAssetService {
-  return {
-    upload: async () => {
-      throw new Error("Unexpected Brain asset upload.");
-    },
-    replace: async () => {
-      throw new Error("Unexpected Brain asset replacement.");
-    },
-    download: async () => {
-      throw new Error("Unexpected Brain asset download.");
-    },
-  };
-}
-
-function fakeBrainControl(): Parameters<typeof createApiApp>[0]["brainControl"] {
-  return {
-    switchBrain: async () => {
-      throw new Error("Unexpected Brain switch.");
-    },
-    createBrain: async () => {
-      throw new Error("Unexpected Brain creation.");
-    },
-    getAccess: async () => {
-      throw new Error("Unexpected Brain access read.");
-    },
-    setAccess: async () => {
-      throw new Error("Unexpected Brain access mutation.");
-    },
-    getEnrichment: async () => {
-      throw new Error("Unexpected Brain enrichment read.");
-    },
-    setEnrichment: async () => {
-      throw new Error("Unexpected Brain enrichment mutation.");
-    },
-    getIntelligence: async () => {
-      throw new Error("Unexpected Brain intelligence read.");
-    },
-    setIntelligence: async () => {
-      throw new Error("Unexpected Brain intelligence mutation.");
     },
   };
 }
@@ -5524,12 +4820,9 @@ function fakeIdentity(): Parameters<typeof createApiApp>[0]["identity"] {
         name: "Workspace",
         slug: "workspace",
         role: "admin" as const,
-        legacyBrainEnabled: true,
       },
     ],
     activeWorkspaceId: actor.workspaceId,
-    brains: [],
-    activeBrainId: null,
   };
   return {
     get: async () => data,
@@ -5569,29 +4862,6 @@ function fakeOnboardingEmails(): Parameters<typeof createApiApp>[0]["onboardingE
       throw new Error("Unexpected onboarding email unsubscribe.");
     },
   };
-}
-
-function fakeBrainImports(): Parameters<typeof createApiApp>[0]["brainImports"] {
-  return {
-    start: async () => {
-      throw new Error("Unexpected Brain import start.");
-    },
-    confirm: async () => {
-      throw new Error("Unexpected Brain import confirmation.");
-    },
-    cancel: async () => {
-      throw new Error("Unexpected Brain import cancellation.");
-    },
-    retry: async () => {
-      throw new Error("Unexpected Brain import retry.");
-    },
-  };
-}
-
-function brainImportService(
-  overrides: Partial<Parameters<typeof createApiApp>[0]["brainImports"]>,
-): Parameters<typeof createApiApp>[0]["brainImports"] {
-  return { ...fakeBrainImports(), ...overrides };
 }
 
 function fakeUserSettings(): Parameters<typeof createApiApp>[0]["userSettings"] {
@@ -5636,11 +4906,11 @@ function fakeBilling(): Parameters<typeof createApiApp>[0]["billing"] {
     getOverview: async () => {
       throw new Error("Unexpected billing overview read.");
     },
-    getUsage: async () => {
-      throw new Error("Unexpected billing usage read.");
-    },
     getBalance: async () => {
       throw new Error("Unexpected billing balance read.");
+    },
+    getUsage: async () => {
+      throw new Error("Unexpected billing usage read.");
     },
     createCreditTopUp: async () => {
       throw new Error("Unexpected billing top-up.");
@@ -5678,9 +4948,6 @@ function fakeIntegrationAccounts(): Parameters<typeof createApiApp>[0]["integrat
   return {
     list: async () => {
       throw new Error("Unexpected integration account list.");
-    },
-    getUsage: async () => {
-      throw new Error("Unexpected integration account usage read.");
     },
     disconnect: async () => {
       throw new Error("Unexpected integration account disconnect.");
@@ -5747,15 +5014,6 @@ function fakeSlackBotSettings(): Parameters<typeof createApiApp>[0]["slackBotSet
     },
     disconnect: async () => {
       throw new Error("Unexpected Slack bot disconnect.");
-    },
-    getDestination: async () => {
-      throw new Error("Unexpected Slack bot destination read.");
-    },
-    listChannels: async () => {
-      throw new Error("Unexpected Slack bot channel list.");
-    },
-    setDestination: async () => {
-      throw new Error("Unexpected Slack bot destination mutation.");
     },
   };
 }
@@ -5865,29 +5123,6 @@ function wikiActivityItem() {
   };
 }
 
-function fakeBrainSources(): Parameters<typeof createApiApp>[0]["brainSources"] {
-  return {
-    list: async () => {
-      throw new Error("Unexpected Brain source list.");
-    },
-    set: async () => {
-      throw new Error("Unexpected Brain source mutation.");
-    },
-    remove: async () => {
-      throw new Error("Unexpected Brain source removal.");
-    },
-    listOptions: async () => {
-      throw new Error("Unexpected Brain source option list.");
-    },
-  };
-}
-
-function brainSourceService(
-  overrides: Partial<Parameters<typeof createApiApp>[0]["brainSources"]>,
-): Parameters<typeof createApiApp>[0]["brainSources"] {
-  return { ...fakeBrainSources(), ...overrides };
-}
-
 function fakeBrowserProfiles(): Parameters<typeof createApiApp>[0]["browserProfiles"] {
   return {
     list: async () => {
@@ -5938,92 +5173,6 @@ function wikiSourceView(overrides: Record<string, unknown> = {}) {
     canDelete: true,
     ...overrides,
   };
-}
-
-function brainSourceDetails() {
-  const unavailableBase = {
-    connected: false,
-    status: "not_connected" as const,
-    integrationId: null,
-    statusReason: null,
-  };
-  return {
-    viewer: { actorId: actor.userId, isAdmin: true },
-    sources: [],
-    ownAccounts: {
-      linear: [],
-      gmail: [],
-      google_drive: [],
-      hubspot: [],
-      granola: [],
-      fathom: [],
-      attio: [],
-    },
-    jamie: {
-      integration: {
-        ...unavailableBase,
-        provider: "jamie" as const,
-        accountName: null,
-        webhookUrl: null,
-        apiKeyConfigured: false,
-      },
-      legacyDefaultDelivery: false,
-      isDefaultBrain: false,
-    },
-    linear: {
-      integration: {
-        ...unavailableBase,
-        provider: "linear" as const,
-        accountName: null,
-        organizationName: null,
-      },
-    },
-    gmail: {
-      integration: { ...unavailableBase, provider: "gmail" as const, accountEmail: null },
-    },
-    googleDrive: {
-      integration: {
-        ...unavailableBase,
-        provider: "google_drive" as const,
-        accountEmail: null,
-      },
-    },
-    hubspot: {
-      integration: {
-        ...unavailableBase,
-        provider: "hubspot" as const,
-        accountEmail: null,
-        hubDomain: null,
-      },
-    },
-    granola: {
-      integration: {
-        ...unavailableBase,
-        provider: "granola" as const,
-        accountEmail: null,
-        accountName: null,
-      },
-    },
-    fathom: {
-      integration: {
-        ...unavailableBase,
-        provider: "fathom" as const,
-        accountEmail: null,
-        accountName: null,
-      },
-    },
-    attio: {
-      integration: {
-        ...unavailableBase,
-        provider: "attio" as const,
-        workspaceName: null,
-      },
-    },
-  };
-}
-
-function brainAssetService(overrides: Partial<BrainAssetService>): BrainAssetService {
-  return { ...fakeBrainAssets(), ...overrides };
 }
 
 function chatResourceService(overrides: Partial<ChatResourceService>): ChatResourceService {
@@ -6166,35 +5315,6 @@ function knowledgeService(overrides: Partial<KnowledgeRepository>) {
     },
   ) as KnowledgeRepository;
   return new KnowledgeApplicationService(repository);
-}
-
-function fakeBrainDocument() {
-  return {
-    id: "document_1",
-    brainId: "project-alpha",
-    folderPath: "projects",
-    path: "projects/project-alpha.md",
-    title: "Alpha",
-    nodeType: "page" as const,
-    content: "---\nid: project-alpha\n---\n# Alpha",
-    body: "# Alpha",
-    timeline: [],
-    format: "markdown" as const,
-    mimeType: "text/markdown",
-    originalFileName: null,
-    assetSizeBytes: null,
-    relations: [],
-    sources: [],
-    kind: "page" as const,
-    type: "project" as const,
-    status: "draft" as const,
-    aliases: [],
-    contentHash: "a".repeat(64),
-    sizeBytes: 8,
-    createdByActorId: "user_1",
-    createdAt,
-    updatedAt: createdAt,
-  };
 }
 
 function fakeWikiPage(overrides: Partial<ReturnType<typeof baseWikiPage>> = {}) {
@@ -6873,3 +5993,13 @@ describe("retired Wiki ingestion endpoints", () => {
     });
   });
 });
+
+function fakeIntegrationResourceOptions(): Parameters<
+  typeof createApiApp
+>[0]["integrationResourceOptions"] {
+  return {
+    listOptions: async () => {
+      throw new Error("Unexpected integration resource-option read.");
+    },
+  };
+}

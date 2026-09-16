@@ -1087,7 +1087,6 @@ function session(overrides: Partial<CodexChatSession> = {}): CodexChatSession {
     engine: "codex",
     harness: "chat",
     model: "gpt-5.5",
-    brainRef: null,
     workspaceId: null,
     hostToolContractVersion: null,
     executionBackend: "runner_attached",

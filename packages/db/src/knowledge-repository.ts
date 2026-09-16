@@ -1,21 +1,6 @@
 import { createHash } from "node:crypto";
 import {
-  BRAIN_RETRIEVAL_COMMANDS,
-  isValidBrainFolder,
-  normalizeBrainCompiledTruth,
-  normalizeBrainFolderForV1,
-  normalizeBrainId,
-  nowIso,
-  parseBrainDocument,
-  serializeBrainDocument,
-} from "@opencompany/brain";
-import {
   type Actor,
-  type BrainDocument,
-  type BrainFolder,
-  type BrainOverview,
-  type BrainSnapshot,
-  type BrainSourceItem,
   CoreError,
   type KnowledgeRepository,
   type WikiPage,
@@ -23,37 +8,13 @@ import {
   type WikiTimelineEntry,
 } from "@opencompany/core";
 import { isValidWikiKind, isValidWikiSlug, wikiSlugFromTitle } from "@opencompany/wiki";
-import { and, count, eq, gte, inArray, ne } from "drizzle-orm";
-import {
-  brainFilePathFor,
-  createBrainFolderRow,
-  createBrainMarkdownContent,
-  createBrainMarkdownDocument,
-  deleteBrainFile,
-  deleteBrainFolderRow,
-  getBrainFile,
-  listBrainFiles,
-  listBrainFolderRows,
-  renameBrainFolderRow,
-  replaceBrainFileCompiledTruth,
-  updateBrainFileContent,
-} from "./brain-files";
+import { and, eq } from "drizzle-orm";
 import type {
-  BrainDocument as BrainDocumentRow,
   KnowledgeCommandOperation,
   WikiPage as WikiPageRow,
   WikiTimelineEntry as WikiTimelineEntryRow,
 } from "./product-schema";
-import {
-  brainDocuments,
-  brainIngestJobs,
-  brainSourceItems,
-  brainSources,
-  brainToolRuns,
-  knowledgeCommandIdempotency,
-  wikiPages,
-  wikiTimelineEntries,
-} from "./product-schema";
+import { knowledgeCommandIdempotency, wikiPages, wikiTimelineEntries } from "./product-schema";
 import {
   addWikiTimelineEntry,
   createWikiFolder,
@@ -65,321 +26,10 @@ import {
   writeWikiPage,
 } from "./wiki";
 import { listWikisForUser, resolveWikiForUser, type WikiScope } from "./wikis";
-import { getBrainAccess } from "./workspaces";
 
 type DbClient = any;
-const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1_000;
-
 export class PostgresKnowledgeRepository implements KnowledgeRepository {
   constructor(private readonly db: DbClient) {}
-
-  async assertBrainAccess(input: { actor: Actor; brainId: string }) {
-    const access = await getBrainAccess(
-      { userWorkosId: input.actor.userId, brainRef: input.brainId },
-      { db: this.db },
-    );
-    if (!access || access.brain.workspaceId !== input.actor.workspaceId) {
-      throw new CoreError("not_found", "Brain not found.");
-    }
-  }
-
-  async getBrainSnapshot(input: { actor: Actor; brainId: string }): Promise<BrainSnapshot> {
-    const [documents, folders] = await Promise.all([
-      listBrainFiles({ brainRef: input.brainId }, { db: this.db, includeInvalid: true }),
-      listBrainFolderRows({ brainRef: input.brainId }, { db: this.db }),
-    ]);
-    return {
-      folders: folders.map(brainFolder),
-      documents: documents.map(brainDocument).sort(compareBrainDocuments),
-    };
-  }
-
-  async getBrainOverview(input: {
-    actor: Actor;
-    brainId: string;
-    now: Date;
-  }): Promise<BrainOverview> {
-    const cutoff = new Date(input.now.getTime() - SEVEN_DAYS_MS);
-    const [[itemsAdded], [retrievals], [sources]] = await Promise.all([
-      this.db
-        .select({ value: count() })
-        .from(brainDocuments)
-        .where(
-          and(eq(brainDocuments.brainRef, input.brainId), gte(brainDocuments.createdAt, cutoff)),
-        ),
-      this.db
-        .select({ value: count() })
-        .from(brainToolRuns)
-        .where(
-          and(
-            eq(brainToolRuns.brainRef, input.brainId),
-            eq(brainToolRuns.ok, true),
-            gte(brainToolRuns.createdAt, cutoff),
-            inArray(brainToolRuns.action, BRAIN_RETRIEVAL_COMMANDS),
-          ),
-        ),
-      this.db
-        .select({ value: count() })
-        .from(brainSources)
-        .where(
-          and(
-            eq(brainSources.brainId, input.brainId),
-            eq(brainSources.enabled, true),
-            ne(brainSources.provider, "slack_bot"),
-          ),
-        ),
-    ]);
-    return {
-      windowStartedAt: cutoff,
-      itemsAddedLast7Days: numberValue(itemsAdded?.value),
-      retrievalsLast7Days: numberValue(retrievals?.value),
-      activeSources: numberValue(sources?.value),
-    };
-  }
-
-  async listBrainSourceItems(input: {
-    actor: Actor;
-    brainId: string;
-    ids: string[];
-  }): Promise<BrainSourceItem[]> {
-    const rows = await this.db
-      .select({
-        id: brainSourceItems.id,
-        sourceProvider: brainSourceItems.sourceProvider,
-        sourceType: brainSourceItems.sourceType,
-        externalId: brainSourceItems.externalId,
-        title: brainSourceItems.title,
-        lastIngestError: brainSourceItems.lastIngestError,
-        createdAt: brainSourceItems.createdAt,
-      })
-      .from(brainSourceItems)
-      .innerJoin(brainIngestJobs, eq(brainIngestJobs.sourceItemId, brainSourceItems.id))
-      .where(
-        and(eq(brainIngestJobs.brainRef, input.brainId), inArray(brainSourceItems.id, input.ids)),
-      );
-    const sourceItems = rows as BrainSourceItem[];
-    return Array.from(new Map(sourceItems.map((row) => [row.id, row])).values());
-  }
-
-  async createBrainDocument(input: {
-    actor: Actor;
-    brainId: string;
-    idempotencyKey: string;
-    folderPath: string;
-    fileName: string;
-  }) {
-    try {
-      const folderPath = normalizeBrainFolderForV1(input.folderPath);
-      const fileName = input.fileName.trim();
-      const id = await this.reserveCreate(
-        input,
-        "brain_document.create",
-        { folderPath, fileName },
-        deterministicResourceId("goat_brain_doc", input, input.idempotencyKey),
-      );
-      const replay = await getBrainFile({ brainRef: input.brainId, fileId: id }, { db: this.db });
-      if (replay) return brainDocument(replay);
-      if (!isValidBrainFolder(folderPath)) {
-        throw new CoreError(
-          "invalid_argument",
-          "Folder paths must be lowercase slugs separated by /.",
-        );
-      }
-      if (!fileName || fileName.includes("/") || fileName.includes("\\")) {
-        throw new CoreError("invalid_argument", "Give the Markdown file a valid name.");
-      }
-      const title = fileName.replace(/\.md$/iu, "").trim();
-      const baseId = normalizeBrainId(title).slice(0, 80).replace(/-+$/gu, "");
-      if (!baseId) {
-        throw new CoreError(
-          "invalid_argument",
-          "File names must contain at least one letter or number.",
-        );
-      }
-      const rows = await listBrainFiles({ brainRef: input.brainId }, { db: this.db });
-      const used = new Set(rows.map((row) => row.brainId));
-      for (let suffix = 1; suffix < 1_000; suffix += 1) {
-        const brainId = suffixedId(baseId, suffix, 80);
-        if (used.has(brainId)) continue;
-        const path = brainFilePathFor(folderPath, brainId);
-        const row = await createBrainMarkdownDocument(
-          {
-            id,
-            brainRef: input.brainId,
-            userWorkosId: input.actor.userId,
-            path,
-            content: createBrainMarkdownContent({
-              id: brainId,
-              folderPath,
-              title,
-              type: "note",
-              status: "draft",
-            }),
-          },
-          { db: this.db },
-        );
-        if (row) return brainDocument(row);
-        const claimed = await getBrainFile(
-          { brainRef: input.brainId, fileId: id },
-          { db: this.db },
-        );
-        if (claimed) return brainDocument(claimed);
-        used.add(brainId);
-      }
-      throw new CoreError("conflict", "Could not allocate a unique Brain document id.");
-    } catch (error) {
-      throw knowledgeError(error);
-    }
-  }
-
-  async updateBrainDocument(input: {
-    actor: Actor;
-    brainId: string;
-    documentId: string;
-    body: string;
-    expectedContentHash?: string;
-  }) {
-    try {
-      const existing = await this.requireBrainDocument(input.brainId, input.documentId);
-      const content = replaceBrainFileCompiledTruth({
-        content: existing.content,
-        compiledTruth: input.body,
-        updatedAt: nowIso(),
-      });
-      const row = await updateBrainFileContent(
-        {
-          brainRef: input.brainId,
-          userWorkosId: input.actor.userId,
-          fileId: input.documentId,
-          content,
-          ...(input.expectedContentHash ? { expectedContentHash: input.expectedContentHash } : {}),
-        },
-        { db: this.db },
-      );
-      return brainDocument(row);
-    } catch (error) {
-      throw knowledgeError(error);
-    }
-  }
-
-  async renameBrainDocument(input: {
-    actor: Actor;
-    brainId: string;
-    documentId: string;
-    title: string;
-  }) {
-    try {
-      const title = input.title.trim();
-      if (!title) throw new CoreError("invalid_argument", "Title cannot be empty.");
-      const existing = await this.requireBrainDocument(input.brainId, input.documentId);
-      const parsed = parseBrainDocument(existing.content);
-      const content = serializeBrainDocument({
-        title,
-        compiledTruth: parsed.compiledTruth,
-        timeline: parsed.timeline,
-        frontmatter: {
-          id: existing.brainId,
-          folder: existing.folderPath,
-          kind: existing.kind,
-          type: existing.entityType,
-          status: parsed.frontmatter.status ?? existing.status,
-          title,
-          createdAt: parsed.frontmatter.createdAt ?? existing.createdAt.toISOString(),
-          updatedAt: nowIso(),
-          relations: parsed.frontmatter.relations ?? [],
-          ...(parsed.frontmatter.aliases ? { aliases: parsed.frontmatter.aliases } : {}),
-          ...(parsed.frontmatter.description
-            ? { description: parsed.frontmatter.description }
-            : {}),
-          ...(parsed.frontmatter.sources ? { sources: parsed.frontmatter.sources } : {}),
-          ...(parsed.frontmatter.mergedInto ? { mergedInto: parsed.frontmatter.mergedInto } : {}),
-        },
-      });
-      return brainDocument(
-        await updateBrainFileContent(
-          {
-            brainRef: input.brainId,
-            userWorkosId: input.actor.userId,
-            fileId: input.documentId,
-            content,
-          },
-          { db: this.db },
-        ),
-      );
-    } catch (error) {
-      throw knowledgeError(error);
-    }
-  }
-
-  async deleteBrainDocument(input: { actor: Actor; brainId: string; documentId: string }) {
-    try {
-      await this.requireBrainDocument(input.brainId, input.documentId);
-      await deleteBrainFile(
-        {
-          brainRef: input.brainId,
-          userWorkosId: input.actor.userId,
-          fileId: input.documentId,
-        },
-        { db: this.db },
-      );
-    } catch (error) {
-      throw knowledgeError(error);
-    }
-  }
-
-  async createBrainFolder(input: { actor: Actor; brainId: string; path: string }) {
-    try {
-      return brainFolder(
-        await createBrainFolderRow(
-          {
-            brainRef: input.brainId,
-            userWorkosId: input.actor.userId,
-            path: input.path,
-          },
-          { db: this.db },
-        ),
-      );
-    } catch (error) {
-      throw knowledgeError(error);
-    }
-  }
-
-  async renameBrainFolder(input: {
-    actor: Actor;
-    brainId: string;
-    fromPath: string;
-    toPath: string;
-  }) {
-    try {
-      await renameBrainFolderRow(
-        {
-          brainRef: input.brainId,
-          userWorkosId: input.actor.userId,
-          fromPath: input.fromPath,
-          toPath: input.toPath,
-        },
-        { db: this.db },
-      );
-      return { path: normalizeBrainFolderForV1(input.toPath) };
-    } catch (error) {
-      throw knowledgeError(error);
-    }
-  }
-
-  async deleteBrainFolder(input: { actor: Actor; brainId: string; path: string }) {
-    try {
-      await deleteBrainFolderRow(
-        {
-          brainRef: input.brainId,
-          userWorkosId: input.actor.userId,
-          path: input.path,
-        },
-        { db: this.db },
-      );
-    } catch (error) {
-      throw knowledgeError(error);
-    }
-  }
 
   async resolveWiki(input: { actor: Actor; wikiId?: string | undefined }) {
     const wiki = await resolveWikiForUser(
@@ -705,12 +355,6 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
     return { workspaceId: input.actor.workspaceId, wikiId: input.wikiId };
   }
 
-  private async requireBrainDocument(brainId: string, documentId: string) {
-    const row = await getBrainFile({ brainRef: brainId, fileId: documentId }, { db: this.db });
-    if (!row) throw new CoreError("not_found", "Brain document not found.");
-    return row;
-  }
-
   private async reserveCreate(
     input: { actor: Actor; idempotencyKey: string },
     operation: KnowledgeCommandOperation,
@@ -753,53 +397,6 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
   }
 }
 
-function brainDocument(row: BrainDocumentRow): BrainDocument {
-  const parsed = parseBrainDocument(row.content);
-  const title = row.title || parsed.title || row.brainId;
-  return {
-    id: row.id,
-    brainId: row.brainId,
-    folderPath: row.folderPath,
-    path: brainFilePathFor(row.folderPath, row.brainId),
-    title,
-    ...(parsed.frontmatter.description ? { description: parsed.frontmatter.description } : {}),
-    content: row.content,
-    body: normalizeBrainCompiledTruth(row.body, title),
-    timeline: parsed.timeline,
-    format: row.format,
-    mimeType: row.mimeType ?? "text/markdown",
-    originalFileName: row.originalFileName,
-    assetSizeBytes: row.assetSizeBytes,
-    relations: parsed.frontmatter.relations ?? [],
-    sources: parsed.frontmatter.sources ?? [],
-    kind: row.kind,
-    type: row.entityType,
-    status: row.status,
-    aliases: parsed.frontmatter.aliases ?? [],
-    contentHash: row.contentHash,
-    sizeBytes: row.sizeBytes,
-    createdByActorId: row.createdByWorkosId,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  };
-}
-
-function brainFolder(row: {
-  id: string;
-  path: string;
-  source: "system" | "custom";
-  createdAt: Date;
-  updatedAt: Date;
-}): BrainFolder {
-  return {
-    id: row.id,
-    path: row.path,
-    source: row.source,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  };
-}
-
 function wikiPage(row: WikiPageRow): WikiPage {
   return {
     id: row.id,
@@ -838,10 +435,6 @@ function deterministicResourceId(prefix: string, input: { actor: Actor }, key: s
   return `${prefix}_${digest}`;
 }
 
-function deterministicUuid(prefix: string, input: { actor: Actor }, key: string) {
-  return uuidFromParts([prefix, input.actor.userId, input.actor.workspaceId, key]);
-}
-
 /**
  * Wiki resources fold the target wiki into their derived id. Without it, the
  * same actor reusing one Idempotency-Key across two wikis would derive the same
@@ -876,30 +469,11 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value) ?? "null";
 }
 
-function suffixedId(base: string, suffix: number, maxLength: number) {
-  if (suffix === 1) return base;
-  const ending = `-${suffix}`;
-  const prefix = base.slice(0, maxLength - ending.length).replace(/-+$/gu, "");
-  return `${prefix || "untitled"}${ending}`;
-}
-
-function compareBrainDocuments(a: BrainDocument, b: BrainDocument) {
-  const folder = a.folderPath.localeCompare(b.folderPath);
-  return folder || b.updatedAt.getTime() - a.updatedAt.getTime();
-}
-
-function numberValue(value: unknown) {
-  const parsed = Number(value ?? 0);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
 function knowledgeError(error: unknown) {
   if (error instanceof CoreError) return error;
   const message = error instanceof Error ? error.message : "Knowledge mutation failed.";
   if (/changed since it was loaded/iu.test(message)) return new CoreError("conflict", message);
-  if (message === "Brain document not found." || /^No wiki page /u.test(message)) {
-    return new CoreError("not_found", message);
-  }
+  if (/^No wiki page /u.test(message)) return new CoreError("not_found", message);
   if (/already exists|is not empty/iu.test(message)) return new CoreError("conflict", message);
   if (error instanceof WikiError) {
     // WikiError also guards storage invariants. Those failures must remain internal instead of
@@ -907,14 +481,6 @@ function knowledgeError(error: unknown) {
     return /^Expected (?:a row|a txid) /u.test(message)
       ? error
       : new CoreError("invalid_argument", message);
-  }
-  if (
-    /^(?:Brain file path|Folder path|Folder paths|Required folders|Cannot rename|Only binary-backed)/u.test(
-      message,
-    ) ||
-    /^Folder ".*" (?:is required|does not exist)/u.test(message)
-  ) {
-    return new CoreError("invalid_argument", message);
   }
   return error;
 }

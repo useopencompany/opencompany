@@ -6,26 +6,18 @@ import { rowsFromExecute } from "./sql-exec";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "stuck-work-monitor" });
 const DEFAULT_POLL_INTERVAL_MS = 60_000;
-const DEFAULT_BACKGROUND_THRESHOLD_MS = 20 * 60_000;
 const MAX_STUCK_ROWS = 100;
 
 export type StuckRunnerWork = {
-  kind: "codex_chat_turn" | "brain_ingest_job" | "brain_import_run";
+  kind: "codex_chat_turn";
   id: string;
   status: string;
   updatedAt: Date;
 };
 
-export async function listStuckRunnerWork(input: {
-  now?: Date;
-  turnThresholdMs: number;
-  backgroundThresholdMs?: number;
-}) {
+export async function listStuckRunnerWork(input: { now?: Date; turnThresholdMs: number }) {
   const now = input.now ?? new Date();
   const turnCutoff = new Date(now.getTime() - input.turnThresholdMs);
-  const backgroundCutoff = new Date(
-    now.getTime() - (input.backgroundThresholdMs ?? DEFAULT_BACKGROUND_THRESHOLD_MS),
-  );
   const result = await getDb().execute(sql`
     SELECT kind, id, status, updated_at AS "updatedAt"
     FROM (
@@ -55,29 +47,6 @@ export async function listStuckRunnerWork(input: {
             THEN COALESCE(attempt.started_at, turn.updated_at)
           ELSE turn.updated_at
         END <= ${turnCutoff}
-
-      UNION ALL
-
-      SELECT
-        'brain_ingest_job'::text AS kind,
-        job.id,
-        job.status,
-        job.next_run_at AS updated_at
-      FROM goat.brain_ingest_jobs AS job
-      WHERE job.status IN ('queued', 'running')
-        AND job.plan_paused = false
-        AND job.next_run_at <= ${backgroundCutoff}
-
-      UNION ALL
-
-      SELECT
-        'brain_import_run'::text AS kind,
-        import_run.id,
-        import_run.status,
-        import_run.next_run_at AS updated_at
-      FROM goat.brain_import_runs AS import_run
-      WHERE import_run.status IN ('discovering', 'ingesting', 'finalizing')
-        AND import_run.next_run_at <= ${backgroundCutoff}
     ) AS stuck
     ORDER BY updated_at ASC, kind ASC, id ASC
     LIMIT ${MAX_STUCK_ROWS}
@@ -102,7 +71,6 @@ export function createStuckWorkReporter(
 
 export function startStuckWorkMonitor(options: {
   turnThresholdMs: number;
-  backgroundThresholdMs?: number;
   pollIntervalMs?: number;
 }) {
   const report = createStuckWorkReporter();
@@ -113,9 +81,6 @@ export function startStuckWorkMonitor(options: {
       report(
         await listStuckRunnerWork({
           turnThresholdMs: options.turnThresholdMs,
-          ...(options.backgroundThresholdMs
-            ? { backgroundThresholdMs: options.backgroundThresholdMs }
-            : {}),
         }),
       );
     },

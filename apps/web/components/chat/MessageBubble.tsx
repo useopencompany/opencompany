@@ -170,7 +170,7 @@ function AssistantTurn({
   // as plain read-only rows (no plan-implement / approval affordances).
   const renderItem = (item: AssistantRenderItem, nested: boolean): ReactNode => {
     if (item.type === "text") {
-      return <AssistantTextBubble key={item.key} text={item.text} citations={item.citations} />;
+      return <AssistantTextBubble key={item.key} text={item.text} />;
     }
     if (item.type === "reasoning") {
       return (

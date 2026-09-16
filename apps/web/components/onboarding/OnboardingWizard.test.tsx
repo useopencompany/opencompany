@@ -72,7 +72,6 @@ const OWNER_PROPS = {
     avatarUrl: null,
   },
   currentWorkspaceName: "",
-  legacyBrainEnabled: false,
   variant: "owner" as const,
   initialStep: 0,
   initialWorkspaceId: null,
@@ -91,7 +90,6 @@ describe("OnboardingWizard", () => {
     mocks.saveOnboardingWorkspaceAction.mockResolvedValue({
       ok: true,
       workspaceId: "workspace_1",
-      brainRef: null,
     });
     mocks.getOnboardingSubscriptionsAction.mockResolvedValue({
       claudeCode: { connected: false, needsReauth: false },

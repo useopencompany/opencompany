@@ -16,7 +16,6 @@ import { PUBLISH_ARTIFACT_TOOL_NAME, WRITE_ARTIFACT_TOOL_NAME } from "@opencompa
 import { BROWSER_TOOL_NAMES } from "@opencompany/browser-tools";
 import { WIKI_TOOL_NAME } from "@opencompany/wiki/tool";
 import {
-  BRAIN_TOOL_NAME,
   BROWSER_USE_PROFILE_TOOL_NAME,
   CREATE_WORKSPACE_SKILL_TOOL_NAME,
   DESCRIBE_ACTIONS_TOOL_NAME,
@@ -24,7 +23,6 @@ import {
   LIST_ACTIONS_TOOL_NAME,
   LIST_SKILLS_TOOL_NAME,
   READ_SKILL_FILE_TOOL_NAME,
-  SAVE_TO_BRAIN_TOOL_NAME,
   START_WORKFLOW_TOOL_NAME,
   USE_ACTION_TOOL_NAME,
   USE_SKILL_TOOL_NAME,
@@ -68,7 +66,7 @@ export const SUBAGENT_TOOL_DESCRIPTION = [
   "",
   "The subagent starts fresh. It cannot see this conversation, so `task` has to stand on its own: the goal, the context it needs, and the exact shape of the answer you want back. It cannot ask you a follow-up question.",
   "",
-  "A subagent is read-only. It can search the web, read the Wiki and Brain, read Skills, and call integration actions that run without approval. It cannot write, publish, save, start tasks or workflows, or call anything that needs the user's approval. When the work needs one of those, have the subagent report exactly what to do and then do it yourself.",
+  "A subagent is read-only. It can search the web, read the Wiki, read Skills, and call integration actions that run without approval. It cannot write, publish, save, start tasks or workflows, or call anything that needs the user's approval. When the work needs one of those, have the subagent report exactly what to do and then do it yourself.",
 ].join("\n");
 
 export const SUBAGENT_TOOL_INPUT_JSON_SCHEMA = {
@@ -141,7 +139,6 @@ export const SUBAGENT_SYSTEM_PROMPT = [
  * be skipped by accident.
  */
 export const SUBAGENT_INHERITED_TOOL_NAMES: readonly string[] = [
-  BRAIN_TOOL_NAME,
   WIKI_TOOL_NAME,
   WEB_SEARCH_TOOL_NAME,
   WEB_FETCH_TOOL_NAME,
@@ -156,7 +153,6 @@ export const SUBAGENT_INHERITED_TOOL_NAMES: readonly string[] = [
 /** Parent tools deliberately withheld, with the reason grouped by line. */
 export const SUBAGENT_WITHHELD_TOOL_NAMES: readonly string[] = [
   // Writes and publishes. A subagent reports what to change; the main agent changes it.
-  SAVE_TO_BRAIN_TOOL_NAME,
   WRITE_ARTIFACT_TOOL_NAME,
   PUBLISH_ARTIFACT_TOOL_NAME,
   CREATE_WORKSPACE_SKILL_TOOL_NAME,

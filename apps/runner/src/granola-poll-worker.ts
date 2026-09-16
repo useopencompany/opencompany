@@ -1,15 +1,5 @@
 import { listGranolaFolders } from "@opencompany/agent/integrations/granola";
 import { captureProductIngestionQuotaAnalytics } from "@opencompany/analytics/product";
-import { normalizeGranolaMeetingNote } from "@opencompany/brain";
-import {
-  attributeBrainSourceEventClaims,
-  claimBrainSourceEvents,
-  listBrainSourceEventClaimedBrainRefs,
-} from "@opencompany/db/brain-event-claims";
-import {
-  BRAIN_AGENT_INGEST_JOB_KIND,
-  upsertBrainSourceItemAndEnqueue,
-} from "@opencompany/db/brain-ingest";
 import {
   claimGranolaSyncState,
   completeGranolaSyncPages,
@@ -22,7 +12,6 @@ import {
   granolaNoteFolderScope,
   granolaWorkflowEventContext,
   granolaWorkflowEventDeliveryId,
-  listEnabledGranolaBrainSourceRoutes,
   updateGranolaSyncCursor,
   updateGranolaSyncPage,
 } from "@opencompany/db/granola";
@@ -35,7 +24,6 @@ import {
 } from "@opencompany/db/workflow-event-routes";
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
-import { wakeBrainIngestWorker } from "./brain-ingest-worker";
 import { getDb } from "./db";
 import {
   fetchGranolaNote,
@@ -55,8 +43,8 @@ const logger = createLogger({ service: "opencompany-runner", runtime: "goat-gran
 // late-finishing note.
 export const GRANOLA_POLL_INTERVAL_MS = 5 * 60_000;
 // A claim stamps last_polled_at; other runner replicas skip integrations
-// claimed within the cooldown. Brain event claims absorb any residual
-// double-poll race.
+// claimed within the cooldown. The event inbox's unique (workflow, provider,
+// delivery) index absorbs any residual double-poll race.
 export const GRANOLA_POLL_COOLDOWN_MS = 4 * 60_000;
 // Runaway guard on cursor pagination within one poll pass. Meetings are
 // low-volume; anything beyond this is drained by later polls because the
@@ -87,13 +75,6 @@ export async function listGranolaPollCandidates(
       AND i.workspace_id IS NULL
       AND (
         EXISTS (
-          SELECT 1
-          FROM goat.brain_sources bs
-          WHERE bs.integration_id = i.id
-            AND bs.provider = 'granola'
-            AND bs.enabled = true
-        )
-        OR EXISTS (
           SELECT 1
           FROM goat.workflows w
           JOIN goat.plugins p
@@ -138,7 +119,7 @@ export async function pollGranolaIntegration(input: {
   candidate: GranolaPollCandidate;
   signal: AbortSignal;
   cooldownMs?: number;
-}): Promise<{ enqueued: number; seen: number; workflowRuns: number } | null> {
+}): Promise<{ seen: number; workflowRuns: number } | null> {
   const { candidate } = input;
   const db = getDb();
   await ensureGranolaSyncState(
@@ -184,7 +165,7 @@ export async function pollGranolaIntegration(input: {
       { integrationId: candidate.integrationId, updatedAfterCursor: start },
       db,
     );
-    return { enqueued: 0, seen: 0, workflowRuns: 0 };
+    return { seen: 0, workflowRuns: 0 };
   }
 
   const credential = await loadIntegrationCredential({
@@ -217,8 +198,6 @@ export async function pollGranolaIntegration(input: {
   }
   const { notes } = batch;
 
-  const routes = await listEnabledGranolaBrainSourceRoutes([candidate.integrationId], db);
-  const routedBrainRefs = [...new Set(routes.map((route) => route.brainRef))];
   // Event routing is authorized per pass, not per note: the plugin event toggle, the workflow
   // status, and the connection can all change between polls. Declared filters are matched per
   // note, once the note payload that carries its folders has been fetched.
@@ -275,7 +254,6 @@ export async function pollGranolaIntegration(input: {
     );
   }
 
-  let enqueued = 0;
   let workflowRuns = 0;
   const noteErrors: unknown[] = [];
   for (const note of notes) {
@@ -286,7 +264,6 @@ export async function pollGranolaIntegration(input: {
         candidate,
         apiKey,
         note,
-        routedBrainRefs,
         workflowRoutes,
         folderParentIds,
         signal: input.signal,
@@ -300,11 +277,10 @@ export async function pollGranolaIntegration(input: {
       noteErrors.push(error);
       continue;
     }
-    if (result.enqueued) enqueued += 1;
     workflowRuns += result.workflowRuns;
   }
-  // Finish routing other meetings even if one note or its separate Brain ingestion failed.
-  // Leave the cursor unchanged on failure so the next pass retries without losing either path.
+  // Finish routing other meetings even if one note failed. Leave the cursor unchanged on
+  // failure so the next pass retries without losing anything.
   if (noteErrors.length > 0) throw noteErrors[0];
 
   // The timestamp watermark only advances after the final page. When a pass
@@ -340,7 +316,7 @@ export async function pollGranolaIntegration(input: {
       db,
     );
   }
-  return { enqueued, seen: notes.length, workflowRuns };
+  return { seen: notes.length, workflowRuns };
 }
 
 type GranolaNotesBatch = {
@@ -391,40 +367,25 @@ export async function ingestGranolaNote(input: {
   candidate: GranolaPollCandidate;
   apiKey: string;
   note: GranolaNoteSummary;
-  routedBrainRefs: readonly string[];
   workflowRoutes?: readonly WorkflowEventTriggerRoute[];
   folderParentIds?: ReadonlyMap<string, string | null>;
   now?: Date;
   signal: AbortSignal;
   fetchNote?: typeof fetchGranolaNote;
-}): Promise<{ enqueued: boolean; workflowRuns: number }> {
-  const { candidate, note } = input;
+}): Promise<{ workflowRuns: number }> {
+  const { note } = input;
   const db = getDb();
-  const eventKey = granolaEventClaimKey(note.id);
 
-  // Skip the transcript fetch when every routed Brain has already claimed the note
-  // and no workflow needs it. Edits may bump updated_at without creating a new note.
-  const alreadyClaimedBrainRefs = await listBrainSourceEventClaimedBrainRefs({
-    brainRefs: input.routedBrainRefs,
-    sourceProvider: GRANOLA_PROVIDER,
-    eventKey,
-    db,
-  });
-  const pendingBrainRefs = input.routedBrainRefs.filter(
-    (brainRef) => !alreadyClaimedBrainRefs.has(brainRef),
-  );
   const workflowRoutes = input.workflowRoutes ?? [];
-  if (pendingBrainRefs.length === 0 && workflowRoutes.length === 0) {
-    return { enqueued: false, workflowRuns: 0 };
-  }
+  if (workflowRoutes.length === 0) return { workflowRuns: 0 };
 
   const fetchNote = input.fetchNote ?? fetchGranolaNote;
   // Events only need the summary. Granola rejects inline transcripts that are too large;
   // requesting one here would prevent an otherwise-ready meeting from starting its workflow.
-  let payload = await fetchNote({
+  const payload = await fetchNote({
     apiKey: input.apiKey,
     noteId: note.id,
-    includeTranscript: workflowRoutes.length === 0,
+    includeTranscript: false,
     signal: input.signal,
   });
 
@@ -437,68 +398,7 @@ export async function ingestGranolaNote(input: {
     db,
   });
 
-  if (pendingBrainRefs.length === 0) {
-    return { enqueued: false, workflowRuns };
-  }
-  // Save workflow deliveries before fetching the transcript for a separate Brain subscription.
-  // If that fetch fails, retries deduplicate the delivery already in the durable event inbox.
-  if (workflowRoutes.length > 0) {
-    payload = await fetchNote({
-      apiKey: input.apiKey,
-      noteId: note.id,
-      includeTranscript: true,
-      signal: input.signal,
-    });
-  }
-  const item = normalizeGranolaMeetingNote(payload, { capturedAt: new Date().toISOString() });
-
-  let brainEnqueued = false;
-  if (pendingBrainRefs.length > 0) {
-    const result = await db.transaction(async (tx: any) => {
-      const brainRefs: string[] = [];
-      const claimedEventKeysByBrainRef = new Map<string, string[]>();
-      for (const brainRef of pendingBrainRefs) {
-        const { claimedEventKeys } = await claimBrainSourceEvents({
-          brainRef,
-          sourceProvider: GRANOLA_PROVIDER,
-          eventKeys: [eventKey],
-          db: tx,
-        });
-        if (claimedEventKeys.length === 0) continue;
-        brainRefs.push(brainRef);
-        claimedEventKeysByBrainRef.set(brainRef, claimedEventKeys);
-      }
-      if (brainRefs.length === 0) return null;
-
-      const upserted = await upsertBrainSourceItemAndEnqueue({
-        userWorkosId: candidate.userWorkosId,
-        sourceConnectionId: candidate.integrationId,
-        integrationId: candidate.integrationId,
-        item,
-        rawPayload: payload,
-        rawEventKeysByBrainRef: claimedEventKeysByBrainRef,
-        kind: BRAIN_AGENT_INGEST_JOB_KIND,
-        brainRefs,
-        db: tx,
-      });
-      for (const brainRef of brainRefs) {
-        await attributeBrainSourceEventClaims({
-          brainRef,
-          sourceProvider: GRANOLA_PROVIDER,
-          eventKeys: claimedEventKeysByBrainRef.get(brainRef) ?? [],
-          sourceItemId: upserted.sourceItemId,
-          db: tx,
-        });
-      }
-      return upserted;
-    });
-
-    captureProductIngestionQuotaAnalytics(result?.quotaUpdates);
-    brainEnqueued = Boolean(result?.enqueued);
-    if (brainEnqueued) wakeBrainIngestWorker();
-  }
-
-  return { enqueued: brainEnqueued, workflowRuns };
+  return { workflowRuns };
 }
 
 // The list endpoint only returns notes Granola has finished summarizing, but a note whose summary
@@ -580,11 +480,10 @@ export function startGranolaPollWorker(options: { pollIntervalMs?: number } = {}
           });
           return null;
         });
-        if (polled && (polled.enqueued > 0 || polled.workflowRuns > 0)) {
-          logger.info("opencompany Granola notes enqueued", {
-            event: "opencompany.goat_granola_notes_enqueued",
+        if (polled && polled.workflowRuns > 0) {
+          logger.info("opencompany Granola notes started workflow runs", {
+            event: "opencompany.goat_granola_workflow_runs_started",
             integration_id: candidate.integrationId,
-            enqueued_count: polled.enqueued,
             workflow_run_count: polled.workflowRuns,
             seen_count: polled.seen,
           });

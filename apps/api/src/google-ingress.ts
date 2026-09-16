@@ -14,10 +14,6 @@ import {
   isGoogleIntegrationConfigured,
   verifyGoogleIntegrationState,
 } from "@opencompany/agent/integrations/google-oauth";
-import {
-  loadGoogleDriveWatchChannel,
-  requestGoogleDriveCursorWake,
-} from "@opencompany/db/google-drive";
 import { connectGoogleIntegration } from "@opencompany/db/integrations";
 import { createLogger } from "@opencompany/observability";
 import type { ApiIdentityVerifier } from "./auth";
@@ -27,14 +23,12 @@ const logger = createLogger({ service: "opencompany-api", runtime: "google-ingre
 
 type DbLike = any;
 
-// Provider ingress composition for the Google family (Gmail, Calendar,
-// Drive): the shared OAuth connect flow plus the Drive push-notification
-// webhook. Public URLs stay on the web origin — web relays the exact request
-// here — so no Google Cloud console or Drive watch configuration changes.
+// Provider ingress composition for the Google family (Gmail, Calendar, Drive):
+// the shared OAuth connect flow. Public URLs stay on the web origin — web
+// relays the exact request here.
 export type GoogleIngressService = {
   start(provider: GoogleIntegrationProvider, request: Request): Promise<Response>;
   callback(provider: GoogleIntegrationProvider, request: Request): Promise<Response>;
-  driveWebhook(request: Request): Promise<Response>;
 };
 
 export function createGoogleIngress(input: {
@@ -49,7 +43,6 @@ export function createGoogleIngress(input: {
   return {
     start: (provider, request) => handleStart(input, provider, request),
     callback: (provider, request) => handleCallback(input, provider, request),
-    driveWebhook: (request) => handleDriveWebhook(input, request),
   };
 }
 
@@ -214,35 +207,6 @@ async function refreshGooglePluginAfterConnection(
       error_message: error instanceof Error ? error.message : String(error),
     });
   }
-}
-
-async function handleDriveWebhook(input: IngressInput, request: Request): Promise<Response> {
-  const channelId = request.headers.get("x-goog-channel-id")?.trim();
-  const channelToken = request.headers.get("x-goog-channel-token")?.trim();
-  const resourceId = request.headers.get("x-goog-resource-id")?.trim();
-  const resourceState = request.headers.get("x-goog-resource-state")?.trim();
-  if (!channelId || !channelToken || !resourceId || !resourceState) {
-    return new Response("Missing Google Drive notification headers.", { status: 400 });
-  }
-  const channel = await loadGoogleDriveWatchChannel(channelId, input.db);
-  if (
-    !channel ||
-    channel.status === "stopped" ||
-    (channel.expiresAt && channel.expiresAt.getTime() <= Date.now()) ||
-    !safeEqual(channel.tokenHash, sha256(channelToken)) ||
-    (channel.resourceId && !safeEqual(channel.resourceId, resourceId))
-  ) {
-    return new Response("Invalid Google Drive notification channel.", { status: 401 });
-  }
-
-  // Google can deliver the initial sync before the watch response reaches the
-  // runner. The creating row already holds the channel id/token, so accepting
-  // it here is safe even while resource_id is not populated yet. The durable
-  // cursor wake propagates to the runner through the admission triggers.
-  if (resourceState === "sync" || resourceState === "change") {
-    await requestGoogleDriveCursorWake(channel.cursorId, new Date(), input.db);
-  }
-  return new Response(null, { status: 204 });
 }
 
 function statusRedirect(

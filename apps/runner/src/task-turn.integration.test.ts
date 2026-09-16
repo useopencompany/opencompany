@@ -231,7 +231,6 @@ function taskFixture(spec: HarnessSpec, overrides?: Partial<Task>): Task {
     result: null,
     error: null,
     workflowId: null,
-    workflowBrainRef: null,
     reportedOutcome: null,
     outcomeComment: null,
     harnessSpec: spec,

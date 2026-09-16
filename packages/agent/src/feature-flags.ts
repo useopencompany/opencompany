@@ -1,7 +1,6 @@
 export type FeatureFlags = {
   bots?: boolean;
   autoModelRouting: boolean;
-  legacyBrain: boolean;
   reviewInbox: boolean;
   sidebarProjects: boolean;
   subagents: boolean;
@@ -12,7 +11,6 @@ export type FeatureFlags = {
 export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   bots: false,
   autoModelRouting: false,
-  legacyBrain: false,
   reviewInbox: false,
   sidebarProjects: false,
   subagents: false,
@@ -23,7 +21,6 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
 export function featureFlagsFromUser(input: {
   botsEnabled?: boolean | null | undefined;
   autoModelRoutingEnabled?: boolean | null | undefined;
-  legacyBrainEnabled?: boolean | null | undefined;
   reviewInboxEnabled?: boolean | null | undefined;
   sidebarProjectsEnabled?: boolean | null | undefined;
   pastSessionAccessEnabled?: boolean | null | undefined;
@@ -33,7 +30,6 @@ export function featureFlagsFromUser(input: {
   return {
     bots: input.botsEnabled === true,
     autoModelRouting: input.autoModelRoutingEnabled === true,
-    legacyBrain: input.legacyBrainEnabled === true,
     reviewInbox: input.reviewInboxEnabled === true,
     sidebarProjects: input.sidebarProjectsEnabled === true,
     subagents: input.subagentsEnabled === true,

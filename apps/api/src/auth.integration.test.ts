@@ -26,8 +26,7 @@ describe("plugin setup authentication during onboarding", () => {
         );
         CREATE TABLE goat.workspaces (
           id text PRIMARY KEY,
-          workos_organization_id text,
-          legacy_brain_enabled boolean NOT NULL DEFAULT false
+          workos_organization_id text
         );
         CREATE TABLE goat.workspace_members (
           workspace_id text REFERENCES goat.workspaces(id),
