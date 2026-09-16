@@ -108,6 +108,33 @@ describe("createPullRequestCaptureScanner", () => {
     expect(scanner.scan(commandOutput("cmd-1", "gh pr create", "eb/pull/42\n"))).toEqual([]);
   });
 
+  it("reports a PR once, however many output lines follow it", () => {
+    const scanner = createPullRequestCaptureScanner();
+    expect(
+      scanner.scan(commandOutput("cmd-1", "gh pr create", "https://github.com/acme/web/pull/42\n")),
+    ).toHaveLength(1);
+    // The tail is re-scanned on every delta, so without de-duplication each of these would
+    // re-report the same PR and cost a redundant write from inside the projection loop.
+    expect(scanner.scan(commandOutput("cmd-1", "gh pr create", "done\n"))).toEqual([]);
+    expect(scanner.scan(commandOutput("cmd-1", "gh pr create", "cleaning up\n"))).toEqual([]);
+  });
+
+  it("reports the same PR once across both capture sources in one turn", () => {
+    const scanner = createPullRequestCaptureScanner();
+    expect(
+      scanner.scan(
+        event("mcp_tool.completed", {
+          status: "completed",
+          tool: "create_pull_request",
+          result: "https://github.com/acme/web/pull/42",
+        }),
+      ),
+    ).toHaveLength(1);
+    expect(
+      scanner.scan(commandOutput("cmd-1", "gh pr create", "https://github.com/acme/web/pull/42")),
+    ).toEqual([]);
+  });
+
   it("never captures a PR the agent only talked about", () => {
     const scanner = createPullRequestCaptureScanner();
     expect(

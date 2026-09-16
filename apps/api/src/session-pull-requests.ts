@@ -28,6 +28,9 @@ import type { SessionPullRequestDto } from "@opencompany/protocol";
  */
 export const SESSION_PULL_REQUEST_TTL_MS = 60_000;
 
+/** What a refresh concluded about one link: its new state, or that the link should not survive. */
+type RefreshOutcome = SessionPullRequestView["state"] | "unlinked";
+
 /**
  * The caller's linked PRs, refreshed against GitHub when stale.
  *
@@ -50,7 +53,7 @@ export async function listSessionPullRequestStatuses(input: {
     input.ttlMs ?? SESSION_PULL_REQUEST_TTL_MS,
     now.getTime(),
   );
-  const refreshed =
+  const refreshed: ReadonlyMap<string, RefreshOutcome> =
     stale.length > 0 ? await refreshStatuses(stale, input.userWorkosId, now) : new Map();
 
   return links.flatMap((link) => {
@@ -71,8 +74,6 @@ export async function listSessionPullRequestStatuses(input: {
     ];
   });
 }
-
-type RefreshOutcome = SessionPullRequestView["state"] | "unlinked";
 
 /**
  * Reads `stale` from GitHub and writes the answer back.

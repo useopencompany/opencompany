@@ -18,9 +18,24 @@ export function createPullRequestCaptureScanner() {
   // `gh pr create` prints its URL as the last line of stdout, but output arrives as deltas that can
   // split mid-URL. Keep a bounded tail per command so a URL spanning two deltas is still matched.
   const commandOutputTails = new Map<string, string>();
+  // Because that tail is re-scanned on every delta, one `gh pr create` reports the same PR on each
+  // line it prints afterwards. Reporting only first sightings keeps the caller from issuing a
+  // redundant write per line from inside the turn's projection loop.
+  const reported = new Set<string>();
+
+  const firstSightings = (refs: PullRequestRef[]) =>
+    refs.filter((ref) => {
+      const key = `${ref.repository.toLowerCase()}#${ref.number}`;
+      if (reported.has(key)) return false;
+      reported.add(key);
+      return true;
+    });
 
   return {
-    /** The PRs this event shows being created. Empty for the overwhelming majority of events. */
+    /**
+     * The PRs this event newly shows being created. Empty for the overwhelming majority of events,
+     * and empty for a PR an earlier event in this turn already reported.
+     */
     scan(event: HarnessNormalizedEvent): PullRequestRef[] {
       if (event.type === "mcp_tool.completed") {
         if (event.payload.status !== "completed") return [];
@@ -29,7 +44,7 @@ export function createPullRequestCaptureScanner() {
         // The tool result is JSON carrying `html_url`; scanning its text finds that without
         // having to depend on the hosted server's exact response shape.
         const result = readString(event.payload.result);
-        return result ? findPullRequestRefs(result) : [];
+        return result ? firstSightings(findPullRequestRefs(result)) : [];
       }
 
       if (event.type === "command.output") {
@@ -39,7 +54,7 @@ export function createPullRequestCaptureScanner() {
           return [];
         const scanned = `${commandOutputTails.get(itemId) ?? ""}${delta}`;
         commandOutputTails.set(itemId, scanned.slice(-COMMAND_TAIL_LIMIT));
-        return findPullRequestRefs(scanned);
+        return firstSightings(findPullRequestRefs(scanned));
       }
 
       if (event.type === "command.completed" || event.type === "command.failed") {

@@ -808,12 +808,10 @@ function SidebarChatRow({
         <>
           {/* The badge rests in the pin column and yields to the pin on hover. A third column
               would cost every row title 24px of width to show a control the reader is already
-              reaching past. */}
+              reaching past. Hover only, not focus: the badge is itself focusable, and
+              `group-focus-within` would hide it the moment a keyboard user tabbed onto it. */}
           {pullRequest && !pinned && !pinning ? (
-            <PullRequestBadge
-              pullRequest={pullRequest}
-              className="group-hover:hidden group-focus-within:hidden"
-            />
+            <PullRequestBadge pullRequest={pullRequest} className="group-hover:hidden" />
           ) : null}
           <button
             type="button"
@@ -914,8 +912,9 @@ function SidebarTaskRow({
         </span>
       </Link>
       {/* Stand-in for the chat row's pin control, so the archive icon lands in the same column on
-          every row the reader hovers down the list. A Task row is two lines tall, so the badge is
-          pulled up to sit against the title rather than floating between the two. */}
+          every row the reader hovers down the list. A Task row is two lines tall, so both this
+          slot and the archive beside it are pulled up against the title: centred across both lines
+          they would sit at a different height from the row's own text and read as misaligned. */}
       {pullRequest ? (
         <PullRequestBadge pullRequest={pullRequest} className="mt-[1.5px] self-start" />
       ) : (
