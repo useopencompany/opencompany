@@ -84,6 +84,7 @@ import {
   CodingWorkspacePanel,
   type CodingWorkspacePanelHandle,
 } from "@/components/CodingWorkspacePanel";
+import { ContextReferenceIcon } from "@/components/ContextReference";
 import { ConversationRuntimeSync } from "@/components/ConversationRuntimeSync";
 import type { ArtifactSelection } from "@/components/chat/ArtifactViewer";
 import { pendingApprovals } from "@/components/chat/approval-presentation";
@@ -101,6 +102,11 @@ import { MessageBubble } from "@/components/chat/MessageBubble";
 import { PendingApprovalBanner } from "@/components/chat/PendingApprovalBanner";
 import { QueuedMessageCard } from "@/components/chat/QueuedMessageCard";
 import { pendingRunMessageIds, queuedChatMessages } from "@/components/chat/queued-messages";
+import {
+  type ComposerInputChange,
+  type ComposerInputHandle,
+  ReferenceComposerInput,
+} from "@/components/chat/ReferenceComposerInput";
 import { PendingActivityIndicator, ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import type { ActionApprovalRequest, CodexToolAction } from "@/components/chat/ToolCallItem";
 import { useChatAttachments } from "@/components/chat/useChatAttachments";
@@ -112,6 +118,7 @@ import {
   modelProviderLabel,
 } from "@/components/ModelPickerParts";
 import { ModelProviderIcon } from "@/components/ModelProviderIcon";
+import { useContextReferenceCatalog } from "@/components/useContextReferenceCatalog";
 import { useHeadlessChatTranscript } from "@/components/useHeadlessChatTranscript";
 import { useHydrated } from "@/components/useHydrated";
 import { WorkflowComposerControls } from "@/components/WorkflowComposerControls";
@@ -167,6 +174,11 @@ import {
   DEFAULT_CLAUDE_CHAT_REASONING_EFFORT,
   DEFAULT_CODEX_CHAT_REASONING_EFFORT,
 } from "@/lib/codex-chat-settings";
+import {
+  type ContextReferenceOption,
+  filterContextReferences,
+} from "@/lib/context-reference-catalog";
+import { referenceMarkdown } from "@/lib/context-references";
 import {
   CLAUDE_CHAT_DEFAULT_MODEL_ID,
   CLAUDE_PICKER_VALUE,
@@ -228,7 +240,6 @@ import type { TaskRow } from "@/lib/task-collections";
 import { deriveTaskWorkflowSteps, type TaskWorkflowStepView } from "@/lib/task-workflow-activity";
 import { updateTimezoneAction } from "@/lib/user-preferences";
 
-const TEXTAREA_MAX_HEIGHT_PX = 128;
 const SCROLL_BOTTOM_THRESHOLD_PX = 80;
 const CHAT_THREAD_MIN_BOTTOM_PADDING_PX = 160;
 const CHAT_THREAD_COMPOSER_GAP_PX = 20;
@@ -239,8 +250,6 @@ const COMMAND_PALETTE_RESULT_LIMIT = 50;
 const CODEX_MENTION: ChatMention = { kind: "engine", id: "codex" };
 const CLAUDE_MENTION: ChatMention = { kind: "engine", id: "claude" };
 const CLOUD_CODEX_ATTACHMENT_CAPABILITIES = { images: true, pdf: true } as const;
-const COMPOSER_MENTION_CHIP_CLASS =
-  "rounded-sm bg-ink/8 text-ink shadow-[0_0_0_3px_rgba(15,15,15,0.08)]";
 
 type ActiveMentionToken = {
   start: number;
@@ -278,6 +287,13 @@ type CommandPaletteItem =
     };
 
 type MentionOption =
+  | {
+      kind: "reference";
+      token: string;
+      label: string;
+      description: string;
+      reference: ContextReferenceOption;
+    }
   | { kind: "engine"; token: "@codex" | "@claude"; label: string; mention: ChatMention }
   | {
       kind: "task";
@@ -477,8 +493,7 @@ export function Surface({
   const router = useRouter();
   const pathname = usePathname();
   const formRef = useRef<HTMLFormElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const inputOverlayRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<ComposerInputHandle>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const workspacePanelRef = useRef<CodingWorkspacePanelHandle>(null);
   const workspaceToggleButtonRef = useRef<HTMLButtonElement>(null);
@@ -927,7 +942,9 @@ export function Surface({
   const selectedAdHocTask =
     backgroundAdHocTaskSelected ||
     (!backgroundChatDirective && adHocTaskMentionEnabled && hasAdHocTaskToken(input));
+  const referenceCatalog = useContextReferenceCatalog(mentionToken?.sigil === "@");
   const mentionOptions = buildMentionOptions({
+    references: referenceCatalog.items,
     token: mentionToken,
     skills: skillCatalog,
     workflows: workflowCatalog,
@@ -983,7 +1000,7 @@ export function Surface({
         current.filter((mention) => chatMentionIsVisible(nextInput, mention)),
       );
     },
-    [setSelectedMentions],
+    [setSelectedMentions, setInput],
   );
   const voiceDictation = useComposerVoiceDictation({
     input,
@@ -1576,6 +1593,7 @@ export function Surface({
       setClaudeModel,
       setCodexModel,
       setMessages,
+      setInput,
       setSelectedMentions,
       selectedMentions,
     ],
@@ -1632,19 +1650,6 @@ export function Surface({
     if (!consumePendingChatComposerFocus(chatSessionId)) return;
     inputRef.current?.focus({ preventScroll: true });
   }, [chatSessionId, mode]);
-
-  useEffect(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    if (input.length === 0) {
-      el.style.height = "";
-      if (inputOverlayRef.current) inputOverlayRef.current.scrollTop = 0;
-      return;
-    }
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
-    if (inputOverlayRef.current) inputOverlayRef.current.scrollTop = el.scrollTop;
-  }, [input]);
 
   useLayoutEffect(() => {
     const form = formRef.current;
@@ -1757,7 +1762,8 @@ export function Surface({
     const activeElement = document.activeElement;
     backgroundTaskFocusOriginRef.current =
       activeElement &&
-      (activeElement === inputRef.current || Boolean(formRef.current?.contains(activeElement)))
+      (activeElement === inputRef.current?.element ||
+        Boolean(formRef.current?.contains(activeElement)))
         ? activeElement
         : null;
   };
@@ -1773,7 +1779,7 @@ export function Surface({
         activeElement &&
         activeElement !== document.body &&
         activeElement !== focusOrigin &&
-        activeElement !== inputRef.current
+        activeElement !== inputRef.current?.element
       ) {
         return;
       }
@@ -2702,7 +2708,7 @@ export function Surface({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [closeChat, isActivePane, mode]);
 
-  const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (mentionToken) {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -2748,7 +2754,7 @@ export function Surface({
     setMentionToken(findActiveMentionToken(value, selectionStart));
   };
 
-  const onInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+  const onInputChange = (event: ComposerInputChange) => {
     const nextInput = event.target.value;
     pendingProgrammaticPromptRef.current = null;
     if (pendingTaskCommentRef.current?.body !== nextInput) pendingTaskCommentRef.current = null;
@@ -2759,7 +2765,7 @@ export function Surface({
     updateMentionToken(nextInput, event.target.selectionStart);
   };
 
-  const onInputPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+  const onInputPaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
     if (composerAttachments.handlePasteFiles(event)) return;
     if (!userWorkosId) return;
 
@@ -2774,12 +2780,14 @@ export function Surface({
     // ourselves, then resolve only exact skill tokens from the pasted fragment against the active
     // Brain catalog. Manually typed lookalikes continue to stay plain text.
     event.preventDefault();
-    const textareaValue = event.currentTarget.value;
-    const selectionStart = event.currentTarget.selectionStart ?? textareaValue.length;
-    const selectionEnd = event.currentTarget.selectionEnd ?? selectionStart;
+    const composer = inputRef.current;
+    if (!composer) return;
+    const textareaValue = composer.value;
+    const selectionStart = composer.selectionStart ?? textareaValue.length;
+    const selectionEnd = composer.selectionEnd ?? selectionStart;
     const availableLength = Math.max(
       0,
-      event.currentTarget.maxLength - (textareaValue.length - (selectionEnd - selectionStart)),
+      composer.maxLength - (textareaValue.length - (selectionEnd - selectionStart)),
     );
     const insertedText = pastedText.slice(0, availableLength);
     const nextInput = `${textareaValue.slice(0, selectionStart)}${insertedText}${textareaValue.slice(selectionEnd)}`;
@@ -2858,7 +2866,12 @@ export function Surface({
     const nextInput = `${before}${option.token} ${after}`;
     const nextCaret = before.length + option.token.length + 1;
     pendingInputCaretRef.current = nextCaret;
+    if (nextInput.length > 10_000) return;
     setInput(nextInput);
+    if (option.kind === "reference") {
+      setMentionToken(null);
+      return;
+    }
     if (option.kind === "task") {
       setSelectedMentions((current) => current.filter((mention) => mention.kind !== "workflow"));
       setMentionToken(null);
@@ -3293,12 +3306,21 @@ export function Surface({
                   {chatError.message || "opencompany could not answer that right now."}
                 </p>
               ) : null}
-              {mentionToken && mentionOptions.length > 0 ? (
+              {mentionToken && (mentionOptions.length > 0 || mentionToken.sigil === "@") ? (
                 <div
                   role="listbox"
                   aria-label="Mention menu"
                   className="absolute bottom-full left-3 z-20 mb-2 max-h-72 w-80 overflow-y-auto shadow-ring-md rounded-lg bg-surface p-1"
                 >
+                  {mentionToken.sigil === "@" &&
+                  (referenceCatalog.loading || referenceCatalog.error || !mentionOptions.length) ? (
+                    <p role="status" className="px-2.5 py-2 text-xs text-ink-subtle">
+                      {referenceCatalog.loading
+                        ? "Loading mentions…"
+                        : (referenceCatalog.error ??
+                          "No matching mentions. Manage connections in Plugins.")}
+                    </p>
+                  ) : null}
                   {mentionOptions.map((option, index) => (
                     <button
                       key={option.token}
@@ -3316,7 +3338,9 @@ export function Surface({
                         index === mentionOptionIndex && "bg-surface-hover",
                       )}
                     >
-                      {option.kind === "engine" ? (
+                      {option.kind === "reference" ? (
+                        <ContextReferenceIcon plugin={option.reference.plugin} />
+                      ) : option.kind === "engine" ? (
                         <Code2
                           size={14}
                           strokeWidth={2}
@@ -3343,14 +3367,17 @@ export function Surface({
                       )}
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-[13px] font-medium leading-4 text-ink">
-                          {option.token}
+                          {option.kind === "reference" ? option.label : option.token}
                         </span>
-                        {option.kind === "skill" ||
+                        {option.kind === "reference" ||
+                        option.kind === "skill" ||
                         option.kind === "workflow" ||
                         option.kind === "task" ? (
                           <span className="mt-0.5 block truncate text-[12px] leading-4 text-ink-subtle">
-                            {option.label}
-                            {option.description ? ` · ${option.description}` : ""}
+                            {option.kind === "reference" ? "" : option.label}
+                            {option.description
+                              ? `${option.kind === "reference" ? "" : " · "}${option.description}`
+                              : ""}
                           </span>
                         ) : null}
                       </span>
@@ -3418,16 +3445,10 @@ export function Surface({
                 ) : null}
                 <div className="flex items-end gap-2.5 px-3.5 pt-3 pb-1.5">
                   <div className="relative min-w-0 flex-1 self-center">
-                    {renderComposerInputOverlay({
-                      value: input,
-                      mentions: activeSelectedMentions,
-                      overlayRef: inputOverlayRef,
-                    })}
-                    <textarea
+                    <ReferenceComposerInput
                       ref={inputRef}
-                      rows={1}
+                      key={persistedChatSessionId ?? "home"}
                       id="prompt"
-                      name="prompt"
                       value={input}
                       placeholder={
                         activeTaskConversation || mode === "chat"
@@ -3436,36 +3457,12 @@ export function Surface({
                       }
                       onChange={onInputChange}
                       onBlur={() => setMentionToken(null)}
-                      onClick={(event) =>
-                        updateMentionToken(
-                          event.currentTarget.value,
-                          event.currentTarget.selectionStart,
-                        )
-                      }
+                      onSelectionChange={updateMentionToken}
                       onKeyDown={onKeyDown}
                       onPaste={onInputPaste}
-                      onScroll={(event) => {
-                        if (inputOverlayRef.current) {
-                          inputOverlayRef.current.scrollTop = event.currentTarget.scrollTop;
-                        }
-                      }}
-                      onSelect={(event) =>
-                        updateMentionToken(
-                          event.currentTarget.value,
-                          event.currentTarget.selectionStart,
-                        )
-                      }
-                      // A run in flight gates sending, not composing: the reply stays editable so a
-                      // draft can be written while the task works. onSubmit/onKeyDown hold the send.
+                      highlights={composerInputHighlightRanges(input, activeSelectedMentions)}
                       disabled={backgroundTaskSubmitting || taskCommentSubmitting || readOnly}
                       readOnly={voiceDictation.isActive}
-                      className={cn(
-                        "relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-ink outline-none placeholder:text-ink-subtle",
-                        composerInputHasHighlights(input, activeSelectedMentions) &&
-                          "text-transparent caret-ink",
-                      )}
-                      style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
-                      maxLength={10_000}
                     />
                   </div>
                   {activeTaskConversation ? (
@@ -3514,6 +3511,30 @@ export function Surface({
                   />
                 </div>
                 <div className="flex flex-wrap items-center gap-1 border-t border-border px-2.5 py-1.5">
+                  <button
+                    type="button"
+                    disabled={
+                      backgroundTaskSubmitting ||
+                      taskCommentSubmitting ||
+                      readOnly ||
+                      voiceDictation.isActive
+                    }
+                    aria-label="Mention a plugin or repository"
+                    title="Mention a plugin or repository"
+                    className="rounded-md px-2 py-1 text-sm text-ink-subtle hover:bg-surface-hover"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => {
+                      const caret = inputRef.current?.selectionStart ?? input.length;
+                      const before = input.slice(0, caret);
+                      const inserted = `${before && !/\s$/.test(before) ? " " : ""}@`;
+                      const next = `${before}${inserted}${input.slice(caret)}`;
+                      pendingInputCaretRef.current = caret + inserted.length;
+                      setInput(next);
+                      updateMentionToken(next, caret + inserted.length);
+                    }}
+                  >
+                    @
+                  </button>
                   {attachmentsEnabled ? (
                     <>
                       <input
@@ -3717,8 +3738,7 @@ export function QuickChatComposer({
 }) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const inputOverlayRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<ComposerInputHandle>(null);
   const attachmentFileInputRef = useRef<HTMLInputElement>(null);
   const pendingInputCaretRef = useRef<number | null>(null);
   const mountedRef = useRef(true);
@@ -3810,7 +3830,9 @@ export function QuickChatComposer({
     creditBalance && creditBalance.enforcementEnabled && creditBalance.balanceUsdMicros <= 0,
   );
 
+  const referenceCatalog = useContextReferenceCatalog(mentionToken?.sigil === "@");
   const mentionOptions = buildMentionOptions({
+    references: referenceCatalog.items,
     token: mentionToken,
     skills: skillCatalog,
     workflows: workflowCatalog,
@@ -3912,19 +3934,6 @@ export function QuickChatComposer({
     };
   }, [skillCommandMenuOpen, workflowMentionMenuOpen, selectedWorkflowMentionId, selectedWorkflow]);
 
-  useEffect(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    if (input.length === 0) {
-      el.style.height = "";
-      if (inputOverlayRef.current) inputOverlayRef.current.scrollTop = 0;
-      return;
-    }
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
-    if (inputOverlayRef.current) inputOverlayRef.current.scrollTop = el.scrollTop;
-  }, [input]);
-
   useLayoutEffect(() => {
     const caret = pendingInputCaretRef.current;
     if (caret === null) return;
@@ -3942,7 +3951,7 @@ export function QuickChatComposer({
     setMentionToken(findActiveMentionToken(value, selectionStart));
   };
 
-  const onInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+  const onInputChange = (event: ComposerInputChange) => {
     const nextInput = event.target.value;
     setInput(nextInput);
     setSelectedMentions((current) =>
@@ -3958,7 +3967,12 @@ export function QuickChatComposer({
     const nextInput = `${before}${option.token} ${after}`;
     const nextCaret = before.length + option.token.length + 1;
     pendingInputCaretRef.current = nextCaret;
+    if (nextInput.length > 10_000) return;
     setInput(nextInput);
+    if (option.kind === "reference") {
+      setMentionToken(null);
+      return;
+    }
     if (option.kind === "task") {
       setSelectedMentions((current) => current.filter((mention) => mention.kind !== "workflow"));
       setMentionToken(null);
@@ -3988,7 +4002,7 @@ export function QuickChatComposer({
     setMentionToken(null);
   };
 
-  const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (mentionToken) {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -4022,7 +4036,7 @@ export function QuickChatComposer({
     }
   };
 
-  const onInputPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+  const onInputPaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
     if (composerAttachments.handlePasteFiles(event)) return;
     if (!userWorkosId) return;
 
@@ -4032,12 +4046,14 @@ export function QuickChatComposer({
     if (pastedSkillIds.size === 0 && pastedWorkflowIds.size === 0) return;
 
     event.preventDefault();
-    const textareaValue = event.currentTarget.value;
-    const selectionStart = event.currentTarget.selectionStart ?? textareaValue.length;
-    const selectionEnd = event.currentTarget.selectionEnd ?? selectionStart;
+    const composer = inputRef.current;
+    if (!composer) return;
+    const textareaValue = composer.value;
+    const selectionStart = composer.selectionStart ?? textareaValue.length;
+    const selectionEnd = composer.selectionEnd ?? selectionStart;
     const availableLength = Math.max(
       0,
-      event.currentTarget.maxLength - (textareaValue.length - (selectionEnd - selectionStart)),
+      composer.maxLength - (textareaValue.length - (selectionEnd - selectionStart)),
     );
     const insertedText = pastedText.slice(0, availableLength);
     const nextInput = `${textareaValue.slice(0, selectionStart)}${insertedText}${textareaValue.slice(selectionEnd)}`;
@@ -4380,12 +4396,21 @@ export function QuickChatComposer({
 
   return (
     <div className={cn("flex flex-col gap-2", className)}>
-      {mentionToken && mentionOptions.length > 0 ? (
+      {mentionToken && (mentionOptions.length > 0 || mentionToken.sigil === "@") ? (
         <div
           role="listbox"
           aria-label="Mention menu"
           className="max-h-72 w-full overflow-y-auto shadow-ring-md rounded-lg bg-surface p-1"
         >
+          {mentionToken.sigil === "@" &&
+          (referenceCatalog.loading || referenceCatalog.error || !mentionOptions.length) ? (
+            <p role="status" className="px-2.5 py-2 text-xs text-ink-subtle">
+              {referenceCatalog.loading
+                ? "Loading mentions…"
+                : (referenceCatalog.error ??
+                  "No matching mentions. Manage connections in Plugins.")}
+            </p>
+          ) : null}
           {mentionOptions.map((option, index) => (
             <button
               key={option.token}
@@ -4403,7 +4428,9 @@ export function QuickChatComposer({
                 index === mentionOptionIndex && "bg-surface-hover",
               )}
             >
-              {option.kind === "engine" ? (
+              {option.kind === "reference" ? (
+                <ContextReferenceIcon plugin={option.reference.plugin} />
+              ) : option.kind === "engine" ? (
                 <Code2 size={14} strokeWidth={2} className="mt-0.5 shrink-0 text-ink-subtle" />
               ) : option.kind === "workflow" ? (
                 <WorkflowIcon
@@ -4418,12 +4445,17 @@ export function QuickChatComposer({
               )}
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[13px] font-medium leading-4 text-ink">
-                  {option.token}
+                  {option.kind === "reference" ? option.label : option.token}
                 </span>
-                {option.kind === "skill" || option.kind === "workflow" || option.kind === "task" ? (
+                {option.kind === "reference" ||
+                option.kind === "skill" ||
+                option.kind === "workflow" ||
+                option.kind === "task" ? (
                   <span className="mt-0.5 block truncate text-[12px] leading-4 text-ink-subtle">
-                    {option.label}
-                    {option.description ? ` · ${option.description}` : ""}
+                    {option.kind === "reference" ? "" : option.label}
+                    {option.description
+                      ? `${option.kind === "reference" ? "" : " · "}${option.description}`
+                      : ""}
                   </span>
                 ) : null}
               </span>
@@ -4478,41 +4510,18 @@ export function QuickChatComposer({
           ) : null}
           <div className="flex items-end gap-2.5 px-3.5 pt-3 pb-1.5">
             <div className="relative min-w-0 flex-1 self-center">
-              {renderComposerInputOverlay({
-                value: input,
-                mentions: activeSelectedMentions,
-                overlayRef: inputOverlayRef,
-              })}
-              <textarea
+              <ReferenceComposerInput
                 ref={inputRef}
-                rows={1}
                 id="quick-chat-prompt"
-                name="prompt"
                 value={input}
-                placeholder="Ask opencompany anything, or describe a task..."
+                placeholder={"Ask opencompany anything, or describe a task..."}
                 onChange={onInputChange}
                 onBlur={() => setMentionToken(null)}
-                onClick={(event) =>
-                  updateMentionToken(event.currentTarget.value, event.currentTarget.selectionStart)
-                }
+                onSelectionChange={updateMentionToken}
                 onKeyDown={onKeyDown}
                 onPaste={onInputPaste}
-                onScroll={(event) => {
-                  if (inputOverlayRef.current) {
-                    inputOverlayRef.current.scrollTop = event.currentTarget.scrollTop;
-                  }
-                }}
-                onSelect={(event) =>
-                  updateMentionToken(event.currentTarget.value, event.currentTarget.selectionStart)
-                }
+                highlights={composerInputHighlightRanges(input, activeSelectedMentions)}
                 disabled={isSubmitting}
-                className={cn(
-                  "relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-ink outline-none placeholder:text-ink-subtle",
-                  composerInputHasHighlights(input, activeSelectedMentions) &&
-                    "text-transparent caret-ink",
-                )}
-                style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
-                maxLength={10_000}
               />
             </div>
             <SubmitButton
@@ -4531,6 +4540,25 @@ export function QuickChatComposer({
             />
           </div>
           <div className="flex flex-wrap items-center gap-1 border-t border-border px-2.5 py-1.5">
+            <button
+              type="button"
+              disabled={isSubmitting}
+              aria-label="Mention a plugin or repository"
+              title="Mention a plugin or repository"
+              className="rounded-md px-2 py-1 text-sm text-ink-subtle hover:bg-surface-hover"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                const caret = inputRef.current?.selectionStart ?? input.length;
+                const before = input.slice(0, caret);
+                const inserted = `${before && !/\s$/.test(before) ? " " : ""}@`;
+                const next = `${before}${inserted}${input.slice(caret)}`;
+                pendingInputCaretRef.current = caret + inserted.length;
+                setInput(next);
+                updateMentionToken(next, caret + inserted.length);
+              }}
+            >
+              @
+            </button>
             {attachmentsEnabled ? (
               <>
                 <input
@@ -4656,7 +4684,7 @@ function useComposerVoiceDictation({
   onInputChange,
 }: {
   input: string;
-  inputRef: RefObject<HTMLTextAreaElement | null>;
+  inputRef: RefObject<ComposerInputHandle | null>;
   onInputChange: (nextInput: string) => void;
 }) {
   const [status, setStatus] = useState<VoiceDictationStatus>("idle");
@@ -5289,54 +5317,6 @@ type ComposerInputHighlightRange =
       mention: ComposerMentionHighlight;
     };
 
-function composerInputHasHighlights(value: string, mentions: readonly ChatMention[]) {
-  return composerInputHighlightRanges(value, mentions).length > 0;
-}
-
-function renderComposerInputOverlay({
-  value,
-  mentions,
-  overlayRef,
-}: {
-  value: string;
-  mentions: readonly ChatMention[];
-  overlayRef: RefObject<HTMLDivElement | null>;
-}) {
-  const ranges = composerInputHighlightRanges(value, mentions);
-  if (ranges.length === 0) return null;
-
-  let offset = 0;
-  const parts = ranges.flatMap((range, index) => {
-    const plain = value.slice(offset, range.start);
-    const chip = (
-      <span
-        key={`mention-${range.start}-${range.end}-${index}`}
-        {...(range.kind === "mention"
-          ? { "data-opencompany-chat-mention": range.mention.kind }
-          : { "data-opencompany-chat-directive": "background" })}
-        className={COMPOSER_MENTION_CHIP_CLASS}
-      >
-        {value.slice(range.start, range.end)}
-      </span>
-    );
-    offset = range.end;
-    return plain ? [plain, chip] : [chip];
-  });
-  const tail = value.slice(offset);
-  if (tail) parts.push(tail);
-
-  return (
-    <div
-      ref={overlayRef}
-      aria-hidden="true"
-      data-testid="composer-mention-overlay"
-      className="pointer-events-none absolute inset-0 z-0 max-h-32 overflow-hidden whitespace-pre-wrap break-words py-[3px] text-[13.5px] leading-5 text-ink"
-    >
-      {parts}
-    </div>
-  );
-}
-
 function composerInputHighlightRanges(
   value: string,
   mentions: readonly ChatMention[],
@@ -5468,6 +5448,7 @@ function buildMentionOptions(input: {
   skillsEnabled: boolean;
   workflowsEnabled: boolean;
   adHocTaskEnabled: boolean;
+  references?: ContextReferenceOption[];
 }): MentionOption[] {
   if (!input.token) return [];
   const query = input.token.query;
@@ -5534,7 +5515,15 @@ function buildMentionOptions(input: {
     return options;
   }
 
-  const options: MentionOption[] = [];
+  const options: MentionOption[] = filterContextReferences(input.references ?? [], query).map(
+    (reference) => ({
+      kind: "reference",
+      token: referenceMarkdown(reference),
+      label: reference.label,
+      description: reference.description,
+      reference,
+    }),
+  );
   if (input.codexConnected && (!query || "codex".startsWith(query))) {
     options.push({ kind: "engine", token: "@codex", label: "Codex", mention: CODEX_MENTION });
   }

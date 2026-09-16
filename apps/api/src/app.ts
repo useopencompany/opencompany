@@ -12,6 +12,7 @@ import type {
   FathomProviderState,
   GranolaProviderState,
   JamieEventsProviderState,
+  PostHogEventsProviderState,
   StripeProviderState,
 } from "@opencompany/agent/integration-state";
 import type { ConvexProviderState } from "@opencompany/agent/integrations/convex-mcp";
@@ -2533,6 +2534,20 @@ export function createApiApp(input: CreateApiAppInput) {
       );
       return c.json({ data: { state: granolaStateDto(state) }, meta }, 200);
     },
+    connectPostHogEventsAccount: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const body = c.req.valid("json");
+      const state = await input.integrationAccounts.connectPostHogEvents(actor, body);
+      return c.json({ data: { state: posthogEventsStateDto(state) }, meta }, 200);
+    },
+    listPostHogEventDefinitions: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 120);
+      const { integrationId } = c.req.valid("param");
+      const data = await input.integrationAccounts.listPostHogEvents(actor, integrationId);
+      return c.json({ data, meta }, 200);
+    },
     createJamieEventsEndpoint: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 60);
@@ -3994,6 +4009,19 @@ function granolaStateDto(state: GranolaProviderState) {
     integrationId: state.integrationId,
     accountEmail: state.accountEmail,
     accountName: state.accountName,
+    statusReason: state.statusReason,
+  };
+}
+
+function posthogEventsStateDto(state: PostHogEventsProviderState) {
+  return {
+    provider: state.provider,
+    connected: state.connected,
+    status: integrationAccountStatusDto(state.status),
+    integrationId: state.integrationId,
+    projectId: state.projectId,
+    region: state.region,
+    connectionLabel: state.connectionLabel,
     statusReason: state.statusReason,
   };
 }

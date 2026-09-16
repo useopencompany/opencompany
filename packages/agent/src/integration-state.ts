@@ -63,6 +63,17 @@ export type PostHogProviderState = {
   toolModes: Record<string, unknown>;
 };
 
+export type PostHogEventsProviderState = {
+  provider: "posthog";
+  connected: boolean;
+  status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
+  integrationId: string | null;
+  projectId: string | null;
+  region: "us" | "eu" | null;
+  connectionLabel: string | null;
+  statusReason: string | null;
+};
+
 export type HubSpotProviderState = {
   provider: "hubspot";
   connected: boolean;
@@ -318,6 +329,7 @@ export type PersonalAccountProvider =
   | "jamie"
   | "slack"
   | "hubspot"
+  | "posthog"
   | "granola"
   | "fathom"
   | "attio"
@@ -419,6 +431,7 @@ export function personalAccountsFromRows(
     jamie: [],
     slack: [],
     hubspot: [],
+    posthog: [],
     granola: [],
     fathom: [],
     attio: [],
@@ -449,6 +462,12 @@ export function personalAccountsFromRows(
     if (row.provider === "hubspot") {
       if ((row.externalId ?? row.external_id) !== "hubspot_mcp") {
         personalAccounts.hubspot.push(accountViewFromRow("hubspot", row));
+      }
+      continue;
+    }
+    if (row.provider === "posthog") {
+      if ((row.externalId ?? row.external_id) === "posthog_events") {
+        personalAccounts.posthog.push(accountViewFromRow("posthog", row));
       }
       continue;
     }
@@ -535,6 +554,11 @@ export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): 
     // HubSpot also has a separate OAuth connection for Wiki ingestion. Only
     // the MCP-auth-app row belongs to the plugin settings and action gateway.
     if (row.provider === "hubspot" && (row.externalId ?? row.external_id) !== "hubspot_mcp") {
+      continue;
+    }
+    // The API-key event connection is offered to workflow triggers through personalAccounts;
+    // the plugin tool card must continue to reflect only PostHog's MCP OAuth row.
+    if (row.provider === "posthog" && (row.externalId ?? row.external_id) !== "posthog_mcp") {
       continue;
     }
     if (row.provider === "granola" && (row.externalId ?? row.external_id) === "granola_mcp") {

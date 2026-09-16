@@ -736,7 +736,10 @@ describe("resolvePlugin", () => {
       trustedCapabilitySources: ["useopencompany/plugins"],
     });
 
-    expect(plugin.manifest).toMatchObject({ name: "posthog", version: "1.0.0" });
+    expect(plugin.manifest).toMatchObject({ name: "posthog", version: "1.1.0" });
+    expect(plugin.manifest.extensions?.["so.opencompany.events"]).toMatchObject([
+      { id: "event.captured", delivery: "poll" },
+    ]);
     expect(plugin.skills).toEqual([]);
     expect(plugin.stdioServers).toEqual([]);
     expect(plugin.remoteServers).toEqual([

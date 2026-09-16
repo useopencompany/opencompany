@@ -466,7 +466,7 @@ describe("Plugin settings", () => {
       "https://github.com/useopencompany/plugins/tree/14e7f6d3e978103c5427c725229ae93bc3e47f8c/vercel",
     );
     expect(POSTHOG_PLUGIN_SOURCE).toBe(
-      "https://github.com/useopencompany/plugins/tree/4ba32cd5a7618d9be3714ec0efd3c8784209046c/posthog",
+      "https://github.com/useopencompany/plugins/tree/e2b5b58aaccca1783df7ec960751ab13d23dcd86/posthog",
     );
     expect(HUBSPOT_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/6b4e00b71f7d1b388fe5aa225aa86c8d35ba2578/hubspot",

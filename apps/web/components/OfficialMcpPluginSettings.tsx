@@ -48,6 +48,7 @@ import { InfisicalPluginConnectionForm } from "@/components/InfisicalPluginConne
 import { JamieEventsSetup } from "@/components/JamieEventsSetup";
 import { PageContent } from "@/components/PageContent";
 import { PluginAccountRow, PluginConnectionFeedback } from "@/components/PluginConnectionSettings";
+import { PostHogEventsSetup } from "@/components/PostHogEventsSetup";
 import { RenderApiKeyConnectionForm } from "@/components/RenderApiKeyConnectionForm";
 import { ToolPermissionRow } from "@/components/ToolPermissionRow";
 import {
@@ -980,6 +981,9 @@ function EventsSection({ plugin, canEdit }: { plugin: PluginInstallationDto; can
   const router = useRouter();
   const { integrations } = useAppData();
   const linearAccount = integrations.personalAccounts.linear.find((account) => account.connected);
+  const posthogAccounts = integrations.personalAccounts.posthog ?? [];
+  const posthogAccount =
+    posthogAccounts.find((account) => account.connected) ?? posthogAccounts[0] ?? null;
   const [error, setError] = useState<string | null>(null);
   const [pendingEventId, setPendingEventId] = useState<string | null>(null);
 
@@ -1025,6 +1029,9 @@ function EventsSection({ plugin, canEdit }: { plugin: PluginInstallationDto; can
       ) : null}
       {plugin.name === "granola" && canEdit ? (
         <GranolaIntegrationSetup initialState={integrations.granola} variant="modal" />
+      ) : null}
+      {plugin.name === "posthog" && canEdit ? (
+        <PostHogEventsSetup initialAccount={posthogAccount} />
       ) : null}
       {plugin.name === "jamie" && canEdit ? (
         <JamieEventsSetup initialState={integrations.jamie_events} />
