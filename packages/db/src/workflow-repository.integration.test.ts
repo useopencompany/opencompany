@@ -28,6 +28,7 @@ const migrationPaths = [
   "drizzle/0277_workflow_multiple_triggers.sql",
   "drizzle/0291_workflow_slack_channel.sql",
   "drizzle/0294_workflow_slack_avatar.sql",
+  "drizzle/0295_workflow_schedule_authorization.sql",
 ].map((migration) => path.join(repositoryRoot, migration));
 const dialect = new PgDialect();
 const now = new Date("2026-08-12T08:00:00.000Z");
@@ -49,6 +50,8 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
     workflowSlackBotAvatarUrl: string;
     workflowProjected: boolean;
     workflowScheduleProjected: boolean;
+    workflowScheduleVisibilityProjected: boolean;
+    personalWorkflowScheduleBackfilled: boolean;
     taskScheduleVersion: number;
     taskScheduleProjected: boolean;
   };
@@ -81,6 +84,17 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
       );
     `);
       for (const migrationPath of migrationPaths) {
+        if (migrationPath.endsWith("0295_workflow_schedule_authorization.sql")) {
+          await database.exec(`
+            INSERT INTO goat.workflows (
+              id, workspace_id, slug, name, trigger, schedule_cron, schedule_enabled,
+              scope, created_by_workos_id
+            ) VALUES (
+              'migration_personal_workflow', 'migration_workspace', 'personal-workflow',
+              'Personal workflow', 'schedule', '0 8 * * *', true, 'personal', 'migration_user'
+            )
+          `);
+        }
         const migration = await readFile(migrationPath, "utf8");
         for (const statement of migration.split("--> statement-breakpoint")) {
           if (statement.trim()) await database.exec(statement);
@@ -99,6 +113,8 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
           workflow_slack_bot_avatar_url: string;
           workflow_projected: boolean;
           workflow_schedule_projected: boolean;
+          workflow_schedule_visibility_projected: boolean;
+          personal_workflow_schedule_backfilled: boolean;
           task_schedule_version: number;
           task_schedule_projected: boolean;
         }>(`
@@ -131,6 +147,18 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
             SELECT 1 FROM goat.workflow_schedule_read_model_v1
             WHERE workflow_id = workflow.id AND cron = workflow.schedule_cron
           ) AS workflow_schedule_projected,
+          EXISTS (
+            SELECT 1 FROM goat.workflow_schedule_read_model_v1
+            WHERE workflow_id = workflow.id
+              AND scope = workflow.scope
+              AND created_by_workos_id IS NOT DISTINCT FROM workflow.created_by_workos_id
+          ) AS workflow_schedule_visibility_projected,
+          EXISTS (
+            SELECT 1 FROM goat.workflow_schedule_read_model_v1
+            WHERE workflow_id = 'migration_personal_workflow'
+              AND scope = 'personal'
+              AND created_by_workos_id = 'migration_user'
+          ) AS personal_workflow_schedule_backfilled,
           schedule.version AS task_schedule_version,
           EXISTS (
             SELECT 1 FROM goat.task_schedule_read_model_v1
@@ -154,6 +182,10 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
         workflowSlackBotAvatarUrl: migrationRow?.workflow_slack_bot_avatar_url ?? "",
         workflowProjected: migrationRow?.workflow_projected ?? false,
         workflowScheduleProjected: migrationRow?.workflow_schedule_projected ?? false,
+        workflowScheduleVisibilityProjected:
+          migrationRow?.workflow_schedule_visibility_projected ?? false,
+        personalWorkflowScheduleBackfilled:
+          migrationRow?.personal_workflow_schedule_backfilled ?? false,
         taskScheduleVersion: migrationRow?.task_schedule_version ?? 0,
         taskScheduleProjected: migrationRow?.task_schedule_projected ?? false,
       };
@@ -231,6 +263,8 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
       workflowSlackBotAvatarUrl: "",
       workflowProjected: true,
       workflowScheduleProjected: true,
+      workflowScheduleVisibilityProjected: true,
+      personalWorkflowScheduleBackfilled: true,
       taskScheduleVersion: 1,
       taskScheduleProjected: true,
     });
@@ -360,6 +394,81 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
     ).resolves.toMatchObject({
       rows: [{ scope: "personal", created_by_workos_id: "user_1" }],
     });
+  });
+
+  it("projects Workflow visibility onto schedules and updates it when scope changes", async () => {
+    const personal = await workflows.createWorkflow(actor(), {
+      idempotencyKey: "schedule-visibility-personal",
+      name: "Personal morning digest",
+      scope: "personal",
+    });
+    const company = await workflows.createWorkflow(actor(), {
+      idempotencyKey: "schedule-visibility-company",
+      name: "Company morning digest",
+      scope: "company",
+    });
+    const activateSchedule = (workflow: typeof personal.workflow) =>
+      workflows.updateWorkflow(actor(), workflow.id, {
+        expectedVersion: 1,
+        name: workflow.name,
+        description: "",
+        steps: [
+          {
+            id: "step_1",
+            title: "Digest",
+            model: "provider/model",
+            instructions: "Write the morning digest.",
+          },
+        ],
+        status: "active",
+        trigger: { type: "schedule", cron: "0 9 * * *", timezone: "UTC" },
+      });
+    await activateSchedule(personal.workflow);
+    await activateSchedule(company.workflow);
+
+    const visibleScheduleIds = async (workspaceId: string, userId: string) =>
+      (
+        await database.query<{ id: string }>(
+          `SELECT id
+           FROM goat.workflow_schedule_read_model_v1
+           WHERE workspace_id = $1
+             AND (scope = 'company' OR created_by_workos_id = $2)
+           ORDER BY id`,
+          [workspaceId, userId],
+        )
+      ).rows.map((row) => row.id);
+
+    await expect(visibleScheduleIds("workspace_1", "user_1")).resolves.toEqual([
+      personal.workflow.id,
+      company.workflow.id,
+    ]);
+    await expect(visibleScheduleIds("workspace_1", "user_teammate")).resolves.toEqual([
+      company.workflow.id,
+    ]);
+    await expect(visibleScheduleIds("workspace_2", "user_2")).resolves.toEqual([]);
+
+    await workflows.updateWorkflow(actor(), company.workflow.id, {
+      expectedVersion: 2,
+      name: company.workflow.name,
+      description: "",
+      steps: [
+        {
+          id: "step_1",
+          title: "Digest",
+          model: "provider/model",
+          instructions: "Write the morning digest.",
+        },
+      ],
+      status: "active",
+      scope: "personal",
+      trigger: { type: "schedule", cron: "0 9 * * *", timezone: "UTC" },
+    });
+
+    await expect(visibleScheduleIds("workspace_1", "user_teammate")).resolves.toEqual([]);
+    await expect(visibleScheduleIds("workspace_1", "user_1")).resolves.toEqual([
+      personal.workflow.id,
+      company.workflow.id,
+    ]);
   });
 
   it("lets the creator share a personal Workflow and refuses a teammate the same change", async () => {
