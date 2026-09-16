@@ -14,6 +14,7 @@ import {
   clearAllOptimisticChatSummaries,
   removeOptimisticChatSummary,
 } from "@/lib/optimistic-chat-summaries";
+import { AWAITING_INPUT_LABEL } from "./ChatStateIndicator";
 import { Sidebar } from "./Sidebar";
 import { SIDEBAR_NESTED_ROW_PADDING_CLASSNAME } from "./SidebarProjects";
 
@@ -1703,6 +1704,28 @@ describe("Sidebar", () => {
     );
   });
 
+  const RUN_STATE_SLOT_WIDTH_CLASSNAME = "w-[11px]";
+
+  /** The status column that leads a session row: its run state, then its pull request. */
+  function statusColumnOf(title: string) {
+    const row = screen.getByRole("link", { name: new RegExp(title) }).parentElement;
+    const column = row?.firstElementChild;
+    if (!(column instanceof HTMLElement)) throw new Error(`No status column for "${title}".`);
+    return column;
+  }
+
+  function runStateSlotOf(title: string) {
+    const slot = statusColumnOf(title).firstElementChild;
+    if (!(slot instanceof HTMLElement)) throw new Error(`No run-state slot for "${title}".`);
+    return slot;
+  }
+
+  /** Null when the list reserves no pull-request slot, which is the point of half the assertions. */
+  function pullRequestSlotOf(title: string) {
+    const column = statusColumnOf(title);
+    return column.childElementCount > 1 ? column.children[1] : null;
+  }
+
   describe("Pull request badge", () => {
     function chatWithPullRequest(state: "draft" | "open" | "blocked" | "merged" | "closed") {
       recentChatsMock.value = [archivableChat("conversation_pr", "Rework onboarding copy")];
@@ -1819,12 +1842,7 @@ describe("Sidebar", () => {
       expect(badge.parentElement?.closest("a")).toBeNull();
     });
 
-    function leadingColumnOf(title: string) {
-      const row = screen.getByRole("link", { name: new RegExp(title) }).parentElement;
-      return row?.firstElementChild ?? null;
-    }
-
-    it("reserves the badge's column on rows without a pull request, so titles line up", () => {
+    it("reserves the badge's slot on rows without a pull request, so titles line up", () => {
       recentChatsMock.value = [
         archivableChat("conversation_pr", "Rework onboarding copy"),
         archivableChat("conversation_plain", "YC customer meetings"),
@@ -1839,15 +1857,50 @@ describe("Sidebar", () => {
         },
       ];
       const { rerender } = render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
-      expect(leadingColumnOf("YC customer meetings")?.querySelector("span")).toHaveClass(
-        "size-[18px]",
-      );
+      expect(pullRequestSlotOf("YC customer meetings")).toHaveClass("size-[18px]");
 
-      // Nothing to align against: the reader pays no width for an always-empty column.
+      // Nothing to align against: the reader pays no width for an always-empty slot.
       sessionPullRequestsMock.value = [];
       rerender(<Sidebar collapsed onToggleCollapsed={() => {}} />);
       rerender(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
-      expect(leadingColumnOf("YC customer meetings")?.tagName).toBe("A");
+      expect(pullRequestSlotOf("YC customer meetings")).toBeNull();
+    });
+  });
+
+  describe("Run state slot", () => {
+    // The indicator renders nothing on a settled, seen session. Inline, that moved the title by a
+    // glyph the moment a run started, so a list of identical rows sat on several left edges.
+    it("holds the run-state slot open whether or not the session has an indicator", () => {
+      recentChatsMock.value = [
+        { ...archivableChat("conversation_working", "Linear triage"), state: "working" },
+        archivableChat("conversation_settled", "YC customer meetings"),
+      ];
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+      const working = runStateSlotOf("Linear triage");
+      const settled = runStateSlotOf("YC customer meetings");
+      expect(working).toHaveClass(RUN_STATE_SLOT_WIDTH_CLASSNAME);
+      expect(settled).toHaveClass(RUN_STATE_SLOT_WIDTH_CLASSNAME);
+      expect(within(working).getByTestId("sidebar-chat-working")).toBeInTheDocument();
+      expect(settled.childElementCount).toBe(0);
+    });
+
+    // The slot sits beside the row's link, not inside it, so "Waiting for you" no longer lands in
+    // the link's own name. A reader moving link by link has to hear it some other way.
+    it("describes a parked session's link with the run-state slot", () => {
+      recentChatsMock.value = [
+        { ...archivableChat("conversation_parked", "Rework onboarding copy"), awaitingInput: true },
+        archivableChat("conversation_settled", "YC customer meetings"),
+      ];
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+      expect(
+        screen.getByRole("link", { name: /Rework onboarding copy/ }),
+      ).toHaveAccessibleDescription(AWAITING_INPUT_LABEL);
+      // Nothing to say about a settled session, so the link claims no description at all.
+      expect(screen.getByRole("link", { name: /YC customer meetings/ })).not.toHaveAttribute(
+        "aria-describedby",
+      );
     });
   });
 
@@ -1914,19 +1967,21 @@ describe("Sidebar", () => {
       render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
       const projects = await findLoadedProjects();
+      // The row's leading status column carries the indent; the link beside it only ever carries
+      // the gap between the two.
       for (const name of ["chat_filed title", /task_filed name/]) {
-        expect(within(projects).getByRole("link", { name })).toHaveClass(
-          SIDEBAR_NESTED_ROW_PADDING_CLASSNAME,
-        );
+        const row = within(projects).getByRole("link", { name }).parentElement;
+        expect(row?.firstElementChild).toHaveClass(SIDEBAR_NESTED_ROW_PADDING_CLASSNAME);
       }
       expect(within(projects).getByText("No chats")).toHaveClass(
         SIDEBAR_NESTED_ROW_PADDING_CLASSNAME,
       );
 
       const recents = screen.getByRole("navigation", { name: "Recents" });
-      expect(within(recents).getByRole("link", { name: "chat_loose title" })).not.toHaveClass(
-        SIDEBAR_NESTED_ROW_PADDING_CLASSNAME,
-      );
+      const looseRow = within(recents).getByRole("link", {
+        name: "chat_loose title",
+      }).parentElement;
+      expect(looseRow?.firstElementChild).not.toHaveClass(SIDEBAR_NESTED_ROW_PADDING_CLASSNAME);
     });
 
     it("files a chat dropped on a project and keeps the row out of Recents", async () => {
