@@ -3,7 +3,10 @@
 import { modelSupportsAttachments } from "@opencompany/agent-runtime";
 import { useState } from "react";
 import type { WorkflowCatalogItem, WorkflowStep } from "@/lib/headless-automation-types";
-import { resolveWorkflowStepModelSelection } from "@/lib/workflow-model-options";
+import {
+  isWorkflowCloudRuntime,
+  resolveWorkflowStepModelSelection,
+} from "@/lib/workflow-model-options";
 
 type Overrides = Pick<WorkflowStep, "id" | "model" | "runtimeModel" | "reasoningEffort">[];
 
@@ -22,10 +25,15 @@ export function useWorkflowComposer(workflow: WorkflowCatalogItem | null) {
   });
   let error: string | null = null;
   let requiresCredits = false;
+  let usesSandbox = false;
   let capabilities = { images: true, pdf: true };
   try {
     for (const step of steps) {
       const selection = resolveWorkflowStepModelSelection(step);
+      if (isWorkflowCloudRuntime(selection.engine)) {
+        usesSandbox = true;
+        continue;
+      }
       if (selection.engine !== "opencompany") continue;
       requiresCredits = true;
       const supported = modelSupportsAttachments(selection.model);
@@ -36,6 +44,7 @@ export function useWorkflowComposer(workflow: WorkflowCatalogItem | null) {
     }
   } catch (cause) {
     error = cause instanceof Error ? cause.message : "Could not resolve workflow models.";
+    usesSandbox = false;
     capabilities = { images: false, pdf: false };
   }
   return {
@@ -43,6 +52,7 @@ export function useWorkflowComposer(workflow: WorkflowCatalogItem | null) {
     overrides,
     error,
     requiresCredits,
+    usesSandbox,
     capabilities,
     attachmentError: (attachments: readonly { kind: string }[]) => {
       if (attachments.some((attachment) => attachment.kind === "image") && !capabilities.images)
