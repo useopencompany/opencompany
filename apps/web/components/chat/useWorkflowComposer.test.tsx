@@ -23,6 +23,7 @@ const workflow: WorkflowCatalogItem = {
 describe("workflow composer selection", () => {
   it("checks every selected step and drops cloud settings when switching to a gateway model", () => {
     const { result } = renderHook(() => useWorkflowComposer(workflow));
+    expect(result.current.usesSandbox).toBe(true);
     expect(result.current.capabilities.images).toBe(false);
     expect(result.current.requiresCredits).toBe(true);
     act(() => result.current.update({ ...workflow.steps[1]!, model: "gpt-5.5" }));
@@ -35,6 +36,7 @@ describe("workflow composer selection", () => {
         model: "gpt-5.5",
       }),
     );
+    expect(result.current.usesSandbox).toBe(false);
     expect(result.current.steps[0]).not.toHaveProperty("runtimeModel");
     expect(result.current.steps[0]).not.toHaveProperty("reasoningEffort");
     expect(workflow.steps[0]?.model).toBe("codex");

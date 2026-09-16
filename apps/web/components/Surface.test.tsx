@@ -1305,6 +1305,16 @@ describe("Surface chat streaming UI", () => {
               id: "ship-feature",
               name: "Ship feature",
               description: "Use this to ship features.",
+              steps: [
+                {
+                  id: "build",
+                  title: "Build",
+                  model: "codex",
+                  runtimeModel: CODEX_CHAT_DEFAULT_MODEL_ID,
+                  reasoningEffort: "high",
+                  instructions: "Build the requested feature.",
+                },
+              ],
             },
           ],
         });
@@ -1346,6 +1356,9 @@ describe("Surface chat streaming UI", () => {
     expect(screen.getByTestId("workflow-task-hint")).toHaveTextContent(
       "Sending runs workflow Ship feature as a background task.",
     );
+    expect(
+      screen.getByRole("button", { name: "Runs in an isolated cloud sandbox" }),
+    ).toBeInTheDocument();
     const submit = screen.getByRole("button", { name: "Start task" });
     expect(submit).toBeEnabled();
 

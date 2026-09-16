@@ -1274,6 +1274,9 @@ export function Surface({
     [chatSearchQuery, commandPaletteItems],
   );
   const showEngineComposerControls = composerEngine !== null;
+  const composerUsesSandbox = selectedWorkflow
+    ? workflowComposer.usesSandbox
+    : showEngineComposerControls;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -3647,9 +3650,7 @@ export function Surface({
                           onGoalTokenBudgetChange={setCodexGoalTokenBudget}
                         />
                       ) : null}
-                      {showEngineComposerControls && !selectedWorkflow ? (
-                        <SandboxIndicator />
-                      ) : null}
+                      {composerUsesSandbox ? <SandboxIndicator /> : null}
                     </>
                   )}
                 </div>
@@ -4373,6 +4374,9 @@ export function QuickChatComposer({
   };
 
   const showEngineComposerControls = isEngineChat;
+  const composerUsesSandbox = selectedWorkflow
+    ? workflowComposer.usesSandbox
+    : showEngineComposerControls;
 
   return (
     <div className={cn("flex flex-col gap-2", className)}>
@@ -4617,7 +4621,7 @@ export function QuickChatComposer({
                 onGoalTokenBudgetChange={setCodexGoalTokenBudget}
               />
             ) : null}
-            {showEngineComposerControls && !selectedWorkflow ? <SandboxIndicator /> : null}
+            {composerUsesSandbox ? <SandboxIndicator /> : null}
           </div>
         </div>
       </form>
