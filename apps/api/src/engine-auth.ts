@@ -258,16 +258,34 @@ export function createEngineAuthService(input: {
       if (!trimmedFlowId) {
         throw new ApiError(400, "invalid_request", "Codex auth flow is required.");
       }
+      let flow: CodexDeviceAuthFlow;
       try {
         const response = await runner.postJson<RunnerFlowResponse<CodexDeviceAuthFlow>>(
           `/internal/goat/codex-auth/device/${encodeURIComponent(trimmedFlowId)}/poll`,
           { userWorkosId: actor.userId },
           { errorFormat: "status-text" },
         );
-        return response.flow;
+        flow = response.flow;
       } catch (error) {
         throw runnerFailure(error, "Could not check Codex authentication.", "codex_device_poll");
       }
+      if (flow.status === "completed" && actor.role === "admin") {
+        try {
+          await setWorkspaceCodexEngineAccount({
+            db,
+            workspaceId: actor.workspaceId,
+            providerUserWorkosId: actor.userId,
+            updatedByWorkosId: actor.userId,
+          });
+        } catch (error) {
+          throw commandFailure(
+            error,
+            "Codex connected, but workspace subscription sharing could not be enabled.",
+            "codex_workspace_engine_enable_after_connect",
+          );
+        }
+      }
+      return flow;
     },
 
     async disconnectCodex(actor) {

@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { OnboardingWizard } from "./OnboardingWizard";
@@ -10,9 +10,11 @@ const mocks = vi.hoisted(() => ({
   getOnboardingInstalledPluginsAction: vi.fn(),
   getOnboardingSubscriptionsAction: vi.fn(),
   installOfficialPlugin: vi.fn(),
+  pollCodexDeviceAuth: vi.fn(),
   push: vi.fn(),
   saveOnboardingProfileAction: vi.fn(),
   saveOnboardingWorkspaceAction: vi.fn(),
+  startCodexDeviceAuth: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -38,8 +40,8 @@ vi.mock("@/lib/onboarding-kickoff", () => ({
 
 vi.mock("@/lib/claude-code-auth", () => ({ saveClaudeCodeToken: vi.fn() }));
 vi.mock("@/lib/codex-auth", () => ({
-  pollCodexDeviceAuth: vi.fn(),
-  startCodexDeviceAuth: vi.fn(),
+  pollCodexDeviceAuth: mocks.pollCodexDeviceAuth,
+  startCodexDeviceAuth: mocks.startCodexDeviceAuth,
 }));
 
 vi.mock("@/lib/official-plugin-catalog", async () => {
@@ -99,6 +101,8 @@ describe("OnboardingWizard", () => {
     });
     mocks.getOnboardingInstalledPluginsAction.mockResolvedValue([]);
     mocks.installOfficialPlugin.mockResolvedValue({ name: "github" });
+    mocks.pollCodexDeviceAuth.mockReset();
+    mocks.startCodexDeviceAuth.mockReset();
   });
 
   it("walks an owner through profile, workspace, subscriptions, plugins, and completion", async () => {
@@ -164,6 +168,64 @@ describe("OnboardingWizard", () => {
       expect(await navigator.clipboard.readText()).toBe("claude setup-token"),
     );
     expect(screen.getByPlaceholderText(/Paste your token/u)).toBeInTheDocument();
+  });
+
+  it("refreshes onboarding subscription state when Codex authentication completes", async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.getOnboardingSubscriptionsAction
+        .mockResolvedValueOnce({
+          claudeCode: { connected: false, needsReauth: false },
+          codex: { connected: false, needsReauth: false },
+        })
+        .mockResolvedValue({
+          claudeCode: { connected: false, needsReauth: false },
+          codex: { connected: true, needsReauth: false },
+        });
+      mocks.startCodexDeviceAuth.mockResolvedValue({
+        ok: true,
+        flow: {
+          id: "gcodf_1",
+          status: "code_ready",
+          verificationUri: "https://example.com/device",
+          userCode: "ABCD-EFGH",
+          statusReason: null,
+        },
+      });
+      mocks.pollCodexDeviceAuth.mockResolvedValue({
+        ok: true,
+        flow: {
+          id: "gcodf_1",
+          status: "completed",
+          verificationUri: null,
+          userCode: null,
+          statusReason: null,
+        },
+      });
+      render(
+        <OnboardingWizard {...OWNER_PROPS} initialStep={2} initialWorkspaceId="workspace_1" />,
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+      const codexCard = screen.getByText("ChatGPT").closest("div.rounded-xl");
+      expect(codexCard).not.toBeNull();
+      await act(async () => {
+        fireEvent.click(within(codexCard as HTMLElement).getByRole("button", { name: "Connect" }));
+      });
+      expect(screen.getByRole("link", { name: "Open ChatGPT sign-in" })).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2500);
+      });
+
+      expect(mocks.pollCodexDeviceAuth).toHaveBeenCalledWith("gcodf_1");
+      expect(mocks.getOnboardingSubscriptionsAction).toHaveBeenCalledTimes(2);
+      expect(within(codexCard as HTMLElement).getByText("Connected")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("installs the recommended plugin and offers to connect it", async () => {
