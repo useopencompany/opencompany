@@ -89,6 +89,7 @@ export async function postWorkflowSlackMessage(
       sessionId: string;
       leaseId: string;
       botDisplayName: string;
+      botAvatarUrl: string;
       subscriptionEventId: number | null;
       followUpChannelId: string | null;
       followUpThreadTs: string | null;
@@ -98,6 +99,7 @@ export async function postWorkflowSlackMessage(
     SELECT integration.id, integration.user_workos_id AS "userWorkosId", integration.workspace_id AS "workspaceId",
       integration.external_id AS "teamId", integration.scopes, task.session_id AS "sessionId", run.lease_id AS "leaseId",
       workflow.slack_bot_display_name AS "botDisplayName",
+      workflow.slack_bot_avatar_url AS "botAvatarUrl",
       event.id AS "subscriptionEventId", subscription.source_key->>'channelId' AS "followUpChannelId",
       subscription.source_key->>'threadTs' AS "followUpThreadTs"
     FROM goat.codex_chat_turns run JOIN goat.tasks task ON task.session_id = run.chat_session_id
@@ -139,9 +141,9 @@ export async function postWorkflowSlackMessage(
         FOR SHARE OF event, run
       ), delivery AS MATERIALIZED (
         INSERT INTO goat.channel_deliveries
-          (id, workspace_id, session_id, integration_id, team_id, channel_id, thread_ts, text, bot_display_name)
+          (id, workspace_id, session_id, integration_id, team_id, channel_id, thread_ts, text, bot_display_name, bot_avatar_url)
         SELECT ${deliveryId}, ${target.workspaceId}, ${target.sessionId}, ${target.id}, ${target.teamId},
-          ${target.followUpChannelId}, ${target.followUpThreadTs}, ${text}, ${target.botDisplayName}
+          ${target.followUpChannelId}, ${target.followUpThreadTs}, ${text}, ${target.botDisplayName}, ${target.botAvatarUrl}
         FROM active
         ON CONFLICT (id) DO UPDATE SET id = EXCLUDED.id
         WHERE channel_deliveries.text = EXCLUDED.text
@@ -180,8 +182,8 @@ export async function postWorkflowSlackMessage(
       WITH connected AS MATERIALIZED (
         SELECT id FROM goat.integrations WHERE id = ${target.id} AND status = 'connected' AND external_id = ${target.teamId} FOR SHARE
       )
-      INSERT INTO goat.channel_deliveries (id, workspace_id, session_id, integration_id, team_id, channel_id, text, bot_display_name)
-      SELECT ${id}, ${target.workspaceId}, ${target.sessionId}, ${target.id}, ${target.teamId}, ${channelId}, ${text}, ${target.botDisplayName}
+      INSERT INTO goat.channel_deliveries (id, workspace_id, session_id, integration_id, team_id, channel_id, text, bot_display_name, bot_avatar_url)
+      SELECT ${id}, ${target.workspaceId}, ${target.sessionId}, ${target.id}, ${target.teamId}, ${channelId}, ${text}, ${target.botDisplayName}, ${target.botAvatarUrl}
       FROM connected
       WHERE EXISTS (SELECT 1 FROM goat.codex_chat_turns WHERE id = ${input.runId} AND status = 'running' AND lease_id = ${target.leaseId} AND lease_expires_at > now())
       ON CONFLICT (id) DO UPDATE SET id = EXCLUDED.id

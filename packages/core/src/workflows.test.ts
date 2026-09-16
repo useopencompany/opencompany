@@ -179,23 +179,44 @@ describe("WorkflowApplicationService", () => {
 
     await service.updateWorkflow(actor(), "workflow_1", definition);
     expect(repository.updateWorkflow).toHaveBeenCalledWith(
-      expect.objectContaining({ slackChannel: { enabled: true, displayName: "" } }),
+      expect.objectContaining({ slackChannel: { enabled: true, displayName: "", avatarUrl: "" } }),
     );
 
     await service.updateWorkflow(actor(), "workflow_1", {
       ...definition,
-      slackChannel: { enabled: false, displayName: "  James  " },
+      slackChannel: {
+        enabled: false,
+        displayName: "  James  ",
+        avatarUrl: "  https://example.com/james.png  ",
+      },
     });
     expect(repository.updateWorkflow).toHaveBeenLastCalledWith(
-      expect.objectContaining({ slackChannel: { enabled: false, displayName: "James" } }),
+      expect.objectContaining({
+        slackChannel: {
+          enabled: false,
+          displayName: "James",
+          avatarUrl: "https://example.com/james.png",
+        },
+      }),
     );
 
     await expect(
       service.updateWorkflow(actor(), "workflow_1", {
         ...definition,
-        slackChannel: { enabled: true, displayName: "J".repeat(81) },
+        slackChannel: { enabled: true, displayName: "J".repeat(81), avatarUrl: "" },
       }),
     ).rejects.toThrow("80 characters or fewer");
+
+    await expect(
+      service.updateWorkflow(actor(), "workflow_1", {
+        ...definition,
+        slackChannel: {
+          enabled: true,
+          displayName: "James",
+          avatarUrl: "http://example.com/a.png",
+        },
+      }),
+    ).rejects.toThrow("valid HTTPS URL");
   });
 
   it("rejects stale or incomplete scheduled definitions before planning or persistence", async () => {
@@ -831,7 +852,7 @@ function workflow(overrides: Partial<Workflow> = {}): Workflow {
     ],
     status: "active",
     scope: "company",
-    slackChannel: { enabled: true, displayName: "" },
+    slackChannel: { enabled: true, displayName: "", avatarUrl: "" },
     createdByUserId: "user_1",
     trigger: { type: "manual" },
     version: 1,

@@ -148,8 +148,8 @@ function SlackBotPanel({ data }: { data: SlackBotSettingsData }) {
       ) : data.needsScopeUpgrade ? (
         <div className="flex flex-col gap-3">
           <Banner tone="success">
-            Reconnect Slack to grant the access needed for workflow posts, thread replies, and
-            per-workflow display names. Until then, posts keep the default @opencompany identity.
+            Reconnect Slack to grant access for per-workflow identities. Until then, posts keep the
+            default @opencompany identity.
           </Banner>
           <a
             href={connectHref}

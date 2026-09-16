@@ -1111,6 +1111,11 @@
           "displayName": {
             "type": "string",
             "maxLength": 80
+          },
+          "avatarUrl": {
+            "type": "string",
+            "maxLength": 2048,
+            "default": ""
           }
         },
         "required": [
@@ -12193,6 +12198,9 @@
           "needsScopeUpgrade": {
             "type": "boolean"
           },
+          "canCustomizeIdentity": {
+            "type": "boolean"
+          },
           "teamName": {
             "type": "string",
             "nullable": true,
@@ -12214,6 +12222,7 @@
           "installed",
           "status",
           "needsScopeUpgrade",
+          "canCustomizeIdentity",
           "teamName",
           "statusReason",
           "destinationCount"
