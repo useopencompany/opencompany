@@ -29,6 +29,7 @@ export type IdentityUser = {
   sidebarProjectsEnabled: boolean;
   subagentsEnabled: boolean;
   pastSessionAccessEnabled: boolean;
+  imessageEnabled: boolean;
   /** @deprecated Wiki is always enabled. */
   wikiEnabled: true;
   taskViewMode: "board" | "list";
@@ -235,6 +236,7 @@ function identityUser(user: IdentityDto["user"]): IdentityUser {
     sidebarProjectsEnabled: user.sidebarProjectsEnabled,
     subagentsEnabled: user.subagentsEnabled,
     pastSessionAccessEnabled: user.pastSessionAccessEnabled,
+    imessageEnabled: user.imessageEnabled,
     wikiEnabled: true,
     taskViewMode: user.taskViewMode,
     taskTimeRange: user.taskTimeRange,

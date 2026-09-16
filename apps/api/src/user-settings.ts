@@ -27,6 +27,7 @@ export type UserPreferenceSet = {
   sidebarProjectsEnabled: boolean;
   subagentsEnabled: boolean;
   pastSessionAccessEnabled: boolean;
+  imessageEnabled: boolean;
 };
 
 export type UpdateUserPreferencesCommand = Partial<
@@ -61,6 +62,7 @@ const PREFERENCE_COLUMNS = {
   sidebarProjectsEnabled: users.sidebarProjectsEnabled,
   subagentsEnabled: users.subagentsEnabled,
   pastSessionAccessEnabled: users.pastSessionAccessEnabled,
+  imessageEnabled: users.imessageEnabled,
 };
 
 export function createUserSettingsService(input: {
@@ -84,6 +86,7 @@ export function createUserSettingsService(input: {
         "sidebarProjectsEnabled",
         "subagentsEnabled",
         "pastSessionAccessEnabled",
+        "imessageEnabled",
       ] as const) {
         const value = command[field];
         if (value !== undefined && value !== current[field]) changes[field] = value;

@@ -32,7 +32,9 @@ const allowedStandaloneFiles = new Set([
 const protectedCompatibilityTokens = [
   // 1180 = 1192 - the twelve Recurring Task fixture ids that left with those tests. The physical
   // goat.task_schedules and goat.task_schedule_runs identifiers stay until their own drop migration.
-  ["physical and stored quoted goat_* identifiers", /["'`]goat_[a-z0-9_]*["'`]/gu, 1180],
+  // 1185 = 1180 + the harness check on goat.codex_chat_sessions and the four constraint and index
+  // names on goat.imessage_bindings.
+  ["physical and stored quoted goat_* identifiers", /["'`]goat_[a-z0-9_]*["'`]/gu, 1185],
   ["quoted sandbox runtime roots", /["'`]opencompany-goat[a-z0-9_./${}:*-]*["'`]/gu, 26],
   ["chat source-provider values", /["']goat-chat["']/gu, 28],
   ["import source-provider values", /["']goat-import["']/gu, 13],
@@ -190,6 +192,9 @@ const baseEnvKeys = envKeys(
 // variables are declared here so the check accepts them.
 const addedEnvKeys = [
   "API_INTERNAL_TOKEN",
+  "MESSAGES_API_KEY",
+  "MESSAGES_LINE_HANDLE",
+  "MESSAGES_WEBHOOK_SECRET",
   "BUN_CONFIG_MAX_HTTP_REQUESTS",
   "DOCS_VERCEL_PROJECT_ID",
   "ELECTRIC_AUTH_MODE",

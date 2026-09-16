@@ -41,6 +41,7 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
+  Smartphone,
   Sparkles,
   Sun,
   Trash2,
@@ -115,6 +116,7 @@ import type { WorkspaceSandboxSizeResult } from "@/lib/sandbox-size";
 import {
   updateAutoModelRoutingAction,
   updateBotsAction,
+  updateImessageAction,
   updatePastSessionAccessAction,
   updateReviewInboxAction,
   updateSidebarProjectsAction,
@@ -357,6 +359,13 @@ export function PreferencesSettingsRoute() {
           description="Let opencompany hand wide research to helpers that work in their own context and report back, so one answer can cover several sources at once. Uses more credits per message."
           checked={featureFlags.subagents}
           update={updateSubagentsAction}
+        />
+        <BetaFeatureSwitch
+          icon={Smartphone}
+          label="iMessage assistant"
+          description="Text a personal assistant from your phone. Link your number under Channels → iMessage. It answers with web search, the Wiki, Skills and your connected plugins."
+          checked={featureFlags.imessage}
+          update={updateImessageAction}
         />
       </section>
     </PageContent>

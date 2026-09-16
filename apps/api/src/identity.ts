@@ -170,6 +170,7 @@ export function createIdentityService(input: {
         sidebarProjectsEnabled: user.sidebarProjectsEnabled,
         subagentsEnabled: user.subagentsEnabled,
         pastSessionAccessEnabled: user.pastSessionAccessEnabled,
+        imessageEnabled: user.imessageEnabled,
         wikiEnabled: true as const,
         taskViewMode: user.taskViewMode,
         taskTimeRange: user.taskTimeRange,

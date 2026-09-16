@@ -16,7 +16,8 @@
       "types": "./src/*.ts",
       "default": "./src/*.ts"
     },
-    "./integrations/slack-channel": "./src/integrations/slack-channel.ts"
+    "./integrations/slack-channel": "./src/integrations/slack-channel.ts",
+    "./integrations/imessage": "./src/integrations/imessage.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit --project tsconfig.json",

@@ -13,6 +13,8 @@ Start with:
 - [Public launch runbook](./public-launch-runbook.md) — attended visibility change, public-only
   controls, external-fork canary, and rollback.
 - [Chat operations](./chat-operations.md) — `/v1` topology, release verification, and recovery.
+- [iMessage personal assistant](./imessage-channel.md) — the flag-gated personal-agent harness,
+  phone pairing over messages.dev, and how it stays isolated from the main chat harness.
 - [Subagents](./subagents.md) — delegated research in the opencompany chat engine, its tool
   inheritance rules, and its limits.
 - [opencompany context compaction](./context-compaction.md) — long-chat checkpoint behavior,

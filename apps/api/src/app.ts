@@ -108,6 +108,8 @@ import type { GitHubUserIngressService } from "./github-user-ingress";
 import type { GoogleIngressService } from "./google-ingress";
 import type { HubspotIngressService } from "./hubspot-ingress";
 import type { IdentityService } from "./identity";
+import type { ImessageIngressService } from "./imessage-ingress";
+import type { ImessageSettingsService } from "./imessage-settings";
 import type { IntegrationAccountService } from "./integration-accounts";
 import type { JamieIngressService } from "./jamie-ingress";
 import type { LinearIngressService } from "./linear-ingress";
@@ -218,6 +220,7 @@ export type CreateApiAppInput = {
   sessionPullRequests: (actor: Actor) => Promise<SessionPullRequestDto[]>;
   integrationAccounts: IntegrationAccountService;
   slackBotSettings: SlackBotSettingsService;
+  imessageSettings?: ImessageSettingsService;
   mcp?: McpService;
   gmailMcp?: GmailMcpService;
   googleAdminMcp?: GoogleAdminMcpService;
@@ -248,6 +251,7 @@ export type CreateApiAppInput = {
   mcpOAuthIngress?: McpOAuthIngressService;
   xAccountIngress?: XAccountIngressService;
   slackBotIngress?: SlackBotIngressService;
+  imessageIngress?: ImessageIngressService;
   stripeIngress?: StripeIngressService;
   billingReconcile?: BillingReconcileService;
   notifier?: RunEventNotifier;
@@ -2422,6 +2426,24 @@ export function createApiApp(input: CreateApiAppInput) {
       const status = await input.userSettings.getMcpSetup(actor);
       return c.json({ data: mcpSetupDto(status), meta }, 200);
     },
+    getImessageSettings: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      if (!input.imessageSettings) throw new ApiError(404, "not_found", "iMessage is not enabled.");
+      return c.json({ data: await input.imessageSettings.get(actor), meta }, 200);
+    },
+    startImessageLink: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 30);
+      if (!input.imessageSettings) throw new ApiError(404, "not_found", "iMessage is not enabled.");
+      return c.json({ data: await input.imessageSettings.startLink(actor), meta }, 200);
+    },
+    unlinkImessage: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 30);
+      if (!input.imessageSettings) throw new ApiError(404, "not_found", "iMessage is not enabled.");
+      return c.json({ data: await input.imessageSettings.unlink(actor), meta }, 200);
+    },
     updateMcpSetup: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 60);
@@ -3297,6 +3319,11 @@ export function createApiApp(input: CreateApiAppInput) {
     app.get("/integrations/slack-bot/callback", (c) => ingress.callback(c.req.raw));
     app.use("/webhooks/slack-bot/events", ingressBodyLimit(1024 * 1024));
     app.post("/webhooks/slack-bot/events", (c) => ingress.webhook(c.req.raw));
+  }
+  if (input.imessageIngress) {
+    const ingress = input.imessageIngress;
+    app.use("/webhooks/imessage/events", ingressBodyLimit(256 * 1024));
+    app.post("/webhooks/imessage/events", (c) => ingress.webhook(c.req.raw));
   }
   if (input.stripeIngress) {
     app.use("/webhooks/stripe", ingressBodyLimit(1024 * 1024));

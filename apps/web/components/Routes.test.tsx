@@ -50,6 +50,7 @@ const appDataMock = vi.hoisted(() => ({
 const userPreferencesMock = vi.hoisted(() => ({
   updateBotsAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateAutoModelRoutingAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
+  updateImessageAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateReviewInboxAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateSidebarProjectsAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updatePastSessionAccessAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
@@ -181,6 +182,7 @@ vi.mock("@/components/SandboxSettingsPanel", () => ({
 vi.mock("@/lib/user-preferences", () => ({
   updateBotsAction: userPreferencesMock.updateBotsAction,
   updateAutoModelRoutingAction: userPreferencesMock.updateAutoModelRoutingAction,
+  updateImessageAction: userPreferencesMock.updateImessageAction,
   updateReviewInboxAction: userPreferencesMock.updateReviewInboxAction,
   updateSidebarProjectsAction: userPreferencesMock.updateSidebarProjectsAction,
   updateSubagentsAction: userPreferencesMock.updateSubagentsAction,

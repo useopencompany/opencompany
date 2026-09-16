@@ -19,6 +19,7 @@ type UserPreferences = {
   sidebarProjectsEnabled: boolean;
   subagentsEnabled: boolean;
   pastSessionAccessEnabled: boolean;
+  imessageEnabled: boolean;
 };
 
 export async function updateTimezoneAction(timezone: string) {
@@ -96,4 +97,11 @@ async function patchPreferences(body: Partial<UserPreferences>): Promise<UserPre
     throw await serverApiError(response, "Preferences could not be saved.");
   }
   return (await response.json()).data;
+}
+
+export async function updateImessageAction(enabled: boolean) {
+  const preferences = await patchPreferences({ imessageEnabled: enabled === true });
+  revalidatePath("/");
+  revalidatePath("/settings/preferences");
+  return { ok: true, enabled: preferences.imessageEnabled } as const;
 }

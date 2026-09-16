@@ -100,6 +100,7 @@ import {
   GenerateConversationTitleEnvelopeSchema,
   GranolaAccountStateEnvelopeSchema,
   IdentityEnvelopeSchema,
+  ImessageSettingsEnvelopeSchema,
   ImportSkillBodySchema,
   InfisicalAuthFlowEnvelopeSchema,
   InfisicalAuthStatusEnvelopeSchema,
@@ -3231,6 +3232,48 @@ export const updateUserPreferencesRoute = createRoute({
   },
 });
 
+export const getImessageSettingsRoute = createRoute({
+  method: "get",
+  path: "/v1/me/imessage",
+  tags: ["Settings"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "The acting user's iMessage assistant channel state.",
+      content: { "application/json": { schema: ImessageSettingsEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const startImessageLinkRoute = createRoute({
+  method: "post",
+  path: "/v1/me/imessage/link",
+  tags: ["Settings"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "A fresh link code the user texts to the opencompany line.",
+      content: { "application/json": { schema: ImessageSettingsEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const unlinkImessageRoute = createRoute({
+  method: "delete",
+  path: "/v1/me/imessage",
+  tags: ["Settings"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "The phone is unlinked; the Conversation and its history remain.",
+      content: { "application/json": { schema: ImessageSettingsEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const getMcpSetupRoute = createRoute({
   method: "get",
   path: "/v1/me/mcp-setup",
@@ -4398,6 +4441,9 @@ export type V1RouteHandlers = {
   updateUserPreferences: RouteHandler<typeof updateUserPreferencesRoute>;
   getMcpSetup: RouteHandler<typeof getMcpSetupRoute>;
   updateMcpSetup: RouteHandler<typeof updateMcpSetupRoute>;
+  getImessageSettings: RouteHandler<typeof getImessageSettingsRoute>;
+  startImessageLink: RouteHandler<typeof startImessageLinkRoute>;
+  unlinkImessage: RouteHandler<typeof unlinkImessageRoute>;
   submitFeedback: RouteHandler<typeof submitFeedbackRoute>;
   listRepoConfigs: RouteHandler<typeof listRepoConfigsRoute>;
   setRepoConfigEnv: RouteHandler<typeof setRepoConfigEnvRoute>;
@@ -4618,6 +4664,9 @@ export function createV1Router(
       .openapi(updateUserPreferencesRoute, handlers.updateUserPreferences)
       .openapi(getMcpSetupRoute, handlers.getMcpSetup)
       .openapi(updateMcpSetupRoute, handlers.updateMcpSetup)
+      .openapi(getImessageSettingsRoute, handlers.getImessageSettings)
+      .openapi(startImessageLinkRoute, handlers.startImessageLink)
+      .openapi(unlinkImessageRoute, handlers.unlinkImessage)
       .openapi(submitFeedbackRoute, handlers.submitFeedback)
       .openapi(listRepoConfigsRoute, handlers.listRepoConfigs)
       .openapi(setRepoConfigEnvRoute, handlers.setRepoConfigEnv)
@@ -5974,6 +6023,12 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       200,
     ),
+  getImessageSettings: (c) =>
+    c.json({ data: { configured: false, lineHandle: null, binding: null }, meta }, 200),
+  startImessageLink: (c) =>
+    c.json({ data: { configured: false, lineHandle: null, binding: null }, meta }, 200),
+  unlinkImessage: (c) =>
+    c.json({ data: { configured: false, lineHandle: null, binding: null }, meta }, 200),
   getMcpSetup: (c) =>
     c.json({ data: { preferredClient: null, complete: false, completedAt: null }, meta }, 200),
   updateMcpSetup: (c) =>
