@@ -1778,7 +1778,7 @@ describe("Sidebar", () => {
       expect(screen.queryByTestId("sidebar-pull-request-badge")).not.toBeInTheDocument();
     });
 
-    it("yields the badge's column to the pin control once the chat is pinned", () => {
+    it("keeps the badge and the pin control on a pinned chat, in their own columns", () => {
       recentChatsMock.value = [
         {
           ...archivableChat("conversation_pr", "Rework onboarding copy"),
@@ -1796,10 +1796,45 @@ describe("Sidebar", () => {
       ];
       render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
-      expect(screen.queryByTestId("sidebar-pull-request-badge")).not.toBeInTheDocument();
+      expect(screen.getByTestId("sidebar-pull-request-badge")).toBeInTheDocument();
       expect(
         screen.getByRole("button", { name: "Unpin Rework onboarding copy" }),
       ).toBeInTheDocument();
+    });
+
+    it("leads the row with the badge, before the session name", () => {
+      chatWithPullRequest("open");
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+      const badge = screen.getByTestId("sidebar-pull-request-badge");
+      const title = screen.getByText("Rework onboarding copy");
+      expect(badge.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it("reserves the badge's column on rows without a pull request, so titles line up", () => {
+      recentChatsMock.value = [
+        archivableChat("conversation_pr", "Rework onboarding copy"),
+        archivableChat("conversation_plain", "YC customer meetings"),
+      ];
+      sessionPullRequestsMock.value = [
+        {
+          conversationId: "conversation_pr",
+          repository: "acme/web",
+          number: 42,
+          url: "https://github.com/acme/web/pull/42",
+          state: "open",
+        },
+      ];
+      const { rerender } = render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+      expect(screen.getByText("YC customer meetings").previousElementSibling).toHaveClass(
+        "size-[18px]",
+      );
+
+      // Nothing to align against: the reader pays no width for an always-empty column.
+      sessionPullRequestsMock.value = [];
+      rerender(<Sidebar collapsed onToggleCollapsed={() => {}} />);
+      rerender(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+      expect(screen.getByText("YC customer meetings").previousElementSibling).toBeNull();
     });
   });
 

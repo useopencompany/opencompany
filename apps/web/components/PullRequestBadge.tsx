@@ -4,12 +4,15 @@ import { GitMerge, GitPullRequest, GitPullRequestClosed, GitPullRequestDraft } f
 import type { SessionPullRequest } from "@/lib/session-pull-requests";
 
 /**
- * The state of the pull request a coding session opened, on that session's sidebar row.
+ * The state of the pull request a coding session opened, leading that session's sidebar row.
  *
  * Both the glyph and the colour carry the state. Colour alone would be the obvious choice at this
  * size, but four states at 13px is more than hue can carry legibly — and not at all for a
  * colourblind reader. The colours are GitHub's own, so a PR reads the same here as it does on the
  * page this badge links to.
+ *
+ * Sized to the row's text rather than to the trailing icon buttons: it sits against the session
+ * name, and a 24px control there would push every title in the list a third of a word to the right.
  */
 export function PullRequestBadge({
   pullRequest,
@@ -32,7 +35,7 @@ export function PullRequestBadge({
       // Stops the click from also selecting the row underneath it.
       onClick={(event) => event.stopPropagation()}
       className={cn(
-        "flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors duration-150 hover:bg-surface-active focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20",
+        "flex size-[18px] shrink-0 items-center justify-center rounded transition-colors duration-150 hover:bg-surface-active focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20",
         colorClassName,
         className,
       )}

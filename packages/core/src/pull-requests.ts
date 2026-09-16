@@ -63,6 +63,24 @@ export function findPullRequestRefs(text: string): PullRequestRef[] {
   return [...found.values()];
 }
 
+/**
+ * The one pull request a piece of agent-authored reporting is about, if any.
+ *
+ * Unlike `findPullRequestRefs`, this is for text the agent wrote *about its own run* — a Task's
+ * result and outcome comment. Those two fields are the agent's account of what it did, so a PR URL
+ * in them is the PR the run opened rather than one it happened to cite, and taking the first keeps
+ * every surface that reads a Task's PR pointing at the same one.
+ */
+export function findReportedPullRequestRef(
+  ...texts: Array<string | null | undefined>
+): PullRequestRef | null {
+  for (const text of texts) {
+    const [ref] = text ? findPullRequestRefs(text) : [];
+    if (ref) return ref;
+  }
+  return null;
+}
+
 /** The MCP tools that open a PR, across GitHub's hosted MCP server and any namespaced alias of it. */
 export function isPullRequestCreationTool(toolName: string | null | undefined) {
   if (!toolName) return false;

@@ -565,6 +565,11 @@ function SidebarWorkList() {
   const rowDragProps = (conversationId: string): SidebarRowDragProps =>
     projects.enabled ? conversationDragProps(conversationId) : {};
 
+  // One decision for the whole list, so a section's rows never align differently from the section
+  // above it. The map only holds links for sessions the sidebar can still show, so "any link at
+  // all" and "any row with a badge" are the same question in all but the rarest case.
+  const reservePullRequestColumn = pullRequests.size > 0;
+
   const renderChatRow = (chat: ChatSummaryView) => {
     const href = chatHref(chat.id);
     const pinned = isPinned(chat);
@@ -586,6 +591,7 @@ function SidebarWorkList() {
         optimistic={optimistic}
         localState={localChatStates.get(chat.id) ?? null}
         pullRequest={pullRequests.get(chat.id) ?? null}
+        reservePullRequestColumn={reservePullRequestColumn}
         pinned={pinned}
         pinning={pinningIds.has(chat.id)}
         dragProps={optimistic ? {} : rowDragProps(chat.id)}
@@ -607,6 +613,7 @@ function SidebarWorkList() {
         state={item.state}
         href={href}
         pullRequest={pullRequests.get(item.task.conversationId) ?? null}
+        reservePullRequestColumn={reservePullRequestColumn}
         active={isTaskRouteActive(pathname, href)}
         dragProps={rowDragProps(item.task.conversationId)}
         onArchive={() => archiveTask(item.task, href)}
@@ -734,6 +741,7 @@ function SidebarChatRow({
   optimistic,
   localState,
   pullRequest,
+  reservePullRequestColumn,
   pinned,
   pinning,
   dragProps,
@@ -749,6 +757,8 @@ function SidebarChatRow({
   localState: ReturnType<typeof chatSummaryState> | null;
   /** The PR this chat's coding agent opened, when it opened one. */
   pullRequest: SessionPullRequest | null;
+  /** Whether the list reserves the leading PR column on every row. See `SidebarPullRequestColumn`. */
+  reservePullRequestColumn: boolean;
   pinned: boolean;
   pinning: boolean;
   // Lets the row be dragged into a sidebar Project. Empty when Projects are off, and for a chat
@@ -763,6 +773,7 @@ function SidebarChatRow({
   const contentPadding = useSidebarRowPadding();
   const content = (
     <>
+      <SidebarPullRequestColumn pullRequest={pullRequest} reserved={reservePullRequestColumn} />
       <SidebarChatStateIndicator state={state} />
       <span className="truncate tracking-[-0.005em]">{chat.title}</span>
     </>
@@ -806,13 +817,6 @@ function SidebarChatRow({
       )}
       {optimistic ? null : (
         <>
-          {/* The badge rests in the pin column and yields to the pin on hover. A third column
-              would cost every row title 24px of width to show a control the reader is already
-              reaching past. Hover only, not focus: the badge is itself focusable, and
-              `group-focus-within` would hide it the moment a keyboard user tabbed onto it. */}
-          {pullRequest && !pinned && !pinning ? (
-            <PullRequestBadge pullRequest={pullRequest} className="group-hover:hidden" />
-          ) : null}
           <button
             type="button"
             title={pinned ? "Unpin chat" : "Pin chat"}
@@ -820,12 +824,10 @@ function SidebarChatRow({
             aria-pressed={pinned}
             disabled={pinning}
             onClick={onTogglePin}
-            className={`h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink/50 transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed ${
+            className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink/50 transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed ${
               pinned || pinning
-                ? "flex opacity-100"
-                : pullRequest
-                  ? "hidden opacity-0 group-hover:flex group-hover:opacity-100 group-focus-within:flex group-focus-within:opacity-100"
-                  : "flex opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+                ? "opacity-100"
+                : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
             }`}
           >
             {/* The row has already moved to its new section, so the icon shows the state the user
@@ -845,6 +847,34 @@ function SidebarChatRow({
       )}
     </div>
   );
+}
+
+/**
+ * The leading column that carries a session's pull-request state, to the left of its name.
+ *
+ * It leads the row rather than trailing it because the state of the work an agent left behind is
+ * something the reader scans a column for, the way they scan the row's own title — not a control
+ * they reach for. Trailing, it also had to share the pin's column and disappear on hover.
+ *
+ * The column is reserved on every row as soon as any session in the sidebar has a linked PR, so
+ * those titles line up down the list instead of stepping in and out by a glyph. It is not reserved
+ * at all otherwise: a reader with no GitHub sessions should not pay the width forever to align a
+ * column that is always empty.
+ */
+function SidebarPullRequestColumn({
+  pullRequest,
+  reserved,
+  className,
+}: {
+  pullRequest: SessionPullRequest | null;
+  reserved: boolean;
+  className?: string;
+}) {
+  if (pullRequest) {
+    return <PullRequestBadge pullRequest={pullRequest} {...(className ? { className } : {})} />;
+  }
+  if (!reserved) return null;
+  return <span aria-hidden="true" className={`size-[18px] shrink-0 ${className ?? ""}`} />;
 }
 
 function resolveSidebarChatState(input: {
@@ -877,6 +907,7 @@ function SidebarTaskRow({
   href,
   active,
   pullRequest,
+  reservePullRequestColumn,
   dragProps,
   onArchive,
 }: {
@@ -886,6 +917,8 @@ function SidebarTaskRow({
   active: boolean;
   /** The PR this Task's coding agent opened, when it opened one. */
   pullRequest: SessionPullRequest | null;
+  /** Whether the list reserves the leading PR column on every row. See `SidebarPullRequestColumn`. */
+  reservePullRequestColumn: boolean;
   // Keyed by the conversation behind the Task, the same key a Project stores for a chat.
   dragProps: SidebarRowDragProps;
   onArchive: () => void;
@@ -905,6 +938,13 @@ function SidebarTaskRow({
         aria-current={active ? "page" : undefined}
         className={`flex min-w-0 flex-1 items-center gap-2 rounded-l-md py-[5px] text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${contentPadding}`}
       >
+        <SidebarPullRequestColumn
+          pullRequest={pullRequest}
+          reserved={reservePullRequestColumn}
+          // A Task row is two lines tall. Centred across both, the badge would sit at a different
+          // height from the row's own text and from every one-line chat row above it.
+          className="mt-[1px] self-start"
+        />
         <ChatStateIndicator state={state} surface="sidebar" className="mt-[7px] self-start" />
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate tracking-[-0.005em]">{task.name}</span>
@@ -915,11 +955,7 @@ function SidebarTaskRow({
           every row the reader hovers down the list. A Task row is two lines tall, so both this
           slot and the archive beside it are pulled up against the title: centred across both lines
           they would sit at a different height from the row's own text and read as misaligned. */}
-      {pullRequest ? (
-        <PullRequestBadge pullRequest={pullRequest} className="mt-[1.5px] self-start" />
-      ) : (
-        <span aria-hidden="true" className="h-6 w-6 shrink-0" />
-      )}
+      <span aria-hidden="true" className="h-6 w-6 shrink-0" />
       <span className="mr-1 mt-[1.5px] flex h-6 w-6 shrink-0 items-center justify-center self-start">
         {archivable ? (
           <button
