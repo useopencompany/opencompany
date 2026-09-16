@@ -1459,9 +1459,6 @@ async function resolveProductChatRuntime(input: {
     model,
     ...(runBrainCli ? { runBrainCli } : {}),
     ...(brainCapture ? { saveToBrain: brainCapture } : {}),
-    ...(hostTools?.scheduleTask ? { scheduleTask: hostTools.scheduleTask } : {}),
-    ...(hostTools?.editTaskSchedule ? { editTaskSchedule: hostTools.editTaskSchedule } : {}),
-    ...(hostTools?.deleteTaskSchedule ? { deleteTaskSchedule: hostTools.deleteTaskSchedule } : {}),
     ...(hostTools?.workspaceSkills ? { workspaceSkills: hostTools.workspaceSkills } : {}),
     ...(hostTools?.createWorkspaceSkill
       ? { createWorkspaceSkill: hostTools.createWorkspaceSkill }
@@ -1510,7 +1507,6 @@ async function resolveProductChatRuntime(input: {
     webSearchEnabled: Boolean(exaApiKey),
     browserToolsEnabled: Boolean(hostTools?.browserTools),
     automationToolsEnabled: Boolean(hostTools?.bootstrap.automationToolsEnabled),
-    scheduleToolsEnabled: Boolean(hostTools?.bootstrap.automationToolsEnabled),
     wikiToolEnabled: Boolean(hostTools?.runWiki),
     artifactToolEnabled: Boolean(hostTools?.writeArtifact),
     subagentsEnabled: Boolean(subagentRunner),
@@ -1524,7 +1520,6 @@ async function resolveProductChatRuntime(input: {
     ...(hostTools
       ? {
           userContext: hostTools.bootstrap.userContext,
-          recurringSchedules: hostTools.bootstrap.recurringSchedules,
           skillsAvailable: hostTools.bootstrap.skills.length > 0,
           workflows: hostTools.bootstrap.workflows,
         }

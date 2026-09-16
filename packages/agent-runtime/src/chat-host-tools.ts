@@ -5,9 +5,6 @@ export type ChatHostToolOperation =
   | "create_workspace_skill"
   | "edit_workspace_skill"
   | "workspace_skills"
-  | "schedule_task"
-  | "edit_task_schedule"
-  | "delete_task_schedule"
   | "start_workflow"
   | "browser_use_profile"
   | "browser_end_profile"
@@ -73,16 +70,6 @@ export type ChatHostBootstrap = {
   skills: Array<{ id: string; name: string; description: string }>;
   activeSkills: ChatHostSkill[];
   workflows: Array<{ id: string; name: string; description: string }>;
-  recurringSchedules: Array<{
-    id: string;
-    name: string;
-    cron: string;
-    timezone: string;
-    enabled: boolean;
-    nextRunAt: string;
-    prompt: string;
-    sourceDescription: string;
-  }>;
 };
 
 export type ChatHostToolGatewayResponse =

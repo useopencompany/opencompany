@@ -2,10 +2,6 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   type Actor,
   CoreError,
-  type TaskSchedule,
-  type TaskScheduleMutationResult,
-  type TaskSchedulePage,
-  type TaskScheduleRepository,
   type VersionedRepositoryResult,
   type Workflow,
   type WorkflowAutomationTrigger,
@@ -26,8 +22,7 @@ export type WorkflowSqlExecute = (query: SQL) => Promise<unknown>;
 type RepositoryIds = {
   command: () => string;
   workflow: () => string;
-  taskSchedule: () => string;
-  scheduleRun: (kind: "workflow" | "task") => string;
+  scheduleRun: (kind: "workflow") => string;
 };
 
 type WorkflowRepositoryOptions = {
@@ -71,27 +66,11 @@ type WorkflowMemoryRow = {
   contentUpdatedAt: Date | string | null;
 };
 
-type TaskScheduleRow = {
-  id: string;
-  name: string;
-  sourceDescription: string;
-  cron: string;
-  timezone: string;
-  prompt: string;
-  plannedHarnessSpec?: unknown;
-  enabled: boolean;
-  lastRunAt: Date | string | null;
-  nextRunAt: Date | string;
-  version: number | string;
-  createdAt: Date | string;
-  updatedAt: Date | string;
-};
-
 type CreateReservationRow = {
   authorized: boolean;
   commandId: string | null;
   requestHash: string | null;
-  operation: "workflow.create" | "task_schedule.create" | null;
+  operation: "workflow.create" | null;
   resourceId: string | null;
   transactionId: number | string | null;
   replayed: boolean | null;
@@ -100,7 +79,6 @@ type CreateReservationRow = {
 const defaultIds: RepositoryIds = {
   command: () => `goat_automation_command_${randomUUID()}`,
   workflow: () => newResourceId("workflow"),
-  taskSchedule: () => newResourceId("task_schedule"),
   scheduleRun: (kind) => newResourceId(`${kind}_schedule_run`),
 };
 
@@ -509,406 +487,6 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     `);
   }
 
-  async listTaskSchedules(input: {
-    actor: Actor;
-    cursor?: string;
-    limit: number;
-  }): Promise<TaskSchedulePage> {
-    const rows = await this.rows<TaskScheduleRow>(sql`
-      ${taskScheduleSelect()}
-      WHERE schedule.user_workos_id = ${input.actor.userId}
-        AND (schedule.workspace_id = ${input.actor.workspaceId} OR schedule.workspace_id IS NULL)
-        AND schedule.deleted_at IS NULL
-        AND ${workspaceMembership(input.actor)}
-        AND (
-          ${input.cursor ?? null}::text IS NULL
-          OR EXISTS (
-            SELECT 1
-            FROM goat.task_schedules AS cursor_schedule
-            WHERE cursor_schedule.id = ${input.cursor ?? null}
-              AND cursor_schedule.user_workos_id = ${input.actor.userId}
-              AND (
-                cursor_schedule.workspace_id = ${input.actor.workspaceId}
-                OR cursor_schedule.workspace_id IS NULL
-              )
-              AND (schedule.updated_at, schedule.id)
-                < (cursor_schedule.updated_at, cursor_schedule.id)
-          )
-        )
-      ORDER BY schedule.updated_at DESC, schedule.id DESC
-      LIMIT ${input.limit + 1}
-    `);
-    const hasNext = rows.length > input.limit;
-    const page = rows.slice(0, input.limit);
-    return {
-      schedules: page.map(mapTaskSchedule),
-      nextCursor: hasNext ? (page.at(-1)?.id ?? null) : null,
-    };
-  }
-
-  // Recurring Task writes are open to every workspace member, so this fails fast on the one
-  // precondition the individual mutations would otherwise surface as a silent empty result.
-  async assertTaskScheduleWriteAllowed(actor: Actor): Promise<void> {
-    const [row] = await this.rows<{ userId: string }>(sql`
-      SELECT actor_user.workos_user_id AS "userId"
-      FROM goat.users AS actor_user
-      JOIN goat.workspace_members AS member
-        ON member.user_workos_id = actor_user.workos_user_id
-       AND member.workspace_id = ${actor.workspaceId}
-      WHERE actor_user.workos_user_id = ${actor.userId}
-      LIMIT 1
-    `);
-    if (!row) throw new CoreError("not_found", "Workspace membership not found.");
-  }
-
-  async replayTaskScheduleCreate(
-    input: Parameters<TaskScheduleRepository["replayTaskScheduleCreate"]>[0],
-  ): Promise<TaskScheduleMutationResult | null> {
-    const requestHash = taskScheduleCreateHash(input);
-    const [row] = await this.rows<CreateReservationRow & TaskScheduleRow>(sql`
-      WITH actor_scope AS MATERIALIZED (
-        SELECT actor_user.workos_user_id
-        FROM goat.users AS actor_user
-        JOIN goat.workspace_members AS member
-          ON member.user_workos_id = actor_user.workos_user_id
-         AND member.workspace_id = ${input.actor.workspaceId}
-        WHERE actor_user.workos_user_id = ${input.actor.userId}
-      )
-      SELECT
-        EXISTS (SELECT 1 FROM actor_scope) AS authorized,
-        reservation.command_id AS "commandId",
-        reservation.request_hash AS "requestHash",
-        reservation.operation,
-        reservation.resource_id AS "resourceId",
-        reservation.transaction_id AS "transactionId",
-        true AS replayed,
-        schedule.id,
-        schedule.name,
-        schedule.source_description AS "sourceDescription",
-        schedule.cron,
-        schedule.timezone,
-        schedule.prompt,
-        schedule.enabled,
-        schedule.last_run_at AS "lastRunAt",
-        schedule.next_run_at AS "nextRunAt",
-        schedule.version,
-        schedule.created_at AS "createdAt",
-        schedule.updated_at AS "updatedAt"
-      FROM (SELECT 1) AS singleton
-      LEFT JOIN actor_scope ON true
-      LEFT JOIN goat.automation_command_idempotency AS reservation
-        ON reservation.user_workos_id = ${input.actor.userId}
-       AND reservation.workspace_id = ${input.actor.workspaceId}
-       AND reservation.idempotency_key = ${input.idempotencyKey}
-       AND EXISTS (SELECT 1 FROM actor_scope)
-      LEFT JOIN goat.task_schedules AS schedule
-        ON schedule.id = reservation.resource_id
-       AND schedule.user_workos_id = ${input.actor.userId}
-       AND (schedule.workspace_id = ${input.actor.workspaceId} OR schedule.workspace_id IS NULL)
-      LIMIT 1
-    `);
-    if (!row?.authorized) throw new CoreError("not_found", "Workspace membership not found.");
-    if (!row.commandId) return null;
-    assertReservation(row, "task_schedule.create", requestHash);
-    if (!row.id) throw new Error("Recurring Task command reservation did not materialize.");
-    return {
-      schedule: mapTaskSchedule(row),
-      transactionId: String(row.transactionId),
-      idempotentReplay: true,
-    };
-  }
-
-  async getTaskSchedule(input: { actor: Actor; scheduleId: string }): Promise<TaskSchedule | null> {
-    const [row] = await this.rows<TaskScheduleRow>(sql`
-      ${taskScheduleSelect()}
-      WHERE schedule.id = ${input.scheduleId}
-        AND schedule.user_workos_id = ${input.actor.userId}
-        AND (schedule.workspace_id = ${input.actor.workspaceId} OR schedule.workspace_id IS NULL)
-        AND schedule.deleted_at IS NULL
-        AND ${workspaceMembership(input.actor)}
-      LIMIT 1
-    `);
-    return row ? mapTaskSchedule(row) : null;
-  }
-
-  async createTaskSchedule(
-    input: Parameters<TaskScheduleRepository["createTaskSchedule"]>[0],
-  ): Promise<TaskScheduleMutationResult> {
-    const ids = this.options.ids ?? defaultIds;
-    const commandId = ids.command();
-    const scheduleId = ids.taskSchedule();
-    const now = this.options.now?.() ?? new Date();
-    const requestHash = taskScheduleCreateHash(input);
-    const [row] = await this.rows<CreateReservationRow & TaskScheduleRow>(sql`
-      WITH actor_scope AS MATERIALIZED (
-        SELECT actor_user.workos_user_id
-        FROM goat.users AS actor_user
-        JOIN goat.workspace_members AS member
-          ON member.user_workos_id = actor_user.workos_user_id
-         AND member.workspace_id = ${input.actor.workspaceId}
-        WHERE actor_user.workos_user_id = ${input.actor.userId}
-        FOR UPDATE OF actor_user
-      ),
-      reservation AS MATERIALIZED (
-        INSERT INTO goat.automation_command_idempotency (
-          command_id, user_workos_id, workspace_id, idempotency_key,
-          request_hash, operation, resource_id, created_at, touched_at
-        )
-        SELECT
-          ${commandId}, ${input.actor.userId}, ${input.actor.workspaceId},
-          ${input.idempotencyKey}, ${requestHash}, 'task_schedule.create', ${scheduleId},
-          ${now}, ${now}
-        FROM actor_scope
-        ON CONFLICT (user_workos_id, workspace_id, idempotency_key)
-        DO UPDATE SET touched_at = EXCLUDED.touched_at
-        RETURNING *
-      ),
-      winner AS MATERIALIZED (
-        SELECT * FROM reservation WHERE command_id = ${commandId}
-      ),
-      created AS MATERIALIZED (
-        INSERT INTO goat.task_schedules (
-          id, user_workos_id, workspace_id, name, source_description,
-          cron, timezone, prompt, planned_harness_spec, enabled,
-          next_run_at, version, created_at, updated_at
-        )
-        SELECT
-          winner.resource_id, ${input.actor.userId}, ${input.actor.workspaceId},
-          ${input.name}, ${input.sourceDescription}, ${input.schedule.cron},
-          ${input.schedule.timezone}, ${input.prompt}, ${stringifyPostgresJson(input.execution.payload)}::jsonb,
-          true, ${input.schedule.nextRunAt}, 1, ${now}, ${now}
-        FROM winner
-        RETURNING *
-      ),
-      selected_schedule AS MATERIALIZED (
-        SELECT created.*
-        FROM created
-        UNION ALL
-        SELECT existing.*
-        FROM goat.task_schedules AS existing
-        JOIN reservation ON reservation.resource_id = existing.id
-        WHERE NOT EXISTS (SELECT 1 FROM created)
-      )
-      SELECT
-        EXISTS (SELECT 1 FROM actor_scope) AS authorized,
-        reservation.command_id AS "commandId",
-        reservation.request_hash AS "requestHash",
-        reservation.operation,
-        reservation.resource_id AS "resourceId",
-        reservation.transaction_id AS "transactionId",
-        reservation.command_id <> ${commandId} AS replayed,
-        schedule.id,
-        schedule.name,
-        schedule.source_description AS "sourceDescription",
-        schedule.cron,
-        schedule.timezone,
-        schedule.prompt,
-        schedule.enabled,
-        schedule.last_run_at AS "lastRunAt",
-        schedule.next_run_at AS "nextRunAt",
-        schedule.version,
-        schedule.created_at AS "createdAt",
-        schedule.updated_at AS "updatedAt"
-      FROM (SELECT 1) AS singleton
-      LEFT JOIN actor_scope ON true
-      LEFT JOIN reservation ON true
-      LEFT JOIN selected_schedule AS schedule
-        ON schedule.id = reservation.resource_id
-       AND schedule.user_workos_id = ${input.actor.userId}
-       AND schedule.workspace_id = ${input.actor.workspaceId}
-      LIMIT 1
-    `);
-    if (!row?.authorized) throw new CoreError("not_found", "Workspace membership not found.");
-    assertReservation(row, "task_schedule.create", requestHash);
-    if (!row.id) throw new Error("Recurring Task command reservation did not materialize.");
-    return {
-      schedule: mapTaskSchedule(row),
-      transactionId: String(row.transactionId),
-      idempotentReplay: row.replayed === true,
-    };
-  }
-
-  async updateTaskSchedule(input: Parameters<TaskScheduleRepository["updateTaskSchedule"]>[0]) {
-    const now = this.options.now?.() ?? new Date();
-    const [row] = await this.rows<TaskScheduleRow & { transactionId: number | string }>(sql`
-      UPDATE goat.task_schedules AS schedule
-      SET name = ${input.name},
-          workspace_id = ${input.actor.workspaceId},
-          source_description = ${input.sourceDescription},
-          cron = ${input.schedule.cron},
-          timezone = ${input.schedule.timezone},
-          prompt = ${input.prompt},
-          planned_harness_spec = ${stringifyPostgresJson(input.execution.payload)}::jsonb,
-          next_run_at = ${input.schedule.nextRunAt},
-          version = schedule.version + 1,
-          updated_at = ${now}
-      WHERE schedule.id = ${input.scheduleId}
-        AND schedule.user_workos_id = ${input.actor.userId}
-        AND (schedule.workspace_id = ${input.actor.workspaceId} OR schedule.workspace_id IS NULL)
-        AND schedule.deleted_at IS NULL
-        AND schedule.version = ${input.expectedVersion}
-        AND ${workspaceMembership(input.actor)}
-      RETURNING
-        schedule.id,
-        schedule.name,
-        schedule.source_description AS "sourceDescription",
-        schedule.cron,
-        schedule.timezone,
-        schedule.prompt,
-        schedule.enabled,
-        schedule.last_run_at AS "lastRunAt",
-        schedule.next_run_at AS "nextRunAt",
-        schedule.version,
-        schedule.created_at AS "createdAt",
-        schedule.updated_at AS "updatedAt",
-        pg_current_xact_id()::xid::text::bigint AS "transactionId"
-    `);
-    if (row) {
-      return {
-        status: "updated" as const,
-        value: mapTaskSchedule(row),
-        transactionId: String(row.transactionId),
-      };
-    }
-    return this.taskScheduleMiss(input.actor, input.scheduleId);
-  }
-
-  async setTaskScheduleEnabled(
-    input: Parameters<TaskScheduleRepository["setTaskScheduleEnabled"]>[0],
-  ) {
-    const now = this.options.now?.() ?? new Date();
-    const [row] = await this.rows<TaskScheduleRow & { transactionId: number | string }>(sql`
-      UPDATE goat.task_schedules AS schedule
-      SET enabled = ${input.enabled},
-          workspace_id = ${input.actor.workspaceId},
-          next_run_at = COALESCE(${input.nextRunAt ?? null}, schedule.next_run_at),
-          version = schedule.version + 1,
-          updated_at = ${now}
-      WHERE schedule.id = ${input.scheduleId}
-        AND schedule.user_workos_id = ${input.actor.userId}
-        AND (schedule.workspace_id = ${input.actor.workspaceId} OR schedule.workspace_id IS NULL)
-        AND schedule.deleted_at IS NULL
-        AND schedule.version = ${input.expectedVersion}
-        AND ${workspaceMembership(input.actor)}
-      RETURNING
-        schedule.id,
-        schedule.name,
-        schedule.source_description AS "sourceDescription",
-        schedule.cron,
-        schedule.timezone,
-        schedule.prompt,
-        schedule.enabled,
-        schedule.last_run_at AS "lastRunAt",
-        schedule.next_run_at AS "nextRunAt",
-        schedule.version,
-        schedule.created_at AS "createdAt",
-        schedule.updated_at AS "updatedAt",
-        pg_current_xact_id()::xid::text::bigint AS "transactionId"
-    `);
-    if (row) {
-      return {
-        status: "updated" as const,
-        value: mapTaskSchedule(row),
-        transactionId: String(row.transactionId),
-      };
-    }
-    return this.taskScheduleMiss(input.actor, input.scheduleId);
-  }
-
-  async archiveTaskSchedule(input: Parameters<TaskScheduleRepository["archiveTaskSchedule"]>[0]) {
-    const now = this.options.now?.() ?? new Date();
-    const [row] = await this.rows<{
-      id: string;
-      version: number | string;
-      transactionId: number | string;
-    }>(sql`
-      UPDATE goat.task_schedules AS schedule
-      SET enabled = false,
-          workspace_id = ${input.actor.workspaceId},
-          deleted_at = ${now},
-          version = schedule.version + 1,
-          updated_at = ${now}
-      WHERE schedule.id = ${input.scheduleId}
-        AND schedule.user_workos_id = ${input.actor.userId}
-        AND (schedule.workspace_id = ${input.actor.workspaceId} OR schedule.workspace_id IS NULL)
-        AND schedule.deleted_at IS NULL
-        AND schedule.version = ${input.expectedVersion}
-        AND ${workspaceMembership(input.actor)}
-      RETURNING
-        schedule.id,
-        schedule.version,
-        pg_current_xact_id()::xid::text::bigint AS "transactionId"
-    `);
-    if (row) {
-      return {
-        status: "updated" as const,
-        value: { scheduleId: row.id, version: Number(row.version) },
-        transactionId: String(row.transactionId),
-      };
-    }
-    return this.taskScheduleMiss(input.actor, input.scheduleId);
-  }
-
-  async loadTaskScheduleExecution(input: { actor: Actor; scheduleId: string }): Promise<{
-    schedule: TaskSchedule;
-    execution: { engine: "opencompany" | "codex" | "claude_code"; model: string; payload: unknown };
-  } | null> {
-    const [row] = await this.rows<TaskScheduleRow>(sql`
-      SELECT
-        schedule.id,
-        schedule.name,
-        schedule.source_description AS "sourceDescription",
-        schedule.cron,
-        schedule.timezone,
-        schedule.prompt,
-        schedule.planned_harness_spec AS "plannedHarnessSpec",
-        schedule.enabled,
-        schedule.last_run_at AS "lastRunAt",
-        schedule.next_run_at AS "nextRunAt",
-        schedule.version,
-        schedule.created_at AS "createdAt",
-        schedule.updated_at AS "updatedAt"
-      FROM goat.task_schedules AS schedule
-      WHERE schedule.id = ${input.scheduleId}
-        AND schedule.user_workos_id = ${input.actor.userId}
-        AND (schedule.workspace_id = ${input.actor.workspaceId} OR schedule.workspace_id IS NULL)
-        AND schedule.deleted_at IS NULL
-        AND ${workspaceMembership(input.actor)}
-      LIMIT 1
-    `);
-    if (!row) return null;
-    const plan = executionFromPayload(row.plannedHarnessSpec);
-    return { schedule: mapTaskSchedule(row), execution: plan };
-  }
-
-  async recordTaskScheduleRunNow(input: {
-    actor: Actor;
-    scheduleId: string;
-    taskId: string;
-    occurredAt: Date;
-  }): Promise<void> {
-    const ids = this.options.ids ?? defaultIds;
-    await this.execute(sql`
-      INSERT INTO goat.task_schedule_runs (
-        id, schedule_id, user_workos_id, scheduled_for,
-        task_id, status, created_at, updated_at
-      )
-      SELECT
-        ${ids.scheduleRun("task")}, schedule.id, ${input.actor.userId},
-        ${input.occurredAt}, ${input.taskId}, 'created', ${input.occurredAt}, ${input.occurredAt}
-      FROM goat.task_schedules AS schedule
-      WHERE schedule.id = ${input.scheduleId}
-        AND schedule.user_workos_id = ${input.actor.userId}
-        AND (schedule.workspace_id = ${input.actor.workspaceId} OR schedule.workspace_id IS NULL)
-        AND schedule.deleted_at IS NULL
-        AND ${workspaceMembership(input.actor)}
-      ON CONFLICT (schedule_id, scheduled_for) DO UPDATE
-      SET task_id = EXCLUDED.task_id,
-          status = 'created',
-          updated_at = EXCLUDED.updated_at
-    `);
-  }
-
   async getWorkflowMemory(input: {
     actor: Actor;
     workflowId: string;
@@ -987,77 +565,8 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     return row ? { status: "conflict" } : { status: "not_found" };
   }
 
-  private async taskScheduleMiss(
-    actor: Actor,
-    scheduleId: string,
-  ): Promise<VersionedRepositoryResult<never>> {
-    const [row] = await this.rows<{ version: number | string }>(sql`
-      SELECT schedule.version
-      FROM goat.task_schedules AS schedule
-      WHERE schedule.id = ${scheduleId}
-        AND schedule.user_workos_id = ${actor.userId}
-        AND (schedule.workspace_id = ${actor.workspaceId} OR schedule.workspace_id IS NULL)
-        AND schedule.deleted_at IS NULL
-        AND ${workspaceMembership(actor)}
-      LIMIT 1
-    `);
-    return row ? { status: "conflict" } : { status: "not_found" };
-  }
-
   private async rows<T>(query: SQL): Promise<T[]> {
     return rowsFromExecute<T>(await this.execute(query));
-  }
-}
-
-export class PostgresTaskScheduleRepository implements TaskScheduleRepository {
-  private readonly repository: PostgresWorkflowRepository;
-
-  constructor(execute: WorkflowSqlExecute, options: WorkflowRepositoryOptions = {}) {
-    this.repository = new PostgresWorkflowRepository(execute, options);
-  }
-
-  listTaskSchedules(input: Parameters<TaskScheduleRepository["listTaskSchedules"]>[0]) {
-    return this.repository.listTaskSchedules(input);
-  }
-
-  assertTaskScheduleWriteAllowed(actor: Actor) {
-    return this.repository.assertTaskScheduleWriteAllowed(actor);
-  }
-
-  replayTaskScheduleCreate(
-    input: Parameters<TaskScheduleRepository["replayTaskScheduleCreate"]>[0],
-  ) {
-    return this.repository.replayTaskScheduleCreate(input);
-  }
-
-  getTaskSchedule(input: Parameters<TaskScheduleRepository["getTaskSchedule"]>[0]) {
-    return this.repository.getTaskSchedule(input);
-  }
-
-  createTaskSchedule(input: Parameters<TaskScheduleRepository["createTaskSchedule"]>[0]) {
-    return this.repository.createTaskSchedule(input);
-  }
-
-  updateTaskSchedule(input: Parameters<TaskScheduleRepository["updateTaskSchedule"]>[0]) {
-    return this.repository.updateTaskSchedule(input);
-  }
-
-  setTaskScheduleEnabled(input: Parameters<TaskScheduleRepository["setTaskScheduleEnabled"]>[0]) {
-    return this.repository.setTaskScheduleEnabled(input);
-  }
-
-  archiveTaskSchedule(input: Parameters<TaskScheduleRepository["archiveTaskSchedule"]>[0]) {
-    return this.repository.archiveTaskSchedule(input);
-  }
-
-  loadTaskScheduleExecution(
-    input: Parameters<TaskScheduleRepository["loadTaskScheduleExecution"]>[0],
-  ) {
-    return this.repository.loadTaskScheduleExecution(input);
-  }
-
-  recordRunNow(input: Parameters<TaskScheduleRepository["recordRunNow"]>[0]) {
-    return this.repository.recordTaskScheduleRunNow(input);
   }
 }
 
@@ -1104,25 +613,6 @@ function workflowMemorySelect() {
       memory.content_updated_at AS "contentUpdatedAt"
     FROM goat.workflows AS workflow
     LEFT JOIN goat.workflow_memories AS memory ON memory.workflow_id = workflow.id
-  `;
-}
-
-function taskScheduleSelect() {
-  return sql`
-    SELECT
-      schedule.id,
-      schedule.name,
-      schedule.source_description AS "sourceDescription",
-      schedule.cron,
-      schedule.timezone,
-      schedule.prompt,
-      schedule.enabled,
-      schedule.last_run_at AS "lastRunAt",
-      schedule.next_run_at AS "nextRunAt",
-      schedule.version,
-      schedule.created_at AS "createdAt",
-      schedule.updated_at AS "updatedAt"
-    FROM goat.task_schedules AS schedule
   `;
 }
 
@@ -1329,41 +819,9 @@ function workflowEventFilter(value: unknown, filterId: string) {
   };
 }
 
-function mapTaskSchedule(row: TaskScheduleRow): TaskSchedule {
-  return {
-    id: row.id,
-    name: row.name,
-    sourceDescription: row.sourceDescription,
-    cron: row.cron,
-    timezone: row.timezone,
-    prompt: row.prompt,
-    enabled: row.enabled,
-    lastRunAt: nullableDate(row.lastRunAt),
-    nextRunAt: asDate(row.nextRunAt),
-    version: Number(row.version),
-    createdAt: asDate(row.createdAt),
-    updatedAt: asDate(row.updatedAt),
-  };
-}
-
-function executionFromPayload(payload: unknown) {
-  if (!isRecord(payload))
-    throw new Error("Recurring Task storage contains an invalid execution plan.");
-  const engine = payload.engine;
-  if (engine !== "opencompany" && engine !== "codex" && engine !== "claude_code") {
-    throw new Error("Recurring Task storage contains an invalid execution engine.");
-  }
-  const model = requiredString(payload.model, "model");
-  return {
-    engine: engine as "opencompany" | "codex" | "claude_code",
-    model,
-    payload,
-  };
-}
-
 function assertReservation(
   row: CreateReservationRow,
-  operation: "workflow.create" | "task_schedule.create",
+  operation: "workflow.create",
   requestHash: string,
 ) {
   if (!row.commandId || !row.resourceId || row.transactionId === null) {
@@ -1379,21 +837,6 @@ function assertReservation(
 
 function commandHash(operation: string, input: unknown) {
   return createHash("sha256").update(stableJson({ operation, input })).digest("hex");
-}
-
-function taskScheduleCreateHash(input: {
-  name: string;
-  sourceDescription: string;
-  prompt: string;
-  schedule: { cron: string; timezone: string };
-}) {
-  return commandHash("task_schedule.create", {
-    name: input.name,
-    sourceDescription: input.sourceDescription,
-    prompt: input.prompt,
-    cron: input.schedule.cron,
-    timezone: input.schedule.timezone,
-  });
 }
 
 function stableJson(value: unknown): string {

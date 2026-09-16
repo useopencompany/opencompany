@@ -53,8 +53,6 @@ import {
   type SkillInstallationListItem,
   type Task,
   type TaskApplicationService,
-  type TaskSchedule,
-  type TaskScheduleApplicationService,
   type WikiCommandApplicationService,
   type WikiPage,
   type WikiTimelineEntry,
@@ -161,7 +159,6 @@ export type CreateApiAppInput = {
   chat: ChatApplicationService;
   tasks: TaskApplicationService;
   workflows: WorkflowApplicationService;
-  schedules: TaskScheduleApplicationService;
   knowledge: KnowledgeApplicationService;
   // Executes the `wiki` agent tool command contract for internal callers
   // (the runner over HTTP, the API-hosted MCP tool in-process).
@@ -549,91 +546,6 @@ export function createApiApp(input: CreateApiAppInput) {
         c.req.valid("param").workflowId,
       );
       return c.json({ data: workflowMemoryDto(memory), meta }, 200);
-    },
-    listTaskSchedules: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "read", 300);
-      const query = c.req.valid("query");
-      const page = await input.schedules.listTaskSchedules(actor, {
-        ...(query.cursor ? { cursor: query.cursor } : {}),
-        ...(query.limit ? { limit: query.limit } : {}),
-      });
-      return c.json(
-        { data: page.schedules.map(taskScheduleDto), nextCursor: page.nextCursor, meta },
-        200,
-      );
-    },
-    createTaskSchedule: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const body = c.req.valid("json");
-      const result = await input.schedules.createTaskSchedule(actor, {
-        idempotencyKey: c.req.valid("header")["idempotency-key"],
-        ...(body.name !== undefined ? { name: body.name } : {}),
-        ...(body.sourceDescription !== undefined
-          ? { sourceDescription: body.sourceDescription }
-          : {}),
-        cron: body.cron,
-        ...(body.timezone !== undefined ? { timezone: body.timezone } : {}),
-        prompt: body.prompt,
-      });
-      return c.json(
-        {
-          data: {
-            schedule: taskScheduleDto(result.schedule),
-            transactionId: result.transactionId,
-            replayed: result.idempotentReplay,
-          },
-          meta,
-        },
-        201,
-      );
-    },
-    getTaskSchedule: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "read", 300);
-      const schedule = await input.schedules.getTaskSchedule(
-        actor,
-        c.req.valid("param").scheduleId,
-      );
-      return c.json({ data: taskScheduleDto(schedule), meta }, 200);
-    },
-    updateTaskSchedule: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const body = c.req.valid("json");
-      const scheduleId = c.req.valid("param").scheduleId;
-      const result =
-        "enabled" in body
-          ? await input.schedules.setTaskScheduleEnabled(actor, scheduleId, body)
-          : await input.schedules.updateTaskSchedule(actor, scheduleId, body);
-      return c.json(
-        {
-          data: { schedule: taskScheduleDto(result.schedule), transactionId: result.transactionId },
-          meta,
-        },
-        200,
-      );
-    },
-    archiveTaskSchedule: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const result = await input.schedules.archiveTaskSchedule(
-        actor,
-        c.req.valid("param").scheduleId,
-        c.req.valid("json").expectedVersion,
-      );
-      return c.json({ data: result, meta }, 200);
-    },
-    runTaskScheduleNow: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "message", 30);
-      const result = await input.schedules.runTaskScheduleNow(
-        actor,
-        c.req.valid("param").scheduleId,
-        c.req.valid("header")["idempotency-key"],
-      );
-      return c.json({ data: taskCreationDto(result), meta }, 202);
     },
     getBrainSnapshot: async (c) => {
       const actor = actorFrom(c);
@@ -2421,15 +2333,6 @@ export function createApiApp(input: CreateApiAppInput) {
           );
         }
         await input.workflows.listWorkflows(actor, { limit: 1 });
-      } else if (params.readModel === "task-schedules-v1") {
-        if (query.conversationId || query.brainId) {
-          throw new ApiError(
-            400,
-            "invalid_request",
-            "conversationId is not valid for this read model.",
-          );
-        }
-        await input.schedules.listTaskSchedules(actor, { limit: 1 });
       } else if (params.readModel === "integration-accounts-v1") {
         if (query.conversationId || query.brainId) {
           throw new ApiError(
@@ -3789,16 +3692,6 @@ function workflowDto(workflow: Workflow) {
 
 function workflowMemoryDto(memory: WorkflowMemory) {
   return { ...memory, updatedAt: memory.updatedAt?.toISOString() ?? null };
-}
-
-function taskScheduleDto(schedule: TaskSchedule) {
-  return {
-    ...schedule,
-    lastRunAt: schedule.lastRunAt?.toISOString() ?? null,
-    nextRunAt: schedule.nextRunAt.toISOString(),
-    createdAt: schedule.createdAt.toISOString(),
-    updatedAt: schedule.updatedAt.toISOString(),
-  };
 }
 
 function brainFolderDto(folder: BrainFolder) {

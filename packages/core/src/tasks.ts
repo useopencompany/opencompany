@@ -26,6 +26,8 @@ export function isSettledTaskStatus(status: TaskStatus): boolean {
   return SETTLED_TASK_STATUSES.some((settledStatus) => settledStatus === status);
 }
 
+// "schedule" still marks a Task a scheduled Workflow trigger created. It also covers Tasks left
+// behind by the removed Recurring Tasks feature, whose rows would otherwise become unreadable.
 export const TASK_SOURCES = ["manual", "workflow", "schedule", "agent"] as const;
 export type TaskSource = (typeof TASK_SOURCES)[number];
 
@@ -105,7 +107,6 @@ export type CreateTaskCommand = {
   attachmentIds?: readonly string[];
   source: TaskSource;
   workflowId?: string;
-  scheduleId?: string;
   scheduledFor?: Date;
 };
 
@@ -306,7 +307,6 @@ export class TaskApplicationService {
         source: input.source,
         ...(attachmentIds.length ? { attachmentIds } : {}),
         ...(input.workflowId ? { workflowId: resourceId(input.workflowId, "workflowId") } : {}),
-        ...(input.scheduleId ? { scheduleId: resourceId(input.scheduleId, "scheduleId") } : {}),
         ...(scheduledFor ? { scheduledFor } : {}),
       },
     });

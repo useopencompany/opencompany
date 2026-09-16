@@ -163,7 +163,6 @@ const app = createApiApp({
   chat,
   tasks,
   workflows: automations.workflows,
-  schedules: automations.schedules,
   knowledge,
   wikiCommands,
   resolveWikiServiceActor: (actorInput) => resolveWikiServiceActor(execute, actorInput),

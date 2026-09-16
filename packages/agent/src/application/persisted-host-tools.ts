@@ -35,12 +35,6 @@ import {
   resolveSkillMentions,
   updateWorkspaceSkillForActor,
 } from "../skills";
-import {
-  createTaskScheduleForUser,
-  deleteTaskScheduleForUser,
-  listTaskSchedulesForUser,
-  updateTaskScheduleForUser,
-} from "../task-schedules";
 import { refineWorkflowTaskTitle } from "../workflow-task-title";
 import { createTaskFromWorkflow } from "../workflow-tasks";
 import { listWorkflowCatalog } from "../workflows";
@@ -58,7 +52,6 @@ export type PersistedHostRuntime = {
   wakeTaskWorker: () => Promise<unknown> | unknown;
   defer: (work: Promise<unknown>) => void;
   gatewayApiKey: string;
-  planHarness: (input: { actorId: string; prompt: string }) => Promise<HarnessSpec>;
   /**
    * Executes a `wiki` tool command through the API-owned boundary. The runner
    * injects an HTTP client that reaches apps/api; there is no direct-DB path.
@@ -121,17 +114,6 @@ export function executePersistedChatHostTool(input: {
     createWorkspaceSkill: createWorkspaceSkillForActor,
     manageWorkspaceSkills: manageWorkspaceSkillsForActor,
     updateWorkspaceSkill: updateWorkspaceSkillForActor,
-    listSchedules: listTaskSchedulesForUser,
-    createSchedule: ({ actorId, workspaceId, ...schedule }) =>
-      createTaskScheduleForUser(
-        { ...schedule, userWorkosId: actorId, workspaceId },
-        { planHarness: input.runtime.planHarness },
-      ),
-    updateSchedule: (actorId, scheduleId, schedule) =>
-      updateTaskScheduleForUser(actorId, scheduleId, schedule, {
-        planHarness: input.runtime.planHarness,
-      }),
-    deleteSchedule: deleteTaskScheduleForUser,
     createWorkflowTask: async ({ actorId, ...workflow }) => {
       const task = await createTaskFromWorkflow(
         { ...workflow, userWorkosId: actorId },

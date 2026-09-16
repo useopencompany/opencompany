@@ -1,21 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { awaitHeadlessTaskScheduleTransaction } from "./headless-automation-collections";
 import {
-  archiveHeadlessTaskSchedule,
-  createHeadlessTaskSchedule,
   createHeadlessWorkflow,
   invokeHeadlessWorkflow,
   listHeadlessWorkflowCatalog,
-  runHeadlessTaskScheduleNow,
   runHeadlessWorkflowNow,
-  updateHeadlessTaskSchedule,
   updateHeadlessWorkflow,
 } from "./headless-automation-commands";
 import { awaitHeadlessTaskTransaction } from "./headless-task-collections";
-
-vi.mock("./headless-automation-collections", () => ({
-  awaitHeadlessTaskScheduleTransaction: vi.fn(async () => undefined),
-}));
 
 vi.mock("./headless-task-collections", () => ({
   awaitHeadlessTaskTransaction: vi.fn(async () => undefined),
@@ -44,18 +35,9 @@ const workflow = {
   updatedAt: createdAt,
 } as const;
 const schedule = {
-  id: "schedule_1",
-  name: "Daily research",
-  sourceDescription: "Every morning",
   cron: "0 9 * * *",
   timezone: "UTC",
   prompt: "Research market changes.",
-  enabled: true,
-  lastRunAt: null,
-  nextRunAt: "2026-08-12T09:00:00.000Z",
-  version: 1,
-  createdAt,
-  updatedAt: createdAt,
 } as const;
 const task = {
   id: "task_1",
@@ -242,67 +224,6 @@ describe("headless automation commands", () => {
       "?limit=100",
       "?limit=100&cursor=page_2",
     ]);
-  });
-
-  it("uses canonical schedule mutations and reconciles each returned transaction", async () => {
-    const requests: Request[] = [];
-    const responses = [
-      { data: { schedule, transactionId: "61", replayed: false }, meta },
-      { data: { schedule: { ...schedule, version: 2 }, transactionId: "62" }, meta },
-      { data: { scheduleId: schedule.id, version: 3, transactionId: "63" }, meta },
-      {
-        data: {
-          task,
-          messageId: "message_2",
-          runId: "run_2",
-          transactionId: "64",
-          replayed: false,
-        },
-        meta,
-      },
-    ];
-    const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
-      requests.push(input instanceof Request ? input : new Request(input, init));
-      const body = responses.shift();
-      if (!body) throw new Error("Unexpected request");
-      return Response.json(body);
-    });
-    const options = {
-      baseUrl: "https://app.example.test",
-      fetch: fetchMock as typeof fetch,
-      scopeKey: "workspace_1",
-    };
-
-    await createHeadlessTaskSchedule(
-      { cron: schedule.cron, timezone: schedule.timezone, prompt: schedule.prompt },
-      options,
-    );
-    await updateHeadlessTaskSchedule(schedule.id, { expectedVersion: 1, enabled: false }, options);
-    await archiveHeadlessTaskSchedule(schedule.id, { expectedVersion: 2 }, options);
-    await runHeadlessTaskScheduleNow(schedule.id, options);
-
-    expect(requests.map((request) => `${request.method} ${new URL(request.url).pathname}`)).toEqual(
-      [
-        "POST /v1/schedules",
-        "PATCH /v1/schedules/schedule_1",
-        "POST /v1/schedules/schedule_1/archive",
-        "POST /v1/schedules/schedule_1/run-now",
-      ],
-    );
-    expect(requests[0]?.headers.get("idempotency-key")).toMatch(/^web-task-schedule:/u);
-    expect(requests[3]?.headers.get("idempotency-key")).toMatch(/^web-task-schedule-run:/u);
-    expect(awaitHeadlessTaskScheduleTransaction).toHaveBeenNthCalledWith(1, "61", {
-      scopeKey: "workspace_1",
-    });
-    expect(awaitHeadlessTaskScheduleTransaction).toHaveBeenNthCalledWith(2, "62", {
-      scopeKey: "workspace_1",
-    });
-    expect(awaitHeadlessTaskScheduleTransaction).toHaveBeenNthCalledWith(3, "63", {
-      scopeKey: "workspace_1",
-    });
-    expect(awaitHeadlessTaskTransaction).toHaveBeenCalledWith("64", {
-      scopeKey: "workspace_1",
-    });
   });
 
   it("surfaces the canonical error and request id", async () => {
