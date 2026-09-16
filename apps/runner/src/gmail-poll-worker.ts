@@ -229,7 +229,12 @@ export async function pollGmailIntegration(input: {
   let routedMessages = 0;
   let workflowRuns = 0;
   let cappedMessages = 0;
-  for (const discovered of history.messages) {
+  // The candidate query ran a pass ago, so the ingestion source or the event trigger it matched on
+  // may already be gone. Nothing downstream wants these messages, and reading each one's metadata
+  // to discover that would cost an API call per arriving message. The cursor still advances, or the
+  // next pass would re-read the same window forever.
+  const messages = brainRoutes.length === 0 && workflowRoutes.length === 0 ? [] : history.messages;
+  for (const discovered of messages) {
     if (discovered.labelIds.some((label) => SKIPPED_LABEL_IDS.has(label))) continue;
     const metadata = await fetchGmailMessageMetadata(call, discovered.id);
     if (!metadata) continue;

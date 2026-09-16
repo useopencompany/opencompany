@@ -250,6 +250,17 @@ describe("Gmail workflow event routing", () => {
     );
   });
 
+  it("reads no message metadata once the consumer that asked for the poll is gone", async () => {
+    // Both reads return nothing: the trigger or source the candidate query matched was removed.
+    await expect(poll()).resolves.toEqual({ buffered: 0, workflowRuns: 0 });
+
+    expect(workerMocks.fetchMetadata).not.toHaveBeenCalled();
+    expect(workerMocks.updateSyncCursor).toHaveBeenCalledWith(
+      expect.objectContaining({ historyId: "200" }),
+      expect.anything(),
+    );
+  });
+
   it("reads the full message only for a message a route matched", async () => {
     await poll();
     expect(workerMocks.fetchBodyText).not.toHaveBeenCalled();
