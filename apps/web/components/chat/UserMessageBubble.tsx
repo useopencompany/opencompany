@@ -1,5 +1,6 @@
 "use client";
 
+import { ContextReferenceText } from "@/components/ContextReference";
 import { ChatAttachmentCard } from "@/components/chat/ChatComposerAttachments";
 import { type ChatUiAttachment, type ChatUiMessage, textFromChatUiMessage } from "@/lib/chat-ui";
 
@@ -44,8 +45,8 @@ export function UserMessageBubble({
         </div>
       ) : null}
       {text ? (
-        <div className="max-w-[80%] rounded-2xl px-3 py-2 text-[13px] leading-5 rounded-br-md bg-ink text-canvas">
-          {text}
+        <div className="whitespace-pre-wrap max-w-[80%] rounded-2xl px-3 py-2 text-[13px] leading-5 rounded-br-md bg-ink text-canvas">
+          <ContextReferenceText text={text} />
         </div>
       ) : null}
     </div>

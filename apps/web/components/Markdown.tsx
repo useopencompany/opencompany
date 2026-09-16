@@ -2,6 +2,8 @@ import Link from "next/link";
 import { memo, useMemo } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { ContextReferenceChip } from "@/components/ContextReference";
+import { contextReference } from "@/lib/context-references";
 
 type MarkdownNode = {
   type: string;
@@ -15,6 +17,9 @@ const SAFE_EXTERNAL_URL_PATTERN = /^(https?:|mailto:|tel:)/i;
 
 const MARKDOWN_COMPONENTS: Components = {
   a: ({ children, href }) => {
+    const reference =
+      href && typeof children === "string" ? contextReference(href, children) : null;
+    if (reference) return <ContextReferenceChip reference={reference} />;
     if (!href || !isSafeHref(href)) return <span>{children}</span>;
     if (isInternalHref(href)) {
       return (
