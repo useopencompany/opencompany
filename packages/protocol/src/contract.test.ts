@@ -291,6 +291,7 @@ describe("v1 protocol contract", () => {
       "/v1/projects/{projectId}/conversations",
       "/v1/projects/{projectId}/conversations/{conversationId}",
       "/v1/conversations",
+      "/v1/session-pull-requests",
       "/v1/conversations/{conversationId}",
       "/v1/conversations/{conversationId}/share",
       "/v1/conversations/{conversationId}/title",

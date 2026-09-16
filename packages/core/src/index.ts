@@ -4,6 +4,7 @@ export * from "./chat";
 export * from "./custom-mcp";
 export * from "./knowledge";
 export * from "./plugin-import";
+export * from "./pull-requests";
 export * from "./sandbox-sizes";
 export * from "./skill-import";
 export * from "./tasks";

@@ -2052,6 +2052,34 @@
       "when": 1790100400013,
       "tag": "0292_channel_delivery_bot_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 293,
+      "version": "7",
+      "when": 1790100400014,
+      "tag": "0293_session_pull_requests",
+      "breakpoints": true
+    },
+    {
+      "idx": 294,
+      "version": "7",
+      "when": 1790100400015,
+      "tag": "0294_workflow_slack_avatar",
+      "breakpoints": true
+    },
+    {
+      "idx": 295,
+      "version": "7",
+      "when": 1790100400016,
+      "tag": "0295_workflow_schedule_authorization",
+      "breakpoints": true
+    },
+    {
+      "idx": 296,
+      "version": "7",
+      "when": 1790100400017,
+      "tag": "0296_channel_delivery_thread_parent",
+      "breakpoints": true
     }
   ]
 }

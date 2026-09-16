@@ -3104,7 +3104,7 @@ describe("Linear plugin settings", () => {
         },
       ],
     });
-    expect(GMAIL_PLUGIN_SOURCE).toContain("/tree/e78fb74bd31f16e9e03b68799e3bcafaa052e88b/gmail");
+    expect(GMAIL_PLUGIN_SOURCE).toContain("/tree/82998a44647a31c0b1f973f0554ca25c33e822dc/gmail");
   });
 
   it("edits the same Gmail account selected by the MCP gateway", async () => {

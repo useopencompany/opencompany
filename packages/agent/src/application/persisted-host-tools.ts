@@ -16,7 +16,7 @@ import {
   workspaces,
 } from "@opencompany/db/product-schema";
 import { createLogger } from "@opencompany/observability";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull, lte } from "drizzle-orm";
 import {
   browserProfilesAvailable,
   createAgentSession,
@@ -277,8 +277,18 @@ async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostCo
     )
     .innerJoin(workspaces, eq(workspaces.id, codexChatSessions.workspaceId))
     // Only a workflow run can post to Slack, and only while its Channels section keeps Slack on.
+    // Tasks store the workflow slug, so the creation-time fence keeps an old Task from inheriting
+    // a later workflow that reused the same slug after archival.
     .leftJoin(tasks, eq(tasks.sessionId, codexChatSessions.chatSessionId))
-    .leftJoin(workflows, eq(workflows.id, tasks.workflowId))
+    .leftJoin(
+      workflows,
+      and(
+        eq(workflows.workspaceId, tasks.workspaceId),
+        eq(workflows.slug, tasks.workflowId),
+        isNull(workflows.archivedAt),
+        lte(workflows.createdAt, tasks.createdAt),
+      ),
+    )
     .where(
       and(
         eq(codexChatSessions.id, command.sessionId),

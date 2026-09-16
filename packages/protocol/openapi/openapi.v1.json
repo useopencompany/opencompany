@@ -1111,6 +1111,11 @@
           "displayName": {
             "type": "string",
             "maxLength": 80
+          },
+          "avatarUrl": {
+            "type": "string",
+            "maxLength": 2048,
+            "default": ""
           }
         },
         "required": [
@@ -5659,6 +5664,45 @@
               "provider": {
                 "type": "string",
                 "enum": [
+                  "gmail"
+                ]
+              },
+              "labels": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "provider",
+              "labels"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "enum": [
                   "google_drive"
                 ]
               },
@@ -8220,6 +8264,62 @@
           "activeRunId",
           "hasError",
           "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "SessionPullRequestList": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SessionPullRequest"
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SessionPullRequest": {
+        "type": "object",
+        "properties": {
+          "conversationId": {
+            "type": "string"
+          },
+          "repository": {
+            "type": "string"
+          },
+          "number": {
+            "type": "integer",
+            "minimum": 0,
+            "exclusiveMinimum": true
+          },
+          "url": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "open",
+              "blocked",
+              "merged",
+              "closed"
+            ]
+          }
+        },
+        "required": [
+          "conversationId",
+          "repository",
+          "number",
+          "url",
+          "state"
         ],
         "additionalProperties": false
       },
@@ -12137,6 +12237,9 @@
           "needsScopeUpgrade": {
             "type": "boolean"
           },
+          "canCustomizeIdentity": {
+            "type": "boolean"
+          },
           "teamName": {
             "type": "string",
             "nullable": true,
@@ -12158,6 +12261,7 @@
           "installed",
           "status",
           "needsScopeUpgrade",
+          "canCustomizeIdentity",
           "teamName",
           "statusReason",
           "destinationCount"
@@ -19048,6 +19152,21 @@
                       "provider": {
                         "type": "string",
                         "enum": [
+                          "gmail"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "provider"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "provider": {
+                        "type": "string",
+                        "enum": [
                           "google_drive"
                         ]
                       },
@@ -22622,6 +22741,43 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ConversationPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/session-pull-requests": {
+      "get": {
+        "tags": [
+          "Chat"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pull requests opened by the actor's coding sessions, with each PR's state read from GitHub.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionPullRequestList"
                 }
               }
             }

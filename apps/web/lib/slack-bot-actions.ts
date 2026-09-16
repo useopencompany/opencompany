@@ -1,6 +1,10 @@
 "use server";
 
-import type { SlackBotChannelDto, SlackBotDestinationDto } from "@opencompany/protocol";
+import type {
+  SlackBotChannelDto,
+  SlackBotDestinationDto,
+  SlackBotWorkspaceSettingsDto,
+} from "@opencompany/protocol";
 import { revalidatePath } from "next/cache";
 import { serverApiClient, serverApiErrorMessage } from "@/lib/server-api-client";
 import type { WorkspaceActionResult } from "@/lib/workspace-actions";
@@ -14,6 +18,16 @@ export type SlackBotChannelListResult =
   | { ok: false; error: string };
 
 export type SlackBotDestinationView = SlackBotDestinationDto;
+
+export async function getSlackBotWorkspaceSettingsAction(): Promise<SlackBotWorkspaceSettingsDto> {
+  const response = await (await serverApiClient()).v1.workspace["slack-bot"].$get();
+  if (!response.ok) {
+    throw new Error(
+      await serverApiErrorMessage(response, "Could not load the Slack bot connection."),
+    );
+  }
+  return (await response.json()).data;
+}
 
 export async function disconnectSlackBotAction(): Promise<WorkspaceActionResult> {
   try {

@@ -40,6 +40,14 @@ are rejected with an instruction to refresh rather than being parsed through a l
 Attachments are uploaded to `/v1/attachments` and referenced by opaque IDs. Credential or storage
 locator fields never enter client DTOs.
 
+A coding session that opens a pull request gets a status badge on its sidebar row, for ordinary
+chats and Tasks alike. The runner records the link while the turn streams — from the hosted GitHub
+MCP `create_pull_request` tool or from `gh pr create` output, never from assistant prose — into
+`goat.session_pull_requests`, keyed on `chat_sessions` so both kinds of row read the same table.
+`GET /v1/session-pull-requests` returns those links, refreshing any non-terminal PR against GitHub
+behind a 60s TTL with the caller's own user token; merged and closed are final and never re-read.
+There is no GitHub webhook ingress, and this feature does not add one.
+
 Claude Code coding chats and Workflow steps share the model catalog in
 `packages/agent-runtime/src/models.ts`. Claude Opus 5 is available as
 `anthropic/claude-opus-5`, mapped to `claude-opus-5` for sandbox execution, with reasoning-effort

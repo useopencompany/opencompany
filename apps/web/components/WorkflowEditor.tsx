@@ -8,10 +8,15 @@ import {
   scheduleSummary,
 } from "@opencompany/agent-runtime";
 import {
+  MAX_SLACK_AVATAR_URL_LENGTH,
   MAX_SLACK_DISPLAY_NAME_LENGTH,
   workflowActivationDisabledReason,
 } from "@opencompany/core/workflows";
-import type { PluginEventFilterDefinitionDto, WorkflowMemoryDto } from "@opencompany/protocol";
+import type {
+  PluginEventFilterDefinitionDto,
+  SlackBotWorkspaceSettingsDto,
+  WorkflowMemoryDto,
+} from "@opencompany/protocol";
 import { Button } from "@opencompany/ui/components/button";
 import { Input } from "@opencompany/ui/components/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
@@ -117,6 +122,7 @@ export function WorkflowEditor({
   canManageScope,
   skillCatalog,
   eventProviders = NO_EVENT_PROVIDERS,
+  slackBotSettings,
   owner,
   memory,
 }: {
@@ -126,6 +132,7 @@ export function WorkflowEditor({
   canManageScope: boolean;
   skillCatalog: SkillCatalogItem[];
   eventProviders?: WorkflowEventProviderOption[];
+  slackBotSettings: SlackBotWorkspaceSettingsDto;
   owner: { name: string; avatarUrl: string | null };
   memory: WorkflowMemoryDto;
 }) {
@@ -405,6 +412,7 @@ export function WorkflowEditor({
 
           <ChannelSection
             slackChannel={draft.slackChannel}
+            slackBotSettings={slackBotSettings}
             canEdit={canEdit}
             onChange={(slackChannel) => patch({ slackChannel })}
           />
@@ -1573,13 +1581,16 @@ function EditorMoreMenu({
 
 function ChannelSection({
   slackChannel,
+  slackBotSettings,
   canEdit,
   onChange,
 }: {
   slackChannel: WorkflowDetail["slackChannel"];
+  slackBotSettings: SlackBotWorkspaceSettingsDto;
   canEdit: boolean;
   onChange: (slackChannel: WorkflowDetail["slackChannel"]) => void;
 }) {
+  const avatarPreviewUrl = slackAvatarPreviewUrl(slackChannel.avatarUrl);
   return (
     <section className="flex flex-col gap-3">
       <SectionLabel>Channels</SectionLabel>
@@ -1605,7 +1616,7 @@ function ChannelSection({
               htmlFor="workflow-slack-display-name"
               className="text-[12px] font-medium text-ink"
             >
-              Posts as
+              Identity
             </label>
             <Input
               id="workflow-slack-display-name"
@@ -1616,23 +1627,99 @@ function ChannelSection({
               placeholder="opencompany"
               className="max-w-[280px]"
             />
-            <p className="text-[12px] leading-4 text-ink-subtle">
-              Cosmetic only: the post still comes from the single opencompany bot, keeps its APP
-              badge, and cannot be mentioned by this name. Posting needs the{" "}
-              <Link
-                href="/settings/workspace/slack"
-                prefetch
-                className="text-ink underline underline-offset-2"
-              >
-                workspace Slack connection
-              </Link>
-              .
-            </p>
+            <label
+              htmlFor="workflow-slack-avatar-url"
+              className="mt-1 text-[12px] font-medium text-ink"
+            >
+              Avatar URL
+            </label>
+            <div className="flex items-center gap-2">
+              <div
+                aria-hidden="true"
+                className="h-9 w-9 shrink-0 rounded-lg border border-border bg-surface-muted bg-cover bg-center"
+                style={
+                  avatarPreviewUrl
+                    ? { backgroundImage: `url(${JSON.stringify(avatarPreviewUrl)})` }
+                    : undefined
+                }
+              />
+              <Input
+                id="workflow-slack-avatar-url"
+                type="url"
+                value={slackChannel.avatarUrl}
+                onChange={(event) => onChange({ ...slackChannel, avatarUrl: event.target.value })}
+                disabled={!canEdit}
+                maxLength={MAX_SLACK_AVATAR_URL_LENGTH}
+                placeholder="https://example.com/avatar.png"
+                className="max-w-[420px]"
+              />
+            </div>
+            <SlackIdentityStatus
+              displayName={slackChannel.displayName}
+              settings={slackBotSettings}
+            />
           </div>
         ) : null}
       </div>
     </section>
   );
+}
+
+function SlackIdentityStatus({
+  displayName,
+  settings,
+}: {
+  displayName: string;
+  settings: SlackBotWorkspaceSettingsDto;
+}) {
+  const settingsLink = (
+    <Link
+      href="/settings/workspace/slack"
+      prefetch
+      className="text-ink underline underline-offset-2"
+    >
+      workspace Slack connection
+    </Link>
+  );
+
+  if (
+    !settings.installed ||
+    settings.status === "not_connected" ||
+    settings.status === "needs_reauth"
+  ) {
+    return (
+      <p role="alert" className="text-[12px] leading-4 text-ink-subtle">
+        {settings.isAdmin ? "Connect" : "Ask a workspace admin to connect"} Slack from the{" "}
+        {settingsLink} before this workflow can post.
+      </p>
+    );
+  }
+
+  if (!settings.canCustomizeIdentity) {
+    return (
+      <p role="alert" className="text-[12px] leading-4 text-ink-subtle">
+        This connection cannot apply custom identities yet.{" "}
+        {settings.isAdmin ? "Reconnect" : "Ask a workspace admin to reconnect"} Slack from the{" "}
+        {settingsLink}; until then messages post as opencompany.
+      </p>
+    );
+  }
+
+  return (
+    <p className="text-[12px] leading-4 text-ink-subtle">
+      Messages post as {displayName.trim() || "opencompany"}. The avatar must be a public HTTPS
+      image. The identity is cosmetic: it keeps the APP badge and cannot be mentioned by this name.
+    </p>
+  );
+}
+
+function slackAvatarPreviewUrl(value: string) {
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "https:" && Boolean(url.hostname) ? url.href : null;
+  } catch {
+    return null;
+  }
 }
 
 function SectionLabel({ children }: { children: ReactNode }) {

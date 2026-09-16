@@ -129,12 +129,36 @@ test("pins production secret access to the audited Infisical identity", async ()
   assert.match(workflow, /INFISICAL_MACHINE_IDENTITY_ID: "251c74b2-32d5-490a-abfa-12d83f59ed7b"/u);
   assert.equal(
     workflow.match(/identity-id: \$\{\{ env\.INFISICAL_MACHINE_IDENTITY_ID \}\}/gu)?.length,
-    3,
+    6,
   );
   assert.doesNotMatch(
     workflow,
     /vars\.INFISICAL_MACHINE_IDENTITY_ID|secrets\.INFISICAL_MACHINE_IDENTITY_ID/u,
   );
+});
+
+test("retries bounded Infisical secret fetches before changing production", async () => {
+  const workflow = await readFile(workflowUrl, "utf8");
+
+  for (const [label, id] of [
+    ["release", "infisical-release-secrets"],
+    ["API", "infisical-api-secrets"],
+    ["runner", "infisical-runner-secrets"],
+  ]) {
+    const firstAttempt = workflow.slice(
+      workflow.indexOf(`- name: Fetch ${label} secrets from Infisical`),
+      workflow.indexOf(`- name: Retry ${label} secrets from Infisical`),
+    );
+    assert.match(firstAttempt, new RegExp(`id: ${id}`, "u"));
+    assert.match(firstAttempt, /continue-on-error: true/u);
+    assert.match(firstAttempt, /timeout-minutes: 2/u);
+
+    const retryStart = workflow.indexOf(`- name: Retry ${label} secrets from Infisical`);
+    assert.ok(retryStart >= 0, `missing ${label} Infisical retry`);
+    const retry = workflow.slice(retryStart, workflow.indexOf("\n      - name:", retryStart + 1));
+    assert.match(retry, new RegExp(`steps\\.${id}\\.outcome == 'failure'`, "u"));
+    assert.match(retry, /timeout-minutes: 2/u);
+  }
 });
 
 function assertStepOrder(workflow, markers) {

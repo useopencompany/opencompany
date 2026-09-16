@@ -21,7 +21,18 @@ The workflow editor's **Channels** section owns two things, both stored on `goat
 phrase people write in instructions so the model picks it over a member's personal Slack plugin
 action, which can also post messages. It queues a root post with a stable
 `messageKey`; each successful root creates a 30-day subscription to the workflow's existing
-Conversation. Slack replies become Task follow-up Messages and Runs through the existing Task
+Conversation.
+
+Its description carries the house writing style, because the tool is the only Slack-facing
+instruction a workflow run reliably sees: lead with the outcome, short sentences, and split a long
+update rather than posting a wall of text. Splitting is a real capability, not just advice —
+passing `replyToMessageKey` with an earlier message's `messageKey` queues the new message as a
+reply in that message's thread, inheriting its channel. A reply is queued before Slack has
+timestamped its root, so it stores `thread_parent_id` instead of a `thread_ts` and stays unclaimed
+until the root is confirmed `sent`; the worker then resolves the root's `message_ts`, persists it
+on the row, and posts. A reply whose root is canceled or failed is canceled rather than dropped
+into the channel on its own. Replies to replies resolve back to the root, matching Slack's flat
+threads, and only root posts open a subscription. Slack replies become Task follow-up Messages and Runs through the existing Task
 repository. The original Task, Conversation, harness, artifacts, and runtime references remain;
 a reply never starts another workflow. While idle, the subscription is `waiting` and the runtime
 uses its normal durable idle/checkpoint lifecycle. No engine process is kept alive for Slack.
@@ -67,9 +78,11 @@ Use the existing `OPENCOMPANY_SLACK_BOT_*` credentials. OAuth still uses
 `tokens_revoked`. Required bot scopes: `chat:write`, `channels:read`, `channels:history`,
 and `users:read`. New installs additionally request `users:read.email` and `chat:write.customize`;
 an install that predates either keeps delivering, and Channels settings asks an admin to reconnect.
-Without `chat:write.customize` a workflow's display name is dropped and the post uses the default
-bot identity rather than failing. New installs no longer request DM, private-channel, mention,
-or reaction scopes. Old grants may remain until the Slack app is reinstalled; ingress ignores
+Without `chat:write.customize` a workflow's display name and avatar are dropped and the post uses
+the default bot identity rather than failing. Custom avatars must be public HTTPS image URLs
+because Slack downloads the image when it posts the message. New installs no longer request DM,
+private-channel, mention, or reaction scopes. Old grants may remain until the Slack app is
+reinstalled; ingress ignores
 those event types. Stop configuring the legacy Wiki answer bot's Brain destinations.
 
 Slack contracts: [posting and thread timestamps](https://docs.slack.dev/reference/methods/chat.postmessage/),
@@ -82,7 +95,12 @@ runner. Application rollback can retain these tables and their queued data. Roll
 API also restores legacy bot ingress behavior, so disable Slack event delivery during rollback
 if that behavior is unwanted. Do not drop the tables while subscriptions or deliveries are active.
 
+Migration `0296_channel_delivery_thread_parent` is additive: it adds a nullable, self-referencing
+`thread_parent_id` to `channel_deliveries` and a partial index over it. Existing rows keep
+`NULL` and behave exactly as before, so an application rollback can leave the column deployed.
+
 Migrations `0291_workflow_slack_channel` and `0292_channel_delivery_bot_identity` are additive and
+`0294_workflow_slack_avatar` adds the avatar URL to both the workflow and delivery snapshot. They
 default every existing row to today's behavior: the Slack channel on, and the default bot identity.
 An application rollback can leave both columns deployed.
 

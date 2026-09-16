@@ -11,6 +11,7 @@ import {
   productAnalyticsUsageSourceForEngine,
 } from "@opencompany/analytics/product/server";
 import { calculateModelUsageCost } from "@opencompany/billing";
+import { findReportedPullRequestRef } from "@opencompany/core";
 import { RUN_EVENT_NOTIFY_CHANNEL } from "@opencompany/db/chat-repository";
 import { recordCreditDebit } from "@opencompany/db/credits";
 import { stringifyPostgresJson } from "@opencompany/db/postgres-json";
@@ -24,7 +25,8 @@ import {
   type Task,
   type TaskReportedOutcome,
 } from "@opencompany/db/product-schema";
-import { createLogger } from "@opencompany/observability";
+import { linkSessionPullRequest } from "@opencompany/db/session-pull-requests";
+import { captureException, createLogger } from "@opencompany/observability";
 import {
   createGatewayAttribution,
   gatewayProviderOptions,
@@ -1306,10 +1308,53 @@ export async function settleDurableTurn(input: {
   `);
   const settled = rowsFromExecute<{ id: string; nextQueued?: boolean }>(result)[0];
   if (!settled) throw new CodexChatLeaseLostError();
+  await linkPullRequestReportedByTask({ target, completion, turnStatus: input.turnStatus });
   await captureWorkflowHandoffChatMessageSent({
     target,
     next: settled.nextQueued === false ? null : next,
   });
+}
+
+/**
+ * Links the PR a settled Task says it opened.
+ *
+ * Streaming capture in `createExternalEngineProjector` only sees a PR opened by `gh pr create` or
+ * the GitHub MCP tool, which leaves two kinds of Task with a PR nobody can see from the sidebar:
+ * one run on the `opencompany` engine, which streams through a different projector entirely, and
+ * one whose agent opened the PR some other way. A Task reports what it did in its result and
+ * outcome comment, and the board card already treats a PR URL there as that Task's PR, so the
+ * sidebar reads the same two fields rather than disagreeing with the card beside it.
+ *
+ * Only a completed Task is scanned: a failed or cancelled run's result is an error string, and a
+ * PR named in one is as likely to be the PR that could not be finished as one that was opened.
+ *
+ * The link is a convenience on top of a Task that has already settled, so a failure here must not
+ * undo that. `linkSessionPullRequest` is idempotent, so a PR streaming capture already recorded
+ * stays on the state GitHub gave it.
+ */
+async function linkPullRequestReportedByTask(input: {
+  target: { userWorkosId: string; chatSessionId: string; turnId: string };
+  completion: TaskTurnCompletion | null;
+  turnStatus: "completed" | "failed" | "interrupted";
+}) {
+  const { completion } = input;
+  if (input.turnStatus !== "completed" || !completion || completion.disposition === "retry") return;
+  const ref = findReportedPullRequestRef(completion.result, completion.outcomeComment);
+  if (!ref) return;
+  try {
+    await linkSessionPullRequest({
+      db: getDb(),
+      chatSessionId: input.target.chatSessionId,
+      userWorkosId: input.target.userWorkosId,
+      ref,
+    });
+  } catch (error) {
+    captureException(error, {
+      event: "opencompany.task_reported_pull_request_link_failed",
+      turn_id: input.target.turnId,
+      chat_session_id: input.target.chatSessionId,
+    });
+  }
 }
 
 async function captureWorkflowHandoffChatMessageSent(input: {

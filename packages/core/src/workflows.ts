@@ -32,10 +32,11 @@ export function canManageWorkflowScope(
 }
 
 // Slack is the only channel a workflow can post to today. The toggle decides whether the run gets
-// the Slack send tool at all; the display name is a cosmetic override on the post itself.
+// the Slack send tool at all; the name and avatar are cosmetic overrides on the post itself.
 export type WorkflowSlackChannel = {
   enabled: boolean;
   displayName: string;
+  avatarUrl: string;
 };
 
 export type WorkflowStep = {
@@ -430,6 +431,7 @@ const MAX_WORKFLOW_SKILLS = 16;
 // Slack truncates long custom usernames on the message itself; keep the stored value inside a
 // length Slack renders in full. Exported so the editor's input cap cannot drift from validation.
 export const MAX_SLACK_DISPLAY_NAME_LENGTH = 80;
+export const MAX_SLACK_AVATAR_URL_LENGTH = 2_048;
 
 export class WorkflowApplicationService {
   constructor(
@@ -1338,7 +1340,25 @@ function workflowSlackChannel(value: WorkflowSlackChannel): WorkflowSlackChannel
       `The Slack display name must be ${MAX_SLACK_DISPLAY_NAME_LENGTH} characters or fewer.`,
     );
   }
-  return { enabled: value.enabled, displayName };
+  const avatarUrl = value.avatarUrl.trim();
+  if (avatarUrl.length > MAX_SLACK_AVATAR_URL_LENGTH) {
+    throw new CoreError(
+      "invalid_argument",
+      `The Slack avatar URL must be ${MAX_SLACK_AVATAR_URL_LENGTH} characters or fewer.`,
+    );
+  }
+  if (avatarUrl) {
+    let parsed: URL;
+    try {
+      parsed = new URL(avatarUrl);
+    } catch {
+      throw new CoreError("invalid_argument", "The Slack avatar must be a valid HTTPS URL.");
+    }
+    if (parsed.protocol !== "https:" || !parsed.hostname || parsed.username || parsed.password) {
+      throw new CoreError("invalid_argument", "The Slack avatar must be a valid HTTPS URL.");
+    }
+  }
+  return { enabled: value.enabled, displayName, avatarUrl };
 }
 
 function workflowScope(value: WorkflowScope): WorkflowScope {

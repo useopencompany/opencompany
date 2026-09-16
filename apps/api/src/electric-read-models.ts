@@ -430,8 +430,10 @@ function readModelShape(input: {
           "created_at",
           "updated_at",
         ],
-        where: `"workspace_id" = $1`,
-        params: [input.actor.workspaceId],
+        // A schedule inherits the visibility of its Workflow. Filtering in the Electric shape
+        // also removes an existing row from a teammate's live stream when its scope changes.
+        where: `"workspace_id" = $1 AND ("scope" = 'company' OR "created_by_workos_id" = $2)`,
+        params: [input.actor.workspaceId, input.actor.userId],
       };
     case "task-schedules-v1":
       return {

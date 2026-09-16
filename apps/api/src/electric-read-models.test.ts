@@ -1397,6 +1397,8 @@ describe("Electric read models", () => {
       "goat.workflow_schedule_read_model_v1": {
         id: "workflow_1",
         workflow_id: "workflow_1",
+        scope: "company",
+        created_by_workos_id: "user_1",
         workflow_slug: "weekly-research",
         name: "Weekly research",
         cron: "0 9 * * 1",
@@ -1470,6 +1472,13 @@ describe("Electric read models", () => {
     expect(requestedUrls[0]?.searchParams.get("where")).toBe(
       '"workspace_id" = $1 AND ("scope" = \'company\' OR "created_by_workos_id" = $2)',
     );
+    expect(requestedUrls[1]?.searchParams.get("where")).toBe(
+      '"workspace_id" = $1 AND ("scope" = \'company\' OR "created_by_workos_id" = $2)',
+    );
+    expect(requestedUrls[1]?.searchParams.get("params[1]")).toBe("workspace_1");
+    expect(requestedUrls[1]?.searchParams.get("params[2]")).toBe("user_1");
+    expect(requestedUrls[1]?.searchParams.get("columns")).not.toContain("scope");
+    expect(requestedUrls[1]?.searchParams.get("columns")).not.toContain("created_by_workos_id");
     expect(requestedUrls[2]?.searchParams.get("where")).toContain('"actor_id" = $1');
     expect(requestedUrls[2]?.searchParams.get("where")).toContain('"workspace_id" IS NULL');
     expect((await workflowResponse.json())[0]?.value).toEqual({

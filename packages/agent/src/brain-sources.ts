@@ -24,6 +24,8 @@ import {
   GMAIL_EVENT_TYPES,
   type GmailEventRef,
   type GmailEventType,
+  type GmailLabelRef,
+  gmailFilterLabelOptions,
   sanitizeGmailInstructions,
 } from "@opencompany/db/gmail";
 import {
@@ -72,6 +74,8 @@ import type {
   LinearSourceProviderState,
 } from "./integration-state";
 import { FATHOM_MCP_EXTERNAL_ID } from "./integrations/fathom-mcp";
+import { listGmailLabels, loadOwnGmailAccount } from "./integrations/gmail-source";
+import { GoogleAccessAuthError } from "./integrations/google-access-token";
 import {
   GoogleDriveReconnectRequiredError,
   GoogleDriveRequestError,
@@ -187,6 +191,7 @@ export type BrainSourceCommand =
 export type BrainSourceOptionsCommand =
   | { provider: "linear"; includeTriageStateIds?: boolean }
   | { provider: "granola" }
+  | { provider: "gmail" }
   | {
       provider: "google_drive";
       parentId?: string;
@@ -201,6 +206,7 @@ export type BrainSourceOptions =
       folders: Array<{ id: string; name: string; parentFolderId: string | null }>;
       partial: boolean;
     }
+  | { provider: "gmail"; labels: GmailLabelRef[] }
   | {
       provider: "google_drive";
       files: Array<{
@@ -352,6 +358,8 @@ export class BrainSourceApplicationService {
         return this.listLinearOptions(actor, integration, command.includeTriageStateIds ?? false);
       case "granola":
         return this.listGranolaOptions(actor, integration);
+      case "gmail":
+        return this.listGmailOptions(actor, integration);
       case "google_drive":
         return this.listGoogleDriveOptions(actor, integration, command);
     }
@@ -768,6 +776,32 @@ export class BrainSourceApplicationService {
     } catch (error) {
       if (!(error instanceof LinearIngestAuthError)) throw error;
       throw new CoreError("conflict", error.message);
+    }
+  }
+
+  private async listGmailOptions(
+    actor: Actor,
+    integrationId: string,
+  ): Promise<Extract<BrainSourceOptions, { provider: "gmail" }>> {
+    const account = await loadOwnGmailAccount(actor.userId, integrationId, this.db);
+    if (!account) {
+      throw new CoreError("conflict", "Connect Gmail in Plugins first.");
+    }
+    try {
+      return {
+        provider: "gmail",
+        labels: gmailFilterLabelOptions(await listGmailLabels({ account })),
+      };
+    } catch (error) {
+      if (error instanceof CoreError) throw error;
+      if (error instanceof GoogleAccessAuthError) {
+        // The connection is already marked needs_reauth; the author is sent to the plugin page.
+        throw new CoreError("conflict", "Reconnect Gmail in Plugins first.");
+      }
+      // Keep the cause: everything that is not a rejected credential reaches the author as the
+      // same retryable message, so the original failure is the only way to tell a Gmail outage
+      // from a misconfigured deployment.
+      throw new CoreError("unavailable", "Could not load Gmail labels.", { cause: error });
     }
   }
 
@@ -1217,6 +1251,7 @@ function requireBrainRead(actor: Actor) {
 const WORKFLOW_EVENT_FILTER_SOURCE_PROVIDERS = new Set<BrainSourceOptionsCommand["provider"]>([
   "linear",
   "granola",
+  "gmail",
 ]);
 
 function requireSourceOptionsRead(actor: Actor, provider: BrainSourceOptionsCommand["provider"]) {

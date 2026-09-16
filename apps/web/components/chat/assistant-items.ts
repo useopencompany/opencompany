@@ -518,8 +518,11 @@ export function toolDetail(
   }
   if (name === SLACK_BOT_TOOL_NAME || name === LEGACY_SLACK_BOT_TOOL_NAME) {
     // The destination is what a reader checks; the message body is already in the transcript.
-    const channel = isRecord(part.input) ? readString(part.input.channel) : null;
-    return channel ? truncateToolPreview(channel) : formatToolInput(part.input);
+    if (!isRecord(part.input)) return formatToolInput(part.input);
+    const channel = readString(part.input.channel);
+    // No channel means a reply, which lands in the thread of an earlier post or of the Slack
+    // message that started this run. Naming the thread beats dumping the message body here.
+    return channel ? truncateToolPreview(channel) : "Thread reply";
   }
   if (name === USE_ACTION_TOOL_NAME) {
     return actionToolDetail(part);

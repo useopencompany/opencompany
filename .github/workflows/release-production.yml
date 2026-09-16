@@ -162,7 +162,22 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Fetch release secrets from Infisical
+        id: infisical-release-secrets
         if: ${{ steps.current-before-prepare.outputs.should_release == 'true' }}
+        continue-on-error: true
+        timeout-minutes: 2
+        uses: Infisical/secrets-action@6cd3f7c0e4cc0d2395ee4ef414eb6eeb5d3e73db # v1.0.17
+        with:
+          method: oidc
+          identity-id: ${{ env.INFISICAL_MACHINE_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG || secrets.INFISICAL_PROJECT_SLUG }}
+          env-slug: ${{ env.INFISICAL_ENV_SLUG }}
+          domain: ${{ env.INFISICAL_DOMAIN }}
+          secret-path: /release
+
+      - name: Retry release secrets from Infisical
+        if: ${{ steps.current-before-prepare.outputs.should_release == 'true' && steps.infisical-release-secrets.outcome == 'failure' }}
+        timeout-minutes: 2
         uses: Infisical/secrets-action@6cd3f7c0e4cc0d2395ee4ef414eb6eeb5d3e73db # v1.0.17
         with:
           method: oidc
@@ -177,7 +192,22 @@ jobs:
         run: bun run release:preflight -- --release
 
       - name: Fetch API secrets from Infisical
+        id: infisical-api-secrets
         if: ${{ steps.current-before-prepare.outputs.should_release == 'true' && needs.plan.outputs.api == 'true' }}
+        continue-on-error: true
+        timeout-minutes: 2
+        uses: Infisical/secrets-action@6cd3f7c0e4cc0d2395ee4ef414eb6eeb5d3e73db # v1.0.17
+        with:
+          method: oidc
+          identity-id: ${{ env.INFISICAL_MACHINE_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG || secrets.INFISICAL_PROJECT_SLUG }}
+          env-slug: ${{ env.INFISICAL_ENV_SLUG }}
+          domain: ${{ env.INFISICAL_DOMAIN }}
+          secret-path: /api
+
+      - name: Retry API secrets from Infisical
+        if: ${{ steps.current-before-prepare.outputs.should_release == 'true' && needs.plan.outputs.api == 'true' && steps.infisical-api-secrets.outcome == 'failure' }}
+        timeout-minutes: 2
         uses: Infisical/secrets-action@6cd3f7c0e4cc0d2395ee4ef414eb6eeb5d3e73db # v1.0.17
         with:
           method: oidc
@@ -192,7 +222,22 @@ jobs:
         run: bun run release:preflight -- --api
 
       - name: Fetch runner secrets from Infisical
+        id: infisical-runner-secrets
         if: ${{ steps.current-before-prepare.outputs.should_release == 'true' && needs.plan.outputs.runner == 'true' }}
+        continue-on-error: true
+        timeout-minutes: 2
+        uses: Infisical/secrets-action@6cd3f7c0e4cc0d2395ee4ef414eb6eeb5d3e73db # v1.0.17
+        with:
+          method: oidc
+          identity-id: ${{ env.INFISICAL_MACHINE_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG || secrets.INFISICAL_PROJECT_SLUG }}
+          env-slug: ${{ env.INFISICAL_ENV_SLUG }}
+          domain: ${{ env.INFISICAL_DOMAIN }}
+          secret-path: /runner
+
+      - name: Retry runner secrets from Infisical
+        if: ${{ steps.current-before-prepare.outputs.should_release == 'true' && needs.plan.outputs.runner == 'true' && steps.infisical-runner-secrets.outcome == 'failure' }}
+        timeout-minutes: 2
         uses: Infisical/secrets-action@6cd3f7c0e4cc0d2395ee4ef414eb6eeb5d3e73db # v1.0.17
         with:
           method: oidc

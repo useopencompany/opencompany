@@ -162,6 +162,26 @@ vi.mock("@/lib/headless-task-commands", () => taskCommandsMock);
 
 vi.mock("@/lib/headless-chat-collections", () => chatCollectionMocks);
 
+const sessionPullRequestsMock = vi.hoisted(() => ({
+  value: [] as Array<{
+    conversationId: string;
+    repository: string;
+    number: number;
+    url: string;
+    state: "draft" | "open" | "blocked" | "merged" | "closed";
+  }>,
+}));
+
+// The hook polls the API on a timer; these tests are about what a row renders for a given link,
+// so the network is replaced by the fixture list.
+vi.mock("@/lib/use-session-pull-requests", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/use-session-pull-requests")>();
+  return {
+    ...actual,
+    useSessionPullRequests: () => actual.indexByConversation(sessionPullRequestsMock.value),
+  };
+});
+
 // The provider applies the user's pending archives to the chat list it publishes, so the mock does
 // the same: these tests are about what the sidebar shows between the click and the projection.
 vi.mock("@/components/AppDataProvider", async () => {
@@ -291,6 +311,7 @@ describe("Sidebar", () => {
     recentChatsMock.value = [];
     tasksMock.value = [];
     sidebarTasksMock.value = [];
+    sessionPullRequestsMock.value = [];
     clearAllLocalChatStates();
     clearAllOptimisticChatSummaries();
     clearOptimisticArchives();
@@ -1680,6 +1701,154 @@ describe("Sidebar", () => {
       "aria-current",
       "page",
     );
+  });
+
+  describe("Pull request badge", () => {
+    function chatWithPullRequest(state: "draft" | "open" | "blocked" | "merged" | "closed") {
+      recentChatsMock.value = [archivableChat("conversation_pr", "Rework onboarding copy")];
+      sessionPullRequestsMock.value = [
+        {
+          conversationId: "conversation_pr",
+          repository: "acme/web",
+          number: 42,
+          url: "https://github.com/acme/web/pull/42",
+          state,
+        },
+      ];
+    }
+
+    it("links a chat row's badge to the pull request it opened", () => {
+      chatWithPullRequest("open");
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+      const badge = screen.getByTestId("sidebar-pull-request-badge");
+      expect(badge).toHaveAttribute("href", "https://github.com/acme/web/pull/42");
+      expect(badge).toHaveAttribute("target", "_blank");
+      expect(badge).toHaveAccessibleName("Pull request open: acme/web #42");
+      expect(badge).toHaveAttribute("data-state", "open");
+    });
+
+    it("names each state so colour is never the only signal", () => {
+      for (const [state, label] of [
+        ["blocked", "Pull request blocked: acme/web #42"],
+        ["merged", "Pull request merged: acme/web #42"],
+        ["draft", "Draft pull request: acme/web #42"],
+        ["closed", "Pull request closed: acme/web #42"],
+      ] as const) {
+        chatWithPullRequest(state);
+        const { unmount } = render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+        expect(screen.getByTestId("sidebar-pull-request-badge")).toHaveAccessibleName(label);
+        unmount();
+      }
+    });
+
+    it("shows a badge on a Task row, keyed by the Task's conversation", () => {
+      sidebarTasksMock.value = [
+        {
+          id: "task_1",
+          conversationId: "conversation_task",
+          displayId: "TASK-1717",
+          name: "Main commits not deployed",
+          status: "succeeded",
+          hasUnseen: false,
+          updatedAt: "2026-07-14T09:00:00.000Z",
+        },
+      ];
+      sessionPullRequestsMock.value = [
+        {
+          conversationId: "conversation_task",
+          repository: "acme/web",
+          number: 7,
+          url: "https://github.com/acme/web/pull/7",
+          state: "merged",
+        },
+      ];
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+      expect(screen.getByTestId("sidebar-pull-request-badge")).toHaveAttribute(
+        "href",
+        "https://github.com/acme/web/pull/7",
+      );
+    });
+
+    it("shows no badge for a session that has not opened a pull request", () => {
+      recentChatsMock.value = [archivableChat("conversation_plain", "YC customer meetings")];
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+      expect(screen.queryByTestId("sidebar-pull-request-badge")).not.toBeInTheDocument();
+    });
+
+    it("keeps the badge and the pin control on a pinned chat, in their own columns", () => {
+      recentChatsMock.value = [
+        {
+          ...archivableChat("conversation_pr", "Rework onboarding copy"),
+          pinnedAt: "2026-07-14T09:00:00.000Z",
+        },
+      ];
+      sessionPullRequestsMock.value = [
+        {
+          conversationId: "conversation_pr",
+          repository: "acme/web",
+          number: 42,
+          url: "https://github.com/acme/web/pull/42",
+          state: "open",
+        },
+      ];
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+      expect(screen.getByTestId("sidebar-pull-request-badge")).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Unpin Rework onboarding copy" }),
+      ).toBeInTheDocument();
+    });
+
+    it("leads the row with the badge, before the session name", () => {
+      chatWithPullRequest("open");
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+      const badge = screen.getByTestId("sidebar-pull-request-badge");
+      const title = screen.getByText("Rework onboarding copy");
+      expect(badge.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it("keeps the badge out of the row's own link, so no anchor nests in another", () => {
+      chatWithPullRequest("open");
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+      const badge = screen.getByTestId("sidebar-pull-request-badge");
+      expect(badge.parentElement?.closest("a")).toBeNull();
+    });
+
+    function leadingColumnOf(title: string) {
+      const row = screen.getByRole("link", { name: new RegExp(title) }).parentElement;
+      return row?.firstElementChild ?? null;
+    }
+
+    it("reserves the badge's column on rows without a pull request, so titles line up", () => {
+      recentChatsMock.value = [
+        archivableChat("conversation_pr", "Rework onboarding copy"),
+        archivableChat("conversation_plain", "YC customer meetings"),
+      ];
+      sessionPullRequestsMock.value = [
+        {
+          conversationId: "conversation_pr",
+          repository: "acme/web",
+          number: 42,
+          url: "https://github.com/acme/web/pull/42",
+          state: "open",
+        },
+      ];
+      const { rerender } = render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+      expect(leadingColumnOf("YC customer meetings")?.querySelector("span")).toHaveClass(
+        "size-[18px]",
+      );
+
+      // Nothing to align against: the reader pays no width for an always-empty column.
+      sessionPullRequestsMock.value = [];
+      rerender(<Sidebar collapsed onToggleCollapsed={() => {}} />);
+      rerender(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+      expect(leadingColumnOf("YC customer meetings")?.tagName).toBe("A");
+    });
   });
 
   describe("Projects", () => {

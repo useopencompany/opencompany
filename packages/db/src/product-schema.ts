@@ -14,6 +14,7 @@ import {
   type PluginPricing,
   type PluginStatus,
   type PluginStdioServer,
+  type PullRequestState,
   RUN_APPROVAL_STATUSES,
   RUN_ATTEMPT_STATUSES,
   RUN_EVENT_TYPES,
@@ -3336,6 +3337,8 @@ export const workflows = productSchema.table(
     // Cosmetic per-workflow Slack identity. One Slack app has one bot user, so this only overrides
     // the display name on the post; empty means the default @opencompany identity.
     slackBotDisplayName: text("slack_bot_display_name").notNull().default(""),
+    // Public HTTPS image Slack downloads for the cosmetic per-message avatar.
+    slackBotAvatarUrl: text("slack_bot_avatar_url").notNull().default(""),
     createdByWorkosId: text("created_by_workos_id").references(() => users.workosUserId, {
       onDelete: "set null",
     }),
@@ -5171,6 +5174,56 @@ export const codexChatSessions = productSchema.table(
   }),
 );
 
+/**
+ * A pull request a coding-agent session opened.
+ *
+ * Keyed on `chat_sessions` rather than on the coding runtime row or on `tasks`, because a Task is
+ * a `chat_sessions` row with `kind = 'task'`: linking here is what lets an ordinary chat and a
+ * Task carry the same PR badge without the sidebar branching on which one it is looking at.
+ *
+ * One row per (session, PR). `state` is a cache of GitHub's answer, not a fact this system owns:
+ * it is refreshed on read and `checked_at` is how the reader decides whether it is stale enough
+ * to re-ask.
+ */
+export const sessionPullRequests = productSchema.table(
+  "session_pull_requests",
+  {
+    id: text("id").primaryKey(),
+    chatSessionId: text("chat_session_id")
+      .notNull()
+      .references(() => chatSessions.id, { onDelete: "cascade" }),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => users.workosUserId, { onDelete: "cascade" }),
+    repositoryFullName: text("repository_full_name").notNull(),
+    number: integer("number").notNull(),
+    url: text("url").notNull(),
+    state: text("state").$type<PullRequestState>().notNull().default("open"),
+    // Null until the first successful read from GitHub, which is also what marks a link as
+    // never-yet-confirmed: the badge stays hidden until GitHub has agreed the PR exists.
+    checkedAt: timestamp("checked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    sessionPullRequestIdx: uniqueIndex("goat_session_pull_requests_session_pr_idx").on(
+      table.chatSessionId,
+      table.repositoryFullName,
+      table.number,
+    ),
+    // The sidebar asks "which of my sessions have a PR", so the read is per-user.
+    userSessionIdx: index("goat_session_pull_requests_user_session_idx").on(
+      table.userWorkosId,
+      table.chatSessionId,
+    ),
+    numberCheck: check("goat_session_pull_requests_number_check", sql`${table.number} > 0`),
+    stateCheck: check(
+      "goat_session_pull_requests_state_check",
+      sql`${table.state} IN ('draft', 'open', 'blocked', 'merged', 'closed')`,
+    ),
+  }),
+);
+
 export const codexChatTurns = productSchema.table(
   "codex_chat_turns",
   {
@@ -5812,6 +5865,8 @@ export const workflowScheduleReadModelV1 = productSchema.table(
     id: text("id").primaryKey(),
     workflowId: text("workflow_id").notNull(),
     workspaceId: text("workspace_id").notNull(),
+    scope: text("scope").$type<WorkflowScope>().notNull(),
+    createdByWorkosId: text("created_by_workos_id"),
     workflowSlug: text("workflow_slug").notNull(),
     name: text("name").notNull(),
     cron: text("cron").notNull(),
@@ -7594,10 +7649,16 @@ export const channelDeliveries = productSchema.table(
     teamId: text("team_id").notNull(),
     channelId: text("channel_id").notNull(),
     threadTs: text("thread_ts"),
+    // A reply is queued before Slack has given its root post a timestamp, so it points at the root
+    // delivery and the worker fills thread_ts in from that row's message_ts when it sends.
+    threadParentId: text("thread_parent_id").references((): AnyPgColumn => channelDeliveries.id, {
+      onDelete: "cascade",
+    }),
     text: text("text").notNull(),
-    // Snapshot of the workflow's cosmetic Slack name at enqueue time, so a later edit to the
-    // workflow cannot retroactively change the identity of a queued post. Empty is the default bot.
+    // Snapshot the workflow's cosmetic Slack identity at enqueue time, so a later edit cannot
+    // retroactively change a queued post. Empty values keep the default bot identity.
     botDisplayName: text("bot_display_name").notNull().default(""),
+    botAvatarUrl: text("bot_avatar_url").notNull().default(""),
     status: text("status").notNull().default("pending"),
     messageTs: text("message_ts"),
     leaseId: text("lease_id"),
@@ -7607,6 +7668,9 @@ export const channelDeliveries = productSchema.table(
   },
   (table) => [
     index("channel_deliveries_pending_idx").on(table.status, table.createdAt),
+    index("channel_deliveries_thread_parent_idx")
+      .on(table.threadParentId)
+      .where(sql`${table.threadParentId} IS NOT NULL`),
     check(
       "channel_deliveries_status_check",
       sql`${table.status} IN ('pending', 'sending', 'sent', 'uncertain', 'failed', 'canceled')`,

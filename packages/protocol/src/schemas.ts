@@ -263,13 +263,14 @@ export const WorkflowStatusSchema = z.enum(["draft", "active"]);
 export const WorkflowScopeSchema = z.enum(["personal", "company"]).openapi("WorkflowScope");
 
 // Slack is the only workflow channel today. `enabled` decides whether a run is given the Slack
-// send tool at all; `displayName` is a cosmetic chat.postMessage username override and is empty
-// when the workflow posts under the default bot identity.
+// send tool at all; `displayName` and `avatarUrl` are cosmetic chat.postMessage identity overrides
+// and are empty when the workflow posts under the default bot identity.
 export const WorkflowSlackChannelSchema = z
   .object({
     enabled: z.boolean(),
     // Trimmed before measuring, so this matches the Core rule the API delegates to.
     displayName: z.string().trim().max(80),
+    avatarUrl: z.string().trim().max(2_048).default(""),
   })
   .strict()
   .openapi("WorkflowSlackChannel");
@@ -1186,6 +1187,7 @@ export const BrainSourceOptionsBodySchema = z.discriminatedUnion("provider", [
     })
     .strict(),
   z.object({ provider: z.literal("granola") }).strict(),
+  z.object({ provider: z.literal("gmail") }).strict(),
   z
     .object({
       provider: z.literal("google_drive"),
@@ -1227,6 +1229,12 @@ export const BrainSourceOptionsSchema = z
         provider: z.literal("granola"),
         folders: z.array(GranolaFolderRefSchema),
         partial: z.boolean(),
+      })
+      .strict(),
+    z
+      .object({
+        provider: z.literal("gmail"),
+        labels: z.array(NamedSourceRefSchema),
       })
       .strict(),
     z
@@ -2808,6 +2816,25 @@ export const ConversationPageSchema = z
   .strict()
   .openapi("ConversationPage");
 
+export const SessionPullRequestSchema = z
+  .object({
+    conversationId: z.string(),
+    repository: z.string(),
+    number: z.number().int().positive(),
+    url: z.string(),
+    state: z.enum(["draft", "open", "blocked", "merged", "closed"]),
+  })
+  .strict()
+  .openapi("SessionPullRequest");
+
+export const SessionPullRequestListSchema = z
+  .object({
+    data: z.array(SessionPullRequestSchema),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("SessionPullRequestList");
+
 export const TaskPageSchema = z
   .object({
     data: z.array(TaskSchema),
@@ -4284,6 +4311,7 @@ export const SlackBotWorkspaceSettingsSchema = z
     installed: z.boolean(),
     status: z.enum(["connected", "needs_reauth", "sync_failed", "not_connected"]),
     needsScopeUpgrade: z.boolean(),
+    canCustomizeIdentity: z.boolean(),
     teamName: z.string().max(512).nullable(),
     statusReason: z.string().max(2_000).nullable(),
     destinationCount: z.number().int().min(0),
@@ -4827,6 +4855,7 @@ export const DopplerAuthFlowEnvelopeSchema = z
   .openapi("DopplerAuthFlowEnvelope");
 
 export type ConversationDto = z.infer<typeof ConversationSchema>;
+export type SessionPullRequestDto = z.infer<typeof SessionPullRequestSchema>;
 export type ConversationRuntimeDto = z.infer<typeof ConversationRuntimeSchema>;
 export type ConversationShareDto = z.infer<typeof ConversationShareSchema>;
 export type PublicChatMessageDto = z.infer<typeof PublicChatMessageSchema>;

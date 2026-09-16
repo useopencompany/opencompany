@@ -1,3 +1,7 @@
+import {
+  slackBotCanCustomizeIdentity,
+  slackBotScopesSatisfied,
+} from "@opencompany/agent/integrations/slack-bot";
 import { captureProductServerEvent } from "@opencompany/analytics/product/server";
 import type { Actor } from "@opencompany/core";
 import { upsertBrainSource } from "@opencompany/db/brain-sources";
@@ -25,6 +29,7 @@ vi.mock("@opencompany/db/workspaces", () => ({
 }));
 vi.mock("@opencompany/agent/integrations/slack-bot", () => ({
   slackBotScopesSatisfied: vi.fn(() => true),
+  slackBotCanCustomizeIdentity: vi.fn(() => true),
   isSlackBotConfigured: vi.fn(() => true),
 }));
 
@@ -60,6 +65,8 @@ function unusedDb() {
 describe("Slack bot settings service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(slackBotScopesSatisfied).mockReturnValue(true);
+    vi.mocked(slackBotCanCustomizeIdentity).mockReturnValue(true);
     vi.mocked(getSlackBotIntegrationForWorkspace).mockResolvedValue(integration as never);
     vi.mocked(getBrainAccess).mockResolvedValue(access as never);
     vi.mocked(loadIntegrationCredential).mockResolvedValue({
@@ -71,19 +78,33 @@ describe("Slack bot settings service", () => {
     });
   });
 
-  it("does not expose workspace integration metadata to non-admins", async () => {
+  it("exposes Slack capabilities without workspace integration metadata to non-admins", async () => {
     const service = createSlackBotSettingsService({ db: unusedDb() });
     await expect(service.getWorkspaceSettings(member)).resolves.toEqual({
       isAdmin: false,
       configured: true,
-      installed: false,
-      status: "not_connected",
+      installed: true,
+      status: "connected",
       needsScopeUpgrade: false,
+      canCustomizeIdentity: true,
       teamName: null,
       statusReason: null,
       destinationCount: 0,
     });
-    expect(getSlackBotIntegrationForWorkspace).not.toHaveBeenCalled();
+    expect(getSlackBotIntegrationForWorkspace).toHaveBeenCalledWith(
+      "workspace_1",
+      expect.anything(),
+    );
+  });
+
+  it("reports identity customization independently from unrelated missing scopes", async () => {
+    vi.mocked(slackBotScopesSatisfied).mockReturnValue(false);
+    const service = createSlackBotSettingsService({ db: unusedDb() });
+
+    await expect(service.getWorkspaceSettings(member)).resolves.toMatchObject({
+      needsScopeUpgrade: true,
+      canCustomizeIdentity: true,
+    });
   });
 
   it("admin-gates channel listing before loading the bot credential", async () => {

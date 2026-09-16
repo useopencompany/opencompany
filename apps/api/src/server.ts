@@ -85,6 +85,7 @@ import { PostgresRunEventNotifier } from "./run-event-notifier";
 import { createRunnerClient } from "./runner-client";
 import { closeHttpServer, createDrainAwareFetch } from "./server-lifecycle";
 import { resolveApiPort } from "./server-port";
+import { listSessionPullRequestStatuses } from "./session-pull-requests";
 import { createSlackBotIngress } from "./slack-bot-ingress";
 import { createSlackBotSettingsService } from "./slack-bot-settings";
 import { createSlackIngress } from "./slack-ingress";
@@ -219,6 +220,7 @@ const app = createApiApp({
   userSettings: createUserSettingsService({ db: database.db }),
   feedback: createFeedbackService({ db: database.db }),
   repoConfigs: createRepoConfigService({ db: database.db }),
+  sessionPullRequests: (actor) => listSessionPullRequestStatuses({ userWorkosId: actor.userId }),
   integrationAccounts: createIntegrationAccountService({
     db: database.db,
     runner: runnerClient,

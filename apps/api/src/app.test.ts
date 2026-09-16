@@ -338,6 +338,7 @@ describe("canonical Hono API", () => {
       userSettings: fakeUserSettings(),
       feedback: fakeFeedback(),
       repoConfigs: fakeRepoConfigs(),
+      sessionPullRequests: async () => [],
       integrationAccounts: fakeIntegrationAccounts(),
       slackBotSettings: fakeSlackBotSettings(),
       engineAuth: fakeEngineAuth(),
@@ -578,13 +579,16 @@ describe("canonical Hono API", () => {
         ],
         status: "active",
         trigger: { type: "manual" },
-        slackChannel: { enabled: false, displayName: "James" },
+        slackChannel: { enabled: false, displayName: "James", avatarUrl: "" },
       }),
     });
     expect(updatedWorkflow.status).toBe(200);
     await expect(updatedWorkflow.json()).resolves.toMatchObject({
       data: {
-        workflow: { version: 2, slackChannel: { enabled: false, displayName: "James" } },
+        workflow: {
+          version: 2,
+          slackChannel: { enabled: false, displayName: "James", avatarUrl: "" },
+        },
         transactionId: "52",
       },
     });
@@ -3947,6 +3951,7 @@ describe("canonical Hono API", () => {
       installed: true,
       status: "connected" as const,
       needsScopeUpgrade: false,
+      canCustomizeIdentity: true,
       teamName: "Acme",
       statusReason: null,
       destinationCount: 1,
@@ -5297,6 +5302,7 @@ function testApp(
     userSettings: fakeUserSettings(),
     feedback: fakeFeedback(),
     repoConfigs: fakeRepoConfigs(),
+    sessionPullRequests: async () => [],
     integrationAccounts: fakeIntegrationAccounts(),
     slackBotSettings: fakeSlackBotSettings(),
     engineAuth: fakeEngineAuth(),
@@ -6415,7 +6421,7 @@ function populatedAutomationServices() {
     ],
     status: "active",
     scope: "company",
-    slackChannel: { enabled: true, displayName: "" },
+    slackChannel: { enabled: true, displayName: "", avatarUrl: "" },
     createdByUserId: "user_1",
     trigger: { type: "manual" },
     version: 1,
