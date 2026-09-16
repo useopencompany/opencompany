@@ -8,8 +8,8 @@ import {
   scheduleSummary,
 } from "@opencompany/agent-runtime";
 import {
-  MAX_SLACK_AVATAR_URL_LENGTH,
   MAX_SLACK_DISPLAY_NAME_LENGTH,
+  WORKFLOW_AVATAR_MEDIA_TYPES,
   workflowActivationDisabledReason,
 } from "@opencompany/core/workflows";
 import type {
@@ -28,6 +28,7 @@ import {
   ChevronRight,
   Clock,
   Copy,
+  Image as ImageIcon,
   Loader2,
   MessageSquare,
   MoreHorizontal,
@@ -35,6 +36,7 @@ import {
   Plus,
   Search,
   Trash2,
+  Upload,
   UserRound,
   Webhook,
 } from "lucide-react";
@@ -60,6 +62,7 @@ import {
 import type { WorkflowDetail } from "@/lib/headless-automation-types";
 import type { SkillCatalogItem } from "@/lib/skills";
 import { supportedTimezones, timezoneLabel } from "@/lib/timezones";
+import { uploadWorkflowSlackAvatar } from "@/lib/workflow-avatar-upload";
 import {
   loadWorkflowEventFilterOptions,
   type WorkflowEventFilterOptionsResult,
@@ -411,6 +414,7 @@ export function WorkflowEditor({
           </div>
 
           <ChannelSection
+            workflowId={workflow.id}
             slackChannel={draft.slackChannel}
             slackBotSettings={slackBotSettings}
             canEdit={canEdit}
@@ -1580,17 +1584,18 @@ function EditorMoreMenu({
 }
 
 function ChannelSection({
+  workflowId,
   slackChannel,
   slackBotSettings,
   canEdit,
   onChange,
 }: {
+  workflowId: string;
   slackChannel: WorkflowDetail["slackChannel"];
   slackBotSettings: SlackBotWorkspaceSettingsDto;
   canEdit: boolean;
   onChange: (slackChannel: WorkflowDetail["slackChannel"]) => void;
 }) {
-  const avatarPreviewUrl = slackAvatarPreviewUrl(slackChannel.avatarUrl);
   return (
     <section className="flex flex-col gap-3">
       <SectionLabel>Channels</SectionLabel>
@@ -1627,33 +1632,13 @@ function ChannelSection({
               placeholder="opencompany"
               className="max-w-[280px]"
             />
-            <label
-              htmlFor="workflow-slack-avatar-url"
-              className="mt-1 text-[12px] font-medium text-ink"
-            >
-              Avatar URL
-            </label>
-            <div className="flex items-center gap-2">
-              <div
-                aria-hidden="true"
-                className="h-9 w-9 shrink-0 rounded-lg border border-border bg-surface-muted bg-cover bg-center"
-                style={
-                  avatarPreviewUrl
-                    ? { backgroundImage: `url(${JSON.stringify(avatarPreviewUrl)})` }
-                    : undefined
-                }
-              />
-              <Input
-                id="workflow-slack-avatar-url"
-                type="url"
-                value={slackChannel.avatarUrl}
-                onChange={(event) => onChange({ ...slackChannel, avatarUrl: event.target.value })}
-                disabled={!canEdit}
-                maxLength={MAX_SLACK_AVATAR_URL_LENGTH}
-                placeholder="https://example.com/avatar.png"
-                className="max-w-[420px]"
-              />
-            </div>
+            <span className="mt-1 text-[12px] font-medium text-ink">Avatar</span>
+            <SlackAvatarField
+              workflowId={workflowId}
+              avatarUrl={slackChannel.avatarUrl}
+              canEdit={canEdit}
+              onChange={(avatarUrl) => onChange({ ...slackChannel, avatarUrl })}
+            />
             <SlackIdentityStatus
               displayName={slackChannel.displayName}
               settings={slackBotSettings}
@@ -1662,6 +1647,112 @@ function ChannelSection({
         ) : null}
       </div>
     </section>
+  );
+}
+
+function SlackAvatarField({
+  workflowId,
+  avatarUrl,
+  canEdit,
+  onChange,
+}: {
+  workflowId: string;
+  avatarUrl: string;
+  canEdit: boolean;
+  onChange: (avatarUrl: string) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const previewUrl = slackAvatarPreviewUrl(avatarUrl);
+
+  async function upload(file: File) {
+    setError(null);
+    setUploading(true);
+    try {
+      onChange(await uploadWorkflowSlackAvatar({ workflowId, file }));
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : "The avatar upload failed.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-3">
+        {previewUrl ? (
+          // The URL is workspace-authored and may point at any host, so Next's optimizer is not
+          // in play here; a plain img keeps the preview honest about what Slack will fetch.
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={previewUrl}
+            alt=""
+            className="h-11 w-11 shrink-0 rounded-lg border border-border object-cover"
+          />
+        ) : (
+          <div
+            aria-hidden="true"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-border border-dashed bg-surface-muted text-ink-subtle"
+          >
+            <ImageIcon size={15} strokeWidth={1.8} />
+          </div>
+        )}
+        <input
+          ref={inputRef}
+          data-testid="workflow-slack-avatar-input"
+          type="file"
+          accept={WORKFLOW_AVATAR_MEDIA_TYPES.join(",")}
+          className="hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            // Clearing the value lets the same file be picked again after a failed attempt.
+            event.target.value = "";
+            if (file) void upload(file);
+          }}
+        />
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={!canEdit || uploading}
+          onClick={() => inputRef.current?.click()}
+        >
+          {uploading ? (
+            <>
+              <Loader2 size={13} strokeWidth={1.9} className="animate-spin" />
+              Uploading
+            </>
+          ) : (
+            <>
+              <Upload size={13} strokeWidth={1.9} />
+              {avatarUrl ? "Replace" : "Upload image"}
+            </>
+          )}
+        </Button>
+        {avatarUrl && !uploading ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={!canEdit}
+            onClick={() => {
+              setError(null);
+              onChange("");
+            }}
+          >
+            Remove
+          </Button>
+        ) : null}
+      </div>
+      {error ? (
+        <p role="alert" className="text-[12px] leading-4 text-danger">
+          {error}
+        </p>
+      ) : (
+        <p className="text-[12px] leading-4 text-ink-subtle">
+          PNG, JPEG, or WebP up to 1 MB. Square images look best.
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -1707,8 +1798,8 @@ function SlackIdentityStatus({
 
   return (
     <p className="text-[12px] leading-4 text-ink-subtle">
-      Messages post as {displayName.trim() || "opencompany"}. The avatar must be a public HTTPS
-      image. The identity is cosmetic: it keeps the APP badge and cannot be mentioned by this name.
+      Messages post as {displayName.trim() || "opencompany"}. The identity is cosmetic: it keeps the
+      APP badge and cannot be mentioned by this name.
     </p>
   );
 }

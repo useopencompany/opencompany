@@ -58,6 +58,7 @@ import type { BrainAssetService } from "./brain-assets";
 import type { ChatResourceService } from "./chat-resources";
 import { ApiError } from "./errors";
 import { type ApiRateLimiter, InMemoryApiRateLimiter } from "./rate-limit";
+import type { WorkflowAvatarService } from "./workflow-avatars";
 
 vi.mock("@opencompany/analytics/product/server", () => ({
   captureProductServerEvent: vi.fn(async () => undefined),
@@ -331,6 +332,7 @@ describe("canonical Hono API", () => {
       skillImports: fakeSkillImportService(),
       pluginImports: fakePluginImportService(),
       brainAssets: fakeBrainAssets(),
+      workflowAvatars: fakeWorkflowAvatars(),
       brainControl: fakeBrainControl(),
       wikiControl: fakeWikiControl(),
       attachments: fakeAttachments(),
@@ -3311,6 +3313,7 @@ describe("canonical Hono API", () => {
     }));
     const app = testApp(fakeRepository(), {
       brainAssets: brainAssetService({ upload, replace }),
+      workflowAvatars: fakeWorkflowAvatars(),
     });
     const file = new File(["private bytes"], "plan.pdf", { type: "application/pdf" });
     const createForm = new FormData();
@@ -3373,6 +3376,7 @@ describe("canonical Hono API", () => {
     }));
     const app = testApp(fakeRepository(), {
       brainAssets: brainAssetService({ download }),
+      workflowAvatars: fakeWorkflowAvatars(),
     });
 
     const response = await app.request("/v1/brain-assets/document_1");
@@ -3419,6 +3423,7 @@ describe("canonical Hono API", () => {
     const upload = vi.fn();
     const app = testApp(fakeRepository(), {
       brainAssets: brainAssetService({ upload }),
+      workflowAvatars: fakeWorkflowAvatars(),
     });
     const response = await app.request("/v1/brains/brain_1/assets", {
       method: "POST",
@@ -5295,6 +5300,7 @@ function testApp(
     skillImports: fakeSkillImportService(),
     pluginImports: fakePluginImportService(),
     brainAssets: fakeBrainAssets(),
+    workflowAvatars: fakeWorkflowAvatars(),
     brainControl: fakeBrainControl(),
     wikiControl: fakeWikiControl(),
     attachments: fakeAttachments(),
@@ -5361,6 +5367,17 @@ function fakeAttachments(): AttachmentUploadService {
   return {
     upload: async () => {
       throw new Error("Unexpected attachment upload.");
+    },
+  };
+}
+
+function fakeWorkflowAvatars(): WorkflowAvatarService {
+  return {
+    upload: async () => {
+      throw new Error("Unexpected workflow avatar upload.");
+    },
+    download: async () => {
+      throw new Error("Unexpected workflow avatar download.");
     },
   };
 }

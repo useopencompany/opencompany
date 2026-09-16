@@ -58,6 +58,7 @@ import {
   type WikiCommandApplicationService,
   type WikiPage,
   type WikiTimelineEntry,
+  WORKFLOW_AVATAR_MAX_BYTES,
   type Workflow,
   type WorkflowApplicationService,
   type WorkflowMemory,
@@ -126,6 +127,7 @@ import type { SlackIngressService } from "./slack-ingress";
 import type { StripeIngressService } from "./stripe-ingress";
 import type { UserSettingsService } from "./user-settings";
 import type { WikiControlService, WikiControlView } from "./wiki-control";
+import type { WorkflowAvatarService } from "./workflow-avatars";
 import type { CapabilityApprovalView, WorkspaceCapabilityService } from "./workspace-capabilities";
 import type { WorkspaceControlService } from "./workspace-control";
 import type { XAccountIngressService } from "./x-account-ingress";
@@ -187,6 +189,7 @@ export type CreateApiAppInput = {
   pluginImports: PluginImportApplicationService;
   customMcp?: CustomMcpApplicationService;
   brainAssets: BrainAssetService;
+  workflowAvatars: WorkflowAvatarService;
   chatResources?: ChatResourceService;
   messagePresentations?: MessagePresentationService;
   chatTitles?: ChatTitleService;
@@ -549,6 +552,16 @@ export function createApiApp(input: CreateApiAppInput) {
         c.req.valid("param").workflowId,
       );
       return c.json({ data: workflowMemoryDto(memory), meta }, 200);
+    },
+    uploadWorkflowSlackAvatar: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.workflowAvatars.upload({
+        actor,
+        workflowId: c.req.valid("param").workflowId,
+        file: c.req.valid("form").file,
+      });
+      return c.json({ data: result, meta }, 201);
     },
     listTaskSchedules: async (c) => {
       const actor = actorFrom(c);
@@ -2151,6 +2164,12 @@ export function createApiApp(input: CreateApiAppInput) {
       });
       return chatResourceResponse(asset) as never;
     },
+    downloadPublicWorkflowAvatar: async (c) => {
+      const params = c.req.valid("param");
+      await enforcePublicRateLimit(rateLimiter, params.workflowId, "public-avatar-bytes", 600);
+      const asset = await input.workflowAvatars.download(params);
+      return chatResourceResponse(asset) as never;
+    },
     getEngineRuntimeStatus: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);
@@ -3035,6 +3054,17 @@ export function createApiApp(input: CreateApiAppInput) {
             apiErrorResponse(
               c,
               new ApiError(413, "invalid_request", "The attachment upload is too large."),
+            ),
+        }),
+      );
+      router.use(
+        "/v1/workflows/:workflowId/slack-avatar",
+        bodyLimit({
+          maxSize: WORKFLOW_AVATAR_MAX_BYTES + MULTIPART_ENVELOPE_BYTES,
+          onError: (c) =>
+            apiErrorResponse(
+              c,
+              new ApiError(413, "invalid_request", "The avatar upload is too large."),
             ),
         }),
       );

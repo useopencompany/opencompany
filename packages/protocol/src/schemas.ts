@@ -3371,6 +3371,30 @@ export const AttachmentUploadEnvelopeSchema = z
   .strict()
   .openapi("AttachmentUploadEnvelope");
 
+export const WorkflowSlackAvatarUploadBodySchema = z
+  .object({
+    file: z
+      .file()
+      .max(1024 * 1024)
+      .openapi({ type: "string", format: "binary" }),
+  })
+  .strict()
+  .openapi("WorkflowSlackAvatarUploadBody");
+
+export const WorkflowSlackAvatarUploadEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        // Absolute, unauthenticated URL. The caller saves it onto the workflow through the normal
+        // update command; uploading alone does not change the workflow.
+        avatarUrl: z.string().url().max(2_048),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("WorkflowSlackAvatarUploadEnvelope");
+
 export const CreateMessageBodySchema = z
   .object({
     conversationId: ResourceIdSchema.optional(),
@@ -5013,6 +5037,9 @@ export type EngineSessionReadModel = z.infer<typeof EngineSessionReadModelSchema
 export type EngineRuntimeStatus = z.infer<typeof EngineRuntimeStatusSchema>;
 export type EngineRuntimeAccess = z.infer<typeof EngineRuntimeAccessEnvelopeSchema>["data"];
 export type AttachmentUploadEnvelope = z.infer<typeof AttachmentUploadEnvelopeSchema>;
+export type WorkflowSlackAvatarUploadEnvelope = z.infer<
+  typeof WorkflowSlackAvatarUploadEnvelopeSchema
+>;
 export type CreateMessageBody = z.infer<typeof CreateMessageBodySchema>;
 export type CreateTaskBody = z.infer<typeof CreateTaskBodySchema>;
 export type CreateTaskCommentBody = z.infer<typeof CreateTaskCommentBodySchema>;
