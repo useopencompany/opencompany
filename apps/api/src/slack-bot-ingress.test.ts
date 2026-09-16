@@ -1,4 +1,5 @@
 vi.mock("@opencompany/db/session-subscriptions", () => ({
+  enqueueSlackDirectMessage: vi.fn(async () => 1),
   enqueueSlackThreadReply: vi.fn(async () => 1),
 }));
 
@@ -6,7 +7,10 @@ import { createHmac } from "node:crypto";
 import { slackApiRequest } from "@opencompany/agent/integrations/slack";
 import { createSlackBotState } from "@opencompany/agent/integrations/slack-bot";
 import { connectSlackBotIntegration } from "@opencompany/db/integrations";
-import { enqueueSlackThreadReply } from "@opencompany/db/session-subscriptions";
+import {
+  enqueueSlackDirectMessage,
+  enqueueSlackThreadReply,
+} from "@opencompany/db/session-subscriptions";
 import { listWorkspacesForUser } from "@opencompany/db/workspaces";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunnerClient } from "./runner-client";
@@ -74,6 +78,7 @@ describe("Slack bot ingress", () => {
     vi.stubEnv("OPENCOMPANY_SLACK_BOT_SIGNING_SECRET", "slack-bot-signing");
     vi.stubEnv("OPENCOMPANY_SLACK_BOT_STATE_SECRET", "slack-bot-state-secret");
     vi.mocked(enqueueSlackThreadReply).mockResolvedValue(1);
+    vi.mocked(enqueueSlackDirectMessage).mockResolvedValue(1);
   });
 
   afterEach(() => {
@@ -244,7 +249,6 @@ describe("Slack bot ingress", () => {
   });
   it.each([
     { type: "app_mention" },
-    { channel: "D123", channel_type: "im" },
     { thread_ts: undefined },
     { thread_ts: humanReply.ts },
     { bot_id: "B123" },
@@ -252,11 +256,53 @@ describe("Slack bot ingress", () => {
     { files: [{}] },
     { text: "" },
     { channel_type: "group" },
+    { channel: "D123" },
+    { channel_type: "im" },
   ])("ignores unsupported events %j", async (overrides) => {
     const response = await ingress().webhook(signedEventRequest({ ...humanReply, ...overrides }));
     expect(response.status).toBe(200);
     expect(enqueueSlackThreadReply).not.toHaveBeenCalled();
+    expect(enqueueSlackDirectMessage).not.toHaveBeenCalled();
     expect(runnerRequest).not.toHaveBeenCalled();
+  });
+
+  const directMessage = {
+    type: "message",
+    channel: "D123",
+    channel_type: "im",
+    user: "U123",
+    ts: "1784196000.000100",
+    text: "Where did last week's signups come from?",
+  };
+  it("queues a direct message as a session request before acknowledging Slack", async () => {
+    const response = await ingress().webhook(signedEventRequest(directMessage));
+    expect(response.status).toBe(200);
+    expect(enqueueSlackDirectMessage).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({
+        eventId: "Ev123",
+        teamId: "T123",
+        channelId: "D123",
+        messageTs: directMessage.ts,
+        slackUserId: "U123",
+        text: directMessage.text,
+      }),
+    );
+    expect(enqueueSlackThreadReply).not.toHaveBeenCalled();
+  });
+  it("routes a reply inside a direct message thread to the existing session", async () => {
+    await ingress().webhook(
+      signedEventRequest({
+        ...directMessage,
+        ts: "1784196000.000200",
+        thread_ts: directMessage.ts,
+      }),
+    );
+    expect(enqueueSlackDirectMessage).not.toHaveBeenCalled();
+    expect(enqueueSlackThreadReply).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ channelId: "D123", threadTs: directMessage.ts }),
+    );
   });
   it("acknowledges untracked threads and duplicate events without dispatching", async () => {
     vi.mocked(enqueueSlackThreadReply).mockResolvedValueOnce(0);
