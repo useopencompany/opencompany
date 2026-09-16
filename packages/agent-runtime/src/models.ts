@@ -43,6 +43,35 @@ export const GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS = {
   },
 } satisfies ModelProviderOptions;
 
+// The normal chat catalog is also the source of truth for workflow steps. Keep the ordered ids
+// here, beside the model definitions, so adding or retiring a model updates every model picker.
+export const OPENCOMPANY_CHAT_DEFAULT_MODEL_ID: AgentModelId = "moonshotai/kimi-k3";
+export const OPENCOMPANY_CHAT_MODEL_IDS = [
+  "anthropic/claude-sonnet-5",
+  "anthropic/claude-opus-4.8",
+  "openai/gpt-5.6-sol",
+  "openai/gpt-5.6-terra",
+  "openai/gpt-5.5",
+  "alibaba/qwen3.8-max",
+  "deepseek/deepseek-v4-pro",
+  "deepseek/deepseek-v4-flash",
+  "xai/grok-4.6",
+  "moonshotai/kimi-k3",
+  "moonshotai/kimi-k2.6",
+  "zai/glm-5.2",
+] as const satisfies readonly AgentModelId[];
+
+// Opus 4.8 remains loadable for persisted conversations and runtime settings, but is unavailable
+// for new selections. This rule applies to normal chat and both cloud coding agents.
+export const AGENT_MODEL_PICKER_HIDDEN_IDS = [
+  "anthropic/claude-opus-4.8",
+] as const satisfies readonly AgentModelId[];
+const HIDDEN_MODEL_PICKER_ID_SET = new Set<string>(AGENT_MODEL_PICKER_HIDDEN_IDS);
+
+export function isAgentModelSelectable(modelId: string): boolean {
+  return !HIDDEN_MODEL_PICKER_ID_SET.has(modelId);
+}
+
 export const CODEX_DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-6-astra";
 export const CODEX_AGENT_MODEL_IDS = [
   "openai/gpt-6-astra",

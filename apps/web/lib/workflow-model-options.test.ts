@@ -1,10 +1,30 @@
+import { isAgentModelSelectable } from "@opencompany/agent-runtime";
 import { describe, expect, it } from "vitest";
+import { MODELS } from "@/lib/model-options";
 import {
+  DEFAULT_WORKFLOW_MODEL_TOKEN,
   isWorkflowSubscriptionCoveredModel,
   resolveWorkflowStepModelSelection,
   WORKFLOW_MODEL_OPTIONS,
   workflowStepSettings,
 } from "@/lib/workflow-model-options";
+
+describe("workflow model catalog", () => {
+  it("uses the selectable main-chat models and default", () => {
+    const workflowModelIds = WORKFLOW_MODEL_OPTIONS.filter(
+      (option) => option.engine === "opencompany",
+    ).map((option) => option.id);
+    const chatModelIds = MODELS.filter((model) => isAgentModelSelectable(model.id)).map(
+      (model) => model.id,
+    );
+
+    expect(workflowModelIds).toEqual(chatModelIds);
+    expect(DEFAULT_WORKFLOW_MODEL_TOKEN).toBe("kimi-k2.6");
+    expect(resolveWorkflowStepModelSelection({ model: "", instructions: "" }).model).toBe(
+      "moonshotai/kimi-k2.6",
+    );
+  });
+});
 
 describe("workflowStepSettings", () => {
   it("drops cloud coding settings when the workflow step runtime is not cloud coding", () => {
