@@ -124,6 +124,7 @@ it.each([
       const context = {
         taskConversation: true,
         skillToolsEnabled: false,
+        slackChannelEnabled: false,
         actorId: "user_1",
         workspaceId: "workspace_1",
         workspaceName: "Test",

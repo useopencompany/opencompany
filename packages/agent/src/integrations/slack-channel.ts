@@ -82,6 +82,8 @@ export async function postWorkflowSlackMessage(
   ) {
     throw new Error("Provide text (1–3500 characters) and a stable messageKey (1–100 characters).");
   }
+  // workflow_id is the workspace-scoped slug. Match the live workflow that existed when this Task
+  // was created so an archived Task cannot inherit a replacement workflow's Slack authority.
   const target = subscriptionRows<
     ChannelInstallation & {
       sessionId: string;
@@ -99,7 +101,9 @@ export async function postWorkflowSlackMessage(
       event.id AS "subscriptionEventId", subscription.source_key->>'channelId' AS "followUpChannelId",
       subscription.source_key->>'threadTs' AS "followUpThreadTs"
     FROM goat.codex_chat_turns run JOIN goat.tasks task ON task.session_id = run.chat_session_id
-    JOIN goat.workflows workflow ON workflow.id = task.workflow_id
+    JOIN goat.workflows workflow ON workflow.workspace_id = task.workspace_id
+      AND workflow.slug = task.workflow_id AND workflow.archived_at IS NULL
+      AND workflow.created_at <= task.created_at
     JOIN goat.chat_sessions conversation ON conversation.id = task.session_id
     JOIN goat.integrations integration ON integration.workspace_id = task.workspace_id AND integration.provider = 'slack_bot'
     LEFT JOIN goat.subscription_events event ON event.run_id = run.id AND event.status IN ('running', 'delivering')
