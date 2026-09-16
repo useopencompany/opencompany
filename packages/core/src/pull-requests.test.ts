@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   derivePullRequestState,
   findPullRequestRefs,
+  findReportedPullRequestRef,
   isPullRequestCreationTool,
   isTerminalPullRequestState,
 } from "./pull-requests";
@@ -54,6 +55,29 @@ describe("findPullRequestRefs", () => {
     expect(findPullRequestRefs("https://github.com/acme/web/issues/12")).toEqual([]);
     expect(findPullRequestRefs("fixed in #1620")).toEqual([]);
     expect(findPullRequestRefs("https://github.com/acme/web/pull/0")).toEqual([]);
+  });
+});
+
+describe("findReportedPullRequestRef", () => {
+  it("takes the first PR a Task reports, so every surface shows the same one", () => {
+    const result = [
+      "Opened https://github.com/acme/web/pull/42 with the fix.",
+      "Follows the approach in https://github.com/acme/web/pull/7.",
+    ].join("\n");
+
+    expect(findReportedPullRequestRef(result)?.number).toBe(42);
+  });
+
+  it("falls through to later texts when an earlier one reports nothing", () => {
+    expect(findReportedPullRequestRef(null, "", "see https://github.com/acme/web/pull/9")).toEqual({
+      repository: "acme/web",
+      number: 9,
+      url: "https://github.com/acme/web/pull/9",
+    });
+  });
+
+  it("reports nothing when no text names a pull request", () => {
+    expect(findReportedPullRequestRef("nothing to ship", undefined)).toBeNull();
   });
 });
 

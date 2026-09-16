@@ -34,8 +34,16 @@ const loggerMocks = vi.hoisted(() => ({
   error: vi.fn(),
 }));
 
+const pullRequestMocks = vi.hoisted(() => ({
+  linkSessionPullRequest: vi.fn(async () => undefined),
+}));
+
 vi.mock("./db", () => ({
   getDb: () => ({ execute: mocks.execute }),
+}));
+
+vi.mock("@opencompany/db/session-pull-requests", () => ({
+  linkSessionPullRequest: pullRequestMocks.linkSessionPullRequest,
 }));
 
 vi.mock("@opencompany/analytics/product/server", () => ({
@@ -823,6 +831,109 @@ function durableTurn(): CodexChatTurn {
   };
 }
 
+describe("linking the pull request a Task reports", () => {
+  const target = {
+    userWorkosId: "user_1",
+    workspaceId: "workspace_1",
+    codexChatSessionId: "runtime_1",
+    // The Task's own conversation, so the link lands on the row the sidebar renders for it.
+    chatSessionId: TASK_CONVERSATION_ID,
+    turnId: "turn_1",
+    leaseId: "lease_1",
+    leaseOwner: "runner_1",
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.execute.mockResolvedValue({ rows: [{ id: "runtime_1" }] });
+  });
+
+  async function settle(
+    completion: ReturnType<typeof buildTaskTurnCompletion>,
+    turnStatus: "completed" | "failed" = "completed",
+  ) {
+    await settleDurableTurn({
+      target,
+      turnStatus,
+      sessionStatus: "idle",
+      error: turnStatus === "failed" ? "Sandbox died." : null,
+      completedAt: new Date("2026-07-30T09:30:00.000Z"),
+      taskCompletion: completion,
+    });
+  }
+
+  it("records the PR named in a completed Task's result", async () => {
+    await settle(
+      buildTaskTurnCompletion({
+        context: context(workflowSpec()),
+        result: "Shipped. PR: https://github.com/acme/web/pull/42",
+        reportedOutcome: "done",
+      }),
+    );
+
+    expect(pullRequestMocks.linkSessionPullRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatSessionId: target.chatSessionId,
+        userWorkosId: "user_1",
+        ref: { repository: "acme/web", number: 42, url: "https://github.com/acme/web/pull/42" },
+      }),
+    );
+  });
+
+  it("reads the outcome comment when the result names no PR", async () => {
+    await settle(
+      buildTaskTurnCompletion({
+        context: context(workflowSpec()),
+        result: "Done.",
+        reportedOutcome: "done",
+        outcomeComment: "Opened https://github.com/acme/web/pull/9",
+      }),
+    );
+
+    expect(pullRequestMocks.linkSessionPullRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ ref: expect.objectContaining({ number: 9 }) }),
+    );
+  });
+
+  it("records nothing when the Task reports no pull request", async () => {
+    await settle(
+      buildTaskTurnCompletion({
+        context: context(workflowSpec()),
+        result: "Investigated; no change was needed.",
+        reportedOutcome: "done",
+      }),
+    );
+
+    expect(pullRequestMocks.linkSessionPullRequest).not.toHaveBeenCalled();
+  });
+
+  it("ignores a PR named by a run that did not complete", async () => {
+    await settle(
+      buildTaskFailureCompletion({
+        context: context(workflowSpec()),
+        error: "Could not push to https://github.com/acme/web/pull/42",
+      }),
+      "failed",
+    );
+
+    expect(pullRequestMocks.linkSessionPullRequest).not.toHaveBeenCalled();
+  });
+
+  it("leaves the settled Task alone when the link cannot be written", async () => {
+    pullRequestMocks.linkSessionPullRequest.mockRejectedValueOnce(new Error("db down"));
+
+    await expect(
+      settle(
+        buildTaskTurnCompletion({
+          context: context(workflowSpec()),
+          result: "Shipped https://github.com/acme/web/pull/42",
+          reportedOutcome: "done",
+        }),
+      ),
+    ).resolves.toBeUndefined();
+  });
+});
+
 function workflowSpec(): HarnessSpec {
   return {
     schemaVersion: "goat.harness.v1",
@@ -876,6 +987,9 @@ function context(harnessSpec: HarnessSpec): TaskTurnContext {
   };
 }
 
+/** The conversation behind the fixture Task, and so the key its sidebar row renders under. */
+const TASK_CONVERSATION_ID = "goat_chat_task_1";
+
 function task(harnessSpec: HarnessSpec): Task {
   const now = new Date("2026-07-30T09:00:00.000Z");
   return {
@@ -887,7 +1001,7 @@ function task(harnessSpec: HarnessSpec): Task {
     prompt: "Ship the requested change.",
     source: "workflow",
     model: harnessSpec.model,
-    sessionId: "goat_chat_task_1",
+    sessionId: TASK_CONVERSATION_ID,
     scheduleId: null,
     scheduledFor: null,
     status: "running",

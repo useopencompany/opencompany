@@ -565,6 +565,11 @@ function SidebarWorkList() {
   const rowDragProps = (conversationId: string): SidebarRowDragProps =>
     projects.enabled ? conversationDragProps(conversationId) : {};
 
+  // One decision for the whole list, so a section's rows never align differently from the section
+  // above it. The map only holds links for sessions the sidebar can still show, so "any link at
+  // all" and "any row with a badge" are the same question in all but the rarest case.
+  const reservePullRequestColumn = pullRequests.size > 0;
+
   const renderChatRow = (chat: ChatSummaryView) => {
     const href = chatHref(chat.id);
     const pinned = isPinned(chat);
@@ -586,6 +591,7 @@ function SidebarWorkList() {
         optimistic={optimistic}
         localState={localChatStates.get(chat.id) ?? null}
         pullRequest={pullRequests.get(chat.id) ?? null}
+        reservePullRequestColumn={reservePullRequestColumn}
         pinned={pinned}
         pinning={pinningIds.has(chat.id)}
         dragProps={optimistic ? {} : rowDragProps(chat.id)}
@@ -607,6 +613,7 @@ function SidebarWorkList() {
         state={item.state}
         href={href}
         pullRequest={pullRequests.get(item.task.conversationId) ?? null}
+        reservePullRequestColumn={reservePullRequestColumn}
         active={isTaskRouteActive(pathname, href)}
         dragProps={rowDragProps(item.task.conversationId)}
         onArchive={() => archiveTask(item.task, href)}
@@ -734,6 +741,7 @@ function SidebarChatRow({
   optimistic,
   localState,
   pullRequest,
+  reservePullRequestColumn,
   pinned,
   pinning,
   dragProps,
@@ -749,6 +757,8 @@ function SidebarChatRow({
   localState: ReturnType<typeof chatSummaryState> | null;
   /** The PR this chat's coding agent opened, when it opened one. */
   pullRequest: SessionPullRequest | null;
+  /** Whether the list reserves the leading PR column on every row. See `SidebarPullRequestColumn`. */
+  reservePullRequestColumn: boolean;
   pinned: boolean;
   pinning: boolean;
   // Lets the row be dragged into a sidebar Project. Empty when Projects are off, and for a chat
@@ -761,6 +771,11 @@ function SidebarChatRow({
 }) {
   const state = resolveSidebarChatState({ chat, localState });
   const contentPadding = useSidebarRowPadding();
+  const pullRequestColumnShown = Boolean(pullRequest) || reservePullRequestColumn;
+  const linkPadding = sidebarRowLeadingPadding({
+    columnShown: pullRequestColumnShown,
+    contentPadding,
+  });
   const content = (
     <>
       <SidebarChatStateIndicator state={state} />
@@ -774,11 +789,14 @@ function SidebarChatRow({
         active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
       }`}
     >
+      {pullRequestColumnShown ? (
+        <SidebarPullRequestColumn pullRequest={pullRequest} className={contentPadding} />
+      ) : null}
       {optimistic ? (
         <button
           type="button"
           onClick={onRequestComposerFocus}
-          className={`flex min-w-0 flex-1 items-center gap-2 rounded-md py-[5px] pr-1 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${contentPadding}`}
+          className={`flex min-w-0 flex-1 items-center gap-2 rounded-md py-[5px] pr-1 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${linkPadding}`}
         >
           {content}
         </button>
@@ -799,20 +817,13 @@ function SidebarChatRow({
             onRequestComposerFocus();
           }}
           aria-current={active ? "page" : undefined}
-          className={`flex min-w-0 flex-1 items-center gap-2 rounded-l-md py-[5px] text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${contentPadding}`}
+          className={`flex min-w-0 flex-1 items-center gap-2 rounded-l-md py-[5px] text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${linkPadding}`}
         >
           {content}
         </IntentPrefetchLink>
       )}
       {optimistic ? null : (
         <>
-          {/* The badge rests in the pin column and yields to the pin on hover. A third column
-              would cost every row title 24px of width to show a control the reader is already
-              reaching past. Hover only, not focus: the badge is itself focusable, and
-              `group-focus-within` would hide it the moment a keyboard user tabbed onto it. */}
-          {pullRequest && !pinned && !pinning ? (
-            <PullRequestBadge pullRequest={pullRequest} className="group-hover:hidden" />
-          ) : null}
           <button
             type="button"
             title={pinned ? "Unpin chat" : "Pin chat"}
@@ -820,12 +831,10 @@ function SidebarChatRow({
             aria-pressed={pinned}
             disabled={pinning}
             onClick={onTogglePin}
-            className={`h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink/50 transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed ${
+            className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink/50 transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed ${
               pinned || pinning
-                ? "flex opacity-100"
-                : pullRequest
-                  ? "hidden opacity-0 group-hover:flex group-hover:opacity-100 group-focus-within:flex group-focus-within:opacity-100"
-                  : "flex opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+                ? "opacity-100"
+                : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
             }`}
           >
             {/* The row has already moved to its new section, so the icon shows the state the user
@@ -845,6 +854,48 @@ function SidebarChatRow({
       )}
     </div>
   );
+}
+
+/**
+ * The leading column that carries a session's pull-request state, to the left of its name.
+ *
+ * It leads the row rather than trailing it because the state of the work an agent left behind is
+ * something the reader scans a column for, the way they scan the row's own title — not a control
+ * they reach for. Trailing, it also had to share the pin's column and disappear on hover.
+ *
+ * It sits beside the row's link rather than inside it: the badge is itself a link, to the PR on
+ * GitHub, and an anchor inside an anchor is invalid HTML that the browser's parser silently
+ * rewrites. So the column carries the row's own left padding, and the link beside it drops to the
+ * gap between them — see `sidebarRowLeadingPadding`.
+ */
+function SidebarPullRequestColumn({
+  pullRequest,
+  className,
+}: {
+  pullRequest: SessionPullRequest | null;
+  className?: string;
+}) {
+  return (
+    <span className={`flex shrink-0 items-center ${className ?? ""}`}>
+      {pullRequest ? (
+        <PullRequestBadge pullRequest={pullRequest} />
+      ) : (
+        // Holds the column open on a row with no PR, so titles line up down the list instead of
+        // stepping in and out by a glyph.
+        <span aria-hidden="true" className="size-[18px]" />
+      )}
+    </span>
+  );
+}
+
+/**
+ * The left padding a row's link takes, given whether the PR column leads it.
+ *
+ * With a column in front, the link only needs the gap that separates them; the column itself has
+ * already indented the row. `gap-2` between the two would double-count that space.
+ */
+function sidebarRowLeadingPadding(input: { columnShown: boolean; contentPadding: string }) {
+  return input.columnShown ? "pl-1.5" : input.contentPadding;
 }
 
 function resolveSidebarChatState(input: {
@@ -877,6 +928,7 @@ function SidebarTaskRow({
   href,
   active,
   pullRequest,
+  reservePullRequestColumn,
   dragProps,
   onArchive,
 }: {
@@ -886,12 +938,15 @@ function SidebarTaskRow({
   active: boolean;
   /** The PR this Task's coding agent opened, when it opened one. */
   pullRequest: SessionPullRequest | null;
+  /** Whether the list reserves the leading PR column on every row. See `SidebarPullRequestColumn`. */
+  reservePullRequestColumn: boolean;
   // Keyed by the conversation behind the Task, the same key a Project stores for a chat.
   dragProps: SidebarRowDragProps;
   onArchive: () => void;
 }) {
   const archivable = isSettledTaskStatus(task.status);
   const contentPadding = useSidebarRowPadding();
+  const pullRequestColumnShown = Boolean(pullRequest) || reservePullRequestColumn;
   return (
     <div
       {...dragProps}
@@ -899,11 +954,21 @@ function SidebarTaskRow({
         active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
       }`}
     >
+      {pullRequestColumnShown ? (
+        <SidebarPullRequestColumn
+          pullRequest={pullRequest}
+          // A Task row is two lines tall. Centred across both, the badge would sit at a different
+          // height from the row's own text and from every one-line chat row above it.
+          className={`mt-[6px] self-start ${contentPadding}`}
+        />
+      ) : null}
       <Link
         href={href}
         prefetch
         aria-current={active ? "page" : undefined}
-        className={`flex min-w-0 flex-1 items-center gap-2 rounded-l-md py-[5px] text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${contentPadding}`}
+        className={`flex min-w-0 flex-1 items-center gap-2 rounded-l-md py-[5px] text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${sidebarRowLeadingPadding(
+          { columnShown: pullRequestColumnShown, contentPadding },
+        )}`}
       >
         <ChatStateIndicator state={state} surface="sidebar" className="mt-[7px] self-start" />
         <span className="flex min-w-0 flex-1 flex-col">
@@ -915,11 +980,7 @@ function SidebarTaskRow({
           every row the reader hovers down the list. A Task row is two lines tall, so both this
           slot and the archive beside it are pulled up against the title: centred across both lines
           they would sit at a different height from the row's own text and read as misaligned. */}
-      {pullRequest ? (
-        <PullRequestBadge pullRequest={pullRequest} className="mt-[1.5px] self-start" />
-      ) : (
-        <span aria-hidden="true" className="h-6 w-6 shrink-0" />
-      )}
+      <span aria-hidden="true" className="h-6 w-6 shrink-0" />
       <span className="mr-1 mt-[1.5px] flex h-6 w-6 shrink-0 items-center justify-center self-start">
         {archivable ? (
           <button
