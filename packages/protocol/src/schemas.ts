@@ -4173,6 +4173,7 @@ export const PersonalIntegrationProviderSchema = z.enum([
   "github_user",
   "slack",
   "hubspot",
+  "posthog",
   "granola",
   "fathom",
   "attio",
@@ -4367,6 +4368,15 @@ export const IntegrationApiKeyBodySchema = z
   .strict()
   .openapi("IntegrationApiKeyBody");
 
+export const PostHogEventsConnectBodySchema = z
+  .object({
+    apiKey: z.string().min(1).max(4_000),
+    projectId: z.string().regex(/^[1-9][0-9]{0,19}$/),
+    region: z.enum(["us", "eu"]),
+  })
+  .strict()
+  .openapi("PostHogEventsConnectBody");
+
 export const ConvexAccountStateSchema = z
   .object({
     provider: z.literal("convex"),
@@ -4472,6 +4482,43 @@ export const GranolaAccountStateEnvelopeSchema = z
   })
   .strict()
   .openapi("GranolaAccountStateEnvelope");
+
+export const PostHogEventsAccountStateSchema = z
+  .object({
+    provider: z.literal("posthog"),
+    connected: z.boolean(),
+    status: IntegrationAccountStatusSchema,
+    integrationId: IntegrationAccountIdSchema.nullable(),
+    projectId: z.string().nullable(),
+    region: z.enum(["us", "eu"]).nullable(),
+    connectionLabel: z.string().nullable(),
+    statusReason: z.string().nullable(),
+  })
+  .strict()
+  .openapi("PostHogEventsAccountState");
+
+export const PostHogEventsAccountStateEnvelopeSchema = z
+  .object({
+    data: z.object({ state: PostHogEventsAccountStateSchema }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("PostHogEventsAccountStateEnvelope");
+
+export const PostHogEventDefinitionListEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        events: z
+          .array(z.object({ id: z.string().max(512), name: z.string().max(512) }).strict())
+          .max(500),
+        partial: z.boolean(),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("PostHogEventDefinitionListEnvelope");
 
 // Jamie's event connection is a webhook the user creates in Jamie against opencompany's fixed
 // endpoint; only the digest of the key Jamie mints is stored. The URL is what the setup UI asks the

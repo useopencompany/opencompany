@@ -325,6 +325,8 @@ describe("v1 protocol contract", () => {
       "/v1/integration-accounts/attio/{integrationId}",
       "/v1/integration-accounts/fathom",
       "/v1/integration-accounts/granola",
+      "/v1/integration-accounts/posthog-events",
+      "/v1/integration-accounts/posthog-events/{integrationId}/events",
       "/v1/integration-accounts/jamie-events/endpoint",
       "/v1/integration-accounts/jamie-events",
       "/v1/integration-accounts/convex",

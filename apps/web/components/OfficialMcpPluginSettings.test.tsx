@@ -1954,7 +1954,7 @@ describe("Linear plugin settings", () => {
     expect(html).toContain("Read analytics");
     expect(html).toContain("Create insights");
     expect(POSTHOG_PLUGIN_SOURCE).toBe(
-      "https://github.com/useopencompany/plugins/tree/4ba32cd5a7618d9be3714ec0efd3c8784209046c/posthog",
+      "https://github.com/useopencompany/plugins/tree/e2b5b58aaccca1783df7ec960751ab13d23dcd86/posthog",
     );
     expect(useLiveQuery).not.toHaveBeenCalled();
   });

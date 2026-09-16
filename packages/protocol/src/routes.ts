@@ -131,6 +131,9 @@ import {
   PluginImportPreviewEnvelopeSchema,
   PluginInstallationEnvelopeSchema,
   PluginListEnvelopeSchema,
+  PostHogEventDefinitionListEnvelopeSchema,
+  PostHogEventsAccountStateEnvelopeSchema,
+  PostHogEventsConnectBodySchema,
   PresentationCursorSchema,
   ProjectBodySchema,
   ProjectConversationBodySchema,
@@ -3434,6 +3437,41 @@ export const connectGranolaAccountRoute = createRoute({
   },
 });
 
+export const connectPostHogEventsAccountRoute = createRoute({
+  method: "put",
+  path: "/v1/integration-accounts/posthog-events",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: PostHogEventsConnectBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "PostHog analytics events connected for the acting user.",
+      content: { "application/json": { schema: PostHogEventsAccountStateEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const listPostHogEventDefinitionsRoute = createRoute({
+  method: "get",
+  path: "/v1/integration-accounts/posthog-events/{integrationId}/events",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: { params: z.object({ integrationId: IntegrationAccountIdSchema }) },
+  responses: {
+    200: {
+      description: "PostHog event names visible to the connected project.",
+      content: { "application/json": { schema: PostHogEventDefinitionListEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const connectJamieEventsAccountRoute = createRoute({
   method: "put",
   path: "/v1/integration-accounts/jamie-events",
@@ -4369,6 +4407,8 @@ export type V1RouteHandlers = {
   disconnectAttioAccount: RouteHandler<typeof disconnectAttioAccountRoute>;
   connectFathomAccount: RouteHandler<typeof connectFathomAccountRoute>;
   connectGranolaAccount: RouteHandler<typeof connectGranolaAccountRoute>;
+  connectPostHogEventsAccount: RouteHandler<typeof connectPostHogEventsAccountRoute>;
+  listPostHogEventDefinitions: RouteHandler<typeof listPostHogEventDefinitionsRoute>;
   createJamieEventsEndpoint: RouteHandler<typeof createJamieEventsEndpointRoute>;
   connectJamieEventsAccount: RouteHandler<typeof connectJamieEventsAccountRoute>;
   connectConvexAccount: RouteHandler<typeof connectConvexAccountRoute>;
@@ -4590,6 +4630,8 @@ export function createV1Router(
       .openapi(disconnectAttioAccountRoute, handlers.disconnectAttioAccount)
       .openapi(connectFathomAccountRoute, handlers.connectFathomAccount)
       .openapi(connectGranolaAccountRoute, handlers.connectGranolaAccount)
+      .openapi(connectPostHogEventsAccountRoute, handlers.connectPostHogEventsAccount)
+      .openapi(listPostHogEventDefinitionsRoute, handlers.listPostHogEventDefinitions)
       .openapi(createJamieEventsEndpointRoute, handlers.createJamieEventsEndpoint)
       .openapi(connectJamieEventsAccountRoute, handlers.connectJamieEventsAccount)
       .openapi(connectConvexAccountRoute, handlers.connectConvexAccount)
@@ -6029,6 +6071,27 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       200,
     ),
+  connectPostHogEventsAccount: (c) =>
+    c.json(
+      {
+        data: {
+          state: {
+            provider: "posthog" as const,
+            connected: true,
+            status: "connected" as const,
+            integrationId: "gint_contract",
+            projectId: "12345",
+            region: "us" as const,
+            connectionLabel: "Project 12345 · US",
+            statusReason: null,
+          },
+        },
+        meta,
+      },
+      200,
+    ),
+  listPostHogEventDefinitions: (c) =>
+    c.json({ data: { events: [{ id: "signup", name: "signup" }], partial: false }, meta }, 200),
   createJamieEventsEndpoint: (c) =>
     c.json(
       {

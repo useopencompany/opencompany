@@ -3062,6 +3062,25 @@ export const granolaSyncState = productSchema.table("granola_sync_state", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// PostHog's event timestamp is supplied by the SDK and can arrive late or out of order. The poll
+// cursor therefore follows PostHog's server-side ingestion time, with the immutable event UUID as
+// a tie-breaker when several events share the same timestamp.
+export const posthogEventSyncState = productSchema.table("posthog_event_sync_state", {
+  integrationId: text("integration_id")
+    .primaryKey()
+    .references(() => integrations.id, { onDelete: "cascade" }),
+  userWorkosId: text("user_workos_id")
+    .notNull()
+    .references(() => users.workosUserId, { onDelete: "cascade" }),
+  // Keep PostHog's full DateTime64(6) text. JavaScript Date truncates microseconds and can make a
+  // tuple cursor reread or skip events that were ingested within the same millisecond.
+  ingestedAtCursor: text("ingested_at_cursor").notNull(),
+  eventUuidCursor: text("event_uuid_cursor").notNull().default(""),
+  lastPolledAt: timestamp("last_polled_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // Per-integration Fathom poll cursor. opencompany uses bounded created_after /
 // created_before windows for personal API-key connections. The initial cursor
 // is written when the connection is created, so live ingestion never backfills

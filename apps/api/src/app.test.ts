@@ -5704,6 +5704,12 @@ function fakeIntegrationAccounts(): Parameters<typeof createApiApp>[0]["integrat
     connectGranola: async () => {
       throw new Error("Unexpected Granola connect.");
     },
+    connectPostHogEvents: async () => {
+      throw new Error("Unexpected PostHog event connect.");
+    },
+    listPostHogEvents: async () => {
+      throw new Error("Unexpected PostHog event list.");
+    },
     createJamieEventsEndpoint: async () => {
       throw new Error("Unexpected Jamie event endpoint creation.");
     },
