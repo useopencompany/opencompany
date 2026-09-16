@@ -11,6 +11,7 @@ import {
   CODEX_REASONING_EFFORTS,
   claudeCodeModelSupportsReasoningEffort,
   getAgentModelDefinition,
+  isAgentModelSelectable,
   isCodexSubscriptionModel,
 } from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
@@ -105,6 +106,11 @@ import type { ActionApprovalRequest, CodexToolAction } from "@/components/chat/T
 import { useChatAttachments } from "@/components/chat/useChatAttachments";
 import { useCreditBalance } from "@/components/chat/useCreditBalance";
 import { useWorkflowComposer } from "@/components/chat/useWorkflowComposer";
+import {
+  CodingAgentOption,
+  ModelPickerTabs,
+  modelProviderLabel,
+} from "@/components/ModelPickerParts";
 import { ModelProviderIcon } from "@/components/ModelProviderIcon";
 import { useHeadlessChatTranscript } from "@/components/useHeadlessChatTranscript";
 import { useHydrated } from "@/components/useHydrated";
@@ -5691,7 +5697,7 @@ function CodingEngineModelPicker({
   const selectedModel =
     models.find((model) => model.id === value) ?? models.find((model) => model.id === defaultValue);
   const selectedLabel = selectedModel?.label ?? `${engineLabel} model`;
-  const visibleModels = models.filter((model) => model.id !== "anthropic/claude-opus-4.8");
+  const visibleModels = models.filter((model) => isAgentModelSelectable(model.id));
   const ModelIcon = provider === "anthropic" ? AnthropicIcon : OpenAIIcon;
 
   return (
@@ -6269,32 +6275,7 @@ function ModelPicker({
         sideOffset={10}
         className="w-[360px] max-w-[calc(100vw-1.5rem)] bg-surface p-0 text-ink"
       >
-        <div className="flex gap-1 border-b border-border p-2 pb-1.5">
-          <button
-            type="button"
-            aria-pressed={tab === "chat"}
-            onClick={() => setTab("chat")}
-            className={cn(
-              "flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-[12.5px] font-medium transition-colors duration-150",
-              tab === "chat" ? "bg-surface-active text-ink" : "text-ink-subtle hover:text-ink",
-            )}
-          >
-            <MessageSquare size={12} strokeWidth={2} />
-            Chat
-          </button>
-          <button
-            type="button"
-            aria-pressed={tab === "coding"}
-            onClick={() => setTab("coding")}
-            className={cn(
-              "flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-[12.5px] font-medium transition-colors duration-150",
-              tab === "coding" ? "bg-surface-active text-ink" : "text-ink-subtle hover:text-ink",
-            )}
-          >
-            <Code2 size={12} strokeWidth={2} />
-            Coding agents
-          </button>
-        </div>
+        <ModelPickerTabs value={tab} onChange={setTab} />
         {tab === "chat" ? (
           <Command className="bg-surface text-ink">
             <CommandInput placeholder="Search models..." />
@@ -6332,7 +6313,7 @@ function ModelPicker({
                   </CommandItem>
                 ) : null}
                 {MODELS.map((model) => {
-                  if (model.id === "anthropic/claude-opus-4.8") return null;
+                  if (!isAgentModelSelectable(model.id)) return null;
                   const isSelected =
                     !isAutoSelected && !isEngineSelected && model.id === selectedModel?.id;
                   const isSubscriptionCovered =
@@ -6412,96 +6393,8 @@ function ModelPicker({
   );
 }
 
-// Always shown, connected or not: a disconnected agent still needs a way to be
-// discovered and connected, rather than silently disappearing from the picker.
-function CodingAgentOption({
-  engine,
-  connected,
-  selected,
-  onSelect,
-  onConnect,
-}: {
-  engine: "codex" | "claude_code";
-  connected: boolean;
-  selected: boolean;
-  onSelect: () => void;
-  onConnect: () => void;
-}) {
-  const label = engine === "codex" ? "Codex" : "Claude Code";
-  const subscriptionLabel = engine === "codex" ? "ChatGPT" : "Claude";
-  const icon =
-    engine === "codex" ? (
-      <OpenAIIcon size={14} strokeWidth={1.85} className="shrink-0 text-ink-muted" />
-    ) : (
-      <AnthropicIcon size={14} strokeWidth={1.85} className="shrink-0 text-ink-muted" />
-    );
-  const header = (
-    <>
-      <Check
-        size={13}
-        strokeWidth={2}
-        className={cn("shrink-0 text-ink", selected ? "opacity-100" : "opacity-0")}
-      />
-      {icon}
-      <div className="min-w-0 flex-1">
-        <div
-          className={cn(
-            "truncate font-medium leading-4",
-            connected ? "text-ink" : "text-ink-muted",
-          )}
-        >
-          {label}
-        </div>
-        <div className="truncate text-[11.5px] leading-4 text-ink-subtle">
-          {connected
-            ? `Included with your ${subscriptionLabel} subscription`
-            : `Connect your ${subscriptionLabel} account to use this`}
-        </div>
-      </div>
-    </>
-  );
-
-  if (!connected) {
-    return (
-      <div className="flex flex-col gap-2 rounded-md px-2 py-1.5">
-        <div className="flex items-center gap-2">{header}</div>
-        <button
-          type="button"
-          onClick={onConnect}
-          // Lines up with the label text above: the check icon (13px) plus its gap-2 (8px).
-          className="ml-[21px] self-start rounded-full border border-border-strong bg-surface px-3 py-1 text-[11.5px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover"
-        >
-          Connect {label}
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <button
-      type="button"
-      aria-label={`${label}: included with your ${subscriptionLabel} subscription`}
-      onClick={onSelect}
-      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors duration-150 hover:bg-surface-hover"
-    >
-      {header}
-    </button>
-  );
-}
-
 function findModel(id: string) {
   return MODELS.find((model) => model.id === id);
-}
-
-function modelProviderLabel(id: string) {
-  const provider = id.split("/")[0] ?? "";
-  if (provider === "alibaba") return "Alibaba";
-  if (provider === "anthropic") return "Anthropic";
-  if (provider === "deepseek") return "DeepSeek";
-  if (provider === "moonshotai") return "Moonshot";
-  if (provider === "openai") return "OpenAI";
-  if (provider === "xai") return "SpaceXAI";
-  return provider;
 }
 
 function SubmitButton({

@@ -1,64 +1,60 @@
 import {
+  AGENT_MODEL_PICKER_HIDDEN_IDS,
   type AgentModelDefinition,
   CLAUDE_CODE_AGENT_MODEL_IDS,
   CODEX_AGENT_MODEL_IDS,
   CODEX_REASONING_EFFORTS,
   claudeCodeModelSupportsReasoningEffort,
   getAgentModelDefinition,
+  isAgentModelSelectable,
   isClaudeCodeModelId,
   isCodexModelId,
   isCodexReasoningEffort,
   isCodexSubscriptionModel,
+  OPENCOMPANY_CHAT_MODEL_IDS,
 } from "@opencompany/agent-runtime";
 import type { AgentModelId, CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import type { HarnessEngine } from "@opencompany/db/product-schema";
 
-// The token is stored on a workflow step and can also be used as an inline
-// `@<token>` mention. Model metadata comes from the shared agent catalog.
-const WORKFLOW_MODEL_CONFIG = [
-  {
-    token: "kimi-k2.6",
+type WorkflowModelConfig<Token extends string = string> = {
+  token: Token;
+  engine: HarnessEngine;
+  modelId: AgentModelId;
+  label?: string;
+  hint?: string;
+};
+
+type WorkflowTokenForModelId<ModelId extends AgentModelId> =
+  ModelId extends `anthropic/claude-${infer Model}`
+    ? Model
+    : ModelId extends `${string}/${infer Model}`
+      ? Model
+      : never;
+
+type SharedChatWorkflowModelToken = Exclude<
+  WorkflowTokenForModelId<(typeof OPENCOMPANY_CHAT_MODEL_IDS)[number]>,
+  WorkflowTokenForModelId<(typeof AGENT_MODEL_PICKER_HIDDEN_IDS)[number]>
+>;
+
+// Workflow tokens are the provider-free model id, with Anthropic's redundant `claude-` prefix
+// removed for compatibility with existing workflow documents and inline @mentions.
+function workflowTokenForModelId<ModelId extends AgentModelId>(
+  modelId: ModelId,
+): WorkflowTokenForModelId<ModelId> {
+  const providerFreeId = modelId.split("/")[1] ?? modelId;
+  return providerFreeId.replace(/^claude-/, "") as WorkflowTokenForModelId<ModelId>;
+}
+
+// Normal workflow models come directly from the same ordered catalog as the main chat composer.
+// The token is the only workflow-specific metadata; labels and descriptions stay in the catalog.
+const SHARED_CHAT_WORKFLOW_MODEL_CONFIG: readonly WorkflowModelConfig<SharedChatWorkflowModelToken>[] =
+  OPENCOMPANY_CHAT_MODEL_IDS.filter(isAgentModelSelectable).map((modelId) => ({
+    token: workflowTokenForModelId(modelId) as SharedChatWorkflowModelToken,
     engine: "opencompany",
-    modelId: "moonshotai/kimi-k2.6",
-    hint: "Default — fast and cost-conscious",
-  },
-  {
-    token: "kimi-k3",
-    engine: "opencompany",
-    modelId: "moonshotai/kimi-k3",
-    hint: "Premium Kimi reasoning",
-  },
-  {
-    token: "glm-5.2",
-    engine: "opencompany",
-    modelId: "zai/glm-5.2",
-    hint: "Large-context research",
-  },
-  {
-    token: "sonnet-5",
-    engine: "opencompany",
-    modelId: "anthropic/claude-sonnet-5",
-    hint: "Premium writing and judgment",
-  },
-  {
-    token: "gpt-5.6-sol",
-    engine: "opencompany",
-    modelId: "openai/gpt-5.6-sol",
-    hint: "Frontier GPT for complex, multi-step work",
-  },
-  {
-    token: "gpt-5.6-terra",
-    engine: "opencompany",
-    modelId: "openai/gpt-5.6-terra",
-    hint: "Balanced GPT for everyday work",
-  },
-  // Superseded by the 5.6 family above, kept so steps already saved on this token keep running.
-  {
-    token: "gpt-5.5",
-    engine: "opencompany",
-    modelId: "openai/gpt-5.5",
-    hint: "Coding and sharp analysis",
-  },
+    modelId,
+  }));
+
+const CLOUD_WORKFLOW_MODEL_CONFIG = [
   {
     token: "codex",
     engine: "codex",
@@ -73,15 +69,16 @@ const WORKFLOW_MODEL_CONFIG = [
     label: "Claude Code",
     hint: "Cloud coding agent (needs Claude Code connected)",
   },
-] as const satisfies readonly {
-  token: string;
-  engine: HarnessEngine;
-  modelId: AgentModelId;
-  label?: string;
-  hint: string;
-}[];
+] as const satisfies readonly WorkflowModelConfig[];
 
-export type WorkflowModelToken = (typeof WORKFLOW_MODEL_CONFIG)[number]["token"];
+const WORKFLOW_MODEL_CONFIG: readonly WorkflowModelConfig<WorkflowModelToken>[] = [
+  ...SHARED_CHAT_WORKFLOW_MODEL_CONFIG,
+  ...CLOUD_WORKFLOW_MODEL_CONFIG,
+];
+
+export type WorkflowModelToken =
+  | SharedChatWorkflowModelToken
+  | (typeof CLOUD_WORKFLOW_MODEL_CONFIG)[number]["token"];
 
 export type WorkflowModelOption = AgentModelDefinition & {
   token: WorkflowModelToken;
@@ -102,12 +99,18 @@ export type WorkflowStepSettingsInput = {
 };
 
 export const WORKFLOW_MODEL_OPTIONS: readonly WorkflowModelOption[] = WORKFLOW_MODEL_CONFIG.map(
-  ({ modelId, ...option }) => ({
-    ...requireAgentModelDefinition(modelId),
-    ...option,
-  }),
+  ({ modelId, hint, ...option }) => {
+    const model = requireAgentModelDefinition(modelId);
+    return {
+      ...model,
+      ...option,
+      hint: hint ?? model.description,
+    };
+  },
 );
 
+// Keep the workflow default cost-conscious even though the interactive chat default is Kimi K3.
+// Scheduled and event-driven workflows can run much more frequently than a user-driven chat.
 export const DEFAULT_WORKFLOW_MODEL_TOKEN: WorkflowModelToken = "kimi-k2.6";
 export const DEFAULT_WORKFLOW_REASONING_EFFORT: CodexReasoningEffort = "high";
 export const WORKFLOW_REASONING_EFFORT_OPTIONS = CODEX_REASONING_EFFORTS;
