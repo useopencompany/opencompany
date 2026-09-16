@@ -4016,6 +4016,7 @@ export const IdentityUserSchema = z
     sidebarProjectsEnabled: z.boolean(),
     subagentsEnabled: z.boolean(),
     pastSessionAccessEnabled: z.boolean(),
+    imessageEnabled: z.boolean(),
     /** @deprecated Wiki is always enabled. */
     wikiEnabled: z.literal(true),
     taskViewMode: TaskViewModeSchema,
@@ -4085,6 +4086,7 @@ export const UserPreferencesSchema = z
     sidebarProjectsEnabled: z.boolean(),
     subagentsEnabled: z.boolean(),
     pastSessionAccessEnabled: z.boolean(),
+    imessageEnabled: z.boolean(),
   })
   .strict()
   .openapi("UserPreferences");
@@ -4104,6 +4106,7 @@ export const UpdateUserPreferencesBodySchema = z
     sidebarProjectsEnabled: z.boolean().optional(),
     subagentsEnabled: z.boolean().optional(),
     pastSessionAccessEnabled: z.boolean().optional(),
+    imessageEnabled: z.boolean().optional(),
   })
   .strict()
   .refine((body: Record<string, unknown>) => Object.keys(body).length > 0, {
@@ -4323,6 +4326,32 @@ export const SlackBotWorkspaceSettingsEnvelopeSchema = z
   .object({ data: SlackBotWorkspaceSettingsSchema, meta: ProtocolMetadataSchema })
   .strict()
   .openapi("SlackBotWorkspaceSettingsEnvelope");
+
+// Settings → Channels → iMessage. `binding` is null until the member asks for a link code.
+export const ImessageSettingsSchema = z
+  .object({
+    configured: z.boolean(),
+    lineHandle: z.string().max(64).nullable(),
+    binding: z
+      .object({
+        status: z.enum(["pending", "linked"]),
+        linkCode: z.string().max(12).nullable(),
+        linkCodeExpiresAt: TimestampSchema.nullable(),
+        handle: z.string().max(64).nullable(),
+        conversationId: z.string().max(128).nullable(),
+        linkedAt: TimestampSchema.nullable(),
+      })
+      .strict()
+      .nullable(),
+  })
+  .strict()
+  .openapi("ImessageSettings");
+export type ImessageSettingsDto = z.infer<typeof ImessageSettingsSchema>;
+
+export const ImessageSettingsEnvelopeSchema = z
+  .object({ data: ImessageSettingsSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("ImessageSettingsEnvelope");
 
 export const SlackBotDestinationSchema = z
   .object({

@@ -318,6 +318,8 @@ describe("v1 protocol contract", () => {
       "/v1/read-models/{readModel}",
       "/v1/me/preferences",
       "/v1/me/mcp-setup",
+      "/v1/me/imessage",
+      "/v1/me/imessage/link",
       "/v1/feedback",
       "/v1/repo-configs",
       "/v1/repo-configs/{repositoryExternalId}/env",

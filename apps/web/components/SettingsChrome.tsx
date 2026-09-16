@@ -1,5 +1,6 @@
 "use client";
 
+import type { FeatureFlags } from "@opencompany/agent/feature-flags";
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowLeft,
@@ -13,6 +14,7 @@ import {
   PlugZap,
   SearchCheck,
   SlidersHorizontal,
+  Smartphone,
   UserRound,
   Users,
 } from "lucide-react";
@@ -27,6 +29,8 @@ type SettingsNavItem = {
   label: string;
   badge?: string;
   adminOnly?: boolean;
+  // Shown only while the member has this beta flag on.
+  featureFlag?: keyof FeatureFlags;
   isActive?: (pathname: string) => boolean;
 };
 
@@ -117,6 +121,14 @@ const NAV_GROUPS: SettingsNavGroup[] = [
         adminOnly: true,
         isActive: (pathname) => pathname === "/settings/workspace/slack",
       },
+      {
+        href: "/settings/imessage",
+        icon: Smartphone,
+        label: "iMessage",
+        badge: "Beta",
+        featureFlag: "imessage",
+        isActive: (pathname) => pathname === "/settings/imessage",
+      },
     ],
   },
 ];
@@ -158,7 +170,9 @@ export function SettingsSidebar({
   showCollapseButton?: boolean;
 }) {
   const pathname = usePathname();
-  const isAdmin = useAppDataOptional()?.workspace.role === "admin";
+  const appData = useAppDataOptional();
+  const isAdmin = appData?.workspace.role === "admin";
+  const featureFlags = appData?.featureFlags;
 
   return (
     <aside
@@ -210,6 +224,7 @@ export function SettingsSidebar({
               </div>
               {group.items
                 .filter((item) => !item.adminOnly || isAdmin)
+                .filter((item) => !item.featureFlag || featureFlags?.[item.featureFlag] === true)
                 .map((item) => (
                   <SettingsNavRow
                     key={item.href}

@@ -204,6 +204,10 @@
       "types": "./src/linear.ts",
       "default": "./src/linear.ts"
     },
+    "./imessage": {
+      "types": "./src/imessage.ts",
+      "default": "./src/imessage.ts"
+    },
     "./slack-bot": {
       "types": "./src/slack-bot.ts",
       "default": "./src/slack-bot.ts"

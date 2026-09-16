@@ -1664,6 +1664,7 @@ function codexSession(overrides: Partial<CodexChatSession> = {}): CodexChatSessi
     userWorkosId: "user_1",
     chatSessionId: "goat_chat_1",
     engine: "codex",
+    harness: "chat",
     model: "gpt-5.5",
     brainRef: null,
     workspaceId: "workspace_1",

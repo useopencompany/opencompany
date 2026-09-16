@@ -4802,6 +4802,9 @@
           "pastSessionAccessEnabled": {
             "type": "boolean"
           },
+          "imessageEnabled": {
+            "type": "boolean"
+          },
           "wikiEnabled": {
             "type": "boolean",
             "enum": [
@@ -4869,6 +4872,7 @@
           "sidebarProjectsEnabled",
           "subagentsEnabled",
           "pastSessionAccessEnabled",
+          "imessageEnabled",
           "wikiEnabled",
           "taskViewMode",
           "taskTimeRange",
@@ -10960,6 +10964,9 @@
           },
           "pastSessionAccessEnabled": {
             "type": "boolean"
+          },
+          "imessageEnabled": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -10973,7 +10980,8 @@
           "reviewInboxEnabled",
           "sidebarProjectsEnabled",
           "subagentsEnabled",
-          "pastSessionAccessEnabled"
+          "pastSessionAccessEnabled",
+          "imessageEnabled"
         ],
         "additionalProperties": false
       },
@@ -11025,6 +11033,9 @@
             "type": "boolean"
           },
           "pastSessionAccessEnabled": {
+            "type": "boolean"
+          },
+          "imessageEnabled": {
             "type": "boolean"
           }
         },
@@ -11089,6 +11100,88 @@
         },
         "required": [
           "preferredClient"
+        ],
+        "additionalProperties": false
+      },
+      "ImessageSettingsEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ImessageSettings"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "ImessageSettings": {
+        "type": "object",
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "lineHandle": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 64
+          },
+          "binding": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "linked"
+                ]
+              },
+              "linkCode": {
+                "type": "string",
+                "nullable": true,
+                "maxLength": 12
+              },
+              "linkCodeExpiresAt": {
+                "type": "string",
+                "nullable": true,
+                "format": "date-time"
+              },
+              "handle": {
+                "type": "string",
+                "nullable": true,
+                "maxLength": 64
+              },
+              "conversationId": {
+                "type": "string",
+                "nullable": true,
+                "maxLength": 128
+              },
+              "linkedAt": {
+                "type": "string",
+                "nullable": true,
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "status",
+              "linkCode",
+              "linkCodeExpiresAt",
+              "handle",
+              "conversationId",
+              "linkedAt"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "configured",
+          "lineHandle",
+          "binding"
         ],
         "additionalProperties": false
       },
@@ -24608,6 +24701,115 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/McpSetupEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/me/imessage": {
+      "get": {
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The acting user's iMessage assistant channel state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImessageSettingsEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The phone is unlinked; the Conversation and its history remain.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImessageSettingsEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/me/imessage/link": {
+      "post": {
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A fresh link code the user texts to the opencompany line.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImessageSettingsEnvelope"
                 }
               }
             }

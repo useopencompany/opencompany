@@ -11,6 +11,7 @@ import { createGoogleAdminMcpService } from "@opencompany/agent/integrations/goo
 import { createGoogleCalendarMcpService } from "@opencompany/agent/integrations/google-calendar-mcp-server";
 import { getAvailableHarnessTools } from "@opencompany/agent/integrations/google-data";
 import { createGoogleDriveMcpService } from "@opencompany/agent/integrations/google-drive-mcp-server";
+import { imessageConfig } from "@opencompany/agent/integrations/imessage";
 import { createMcpService } from "@opencompany/agent/mcp-http";
 import {
   createPluginGatewayLifecycle,
@@ -71,6 +72,8 @@ import { createGitHubUserIngress } from "./github-user-ingress";
 import { createGoogleIngress } from "./google-ingress";
 import { createHubspotIngress } from "./hubspot-ingress";
 import { createIdentityService } from "./identity";
+import { createImessageIngress } from "./imessage-ingress";
+import { createImessageSettingsService } from "./imessage-settings";
 import { createIntegrationAccountService } from "./integration-accounts";
 import { createJamieIngress } from "./jamie-ingress";
 import { createLinearIngress } from "./linear-ingress";
@@ -240,6 +243,10 @@ const app = createApiApp({
       }),
   }),
   slackBotSettings: createSlackBotSettingsService({ db: database.db }),
+  imessageSettings: createImessageSettingsService({
+    db: database.db,
+    lineHandle: () => imessageConfig()?.lineHandle ?? null,
+  }),
   mcp: createMcpService({
     // The API-hosted MCP tool runs the same command service in-process — no
     // loopback HTTP. The gateway resolves wiki access and reauthorizes the actor
@@ -387,6 +394,11 @@ const app = createApiApp({
     db: database.db,
     identify: identityVerifier,
     runner: runnerClient,
+  }),
+  imessageIngress: createImessageIngress({
+    db: database.db,
+    chat,
+    defaultModel: process.env.OPENCOMPANY_DEFAULT_CHAT_MODEL ?? "moonshotai/kimi-k3",
   }),
   stripeIngress: createStripeIngress({
     db: database.db,

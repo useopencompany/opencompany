@@ -1587,6 +1587,7 @@ function claudeSession(overrides: Partial<CodexChatSession> = {}): CodexChatSess
     userWorkosId: "user_1",
     chatSessionId: "goat_chat_1",
     engine: "claude_code",
+    harness: "chat",
     model: "claude-sonnet-5",
     brainRef: null,
     workspaceId: "workspace_1",

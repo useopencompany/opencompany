@@ -6,6 +6,7 @@ export type FeatureFlags = {
   sidebarProjects: boolean;
   subagents: boolean;
   pastSessionAccess?: boolean;
+  imessage: boolean;
 };
 
 export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
@@ -16,6 +17,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   sidebarProjects: false,
   subagents: false,
   pastSessionAccess: false,
+  imessage: false,
 };
 
 export function featureFlagsFromUser(input: {
@@ -26,6 +28,7 @@ export function featureFlagsFromUser(input: {
   sidebarProjectsEnabled?: boolean | null | undefined;
   pastSessionAccessEnabled?: boolean | null | undefined;
   subagentsEnabled?: boolean | null | undefined;
+  imessageEnabled?: boolean | null | undefined;
 }): FeatureFlags {
   return {
     bots: input.botsEnabled === true,
@@ -35,5 +38,6 @@ export function featureFlagsFromUser(input: {
     sidebarProjects: input.sidebarProjectsEnabled === true,
     subagents: input.subagentsEnabled === true,
     pastSessionAccess: input.pastSessionAccessEnabled === true,
+    imessage: input.imessageEnabled === true,
   };
 }

@@ -244,6 +244,7 @@ async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostCo
   const [row] = await getDb()
     .select({
       conversationKind: chatSessions.kind,
+      harness: codexChatSessions.harness,
       userWorkosId: codexChatSessions.userWorkosId,
       workspaceId: codexChatSessions.workspaceId,
       chatSessionId: codexChatSessions.chatSessionId,
@@ -311,9 +312,11 @@ async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostCo
     lastName: row.lastName,
     timezone: row.timezone,
     slackChannelEnabled: row.slackChannelEnabled === true,
-    automationToolsEnabled: row.workspaceRole === "admin",
+    // The iMessage personal agent is a phone surface: no workflow, schedule or subagent tools
+    // even for admins. Its runner does not wire those runners either; this is the server fence.
+    automationToolsEnabled: row.workspaceRole === "admin" && row.harness !== "personal_agent",
     // Read-only and personal, so unlike the automation tools this needs no admin role.
-    subagentsEnabled: row.subagentsEnabled,
+    subagentsEnabled: row.subagentsEnabled && row.harness !== "personal_agent",
     skillToolsEnabled: true,
   };
 }

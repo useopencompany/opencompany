@@ -110,6 +110,10 @@ const groups = {
       "OPENCOMPANY_SLACK_BOT_CLIENT_SECRET",
       "OPENCOMPANY_SLACK_BOT_SIGNING_SECRET",
       "OPENCOMPANY_SLACK_BOT_STATE_SECRET",
+      // iMessage personal assistant: webhook ingress and pairing replies (messages.dev).
+      "MESSAGES_API_KEY",
+      "MESSAGES_WEBHOOK_SECRET",
+      "MESSAGES_LINE_HANDLE",
       // Engine auth control calls use the runner's internal transport. The
       // public URL is the guaranteed fallback; the internal URL is optional.
       "RUNNER_PUBLIC_URL",
@@ -205,6 +209,9 @@ const groups = {
       "BETTER_STACK_ERRORS_DSN",
       "DATABASE_URL",
       "RUNNER_INTERNAL_TOKEN",
+      // iMessage personal assistant sends from the runner (messages.dev).
+      "MESSAGES_API_KEY",
+      "MESSAGES_LINE_HANDLE",
       // Runner→API canonical origin and bearer for the internal wiki command
       // endpoint. Agent wiki writes fail closed if either is missing.
       "OPENCOMPANY_API_ORIGIN",
