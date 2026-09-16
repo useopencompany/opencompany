@@ -190,7 +190,7 @@ export function registerAcpToolsMcpRoute(
           },
         );
       }
-      if (authorizedContext.taskConversation) {
+      if (authorizedContext.slackChannelEnabled) {
         server.registerTool(
           SLACK_BOT_TOOL_NAME,
           {
@@ -199,8 +199,8 @@ export function registerAcpToolsMcpRoute(
           },
           async (args) => {
             const current = await authorizeOperation();
-            if (!current?.taskConversation)
-              throw new Error("This workflow turn is no longer active.");
+            if (!current?.slackChannelEnabled)
+              throw new Error("Slack is no longer enabled for this workflow.");
             const result = await postWorkflowSlackMessage(
               {
                 runId: capability.codexChatTurnId,

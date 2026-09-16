@@ -1,4 +1,5 @@
 import { createProductChatToolContext } from "@opencompany/agent/chat-agent";
+import { SLACK_BOT_TOOL_NAME } from "@opencompany/agent/chat-ui";
 import { createProductChatSystemPrompt } from "@opencompany/agent/prompts";
 import type { ChatHostBootstrap, ChatHostToolGatewayRequest } from "@opencompany/agent-runtime";
 import { assert, describe, expect, it, vi } from "vitest";
@@ -32,6 +33,35 @@ const bootstrap: ChatHostBootstrap = {
 };
 
 describe("loadHostTools", () => {
+  it("exposes the Slack bot tool to an enabled opencompany workflow run", async () => {
+    const execute = vi.fn(async ({ request }: { request: ChatHostToolGatewayRequest }) => ({
+      ok: true as const,
+      result:
+        request.operation === "bootstrap"
+          ? { ...bootstrap, automationToolsEnabled: false, slackChannelEnabled: true }
+          : { deliveryId: "delivery_1", status: "pending" },
+    }));
+    const hostTools = await loadHostTools(context(), { execute });
+    assert(hostTools);
+    const slackTool = createProductChatToolContext({
+      model: "moonshotai/kimi-k2.6" as never,
+      ...hostTools,
+      runWiki: hostTools.runWiki as never,
+    }).tools[SLACK_BOT_TOOL_NAME] as { execute: (input: unknown) => Promise<unknown> };
+
+    await expect(
+      slackTool.execute({ channel: "#product", text: "Done.", messageKey: "summary" }),
+    ).resolves.toMatchObject({ deliveryId: "delivery_1" });
+    expect(execute).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({
+          operation: "post_slack_message",
+          input: { channel: "#product", text: "Done.", messageKey: "summary" },
+        }),
+      }),
+    );
+  });
+
   it("keeps task execution tools but removes automation tools and routing instructions", async () => {
     const hostTools = await loadHostTools(context(), {
       execute: async () => ({

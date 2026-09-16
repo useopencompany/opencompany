@@ -88,10 +88,10 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
         subscription.session_id AS "sessionId", task.id AS "taskId", task.user_workos_id AS "ownerId", event.payload, event.status, event.run_id AS "runId",
         (subscription.status = 'closed' OR subscription.expires_at <= now() OR task.archived_at IS NOT NULL
           OR conversation.closed_at IS NOT NULL
-          -- Turning Slack off retires the workflow's open threads too. Without this the reply
-          -- would start a run that has no way to answer, and the person waiting in Slack would
-          -- get the generic "needs attention" notice instead of a closed thread.
-          OR workflow.slack_channel_enabled IS FALSE) AS closed,
+          -- Turning Slack off or retiring the workflow closes its open threads too. Without this
+          -- the reply would start a run that has no way to answer, and the person waiting in Slack
+          -- would get the generic "needs attention" notice instead of a closed thread.
+          OR workflow.id IS NULL OR workflow.slack_channel_enabled IS FALSE) AS closed,
         run.status AS "runStatus",
         COALESCE(workflow.slack_bot_display_name, '') AS "botDisplayName",
         jsonb_build_object('id', integration.id, 'workspaceId', integration.workspace_id,
@@ -99,7 +99,11 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
       FROM goat.subscription_events event
       JOIN goat.session_subscriptions subscription ON subscription.id = event.subscription_id
       JOIN goat.tasks task ON task.session_id = subscription.session_id AND task.workspace_id = subscription.workspace_id
-      LEFT JOIN goat.workflows workflow ON workflow.id = task.workflow_id
+      -- workflow_id is a slug; the time fence prevents a later workflow reusing it from taking
+      -- authority over this historical Task and its Slack thread.
+      LEFT JOIN goat.workflows workflow ON workflow.workspace_id = task.workspace_id
+        AND workflow.slug = task.workflow_id AND workflow.archived_at IS NULL
+        AND workflow.created_at <= task.created_at
       JOIN goat.chat_sessions conversation ON conversation.id = task.session_id
       JOIN goat.integrations integration ON integration.id = subscription.integration_id AND integration.workspace_id = subscription.workspace_id
         AND integration.external_id = subscription.source_key->>'teamId'

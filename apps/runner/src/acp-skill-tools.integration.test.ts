@@ -106,6 +106,7 @@ describe("external engine Skill persistence through the MCP route", () => {
           workspaceName: "Test workspace",
           workspaceSlug: "test-workspace",
           skillToolsEnabled: true,
+          slackChannelEnabled: false,
           legacyBrainEnabled: false,
           conversationId: "conversation_1",
           sandboxId: "sandbox_1",
