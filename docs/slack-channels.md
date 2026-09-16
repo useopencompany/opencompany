@@ -24,8 +24,11 @@ action, which can also post messages. It queues a root post with a stable
 Conversation.
 
 Its description carries the house writing style, because the tool is the only Slack-facing
-instruction a workflow run reliably sees: lead with the outcome, short sentences, and split a long
-update rather than posting a wall of text. Splitting is a real capability, not just advice —
+instruction a workflow run reliably sees. A channel message is one or two spoken sentences saying
+what the run is doing and what it wants back; the real question goes in that message's thread, kept
+to what you would ask a busy CTO for advice. Internal identifiers, headings, and numbered option
+lists are out in both, because a Slack reader has not read the session and anyone who wants the
+full reasoning can open it. Splitting is a real capability, not just advice —
 passing `replyToMessageKey` with an earlier message's `messageKey` queues the new message as a
 reply in that message's thread, inheriting its channel. A reply is queued before Slack has
 timestamped its root, so it stores `thread_parent_id` instead of a `thread_ts` and stays unclaimed
@@ -49,6 +52,22 @@ A paused Run awaiting approval stays paused; later Slack replies wait. Expired, 
 archived, or closed work cannot silently restart. Human replies to a closed thread receive
 an explicit closed-thread response. Disconnecting permanently closes existing subscriptions;
 reconnecting enables new workflow posts.
+
+## Thread progress reactions
+
+A reply can wait minutes for its answer, so the worker marks the inbound message itself: 👀 when it
+starts a Run for that reply, then ✅ once that Run's reply lands in the thread. Everything else is
+⚠️: a failed or interrupted Run, a closed thread, a Run that finished without ever calling the
+Slack tool, or a reply Slack never took. The mark lands on the person's own message, so a thread
+never gains an extra post just to say "working on it", and the check mark only ever means "this
+message got its reply". Slack has no replace, so the swap adds the new mark before clearing 👀 and a
+half-failed swap leaves the message over-marked rather than unmarked.
+
+This is deliberately not a tool the Run calls. Progress is worker state, and a tool would need its
+own harness instructions, would only fire once the model chose to call it, and would go silent in
+exactly the case that most needs a signal: a Run that dies before it answers. Reactions are
+best-effort — a failed one is logged and dropped rather than retried, and an install without
+`reactions:write` runs its threads unmarked.
 
 ## Persistence and recovery
 
@@ -76,14 +95,15 @@ Use the existing `OPENCOMPANY_SLACK_BOT_*` credentials. OAuth still uses
 `/api/integrations/slack-bot/start` and `/api/integrations/slack-bot/callback`; signed events use
 `/webhooks/slack-bot/events` on the API. Subscribe to `message.channels`, `app_uninstalled`, and
 `tokens_revoked`. Required bot scopes: `chat:write`, `channels:read`, `channels:history`,
-and `users:read`. New installs additionally request `users:read.email` and `chat:write.customize`;
-an install that predates either keeps delivering, and Channels settings asks an admin to reconnect.
-Without `chat:write.customize` a workflow's display name and avatar are dropped and the post uses
-the default bot identity rather than failing. Custom avatars must be public HTTPS image URLs
-because Slack downloads the image when it posts the message. New installs no longer request DM,
-private-channel, mention, or reaction scopes. Old grants may remain until the Slack app is
-reinstalled; ingress ignores
-those event types. Stop configuring the legacy Wiki answer bot's Brain destinations.
+and `users:read`. New installs additionally request `users:read.email`, `chat:write.customize`,
+and `reactions:write`; an install that predates any of them keeps delivering, and Channels settings
+asks an admin to reconnect. Without `chat:write.customize` a workflow's display name and avatar are
+dropped and the post uses the default bot identity rather than failing; without `reactions:write`
+thread replies get no progress reaction. Custom avatars must be public HTTPS image URLs
+because Slack downloads the image when it posts the message. New installs still do not request DM,
+private-channel, mention, or reaction *event* scopes - `reactions:write` only lets the bot mark a
+message, not read anyone else's reactions. Old grants may remain until the Slack app is
+reinstalled; ingress ignores those event types. Stop configuring the legacy Wiki answer bot's Brain destinations.
 
 Slack contracts: [posting and thread timestamps](https://docs.slack.dev/reference/methods/chat.postmessage/),
 [message metadata](https://docs.slack.dev/messaging/message-metadata/),

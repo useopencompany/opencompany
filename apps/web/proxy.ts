@@ -15,7 +15,14 @@ const UNAUTHENTICATED_PATHS = new Set([
   "/mcp",
   "/changelog",
 ]);
-const UNAUTHENTICATED_PREFIXES = ["/.well-known/oauth-", "/share/", "/auth/desktop/"];
+// `/workflow-avatars/` is fetched by Slack when it renders a workflow post, so it can never be
+// behind a session.
+const UNAUTHENTICATED_PREFIXES = [
+  "/.well-known/oauth-",
+  "/share/",
+  "/auth/desktop/",
+  "/workflow-avatars/",
+];
 
 export default async function proxy(request: NextRequest) {
   const localHttpsRedirect = localHttpsRedirectUrl(request);

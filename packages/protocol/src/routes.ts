@@ -225,6 +225,8 @@ import {
   WorkflowMemoryEnvelopeSchema,
   WorkflowMutationEnvelopeSchema,
   WorkflowPageSchema,
+  WorkflowSlackAvatarUploadBodySchema,
+  WorkflowSlackAvatarUploadEnvelopeSchema,
   WorkflowUpdateEnvelopeSchema,
   WorkspaceActivationEnvelopeSchema,
   WorkspaceCapabilityMutationEnvelopeSchema,
@@ -552,6 +554,34 @@ export const clearWorkflowMemoryRoute = createRoute({
     200: {
       description: "Workflow memory content cleared. The enabled toggle is left untouched.",
       content: { "application/json": { schema: WorkflowMemoryEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+// The asset id is the stored blob's filename: a v4 UUID plus the validated extension. Pinning the
+// shape here keeps the public route from ever resolving a pathname outside the avatar namespace.
+export const WorkflowAvatarAssetIdSchema = z
+  .string()
+  .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(?:png|jpg|webp)$/u)
+  .openapi("WorkflowAvatarAssetId");
+
+export const uploadWorkflowSlackAvatarRoute = createRoute({
+  method: "post",
+  path: "/v1/workflows/{workflowId}/slack-avatar",
+  tags: ["Workflows"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ workflowId: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "multipart/form-data": { schema: WorkflowSlackAvatarUploadBodySchema } },
+    },
+  },
+  responses: {
+    201: {
+      description: "Avatar stored and addressable by an unguessable public URL.",
+      content: { "application/json": { schema: WorkflowSlackAvatarUploadEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -2430,6 +2460,16 @@ export const downloadPublicChatArtifactRoute = createRoute({
   responses: { 200: binaryResponse, default: errorResponse },
 });
 
+export const downloadPublicWorkflowAvatarRoute = createRoute({
+  method: "get",
+  path: "/public/workflow-avatars/{workflowId}/{assetId}",
+  tags: ["Public Workflow avatars"],
+  request: {
+    params: z.object({ workflowId: ResourceIdSchema, assetId: WorkflowAvatarAssetIdSchema }),
+  },
+  responses: { 200: binaryResponse, default: errorResponse },
+});
+
 export const getEngineRuntimeStatusRoute = createRoute({
   method: "get",
   path: "/v1/conversations/{conversationId}/engine-session/runtime",
@@ -4168,6 +4208,7 @@ export type V1RouteHandlers = {
   getWorkflowMemory: RouteHandler<typeof getWorkflowMemoryRoute>;
   updateWorkflowMemory: RouteHandler<typeof updateWorkflowMemoryRoute>;
   clearWorkflowMemory: RouteHandler<typeof clearWorkflowMemoryRoute>;
+  uploadWorkflowSlackAvatar: RouteHandler<typeof uploadWorkflowSlackAvatarRoute>;
   getBrainSnapshot: RouteHandler<typeof getBrainSnapshotRoute>;
   getBrainOverview: RouteHandler<typeof getBrainOverviewRoute>;
   listBrainSourceItems: RouteHandler<typeof listBrainSourceItemsRoute>;
@@ -4307,6 +4348,7 @@ export type V1RouteHandlers = {
   getPublicChatShareMetadata: RouteHandler<typeof getPublicChatShareMetadataRoute>;
   downloadPublicChatAttachment: RouteHandler<typeof downloadPublicChatAttachmentRoute>;
   downloadPublicChatArtifact: RouteHandler<typeof downloadPublicChatArtifactRoute>;
+  downloadPublicWorkflowAvatar: RouteHandler<typeof downloadPublicWorkflowAvatarRoute>;
   getEngineRuntimeStatus: RouteHandler<typeof getEngineRuntimeStatusRoute>;
   createEngineRuntimeAccess: RouteHandler<typeof createEngineRuntimeAccessRoute>;
   getRun: RouteHandler<typeof getRunRoute>;
@@ -4403,6 +4445,7 @@ export function createV1Router(
       .openapi(getWorkflowMemoryRoute, handlers.getWorkflowMemory)
       .openapi(updateWorkflowMemoryRoute, handlers.updateWorkflowMemory)
       .openapi(clearWorkflowMemoryRoute, handlers.clearWorkflowMemory)
+      .openapi(uploadWorkflowSlackAvatarRoute, handlers.uploadWorkflowSlackAvatar)
       .openapi(getBrainSnapshotRoute, handlers.getBrainSnapshot)
       .openapi(getBrainOverviewRoute, handlers.getBrainOverview)
       .openapi(listBrainSourceItemsRoute, handlers.listBrainSourceItems)
@@ -4523,6 +4566,7 @@ export function createV1Router(
       .openapi(getPublicChatShareMetadataRoute, handlers.getPublicChatShareMetadata)
       .openapi(downloadPublicChatAttachmentRoute, handlers.downloadPublicChatAttachment)
       .openapi(downloadPublicChatArtifactRoute, handlers.downloadPublicChatArtifact)
+      .openapi(downloadPublicWorkflowAvatarRoute, handlers.downloadPublicWorkflowAvatar)
       .openapi(getEngineRuntimeStatusRoute, handlers.getEngineRuntimeStatus)
       .openapi(createEngineRuntimeAccessRoute, handlers.createEngineRuntimeAccess)
       .openapi(getRunRoute, handlers.getRun)
@@ -5023,6 +5067,17 @@ const contractDocumentHandlers: V1RouteHandlers = {
   getWorkflowMemory: (c) => c.json({ data: placeholderWorkflowMemory, meta }, 200),
   updateWorkflowMemory: (c) => c.json({ data: placeholderWorkflowMemory, meta }, 200),
   clearWorkflowMemory: (c) => c.json({ data: placeholderWorkflowMemory, meta }, 200),
+  uploadWorkflowSlackAvatar: (c) =>
+    c.json(
+      {
+        data: {
+          avatarUrl:
+            "https://my.opencompany.chat/workflow-avatars/workflow_contract/00000000-0000-4000-8000-000000000000.png",
+        },
+        meta,
+      },
+      201,
+    ),
   getBrainSnapshot: (c) =>
     c.json(
       { data: { folders: [placeholderBrainFolder], documents: [placeholderBrainDocument] }, meta },
@@ -5802,6 +5857,8 @@ const contractDocumentHandlers: V1RouteHandlers = {
   downloadPublicChatAttachment: (c) =>
     c.body("contract", 200, { "Content-Type": "application/octet-stream" }),
   downloadPublicChatArtifact: (c) =>
+    c.body("contract", 200, { "Content-Type": "application/octet-stream" }),
+  downloadPublicWorkflowAvatar: (c) =>
     c.body("contract", 200, { "Content-Type": "application/octet-stream" }),
   getEngineRuntimeStatus: (c) =>
     c.json(

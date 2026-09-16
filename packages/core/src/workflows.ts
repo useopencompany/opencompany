@@ -326,6 +326,13 @@ const MAX_WORKFLOW_SKILLS = 16;
 export const MAX_SLACK_DISPLAY_NAME_LENGTH = 80;
 export const MAX_SLACK_AVATAR_URL_LENGTH = 2_048;
 
+// An uploaded avatar is served back to Slack as-is, so the accepted set is the three formats
+// Slack renders and every browser can produce. 1 MB is far above a square icon and far below
+// anything worth streaming.
+export const WORKFLOW_AVATAR_MEDIA_TYPES = ["image/png", "image/jpeg", "image/webp"] as const;
+export type WorkflowAvatarMediaType = (typeof WORKFLOW_AVATAR_MEDIA_TYPES)[number];
+export const WORKFLOW_AVATAR_MAX_BYTES = 1024 * 1024;
+
 export class WorkflowApplicationService {
   constructor(
     private readonly repository: WorkflowRepository,
@@ -352,6 +359,17 @@ export class WorkflowApplicationService {
     });
     if (!workflow) throw new CoreError("not_found", "Workflow not found.");
     return workflow;
+  }
+
+  // Authorizes a side-channel write against a workflow the actor can already edit — today the
+  // Slack avatar upload, which stores bytes before the editor saves the resulting URL through
+  // `updateWorkflow`. Returns the normalized id so callers never build a path from raw input.
+  async authorizeWorkflowWrite(actor: Actor, workflowId: string): Promise<string> {
+    requirePermission(actor, WORKFLOW_WRITE_PERMISSION, "Workflows");
+    const id = resourceId(workflowId, "workflowId");
+    const workflow = await this.repository.getWorkflow({ actor, workflowId: id });
+    if (!workflow) throw new CoreError("not_found", "Workflow not found.");
+    return id;
   }
 
   createWorkflow(

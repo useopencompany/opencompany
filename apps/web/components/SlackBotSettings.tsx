@@ -13,6 +13,8 @@ export type SlackBotSettingsData = {
   installed: boolean;
   status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
   needsScopeUpgrade: boolean;
+  canCustomizeIdentity: boolean;
+  canReact: boolean;
   teamName: string | null;
   statusReason: string | null;
   destinationCount: number;
@@ -64,7 +66,18 @@ export function SlackBotSettings({ data }: { data: SlackBotSettingsData }) {
   );
 }
 
+// A reconnect can be outstanding for scopes with no visible effect of their own, so only name the
+// capabilities this installation is actually missing rather than asserting both every time.
+function missingCapabilityCopy(data: SlackBotSettingsData) {
+  const missing = [
+    ...(data.canCustomizeIdentity ? [] : ["posts keep the default @opencompany identity"]),
+    ...(data.canReact ? [] : ["thread replies get no progress reaction"]),
+  ];
+  return missing.join(" and ");
+}
+
 function SlackBotPanel({ data }: { data: SlackBotSettingsData }) {
+  const missingCapabilities = missingCapabilityCopy(data);
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -148,8 +161,8 @@ function SlackBotPanel({ data }: { data: SlackBotSettingsData }) {
       ) : data.needsScopeUpgrade ? (
         <div className="flex flex-col gap-3">
           <Banner tone="success">
-            Reconnect Slack to grant access for per-workflow identities. Until then, posts keep the
-            default @opencompany identity.
+            Reconnect Slack to grant the newest bot scopes.
+            {missingCapabilities ? ` Until then, ${missingCapabilities}.` : null}
           </Banner>
           <a
             href={connectHref}

@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { SLACK_BOT_TOOL_NAME } from "@opencompany/agent/chat-ui";
 import { slackApiRequest } from "@opencompany/agent/integrations/slack";
-import { slackBotCanCustomizeIdentity } from "@opencompany/agent/integrations/slack-bot";
+import {
+  slackBotCanCustomizeIdentity,
+  slackBotCanReact,
+} from "@opencompany/agent/integrations/slack-bot";
 import {
   type ChannelInstallation,
   channelBotCredential,
@@ -27,6 +30,13 @@ const CLOSED_REPLY =
 const UNANSWERED_REPLY =
   "The workflow needs attention. Open the task in opencompany to review and continue.";
 const MAX_SLACK_THREAD_CONTEXT_CHARS = 100_000;
+// Progress on a Slack reply is worker state, so the worker marks it: the person who asked sees the
+// ack on their own message instead of an extra post in the channel. Deliberately not a tool the run
+// calls - that would need its own instructions, would only fire once the model already decided to,
+// and would stay silent in exactly the case that needs a signal most: a run that dies unanswered.
+const REACTION_WORKING = "eyes";
+const REACTION_ANSWERED = "white_check_mark";
+const REACTION_ATTENTION = "warning";
 
 type Event = {
   id: number;
@@ -82,8 +92,11 @@ const defaults = (): SlackChannelWorkerDependencies => ({
 
 export async function processNextSubscriptionEvent(deps = defaults()): Promise<boolean> {
   let claimed: Event | undefined;
+  // Set inside the transaction, applied after it commits: a rolled-back claim must not leave a
+  // mark for a run that never started.
+  let reaction: string | undefined;
   try {
-    return await deps.db.transaction(async (tx) => {
+    const progressed = await deps.db.transaction(async (tx) => {
       const event = subscriptionRows<Event>(
         await tx.execute(sql`
       SELECT event.id, event.subscription_id AS "subscriptionId", subscription.workspace_id AS "workspaceId",
@@ -131,16 +144,21 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
       claimed = event;
       const deliveryId = `subscription_reply_${event.id}`;
       if (event.status === "delivering") {
-        const sent = subscriptionRows(
+        const [settled] = subscriptionRows<{ status: string }>(
           await tx.execute(
-            sql`SELECT id FROM goat.channel_deliveries WHERE id = ${deliveryId} AND status IN ('sent', 'canceled')`,
+            sql`SELECT status FROM goat.channel_deliveries WHERE id = ${deliveryId} AND status IN ('sent', 'canceled')`,
           ),
-        ).length;
-        if (sent)
+        );
+        if (settled) {
           await tx.execute(
             sql`UPDATE goat.subscription_events SET status = 'done' WHERE id = ${event.id}`,
           );
-        return Boolean(sent);
+          reaction =
+            settled.status === "sent" && runEndedCleanly(event)
+              ? REACTION_ANSWERED
+              : REACTION_ATTENTION;
+        }
+        return Boolean(settled);
       }
       if (event.status === "running") {
         if (!event.runStatus || !["completed", "failed", "interrupted"].includes(event.runStatus))
@@ -153,6 +171,9 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
           await tx.execute(
             sql`UPDATE goat.subscription_events SET status = 'done' WHERE id = ${event.id} AND status = 'running'`,
           );
+          // The run succeeded but never called the Slack tool, so this thread is getting no reply
+          // at all. From the asker's side that is the silence the mark exists to break, not an answer.
+          reaction = REACTION_ATTENTION;
           return true;
         }
         await queueReply(tx.execute.bind(tx), event, deliveryId, UNANSWERED_REPLY);
@@ -222,8 +243,11 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
       await tx.execute(
         sql`UPDATE goat.subscription_events SET status = 'running', run_id = ${result.runId} WHERE id = ${event.id}`,
       );
+      reaction = REACTION_WORKING;
       return true;
     });
+    if (claimed && reaction) await reactToSlackMessage(deps, claimed, reaction);
+    return progressed;
   } catch (error) {
     if (claimed) {
       await deps.db.execute(
@@ -234,6 +258,50 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
     throw error;
   }
 }
+// The check mark only means "this message got its reply". Anything else - a failed or interrupted
+// run, a closed thread, a run that never answered, a reply Slack never took - leaves work for a
+// person and gets the attention mark instead.
+function runEndedCleanly(event: Event) {
+  return Boolean(event.runId) && event.runStatus !== "failed" && event.runStatus !== "interrupted";
+}
+
+async function reactToSlackMessage(
+  deps: SlackChannelWorkerDependencies,
+  event: Event,
+  emoji: string,
+) {
+  if (!slackBotCanReact(event.installation.scopes)) return;
+  // An ack never gets to break the work it annotates, so a failed reaction is logged and dropped
+  // rather than retried.
+  const attempt = (method: string, name: string) =>
+    deps
+      .credential(event.installation)
+      .then(({ token }) =>
+        deps.request({
+          method,
+          token,
+          form: {
+            channel: event.payload.channelId,
+            timestamp: event.payload.messageTs,
+            name,
+          },
+          signal: AbortSignal.timeout(5_000),
+        }),
+      )
+      .catch((error) =>
+        logger.info("Slack thread reaction skipped", {
+          slack_method: method,
+          reaction: name,
+          error_message: error instanceof Error ? error.message : "Unknown error",
+        }),
+      );
+  // Slack has no replace. Add before removing so a swap that only half succeeds leaves the message
+  // over-marked rather than unmarked, and only clear a working mark a Run actually put there.
+  await attempt("reactions.add", emoji);
+  if (emoji !== REACTION_WORKING && event.runId)
+    await attempt("reactions.remove", REACTION_WORKING);
+}
+
 async function readSlackThread(input: {
   token: string;
   channelId: string;
