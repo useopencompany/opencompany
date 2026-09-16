@@ -50,6 +50,20 @@ archived, or closed work cannot silently restart. Human replies to a closed thre
 an explicit closed-thread response. Disconnecting permanently closes existing subscriptions;
 reconnecting enables new workflow posts.
 
+## Thread progress reactions
+
+A reply can wait minutes for its answer, so the worker marks the inbound message itself: 👀 when it
+starts a Run for that reply, then ✅ once the Run finishes, or ⚠️ if the Run failed, the thread was
+closed, or Slack never took the reply. The mark lands on the person's own message, so a thread
+never gains an extra post just to say "working on it", and the check mark stays worth trusting
+because every outcome that leaves work for a human shows the attention mark instead.
+
+This is deliberately not a tool the Run calls. Progress is worker state, and a tool would need its
+own harness instructions, would only fire once the model chose to call it, and would go silent in
+exactly the case that most needs a signal: a Run that dies before it answers. Reactions are
+best-effort — a failed one is logged and dropped rather than retried, and an install without
+`reactions:write` runs its threads unmarked.
+
 ## Persistence and recovery
 
 - `session_subscriptions` stores source identity, target Conversation, policy, and lifecycle.
@@ -76,14 +90,15 @@ Use the existing `OPENCOMPANY_SLACK_BOT_*` credentials. OAuth still uses
 `/api/integrations/slack-bot/start` and `/api/integrations/slack-bot/callback`; signed events use
 `/webhooks/slack-bot/events` on the API. Subscribe to `message.channels`, `app_uninstalled`, and
 `tokens_revoked`. Required bot scopes: `chat:write`, `channels:read`, `channels:history`,
-and `users:read`. New installs additionally request `users:read.email` and `chat:write.customize`;
-an install that predates either keeps delivering, and Channels settings asks an admin to reconnect.
-Without `chat:write.customize` a workflow's display name and avatar are dropped and the post uses
-the default bot identity rather than failing. Custom avatars must be public HTTPS image URLs
-because Slack downloads the image when it posts the message. New installs no longer request DM,
-private-channel, mention, or reaction scopes. Old grants may remain until the Slack app is
-reinstalled; ingress ignores
-those event types. Stop configuring the legacy Wiki answer bot's Brain destinations.
+and `users:read`. New installs additionally request `users:read.email`, `chat:write.customize`,
+and `reactions:write`; an install that predates any of them keeps delivering, and Channels settings
+asks an admin to reconnect. Without `chat:write.customize` a workflow's display name and avatar are
+dropped and the post uses the default bot identity rather than failing; without `reactions:write`
+thread replies get no progress reaction. Custom avatars must be public HTTPS image URLs
+because Slack downloads the image when it posts the message. New installs still do not request DM,
+private-channel, mention, or reaction *event* scopes - `reactions:write` only lets the bot mark a
+message, not read anyone else's reactions. Old grants may remain until the Slack app is
+reinstalled; ingress ignores those event types. Stop configuring the legacy Wiki answer bot's Brain destinations.
 
 Slack contracts: [posting and thread timestamps](https://docs.slack.dev/reference/methods/chat.postmessage/),
 [message metadata](https://docs.slack.dev/messaging/message-metadata/),
