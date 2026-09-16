@@ -31,6 +31,7 @@ import {
   type FormEvent,
   type MouseEventHandler,
   useEffect,
+  useId,
   useMemo,
   useState,
   useTransition,
@@ -771,6 +772,7 @@ function SidebarChatRow({
 }) {
   const state = resolveSidebarChatState({ chat, localState });
   const contentPadding = useSidebarRowPadding();
+  const runStateDescriptionId = useRunStateDescription(state);
   const content = <span className="truncate tracking-[-0.005em]">{chat.title}</span>;
   return (
     <div
@@ -781,6 +783,7 @@ function SidebarChatRow({
     >
       <SidebarSessionStatusColumn
         state={state}
+        runStateDescriptionId={runStateDescriptionId}
         pullRequest={pullRequest}
         reservePullRequestSlot={reservePullRequestColumn}
         className={contentPadding}
@@ -788,6 +791,7 @@ function SidebarChatRow({
       {optimistic ? (
         <button
           type="button"
+          aria-describedby={runStateDescriptionId}
           onClick={onRequestComposerFocus}
           className={`flex min-w-0 flex-1 items-center rounded-md py-[5px] pr-1 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${SIDEBAR_ROW_LINK_PADDING}`}
         >
@@ -810,6 +814,7 @@ function SidebarChatRow({
             onRequestComposerFocus();
           }}
           aria-current={active ? "page" : undefined}
+          aria-describedby={runStateDescriptionId}
           className={`flex min-w-0 flex-1 items-center rounded-l-md py-[5px] text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${SIDEBAR_ROW_LINK_PADDING}`}
         >
           {content}
@@ -870,11 +875,14 @@ function SidebarChatRow({
  */
 function SidebarSessionStatusColumn({
   state,
+  runStateDescriptionId,
   pullRequest,
   reservePullRequestSlot,
   className,
 }: {
   state: ReturnType<typeof chatSummaryState>;
+  /** Set by `useRunStateDescription` when the row's link describes itself with this slot. */
+  runStateDescriptionId: string | undefined;
   pullRequest: SessionPullRequest | null;
   /** Whether the list reserves the pull-request slot. See `reservePullRequestColumn`. */
   reservePullRequestSlot: boolean;
@@ -883,9 +891,11 @@ function SidebarSessionStatusColumn({
   return (
     <span className={`flex shrink-0 items-center gap-1 ${className ?? ""}`}>
       {/* The run state reads as the row's unread rail, so it takes the outer slot and the pull
-          request — the marker tied to what the session produced — sits against the name. */}
+          request — the marker tied to what the session produced — sits against the name. The slot
+          is a fixed width so that an absent indicator cannot move the name: it matches the widest
+          glyph `ChatStateIndicator` draws on this surface, its 11px spinner. */}
       <span className="flex w-[11px] shrink-0 items-center">
-        <ChatStateIndicator state={state} surface="sidebar" />
+        <ChatStateIndicator state={state} surface="sidebar" id={runStateDescriptionId} />
       </span>
       {reservePullRequestSlot ? (
         pullRequest ? (
@@ -904,6 +914,20 @@ function SidebarSessionStatusColumn({
  * would double-count that space.
  */
 const SIDEBAR_ROW_LINK_PADDING = "pl-1.5";
+
+/**
+ * Ties a row's link to its run-state slot for screen readers.
+ *
+ * `awaiting_input` is the one state `ChatStateIndicator` gives an accessible name, because it is
+ * the difference between a run that is progressing and one that is stuck on the reader. The slot
+ * sits beside the link rather than inside it, so that name no longer falls into the link's own —
+ * a reader moving link by link would hear the session's title and nothing about it waiting. The
+ * link points back at the indicator instead, which puts the state in its description.
+ */
+function useRunStateDescription(state: ReturnType<typeof chatSummaryState>) {
+  const id = useId();
+  return state === "awaiting_input" ? id : undefined;
+}
 
 function resolveSidebarChatState(input: {
   chat: ChatSummaryView;
@@ -949,6 +973,7 @@ function SidebarTaskRow({
 }) {
   const archivable = isSettledTaskStatus(task.status);
   const contentPadding = useSidebarRowPadding();
+  const runStateDescriptionId = useRunStateDescription(state);
   return (
     <div
       {...dragProps}
@@ -958,6 +983,7 @@ function SidebarTaskRow({
     >
       <SidebarSessionStatusColumn
         state={state}
+        runStateDescriptionId={runStateDescriptionId}
         pullRequest={pullRequest}
         reservePullRequestSlot={reservePullRequestColumn}
         // A Task row is two lines tall. Centred across both, the column would sit at a different
@@ -968,6 +994,7 @@ function SidebarTaskRow({
         href={href}
         prefetch
         aria-current={active ? "page" : undefined}
+        aria-describedby={runStateDescriptionId}
         className={`flex min-w-0 flex-1 items-center rounded-l-md py-[5px] text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${SIDEBAR_ROW_LINK_PADDING}`}
       >
         <span className="flex min-w-0 flex-1 flex-col">

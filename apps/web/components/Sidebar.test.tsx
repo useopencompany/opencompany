@@ -14,6 +14,7 @@ import {
   clearAllOptimisticChatSummaries,
   removeOptimisticChatSummary,
 } from "@/lib/optimistic-chat-summaries";
+import { AWAITING_INPUT_LABEL } from "./ChatStateIndicator";
 import { Sidebar } from "./Sidebar";
 import { SIDEBAR_NESTED_ROW_PADDING_CLASSNAME } from "./SidebarProjects";
 
@@ -1708,16 +1709,21 @@ describe("Sidebar", () => {
   /** The status column that leads a session row: its run state, then its pull request. */
   function statusColumnOf(title: string) {
     const row = screen.getByRole("link", { name: new RegExp(title) }).parentElement;
-    return row?.firstElementChild ?? null;
+    const column = row?.firstElementChild;
+    if (!(column instanceof HTMLElement)) throw new Error(`No status column for "${title}".`);
+    return column;
   }
 
   function runStateSlotOf(title: string) {
-    return statusColumnOf(title)?.firstElementChild ?? null;
+    const slot = statusColumnOf(title).firstElementChild;
+    if (!(slot instanceof HTMLElement)) throw new Error(`No run-state slot for "${title}".`);
+    return slot;
   }
 
+  /** Null when the list reserves no pull-request slot, which is the point of half the assertions. */
   function pullRequestSlotOf(title: string) {
     const column = statusColumnOf(title);
-    return column && column.childElementCount > 1 ? column.children[1] : null;
+    return column.childElementCount > 1 ? column.children[1] : null;
   }
 
   describe("Pull request badge", () => {
@@ -1875,10 +1881,26 @@ describe("Sidebar", () => {
       const settled = runStateSlotOf("YC customer meetings");
       expect(working).toHaveClass(RUN_STATE_SLOT_WIDTH_CLASSNAME);
       expect(settled).toHaveClass(RUN_STATE_SLOT_WIDTH_CLASSNAME);
+      expect(within(working).getByTestId("sidebar-chat-working")).toBeInTheDocument();
+      expect(settled.childElementCount).toBe(0);
+    });
+
+    // The slot sits beside the row's link, not inside it, so "Waiting for you" no longer lands in
+    // the link's own name. A reader moving link by link has to hear it some other way.
+    it("describes a parked session's link with the run-state slot", () => {
+      recentChatsMock.value = [
+        { ...archivableChat("conversation_parked", "Rework onboarding copy"), awaitingInput: true },
+        archivableChat("conversation_settled", "YC customer meetings"),
+      ];
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
       expect(
-        within(working as HTMLElement).getByTestId("sidebar-chat-working"),
-      ).toBeInTheDocument();
-      expect(settled?.childElementCount).toBe(0);
+        screen.getByRole("link", { name: /Rework onboarding copy/ }),
+      ).toHaveAccessibleDescription(AWAITING_INPUT_LABEL);
+      // Nothing to say about a settled session, so the link claims no description at all.
+      expect(screen.getByRole("link", { name: /YC customer meetings/ })).not.toHaveAttribute(
+        "aria-describedby",
+      );
     });
   });
 
