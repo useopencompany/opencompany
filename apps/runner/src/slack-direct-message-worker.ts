@@ -14,7 +14,13 @@ import { PostgresTaskRepository } from "@opencompany/db/task-repository";
 import { createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import { getDb } from "./db";
-import { quoteSlackText, type SlackUser, slackUserName } from "./slack-channel-worker";
+import {
+  markSlackMessage,
+  quoteSlackText,
+  REACTION_WORKING,
+  type SlackUser,
+  slackUserName,
+} from "./slack-channel-worker";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "slack-direct-message" });
 // Slack's own cap is generous; the Task goal is capped at 10k, and the full message still reaches
@@ -146,8 +152,22 @@ export async function processNextSlackDirectMessage(deps = defaults()): Promise<
         return { handled: true };
       }
       await startSession({ execute, request, member, user, deps });
-      return { handled: true };
+      return { handled: true, started: request };
     });
+    // A direct message is someone waiting on an answer that takes a while, so mark it as picked up
+    // as soon as the session is committed. The subscription worker replaces this with the answered
+    // or attention mark when the run settles, exactly as it does for a workflow thread reply.
+    if (result.started) {
+      await markSlackMessage({
+        credential: deps.credential,
+        request: deps.request,
+        installation: result.started.installation,
+        channelId: result.started.channelId,
+        messageTs: result.started.messageTs,
+        emoji: REACTION_WORKING,
+        clearWorking: false,
+      });
+    }
     // The notice is posted after the inbox row is committed as handled, so a failure here drops a
     // fixed sentence rather than risking a second copy of it on the next attempt.
     if (result.notice) {

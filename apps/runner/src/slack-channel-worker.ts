@@ -34,7 +34,7 @@ const MAX_SLACK_THREAD_CONTEXT_CHARS = 100_000;
 // ack on their own message instead of an extra post in the channel. Deliberately not a tool the run
 // calls - that would need its own instructions, would only fire once the model already decided to,
 // and would stay silent in exactly the case that needs a signal most: a run that dies unanswered.
-const REACTION_WORKING = "eyes";
+export const REACTION_WORKING = "eyes";
 const REACTION_ANSWERED = "white_check_mark";
 const REACTION_ATTENTION = "warning";
 
@@ -268,24 +268,31 @@ function runEndedCleanly(event: Event) {
   return Boolean(event.runId) && event.runStatus !== "failed" && event.runStatus !== "interrupted";
 }
 
-async function reactToSlackMessage(
-  deps: SlackChannelWorkerDependencies,
-  event: Event,
-  emoji: string,
-) {
-  if (!slackBotCanReact(event.installation.scopes)) return;
+// Marking a Slack message is the same job whichever worker asks for it, so this takes the message
+// and the install rather than a subscription event. `clearWorking` says whether a working mark was
+// ever put there to clear.
+export async function markSlackMessage(input: {
+  credential: typeof channelBotCredential;
+  request: typeof slackApiRequest;
+  installation: ChannelInstallation;
+  channelId: string;
+  messageTs: string;
+  emoji: string;
+  clearWorking: boolean;
+}) {
+  if (!slackBotCanReact(input.installation.scopes)) return;
   // An ack never gets to break the work it annotates, so a failed reaction is logged and dropped
   // rather than retried.
   const attempt = (method: string, name: string) =>
-    deps
-      .credential(event.installation)
+    input
+      .credential(input.installation)
       .then(({ token }) =>
-        deps.request({
+        input.request({
           method,
           token,
           form: {
-            channel: event.payload.channelId,
-            timestamp: event.payload.messageTs,
+            channel: input.channelId,
+            timestamp: input.messageTs,
             name,
           },
           signal: AbortSignal.timeout(5_000),
@@ -300,9 +307,25 @@ async function reactToSlackMessage(
       );
   // Slack has no replace. Add before removing so a swap that only half succeeds leaves the message
   // over-marked rather than unmarked, and only clear a working mark a Run actually put there.
-  await attempt("reactions.add", emoji);
-  if (emoji !== REACTION_WORKING && event.runId)
+  await attempt("reactions.add", input.emoji);
+  if (input.emoji !== REACTION_WORKING && input.clearWorking)
     await attempt("reactions.remove", REACTION_WORKING);
+}
+
+async function reactToSlackMessage(
+  deps: SlackChannelWorkerDependencies,
+  event: Event,
+  emoji: string,
+) {
+  await markSlackMessage({
+    credential: deps.credential,
+    request: deps.request,
+    installation: event.installation,
+    channelId: event.payload.channelId,
+    messageTs: event.payload.messageTs,
+    emoji,
+    clearWorking: Boolean(event.runId),
+  });
 }
 
 // Slack only delivers an `im` event for the bot's own direct message conversation, and chat:write

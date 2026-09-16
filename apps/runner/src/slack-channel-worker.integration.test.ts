@@ -1106,6 +1106,50 @@ describe("Slack direct message sessions", () => {
     ).toEqual([{ status: "ignored", attempt_count: 10 }]);
   });
 
+  it("marks the direct message as picked up, then checks it off once the answer lands", async () => {
+    await pg.exec(
+      `UPDATE goat.integrations SET scopes = '["chat:write","channels:read","channels:history","users:read","users:read.email","reactions:write"]';
+       ${directMessage};`,
+    );
+    await processNextSlackDirectMessage(directMessageDeps);
+    expect(directMessageDeps.request).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        method: "reactions.add",
+        form: expect.objectContaining({ channel: "D1", timestamp: "200.001", name: "eyes" }),
+      }),
+    );
+
+    // The subscription worker owns the rest of the lifecycle, exactly as it does for a workflow
+    // thread reply: the direct message needs no second reaction path of its own.
+    const [event] = (
+      await pg.query<{ run: string }>(
+        "SELECT run_id AS run FROM goat.subscription_events WHERE status = 'running'",
+      )
+    ).rows;
+    await pg.exec(
+      `UPDATE goat.codex_chat_turns SET status = 'completed' WHERE id = '${event?.run}';
+       UPDATE goat.tasks SET status = 'succeeded' WHERE id <> 'task';
+       INSERT INTO goat.channel_deliveries (id, workspace_id, session_id, integration_id, team_id, channel_id, thread_ts, text, status, message_ts)
+       SELECT 'subscription_reply_' || event.id, subscription.workspace_id, subscription.session_id, subscription.integration_id,
+         'T1', 'D1', '200.001', 'Mostly the launch post.', 'sent', '200.002'
+       FROM goat.subscription_events event
+       JOIN goat.session_subscriptions subscription ON subscription.id = event.subscription_id
+       WHERE event.status = 'running';
+       UPDATE goat.subscription_events SET status = 'delivering' WHERE status = 'running';`,
+    );
+    expect(await processNextSubscriptionEvent(deps)).toBe(true);
+    expect(deps.request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "reactions.add",
+        form: expect.objectContaining({
+          channel: "D1",
+          timestamp: "200.001",
+          name: "white_check_mark",
+        }),
+      }),
+    );
+  });
+
   it("ignores its own messages and leaves nothing pending", async () => {
     await pg.exec(
       `INSERT INTO goat.slack_direct_messages (team_id, event_id, channel_id, message_ts, slack_user_id, text)
