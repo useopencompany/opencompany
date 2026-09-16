@@ -20,6 +20,9 @@ const logger = createLogger({ service: "opencompany-runner", runtime: "slack-dir
 // Slack's own cap is generous; the Task goal is capped at 10k, and the full message still reaches
 // the model through the harness prompt.
 const MAX_SLACK_GOAL_CHARS = 10_000;
+// A message that keeps failing is a poison row, not a transient outage. Give up rather than
+// re-resolving the same sender every minute forever; last_error keeps the reason visible.
+const MAX_DIRECT_MESSAGE_ATTEMPTS = 10;
 const NO_ACCOUNT_REPLY =
   "I could not find an opencompany account for your Slack email. Ask a workspace admin to invite you with that address, then message me again.";
 
@@ -90,7 +93,15 @@ export async function processNextSlackDirectMessage(deps = defaults()): Promise<
         signal: AbortSignal.timeout(10_000),
       });
       const user = response.user;
-      if (user?.id !== request.slackUserId || user.is_bot || user.deleted) {
+      // The team check matters as much as the bot and deleted checks: Slack verifies a profile
+      // email for its own workspace only, so a Slack Connect stranger's self-set email is not
+      // evidence of anything and must never resolve to a member's account.
+      if (
+        user?.id !== request.slackUserId ||
+        user.team_id !== request.teamId ||
+        user.is_bot ||
+        user.deleted
+      ) {
         await ignore(execute, request.id);
         return { handled: true };
       }
@@ -116,6 +127,24 @@ export async function processNextSlackDirectMessage(deps = defaults()): Promise<
         });
         return { handled: true, notice: { request, token } };
       }
+      // Two inbox rows for one Slack message would otherwise fail the subscription's uniqueness
+      // constraint after the Task was already created inside this transaction. A thread that is
+      // already a session continues through the thread-reply path instead.
+      const subscribed = subscriptionRows(
+        await execute(sql`
+        SELECT 1 FROM goat.session_subscriptions
+        WHERE workspace_id = ${request.installation.workspaceId} AND source = 'slack_thread'
+          AND source_key = ${JSON.stringify({
+            teamId: request.teamId,
+            channelId: request.channelId,
+            threadTs: request.messageTs,
+          })}::jsonb
+      `),
+      ).length;
+      if (subscribed) {
+        await ignore(execute, request.id);
+        return { handled: true };
+      }
       await startSession({ execute, request, member, user, deps });
       return { handled: true };
     });
@@ -135,7 +164,8 @@ export async function processNextSlackDirectMessage(deps = defaults()): Promise<
       await deps.db.execute(sql`
         UPDATE goat.slack_direct_messages
         SET attempt_count = attempt_count + 1, next_attempt_at = now() + interval '1 minute',
-          last_error = ${(error instanceof Error ? error.message : String(error)).slice(0, 2_000)}
+          last_error = ${(error instanceof Error ? error.message : String(error)).slice(0, 2_000)},
+          status = CASE WHEN attempt_count + 1 >= ${MAX_DIRECT_MESSAGE_ATTEMPTS} THEN 'ignored' ELSE 'pending' END
         WHERE id = ${claimed.id} AND status = 'pending'
       `);
       await markChannelError(claimed.installation, error);

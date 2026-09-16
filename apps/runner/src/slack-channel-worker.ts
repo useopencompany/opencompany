@@ -56,6 +56,7 @@ type Event = {
 };
 export type SlackUser = {
   id?: string;
+  team_id?: string;
   name?: string;
   real_name?: string;
   is_bot?: boolean;

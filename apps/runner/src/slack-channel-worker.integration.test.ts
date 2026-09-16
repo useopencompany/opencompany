@@ -932,6 +932,7 @@ describe("Slack direct message sessions", () => {
       request: vi.fn(async () => ({
         user: {
           id: "U1",
+          team_id: "T1",
           profile: { real_name: "Member Person", email: "Member@Example.com" },
         },
       })) as unknown as SlackDirectMessageWorkerDependencies["request"],
@@ -1055,6 +1056,54 @@ describe("Slack direct message sessions", () => {
         form: expect.objectContaining({ channel: "D1", thread_ts: "200.001" }),
       }),
     );
+  });
+
+  it.each([
+    { label: "a Slack Connect stranger whose profile claims a member's email", team_id: "T_OTHER" },
+    { label: "another app's bot user", is_bot: true },
+    { label: "a deactivated account", deleted: true },
+  ])("refuses to open a session for $label", async ({ label: _label, ...overrides }) => {
+    directMessageDeps.request = vi.fn(async () => ({
+      user: {
+        id: "U1",
+        team_id: "T1",
+        profile: { real_name: "Member Person", email: "Member@Example.com" },
+        ...overrides,
+      },
+    })) as unknown as SlackDirectMessageWorkerDependencies["request"];
+    await pg.exec(directMessage);
+    expect(await processNextSlackDirectMessage(directMessageDeps)).toBe(true);
+    expect((await pg.query("SELECT status FROM goat.slack_direct_messages")).rows).toEqual([
+      { status: "ignored" },
+    ]);
+    expect((await pg.query("SELECT id FROM goat.tasks WHERE id <> 'task'")).rows).toHaveLength(0);
+  });
+
+  it("opens one session when the same Slack message reaches the inbox twice", async () => {
+    await pg.exec(directMessage);
+    await processNextSlackDirectMessage(directMessageDeps);
+    await pg.exec(`INSERT INTO goat.slack_direct_messages (team_id, event_id, channel_id, message_ts, slack_user_id, text)
+      VALUES ('T1', 'EvDm1Duplicate', 'D1', '200.001', 'U1', 'Where did last week''s signups come from?')`);
+
+    expect(await processNextSlackDirectMessage(directMessageDeps)).toBe(true);
+    expect(
+      (await pg.query("SELECT status FROM goat.slack_direct_messages ORDER BY id")).rows,
+    ).toEqual([{ status: "started" }, { status: "ignored" }]);
+    expect((await pg.query("SELECT id FROM goat.tasks WHERE id <> 'task'")).rows).toHaveLength(1);
+  });
+
+  it("stops retrying a message that keeps failing", async () => {
+    await pg.exec(
+      `${directMessage};
+       UPDATE goat.slack_direct_messages SET attempt_count = 9;`,
+    );
+    directMessageDeps.credential = vi.fn(async () => {
+      throw new Error("Reconnect Slack in Channels settings.");
+    });
+    await expect(processNextSlackDirectMessage(directMessageDeps)).rejects.toThrow("Reconnect");
+    expect(
+      (await pg.query("SELECT status, attempt_count FROM goat.slack_direct_messages")).rows,
+    ).toEqual([{ status: "ignored", attempt_count: 10 }]);
   });
 
   it("ignores its own messages and leaves nothing pending", async () => {
