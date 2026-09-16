@@ -14,13 +14,7 @@ import type { SessionPullRequest } from "@/lib/session-pull-requests";
  * Sized to the row's text rather than to the trailing icon buttons: it sits against the session
  * name, and a 24px control there would push every title in the list a third of a word to the right.
  */
-export function PullRequestBadge({
-  pullRequest,
-  className,
-}: {
-  pullRequest: SessionPullRequest;
-  className?: string;
-}) {
+export function PullRequestBadge({ pullRequest }: { pullRequest: SessionPullRequest }) {
   const { Glyph, colorClassName, label: stateLabel } = presentationFor(pullRequest.state);
   const label = `${stateLabel}: ${pullRequest.repository} #${pullRequest.number}`;
   return (
@@ -32,12 +26,9 @@ export function PullRequestBadge({
       aria-label={label}
       data-testid="sidebar-pull-request-badge"
       data-state={pullRequest.state}
-      // Stops the click from also selecting the row underneath it.
-      onClick={(event) => event.stopPropagation()}
       className={cn(
         "flex size-[18px] shrink-0 items-center justify-center rounded transition-colors duration-150 hover:bg-surface-active focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20",
         colorClassName,
-        className,
       )}
     >
       <Glyph size={13} strokeWidth={1.9} aria-hidden="true" />

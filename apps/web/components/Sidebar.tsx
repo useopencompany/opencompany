@@ -771,9 +771,13 @@ function SidebarChatRow({
 }) {
   const state = resolveSidebarChatState({ chat, localState });
   const contentPadding = useSidebarRowPadding();
+  const pullRequestColumnShown = Boolean(pullRequest) || reservePullRequestColumn;
+  const linkPadding = sidebarRowLeadingPadding({
+    columnShown: pullRequestColumnShown,
+    contentPadding,
+  });
   const content = (
     <>
-      <SidebarPullRequestColumn pullRequest={pullRequest} reserved={reservePullRequestColumn} />
       <SidebarChatStateIndicator state={state} />
       <span className="truncate tracking-[-0.005em]">{chat.title}</span>
     </>
@@ -785,11 +789,14 @@ function SidebarChatRow({
         active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
       }`}
     >
+      {pullRequestColumnShown ? (
+        <SidebarPullRequestColumn pullRequest={pullRequest} className={contentPadding} />
+      ) : null}
       {optimistic ? (
         <button
           type="button"
           onClick={onRequestComposerFocus}
-          className={`flex min-w-0 flex-1 items-center gap-2 rounded-md py-[5px] pr-1 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${contentPadding}`}
+          className={`flex min-w-0 flex-1 items-center gap-2 rounded-md py-[5px] pr-1 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${linkPadding}`}
         >
           {content}
         </button>
@@ -810,7 +817,7 @@ function SidebarChatRow({
             onRequestComposerFocus();
           }}
           aria-current={active ? "page" : undefined}
-          className={`flex min-w-0 flex-1 items-center gap-2 rounded-l-md py-[5px] text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${contentPadding}`}
+          className={`flex min-w-0 flex-1 items-center gap-2 rounded-l-md py-[5px] text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${linkPadding}`}
         >
           {content}
         </IntentPrefetchLink>
@@ -856,25 +863,39 @@ function SidebarChatRow({
  * something the reader scans a column for, the way they scan the row's own title — not a control
  * they reach for. Trailing, it also had to share the pin's column and disappear on hover.
  *
- * The column is reserved on every row as soon as any session in the sidebar has a linked PR, so
- * those titles line up down the list instead of stepping in and out by a glyph. It is not reserved
- * at all otherwise: a reader with no GitHub sessions should not pay the width forever to align a
- * column that is always empty.
+ * It sits beside the row's link rather than inside it: the badge is itself a link, to the PR on
+ * GitHub, and an anchor inside an anchor is invalid HTML that the browser's parser silently
+ * rewrites. So the column carries the row's own left padding, and the link beside it drops to the
+ * gap between them — see `sidebarRowLeadingPadding`.
  */
 function SidebarPullRequestColumn({
   pullRequest,
-  reserved,
   className,
 }: {
   pullRequest: SessionPullRequest | null;
-  reserved: boolean;
   className?: string;
 }) {
-  if (pullRequest) {
-    return <PullRequestBadge pullRequest={pullRequest} {...(className ? { className } : {})} />;
-  }
-  if (!reserved) return null;
-  return <span aria-hidden="true" className={`size-[18px] shrink-0 ${className ?? ""}`} />;
+  return (
+    <span className={`flex shrink-0 items-center ${className ?? ""}`}>
+      {pullRequest ? (
+        <PullRequestBadge pullRequest={pullRequest} />
+      ) : (
+        // Holds the column open on a row with no PR, so titles line up down the list instead of
+        // stepping in and out by a glyph.
+        <span aria-hidden="true" className="size-[18px]" />
+      )}
+    </span>
+  );
+}
+
+/**
+ * The left padding a row's link takes, given whether the PR column leads it.
+ *
+ * With a column in front, the link only needs the gap that separates them; the column itself has
+ * already indented the row. `gap-2` between the two would double-count that space.
+ */
+function sidebarRowLeadingPadding(input: { columnShown: boolean; contentPadding: string }) {
+  return input.columnShown ? "pl-1.5" : input.contentPadding;
 }
 
 function resolveSidebarChatState(input: {
@@ -925,6 +946,7 @@ function SidebarTaskRow({
 }) {
   const archivable = isSettledTaskStatus(task.status);
   const contentPadding = useSidebarRowPadding();
+  const pullRequestColumnShown = Boolean(pullRequest) || reservePullRequestColumn;
   return (
     <div
       {...dragProps}
@@ -932,19 +954,22 @@ function SidebarTaskRow({
         active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
       }`}
     >
+      {pullRequestColumnShown ? (
+        <SidebarPullRequestColumn
+          pullRequest={pullRequest}
+          // A Task row is two lines tall. Centred across both, the badge would sit at a different
+          // height from the row's own text and from every one-line chat row above it.
+          className={`mt-[6px] self-start ${contentPadding}`}
+        />
+      ) : null}
       <Link
         href={href}
         prefetch
         aria-current={active ? "page" : undefined}
-        className={`flex min-w-0 flex-1 items-center gap-2 rounded-l-md py-[5px] text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${contentPadding}`}
+        className={`flex min-w-0 flex-1 items-center gap-2 rounded-l-md py-[5px] text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${sidebarRowLeadingPadding(
+          { columnShown: pullRequestColumnShown, contentPadding },
+        )}`}
       >
-        <SidebarPullRequestColumn
-          pullRequest={pullRequest}
-          reserved={reservePullRequestColumn}
-          // A Task row is two lines tall. Centred across both, the badge would sit at a different
-          // height from the row's own text and from every one-line chat row above it.
-          className="mt-[1px] self-start"
-        />
         <ChatStateIndicator state={state} surface="sidebar" className="mt-[7px] self-start" />
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate tracking-[-0.005em]">{task.name}</span>

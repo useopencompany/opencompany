@@ -1811,6 +1811,19 @@ describe("Sidebar", () => {
       expect(badge.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
+    it("keeps the badge out of the row's own link, so no anchor nests in another", () => {
+      chatWithPullRequest("open");
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+      const badge = screen.getByTestId("sidebar-pull-request-badge");
+      expect(badge.parentElement?.closest("a")).toBeNull();
+    });
+
+    function leadingColumnOf(title: string) {
+      const row = screen.getByRole("link", { name: new RegExp(title) }).parentElement;
+      return row?.firstElementChild ?? null;
+    }
+
     it("reserves the badge's column on rows without a pull request, so titles line up", () => {
       recentChatsMock.value = [
         archivableChat("conversation_pr", "Rework onboarding copy"),
@@ -1826,7 +1839,7 @@ describe("Sidebar", () => {
         },
       ];
       const { rerender } = render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
-      expect(screen.getByText("YC customer meetings").previousElementSibling).toHaveClass(
+      expect(leadingColumnOf("YC customer meetings")?.querySelector("span")).toHaveClass(
         "size-[18px]",
       );
 
@@ -1834,7 +1847,7 @@ describe("Sidebar", () => {
       sessionPullRequestsMock.value = [];
       rerender(<Sidebar collapsed onToggleCollapsed={() => {}} />);
       rerender(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
-      expect(screen.getByText("YC customer meetings").previousElementSibling).toBeNull();
+      expect(leadingColumnOf("YC customer meetings")?.tagName).toBe("A");
     });
   });
 
