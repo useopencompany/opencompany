@@ -7,14 +7,14 @@ import {
   contextReferenceRanges,
   referenceMarkdown,
 } from "@/lib/context-references";
-import { ContextReferenceIcon } from "./ContextReference";
+import { ContextReferenceIcon, contextReferenceClassName } from "./ContextReference";
 
 function ReferenceNodeView({ node }: NodeViewProps) {
   const reference = contextReference(node.attrs.href, node.attrs.label);
   return (
     <NodeViewWrapper
       as="span"
-      className="context-reference"
+      className={contextReferenceClassName(reference?.plugin ?? "")}
       contentEditable={false}
       data-context-reference={reference?.kind}
       title={node.attrs.href}

@@ -9,7 +9,7 @@ import {
   filterContextReferences,
 } from "@/lib/context-reference-catalog";
 import type { SkillCatalogItem } from "@/lib/skills";
-import { ContextReferenceIcon } from "./ContextReference";
+import { ContextReferenceOptionContent } from "./ContextReference";
 import { createSuggestionRenderer } from "./EditorSuggestionMenu";
 import { skillMentionContent } from "./SkillMentionNode";
 import { filterSkillMentionItems } from "./SkillMentionSuggestion";
@@ -59,6 +59,8 @@ export function createContextReferenceSuggestion(editor: Editor, skills: SkillCa
     },
     render: createSuggestionRenderer<Item>({
       ariaLabel: "Mention menu",
+      className: "context-mention-menu context-mention-floating",
+      heading: "Context",
       emptyLabel: "Loading mentions…",
       getKey: (item) =>
         item.kind === "reference"
@@ -71,20 +73,16 @@ export function createContextReferenceSuggestion(editor: Editor, skills: SkillCa
           <span role="status" className="text-xs text-ink-subtle">
             {item.label}
           </span>
+        ) : item.kind === "reference" ? (
+          <ContextReferenceOptionContent reference={item.reference} />
         ) : (
           <>
-            {item.kind === "reference" ? (
-              <ContextReferenceIcon plugin={item.reference.plugin} />
-            ) : (
-              <Sparkles size={14} />
-            )}
+            <Sparkles size={20} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[13px] font-medium text-ink">
-                {item.kind === "reference" ? item.reference.label : item.skill.name}
+                {item.skill.name}
               </span>
-              <span className="block truncate text-xs text-ink-subtle">
-                {item.kind === "reference" ? item.reference.description : "Skill"}
-              </span>
+              <span className="block truncate text-xs text-ink-subtle">Skill</span>
             </span>
           </>
         ),
