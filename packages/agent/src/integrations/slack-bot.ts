@@ -36,14 +36,15 @@ const SLACK_BOT_DELIVERY_SCOPES = [
   "users:read",
 ] as const;
 
-// Email attribution and the cosmetic per-workflow display name are requested for new installs.
-// Existing installations can keep delivering while Settings asks an admin to reconnect and grant
-// these additive scopes; without them posts fall back to email-less attribution and the default
-// bot identity.
+// Email attribution, the cosmetic per-workflow display name, and thread progress reactions are
+// requested for new installs. Existing installations can keep delivering while Settings asks an
+// admin to reconnect and grant these additive scopes; without them posts fall back to email-less
+// attribution, the default bot identity, and threads with no progress ack.
 export const SLACK_BOT_SCOPES = [
   ...SLACK_BOT_DELIVERY_SCOPES,
   "users:read.email",
   "chat:write.customize",
+  "reactions:write",
 ] as const;
 
 // One Slack app has one bot user, so a workflow identity can only override the name and icon on
@@ -51,6 +52,13 @@ export const SLACK_BOT_SCOPES = [
 // that predates it posts under the default identity instead of failing.
 export function slackBotCanCustomizeIdentity(grantedScopes: readonly string[]): boolean {
   return grantedScopes.includes("chat:write.customize");
+}
+
+// The worker acks an inbound thread reply by reacting to that message. It is a progress signal,
+// never the answer, so an install that predates the scope keeps running its threads unmarked
+// instead of failing the follow-up it is annotating.
+export function slackBotCanReact(grantedScopes: readonly string[]): boolean {
+  return grantedScopes.includes("reactions:write");
 }
 
 // Settings surfaces missing grants as a reconnect requirement.

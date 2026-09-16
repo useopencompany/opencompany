@@ -2,6 +2,7 @@ import { slackApiRequest } from "@opencompany/agent/integrations/slack";
 import {
   isSlackBotConfigured,
   slackBotCanCustomizeIdentity,
+  slackBotCanReact,
   slackBotScopesSatisfied,
 } from "@opencompany/agent/integrations/slack-bot";
 import { captureProductServerEvent } from "@opencompany/analytics/product/server";
@@ -33,6 +34,7 @@ export type SlackBotWorkspaceSettings = {
   status: "connected" | "needs_reauth" | "sync_failed" | "not_connected";
   needsScopeUpgrade: boolean;
   canCustomizeIdentity: boolean;
+  canReact: boolean;
   teamName: string | null;
   statusReason: string | null;
   destinationCount: number;
@@ -145,6 +147,9 @@ export function createSlackBotSettingsService(input: {
           integration &&
             integration.status === "connected" &&
             slackBotCanCustomizeIdentity(integration.scopes),
+        ),
+        canReact: Boolean(
+          integration && integration.status === "connected" && slackBotCanReact(integration.scopes),
         ),
         teamName: actor.role === "admin" ? (integration?.connectionLabel ?? null) : null,
         statusReason:
