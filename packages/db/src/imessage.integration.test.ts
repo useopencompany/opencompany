@@ -15,7 +15,7 @@ import { createTestPGlite } from "./test-pglite";
 const migrationPath = path.resolve(
   import.meta.dirname,
   "../../..",
-  "drizzle/0298_imessage_personal_agent.sql",
+  "drizzle/0299_imessage_personal_agent.sql",
 );
 
 describe("iMessage binding lifecycle", () => {

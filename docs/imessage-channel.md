@@ -65,7 +65,7 @@ is roughly one message per second per line and at most five unanswered messages 
 
 ## Data
 
-Migration `0298_imessage_personal_agent` is additive: `goat.users.imessage_enabled`,
+Migration `0299_imessage_personal_agent` is additive: `goat.users.imessage_enabled`,
 `goat.codex_chat_sessions.harness` (default `chat`), and `goat.imessage_bindings`. Application
 rollback can leave all three deployed; turning the flag off for everyone disables the channel.
 
