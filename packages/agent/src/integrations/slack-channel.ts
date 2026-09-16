@@ -8,8 +8,9 @@ import { slackBotDeliveryScopesSatisfied } from "./slack-bot";
 
 export const SLACK_CHANNEL_TOOL_DESCRIPTION = [
   "Send a message as the opencompany Slack bot: the shared workspace bot, not any member's personal Slack plugin. This is the tool for instructions that ask to post, send, or share something in Slack with the opencompany Slack bot, and it should only be used when they ask.",
-  "Write the way a founder posts in their own team channel. Lead with the outcome, or with the decision you need. Short sentences, plain words, no preamble, no restating the request, no sign-off. Cut whatever the reader does not need in order to act.",
-  "Never post a wall of text. A message in a channel is a headline someone reads without scrolling: the result, and what you want back. Everything behind it - reasoning, alternatives considered, file paths, commands, caveats, long lists - goes in that message's thread, by calling this tool again with replyToMessageKey set to the first message's messageKey. Two short messages beat one long one. If a draft does not fit in a few sentences, that is the signal to split it, not to send it.",
+  "Write the way a founder messages their own team: spoken language, short sentences, no preamble, no restating the request, no sign-off. Never use internal identifiers - no file or function names, env vars, table or column names, ticket jargon. Never use headings, bold labels, or numbered option lists. A teammate who has not read the session should understand every message without opening anything.",
+  'The channel message is one or two sentences: what you are doing, and what you want back. Nothing else - no findings, no constraints, no options, no recommendation, no code. Write it as you would say it out loud. Good: "I\'ve started to work on adding avatar upload support for slack bot channels and need your input on how we best build this." Bad: a bold headline followed by the technical constraint, a code path, and a numbered list of decisions.',
+  "Ask the actual question in that message's thread, by calling this tool again with replyToMessageKey set to the first message's messageKey. Keep it to what you would ask a busy CTO for advice: the choice in plain words, which way you lean, and what you need from them. A few sentences. Do not rebuild the reasoning, the alternatives you ruled out, or what you found in the code - anyone who wants that opens the session, and replying in the thread continues it. If the reply reads like a design doc, it is too long.",
   "For a Slack follow-up, omit channel and the message goes to the originating thread. Otherwise channel is required to start a thread and must be a public channel the bot has joined; that message subscribes its thread to this same workflow session for 30 days. A replyToMessageKey reply inherits the channel of the message it answers.",
   "Reuse a messageKey to retry the same intended message; give every new message its own key.",
 ].join("\n");
@@ -25,12 +26,12 @@ export const SLACK_CHANNEL_INPUT_SCHEMA = {
     text: {
       type: "string" as const,
       description:
-        "Slack mrkdwn, not Markdown: *bold* with single asterisks, _italic_, `code`, <https://example.com|label> links, bullets with • or -. No **, no # headings, no tables. Keep the first message in a channel to the headline and put the detail in a thread reply.",
+        "Slack mrkdwn, not Markdown: *bold* with single asterisks, _italic_, `code`, <https://example.com|label> links, bullets with • or -. No **, no # headings, no tables. Keep the first message in a channel to one or two plain sentences and ask the question in a thread reply.",
     },
     replyToMessageKey: {
       type: "string" as const,
       description:
-        "messageKey of an earlier message from this session to answer in its thread. Use it to put detail behind a short first message.",
+        "messageKey of an earlier message from this session to answer in its thread. Use it to ask the real question behind a short first message.",
     },
     messageKey: {
       type: "string" as const,
