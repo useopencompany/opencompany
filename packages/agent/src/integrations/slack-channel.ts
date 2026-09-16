@@ -6,28 +6,45 @@ import { sql } from "drizzle-orm";
 import { slackApiRequest } from "./slack";
 import { slackBotDeliveryScopesSatisfied } from "./slack-bot";
 
-export const SLACK_CHANNEL_TOOL_DESCRIPTION =
-  "Send a message as the opencompany Slack bot: the shared workspace bot, not any member's personal Slack plugin. This is the tool for instructions that ask to post, send, or share something in Slack with the opencompany Slack bot, and it should only be used when they ask. For a Slack follow-up, omit channel and the message goes to the originating thread. Otherwise channel is required and must be a public channel the bot has joined; that post subscribes its thread to this same workflow session for 30 days. Use a stable messageKey for retries of the same intended post.";
+export const SLACK_CHANNEL_TOOL_DESCRIPTION = [
+  "Send a message as the opencompany Slack bot: the shared workspace bot, not any member's personal Slack plugin. This is the tool for instructions that ask to post, send, or share something in Slack with the opencompany Slack bot, and it should only be used when they ask.",
+  "Write the way a founder posts in their own team channel. Lead with the outcome, or with the decision you need. Short sentences, plain words, no preamble, no restating the request, no sign-off. Cut whatever the reader does not need in order to act.",
+  "Never post a wall of text. A message in a channel is a headline someone reads without scrolling: the result, and what you want back. Everything behind it - reasoning, alternatives considered, file paths, commands, caveats, long lists - goes in that message's thread, by calling this tool again with replyToMessageKey set to the first message's messageKey. Two short messages beat one long one. If a draft does not fit in a few sentences, that is the signal to split it, not to send it.",
+  "For a Slack follow-up, omit channel and the message goes to the originating thread. Otherwise channel is required to start a thread and must be a public channel the bot has joined; that message subscribes its thread to this same workflow session for 30 days. A replyToMessageKey reply inherits the channel of the message it answers.",
+  "Reuse a messageKey to retry the same intended message; give every new message its own key.",
+].join("\n");
 export const SLACK_CHANNEL_INPUT_SCHEMA = {
   type: "object" as const,
   additionalProperties: false,
   properties: {
     channel: {
       type: "string" as const,
-      description: "Public channel ID or #name. Required when starting a new Slack thread.",
+      description:
+        "Public channel ID or #name. Required to start a thread; omit it when replying with replyToMessageKey or into the originating thread.",
     },
     text: {
       type: "string" as const,
-      description: "Concise message in Slack mrkdwn, up to 3500 characters.",
+      description:
+        "Slack mrkdwn, not Markdown: *bold* with single asterisks, _italic_, `code`, <https://example.com|label> links, bullets with • or -. No **, no # headings, no tables. Keep the first message in a channel to the headline and put the detail in a thread reply.",
+    },
+    replyToMessageKey: {
+      type: "string" as const,
+      description:
+        "messageKey of an earlier message from this session to answer in its thread. Use it to put detail behind a short first message.",
     },
     messageKey: {
       type: "string" as const,
-      description: "Stable identifier for this intended post, reused on retries.",
+      description: "Stable identifier for this intended message, reused on retries.",
     },
   },
   required: ["text", "messageKey"],
 };
-export type SlackChannelPost = { channel?: string; text: string; messageKey: string };
+export type SlackChannelPost = {
+  channel?: string;
+  text: string;
+  messageKey: string;
+  replyToMessageKey?: string;
+};
 export type ChannelInstallation = {
   id: string;
   userWorkosId: string;
@@ -169,25 +186,47 @@ export async function postWorkflowSlackMessage(
       message: "Queued for durable delivery to the originating Slack thread.",
     };
   }
-  if (typeof post.channel !== "string" || !post.channel.trim())
+  const deliveryKey = (key: string) =>
+    createHash("sha256").update(`${target.sessionId}:${key}`).digest("hex");
+  const replyToKey =
+    typeof post.replyToMessageKey === "string" ? post.replyToMessageKey.trim() : "";
+  // Resolve through to the root delivery: Slack has one flat thread per root message, so a reply
+  // to a reply still has to carry the root's timestamp.
+  const parent = replyToKey
+    ? (subscriptionRows<{ id: string; channelId: string }>(
+        await execute(sql`
+        SELECT COALESCE(thread_parent_id, id) AS id, channel_id AS "channelId"
+        FROM goat.channel_deliveries
+        WHERE id = ${deliveryKey(replyToKey)} AND session_id = ${target.sessionId}
+          AND status NOT IN ('canceled', 'failed')
+      `),
+      )[0] ?? null)
+    : null;
+  if (replyToKey && !parent)
+    throw new Error(
+      `No delivered message in this workflow used messageKey "${replyToKey}". Reply with the messageKey of the message whose thread you want.`,
+    );
+  const requestedChannel = typeof post.channel === "string" ? post.channel.trim() : "";
+  if (!parent && !requestedChannel)
     throw new Error("Provide channel when starting a new Slack thread.");
-  const id = createHash("sha256")
-    .update(`${target.sessionId}:${post.messageKey.trim()}`)
-    .digest("hex");
-  const { token } = await channelBotCredential(target);
+  const id = deliveryKey(post.messageKey.trim());
   try {
-    const channelId = await resolvePublicChannel(token, post.channel.trim());
+    // A reply inherits the root's already-validated channel, so it needs no bot token of its own.
+    const channelId = parent
+      ? parent.channelId
+      : await resolvePublicChannel((await channelBotCredential(target)).token, requestedChannel);
     const result = subscriptionRows<{ id: string; status: string }>(
       await execute(sql`
       WITH connected AS MATERIALIZED (
         SELECT id FROM goat.integrations WHERE id = ${target.id} AND status = 'connected' AND external_id = ${target.teamId} FOR SHARE
       )
-      INSERT INTO goat.channel_deliveries (id, workspace_id, session_id, integration_id, team_id, channel_id, text, bot_display_name, bot_avatar_url)
-      SELECT ${id}, ${target.workspaceId}, ${target.sessionId}, ${target.id}, ${target.teamId}, ${channelId}, ${text}, ${target.botDisplayName}, ${target.botAvatarUrl}
+      INSERT INTO goat.channel_deliveries (id, workspace_id, session_id, integration_id, team_id, channel_id, thread_parent_id, text, bot_display_name, bot_avatar_url)
+      SELECT ${id}, ${target.workspaceId}, ${target.sessionId}, ${target.id}, ${target.teamId}, ${channelId}, ${parent?.id ?? null}, ${text}, ${target.botDisplayName}, ${target.botAvatarUrl}
       FROM connected
       WHERE EXISTS (SELECT 1 FROM goat.codex_chat_turns WHERE id = ${input.runId} AND status = 'running' AND lease_id = ${target.leaseId} AND lease_expires_at > now())
       ON CONFLICT (id) DO UPDATE SET id = EXCLUDED.id
       WHERE channel_deliveries.text = EXCLUDED.text AND channel_deliveries.channel_id = EXCLUDED.channel_id
+        AND channel_deliveries.thread_parent_id IS NOT DISTINCT FROM EXCLUDED.thread_parent_id
       RETURNING id, status
     `),
     )[0];
@@ -196,7 +235,9 @@ export async function postWorkflowSlackMessage(
     return {
       deliveryId: id,
       status: result.status,
-      message: "Queued for durable delivery. The thread will continue this session once posted.",
+      message: parent
+        ? "Queued for durable delivery as a reply in that message's Slack thread."
+        : "Queued for durable delivery. The thread will continue this session once posted.",
     };
   } catch (error) {
     await markChannelError(target, error);

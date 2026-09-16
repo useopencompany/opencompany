@@ -39,6 +39,12 @@ const reply = {
   slackUserId: "U1",
   text: "What are the DB implications?",
 };
+const ACTIVE_RUN = `
+  UPDATE goat.integrations SET scopes = '["chat:write","channels:read","channels:history","users:read","users:read.email"]';
+  INSERT INTO goat.chat_messages (id, session_id, role, content, task_id) VALUES ('initial_user','session','user','Investigate','task'), ('initial_assistant','session','assistant','','task');
+  INSERT INTO goat.codex_chat_turns (id,user_workos_id,codex_chat_session_id,chat_session_id,user_message_id,assistant_message_id,status,prompt,lease_id,lease_expires_at)
+    VALUES ('initial_run','owner','runtime','session','initial_user','initial_assistant','running','Investigate','lease',now() + interval '1 minute');
+`;
 const dialect = new PgDialect();
 let execute: SubscriptionExecute;
 beforeAll(async () => {
@@ -100,6 +106,12 @@ beforeAll(async () => {
     await db.exec(
       await readFile(
         new URL("../../../drizzle/0294_workflow_slack_avatar.sql", import.meta.url),
+        "utf8",
+      ),
+    );
+    await db.exec(
+      await readFile(
+        new URL("../../../drizzle/0296_channel_delivery_thread_parent.sql", import.meta.url),
         "utf8",
       ),
     );
@@ -211,6 +223,163 @@ describe("durable Slack subscriptions", () => {
         )
       ).rows,
     ).toEqual([{ bot_display_name: "James", bot_avatar_url: "https://example.com/james.png" }]);
+  });
+  it("keeps a short root message and its detail reply in one Slack thread", async () => {
+    await pg.exec(ACTIVE_RUN);
+    const root = await postWorkflowSlackMessage(
+      {
+        runId: "initial_run",
+        actorId: "owner",
+        post: { channel: "C1", text: "Shipped the Gmail trigger.", messageKey: "summary" },
+      },
+      execute,
+    );
+    // The reply carries no channel: it inherits the root's, which is the point of the key.
+    const detail = await postWorkflowSlackMessage(
+      {
+        runId: "initial_run",
+        actorId: "owner",
+        post: {
+          text: "Label filter only, 25 per pass, 5 minute interval.",
+          messageKey: "summary-detail",
+          replyToMessageKey: "summary",
+        },
+      },
+      execute,
+    );
+    expect(detail.message).toContain("reply");
+    expect(
+      (
+        await pg.query(
+          "SELECT id, channel_id, thread_parent_id FROM goat.channel_deliveries WHERE id = $1",
+          [detail.deliveryId],
+        )
+      ).rows,
+    ).toEqual([{ id: detail.deliveryId, channel_id: "C1", thread_parent_id: root.deliveryId }]);
+
+    // Nothing to reply under yet, so the worker takes the root first and leaves the reply queued.
+    deps.request = vi.fn(async () => ({
+      ts: "300.001",
+    })) as unknown as SlackChannelWorkerDependencies["request"];
+    await pg.exec("UPDATE goat.channel_deliveries SET status = 'sent' WHERE id = 'root'");
+    expect(await processNextChannelDelivery(deps)).toBe(true);
+    expect(deps.request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "chat.postMessage",
+        form: expect.not.objectContaining({ thread_ts: expect.anything() }),
+      }),
+    );
+
+    deps.request = vi.fn(async () => ({
+      ts: "300.002",
+    })) as unknown as SlackChannelWorkerDependencies["request"];
+    expect(await processNextChannelDelivery(deps)).toBe(true);
+    expect(deps.request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "chat.postMessage",
+        form: expect.objectContaining({ channel: "C1", thread_ts: "300.001" }),
+      }),
+    );
+    expect(
+      (
+        await pg.query("SELECT status, thread_ts FROM goat.channel_deliveries WHERE id = $1", [
+          detail.deliveryId,
+        ])
+      ).rows,
+    ).toEqual([{ status: "sent", thread_ts: "300.001" }]);
+    // Only the root message subscribes a thread; its own replies must not add another.
+    expect((await pg.query("SELECT id FROM goat.session_subscriptions")).rows).toEqual([
+      { id: "root" },
+      { id: root.deliveryId },
+    ]);
+  });
+  it("holds a reply back until its root message is confirmed, and drops it if the root never lands", async () => {
+    await pg.exec(ACTIVE_RUN);
+    await postWorkflowSlackMessage(
+      {
+        runId: "initial_run",
+        actorId: "owner",
+        post: { channel: "C1", text: "Shipped the Gmail trigger.", messageKey: "summary" },
+      },
+      execute,
+    );
+    const detail = await postWorkflowSlackMessage(
+      {
+        runId: "initial_run",
+        actorId: "owner",
+        post: { text: "The long version.", messageKey: "detail", replyToMessageKey: "summary" },
+      },
+      execute,
+    );
+    await pg.exec("UPDATE goat.channel_deliveries SET status = 'sent' WHERE id = 'root'");
+
+    // Root still pending: the reply must not be claimed and posted ahead of it as a root message.
+    await pg.exec(
+      "UPDATE goat.channel_deliveries SET status = 'uncertain', lease_expires_at = now() + interval '1 hour' WHERE text = 'Shipped the Gmail trigger.'",
+    );
+    expect(await processNextChannelDelivery(deps)).toBe(false);
+    expect(deps.request).not.toHaveBeenCalled();
+
+    await pg.exec(
+      "UPDATE goat.channel_deliveries SET status = 'canceled' WHERE text = 'Shipped the Gmail trigger.'",
+    );
+    expect(await processNextChannelDelivery(deps)).toBe(false);
+    expect(deps.request).not.toHaveBeenCalled();
+    expect(
+      (
+        await pg.query("SELECT status FROM goat.channel_deliveries WHERE id = $1", [
+          detail.deliveryId,
+        ])
+      ).rows,
+    ).toEqual([{ status: "canceled" }]);
+  });
+  it("rejects a reply to a messageKey this workflow never posted", async () => {
+    await pg.exec(ACTIVE_RUN);
+    await expect(
+      postWorkflowSlackMessage(
+        {
+          runId: "initial_run",
+          actorId: "owner",
+          post: { text: "Detail", messageKey: "detail", replyToMessageKey: "never-posted" },
+        },
+        execute,
+      ),
+    ).rejects.toThrow("never-posted");
+    expect((await pg.query("SELECT id FROM goat.channel_deliveries")).rows).toHaveLength(1);
+  });
+  it("flattens a reply to a reply onto the root, the way Slack threads work", async () => {
+    await pg.exec(ACTIVE_RUN);
+    const root = await postWorkflowSlackMessage(
+      {
+        runId: "initial_run",
+        actorId: "owner",
+        post: { channel: "C1", text: "Headline", messageKey: "summary" },
+      },
+      execute,
+    );
+    await postWorkflowSlackMessage(
+      {
+        runId: "initial_run",
+        actorId: "owner",
+        post: { text: "Detail", messageKey: "detail", replyToMessageKey: "summary" },
+      },
+      execute,
+    );
+    const third = await postWorkflowSlackMessage(
+      {
+        runId: "initial_run",
+        actorId: "owner",
+        post: { text: "More detail", messageKey: "more", replyToMessageKey: "detail" },
+      },
+      execute,
+    );
+    expect(
+      (
+        await pg.query("SELECT thread_parent_id FROM goat.channel_deliveries WHERE id = $1", [
+          third.deliveryId,
+        ])
+      ).rows,
+    ).toEqual([{ thread_parent_id: root.deliveryId }]);
   });
   it("refuses to post for a workflow whose Slack channel is turned off", async () => {
     await pg.exec(`
@@ -421,7 +590,7 @@ describe("durable Slack subscriptions", () => {
       "Member Person <member@example.com> (Slack user U1):\n> What are the DB implications?",
     );
     expect(activity?.body).toContain(
-      'call post_slack_message with your final Slack reply as text and "slack-follow-up-1" as messageKey',
+      'call opencompany_slack_bot_send_message with your final Slack reply as text and "slack-follow-up-1" as messageKey',
     );
     expect(activity?.body.indexOf("--- Full Slack thread ---")).toBeLessThan(
       activity?.body.indexOf("--- New follow-up message begins ---") ?? 0,
