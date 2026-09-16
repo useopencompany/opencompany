@@ -24,8 +24,11 @@ action, which can also post messages. It queues a root post with a stable
 Conversation.
 
 Its description carries the house writing style, because the tool is the only Slack-facing
-instruction a workflow run reliably sees: lead with the outcome, short sentences, and split a long
-update rather than posting a wall of text. Splitting is a real capability, not just advice —
+instruction a workflow run reliably sees. A channel message is one or two spoken sentences saying
+what the run is doing and what it wants back; the real question goes in that message's thread, kept
+to what you would ask a busy CTO for advice. Internal identifiers, headings, and numbered option
+lists are out in both, because a Slack reader has not read the session and anyone who wants the
+full reasoning can open it. Splitting is a real capability, not just advice —
 passing `replyToMessageKey` with an earlier message's `messageKey` queues the new message as a
 reply in that message's thread, inheriting its channel. A reply is queued before Slack has
 timestamped its root, so it stores `thread_parent_id` instead of a `thread_ts` and stays unclaimed
