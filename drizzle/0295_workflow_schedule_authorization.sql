@@ -4,6 +4,7 @@ ALTER TABLE "goat"."workflow_schedule_read_model_v1"
   ADD COLUMN "scope" text DEFAULT 'company' NOT NULL,
   ADD COLUMN "created_by_workos_id" text;--> statement-breakpoint
 
+-- Backfill directly so the migration only rewrites schedule projections, not every Workflow.
 UPDATE goat.workflow_schedule_read_model_v1 AS schedule
 SET
   scope = workflow.scope,
@@ -136,6 +137,3 @@ BEGIN
   RETURN NEW;
 END;
 $$;--> statement-breakpoint
-
--- Replaying every live Workflow backfills both visibility columns on existing schedule rows.
-UPDATE goat.workflows SET updated_at = updated_at WHERE archived_at IS NULL;
