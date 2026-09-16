@@ -3958,6 +3958,7 @@ describe("canonical Hono API", () => {
       needsScopeUpgrade: false,
       canCustomizeIdentity: true,
       canReact: true,
+      canReadDirectMessages: true,
       teamName: "Acme",
       statusReason: null,
       destinationCount: 1,

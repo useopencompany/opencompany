@@ -7677,3 +7677,35 @@ export const channelDeliveries = productSchema.table(
     ),
   ],
 );
+
+// Durable inbox for direct messages sent to the workspace Slack bot. Ingress persists the message
+// before acknowledging Slack; the runner resolves the sender to an opencompany account and opens
+// the Task that answers in the message's thread.
+export const slackDirectMessages = productSchema.table(
+  "slack_direct_messages",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    teamId: text("team_id").notNull(),
+    eventId: text("event_id").notNull(),
+    channelId: text("channel_id").notNull(),
+    messageTs: text("message_ts").notNull(),
+    slackUserId: text("slack_user_id").notNull(),
+    text: text("text").notNull(),
+    status: text("status").notNull().default("pending"),
+    sessionId: text("session_id").references(() => chatSessions.id, { onDelete: "set null" }),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("slack_direct_messages_event_idx").on(table.teamId, table.eventId),
+    index("slack_direct_messages_pending_idx")
+      .on(table.status, table.nextAttemptAt, table.id)
+      .where(sql`${table.status} = 'pending'`),
+    check(
+      "slack_direct_messages_status_check",
+      sql`${table.status} IN ('pending', 'started', 'ignored')`,
+    ),
+  ],
+);

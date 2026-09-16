@@ -5,6 +5,24 @@ from every member's personal Slack plugin. Invite the bot to a public, unshared 
 the destination in normal workflow instructions: “Post the investigation summary in #product with
 the opencompany Slack bot.” There is no destination picker in the workflow editor.
 
+## Sessions started from a direct message
+
+A direct message to the bot opens a Task on the sender's own opencompany account and answers in
+that message's thread. The sender is matched by the email on their Slack profile: it must belong
+to a member of the workspace this Slack team is installed into, or the bot replies once saying it
+found no account and does nothing else. A DM conversation with the bot has no other participants,
+so the sender and the Task owner are the same person and the session runs on their connected tools
+and context.
+
+Ingress persists the message in `slack_direct_messages` before acknowledging Slack, and the runner
+resolves the sender and creates the Task. The Task is recorded as sequence `0` of a `slack_thread`
+subscription over `(team, DM channel, the sender's message timestamp)`, so its first run owes the
+thread exactly one reply and every later message in that thread continues the same session through
+the workflow follow-up path below. The Task carries no `workflow_id`, which is what grants it the
+Slack send tool in place of a workflow's `slack_channel_enabled` toggle; a workflow Task still
+reads only that toggle. Replies to the bot's own DM conversation skip the public-channel check,
+because Slack only delivers an `im` event for a conversation the bot is already part of.
+
 ## Per-workflow channel configuration
 
 The workflow editor's **Channels** section owns two things, both stored on `goat.workflows`:
@@ -46,7 +64,7 @@ including guests and people without an opencompany account. The worker rechecks 
 channel access and filters bots and deleted users. Follow-up Runs use the workflow owner’s
 existing authority, connected tools, context, and artifacts; the prompt attributes the Slack
 sender by ID. The owner must still belong to the opencompany workspace. No sender email match
-is required. DMs, mentions outside a subscribed thread, edits, attachments, and untracked threads
+is required. Mentions outside a subscribed thread, edits, attachments, and untracked threads
 are ignored.
 A paused Run awaiting approval stays paused; later Slack replies wait. Expired, disconnected,
 archived, or closed work cannot silently restart. Human replies to a closed thread receive
@@ -93,14 +111,17 @@ a duplicate. The conversation and accepted events remain durable during that unc
 
 Use the existing `OPENCOMPANY_SLACK_BOT_*` credentials. OAuth still uses
 `/api/integrations/slack-bot/start` and `/api/integrations/slack-bot/callback`; signed events use
-`/webhooks/slack-bot/events` on the API. Subscribe to `message.channels`, `app_uninstalled`, and
-`tokens_revoked`. Required bot scopes: `chat:write`, `channels:read`, `channels:history`,
-and `users:read`. New installs additionally request `users:read.email`, `chat:write.customize`,
-and `reactions:write`; an install that predates any of them keeps delivering, and Channels settings
-asks an admin to reconnect. Without `chat:write.customize` a workflow's display name and avatar are
-dropped and the post uses the default bot identity rather than failing; without `reactions:write`
-thread replies get no progress reaction. Custom avatars must be public HTTPS image URLs
-because Slack downloads the image when it posts the message. New installs still do not request DM,
+`/webhooks/slack-bot/events` on the API. Subscribe to `message.channels`, `message.im`,
+`app_uninstalled`, and `tokens_revoked`, and turn on the App Home messages tab with
+“Allow users to send Slash commands and messages from the messages tab”. Required bot scopes:
+`chat:write`, `channels:read`, `channels:history`, and `users:read`. New installs additionally
+request `users:read.email`, `chat:write.customize`, `reactions:write`, and `im:history`; an install
+that predates any of them keeps delivering, and Channels settings asks an admin to reconnect.
+Without `chat:write.customize` a workflow's display name and avatar are dropped and the post uses
+the default bot identity rather than failing; without `reactions:write` thread replies get no
+progress reaction. Without `im:history` Slack never delivers a direct message at all, so the bot
+is simply silent when a member writes to it. Custom avatars must be public HTTPS image URLs
+because Slack downloads the image when it posts the message. New installs still do not request
 private-channel, mention, or reaction *event* scopes - `reactions:write` only lets the bot mark a
 message, not read anyone else's reactions. Old grants may remain until the Slack app is
 reinstalled; ingress ignores those event types. Stop configuring the legacy Wiki answer bot's Brain destinations.
@@ -128,3 +149,7 @@ Migration `0284_slack_thread_participants` updates the subscription policy defau
 Slack thread policy labels. It preserves subscriptions and queued events. Rollback can restore
 `workspace_member` policy labels alongside the previous worker. Previously ignored replies stay
 ignored; a new reply is needed to resume those threads.
+
+Migration `0297_slack_direct_message_sessions` is additive: it adds the `slack_direct_messages`
+inbox. An application rollback can leave the table deployed; queued rows stop being claimed and no
+session is opened for them. Do not drop it while direct messages are pending.
