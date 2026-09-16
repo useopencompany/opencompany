@@ -3064,7 +3064,7 @@ export function createApiApp(input: CreateApiAppInput) {
           onError: (c) =>
             apiErrorResponse(
               c,
-              new ApiError(413, "invalid_request", "The avatar upload is too large."),
+              new ApiError(413, "invalid_request", "Avatars are limited to 1 MB."),
             ),
         }),
       );

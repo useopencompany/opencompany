@@ -200,7 +200,7 @@ describe("WorkflowEditor", () => {
   it("uploads an avatar, saves the returned URL, and can clear it again", async () => {
     render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
 
-    expect(screen.getByRole("button", { name: "Upload image" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Upload avatar" })).toBeEnabled();
     const picker = screen.getByTestId("workflow-slack-avatar-input");
     await act(async () => {
       fireEvent.change(picker, {
@@ -215,9 +215,9 @@ describe("WorkflowEditor", () => {
     expect(workflowActionsMock.update.mock.calls.at(-1)?.[1].slackChannel).toMatchObject({
       avatarUrl: "https://app.test/workflow-avatars/a.png",
     });
-    expect(screen.getByRole("button", { name: "Replace" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Replace avatar" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove avatar" }));
     await advanceAutosave();
     expect(workflowActionsMock.update.mock.calls.at(-1)?.[1].slackChannel).toMatchObject({
       avatarUrl: "",
@@ -238,7 +238,7 @@ describe("WorkflowEditor", () => {
     // Nothing about the workflow changed, so the draft stays clean and autosave never fires.
     await advanceAutosave();
     expect(workflowActionsMock.update).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Upload image" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Upload avatar" })).toBeInTheDocument();
   });
 
   it("shows the required Slack reconnect beside an unsupported custom identity", () => {

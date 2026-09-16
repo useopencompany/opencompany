@@ -1715,6 +1715,7 @@ function SlackAvatarField({
           variant="outline"
           size="sm"
           disabled={!canEdit || uploading}
+          aria-label={avatarUrl ? "Replace avatar" : "Upload avatar"}
           onClick={() => inputRef.current?.click()}
         >
           {uploading ? (
@@ -1734,6 +1735,7 @@ function SlackAvatarField({
             variant="ghost"
             size="sm"
             disabled={!canEdit}
+            aria-label="Remove avatar"
             onClick={() => {
               setError(null);
               onChange("");
