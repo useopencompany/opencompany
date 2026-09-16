@@ -771,17 +771,7 @@ function SidebarChatRow({
 }) {
   const state = resolveSidebarChatState({ chat, localState });
   const contentPadding = useSidebarRowPadding();
-  const pullRequestColumnShown = Boolean(pullRequest) || reservePullRequestColumn;
-  const linkPadding = sidebarRowLeadingPadding({
-    columnShown: pullRequestColumnShown,
-    contentPadding,
-  });
-  const content = (
-    <>
-      <SidebarChatStateIndicator state={state} />
-      <span className="truncate tracking-[-0.005em]">{chat.title}</span>
-    </>
-  );
+  const content = <span className="truncate tracking-[-0.005em]">{chat.title}</span>;
   return (
     <div
       {...dragProps}
@@ -789,14 +779,17 @@ function SidebarChatRow({
         active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
       }`}
     >
-      {pullRequestColumnShown ? (
-        <SidebarPullRequestColumn pullRequest={pullRequest} className={contentPadding} />
-      ) : null}
+      <SidebarSessionStatusColumn
+        state={state}
+        pullRequest={pullRequest}
+        reservePullRequestSlot={reservePullRequestColumn}
+        className={contentPadding}
+      />
       {optimistic ? (
         <button
           type="button"
           onClick={onRequestComposerFocus}
-          className={`flex min-w-0 flex-1 items-center gap-2 rounded-md py-[5px] pr-1 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${linkPadding}`}
+          className={`flex min-w-0 flex-1 items-center rounded-md py-[5px] pr-1 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${SIDEBAR_ROW_LINK_PADDING}`}
         >
           {content}
         </button>
@@ -817,7 +810,7 @@ function SidebarChatRow({
             onRequestComposerFocus();
           }}
           aria-current={active ? "page" : undefined}
-          className={`flex min-w-0 flex-1 items-center gap-2 rounded-l-md py-[5px] text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${linkPadding}`}
+          className={`flex min-w-0 flex-1 items-center rounded-l-md py-[5px] text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${SIDEBAR_ROW_LINK_PADDING}`}
         >
           {content}
         </IntentPrefetchLink>
@@ -857,46 +850,60 @@ function SidebarChatRow({
 }
 
 /**
- * The leading column that carries a session's pull-request state, to the left of its name.
+ * The leading column that carries a session's state, to the left of its name: how the run is
+ * doing, then the pull request it opened.
  *
  * It leads the row rather than trailing it because the state of the work an agent left behind is
  * something the reader scans a column for, the way they scan the row's own title — not a control
  * they reach for. Trailing, it also had to share the pin's column and disappear on hover.
  *
+ * Both slots are a fixed width and both are held open on every row in the list, because either
+ * glyph is absent more often than it is present: a settled, seen session has no run-state
+ * indicator and most sessions have no pull request. Rendered only when they apply, each one
+ * stepped the title right by its own width and back again — so a list of otherwise identical rows
+ * had its names on three different left edges, and a run finishing shifted the whole list.
+ *
  * It sits beside the row's link rather than inside it: the badge is itself a link, to the PR on
  * GitHub, and an anchor inside an anchor is invalid HTML that the browser's parser silently
- * rewrites. So the column carries the row's own left padding, and the link beside it drops to the
- * gap between them — see `sidebarRowLeadingPadding`.
+ * rewrites. So the column carries the row's own left padding, and the link beside it drops to
+ * `SIDEBAR_ROW_LINK_PADDING`, the gap between them.
  */
-function SidebarPullRequestColumn({
+function SidebarSessionStatusColumn({
+  state,
   pullRequest,
+  reservePullRequestSlot,
   className,
 }: {
+  state: ReturnType<typeof chatSummaryState>;
   pullRequest: SessionPullRequest | null;
+  /** Whether the list reserves the pull-request slot. See `reservePullRequestColumn`. */
+  reservePullRequestSlot: boolean;
   className?: string;
 }) {
   return (
-    <span className={`flex shrink-0 items-center ${className ?? ""}`}>
-      {pullRequest ? (
-        <PullRequestBadge pullRequest={pullRequest} />
-      ) : (
-        // Holds the column open on a row with no PR, so titles line up down the list instead of
-        // stepping in and out by a glyph.
-        <span aria-hidden="true" className="size-[18px]" />
-      )}
+    <span className={`flex shrink-0 items-center gap-1 ${className ?? ""}`}>
+      {/* The run state reads as the row's unread rail, so it takes the outer slot and the pull
+          request — the marker tied to what the session produced — sits against the name. */}
+      <span className="flex w-[11px] shrink-0 items-center">
+        <ChatStateIndicator state={state} surface="sidebar" />
+      </span>
+      {reservePullRequestSlot ? (
+        pullRequest ? (
+          <PullRequestBadge pullRequest={pullRequest} />
+        ) : (
+          <span aria-hidden="true" className="size-[18px]" />
+        )
+      ) : null}
     </span>
   );
 }
 
 /**
- * The left padding a row's link takes, given whether the PR column leads it.
- *
- * With a column in front, the link only needs the gap that separates them; the column itself has
- * already indented the row. `gap-2` between the two would double-count that space.
+ * The left padding a row's link takes. The status column in front of it has already carried the
+ * row's own padding, so the link only needs the gap that separates the two; `gap-2` between them
+ * would double-count that space.
  */
-function sidebarRowLeadingPadding(input: { columnShown: boolean; contentPadding: string }) {
-  return input.columnShown ? "pl-1.5" : input.contentPadding;
-}
+const SIDEBAR_ROW_LINK_PADDING = "pl-1.5";
 
 function resolveSidebarChatState(input: {
   chat: ChatSummaryView;
@@ -909,10 +916,6 @@ function resolveSidebarChatState(input: {
   if (state === "awaiting_input") return state;
   if (input.localState === "working") return "working";
   return input.localState ?? state;
-}
-
-function SidebarChatStateIndicator({ state }: { state: ReturnType<typeof chatSummaryState> }) {
-  return <ChatStateIndicator state={state} surface="sidebar" />;
 }
 
 /**
@@ -946,7 +949,6 @@ function SidebarTaskRow({
 }) {
   const archivable = isSettledTaskStatus(task.status);
   const contentPadding = useSidebarRowPadding();
-  const pullRequestColumnShown = Boolean(pullRequest) || reservePullRequestColumn;
   return (
     <div
       {...dragProps}
@@ -954,23 +956,20 @@ function SidebarTaskRow({
         active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
       }`}
     >
-      {pullRequestColumnShown ? (
-        <SidebarPullRequestColumn
-          pullRequest={pullRequest}
-          // A Task row is two lines tall. Centred across both, the badge would sit at a different
-          // height from the row's own text and from every one-line chat row above it.
-          className={`mt-[6px] self-start ${contentPadding}`}
-        />
-      ) : null}
+      <SidebarSessionStatusColumn
+        state={state}
+        pullRequest={pullRequest}
+        reservePullRequestSlot={reservePullRequestColumn}
+        // A Task row is two lines tall. Centred across both, the column would sit at a different
+        // height from the row's own text and from every one-line chat row above it.
+        className={`mt-[6px] self-start ${contentPadding}`}
+      />
       <Link
         href={href}
         prefetch
         aria-current={active ? "page" : undefined}
-        className={`flex min-w-0 flex-1 items-center gap-2 rounded-l-md py-[5px] text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${sidebarRowLeadingPadding(
-          { columnShown: pullRequestColumnShown, contentPadding },
-        )}`}
+        className={`flex min-w-0 flex-1 items-center rounded-l-md py-[5px] text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${SIDEBAR_ROW_LINK_PADDING}`}
       >
-        <ChatStateIndicator state={state} surface="sidebar" className="mt-[7px] self-start" />
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate tracking-[-0.005em]">{task.name}</span>
           <span className="truncate text-[11px] leading-none text-ink-faint">{task.displayId}</span>
