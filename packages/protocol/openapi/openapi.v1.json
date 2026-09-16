@@ -8223,6 +8223,62 @@
         ],
         "additionalProperties": false
       },
+      "SessionPullRequestList": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SessionPullRequest"
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SessionPullRequest": {
+        "type": "object",
+        "properties": {
+          "conversationId": {
+            "type": "string"
+          },
+          "repository": {
+            "type": "string"
+          },
+          "number": {
+            "type": "integer",
+            "minimum": 0,
+            "exclusiveMinimum": true
+          },
+          "url": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "open",
+              "blocked",
+              "merged",
+              "closed"
+            ]
+          }
+        },
+        "required": [
+          "conversationId",
+          "repository",
+          "number",
+          "url",
+          "state"
+        ],
+        "additionalProperties": false
+      },
       "ConversationEnvelope": {
         "type": "object",
         "properties": {
@@ -22622,6 +22678,43 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ConversationPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/session-pull-requests": {
+      "get": {
+        "tags": [
+          "Chat"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pull requests opened by the actor's coding sessions, with each PR's state read from GitHub.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionPullRequestList"
                 }
               }
             }
