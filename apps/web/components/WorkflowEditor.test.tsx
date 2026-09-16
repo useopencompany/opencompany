@@ -78,6 +78,7 @@ function WorkflowEditor(
       installed: true,
       status: "connected",
       needsScopeUpgrade: false,
+      canCustomizeIdentity: true,
       teamName: "Acme",
       statusReason: null,
       destinationCount: 0,
@@ -207,6 +208,7 @@ describe("WorkflowEditor", () => {
           installed: true,
           status: "connected",
           needsScopeUpgrade: true,
+          canCustomizeIdentity: false,
           teamName: "Acme",
           statusReason: null,
           destinationCount: 0,
@@ -221,6 +223,33 @@ describe("WorkflowEditor", () => {
       "href",
       "/settings/workspace/slack",
     );
+  });
+
+  it("does not block custom identities when only another Slack scope needs an upgrade", () => {
+    render(
+      <WorkflowEditor
+        workflow={{
+          ...workflow,
+          slackChannel: { enabled: true, displayName: "James", avatarUrl: "" },
+        }}
+        canEdit
+        skillCatalog={[]}
+        slackBotSettings={{
+          isAdmin: true,
+          configured: true,
+          installed: true,
+          status: "connected",
+          needsScopeUpgrade: true,
+          canCustomizeIdentity: true,
+          teamName: "Acme",
+          statusReason: null,
+          destinationCount: 0,
+        }}
+      />,
+    );
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByText(/Messages post as James/)).toBeInTheDocument();
   });
 
   it("adds multiple scheduled triggers from the searchable trigger menu", async () => {

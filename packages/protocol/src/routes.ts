@@ -6262,6 +6262,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
           installed: false,
           status: "not_connected" as const,
           needsScopeUpgrade: false,
+          canCustomizeIdentity: false,
           teamName: null,
           statusReason: null,
           destinationCount: 0,

@@ -4304,6 +4304,7 @@ export const SlackBotWorkspaceSettingsSchema = z
     installed: z.boolean(),
     status: z.enum(["connected", "needs_reauth", "sync_failed", "not_connected"]),
     needsScopeUpgrade: z.boolean(),
+    canCustomizeIdentity: z.boolean(),
     teamName: z.string().max(512).nullable(),
     statusReason: z.string().max(2_000).nullable(),
     destinationCount: z.number().int().min(0),

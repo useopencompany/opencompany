@@ -1682,21 +1682,25 @@ function SlackIdentityStatus({
     </Link>
   );
 
-  if (settings.needsScopeUpgrade) {
+  if (
+    !settings.installed ||
+    settings.status === "not_connected" ||
+    settings.status === "needs_reauth"
+  ) {
+    return (
+      <p role="alert" className="text-[12px] leading-4 text-ink-subtle">
+        {settings.isAdmin ? "Connect" : "Ask a workspace admin to connect"} Slack from the{" "}
+        {settingsLink} before this workflow can post.
+      </p>
+    );
+  }
+
+  if (!settings.canCustomizeIdentity) {
     return (
       <p role="alert" className="text-[12px] leading-4 text-ink-subtle">
         This connection cannot apply custom identities yet.{" "}
         {settings.isAdmin ? "Reconnect" : "Ask a workspace admin to reconnect"} Slack from the{" "}
         {settingsLink}; until then messages post as opencompany.
-      </p>
-    );
-  }
-
-  if (!settings.installed || settings.status !== "connected") {
-    return (
-      <p role="alert" className="text-[12px] leading-4 text-ink-subtle">
-        {settings.isAdmin ? "Connect" : "Ask a workspace admin to connect"} Slack from the{" "}
-        {settingsLink} before this workflow can post.
       </p>
     );
   }
