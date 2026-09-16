@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.29.0] - 2026-09-16
+
+### Added
+- message the opencompany bot in slack to start a task with your own connected tools and context. keep replying in its thread to continue. your slack email must match your account in the connected workspace; admins may need to reconnect slack in settings → channels (#1900) — @louis.
+- try the imessage assistant beta to text opencompany from your phone. turn it on in preferences → beta features, then link your number in settings → channels → imessage. it can search the web, use your wiki, skills, and connected tools; actions that need approval cannot run over text (#1903) — @louis.
+- let workflows remember what happened last time. for workflows using chat models, turn on memory under advanced to carry a note between runs. you can read or clear it there; memory starts off (#1887) — @louis.
+- start a workflow when an email arrives. enable email received in the gmail plugin, then add it as a workflow trigger and optionally filter by label. mail is checked every five minutes; up to 25 messages can trigger workflows per check, and extra matches are skipped (#1893) — @louis.
+- start a workflow from a posthog event, such as a signup. connect your project with a read-only personal api key in the plugin's events setup, then choose the event in your workflow trigger (#1906) — @louis.
+- connect todoist to find, create, and update tasks and projects from chat. changes ask for approval by default; permanent deletion starts off (#1878) — @louis.
+- see a workflow's past runs on its detail page, with status, outcome, duration, and a link to the task. open all runs to see its full history (#1884) — @louis.
+- type @ to add a link to an installed plugin or accessible github repository in chat or workflow instructions. these references help name what you mean; they do not grant access or change tool permissions (#1907) — @louis.
+
+### Changed
+- choose whether each workflow can post to slack in its channels section. give its posts a display name and upload an avatar; an admin may need to reconnect slack to enable the custom identity (#1886, #1892, #1901) — @louis.
+- workflows can put a short slack update in the channel and details in its thread. replies now get a progress reaction while work runs, then an answered or needs-attention mark. reconnect older slack installs to enable reactions (#1895, #1897, #1898) — @louis.
+- search the same model choices in workflows as in chat, including qwen 3.8 max, deepseek v4, and grok 4.6. coding agents have their own tab, and the composer shows when a workflow uses a cloud sandbox (#1905, #1904) — @louis.
+- see a coding chat or task's pull request status in the sidebar. running, waiting, and unread indicators take priority until you have seen the result (#1891, #1896, #1899, #1908) — @louis.
+- tool activity and approval cards now name the service and action, so you can see which connected app the agent is using (#1885) — @louis.
+
+### Fixed
+- connected tools no longer reject unrelated actions as duplicates after a connection restarts (#1879) — @louis.
+- sending a follow-up to a task no longer adds an unnecessary five-second wait before confirming it was sent (#1882) — @louis.
+- workflows with slack enabled can now use the workspace bot consistently across chat models and coding agents (#1890) — @louis.
+
+### Removed
+- routines, the old scheduled tasks, no longer run. recreate recurring work as a workflow with a schedule trigger. tasks from past routine runs remain available (#1902) — @louis.
+
+### Security
+- personal workflow schedules are now visible only to their creator. switching a company workflow to personal also removes teammates' access to its schedule (#1894) — @louis.
+
 ## [1.28.0] - 2026-09-15
 
 ### Added
