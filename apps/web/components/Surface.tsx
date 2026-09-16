@@ -84,7 +84,7 @@ import {
   CodingWorkspacePanel,
   type CodingWorkspacePanelHandle,
 } from "@/components/CodingWorkspacePanel";
-import { ContextReferenceIcon } from "@/components/ContextReference";
+import { ContextReferenceOptionContent } from "@/components/ContextReference";
 import { ConversationRuntimeSync } from "@/components/ConversationRuntimeSync";
 import type { ArtifactSelection } from "@/components/chat/ArtifactViewer";
 import { pendingApprovals } from "@/components/chat/approval-presentation";
@@ -3310,8 +3310,9 @@ export function Surface({
                 <div
                   role="listbox"
                   aria-label="Mention menu"
-                  className="absolute bottom-full left-3 z-20 mb-2 max-h-72 w-80 overflow-y-auto shadow-ring-md rounded-lg bg-surface p-1"
+                  className="context-mention-menu absolute bottom-full left-0 right-0 z-20 mb-2"
                 >
+                  <div className="context-mention-heading">Context</div>
                   {mentionToken.sigil === "@" &&
                   (referenceCatalog.loading || referenceCatalog.error || !mentionOptions.length) ? (
                     <p role="status" className="px-2.5 py-2 text-xs text-ink-subtle">
@@ -3339,7 +3340,7 @@ export function Surface({
                       )}
                     >
                       {option.kind === "reference" ? (
-                        <ContextReferenceIcon plugin={option.reference.plugin} />
+                        <ContextReferenceOptionContent reference={option.reference} />
                       ) : option.kind === "engine" ? (
                         <Code2
                           size={14}
@@ -3365,22 +3366,21 @@ export function Surface({
                           className="mt-0.5 shrink-0 text-ink-subtle"
                         />
                       )}
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[13px] font-medium leading-4 text-ink">
-                          {option.kind === "reference" ? option.label : option.token}
-                        </span>
-                        {option.kind === "reference" ||
-                        option.kind === "skill" ||
-                        option.kind === "workflow" ||
-                        option.kind === "task" ? (
-                          <span className="mt-0.5 block truncate text-[12px] leading-4 text-ink-subtle">
-                            {option.kind === "reference" ? "" : option.label}
-                            {option.description
-                              ? `${option.kind === "reference" ? "" : " · "}${option.description}`
-                              : ""}
+                      {option.kind !== "reference" ? (
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[13px] font-medium leading-4 text-ink">
+                            {option.token}
                           </span>
-                        ) : null}
-                      </span>
+                          {option.kind === "skill" ||
+                          option.kind === "workflow" ||
+                          option.kind === "task" ? (
+                            <span className="mt-0.5 block truncate text-[12px] leading-4 text-ink-subtle">
+                              {option.label}
+                              {option.description ? ` · ${option.description}` : ""}
+                            </span>
+                          ) : null}
+                        </span>
+                      ) : null}
                       {option.kind === "engine" ? (
                         <span className="text-[12px] leading-4 text-ink-subtle">Codex</span>
                       ) : null}
@@ -4397,11 +4397,8 @@ export function QuickChatComposer({
   return (
     <div className={cn("flex flex-col gap-2", className)}>
       {mentionToken && (mentionOptions.length > 0 || mentionToken.sigil === "@") ? (
-        <div
-          role="listbox"
-          aria-label="Mention menu"
-          className="max-h-72 w-full overflow-y-auto shadow-ring-md rounded-lg bg-surface p-1"
-        >
+        <div role="listbox" aria-label="Mention menu" className="context-mention-menu w-full">
+          <div className="context-mention-heading">Context</div>
           {mentionToken.sigil === "@" &&
           (referenceCatalog.loading || referenceCatalog.error || !mentionOptions.length) ? (
             <p role="status" className="px-2.5 py-2 text-xs text-ink-subtle">
@@ -4429,7 +4426,7 @@ export function QuickChatComposer({
               )}
             >
               {option.kind === "reference" ? (
-                <ContextReferenceIcon plugin={option.reference.plugin} />
+                <ContextReferenceOptionContent reference={option.reference} />
               ) : option.kind === "engine" ? (
                 <Code2 size={14} strokeWidth={2} className="mt-0.5 shrink-0 text-ink-subtle" />
               ) : option.kind === "workflow" ? (
@@ -4443,22 +4440,21 @@ export function QuickChatComposer({
               ) : (
                 <Sparkles size={14} strokeWidth={2} className="mt-0.5 shrink-0 text-ink-subtle" />
               )}
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[13px] font-medium leading-4 text-ink">
-                  {option.kind === "reference" ? option.label : option.token}
-                </span>
-                {option.kind === "reference" ||
-                option.kind === "skill" ||
-                option.kind === "workflow" ||
-                option.kind === "task" ? (
-                  <span className="mt-0.5 block truncate text-[12px] leading-4 text-ink-subtle">
-                    {option.kind === "reference" ? "" : option.label}
-                    {option.description
-                      ? `${option.kind === "reference" ? "" : " · "}${option.description}`
-                      : ""}
+              {option.kind !== "reference" ? (
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] font-medium leading-4 text-ink">
+                    {option.token}
                   </span>
-                ) : null}
-              </span>
+                  {option.kind === "skill" ||
+                  option.kind === "workflow" ||
+                  option.kind === "task" ? (
+                    <span className="mt-0.5 block truncate text-[12px] leading-4 text-ink-subtle">
+                      {option.label}
+                      {option.description ? ` · ${option.description}` : ""}
+                    </span>
+                  ) : null}
+                </span>
+              ) : null}
               {option.kind === "engine" ? (
                 <span className="text-[12px] leading-4 text-ink-subtle">Codex</span>
               ) : null}

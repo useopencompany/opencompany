@@ -40,7 +40,10 @@ export async function fetchContextReferenceCatalog(): Promise<ContextReferenceCa
         plugin: plugin.name,
         label: plugin.name === "github" ? "GitHub" : (metadata?.label ?? plugin.name),
         href: `/plugins/${plugin.name}`,
-        description: plugin.status === "disabled" ? "Plugin · Disabled" : "Plugin",
+        description:
+          plugin.status === "disabled"
+            ? "Plugin · Disabled"
+            : (metadata?.description ?? "Custom plugin"),
       });
     }
   }
