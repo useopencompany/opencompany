@@ -45,7 +45,7 @@ export function readImessageInboundSettings(
 }
 
 export type ImessageSendOutput =
-  | { ok: true; messageId: string | null; reaction: ImessageReactionType | null }
+  | { ok: true; outboxId: string | null; reaction: ImessageReactionType | null }
   | { ok: false; error: string };
 
 // One delivery per turn: owns the send budget, the tool the model sees, and the fallback that
@@ -87,7 +87,7 @@ export function createImessageDelivery(input: {
         });
         delivered = true;
       }
-      let messageId: string | null = null;
+      let outboxId: string | null = null;
       if (text) {
         const sent = await client.sendMessage({
           to: input.handle,
@@ -95,10 +95,12 @@ export function createImessageDelivery(input: {
           ...(args.replyToMessageId?.trim() ? { replyTo: args.replyToMessageId.trim() } : {}),
           signal: input.signal,
         });
-        messageId = typeof sent?.id === "string" ? sent.id : null;
+        // messages.dev writes asynchronously: POST /messages returns an `obx_...` outbox item,
+        // not the eventual `msg_...` message id used for reply threading.
+        outboxId = typeof sent?.id === "string" ? sent.id : null;
         delivered = true;
       }
-      return { ok: true, messageId, reaction };
+      return { ok: true, outboxId, reaction };
     } catch (error) {
       logger.warn("iMessage send failed", {
         event: "opencompany.personal_agent_imessage_send_failed",

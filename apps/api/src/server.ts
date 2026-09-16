@@ -95,6 +95,7 @@ import { createSlackIngress } from "./slack-ingress";
 import { createStripeIngress } from "./stripe-ingress";
 import { createUserSettingsService } from "./user-settings";
 import { createWikiControlService } from "./wiki-control";
+import { createWorkflowAvatarService } from "./workflow-avatars";
 import { createWorkspaceCapabilityService } from "./workspace-capabilities";
 import { createWorkspaceControlService } from "./workspace-control";
 import { createXAccountIngress } from "./x-account-ingress";
@@ -166,7 +167,6 @@ const app = createApiApp({
   chat,
   tasks,
   workflows: automations.workflows,
-  schedules: automations.schedules,
   knowledge,
   wikiCommands,
   resolveWikiServiceActor: (actorInput) => resolveWikiServiceActor(execute, actorInput),
@@ -181,6 +181,7 @@ const app = createApiApp({
   pluginImports,
   customMcp: createCustomMcpService(database.db),
   brainAssets: createBrainAssetService({ db: database.db, knowledge }),
+  workflowAvatars: createWorkflowAvatarService({ workflows: automations.workflows }),
   chatResources: createChatResourceService({ db: database.db }),
   messagePresentations: new PostgresMessagePresentationService(execute),
   chatTitles: createChatTitleService({

@@ -13,6 +13,9 @@ export type SlackBotSettingsData = {
   installed: boolean;
   status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
   needsScopeUpgrade: boolean;
+  canCustomizeIdentity: boolean;
+  canReact: boolean;
+  canReadDirectMessages: boolean;
   teamName: string | null;
   statusReason: string | null;
   destinationCount: number;
@@ -34,7 +37,7 @@ export function SlackBotSettings({ data }: { data: SlackBotSettingsData }) {
   return (
     <PageContent
       title="Slack"
-      description="Share workflow results in Slack and continue the same work in a thread."
+      description="Message the bot to start a session, and share workflow results in Slack."
     >
       <p className="mb-5 text-[13px] leading-5 text-ink-subtle">
         This workspace connection is separate from your personal Slack plugin.
@@ -64,7 +67,20 @@ export function SlackBotSettings({ data }: { data: SlackBotSettingsData }) {
   );
 }
 
+// A reconnect can be outstanding for scopes with no visible effect of their own, so only name the
+// capabilities this installation is actually missing rather than asserting both every time.
+function missingCapabilityCopy(data: SlackBotSettingsData) {
+  const missing = [
+    ...(data.canReadDirectMessages ? [] : ["messaging the bot does nothing"]),
+    ...(data.canCustomizeIdentity ? [] : ["posts keep the default @opencompany identity"]),
+    ...(data.canReact ? [] : ["thread replies get no progress reaction"]),
+  ];
+  if (missing.length < 2) return missing.join("");
+  return `${missing.slice(0, -1).join(", ")} and ${missing.at(-1)}`;
+}
+
 function SlackBotPanel({ data }: { data: SlackBotSettingsData }) {
+  const missingCapabilities = missingCapabilityCopy(data);
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -96,8 +112,9 @@ function SlackBotPanel({ data }: { data: SlackBotSettingsData }) {
               Add opencompany to your Slack workspace
             </span>
             <p className="text-[13px] leading-5 text-ink-subtle">
-              Let workflows post as @opencompany. Anyone who can reply in a workflow thread can
-              continue the same work, with its context and files, for 30 days.
+              Members can message @opencompany to start a session on their own account, and
+              workflows can post results to a channel. Every answer opens a thread that continues
+              the same work, with its context and files, for 30 days.
             </p>
           </div>
         </div>
@@ -148,8 +165,8 @@ function SlackBotPanel({ data }: { data: SlackBotSettingsData }) {
       ) : data.needsScopeUpgrade ? (
         <div className="flex flex-col gap-3">
           <Banner tone="success">
-            Reconnect Slack to grant access for per-workflow identities. Until then, posts keep the
-            default @opencompany identity.
+            Reconnect Slack to grant the newest bot scopes.
+            {missingCapabilities ? ` Until then, ${missingCapabilities}.` : null}
           </Banner>
           <a
             href={connectHref}
@@ -163,6 +180,10 @@ function SlackBotPanel({ data }: { data: SlackBotSettingsData }) {
         <div className="flex flex-col gap-2">
           <span className="text-[13px] font-medium text-ink">Next steps</span>
           <ol className="flex list-decimal flex-col gap-1 pl-5 text-[13px] leading-5 text-ink-subtle">
+            <li>
+              Send @opencompany a direct message in Slack. It answers in a thread, on your own
+              opencompany account and connected tools, and the thread keeps that session going.
+            </li>
             <li>Invite @opencompany to a public Slack channel.</li>
             <li>
               Add an instruction to a workflow, such as “Post the investigation summary in #product
@@ -170,9 +191,10 @@ function SlackBotPanel({ data }: { data: SlackBotSettingsData }) {
             </li>
           </ol>
           <p className="text-[13px] leading-5 text-ink-subtle">
-            Anyone who can reply in the Slack thread can continue the workflow for 30 days, using
-            the workflow owner’s connected tools and saved context. Disconnecting closes existing
-            threads.
+            A direct message only starts a session for a member whose opencompany account uses the
+            same email as their Slack profile. In a channel, anyone who can reply in the thread can
+            continue the workflow for 30 days, using the workflow owner’s connected tools and saved
+            context. Disconnecting closes existing threads.
           </p>
           <Link
             href="/workflows"

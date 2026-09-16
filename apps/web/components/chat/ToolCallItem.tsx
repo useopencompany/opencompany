@@ -28,9 +28,6 @@ import {
   CODEX_PLAN_TOOL_NAME,
   CODEX_QUESTION_TOOL_NAME,
   type CodexCommandToolOutput,
-  DELETE_TASK_SCHEDULE_TOOL_NAME,
-  EDIT_TASK_SCHEDULE_TOOL_NAME,
-  SCHEDULE_TASK_TOOL_NAME,
   USE_ACTION_TOOL_NAME,
 } from "@/lib/chat-ui";
 import { githubInstallGapCandidate } from "@/lib/github-repository-access";
@@ -48,6 +45,14 @@ import {
   HistoricalPresentationDetailStatus,
   useHistoricalPresentationDetail,
 } from "./HistoricalPresentationDetail";
+
+// Recurring Tasks were removed; saved transcripts still contain their tool calls, so the icon
+// treatment stays keyed off the retired names.
+const RETIRED_SCHEDULE_TOOL_NAMES = new Set([
+  "schedule_task",
+  "edit_task_schedule",
+  "delete_task_schedule",
+]);
 
 export type CodexToolAction =
   | { type: "implement-plan" }
@@ -1388,16 +1393,10 @@ function getToolCallMeta(tool: ToolCallView): {
     icon:
       tool.name === BRAIN_TOOL_NAME
         ? BookOpen
-        : tool.name === SCHEDULE_TASK_TOOL_NAME ||
-            tool.name === EDIT_TASK_SCHEDULE_TOOL_NAME ||
-            tool.name === DELETE_TASK_SCHEDULE_TOOL_NAME
+        : RETIRED_SCHEDULE_TOOL_NAMES.has(tool.name)
           ? CalendarClock
           : CircleDotDashed,
     className: "text-amber-500",
-    spin:
-      tool.name !== BRAIN_TOOL_NAME &&
-      tool.name !== SCHEDULE_TASK_TOOL_NAME &&
-      tool.name !== EDIT_TASK_SCHEDULE_TOOL_NAME &&
-      tool.name !== DELETE_TASK_SCHEDULE_TOOL_NAME,
+    spin: tool.name !== BRAIN_TOOL_NAME && !RETIRED_SCHEDULE_TOOL_NAMES.has(tool.name),
   };
 }

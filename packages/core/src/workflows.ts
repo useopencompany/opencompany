@@ -1,8 +1,6 @@
 import {
   type Actor,
   actorHasPermission,
-  SCHEDULE_READ_PERMISSION,
-  SCHEDULE_WRITE_PERMISSION,
   WORKFLOW_READ_PERMISSION,
   WORKFLOW_WRITE_PERMISSION,
 } from "./actor";
@@ -171,26 +169,6 @@ export type WorkflowMemory = {
 // rejected with the limit in the message so the model can re-summarize and retry.
 export const WORKFLOW_MEMORY_MAX_CHARACTERS = 20_000;
 
-export type TaskSchedule = {
-  id: string;
-  name: string;
-  sourceDescription: string;
-  cron: string;
-  timezone: string;
-  prompt: string;
-  enabled: boolean;
-  lastRunAt: Date | null;
-  nextRunAt: Date;
-  version: number;
-  createdAt: Date;
-  updatedAt: Date;
-};
-
-export type TaskSchedulePage = {
-  schedules: TaskSchedule[];
-  nextCursor: string | null;
-};
-
 export type AutomationExecutionPlan = {
   engine: ChatEngine;
   model: string;
@@ -218,7 +196,6 @@ export interface AutomationExecutionPlanner {
     prompt: string;
     skillIds?: readonly string[];
   }): Promise<AutomationExecutionPlan>;
-  prepareTaskSchedule(input: { actor: Actor; prompt: string }): Promise<AutomationExecutionPlan>;
 }
 
 export interface AutomationTaskCreator {
@@ -228,9 +205,8 @@ export interface AutomationTaskCreator {
     name: string;
     goal: string;
     execution: AutomationExecutionPlan;
-    source: "workflow" | "schedule";
+    source: "workflow";
     workflowId?: string;
-    scheduleId?: string;
     attachmentIds?: readonly string[];
   }): Promise<CreateTaskResult>;
 }
@@ -248,23 +224,6 @@ export type WorkflowVersionResult = {
 
 export type WorkflowArchiveResult = {
   workflowId: string;
-  version: number;
-  transactionId: string;
-};
-
-export type TaskScheduleMutationResult = {
-  schedule: TaskSchedule;
-  transactionId: string;
-  idempotentReplay: boolean;
-};
-
-export type TaskScheduleVersionResult = {
-  schedule: TaskSchedule;
-  transactionId: string;
-};
-
-export type TaskScheduleArchiveResult = {
-  scheduleId: string;
   version: number;
   transactionId: string;
 };
@@ -328,65 +287,6 @@ export interface WorkflowRepository {
   clearWorkflowMemory(input: { actor: Actor; workflowId: string }): Promise<WorkflowMemory | null>;
 }
 
-export interface TaskScheduleRepository {
-  assertTaskScheduleWriteAllowed(actor: Actor): Promise<void>;
-  replayTaskScheduleCreate(input: {
-    actor: Actor;
-    idempotencyKey: string;
-    name: string;
-    sourceDescription: string;
-    prompt: string;
-    schedule: ScheduleDefinition;
-  }): Promise<TaskScheduleMutationResult | null>;
-  listTaskSchedules(input: {
-    actor: Actor;
-    cursor?: string;
-    limit: number;
-  }): Promise<TaskSchedulePage>;
-  getTaskSchedule(input: { actor: Actor; scheduleId: string }): Promise<TaskSchedule | null>;
-  createTaskSchedule(input: {
-    actor: Actor;
-    idempotencyKey: string;
-    name: string;
-    sourceDescription: string;
-    prompt: string;
-    schedule: ScheduleDefinition;
-    execution: AutomationExecutionPlan;
-  }): Promise<TaskScheduleMutationResult>;
-  updateTaskSchedule(input: {
-    actor: Actor;
-    scheduleId: string;
-    expectedVersion: number;
-    name: string;
-    sourceDescription: string;
-    prompt: string;
-    schedule: ScheduleDefinition;
-    execution: AutomationExecutionPlan;
-  }): Promise<VersionedRepositoryResult<TaskSchedule>>;
-  setTaskScheduleEnabled(input: {
-    actor: Actor;
-    scheduleId: string;
-    expectedVersion: number;
-    enabled: boolean;
-    nextRunAt?: Date;
-  }): Promise<VersionedRepositoryResult<TaskSchedule>>;
-  archiveTaskSchedule(input: {
-    actor: Actor;
-    scheduleId: string;
-    expectedVersion: number;
-  }): Promise<VersionedRepositoryResult<{ scheduleId: string; version: number }>>;
-  loadTaskScheduleExecution(input: {
-    actor: Actor;
-    scheduleId: string;
-  }): Promise<{ schedule: TaskSchedule; execution: AutomationExecutionPlan } | null>;
-  recordRunNow(input: {
-    actor: Actor;
-    scheduleId: string;
-    taskId: string;
-    occurredAt: Date;
-  }): Promise<void>;
-}
-
 export type WorkflowDefinitionValidator = (input: {
   name: string;
   description: string;
@@ -408,13 +308,6 @@ type WorkflowApplicationServiceOptions = {
   newStepId?: () => string;
 };
 
-type TaskScheduleApplicationServiceOptions = {
-  scheduleRules: ScheduleRules;
-  planner: AutomationExecutionPlanner;
-  taskCreator: AutomationTaskCreator;
-  now?: () => Date;
-};
-
 const MAX_IDEMPOTENCY_KEY_LENGTH = 200;
 const MAX_RESOURCE_ID_LENGTH = 256;
 const MAX_WORKFLOW_NAME_LENGTH = 64;
@@ -432,6 +325,13 @@ const MAX_WORKFLOW_SKILLS = 16;
 // length Slack renders in full. Exported so the editor's input cap cannot drift from validation.
 export const MAX_SLACK_DISPLAY_NAME_LENGTH = 80;
 export const MAX_SLACK_AVATAR_URL_LENGTH = 2_048;
+
+// An uploaded avatar is served back to Slack as-is, so the accepted set is the three formats
+// Slack renders and every browser can produce. 1 MB is far above a square icon and far below
+// anything worth streaming.
+export const WORKFLOW_AVATAR_MEDIA_TYPES = ["image/png", "image/jpeg", "image/webp"] as const;
+export type WorkflowAvatarMediaType = (typeof WORKFLOW_AVATAR_MEDIA_TYPES)[number];
+export const WORKFLOW_AVATAR_MAX_BYTES = 1024 * 1024;
 
 export class WorkflowApplicationService {
   constructor(
@@ -459,6 +359,17 @@ export class WorkflowApplicationService {
     });
     if (!workflow) throw new CoreError("not_found", "Workflow not found.");
     return workflow;
+  }
+
+  // Authorizes a side-channel write against a workflow the actor can already edit — today the
+  // Slack avatar upload, which stores bytes before the editor saves the resulting URL through
+  // `updateWorkflow`. Returns the normalized id so callers never build a path from raw input.
+  async authorizeWorkflowWrite(actor: Actor, workflowId: string): Promise<string> {
+    requirePermission(actor, WORKFLOW_WRITE_PERMISSION, "Workflows");
+    const id = resourceId(workflowId, "workflowId");
+    const workflow = await this.repository.getWorkflow({ actor, workflowId: id });
+    if (!workflow) throw new CoreError("not_found", "Workflow not found.");
+    return id;
   }
 
   createWorkflow(
@@ -879,201 +790,6 @@ export class WorkflowApplicationService {
   }
 }
 
-export class TaskScheduleApplicationService {
-  constructor(
-    private readonly repository: TaskScheduleRepository,
-    private readonly options: TaskScheduleApplicationServiceOptions,
-  ) {}
-
-  listTaskSchedules(
-    actor: Actor,
-    input: { cursor?: string; limit?: number } = {},
-  ): Promise<TaskSchedulePage> {
-    requirePermission(actor, SCHEDULE_READ_PERMISSION, "Schedules");
-    return this.repository.listTaskSchedules({
-      actor,
-      ...(input.cursor ? { cursor: resourceId(input.cursor, "cursor") } : {}),
-      limit: Math.max(1, Math.min(input.limit ?? 50, 100)),
-    });
-  }
-
-  async getTaskSchedule(actor: Actor, scheduleId: string): Promise<TaskSchedule> {
-    requirePermission(actor, SCHEDULE_READ_PERMISSION, "Schedules");
-    const schedule = await this.repository.getTaskSchedule({
-      actor,
-      scheduleId: resourceId(scheduleId, "scheduleId"),
-    });
-    if (!schedule) throw new CoreError("not_found", "Recurring Task not found.");
-    return schedule;
-  }
-
-  async createTaskSchedule(
-    actor: Actor,
-    input: {
-      idempotencyKey: string;
-      name?: string;
-      sourceDescription?: string;
-      cron: string;
-      timezone?: string | null;
-      prompt: string;
-    },
-  ): Promise<TaskScheduleMutationResult> {
-    requirePermission(actor, SCHEDULE_WRITE_PERMISSION, "Schedules");
-    const now = this.options.now?.() ?? new Date();
-    const normalizedPrompt = prompt(input.prompt, "Recurring Task prompt is required.");
-    const schedule = this.options.scheduleRules.normalize({
-      cron: input.cron,
-      ...(input.timezone !== undefined ? { timezone: input.timezone } : {}),
-      now,
-    });
-    if (!schedule) throw invalidSchedule("Recurring Task");
-    const createInput = {
-      actor,
-      idempotencyKey: idempotencyKey(input.idempotencyKey),
-      name: scheduleName(input.name, normalizedPrompt),
-      sourceDescription: sourceDescription(input.sourceDescription ?? ""),
-      prompt: normalizedPrompt,
-      schedule,
-    };
-    const replay = await this.repository.replayTaskScheduleCreate(createInput);
-    if (replay) return replay;
-    await this.repository.assertTaskScheduleWriteAllowed(actor);
-    const execution = validatedExecution(
-      await this.options.planner.prepareTaskSchedule({ actor, prompt: normalizedPrompt }),
-    );
-    return this.repository.createTaskSchedule({
-      ...createInput,
-      execution,
-    });
-  }
-
-  async updateTaskSchedule(
-    actor: Actor,
-    scheduleId: string,
-    input: {
-      expectedVersion: number;
-      name: string;
-      sourceDescription?: string;
-      cron: string;
-      timezone?: string | null;
-      prompt: string;
-    },
-  ): Promise<TaskScheduleVersionResult> {
-    requirePermission(actor, SCHEDULE_WRITE_PERMISSION, "Schedules");
-    await this.repository.assertTaskScheduleWriteAllowed(actor);
-    const id = resourceId(scheduleId, "scheduleId");
-    const expectedVersion = version(input.expectedVersion);
-    const current = await this.repository.getTaskSchedule({ actor, scheduleId: id });
-    if (!current) throw new CoreError("not_found", "Recurring Task not found.");
-    if (current.version !== expectedVersion) throw versionConflict("Recurring Task");
-    const now = this.options.now?.() ?? new Date();
-    const normalizedPrompt = prompt(input.prompt, "Recurring Task prompt is required.");
-    const schedule = this.options.scheduleRules.normalize({
-      cron: input.cron,
-      ...(input.timezone !== undefined ? { timezone: input.timezone } : {}),
-      now,
-    });
-    if (!schedule) throw invalidSchedule("Recurring Task");
-    const execution = validatedExecution(
-      await this.options.planner.prepareTaskSchedule({ actor, prompt: normalizedPrompt }),
-    );
-    const result = await this.repository.updateTaskSchedule({
-      actor,
-      scheduleId: id,
-      expectedVersion,
-      name: scheduleName(input.name, normalizedPrompt),
-      sourceDescription: sourceDescription(input.sourceDescription ?? ""),
-      prompt: normalizedPrompt,
-      schedule,
-      execution,
-    });
-    return taskScheduleVersionResult(result);
-  }
-
-  async setTaskScheduleEnabled(
-    actor: Actor,
-    scheduleId: string,
-    input: { expectedVersion: number; enabled: boolean },
-  ): Promise<TaskScheduleVersionResult> {
-    requirePermission(actor, SCHEDULE_WRITE_PERMISSION, "Schedules");
-    await this.repository.assertTaskScheduleWriteAllowed(actor);
-    const id = resourceId(scheduleId, "scheduleId");
-    const expectedVersion = version(input.expectedVersion);
-    let nextRunAt: Date | undefined;
-    if (input.enabled) {
-      const current = await this.repository.getTaskSchedule({ actor, scheduleId: id });
-      if (!current) throw new CoreError("not_found", "Recurring Task not found.");
-      if (current.version !== expectedVersion) throw versionConflict("Recurring Task");
-      const schedule = this.options.scheduleRules.normalize({
-        cron: current.cron,
-        timezone: current.timezone,
-        now: this.options.now?.() ?? new Date(),
-      });
-      if (!schedule) throw invalidSchedule("Recurring Task");
-      nextRunAt = schedule.nextRunAt;
-    }
-    const result = await this.repository.setTaskScheduleEnabled({
-      actor,
-      scheduleId: id,
-      expectedVersion,
-      enabled: input.enabled,
-      ...(nextRunAt ? { nextRunAt } : {}),
-    });
-    return taskScheduleVersionResult(result);
-  }
-
-  async archiveTaskSchedule(
-    actor: Actor,
-    scheduleId: string,
-    expectedVersion: number,
-  ): Promise<TaskScheduleArchiveResult> {
-    requirePermission(actor, SCHEDULE_WRITE_PERMISSION, "Schedules");
-    await this.repository.assertTaskScheduleWriteAllowed(actor);
-    const result = await this.repository.archiveTaskSchedule({
-      actor,
-      scheduleId: resourceId(scheduleId, "scheduleId"),
-      expectedVersion: version(expectedVersion),
-    });
-    if (result.status === "not_found") {
-      throw new CoreError("not_found", "Recurring Task not found.");
-    }
-    if (result.status === "conflict") throw versionConflict("Recurring Task");
-    return {
-      scheduleId: result.value.scheduleId,
-      version: result.value.version,
-      transactionId: result.transactionId,
-    };
-  }
-
-  async runTaskScheduleNow(
-    actor: Actor,
-    scheduleId: string,
-    idempotencyKeyValue: string,
-  ): Promise<CreateTaskResult> {
-    requirePermission(actor, SCHEDULE_WRITE_PERMISSION, "Schedules");
-    await this.repository.assertTaskScheduleWriteAllowed(actor);
-    const id = resourceId(scheduleId, "scheduleId");
-    const loaded = await this.repository.loadTaskScheduleExecution({ actor, scheduleId: id });
-    if (!loaded) throw new CoreError("not_found", "Recurring Task not found.");
-    const created = await this.options.taskCreator.create({
-      actor,
-      idempotencyKey: idempotencyKey(idempotencyKeyValue),
-      name: loaded.schedule.name,
-      goal: loaded.schedule.prompt,
-      execution: validatedExecution(loaded.execution),
-      source: "schedule",
-      scheduleId: loaded.schedule.id,
-    });
-    await this.repository.recordRunNow({
-      actor,
-      scheduleId: loaded.schedule.id,
-      taskId: created.task.id,
-      occurredAt: created.task.createdAt,
-    });
-    return created;
-  }
-}
-
 function normalizeWorkflowDefinition(
   input: {
     name: string;
@@ -1413,16 +1129,6 @@ function workflowVersionResult(result: VersionedRepositoryResult<Workflow>): Wor
   if (result.status === "not_found") throw new CoreError("not_found", "Workflow not found.");
   if (result.status === "conflict") throw versionConflict("Workflow");
   return { workflow: result.value, transactionId: result.transactionId };
-}
-
-function taskScheduleVersionResult(
-  result: VersionedRepositoryResult<TaskSchedule>,
-): TaskScheduleVersionResult {
-  if (result.status === "not_found") {
-    throw new CoreError("not_found", "Recurring Task not found.");
-  }
-  if (result.status === "conflict") throw versionConflict("Recurring Task");
-  return { schedule: result.value, transactionId: result.transactionId };
 }
 
 function versionConflict(resource: string) {

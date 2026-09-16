@@ -60,7 +60,7 @@ const linkedBinding = {
 };
 
 describe("iMessage ingress", () => {
-  const sendMessage = vi.fn(async () => ({ id: "msg_out" }));
+  const sendMessage = vi.fn(async () => ({ id: "obx_out" }));
   const createMessage = vi.fn(async () => ({
     conversationId: "conversation_1",
     messageId: "message_1",

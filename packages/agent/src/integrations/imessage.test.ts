@@ -95,7 +95,7 @@ describe("createMessagesClient", () => {
       if (String(url).endsWith("/reactions")) {
         return Response.json({ error: { message: "bad reaction" } }, { status: 400 });
       }
-      return Response.json({ id: "msg_out", echoed: body });
+      return Response.json({ id: "obx_out", echoed: body });
     });
     const client = createMessagesClient({
       config: { apiKey: "sk_live_x", lineHandle: "+16460000000" },
@@ -103,7 +103,7 @@ describe("createMessagesClient", () => {
     });
     const sent = await client.sendMessage({ to: "+15551234567", text: "hi", replyTo: "msg_1" });
     expect(sent).toMatchObject({
-      id: "msg_out",
+      id: "obx_out",
       echoed: { from: "+16460000000", to: "+15551234567", text: "hi", reply_to: "msg_1" },
     });
     const [, init] = fetchImpl.mock.calls[0]!;

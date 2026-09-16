@@ -16,6 +16,11 @@ import {
   processNextSubscriptionEvent,
   type SlackChannelWorkerDependencies,
 } from "./slack-channel-worker";
+import {
+  processNextSlackDirectMessage,
+  type SlackDirectMessageWorkerDependencies,
+  slackDirectMessagePrompt,
+} from "./slack-direct-message-worker";
 
 vi.mock("@opencompany/db/integrations", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -70,6 +75,7 @@ beforeAll(async () => {
       );
     }
     await db.exec(`ALTER TABLE goat.users ADD COLUMN email text;
+      CREATE TABLE goat.plugins (id text PRIMARY KEY, workspace_id text, owner_user_id text, status text);
       CREATE TABLE goat.integrations (id text PRIMARY KEY, workspace_id text, user_workos_id text, provider text, external_id text, status text, scopes jsonb);
       CREATE TABLE goat.workflows (
         id text PRIMARY KEY,
@@ -112,6 +118,12 @@ beforeAll(async () => {
     await db.exec(
       await readFile(
         new URL("../../../drizzle/0296_channel_delivery_thread_parent.sql", import.meta.url),
+        "utf8",
+      ),
+    );
+    await db.exec(
+      await readFile(
+        new URL("../../../drizzle/0297_slack_direct_message_sessions.sql", import.meta.url),
         "utf8",
       ),
     );
@@ -209,7 +221,7 @@ describe("durable Slack subscriptions", () => {
     expect((await pg.query("SELECT id FROM goat.channel_deliveries")).rows).toHaveLength(2);
     await expect(
       postWorkflowSlackMessage({ ...input, actorId: "member" }, execute),
-    ).rejects.toThrow("active workflow session");
+    ).rejects.toThrow("active session with Slack posting enabled");
     await expect(
       postWorkflowSlackMessage(
         { ...input, post: { ...input.post, text: "Different content" } },
@@ -424,7 +436,7 @@ describe("durable Slack subscriptions", () => {
         },
         execute,
       ),
-    ).rejects.toThrow("Slack channel enabled");
+    ).rejects.toThrow("active session with Slack posting enabled");
     expect((await pg.query("SELECT id FROM goat.channel_deliveries")).rows).toHaveLength(1);
   });
   it("does not bind an old task to a later workflow that reuses its slug", async () => {
@@ -446,7 +458,7 @@ describe("durable Slack subscriptions", () => {
         },
         execute,
       ),
-    ).rejects.toThrow("active workflow session");
+    ).rejects.toThrow("active session with Slack posting enabled");
     expect((await pg.query("SELECT id FROM goat.channel_deliveries")).rows).toHaveLength(1);
   });
   it("creates exactly one subscription and deduplicates retries without accepting untracked threads", async () => {
@@ -554,7 +566,7 @@ describe("durable Slack subscriptions", () => {
       (await pg.query("SELECT text FROM goat.channel_deliveries WHERE id <> 'root'")).rows,
     ).toEqual([
       {
-        text: "The workflow needs attention. Open the task in opencompany to review and continue.",
+        text: "This needs attention. Open the task in opencompany to review and continue.",
       },
     ]);
   });
@@ -763,5 +775,402 @@ describe("durable Slack subscriptions", () => {
       { status: "uncertain" },
     ]);
     expect(await processNextChannelDelivery(deps)).toBe(false);
+  });
+});
+
+describe("Slack thread progress reactions", () => {
+  const REACTING_INSTALL = `UPDATE goat.integrations SET scopes = '["chat:write","channels:read","channels:history","users:read","users:read.email","reactions:write"]';`;
+  const onMessage = (name: string) => ({ form: { channel: "C1", timestamp: "100.002", name } });
+
+  it("acks the reply it picked up, then checks it off once the answer lands in the thread", async () => {
+    await pg.exec(REACTING_INSTALL);
+    await enqueueSlackThreadReply(execute, reply);
+    expect(await processNextSubscriptionEvent(deps)).toBe(true);
+    expect(deps.request).toHaveBeenCalledWith(
+      expect.objectContaining({ method: "reactions.add", ...onMessage("eyes") }),
+    );
+    // The whole point of the mark: the thread gains no extra post to carry progress.
+    expect(
+      (await pg.query("SELECT id FROM goat.channel_deliveries WHERE id <> 'root'")).rows,
+    ).toEqual([]);
+
+    const [followUp] = (
+      await pg.query<{ id: string }>("SELECT run_id AS id FROM goat.subscription_events")
+    ).rows;
+    await pg.exec(
+      `UPDATE goat.codex_chat_turns SET status = 'running', lease_id = 'reply-lease', lease_expires_at = now() + interval '1 minute';`,
+    );
+    await postWorkflowSlackMessage(
+      {
+        runId: followUp?.id ?? "",
+        actorId: "owner",
+        post: { text: "One additive column.", messageKey: "slack-follow-up-1" },
+      },
+      execute,
+    );
+    await pg.exec(
+      `UPDATE goat.channel_deliveries SET status = 'sent' WHERE id <> 'root';
+       UPDATE goat.codex_chat_turns SET status = 'completed';
+       UPDATE goat.codex_chat_sessions SET status = 'idle';
+       UPDATE goat.tasks SET status = 'succeeded';`,
+    );
+
+    vi.mocked(deps.request).mockClear();
+    expect(await processNextSubscriptionEvent(deps)).toBe(true);
+    expect(deps.request).toHaveBeenCalledWith(
+      expect.objectContaining({ method: "reactions.add", ...onMessage("white_check_mark") }),
+    );
+    expect(deps.request).toHaveBeenCalledWith(
+      expect.objectContaining({ method: "reactions.remove", ...onMessage("eyes") }),
+    );
+  });
+
+  it("flags a run that finished without ever answering the thread", async () => {
+    await pg.exec(REACTING_INSTALL);
+    await enqueueSlackThreadReply(execute, reply);
+    await processNextSubscriptionEvent(deps);
+    await pg.exec(
+      `UPDATE goat.codex_chat_turns SET status = 'completed';
+       UPDATE goat.codex_chat_sessions SET status = 'idle';
+       UPDATE goat.tasks SET status = 'succeeded';`,
+    );
+
+    vi.mocked(deps.request).mockClear();
+    expect(await processNextSubscriptionEvent(deps)).toBe(true);
+    // Nothing was posted back, so a check mark would tell the asker their question was answered.
+    expect(
+      (await pg.query("SELECT id FROM goat.channel_deliveries WHERE id <> 'root'")).rows,
+    ).toEqual([]);
+    expect(deps.request).toHaveBeenCalledWith(
+      expect.objectContaining({ method: "reactions.add", ...onMessage("warning") }),
+    );
+  });
+
+  it("keeps the working mark until a failed run's notice actually lands, then flags attention", async () => {
+    await pg.exec(REACTING_INSTALL);
+    await enqueueSlackThreadReply(execute, reply);
+    await processNextSubscriptionEvent(deps);
+    await pg.exec(
+      `UPDATE goat.codex_chat_turns SET status = 'failed';
+       UPDATE goat.codex_chat_sessions SET status = 'failed';
+       UPDATE goat.tasks SET status = 'failed';`,
+    );
+
+    vi.mocked(deps.request).mockClear();
+    expect(await processNextSubscriptionEvent(deps)).toBe(true);
+    expect(deps.request).not.toHaveBeenCalledWith(
+      expect.objectContaining({ method: "reactions.add" }),
+    );
+
+    await pg.exec("UPDATE goat.channel_deliveries SET status = 'sent' WHERE id <> 'root'");
+    expect(await processNextSubscriptionEvent(deps)).toBe(true);
+    expect(deps.request).toHaveBeenCalledWith(
+      expect.objectContaining({ method: "reactions.add", ...onMessage("warning") }),
+    );
+    expect(deps.request).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "reactions.add",
+        form: expect.objectContaining({ name: "white_check_mark" }),
+      }),
+    );
+  });
+
+  it("flags a reply to a closed thread without clearing a mark it never made", async () => {
+    await pg.exec(REACTING_INSTALL);
+    await pg.exec("UPDATE goat.session_subscriptions SET status = 'closed'");
+    await enqueueSlackThreadReply(execute, reply);
+    await processNextSubscriptionEvent(deps);
+    await pg.exec("UPDATE goat.channel_deliveries SET status = 'sent' WHERE id <> 'root'");
+
+    vi.mocked(deps.request).mockClear();
+    expect(await processNextSubscriptionEvent(deps)).toBe(true);
+    expect(deps.request).toHaveBeenCalledWith(
+      expect.objectContaining({ method: "reactions.add", ...onMessage("warning") }),
+    );
+    expect(deps.request).not.toHaveBeenCalledWith(
+      expect.objectContaining({ method: "reactions.remove" }),
+    );
+  });
+
+  it("runs an install that predates the reaction scope unmarked", async () => {
+    await enqueueSlackThreadReply(execute, reply);
+    expect(await processNextSubscriptionEvent(deps)).toBe(true);
+    expect(deps.request).not.toHaveBeenCalledWith(
+      expect.objectContaining({ method: expect.stringMatching(/^reactions\./) }),
+    );
+    expect((await pg.query("SELECT status FROM goat.subscription_events")).rows).toEqual([
+      { status: "running" },
+    ]);
+  });
+
+  it("still starts the follow-up run when Slack refuses the reaction", async () => {
+    await pg.exec(REACTING_INSTALL);
+    const slack = deps.request;
+    deps.request = vi.fn(async (input: { method: string }) => {
+      if (input.method.startsWith("reactions."))
+        throw new Error("Slack API reactions.add returned message_not_found.");
+      return slack(input as Parameters<typeof slack>[0]);
+    }) as unknown as SlackChannelWorkerDependencies["request"];
+    await enqueueSlackThreadReply(execute, reply);
+    expect(await processNextSubscriptionEvent(deps)).toBe(true);
+    expect(
+      (await pg.query("SELECT status, run_id IS NOT NULL AS resumed FROM goat.subscription_events"))
+        .rows,
+    ).toEqual([{ status: "running", resumed: true }]);
+  });
+});
+
+describe("Slack direct message sessions", () => {
+  let directMessageDeps: SlackDirectMessageWorkerDependencies;
+  const directMessage = `INSERT INTO goat.slack_direct_messages (team_id, event_id, channel_id, message_ts, slack_user_id, text)
+    VALUES ('T1', 'EvDm1', 'D1', '200.001', 'U1', 'Where did last week''s signups come from?')`;
+
+  beforeEach(async () => {
+    directMessageDeps = {
+      db: drizzle(pg),
+      credential: vi.fn(async () => ({ token: "test-token", botUserId: "BOT" })),
+      request: vi.fn(async () => ({
+        user: {
+          id: "U1",
+          team_id: "T1",
+          profile: { real_name: "Member Person", email: "Member@Example.com" },
+        },
+      })) as unknown as SlackDirectMessageWorkerDependencies["request"],
+      harnessTools: vi.fn(async () => ["exa_search" as const]),
+      now: () => new Date(),
+    };
+    await pg.exec(
+      "INSERT INTO goat.brains (id, workspace_id, slug) VALUES ('brain', 'workspace', 'general')",
+    );
+  });
+
+  it("opens a task on the sender's own account and subscribes the message's thread", async () => {
+    await pg.exec(directMessage);
+    expect(await processNextSlackDirectMessage(directMessageDeps)).toBe(true);
+
+    const [task] = (
+      await pg.query<{ id: string; user: string; workflow: string | null; session: string }>(
+        `SELECT id, user_workos_id AS "user", workflow_id AS workflow, session_id AS session
+         FROM goat.tasks WHERE id <> 'task'`,
+      )
+    ).rows;
+    expect(task).toMatchObject({ user: "member", workflow: null });
+    expect(
+      (await pg.query("SELECT status, session_id FROM goat.slack_direct_messages")).rows,
+    ).toEqual([{ status: "started", session_id: task?.session }]);
+    expect(
+      (
+        await pg.query(
+          `SELECT session_id, source, source_key, status FROM goat.session_subscriptions WHERE id <> 'root'`,
+        )
+      ).rows,
+    ).toEqual([
+      {
+        session_id: task?.session,
+        source: "slack_thread",
+        source_key: { teamId: "T1", channelId: "D1", threadTs: "200.001" },
+        status: "waiting",
+      },
+    ]);
+    // The opening message is the thread's first event, so the run that answers it owes the thread
+    // exactly one reply and every later message continues this same session.
+    const [event] = (
+      await pg.query<{ status: string; sequence: string; run: string | null }>(
+        `SELECT event.status, event.sequence, event.run_id AS run FROM goat.subscription_events event
+         JOIN goat.session_subscriptions subscription ON subscription.id = event.subscription_id
+         WHERE subscription.session_id = '${task?.session}'`,
+      )
+    ).rows;
+    expect(event).toMatchObject({ status: "running", sequence: 0 });
+    expect(
+      (
+        await pg.query(
+          `SELECT id FROM goat.codex_chat_turns WHERE id = '${event?.run}' AND chat_session_id = '${task?.session}'`,
+        )
+      ).rows,
+    ).toHaveLength(1);
+  });
+
+  it("lets the run answer in the thread even though the task has no workflow", async () => {
+    await pg.exec(`UPDATE goat.integrations SET scopes = '["chat:write","channels:read","channels:history","users:read","users:read.email"]';
+      ${directMessage};`);
+    await processNextSlackDirectMessage(directMessageDeps);
+    const [run] = (
+      await pg.query<{ id: string }>(
+        "SELECT run_id AS id FROM goat.subscription_events WHERE status = 'running' AND sequence = 0",
+      )
+    ).rows;
+    await pg.exec(
+      `UPDATE goat.codex_chat_turns SET status = 'running', lease_id = 'lease', lease_expires_at = now() + interval '1 minute' WHERE id = '${run?.id}'`,
+    );
+
+    const posted = await postWorkflowSlackMessage(
+      {
+        runId: run?.id ?? "",
+        actorId: "member",
+        post: { text: "Mostly the launch post.", messageKey: "answer" },
+      },
+      execute,
+    );
+    expect(posted.status).toBe("pending");
+    expect(
+      (
+        await pg.query(
+          `SELECT channel_id, thread_ts, text FROM goat.channel_deliveries WHERE id = '${posted.deliveryId}'`,
+        )
+      ).rows,
+    ).toEqual([{ channel_id: "D1", thread_ts: "200.001", text: "Mostly the launch post." }]);
+  });
+
+  it("delivers into the direct message thread without a public channel check", async () => {
+    await pg.exec(`${directMessage};
+      INSERT INTO goat.chat_sessions (id, user_workos_id, title, model, engine, kind) VALUES ('dm_session', 'member', 'Signups', 'test/model', 'opencompany', 'task');
+      INSERT INTO goat.channel_deliveries (id, workspace_id, session_id, integration_id, team_id, channel_id, thread_ts, text)
+        VALUES ('dm_reply', 'workspace', 'dm_session', 'install', 'T1', 'D1', '200.001', 'Mostly the launch post.');`);
+    deps.request = vi.fn(async () => ({
+      ts: "200.002",
+    })) as unknown as SlackChannelWorkerDependencies["request"];
+
+    expect(await processNextChannelDelivery(deps)).toBe(true);
+    expect(deps.validateChannel).not.toHaveBeenCalled();
+    expect(
+      (
+        await pg.query(
+          "SELECT status, message_ts FROM goat.channel_deliveries WHERE id = 'dm_reply'",
+        )
+      ).rows,
+    ).toEqual([{ status: "sent", message_ts: "200.002" }]);
+  });
+
+  it("answers a sender with no opencompany account instead of opening a session", async () => {
+    await pg.exec("DELETE FROM goat.workspace_members WHERE user_workos_id = 'member'");
+    await pg.exec(directMessage);
+    expect(await processNextSlackDirectMessage(directMessageDeps)).toBe(true);
+    expect((await pg.query("SELECT status FROM goat.slack_direct_messages")).rows).toEqual([
+      { status: "ignored" },
+    ]);
+    expect((await pg.query("SELECT id FROM goat.tasks WHERE id <> 'task'")).rows).toHaveLength(0);
+    expect(directMessageDeps.request).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        method: "chat.postMessage",
+        form: expect.objectContaining({ channel: "D1", thread_ts: "200.001" }),
+      }),
+    );
+  });
+
+  it.each([
+    { label: "a Slack Connect stranger whose profile claims a member's email", team_id: "T_OTHER" },
+    { label: "another app's bot user", is_bot: true },
+    { label: "a deactivated account", deleted: true },
+  ])("refuses to open a session for $label", async ({ label: _label, ...overrides }) => {
+    directMessageDeps.request = vi.fn(async () => ({
+      user: {
+        id: "U1",
+        team_id: "T1",
+        profile: { real_name: "Member Person", email: "Member@Example.com" },
+        ...overrides,
+      },
+    })) as unknown as SlackDirectMessageWorkerDependencies["request"];
+    await pg.exec(directMessage);
+    expect(await processNextSlackDirectMessage(directMessageDeps)).toBe(true);
+    expect((await pg.query("SELECT status FROM goat.slack_direct_messages")).rows).toEqual([
+      { status: "ignored" },
+    ]);
+    expect((await pg.query("SELECT id FROM goat.tasks WHERE id <> 'task'")).rows).toHaveLength(0);
+  });
+
+  it("opens one session when the same Slack message reaches the inbox twice", async () => {
+    await pg.exec(directMessage);
+    await processNextSlackDirectMessage(directMessageDeps);
+    await pg.exec(`INSERT INTO goat.slack_direct_messages (team_id, event_id, channel_id, message_ts, slack_user_id, text)
+      VALUES ('T1', 'EvDm1Duplicate', 'D1', '200.001', 'U1', 'Where did last week''s signups come from?')`);
+
+    expect(await processNextSlackDirectMessage(directMessageDeps)).toBe(true);
+    expect(
+      (await pg.query("SELECT status FROM goat.slack_direct_messages ORDER BY id")).rows,
+    ).toEqual([{ status: "started" }, { status: "ignored" }]);
+    expect((await pg.query("SELECT id FROM goat.tasks WHERE id <> 'task'")).rows).toHaveLength(1);
+  });
+
+  it("stops retrying a message that keeps failing", async () => {
+    await pg.exec(
+      `${directMessage};
+       UPDATE goat.slack_direct_messages SET attempt_count = 9;`,
+    );
+    directMessageDeps.credential = vi.fn(async () => {
+      throw new Error("Reconnect Slack in Channels settings.");
+    });
+    await expect(processNextSlackDirectMessage(directMessageDeps)).rejects.toThrow("Reconnect");
+    expect(
+      (await pg.query("SELECT status, attempt_count FROM goat.slack_direct_messages")).rows,
+    ).toEqual([{ status: "ignored", attempt_count: 10 }]);
+  });
+
+  it("marks the direct message as picked up, then checks it off once the answer lands", async () => {
+    await pg.exec(
+      `UPDATE goat.integrations SET scopes = '["chat:write","channels:read","channels:history","users:read","users:read.email","reactions:write"]';
+       ${directMessage};`,
+    );
+    await processNextSlackDirectMessage(directMessageDeps);
+    expect(directMessageDeps.request).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        method: "reactions.add",
+        form: expect.objectContaining({ channel: "D1", timestamp: "200.001", name: "eyes" }),
+      }),
+    );
+
+    // The subscription worker owns the rest of the lifecycle, exactly as it does for a workflow
+    // thread reply: the direct message needs no second reaction path of its own.
+    const [event] = (
+      await pg.query<{ run: string }>(
+        "SELECT run_id AS run FROM goat.subscription_events WHERE status = 'running'",
+      )
+    ).rows;
+    await pg.exec(
+      `UPDATE goat.codex_chat_turns SET status = 'completed' WHERE id = '${event?.run}';
+       UPDATE goat.tasks SET status = 'succeeded' WHERE id <> 'task';
+       INSERT INTO goat.channel_deliveries (id, workspace_id, session_id, integration_id, team_id, channel_id, thread_ts, text, status, message_ts)
+       SELECT 'subscription_reply_' || event.id, subscription.workspace_id, subscription.session_id, subscription.integration_id,
+         'T1', 'D1', '200.001', 'Mostly the launch post.', 'sent', '200.002'
+       FROM goat.subscription_events event
+       JOIN goat.session_subscriptions subscription ON subscription.id = event.subscription_id
+       WHERE event.status = 'running';
+       UPDATE goat.subscription_events SET status = 'delivering' WHERE status = 'running';`,
+    );
+    expect(await processNextSubscriptionEvent(deps)).toBe(true);
+    expect(deps.request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "reactions.add",
+        form: expect.objectContaining({
+          channel: "D1",
+          timestamp: "200.001",
+          name: "white_check_mark",
+        }),
+      }),
+    );
+  });
+
+  it("ignores its own messages and leaves nothing pending", async () => {
+    await pg.exec(
+      `INSERT INTO goat.slack_direct_messages (team_id, event_id, channel_id, message_ts, slack_user_id, text)
+       VALUES ('T1', 'EvDm2', 'D1', '200.003', 'BOT', 'Mostly the launch post.')`,
+    );
+    expect(await processNextSlackDirectMessage(directMessageDeps)).toBe(true);
+    expect((await pg.query("SELECT status FROM goat.slack_direct_messages")).rows).toEqual([
+      { status: "ignored" },
+    ]);
+    expect(await processNextSlackDirectMessage(directMessageDeps)).toBe(false);
+  });
+
+  it("attributes the sender and marks the message as untrusted content", () => {
+    const prompt = slackDirectMessagePrompt({
+      requestId: 7,
+      slackUserId: "U1",
+      text: "Where did last week's signups come from?",
+      user: { id: "U1", profile: { real_name: "Member Person", email: "member@example.com" } },
+    });
+    expect(prompt).toContain("Member Person <member@example.com> (Slack user U1)");
+    expect(prompt).toContain('"slack-dm-7" as messageKey');
+    expect(prompt).toContain("> Where did last week's signups come from?");
   });
 });

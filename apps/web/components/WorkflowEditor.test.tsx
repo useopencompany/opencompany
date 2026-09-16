@@ -28,7 +28,14 @@ const workflowActionsMock = vi.hoisted(() => ({
   })),
 }));
 
+const avatarUploadMock = vi.hoisted(() =>
+  vi.fn(async () => "https://app.test/workflow-avatars/a.png"),
+);
+
 vi.mock("next/navigation", () => ({ useRouter: () => routerMock }));
+vi.mock("@/lib/workflow-avatar-upload", () => ({
+  uploadWorkflowSlackAvatar: avatarUploadMock,
+}));
 vi.mock("@/lib/headless-automation-commands", () => ({
   updateHeadlessWorkflow: workflowActionsMock.update,
   archiveHeadlessWorkflow: workflowActionsMock.archive,
@@ -172,14 +179,11 @@ describe("WorkflowEditor", () => {
 
     expect(screen.getByText("Channels")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Identity"), { target: { value: "James" } });
-    fireEvent.change(screen.getByLabelText("Avatar URL"), {
-      target: { value: "https://example.com/james.png" },
-    });
     await advanceAutosave();
     expect(workflowActionsMock.update.mock.calls.at(-1)?.[1].slackChannel).toEqual({
       enabled: true,
       displayName: "James",
-      avatarUrl: "https://example.com/james.png",
+      avatarUrl: "",
     });
 
     fireEvent.click(screen.getByRole("switch", { name: "Turn off Slack" }));
@@ -189,8 +193,52 @@ describe("WorkflowEditor", () => {
     expect(workflowActionsMock.update.mock.calls.at(-1)?.[1].slackChannel).toEqual({
       enabled: false,
       displayName: "James",
-      avatarUrl: "https://example.com/james.png",
+      avatarUrl: "",
     });
+  });
+
+  it("uploads an avatar, saves the returned URL, and can clear it again", async () => {
+    render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
+
+    expect(screen.getByRole("button", { name: "Upload avatar" })).toBeEnabled();
+    const picker = screen.getByTestId("workflow-slack-avatar-input");
+    await act(async () => {
+      fireEvent.change(picker, {
+        target: { files: [new File(["bytes"], "james.png", { type: "image/png" })] },
+      });
+    });
+
+    expect(avatarUploadMock).toHaveBeenCalledWith(
+      expect.objectContaining({ workflowId: "workflow_1" }),
+    );
+    await advanceAutosave();
+    expect(workflowActionsMock.update.mock.calls.at(-1)?.[1].slackChannel).toMatchObject({
+      avatarUrl: "https://app.test/workflow-avatars/a.png",
+    });
+    expect(screen.getByRole("button", { name: "Replace avatar" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove avatar" }));
+    await advanceAutosave();
+    expect(workflowActionsMock.update.mock.calls.at(-1)?.[1].slackChannel).toMatchObject({
+      avatarUrl: "",
+    });
+  });
+
+  it("surfaces a failed upload without touching the saved avatar", async () => {
+    avatarUploadMock.mockRejectedValueOnce(new Error("Avatars are limited to 1 MB."));
+    render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
+
+    await act(async () => {
+      fireEvent.change(screen.getByTestId("workflow-slack-avatar-input"), {
+        target: { files: [new File(["bytes"], "big.png", { type: "image/png" })] },
+      });
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Avatars are limited to 1 MB.");
+    // Nothing about the workflow changed, so the draft stays clean and autosave never fires.
+    await advanceAutosave();
+    expect(workflowActionsMock.update).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Upload avatar" })).toBeInTheDocument();
   });
 
   it("shows the required Slack reconnect beside an unsupported custom identity", () => {

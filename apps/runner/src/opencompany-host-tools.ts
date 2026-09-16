@@ -8,15 +8,7 @@ import type {
   WorkflowDispatcher,
   WorkspaceSkillsRunner,
 } from "@opencompany/agent/chat-agent";
-import type {
-  BrowserUseProfileToolOutput,
-  DeleteTaskScheduleToolInput,
-  DeleteTaskScheduleToolOutput,
-  EditTaskScheduleToolInput,
-  EditTaskScheduleToolOutput,
-  ScheduleTaskToolInput,
-  ScheduleTaskToolOutput,
-} from "@opencompany/agent/chat-ui";
+import type { BrowserUseProfileToolOutput } from "@opencompany/agent/chat-ui";
 import {
   activateAndListChatSessionSkills,
   createWorkspaceSkillForActor,
@@ -62,11 +54,6 @@ type Context = {
 export type HostTools = {
   bootstrap: ChatHostBootstrap;
   activeSkills: ChatHostBootstrap["activeSkills"];
-  scheduleTask?: (input: ScheduleTaskToolInput) => Promise<ScheduleTaskToolOutput>;
-  editTaskSchedule?: (input: EditTaskScheduleToolInput) => Promise<EditTaskScheduleToolOutput>;
-  deleteTaskSchedule?: (
-    input: DeleteTaskScheduleToolInput,
-  ) => Promise<DeleteTaskScheduleToolOutput>;
   workspaceSkills?: WorkspaceSkillsRunner;
   createWorkspaceSkill?: CreateWorkspaceSkillRunner;
   editWorkspaceSkill?: EditWorkspaceSkillRunner;
@@ -123,15 +110,6 @@ export async function loadHostTools(
   return {
     bootstrap,
     activeSkills: bootstrap.activeSkills,
-    ...(bootstrap.automationToolsEnabled
-      ? {
-          scheduleTask: (input) => call("schedule_task", input) as Promise<ScheduleTaskToolOutput>,
-          editTaskSchedule: (input) =>
-            call("edit_task_schedule", input) as Promise<EditTaskScheduleToolOutput>,
-          deleteTaskSchedule: (input) =>
-            call("delete_task_schedule", input) as Promise<DeleteTaskScheduleToolOutput>,
-        }
-      : {}),
     ...(bootstrap.skillToolsEnabled
       ? {
           workspaceSkills: (input) => call("workspace_skills", input),
@@ -309,21 +287,6 @@ async function callGateway(
           idempotencyKey: wikiInput.idempotencyKey,
           signal: context.signal,
         }),
-      planHarness: async ({ actorId, prompt }) => {
-        const plannerContext = await getHarnessPlannerContextForRunner(actorId, {
-          browserEnabled: context.env.browserEnabled,
-        });
-        const planned = await planHarnessForTask({
-          prompt,
-          model: "moonshotai/kimi-k2.6",
-          availableTools: plannerContext.availableTools,
-          githubRepositories: plannerContext.githubRepositories,
-          gatewayApiKey: context.env.vercelAiGatewayApiKey,
-          userWorkosId: actorId,
-          signal: context.signal,
-        });
-        return planned.harnessSpec;
-      },
     },
   });
   if (!response.ok) throw new Error(response.error);

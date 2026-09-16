@@ -1,20 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  type Actor,
-  SCHEDULE_READ_PERMISSION,
-  SCHEDULE_WRITE_PERMISSION,
-  WORKFLOW_READ_PERMISSION,
-  WORKFLOW_WRITE_PERMISSION,
-} from "./actor";
+import { type Actor, WORKFLOW_READ_PERMISSION, WORKFLOW_WRITE_PERMISSION } from "./actor";
 import { CoreError } from "./chat";
 import type { CreateTaskResult } from "./tasks";
 import {
   type AutomationExecutionPlanner,
   type AutomationTaskCreator,
   type ScheduleRules,
-  type TaskSchedule,
-  TaskScheduleApplicationService,
-  type TaskScheduleRepository,
   type Workflow,
   WorkflowApplicationService,
   type WorkflowMemory,
@@ -51,6 +42,22 @@ describe("WorkflowApplicationService", () => {
 
     await expect(
       service.setWorkflowMemoryEnabled(actor({ permissions: [] }), "workflow_1", true),
+    ).rejects.toThrow("The actor is not allowed to access Workflows.");
+  });
+
+  it("authorizes a side-channel workflow write only for a visible workflow and a write permission", async () => {
+    const service = workflowService(fakeWorkflowRepository());
+
+    await expect(service.authorizeWorkflowWrite(actor(), " workflow_1 ")).resolves.toBe(
+      "workflow_1",
+    );
+
+    await expect(service.authorizeWorkflowWrite(actor(), "workflow_missing")).rejects.toThrow(
+      "Workflow not found.",
+    );
+
+    await expect(
+      service.authorizeWorkflowWrite(actor({ permissions: [] }), "workflow_1"),
     ).rejects.toThrow("The actor is not allowed to access Workflows.");
   });
 
@@ -671,166 +678,12 @@ describe("WorkflowApplicationService", () => {
   });
 });
 
-describe("TaskScheduleApplicationService", () => {
-  it("checks actor feature policy before calling the external planner", async () => {
-    const repository = fakeTaskScheduleRepository();
-    repository.assertTaskScheduleWriteAllowed.mockRejectedValue(
-      new CoreError("forbidden", "Tasks & Workflows is disabled for this actor."),
-    );
-    const planner = fakePlanner();
-    const service = scheduleService(repository, { planner });
-
-    await expect(
-      service.createTaskSchedule(actor(), {
-        idempotencyKey: "schedule-1",
-        cron: "0 9 * * 1",
-        prompt: "Research market changes.",
-      }),
-    ).rejects.toMatchObject({ code: "forbidden" });
-    expect(repository.replayTaskScheduleCreate).toHaveBeenCalledOnce();
-    expect(planner.prepareTaskSchedule).not.toHaveBeenCalled();
-    expect(repository.createTaskSchedule).not.toHaveBeenCalled();
-  });
-
-  it("checks actor feature policy before every recurring Task mutation", async () => {
-    const repository = fakeTaskScheduleRepository();
-    repository.assertTaskScheduleWriteAllowed.mockRejectedValue(
-      new CoreError("forbidden", "Tasks & Workflows is disabled for this actor."),
-    );
-    const taskCreator = fakeTaskCreator();
-    const planner = fakePlanner();
-    const service = scheduleService(repository, { planner, taskCreator });
-    const update = {
-      expectedVersion: 1,
-      name: "Weekly research",
-      cron: "0 9 * * 1",
-      prompt: "Research market changes.",
-    };
-
-    await expect(service.updateTaskSchedule(actor(), "schedule_1", update)).rejects.toMatchObject({
-      code: "forbidden",
-    });
-    await expect(
-      service.setTaskScheduleEnabled(actor(), "schedule_1", {
-        expectedVersion: 1,
-        enabled: false,
-      }),
-    ).rejects.toMatchObject({ code: "forbidden" });
-    await expect(service.archiveTaskSchedule(actor(), "schedule_1", 1)).rejects.toMatchObject({
-      code: "forbidden",
-    });
-    await expect(
-      service.runTaskScheduleNow(actor(), "schedule_1", "run-schedule-1"),
-    ).rejects.toMatchObject({ code: "forbidden" });
-
-    expect(repository.getTaskSchedule).not.toHaveBeenCalled();
-    expect(repository.updateTaskSchedule).not.toHaveBeenCalled();
-    expect(repository.setTaskScheduleEnabled).not.toHaveBeenCalled();
-    expect(repository.archiveTaskSchedule).not.toHaveBeenCalled();
-    expect(repository.loadTaskScheduleExecution).not.toHaveBeenCalled();
-    expect(planner.prepareTaskSchedule).not.toHaveBeenCalled();
-    expect(taskCreator.create).not.toHaveBeenCalled();
-  });
-
-  it("normalizes, plans, and writes recurring Tasks under the authenticated Actor", async () => {
-    const repository = fakeTaskScheduleRepository();
-    const planner = fakePlanner();
-    const service = scheduleService(repository, { planner });
-
-    await service.createTaskSchedule(actor(), {
-      idempotencyKey: " create-schedule-1 ",
-      sourceDescription: "  Created from Tasks  ",
-      cron: " 0 9 * * 1 ",
-      timezone: " Europe/Berlin ",
-      prompt: "  Research market changes every week.  ",
-    });
-
-    expect(repository.createTaskSchedule).toHaveBeenCalledWith({
-      actor: actor(),
-      idempotencyKey: "create-schedule-1",
-      name: "Research market changes every week.",
-      sourceDescription: "Created from Tasks",
-      prompt: "Research market changes every week.",
-      schedule: { cron: "0 9 * * 1", timezone: "Europe/Berlin", nextRunAt },
-      execution: executionPlan(),
-    });
-  });
-
-  it("replays a recurring Task create without calling the external planner", async () => {
-    const repository = fakeTaskScheduleRepository();
-    repository.replayTaskScheduleCreate.mockResolvedValue({
-      schedule: taskSchedule(),
-      transactionId: "42",
-      idempotentReplay: true,
-    });
-    const planner = fakePlanner();
-    const service = scheduleService(repository, { planner });
-
-    await expect(
-      service.createTaskSchedule(actor(), {
-        idempotencyKey: "schedule-1",
-        cron: "0 9 * * 1",
-        prompt: "Research market changes.",
-      }),
-    ).resolves.toMatchObject({ idempotentReplay: true });
-    expect(planner.prepareTaskSchedule).not.toHaveBeenCalled();
-    expect(repository.createTaskSchedule).not.toHaveBeenCalled();
-  });
-
-  it("does not accidentally require read permission for an authorized schedule mutation", async () => {
-    const repository = fakeTaskScheduleRepository();
-    const service = scheduleService(repository);
-
-    await expect(
-      service.updateTaskSchedule(
-        actor({ permissions: [SCHEDULE_WRITE_PERMISSION] }),
-        "schedule_1",
-        {
-          expectedVersion: 1,
-          name: "Weekly research",
-          cron: "0 9 * * 1",
-          prompt: "Research market changes.",
-        },
-      ),
-    ).resolves.toMatchObject({ schedule: { version: 2 } });
-  });
-
-  it("runs only an actor-owned stored plan through canonical Task creation", async () => {
-    const repository = fakeTaskScheduleRepository();
-    const taskCreator = fakeTaskCreator();
-    const service = scheduleService(repository, { taskCreator });
-
-    await service.runTaskScheduleNow(actor(), " schedule_1 ", " run-schedule-1 ");
-
-    expect(taskCreator.create).toHaveBeenCalledWith({
-      actor: actor(),
-      idempotencyKey: "run-schedule-1",
-      name: "Weekly research",
-      goal: "Research market changes.",
-      execution: executionPlan(),
-      source: "schedule",
-      scheduleId: "schedule_1",
-    });
-    expect(repository.recordRunNow).toHaveBeenCalledWith({
-      actor: actor(),
-      scheduleId: "schedule_1",
-      taskId: "task_1",
-      occurredAt: now,
-    });
-  });
-});
-
 function actor(overrides: Partial<Actor> = {}): Actor {
   return {
     userId: "user_1",
     workspaceId: "workspace_1",
     role: "admin",
-    permissions: [
-      WORKFLOW_READ_PERMISSION,
-      WORKFLOW_WRITE_PERMISSION,
-      SCHEDULE_READ_PERMISSION,
-      SCHEDULE_WRITE_PERMISSION,
-    ],
+    permissions: [WORKFLOW_READ_PERMISSION, WORKFLOW_WRITE_PERMISSION],
     authenticationMethod: "session",
     ...overrides,
   };
@@ -860,23 +713,6 @@ function workflow(overrides: Partial<Workflow> = {}): Workflow {
     createdAt: now,
     updatedAt: now,
     ...overrides,
-  };
-}
-
-function taskSchedule(): TaskSchedule {
-  return {
-    id: "schedule_1",
-    name: "Weekly research",
-    sourceDescription: "Created from Tasks",
-    cron: "0 9 * * 1",
-    timezone: "UTC",
-    prompt: "Research market changes.",
-    enabled: true,
-    lastRunAt: null,
-    nextRunAt,
-    version: 1,
-    createdAt: now,
-    updatedAt: now,
   };
 }
 
@@ -918,12 +754,8 @@ function taskResult(): CreateTaskResult {
 
 function fakePlanner(): AutomationExecutionPlanner & {
   prepareWorkflow: ReturnType<typeof vi.fn>;
-  prepareTaskSchedule: ReturnType<typeof vi.fn>;
 } {
-  return {
-    prepareWorkflow: vi.fn(async () => executionPlan()),
-    prepareTaskSchedule: vi.fn(async () => executionPlan()),
-  };
+  return { prepareWorkflow: vi.fn(async () => executionPlan()) };
 }
 
 function fakeTaskCreator(): AutomationTaskCreator & { create: ReturnType<typeof vi.fn> } {
@@ -957,21 +789,6 @@ function workflowService(
     ...(overrides.validateEventSubscription
       ? { validateEventSubscription: overrides.validateEventSubscription }
       : {}),
-  });
-}
-
-function scheduleService(
-  repository: ReturnType<typeof fakeTaskScheduleRepository>,
-  overrides: {
-    planner?: ReturnType<typeof fakePlanner>;
-    taskCreator?: ReturnType<typeof fakeTaskCreator>;
-  } = {},
-) {
-  return new TaskScheduleApplicationService(repository, {
-    scheduleRules: scheduleRules(),
-    planner: overrides.planner ?? fakePlanner(),
-    taskCreator: overrides.taskCreator ?? fakeTaskCreator(),
-    now: () => now,
   });
 }
 
@@ -1021,44 +838,5 @@ function fakeWorkflowRepository(options: { workflow?: Workflow } = {}): Workflow
       storedMemory = { ...storedMemory, content: "", updatedAt: null };
       return storedMemory;
     }),
-  };
-}
-
-function fakeTaskScheduleRepository(): TaskScheduleRepository & {
-  assertTaskScheduleWriteAllowed: ReturnType<typeof vi.fn>;
-  replayTaskScheduleCreate: ReturnType<typeof vi.fn>;
-  createTaskSchedule: ReturnType<typeof vi.fn>;
-  recordRunNow: ReturnType<typeof vi.fn>;
-} {
-  const stored = taskSchedule();
-  return {
-    assertTaskScheduleWriteAllowed: vi.fn(async () => undefined),
-    replayTaskScheduleCreate: vi.fn(async () => null),
-    listTaskSchedules: vi.fn(async () => ({ schedules: [stored], nextCursor: null })),
-    getTaskSchedule: vi.fn(async ({ scheduleId }) => (scheduleId === stored.id ? stored : null)),
-    createTaskSchedule: vi.fn(async () => ({
-      schedule: stored,
-      transactionId: "42",
-      idempotentReplay: false,
-    })),
-    updateTaskSchedule: vi.fn(async () => ({
-      status: "updated" as const,
-      value: { ...stored, version: 2 },
-      transactionId: "43",
-    })),
-    setTaskScheduleEnabled: vi.fn(async () => ({
-      status: "updated" as const,
-      value: { ...stored, enabled: false, version: 2 },
-      transactionId: "44",
-    })),
-    archiveTaskSchedule: vi.fn(async () => ({
-      status: "updated" as const,
-      value: { scheduleId: stored.id, version: 2 },
-      transactionId: "45",
-    })),
-    loadTaskScheduleExecution: vi.fn(async ({ scheduleId }) =>
-      scheduleId === stored.id ? { schedule: stored, execution: executionPlan() } : null,
-    ),
-    recordRunNow: vi.fn(async () => undefined),
   };
 }

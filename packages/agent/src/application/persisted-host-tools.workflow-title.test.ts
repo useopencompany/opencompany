@@ -45,7 +45,6 @@ describe("persisted workflow host tools", () => {
         wakeTaskWorker: vi.fn(),
         defer: vi.fn(),
         gatewayApiKey: "gateway-key",
-        planHarness: vi.fn(),
       },
       dependencies: {
         loadContext: vi.fn(async () => ({

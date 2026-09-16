@@ -1,9 +1,4 @@
-import type {
-  TaskScheduleReadModel,
-  WorkflowDto,
-  WorkflowScope,
-  WorkflowSlackChannel,
-} from "@opencompany/protocol";
+import type { WorkflowDto, WorkflowScope, WorkflowSlackChannel } from "@opencompany/protocol";
 
 export type WorkflowStep = {
   id: string;
@@ -74,8 +69,6 @@ export function canManageWorkflowScope(
     (workflow.createdByUserId === null && viewer.role === "admin")
   );
 }
-
-export type TaskScheduleView = TaskScheduleReadModel;
 
 export type WorkflowCatalogItem = {
   steps: WorkflowStep[];

@@ -69,7 +69,7 @@ describe("opencompany Chat Task host tools", () => {
     ).resolves.toMatchObject({ ok: true, result: { slackChannelEnabled: true } });
   });
 
-  it("does not advertise task delegation or schedules in a task conversation", async () => {
+  it("does not advertise task delegation in a task conversation", async () => {
     const dependencies = testDependencies({
       loadContext: vi.fn(async () => ({ ...context, taskConversation: true })),
     });
@@ -81,10 +81,9 @@ describe("opencompany Chat Task host tools", () => {
       }),
     ).resolves.toMatchObject({
       ok: true,
-      result: { automationToolsEnabled: false, workflows: [], recurringSchedules: [] },
+      result: { automationToolsEnabled: false, workflows: [] },
     });
     expect(dependencies.listWorkflowCatalog).not.toHaveBeenCalled();
-    expect(dependencies.listSchedules).not.toHaveBeenCalled();
   });
 
   it("carries the member's subagent preference, except inside a task conversation", async () => {
@@ -116,12 +115,7 @@ describe("opencompany Chat Task host tools", () => {
     ).resolves.toMatchObject({ ok: true, result: { subagentsEnabled: false } });
   });
 
-  it.each([
-    "start_workflow",
-    "schedule_task",
-    "edit_task_schedule",
-    "delete_task_schedule",
-  ] as const)("rejects direct %s calls from tasks before any side effect", async (operation) => {
+  it("rejects direct start_workflow calls from tasks before any side effect", async () => {
     const dependencies = testDependencies({
       loadContext: vi.fn(async () => ({ ...context, taskConversation: true })),
     });
@@ -129,7 +123,7 @@ describe("opencompany Chat Task host tools", () => {
     await expect(
       executeChatHostToolService({
         command: {
-          operation,
+          operation: "start_workflow",
           sessionId: "runtime_1",
           runId: "run_1",
           input: {
@@ -139,20 +133,15 @@ describe("opencompany Chat Task host tools", () => {
             model: "moonshotai/kimi-k2.6",
             engine: "opencompany",
             workflowId: "research",
-            cron: "0 9 * * *",
           },
         },
         dependencies,
       }),
     ).resolves.toEqual({
       ok: false,
-      error: "Tasks cannot start workflows or manage task schedules. Use a main chat instead.",
+      error: "Tasks cannot start workflows. Use a main chat instead.",
     });
     expect(dependencies.createWorkflowTask).not.toHaveBeenCalled();
-    expect(dependencies.createSchedule).not.toHaveBeenCalled();
-    expect(dependencies.listSchedules).not.toHaveBeenCalled();
-    expect(dependencies.updateSchedule).not.toHaveBeenCalled();
-    expect(dependencies.deleteSchedule).not.toHaveBeenCalled();
   });
 
   it("keeps the acting member when a task resolves plugin Skills and restricts standalone Skills to company scope", async () => {
@@ -493,42 +482,6 @@ describe("opencompany Chat Task host tools", () => {
     });
   });
 
-  it("binds an agent-created schedule to the active workspace", async () => {
-    const createSchedule = vi.fn(async () => ({
-      id: "schedule_1",
-      name: "Daily briefing",
-      cron: "0 9 * * *",
-      timezone: "Europe/London",
-      nextRunAt: new Date("2026-08-12T08:00:00.000Z"),
-      prompt: "Prepare the briefing.",
-    }));
-    const dependencies = testDependencies({ createSchedule });
-
-    await executeChatHostToolService({
-      command: {
-        operation: "schedule_task",
-        sessionId: "runtime_1",
-        runId: "run_1",
-        input: {
-          name: "Daily briefing",
-          cron: "0 9 * * *",
-          prompt: "Prepare the briefing.",
-        },
-      },
-      dependencies,
-    });
-
-    expect(createSchedule).toHaveBeenCalledWith({
-      actorId: "user_1",
-      workspaceId: "workspace_1",
-      name: "Daily briefing",
-      sourceDescription: "",
-      cron: "0 9 * * *",
-      timezone: "Europe/London",
-      prompt: "Prepare the briefing.",
-    });
-  });
-
   it("runs a wiki command with a turn+toolCall idempotency key", async () => {
     const runWikiTool = vi.fn(async () => ({ ok: true, result: {} }));
     const dependencies = testDependencies({ runWikiTool });
@@ -660,10 +613,6 @@ function testDependencies(
     manageWorkspaceSkills: vi.fn(),
     createWorkspaceSkill: vi.fn(),
     updateWorkspaceSkill: vi.fn(),
-    listSchedules: vi.fn(async () => []),
-    createSchedule: vi.fn(),
-    updateSchedule: vi.fn(),
-    deleteSchedule: vi.fn(),
     createWorkflowTask: vi.fn(async () => taskResult),
     listWorkflowCatalog: vi.fn(async () => []),
     executeBrowserTool: vi.fn(),

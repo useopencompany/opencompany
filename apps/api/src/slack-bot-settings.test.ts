@@ -1,5 +1,7 @@
 import {
   slackBotCanCustomizeIdentity,
+  slackBotCanReact,
+  slackBotCanReadDirectMessages,
   slackBotScopesSatisfied,
 } from "@opencompany/agent/integrations/slack-bot";
 import { captureProductServerEvent } from "@opencompany/analytics/product/server";
@@ -30,6 +32,8 @@ vi.mock("@opencompany/db/workspaces", () => ({
 vi.mock("@opencompany/agent/integrations/slack-bot", () => ({
   slackBotScopesSatisfied: vi.fn(() => true),
   slackBotCanCustomizeIdentity: vi.fn(() => true),
+  slackBotCanReact: vi.fn(() => true),
+  slackBotCanReadDirectMessages: vi.fn(() => true),
   isSlackBotConfigured: vi.fn(() => true),
 }));
 
@@ -67,6 +71,7 @@ describe("Slack bot settings service", () => {
     vi.clearAllMocks();
     vi.mocked(slackBotScopesSatisfied).mockReturnValue(true);
     vi.mocked(slackBotCanCustomizeIdentity).mockReturnValue(true);
+    vi.mocked(slackBotCanReact).mockReturnValue(true);
     vi.mocked(getSlackBotIntegrationForWorkspace).mockResolvedValue(integration as never);
     vi.mocked(getBrainAccess).mockResolvedValue(access as never);
     vi.mocked(loadIntegrationCredential).mockResolvedValue({
@@ -87,6 +92,8 @@ describe("Slack bot settings service", () => {
       status: "connected",
       needsScopeUpgrade: false,
       canCustomizeIdentity: true,
+      canReact: true,
+      canReadDirectMessages: true,
       teamName: null,
       statusReason: null,
       destinationCount: 0,
@@ -97,13 +104,29 @@ describe("Slack bot settings service", () => {
     );
   });
 
-  it("reports identity customization independently from unrelated missing scopes", async () => {
+  it("reports each granted capability independently from unrelated missing scopes", async () => {
     vi.mocked(slackBotScopesSatisfied).mockReturnValue(false);
     const service = createSlackBotSettingsService({ db: unusedDb() });
 
     await expect(service.getWorkspaceSettings(member)).resolves.toMatchObject({
       needsScopeUpgrade: true,
       canCustomizeIdentity: true,
+      canReact: true,
+    });
+
+    // An install can be behind on one capability and current on the others; Settings words the
+    // reconnect from these flags, so they must not move together.
+    vi.mocked(slackBotCanReact).mockReturnValue(false);
+    await expect(service.getWorkspaceSettings(member)).resolves.toMatchObject({
+      canCustomizeIdentity: true,
+      canReact: false,
+      canReadDirectMessages: true,
+    });
+
+    vi.mocked(slackBotCanReadDirectMessages).mockReturnValue(false);
+    await expect(service.getWorkspaceSettings(member)).resolves.toMatchObject({
+      canCustomizeIdentity: true,
+      canReadDirectMessages: false,
     });
   });
 

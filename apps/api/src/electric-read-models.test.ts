@@ -23,8 +23,6 @@ const actor = {
     "task:write",
     "workflow:read",
     "workflow:write",
-    "schedule:read",
-    "schedule:write",
   ],
   authenticationMethod: "session" as const,
 };
@@ -1412,22 +1410,6 @@ describe("Electric read models", () => {
         updated_at: "2026-08-12 08:05:00+00",
         workspace_id: "must-not-cross",
       },
-      "goat.task_schedule_read_model_v1": {
-        id: "schedule_1",
-        name: "Daily research",
-        source_description: "Tasks page",
-        cron: "0 9 * * *",
-        timezone: "UTC",
-        prompt: "Research changes.",
-        enabled: false,
-        last_run_at: null,
-        next_run_at: "2026-08-13 09:00:00+00",
-        version: "3",
-        created_at: "2026-08-12 08:00:00+00",
-        updated_at: "2026-08-12 08:05:00+00",
-        actor_id: "must-not-cross",
-        workspace_id: "must-not-cross",
-      },
     };
     const proxy = new ElectricReadModelProxy({
       electricUrl: "https://electric.example.test",
@@ -1445,7 +1427,7 @@ describe("Electric read models", () => {
       }) as typeof fetch,
     });
 
-    const [workflowResponse, workflowScheduleResponse, taskScheduleResponse] = await Promise.all([
+    const [workflowResponse, workflowScheduleResponse] = await Promise.all([
       proxy.stream({
         actor,
         readModel: "workflows-v1",
@@ -1456,17 +1438,11 @@ describe("Electric read models", () => {
         readModel: "workflow-schedules-v1",
         requestUrl: new URL("https://api.example.test/v1/read-models/workflow-schedules-v1"),
       }),
-      proxy.stream({
-        actor,
-        readModel: "task-schedules-v1",
-        requestUrl: new URL("https://api.example.test/v1/read-models/task-schedules-v1"),
-      }),
     ]);
 
     expect(requestedUrls.map((url) => url.searchParams.get("table"))).toEqual([
       "goat.workflow_read_model_v1",
       "goat.workflow_schedule_read_model_v1",
-      "goat.task_schedule_read_model_v1",
     ]);
     // Personal workflows belong to their creator, so the shape itself withholds a teammate's.
     expect(requestedUrls[0]?.searchParams.get("where")).toBe(
@@ -1479,8 +1455,6 @@ describe("Electric read models", () => {
     expect(requestedUrls[1]?.searchParams.get("params[2]")).toBe("user_1");
     expect(requestedUrls[1]?.searchParams.get("columns")).not.toContain("scope");
     expect(requestedUrls[1]?.searchParams.get("columns")).not.toContain("created_by_workos_id");
-    expect(requestedUrls[2]?.searchParams.get("where")).toContain('"actor_id" = $1');
-    expect(requestedUrls[2]?.searchParams.get("where")).toContain('"workspace_id" IS NULL');
     expect((await workflowResponse.json())[0]?.value).toEqual({
       id: "workflow_1",
       slug: "weekly-research",
@@ -1516,20 +1490,6 @@ describe("Electric read models", () => {
       workflowId: "workflow_1",
       workflowSlug: "weekly-research",
       version: 2,
-    });
-    expect((await taskScheduleResponse.json())[0]?.value).toEqual({
-      id: "schedule_1",
-      name: "Daily research",
-      sourceDescription: "Tasks page",
-      cron: "0 9 * * *",
-      timezone: "UTC",
-      prompt: "Research changes.",
-      enabled: false,
-      lastRunAt: null,
-      nextRunAt: "2026-08-13T09:00:00.000Z",
-      version: 3,
-      createdAt: "2026-08-12T08:00:00.000Z",
-      updatedAt: "2026-08-12T08:05:00.000Z",
     });
   });
 

@@ -11,7 +11,7 @@ const inbound = { deliveryId: "dlv_1", messageId: "msg_in", chatId: null, sender
 
 function fakeClient() {
   return {
-    sendMessage: vi.fn(async () => ({ id: "msg_out" })),
+    sendMessage: vi.fn(async () => ({ id: "obx_out" })),
     sendReaction: vi.fn(async () => ({ id: "rxn_1" })),
     startTyping: vi.fn(async () => undefined),
   } as unknown as MessagesClient & {
@@ -43,7 +43,7 @@ describe("createImessageDelivery", () => {
     expect(delivery.delivered()).toBe(false);
     await expect(send({ text: "hi", reaction: "like" }, {} as never)).resolves.toEqual({
       ok: true,
-      messageId: "msg_out",
+      outboxId: "obx_out",
       reaction: "like",
     });
     expect(client.sendReaction).toHaveBeenCalledWith(

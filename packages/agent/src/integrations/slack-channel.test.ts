@@ -20,7 +20,7 @@ describe("Slack Channel boundary", () => {
     expect(isSupportedSlackChannel({ id: "C123" })).toBe(false);
     expect(isSupportedSlackChannel({ id: "D123", is_member: true })).toBe(false);
   });
-  it("rejects an inactive, foreign, or non-workflow turn before any provider request", async () => {
+  it("rejects an inactive, foreign, or unsubscribed turn before any provider request", async () => {
     await expect(
       postWorkflowSlackMessage(
         {
@@ -30,7 +30,7 @@ describe("Slack Channel boundary", () => {
         },
         async () => [],
       ),
-    ).rejects.toThrow("active workflow session");
+    ).rejects.toThrow("active session with Slack posting enabled");
   });
   it("bounds messages and requires a stable idempotency key", async () => {
     const execute = vi.fn();

@@ -93,10 +93,7 @@ describe("headless protocol", () => {
       "/v1/workflows/{workflowId}/invoke",
       "/v1/workflows/{workflowId}/run-now",
       "/v1/workflows/{workflowId}/memory",
-      "/v1/schedules",
-      "/v1/schedules/{scheduleId}",
-      "/v1/schedules/{scheduleId}/archive",
-      "/v1/schedules/{scheduleId}/run-now",
+      "/v1/workflows/{workflowId}/slack-avatar",
       "/v1/brains/{brainId}",
       "/v1/brains/{brainId}/overview",
       "/v1/brains/{brainId}/source-items",
@@ -194,6 +191,7 @@ describe("headless protocol", () => {
       "/public/chat-shares/{shareId}/metadata",
       "/public/chat-shares/{shareId}/attachments/{messageId}/{attachmentId}",
       "/public/chat-shares/{shareId}/artifacts/{artifactId}/versions/{versionId}",
+      "/public/workflow-avatars/{workflowId}/{assetId}",
       "/v1/conversations/{conversationId}/engine-session/runtime",
       "/v1/conversations/{conversationId}/engine-session/runtime-access",
       "/v1/runs/{runId}",
@@ -341,7 +339,7 @@ describe("headless protocol", () => {
     expect(ReadModelSchema.safeParse("workflows-v1").success).toBe(true);
     expect(ReadModelSchema.safeParse("task-activities-v1").success).toBe(true);
     expect(ReadModelSchema.safeParse("workflow-schedules-v1").success).toBe(true);
-    expect(ReadModelSchema.safeParse("task-schedules-v1").success).toBe(true);
+    expect(ReadModelSchema.safeParse("task-schedules-v1").success).toBe(false);
     expect(ReadModelSchema.safeParse("integration-accounts-v1").success).toBe(true);
     expect(ReadModelSchema.safeParse("goat.workflow_read_model_v1").success).toBe(false);
     expect(

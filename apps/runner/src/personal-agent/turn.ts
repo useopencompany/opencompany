@@ -447,7 +447,6 @@ async function resolvePersonalAgentRuntime(input: {
       webSearchEnabled: Boolean(webSearch),
       browserToolsEnabled: false,
       automationToolsEnabled: false,
-      scheduleToolsEnabled: false,
       artifactToolEnabled: false,
       subagentsEnabled: false,
       wikiToolEnabled: Boolean(hostTools.runWiki),

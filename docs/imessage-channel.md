@@ -54,8 +54,9 @@ never texts an unpaired number except to answer a text that looks like a code.
 `${timestamp}.${rawBody}`, five-minute tolerance). Only `message.received` is handled; the
 provider delivery id is the Message command's idempotency key, so a redelivery never starts a second
 Run. Outbound: `POST /v1/messages`, `/v1/reactions` and `/v1/typing`, called inline from the tool
-with a thin fetch client in `packages/agent/src/integrations/imessage.ts`. There is no outbox table
-in this first version; a failed send is a tool error the model sees.
+with a thin fetch client in `packages/agent/src/integrations/imessage.ts`. The provider accepts
+writes asynchronously and returns an `obx_...` id. This version does not poll that outbox or consume
+`message.sent`, so it catches enqueue failures but does not surface a later delivery failure.
 
 Env: `MESSAGES_API_KEY`, `MESSAGES_WEBHOOK_SECRET`, `MESSAGES_LINE_HANDLE` — see
 [environment variables](./env-vars.md#imessage-personal-assistant). A sandbox line allows 50
@@ -64,7 +65,7 @@ is roughly one message per second per line and at most five unanswered messages 
 
 ## Data
 
-Migration `0297_imessage_personal_agent` is additive: `goat.users.imessage_enabled`,
+Migration `0298_imessage_personal_agent` is additive: `goat.users.imessage_enabled`,
 `goat.codex_chat_sessions.harness` (default `chat`), and `goat.imessage_bindings`. Application
 rollback can leave all three deployed; turning the flag off for everyone disables the channel.
 
