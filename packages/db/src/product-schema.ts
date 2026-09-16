@@ -7649,6 +7649,11 @@ export const channelDeliveries = productSchema.table(
     teamId: text("team_id").notNull(),
     channelId: text("channel_id").notNull(),
     threadTs: text("thread_ts"),
+    // A reply is queued before Slack has given its root post a timestamp, so it points at the root
+    // delivery and the worker fills thread_ts in from that row's message_ts when it sends.
+    threadParentId: text("thread_parent_id").references((): AnyPgColumn => channelDeliveries.id, {
+      onDelete: "cascade",
+    }),
     text: text("text").notNull(),
     // Snapshot the workflow's cosmetic Slack identity at enqueue time, so a later edit cannot
     // retroactively change a queued post. Empty values keep the default bot identity.
@@ -7663,6 +7668,9 @@ export const channelDeliveries = productSchema.table(
   },
   (table) => [
     index("channel_deliveries_pending_idx").on(table.status, table.createdAt),
+    index("channel_deliveries_thread_parent_idx")
+      .on(table.threadParentId)
+      .where(sql`${table.threadParentId} IS NOT NULL`),
     check(
       "channel_deliveries_status_check",
       sql`${table.status} IN ('pending', 'sending', 'sent', 'uncertain', 'failed', 'canceled')`,

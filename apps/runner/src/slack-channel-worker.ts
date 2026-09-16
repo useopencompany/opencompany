@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { SLACK_BOT_TOOL_NAME } from "@opencompany/agent/chat-ui";
 import { slackApiRequest } from "@opencompany/agent/integrations/slack";
 import { slackBotCanCustomizeIdentity } from "@opencompany/agent/integrations/slack-bot";
 import {
@@ -296,7 +297,7 @@ export function slackFollowUpPrompt(input: {
   }
   if (input.thread.truncated || contentTruncated)
     messages.push("[Additional Slack thread context was omitted because the thread is very long.]");
-  return `Slack thread follow-up\n\nSender: ${sender}\n\nContinue this same workflow using its saved context and artifacts. The full Slack thread so far is included as context below. Do not create another task or a root Slack message.\n\nBefore writing your final task answer, call post_slack_message with your final Slack reply as text and \"slack-follow-up-${input.eventId}\" as messageKey. Omit channel so the tool posts to the originating thread. The assistant turn itself is not sent to Slack.\n\n--- Full Slack thread ---\n${messages.join("\n\n")}\n--- End Slack thread ---\n\n--- New follow-up message begins ---\nFrom: ${sender}\n${quoteSlackText(input.text)}\n--- New follow-up message ends ---`;
+  return `Slack thread follow-up\n\nSender: ${sender}\n\nContinue this same workflow using its saved context and artifacts. The full Slack thread so far is included as context below. Do not create another task or a root Slack message.\n\nBefore writing your final task answer, call ${SLACK_BOT_TOOL_NAME} with your final Slack reply as text and \"slack-follow-up-${input.eventId}\" as messageKey. Omit channel so the tool posts to the originating thread. Reply the way a founder replies in their own team channel: lead with the answer, short sentences, plain words, no preamble. The assistant turn itself is not sent to Slack.\n\n--- Full Slack thread ---\n${messages.join("\n\n")}\n--- End Slack thread ---\n\n--- New follow-up message begins ---\nFrom: ${sender}\n${quoteSlackText(input.text)}\n--- New follow-up message ends ---`;
 }
 
 function slackUserName(user: SlackUser, fallbackId: string) {
@@ -356,26 +357,37 @@ export async function processNextChannelDelivery(deps = defaults()): Promise<boo
     await tx.execute(sql`UPDATE goat.channel_deliveries delivery SET status = 'canceled', error = NULL
       WHERE delivery.status = 'pending' AND (
         NOT EXISTS (SELECT 1 FROM goat.integrations integration WHERE integration.id = delivery.integration_id AND integration.external_id = delivery.team_id)
+        -- A reply whose root message never reached Slack has no thread to land in. Posting it
+        -- anyway would drop detail into the channel with nothing to read it against.
+        OR EXISTS (SELECT 1 FROM goat.channel_deliveries parent
+          WHERE parent.id = delivery.thread_parent_id AND parent.status IN ('canceled', 'failed'))
         OR (delivery.thread_ts IS NULL AND (delivery.created_at <= now() - interval '30 days'
           OR EXISTS (SELECT 1 FROM goat.tasks task WHERE task.session_id = delivery.session_id AND task.archived_at IS NOT NULL)
           OR EXISTS (SELECT 1 FROM goat.chat_sessions conversation WHERE conversation.id = delivery.session_id AND conversation.closed_at IS NOT NULL)))
       )`);
     const row = subscriptionRows<Delivery>(
       await tx.execute(sql`
-      SELECT delivery.id, delivery.channel_id AS "channelId", delivery.thread_ts AS "threadTs", delivery.text,
+      SELECT delivery.id, delivery.channel_id AS "channelId",
+        COALESCE(delivery.thread_ts, parent.message_ts) AS "threadTs", delivery.text,
         delivery.bot_display_name AS "botDisplayName", delivery.bot_avatar_url AS "botAvatarUrl",
         delivery.status, delivery.created_at AS "createdAt",
         jsonb_build_object('id', integration.id, 'workspaceId', integration.workspace_id,
           'userWorkosId', integration.user_workos_id, 'teamId', integration.external_id, 'scopes', integration.scopes) AS installation
       FROM goat.channel_deliveries delivery JOIN goat.integrations integration ON integration.id = delivery.integration_id AND integration.external_id = delivery.team_id
-      WHERE integration.status = 'connected' AND ((delivery.status = 'pending' AND (delivery.lease_expires_at IS NULL OR delivery.lease_expires_at < now())) OR (
+      LEFT JOIN goat.channel_deliveries parent ON parent.id = delivery.thread_parent_id
+      -- A reply is queued before Slack has timestamped its root message. Leaving it unclaimed until
+      -- the root is confirmed sent is what keeps the two posts in order and in one thread.
+      WHERE integration.status = 'connected'
+        AND (delivery.thread_parent_id IS NULL OR (parent.status = 'sent' AND parent.message_ts IS NOT NULL))
+        AND ((delivery.status = 'pending' AND (delivery.lease_expires_at IS NULL OR delivery.lease_expires_at < now())) OR (
         delivery.status IN ('sending', 'uncertain') AND delivery.lease_expires_at < now()))
       ORDER BY delivery.created_at FOR UPDATE OF delivery, integration SKIP LOCKED LIMIT 1
     `),
     )[0];
     if (!row) return null;
+    // Persist the resolved thread so a reconciliation after a crash reads the thread, not the channel.
     await tx.execute(
-      sql`UPDATE goat.channel_deliveries SET status = 'sending', lease_id = ${leaseId}, lease_expires_at = now() + interval '2 minutes' WHERE id = ${row.id}`,
+      sql`UPDATE goat.channel_deliveries SET status = 'sending', thread_ts = ${row.threadTs}, lease_id = ${leaseId}, lease_expires_at = now() + interval '2 minutes' WHERE id = ${row.id}`,
     );
     return { ...row, leaseId };
   });

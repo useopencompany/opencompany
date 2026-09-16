@@ -6,7 +6,7 @@ import {
   CODEX_WEB_SEARCH_TOOL_NAME,
 } from "@opencompany/agent-runtime";
 import { describe, expect, it } from "vitest";
-import { USE_ACTION_TOOL_NAME } from "@/lib/chat-ui";
+import { SLACK_BOT_TOOL_NAME, USE_ACTION_TOOL_NAME } from "@/lib/chat-ui";
 import { toolCallViewFromPart } from "./assistant-items";
 
 describe("coding transcript tool presentations", () => {
@@ -26,6 +26,30 @@ describe("coding transcript tool presentations", () => {
       detail: "git status --short && bun test",
       detailChips: ["git status --short && bun test"],
     });
+  });
+
+  it("names the destination of a Slack post without spilling the message body", () => {
+    expect(
+      toolCallViewFromPart({
+        type: `tool-${SLACK_BOT_TOOL_NAME}`,
+        toolCallId: "slack_root",
+        state: "input-available",
+        input: { channel: "#product", text: "Shipped the Gmail trigger.", messageKey: "summary" },
+      }),
+    ).toMatchObject({ label: "Slack bot", detail: "#product" });
+
+    expect(
+      toolCallViewFromPart({
+        type: `tool-${SLACK_BOT_TOOL_NAME}`,
+        toolCallId: "slack_reply",
+        state: "input-available",
+        input: {
+          text: "Label filter only, 25 per pass, 5 minute interval.",
+          messageKey: "summary-detail",
+          replyToMessageKey: "summary",
+        },
+      }),
+    ).toMatchObject({ label: "Slack bot", detail: "Thread reply" });
   });
 
   it("never exposes internal coding tool names when richer fields are absent", () => {

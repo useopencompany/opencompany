@@ -2073,6 +2073,13 @@
       "when": 1790100400016,
       "tag": "0295_workflow_schedule_authorization",
       "breakpoints": true
+    },
+    {
+      "idx": 296,
+      "version": "7",
+      "when": 1790100400017,
+      "tag": "0296_channel_delivery_thread_parent",
+      "breakpoints": true
     }
   ]
 }
