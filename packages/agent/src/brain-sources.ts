@@ -798,7 +798,10 @@ export class BrainSourceApplicationService {
         // The connection is already marked needs_reauth; the author is sent to the plugin page.
         throw new CoreError("conflict", "Reconnect Gmail in Plugins first.");
       }
-      throw new CoreError("unavailable", "Could not load Gmail labels.");
+      // Keep the cause: everything that is not a rejected credential reaches the author as the
+      // same retryable message, so the original failure is the only way to tell a Gmail outage
+      // from a misconfigured deployment.
+      throw new CoreError("unavailable", "Could not load Gmail labels.", { cause: error });
     }
   }
 
