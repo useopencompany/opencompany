@@ -40,6 +40,7 @@ import { SidebarBots } from "@/components/Bots";
 import { BrainSwitcher } from "@/components/BrainSwitcher";
 import { ChatStateIndicator } from "@/components/ChatStateIndicator";
 import { IntentPrefetchLink } from "@/components/IntentPrefetchLink";
+import { PullRequestBadge } from "@/components/PullRequestBadge";
 import { SidebarFeedback } from "@/components/SidebarFeedback";
 import {
   conversationDragProps,
@@ -63,11 +64,13 @@ import {
   restoreOptimisticArchive,
 } from "@/lib/optimistic-archives";
 import { useOptimisticChatSummaries } from "@/lib/optimistic-chat-summaries";
+import type { SessionPullRequest } from "@/lib/session-pull-requests";
 import {
   orderSidebarWorkItems,
   type SidebarTaskView,
   type SidebarWorkItem,
 } from "@/lib/sidebar-items";
+import { useSessionPullRequests } from "@/lib/use-session-pull-requests";
 import { activeWikiSlugFromPathname } from "@/lib/wiki-routes";
 import { createWorkspaceAction, switchWorkspaceAction } from "@/lib/workspace-actions";
 
@@ -449,6 +452,7 @@ function SidebarWorkList() {
   const router = useRouter();
   const [, startTransition] = useTransition();
   const localChatStates = useLocalChatStates();
+  const pullRequests = useSessionPullRequests();
   const optimisticChats = useOptimisticChatSummaries();
   const optimisticChatIds = useMemo(
     () =>
@@ -581,6 +585,7 @@ function SidebarWorkList() {
         active={pathname === href}
         optimistic={optimistic}
         localState={localChatStates.get(chat.id) ?? null}
+        pullRequest={pullRequests.get(chat.id) ?? null}
         pinned={pinned}
         pinning={pinningIds.has(chat.id)}
         dragProps={optimistic ? {} : rowDragProps(chat.id)}
@@ -601,6 +606,7 @@ function SidebarWorkList() {
         task={item.task}
         state={item.state}
         href={href}
+        pullRequest={pullRequests.get(item.task.conversationId) ?? null}
         active={isTaskRouteActive(pathname, href)}
         dragProps={rowDragProps(item.task.conversationId)}
         onArchive={() => archiveTask(item.task, href)}
@@ -727,6 +733,7 @@ function SidebarChatRow({
   active,
   optimistic,
   localState,
+  pullRequest,
   pinned,
   pinning,
   dragProps,
@@ -740,6 +747,8 @@ function SidebarChatRow({
   active: boolean;
   optimistic: boolean;
   localState: ReturnType<typeof chatSummaryState> | null;
+  /** The PR this chat's coding agent opened, when it opened one. */
+  pullRequest: SessionPullRequest | null;
   pinned: boolean;
   pinning: boolean;
   // Lets the row be dragged into a sidebar Project. Empty when Projects are off, and for a chat
@@ -797,6 +806,15 @@ function SidebarChatRow({
       )}
       {optimistic ? null : (
         <>
+          {/* The badge rests in the pin column and yields to the pin on hover. A third column
+              would cost every row title 24px of width to show a control the reader is already
+              reaching past. */}
+          {pullRequest && !pinned && !pinning ? (
+            <PullRequestBadge
+              pullRequest={pullRequest}
+              className="group-hover:hidden group-focus-within:hidden"
+            />
+          ) : null}
           <button
             type="button"
             title={pinned ? "Unpin chat" : "Pin chat"}
@@ -804,10 +822,12 @@ function SidebarChatRow({
             aria-pressed={pinned}
             disabled={pinning}
             onClick={onTogglePin}
-            className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink/50 transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed ${
+            className={`h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink/50 transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed ${
               pinned || pinning
-                ? "opacity-100"
-                : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+                ? "flex opacity-100"
+                : pullRequest
+                  ? "hidden opacity-0 group-hover:flex group-hover:opacity-100 group-focus-within:flex group-focus-within:opacity-100"
+                  : "flex opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
             }`}
           >
             {/* The row has already moved to its new section, so the icon shows the state the user
@@ -858,6 +878,7 @@ function SidebarTaskRow({
   state,
   href,
   active,
+  pullRequest,
   dragProps,
   onArchive,
 }: {
@@ -865,6 +886,8 @@ function SidebarTaskRow({
   state: ReturnType<typeof chatSummaryState>;
   href: string;
   active: boolean;
+  /** The PR this Task's coding agent opened, when it opened one. */
+  pullRequest: SessionPullRequest | null;
   // Keyed by the conversation behind the Task, the same key a Project stores for a chat.
   dragProps: SidebarRowDragProps;
   onArchive: () => void;
@@ -890,10 +913,15 @@ function SidebarTaskRow({
           <span className="truncate text-[11px] leading-none text-ink-faint">{task.displayId}</span>
         </span>
       </Link>
-      {/* Empty stand-in for the chat row's pin control, so the archive icon lands in the same
-          column on every row the reader hovers down the list. */}
-      <span aria-hidden="true" className="h-6 w-6 shrink-0" />
-      <span className="mr-1 flex h-6 w-6 shrink-0 items-center justify-center">
+      {/* Stand-in for the chat row's pin control, so the archive icon lands in the same column on
+          every row the reader hovers down the list. A Task row is two lines tall, so the badge is
+          pulled up to sit against the title rather than floating between the two. */}
+      {pullRequest ? (
+        <PullRequestBadge pullRequest={pullRequest} className="mt-[1.5px] self-start" />
+      ) : (
+        <span aria-hidden="true" className="h-6 w-6 shrink-0" />
+      )}
+      <span className="mr-1 mt-[1.5px] flex h-6 w-6 shrink-0 items-center justify-center self-start">
         {archivable ? (
           <button
             type="button"

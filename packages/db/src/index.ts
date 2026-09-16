@@ -18,6 +18,7 @@ export * from "./plugin-repository";
 export * from "./postgres-json";
 export * from "./product-schema";
 export * from "./repo-configs";
+export * from "./session-pull-requests";
 export * from "./skill-bundle-repository";
 export * from "./task-repository";
 export * from "./worker-admission";

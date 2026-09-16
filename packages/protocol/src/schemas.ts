@@ -2808,6 +2808,25 @@ export const ConversationPageSchema = z
   .strict()
   .openapi("ConversationPage");
 
+export const SessionPullRequestSchema = z
+  .object({
+    conversationId: z.string(),
+    repository: z.string(),
+    number: z.number().int().positive(),
+    url: z.string(),
+    state: z.enum(["draft", "open", "blocked", "merged", "closed"]),
+  })
+  .strict()
+  .openapi("SessionPullRequest");
+
+export const SessionPullRequestListSchema = z
+  .object({
+    data: z.array(SessionPullRequestSchema),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("SessionPullRequestList");
+
 export const TaskPageSchema = z
   .object({
     data: z.array(TaskSchema),
@@ -4827,6 +4846,7 @@ export const DopplerAuthFlowEnvelopeSchema = z
   .openapi("DopplerAuthFlowEnvelope");
 
 export type ConversationDto = z.infer<typeof ConversationSchema>;
+export type SessionPullRequestDto = z.infer<typeof SessionPullRequestSchema>;
 export type ConversationRuntimeDto = z.infer<typeof ConversationRuntimeSchema>;
 export type ConversationShareDto = z.infer<typeof ConversationShareSchema>;
 export type PublicChatMessageDto = z.infer<typeof PublicChatMessageSchema>;

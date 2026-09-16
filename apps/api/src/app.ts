@@ -63,6 +63,7 @@ import {
   type WorkflowMemory,
 } from "@opencompany/core";
 import { captureException, createLogger, type LogFields } from "@opencompany/observability";
+import type { SessionPullRequestDto } from "@opencompany/protocol";
 import {
   createOpenApiDocument,
   createV1Router,
@@ -212,6 +213,8 @@ export type CreateApiAppInput = {
   userSettings: UserSettingsService;
   feedback: FeedbackService;
   repoConfigs: RepoConfigService;
+  /** Pull requests opened by the actor's own coding sessions, with each state read from GitHub. */
+  sessionPullRequests: (actor: Actor) => Promise<SessionPullRequestDto[]>;
   integrationAccounts: IntegrationAccountService;
   slackBotSettings: SlackBotSettingsService;
   mcp?: McpService;
@@ -1793,6 +1796,11 @@ export function createApiApp(input: CreateApiAppInput) {
         },
         200,
       );
+    },
+    listSessionPullRequests: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      return c.json({ data: await input.sessionPullRequests(actor), meta }, 200);
     },
     getConversation: async (c) => {
       const actor = actorFrom(c);

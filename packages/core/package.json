@@ -35,6 +35,10 @@
     "./sandbox-sizes": {
       "types": "./src/sandbox-sizes.ts",
       "default": "./src/sandbox-sizes.ts"
+    },
+    "./pull-requests": {
+      "types": "./src/pull-requests.ts",
+      "default": "./src/pull-requests.ts"
     }
   },
   "scripts": {
