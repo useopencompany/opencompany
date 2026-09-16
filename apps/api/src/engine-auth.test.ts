@@ -107,6 +107,13 @@ const codexFlow = {
   expiresAt: "2026-08-13T09:15:00.000Z",
 };
 
+const completedCodexFlow = {
+  ...codexFlow,
+  status: "completed" as const,
+  userCode: null,
+  verificationUri: null,
+};
+
 const infisicalFlow = {
   id: "ginff_1",
   status: "link_ready" as const,
@@ -297,6 +304,49 @@ describe("engine auth service", () => {
     const { runner, calls } = fakeRunner([{ ok: true, flow: codexFlow }]);
     await service(runner).pollCodexDeviceAuth(member, " flow/1 ");
     expect(calls[0]?.path).toBe("/internal/goat/codex-auth/device/flow%2F1/poll");
+  });
+
+  it("waits for completed Codex authentication before enabling workspace sharing", async () => {
+    const { runner } = fakeRunner([{ ok: true, flow: codexFlow }]);
+
+    await service(runner).pollCodexDeviceAuth(admin, "gcodf_1");
+
+    expect(setWorkspaceCodexEngineAccount).not.toHaveBeenCalled();
+  });
+
+  it("enables the current workspace when an admin completes Codex authentication", async () => {
+    const { runner } = fakeRunner([{ ok: true, flow: completedCodexFlow }]);
+
+    await expect(service(runner).pollCodexDeviceAuth(admin, "gcodf_1")).resolves.toEqual(
+      completedCodexFlow,
+    );
+
+    expect(setWorkspaceCodexEngineAccount).toHaveBeenCalledWith({
+      db: dbSentinel,
+      workspaceId: admin.workspaceId,
+      providerUserWorkosId: admin.userId,
+      updatedByWorkosId: admin.userId,
+    });
+  });
+
+  it("does not share a member's personal Codex connection with the workspace", async () => {
+    const { runner } = fakeRunner([{ ok: true, flow: completedCodexFlow }]);
+
+    await expect(service(runner).pollCodexDeviceAuth(member, "gcodf_1")).resolves.toEqual(
+      completedCodexFlow,
+    );
+
+    expect(setWorkspaceCodexEngineAccount).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a workspace sharing failure after Codex authentication completes", async () => {
+    vi.mocked(setWorkspaceCodexEngineAccount).mockRejectedValueOnce(new Error("database offline"));
+    const { runner } = fakeRunner([{ ok: true, flow: completedCodexFlow }]);
+
+    await expect(service(runner).pollCodexDeviceAuth(admin, "gcodf_1")).rejects.toMatchObject({
+      status: 503,
+      message: "Codex connected, but workspace subscription sharing could not be enabled.",
+    });
   });
 
   it("surfaces Codex runner failures with the retired message copy", async () => {

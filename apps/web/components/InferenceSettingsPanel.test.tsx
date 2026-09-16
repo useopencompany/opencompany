@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { type IntegrationState, integrationStateFromRows } from "@/lib/integration-state";
 import { InferenceSettingsPanel } from "./InferenceSettingsPanel";
@@ -122,6 +122,49 @@ describe("InferenceSettingsPanel", () => {
       "https://example.com/device",
     );
     expect(screen.getByText("ABCD-EFGH")).toBeInTheDocument();
+  });
+
+  it("refreshes Settings when Codex authentication completes", async () => {
+    vi.useFakeTimers();
+    try {
+      startCodexDeviceAuth.mockResolvedValue({
+        ok: true,
+        flow: {
+          id: "gcodf_1",
+          status: "code_ready",
+          verificationUri: "https://example.com/device",
+          userCode: "ABCD-EFGH",
+          statusReason: null,
+        },
+      });
+      pollCodexDeviceAuth.mockResolvedValue({
+        ok: true,
+        flow: {
+          id: "gcodf_1",
+          status: "completed",
+          verificationUri: null,
+          userCode: null,
+          statusReason: null,
+        },
+      });
+      renderPanel(integrationStateFromRows([]), true);
+
+      const codexCard = screen.getByRole("heading", { name: "Codex" }).parentElement?.parentElement;
+      expect(codexCard).not.toBeNull();
+      await act(async () => {
+        fireEvent.click(within(codexCard as HTMLElement).getByRole("button", { name: "Connect" }));
+      });
+      expect(screen.getByRole("link", { name: "Open Codex sign-in" })).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2500);
+      });
+
+      expect(pollCodexDeviceAuth).toHaveBeenCalledWith("gcodf_1");
+      expect(refresh).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("saves a Claude Code setup token", async () => {
