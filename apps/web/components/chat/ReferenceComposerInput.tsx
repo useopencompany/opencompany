@@ -2,6 +2,7 @@
 
 import { Extension, type JSONContent, Node as TiptapNode } from "@tiptap/core";
 import { UndoRedo } from "@tiptap/extensions";
+import { closeHistory } from "@tiptap/pm/history";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
@@ -253,11 +254,15 @@ export function ReferenceComposerInput({
     if (!editor) return;
     const value = nodeText(editor.state.doc);
     if (value !== props.value) {
-      // A single transaction preserves undo when the parent inserts a reference or restores
-      // a draft. Replacing the document avoids slicing through serialized atomic links.
+      // Keep a selected reference separate from the typing that opened its picker in undo
+      // history. Replacing the document avoids slicing through serialized atomic links.
       const document = editor.schema.nodeFromJSON(composerDocument(props.value));
       editor.view.dispatch(
-        editor.state.tr.replaceWith(0, editor.state.doc.content.size, document.content),
+        closeHistory(editor.state.tr).replaceWith(
+          0,
+          editor.state.doc.content.size,
+          document.content,
+        ),
       );
     }
     if (pendingFocus.current) {

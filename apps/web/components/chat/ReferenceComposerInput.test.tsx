@@ -64,8 +64,11 @@ describe("real reference composer", () => {
     expect(handle.current?.value).toBe(`Review ${link} now`);
   });
   it("can undo and redo a selected reference, and delete it as one unit", async () => {
-    render(<Harness initial="Review @repo" />);
+    render(<Harness />);
     await screen.findByRole("textbox");
+    act(() => {
+      captured!.commands.insertContent("Review @repo");
+    });
     fireEvent.click(screen.getByRole("button", { name: "Insert reference" }));
     await waitFor(() => expect(screen.getByTestId("saved")).toHaveTextContent(link));
     act(() => {
