@@ -154,6 +154,7 @@ import {
   SaveClaudeCodeTokenBodySchema,
   SaveOnboardingProfileBodySchema,
   SaveOnboardingWorkspaceBodySchema,
+  SessionPullRequestListSchema,
   SetBrainAccessBodySchema,
   SetBrainEnrichmentBodySchema,
   SetBrainIntelligenceBodySchema,
@@ -2201,6 +2202,21 @@ export const listConversationsRoute = createRoute({
     200: {
       description: "Actor-visible conversations.",
       content: { "application/json": { schema: ConversationPageSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const listSessionPullRequestsRoute = createRoute({
+  method: "get",
+  path: "/v1/session-pull-requests",
+  tags: ["Chat"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description:
+        "Pull requests opened by the actor's coding sessions, with each PR's state read from GitHub.",
+      content: { "application/json": { schema: SessionPullRequestListSchema } },
     },
     default: errorResponse,
   },
@@ -4397,6 +4413,7 @@ export type V1RouteHandlers = {
   fileConversationInProject: RouteHandler<typeof fileConversationInProjectRoute>;
   removeConversationFromProject: RouteHandler<typeof removeConversationFromProjectRoute>;
   listConversations: RouteHandler<typeof listConversationsRoute>;
+  listSessionPullRequests: RouteHandler<typeof listSessionPullRequestsRoute>;
   getConversation: RouteHandler<typeof getConversationRoute>;
   updateConversation: RouteHandler<typeof updateConversationRoute>;
   getConversationShare: RouteHandler<typeof getConversationShareRoute>;
@@ -4618,6 +4635,7 @@ export function createV1Router(
       .openapi(fileConversationInProjectRoute, handlers.fileConversationInProject)
       .openapi(removeConversationFromProjectRoute, handlers.removeConversationFromProject)
       .openapi(listConversationsRoute, handlers.listConversations)
+      .openapi(listSessionPullRequestsRoute, handlers.listSessionPullRequests)
       .openapi(getConversationRoute, handlers.getConversation)
       .openapi(updateConversationRoute, handlers.updateConversation)
       .openapi(getConversationShareRoute, handlers.getConversationShare)
@@ -5820,6 +5838,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
   fileConversationInProject: (c) => c.json({ data: [placeholderProject], meta }, 200),
   removeConversationFromProject: (c) => c.json({ data: [placeholderProject], meta }, 200),
   listConversations: (c) => c.json({ data: [], nextCursor: null, meta }, 200),
+  listSessionPullRequests: (c) => c.json({ data: [], meta }, 200),
   getConversation: (c) => c.json({ data: placeholderConversation, meta }, 200),
   updateConversation: (c) =>
     c.json({ data: { conversationId: "conversation_contract", transactionId: "1" }, meta }, 200),

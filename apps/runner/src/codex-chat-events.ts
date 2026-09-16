@@ -31,11 +31,13 @@ import {
   type CodexChatSessionStatus,
   chatMessages,
 } from "@opencompany/db/product-schema";
+import { linkSessionPullRequest } from "@opencompany/db/session-pull-requests";
 import { captureException } from "@opencompany/observability";
 import { and, eq, sql } from "drizzle-orm";
 import { CodexChatLeaseLostError, presentableEngineFailureMessage } from "./codex-chat-errors";
 import { getDb } from "./db";
 import type { ExternalEngineRequest, ExternalEngineTurnSummary } from "./external-engine-contract";
+import { createPullRequestCaptureScanner } from "./session-pull-request-capture";
 import { rowsFromExecute } from "./sql-exec";
 import { settleDurableTurn, type TaskTurnCompletion } from "./task-turn";
 
@@ -116,6 +118,36 @@ export function createExternalEngineProjector(input: {
   // from that checkpoint so a replacement attempt only emits subsequent transitions.
   semanticEventsFromCodexParts(parts, toolEventStates, publishedArtifactIds, redact);
   const outputAccumulator = createCodexCommandOutputAccumulator();
+  // Every coding engine, chat and Task alike, streams its turn through this projector, so linking
+  // PRs here is what makes the sidebar badge universal to sessions rather than specific to Tasks.
+  const pullRequestScanner = createPullRequestCaptureScanner();
+
+  // A PR link is a convenience on top of a turn that already succeeded, so a failure to record one
+  // must never fail the turn. Report it once per turn instead of per event: a database that is
+  // rejecting writes would otherwise emit one report per output delta.
+  let pullRequestLinkFailureReported = false;
+  const capturePullRequests = async (event: HarnessNormalizedEvent) => {
+    const refs = pullRequestScanner.scan(event);
+    if (refs.length === 0) return;
+    try {
+      for (const ref of refs) {
+        await linkSessionPullRequest({
+          db: getDb(),
+          chatSessionId: target.chatSessionId,
+          userWorkosId: target.userWorkosId,
+          ref,
+        });
+      }
+    } catch (error) {
+      if (pullRequestLinkFailureReported) return;
+      pullRequestLinkFailureReported = true;
+      captureException(error, {
+        event: "opencompany.goat_session_pull_request_link_failed",
+        turn_id: target.turnId,
+        chat_session_id: target.chatSessionId,
+      });
+    }
+  };
 
   const appendProjectionEvents = async (content: string) => {
     if (!target.canonicalAttemptId) return;
@@ -530,6 +562,7 @@ export function createExternalEngineProjector(input: {
         for (const raw of rawEvents) {
           for (const event of normalizeEvent(raw)) {
             await input.onNormalizedEvent?.(event);
+            await capturePullRequests(event);
             const required = await handleEvent(event);
             if (required === "boundary") pendingSync = "boundary";
             else if (required === "streamed" && pendingSync === "none") pendingSync = "streamed";

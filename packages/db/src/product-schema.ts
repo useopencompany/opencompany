@@ -14,6 +14,7 @@ import {
   type PluginPricing,
   type PluginStatus,
   type PluginStdioServer,
+  type PullRequestState,
   RUN_APPROVAL_STATUSES,
   RUN_ATTEMPT_STATUSES,
   RUN_EVENT_TYPES,
@@ -5167,6 +5168,56 @@ export const codexChatSessions = productSchema.table(
         OR
         (${table.executionBackend} = 'sandbox_supervisor' AND NULLIF(${table.supervisorTemplateVersion}, '') IS NOT NULL)
       )`,
+    ),
+  }),
+);
+
+/**
+ * A pull request a coding-agent session opened.
+ *
+ * Keyed on `chat_sessions` rather than on the coding runtime row or on `tasks`, because a Task is
+ * a `chat_sessions` row with `kind = 'task'`: linking here is what lets an ordinary chat and a
+ * Task carry the same PR badge without the sidebar branching on which one it is looking at.
+ *
+ * One row per (session, PR). `state` is a cache of GitHub's answer, not a fact this system owns:
+ * it is refreshed on read and `checked_at` is how the reader decides whether it is stale enough
+ * to re-ask.
+ */
+export const sessionPullRequests = productSchema.table(
+  "session_pull_requests",
+  {
+    id: text("id").primaryKey(),
+    chatSessionId: text("chat_session_id")
+      .notNull()
+      .references(() => chatSessions.id, { onDelete: "cascade" }),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => users.workosUserId, { onDelete: "cascade" }),
+    repositoryFullName: text("repository_full_name").notNull(),
+    number: integer("number").notNull(),
+    url: text("url").notNull(),
+    state: text("state").$type<PullRequestState>().notNull().default("open"),
+    // Null until the first successful read from GitHub, which is also what marks a link as
+    // never-yet-confirmed: the badge stays hidden until GitHub has agreed the PR exists.
+    checkedAt: timestamp("checked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    sessionPullRequestIdx: uniqueIndex("goat_session_pull_requests_session_pr_idx").on(
+      table.chatSessionId,
+      table.repositoryFullName,
+      table.number,
+    ),
+    // The sidebar asks "which of my sessions have a PR", so the read is per-user.
+    userSessionIdx: index("goat_session_pull_requests_user_session_idx").on(
+      table.userWorkosId,
+      table.chatSessionId,
+    ),
+    numberCheck: check("goat_session_pull_requests_number_check", sql`${table.number} > 0`),
+    stateCheck: check(
+      "goat_session_pull_requests_state_check",
+      sql`${table.state} IN ('draft', 'open', 'blocked', 'merged', 'closed')`,
     ),
   }),
 );
