@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getDb: vi.fn(() => ({ name: "db" })),
   loadImmutableSkillBundles: vi.fn(async () => []),
-  resolveLegacyWorkflowSkillAccess: vi.fn(async () => "company" as const),
+  resolveLegacyWorkflowSkillAccess: vi.fn(async (): Promise<"company" | "actor"> => "company"),
 }));
 
 vi.mock("./db", () => ({ getDb: mocks.getDb }));
