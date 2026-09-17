@@ -392,7 +392,7 @@ export function createExternalEngineProjector(input: {
             resolved_at = ${now},
             updated_at = ${now}
         WHERE approval.run_id = ${target.turnId}
-          AND approval.kind = 'acp_permission'
+          AND approval.kind IN ('acp_permission', 'engine_questions')
           AND approval.status = 'pending'
           AND EXISTS (${turnLeaseSubquery({ runningOnly: true })})
         RETURNING approval.id

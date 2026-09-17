@@ -81,6 +81,7 @@ describe("buildCodexConfig", () => {
     expect(config).toContain('model_verbosity = "medium"');
     expect(config).toContain("[features]");
     expect(config).toContain("goals = true");
+    expect(config).toContain("default_mode_request_user_input = true");
     expect(config).toContain("[sandbox_workspace_write]");
     expect(config).toContain("network_access = true");
     expect(config).toContain("[model_providers.opencompany]");
@@ -102,6 +103,7 @@ describe("buildCodexConfig", () => {
     expect(config).toContain('forced_login_method = "chatgpt"');
     expect(config).toContain("[features]");
     expect(config).toContain("goals = true");
+    expect(config).toContain("default_mode_request_user_input = true");
     expect(config).toContain("[sandbox_workspace_write]");
     expect(config).toContain("network_access = true");
     expect(config).not.toContain("model_provider");
@@ -134,6 +136,10 @@ describe("buildCodexAcpCommandEnv", () => {
     });
     expect(commandEnv.CODEX_CONFIG).not.toContain("secret");
     expect(buildCodexJsonConfigForAuth(auth)).toMatchObject({
+      features: {
+        goals: true,
+        default_mode_request_user_input: true,
+      },
       model_provider: "opencompany",
       model_providers: {
         opencompany: {
@@ -188,6 +194,10 @@ describe("buildCodexAcpCommandEnv", () => {
     ).toMatchObject({
       cli_auth_credentials_store: "file",
       forced_login_method: "chatgpt",
+      features: {
+        goals: true,
+        default_mode_request_user_input: true,
+      },
     });
   });
 });
