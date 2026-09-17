@@ -5,7 +5,12 @@ import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { composerDraftKey, persistComposerDraft } from "@/lib/chat-composer-draft";
-import { persistLastChatSelection, readLastChatSelection } from "@/lib/chat-composer-selection";
+import {
+  persistLastChatSelection,
+  persistLastReasoningEffort,
+  readLastChatSelection,
+  readLastReasoningEffort,
+} from "@/lib/chat-composer-selection";
 import {
   CHAT_COMPOSER_FOCUS_EVENT,
   HOME_NAVIGATION_EVENT,
@@ -3513,6 +3518,117 @@ describe("Surface chat streaming UI", () => {
     );
 
     expect(screen.getByLabelText("Codex status: Queued")).toHaveTextContent("Queued");
+  });
+
+  it("opens new chats on the reasoning effort last picked for each engine", async () => {
+    const user = userEvent.setup();
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={null}
+        userWorkosId="user_1"
+        codexConnected
+        claudeCodeConnected
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Codex reasoning effort: XHigh (click to cycle)" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Codex reasoning effort: Low (click to cycle)" }),
+    ).toBeInTheDocument();
+
+    act(() => window.dispatchEvent(new Event(HOME_NAVIGATION_EVENT)));
+    expect(
+      screen.getByRole("button", { name: "Codex reasoning effort: Low (click to cycle)" }),
+    ).toBeInTheDocument();
+
+    // Each engine keeps its own level: Codex dropping to Low must not pull Claude off its default.
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Claude Code: included with your Claude subscription" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Claude reasoning effort: High (click to cycle)" }),
+    ).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Claude reasoning effort: High (click to cycle)" }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Codex reasoning effort: Low (click to cycle)" }),
+    ).toBeInTheDocument();
+
+    expect(readLastReasoningEffort("user_1", "codex")).toBe("low");
+    expect(readLastReasoningEffort("user_1", "claude_code")).toBe("xhigh");
+  });
+
+  it("keeps a saved chat's own reasoning effort ahead of the remembered one", () => {
+    persistLastReasoningEffort("user_1", "codex", "low");
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        userWorkosId="user_1"
+        codexConnected
+        initialChat={{
+          id: "goat_chat_codex_1",
+          title: "Codex chat",
+          model: DEFAULT_MODEL,
+          engine: "codex" as const,
+          codexComposerSettings: { reasoningEffort: "medium" as const, goalMode: null },
+          messages: [],
+        }}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Codex reasoning effort: Medium (click to cycle)" }),
+    ).toBeInTheDocument();
+  });
+
+  it("reads but does not move the remembered reasoning effort from the quick composer", async () => {
+    const user = userEvent.setup();
+    persistLastReasoningEffort("user_1", "codex", "medium");
+    persistLastChatSelection("user_1", "codex");
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={null}
+        userWorkosId="user_1"
+        workspaceId="workspace_1"
+        codexConnected
+      />,
+    );
+
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("option", { name: "Start new chat" }),
+    );
+    const dialog = screen.getByRole("dialog");
+    await user.click(
+      within(dialog).getByRole("button", {
+        name: "Codex reasoning effort: Medium (click to cycle)",
+      }),
+    );
+    expect(
+      within(dialog).getByRole("button", { name: "Codex reasoning effort: High (click to cycle)" }),
+    ).toBeInTheDocument();
+    expect(readLastReasoningEffort("user_1", "codex")).toBe("medium");
   });
 
   it("restores Codex composer controls when returning to a Codex chat", async () => {
