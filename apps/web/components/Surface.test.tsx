@@ -3580,6 +3580,22 @@ describe("Surface chat streaming UI", () => {
 
   it("opens new chats on the model last picked for each engine", async () => {
     const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async (_input: RequestInfo | URL, init?: RequestInit) =>
+          new Response(
+            JSON.stringify({
+              ok: true,
+              sessionId: requestChatSessionId(init, "conversation_engine_model_1"),
+              userMessageId: "message_engine_model_user",
+              assistantMessageId: "message_engine_model_assistant",
+              mode: "started",
+            }),
+            { status: 202, headers: { "Content-Type": "application/json" } },
+          ),
+      ),
+    );
     render(
       <Surface
         tasks={[]}
@@ -3622,6 +3638,22 @@ describe("Surface chat streaming UI", () => {
 
     expect(readLastEngineModel("user_1", "codex")).toBe("openai/gpt-5.6-terra");
     expect(readLastEngineModel("user_1", "claude_code")).toBe("anthropic/claude-fable-5.1");
+
+    // The picker reading right is not enough: the send has to carry the remembered model.
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
+    await user.type(
+      screen.getByPlaceholderText("Ask a question or describe a task..."),
+      "Clone my repo",
+    );
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    expect(chatMock.preparedRequestBodies.at(-1)).toMatchObject({
+      model: "openai/gpt-5.6-terra",
+      engine: { type: "codex", schemaVersion: 1 },
+    });
   });
 
   it("keeps a saved chat's own model ahead of the remembered one", () => {

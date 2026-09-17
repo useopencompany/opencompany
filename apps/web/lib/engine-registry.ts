@@ -10,7 +10,7 @@ import {
   isCloudCodingEngine,
   isCodexModelId,
 } from "@opencompany/agent-runtime";
-import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
+import type { AgentModelId, CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import { AnthropicIcon, type LucideIcon, OpenAIIcon } from "@opencompany/ui/icons";
 import {
   DEFAULT_CLAUDE_CHAT_REASONING_EFFORT,
@@ -52,13 +52,22 @@ export type EngineChatModelId = CodexChatModelId | ClaudeChatModelId;
 // about which Claude model to use, and an opencompany chat says nothing about either. Distinct
 // from normalizeModelId, which answers the same question with the engine default and so cannot
 // tell "this chat chose the default" apart from "this chat chose nothing".
+export function engineChatModelIdForChat(engine: "codex", value: unknown): CodexChatModelId | null;
+export function engineChatModelIdForChat(
+  engine: "claude_code",
+  value: unknown,
+): ClaudeChatModelId | null;
 export function engineChatModelIdForChat(
   engine: EngineChatKind,
   value: unknown,
-): EngineChatModelId | null {
+): EngineChatModelId | null;
+export function engineChatModelIdForChat(
+  engine: EngineChatKind,
+  value: unknown,
+): AgentModelId | null {
   if (typeof value !== "string") return null;
-  if (engine === "codex") return isCodexModelId(value) ? (value as CodexChatModelId) : null;
-  return isClaudeCodeModelId(value) ? (value as ClaudeChatModelId) : null;
+  if (engine === "codex") return isCodexModelId(value) ? value : null;
+  return isClaudeCodeModelId(value) ? value : null;
 }
 
 // A cloud coding engine's client-side presentation and model catalog. Adding an engine is a

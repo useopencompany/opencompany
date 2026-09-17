@@ -573,10 +573,10 @@ export function Surface({
   // The model the open chat pins for each engine. Null means the chat pins none, so the picker
   // shows the model last used with that engine.
   const [codexModelOverride, setCodexModelOverride] = useState<CodexChatModelId | null>(() =>
-    codexChatModelIdForChat(initialChat?.model),
+    engineChatModelIdForChat("codex", initialChat?.model),
   );
   const [claudeModelOverride, setClaudeModelOverride] = useState<ClaudeChatModelId | null>(() =>
-    claudeChatModelIdForChat(initialChat?.model),
+    engineChatModelIdForChat("claude_code", initialChat?.model),
   );
   const rememberedEngineModel = useRememberedEngineModels(userWorkosId);
   const codexModel = codexModelOverride ?? rememberedEngineModel.codex;
@@ -1561,8 +1561,8 @@ export function Surface({
               ? normalizeModel(chat.model)
               : null,
       );
-      setCodexModelOverride(codexChatModelIdForChat(chat?.model));
-      setClaudeModelOverride(claudeChatModelIdForChat(chat?.model));
+      setCodexModelOverride(engineChatModelIdForChat("codex", chat?.model));
+      setClaudeModelOverride(engineChatModelIdForChat("claude_code", chat?.model));
       setEngineChatSession(
         chat && engineTarget ? { engine: engineTarget, chatSessionId: chat.id } : null,
       );
@@ -5168,14 +5168,6 @@ function useRememberedEngineModels(userWorkosId: string): {
     () => CLAUDE_CHAT_DEFAULT_MODEL_ID,
   );
   return { codex, claude_code: claudeCode };
-}
-
-function codexChatModelIdForChat(value: unknown): CodexChatModelId | null {
-  return engineChatModelIdForChat("codex", value) as CodexChatModelId | null;
-}
-
-function claudeChatModelIdForChat(value: unknown): ClaudeChatModelId | null {
-  return engineChatModelIdForChat("claude_code", value) as ClaudeChatModelId | null;
 }
 
 function defaultCodexComposerUiState(): CodexComposerUiState {
