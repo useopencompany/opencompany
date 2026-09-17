@@ -34,10 +34,21 @@ type SuggestionMenuProps<TItem> = {
   getKey: (item: TItem, index: number) => string;
   ariaLabel: string;
   emptyLabel: string;
+  className?: string | undefined;
+  heading?: string | undefined;
 };
 
 function SuggestionMenuInner<TItem>(
-  { items, onSelect, renderItem, getKey, ariaLabel, emptyLabel }: SuggestionMenuProps<TItem>,
+  {
+    items,
+    onSelect,
+    renderItem,
+    getKey,
+    ariaLabel,
+    emptyLabel,
+    className,
+    heading,
+  }: SuggestionMenuProps<TItem>,
   ref: ForwardedRef<SuggestionListHandle>,
 ) {
   const [active, setActive] = useState(0);
@@ -77,7 +88,12 @@ function SuggestionMenuInner<TItem>(
 
   if (items.length === 0) {
     return (
-      <div className="w-72 rounded-lg bg-surface px-3 py-2.5 text-[12.5px] leading-4 text-ink-subtle shadow-ring-md">
+      <div
+        className={
+          className ??
+          "w-72 rounded-lg bg-surface px-3 py-2.5 text-[12.5px] leading-4 text-ink-subtle shadow-ring-md"
+        }
+      >
         {emptyLabel}
       </div>
     );
@@ -87,8 +103,11 @@ function SuggestionMenuInner<TItem>(
     <div
       role="listbox"
       aria-label={ariaLabel}
-      className="max-h-72 w-80 overflow-y-auto rounded-lg bg-surface p-1 shadow-ring-md"
+      className={
+        className ?? "max-h-72 w-80 overflow-y-auto rounded-lg bg-surface p-1 shadow-ring-md"
+      }
     >
+      {heading ? <div className="context-mention-heading">{heading}</div> : null}
       {items.map((item, index) => {
         const isActive = index === active;
         return (
@@ -124,6 +143,8 @@ const SuggestionMenu = forwardRef(SuggestionMenuInner) as <TItem>(
 export type SuggestionRendererConfig<TItem> = {
   ariaLabel: string;
   emptyLabel: string;
+  className?: string | undefined;
+  heading?: string | undefined;
   getKey: (item: TItem, index: number) => string;
   renderItem: (item: TItem, active: boolean) => ReactNode;
 };
@@ -150,6 +171,8 @@ export function createSuggestionRenderer<TItem>(
       getKey: config.getKey,
       ariaLabel: config.ariaLabel,
       emptyLabel: config.emptyLabel,
+      className: config.className,
+      heading: config.heading,
     });
 
     const place = (getRect: (() => DOMRect | null) | null | undefined) => {

@@ -656,6 +656,10 @@ export type ChatMessageAttachment = {
 };
 
 export type CodexChatSessionStatus = ConversationRuntimeStatus;
+// Which turn runner executes an opencompany-engine runtime. `chat` is the main product harness;
+// `personal_agent` is the iMessage personal assistant, which owns its own prompt, tool set and
+// lifecycle while sharing the durable session, run and message tables.
+export type CodexChatHarness = "chat" | "personal_agent";
 export type CodexChatTurnStatus =
   | "queued"
   | "running"
@@ -780,6 +784,8 @@ export const users = productSchema.table(
     sidebarProjectsEnabled: boolean("sidebar_projects_enabled").notNull().default(false),
     subagentsEnabled: boolean("subagents_enabled").notNull().default(false),
     pastSessionAccessEnabled: boolean("past_session_access_enabled").notNull().default(false),
+    // Opt-in to the iMessage personal assistant channel (Settings → Channels → iMessage).
+    imessageEnabled: boolean("imessage_enabled").notNull().default(false),
     // Retained for rollback compatibility after the wiki became the default.
     // Runtime code must not read this legacy per-user preview flag.
     wikiEnabled: boolean("wiki_enabled").notNull().default(false),
@@ -3062,6 +3068,25 @@ export const granolaSyncState = productSchema.table("granola_sync_state", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// PostHog's event timestamp is supplied by the SDK and can arrive late or out of order. The poll
+// cursor therefore follows PostHog's server-side ingestion time, with the immutable event UUID as
+// a tie-breaker when several events share the same timestamp.
+export const posthogEventSyncState = productSchema.table("posthog_event_sync_state", {
+  integrationId: text("integration_id")
+    .primaryKey()
+    .references(() => integrations.id, { onDelete: "cascade" }),
+  userWorkosId: text("user_workos_id")
+    .notNull()
+    .references(() => users.workosUserId, { onDelete: "cascade" }),
+  // Keep PostHog's full DateTime64(6) text. JavaScript Date truncates microseconds and can make a
+  // tuple cursor reread or skip events that were ingested within the same millisecond.
+  ingestedAtCursor: text("ingested_at_cursor").notNull(),
+  eventUuidCursor: text("event_uuid_cursor").notNull().default(""),
+  lastPolledAt: timestamp("last_polled_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // Per-integration Fathom poll cursor. opencompany uses bounded created_after /
 // created_before windows for personal API-key connections. The initial cursor
 // is written when the connection is created, so live ingestion never backfills
@@ -3240,6 +3265,10 @@ export const googleDriveFileStates = productSchema.table(
   }),
 );
 
+// RETIRED: the Recurring Tasks ("Routines") feature was removed. Nothing reads or writes these
+// two tables or `tasks.schedule_id` any more; they are retained only because dropping them is an
+// explicitly destructive migration that needs its own plan and production verification. See
+// PRO-307.
 export const taskSchedules = productSchema.table(
   "task_schedules",
   {
@@ -3985,6 +4014,7 @@ export const tasks = productSchema.table(
   }),
 );
 
+// RETIRED with `taskSchedules` above.
 export const taskScheduleRuns = productSchema.table(
   "task_schedule_runs",
   {
@@ -5090,6 +5120,7 @@ export const codexChatSessions = productSchema.table(
       .notNull()
       .references(() => chatSessions.id, { onDelete: "cascade" }),
     engine: text("engine").$type<CodexChatEngine>().notNull().default("codex"),
+    harness: text("harness").$type<CodexChatHarness>().notNull().default("chat"),
     model: text("model").notNull().default("gpt-5.5"),
     brainRef: text("brain_ref").references(() => brains.id, {
       onDelete: "set null",
@@ -5144,6 +5175,10 @@ export const codexChatSessions = productSchema.table(
     engineCheck: check(
       "goat_codex_chat_sessions_engine_check",
       sql`${table.engine} IN ('opencompany', 'codex', 'claude_code')`,
+    ),
+    harnessCheck: check(
+      "goat_codex_chat_sessions_harness_check",
+      sql`${table.harness} IN ('chat', 'personal_agent')`,
     ),
     sandboxSizeCheck: check(
       "goat_codex_chat_sessions_sandbox_size_check",
@@ -7674,6 +7709,81 @@ export const channelDeliveries = productSchema.table(
     check(
       "channel_deliveries_status_check",
       sql`${table.status} IN ('pending', 'sending', 'sent', 'uncertain', 'failed', 'canceled')`,
+    ),
+  ],
+);
+
+// A member's phone paired to the iMessage personal assistant. One row per user and one per phone.
+// Linking is inbound-only: the member texts a short code to the shared opencompany line and the
+// webhook binds the sending handle. The bound Conversation is an opencompany-engine runtime with
+// the `personal_agent` harness; texts become ordinary Messages and Runs on it.
+export const imessageBindings = productSchema.table(
+  "imessage_bindings",
+  {
+    id: text("id").primaryKey(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => users.workosUserId, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    // pending → linked. A pending row holds the code the member must text; a linked row holds the
+    // handle that texted it and the Conversation its texts route into.
+    status: text("status").$type<ImessageBindingStatus>().notNull().default("pending"),
+    linkCode: text("link_code"),
+    linkCodeExpiresAt: timestamp("link_code_expires_at", { withTimezone: true }),
+    // The paired iMessage handle exactly as messages.dev reports it (E.164 phone or Apple ID).
+    handle: text("handle"),
+    conversationId: text("conversation_id").references(() => chatSessions.id, {
+      onDelete: "set null",
+    }),
+    linkedAt: timestamp("linked_at", { withTimezone: true }),
+    lastInboundAt: timestamp("last_inbound_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("goat_imessage_bindings_user_idx").on(table.userWorkosId),
+    uniqueIndex("goat_imessage_bindings_handle_idx")
+      .on(table.handle)
+      .where(sql`${table.handle} IS NOT NULL`),
+    index("goat_imessage_bindings_link_code_idx")
+      .on(table.linkCode)
+      .where(sql`${table.linkCode} IS NOT NULL`),
+    check("goat_imessage_bindings_status_check", sql`${table.status} IN ('pending', 'linked')`),
+  ],
+);
+export type ImessageBindingStatus = "pending" | "linked";
+export type ImessageBinding = typeof imessageBindings.$inferSelect;
+
+// Durable inbox for direct messages sent to the workspace Slack bot. Ingress persists the message
+// before acknowledging Slack; the runner resolves the sender to an opencompany account and opens
+// the Task that answers in the message's thread.
+export const slackDirectMessages = productSchema.table(
+  "slack_direct_messages",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    teamId: text("team_id").notNull(),
+    eventId: text("event_id").notNull(),
+    channelId: text("channel_id").notNull(),
+    messageTs: text("message_ts").notNull(),
+    slackUserId: text("slack_user_id").notNull(),
+    text: text("text").notNull(),
+    status: text("status").notNull().default("pending"),
+    sessionId: text("session_id").references(() => chatSessions.id, { onDelete: "set null" }),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("slack_direct_messages_event_idx").on(table.teamId, table.eventId),
+    index("slack_direct_messages_pending_idx")
+      .on(table.status, table.nextAttemptAt, table.id)
+      .where(sql`${table.status} = 'pending'`),
+    check(
+      "slack_direct_messages_status_check",
+      sql`${table.status} IN ('pending', 'started', 'ignored')`,
     ),
   ],
 );

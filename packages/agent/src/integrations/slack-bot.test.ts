@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   isSlackBotConfigured,
   SLACK_BOT_SCOPES,
+  slackBotCanReact,
   slackBotDeliveryScopesSatisfied,
   slackBotScopesSatisfied,
 } from "./slack-bot";
@@ -51,5 +52,16 @@ describe("slackBotScopesSatisfied", () => {
     const existingScopes = SLACK_BOT_SCOPES.filter((scope) => scope !== "users:read.email");
     expect(slackBotDeliveryScopesSatisfied(existingScopes)).toBe(true);
     expect(slackBotScopesSatisfied(existingScopes)).toBe(false);
+  });
+});
+
+describe("slackBotCanReact", () => {
+  it("lets a granted install mark thread replies and leaves older ones delivering unmarked", () => {
+    expect(slackBotCanReact([...SLACK_BOT_SCOPES])).toBe(true);
+
+    const beforeReactions = SLACK_BOT_SCOPES.filter((scope) => scope !== "reactions:write");
+    expect(slackBotCanReact(beforeReactions)).toBe(false);
+    expect(slackBotDeliveryScopesSatisfied(beforeReactions)).toBe(true);
+    expect(slackBotScopesSatisfied(beforeReactions)).toBe(false);
   });
 });

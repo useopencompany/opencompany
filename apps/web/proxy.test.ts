@@ -90,6 +90,8 @@ describe("opencompany public routes", () => {
 
   it("allows shared chats and their attachment routes without authentication", () => {
     expect(isUnauthenticatedPath("/share/goat_chat_share_123")).toBe(true);
+    // Slack fetches a workflow avatar itself, with no session to present.
+    expect(isUnauthenticatedPath("/workflow-avatars/workflow_1/abc.png")).toBe(true);
     expect(
       isUnauthenticatedPath(
         "/share/goat_chat_share_123/attachments/goat_chat_msg_1/goat_chat_att_1",

@@ -36,7 +36,7 @@ export const OFFICIAL_PLUGIN_SOURCES = {
   notion:
     "https://github.com/useopencompany/plugins/tree/fb207086016a74e2e5724386c524d275771e5db6/notion",
   posthog:
-    "https://github.com/useopencompany/plugins/tree/4ba32cd5a7618d9be3714ec0efd3c8784209046c/posthog",
+    "https://github.com/useopencompany/plugins/tree/e2b5b58aaccca1783df7ec960751ab13d23dcd86/posthog",
   resend:
     "https://github.com/useopencompany/plugins/tree/194603acc21c455dbce4571fd631e5e228772978/resend",
   render:

@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { SLACK_BOT_TOOL_NAME } from "@opencompany/agent/chat-ui";
 import { slackApiRequest } from "@opencompany/agent/integrations/slack";
-import { slackBotCanCustomizeIdentity } from "@opencompany/agent/integrations/slack-bot";
+import {
+  slackBotCanCustomizeIdentity,
+  slackBotCanReact,
+} from "@opencompany/agent/integrations/slack-bot";
 import {
   type ChannelInstallation,
   channelBotCredential,
@@ -20,13 +23,20 @@ import { createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import { getDb } from "./db";
 import { createPollingWorker } from "./polling-worker";
+import { processNextSlackDirectMessage } from "./slack-direct-message-worker";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "slack-channel" });
-const CLOSED_REPLY =
-  "This workflow thread is closed. Open the task in opencompany to continue the work.";
+const CLOSED_REPLY = "This thread is closed. Open the task in opencompany to continue the work.";
 const UNANSWERED_REPLY =
-  "The workflow needs attention. Open the task in opencompany to review and continue.";
+  "This needs attention. Open the task in opencompany to review and continue.";
 const MAX_SLACK_THREAD_CONTEXT_CHARS = 100_000;
+// Progress on a Slack reply is worker state, so the worker marks it: the person who asked sees the
+// ack on their own message instead of an extra post in the channel. Deliberately not a tool the run
+// calls - that would need its own instructions, would only fire once the model already decided to,
+// and would stay silent in exactly the case that needs a signal most: a run that dies unanswered.
+export const REACTION_WORKING = "eyes";
+const REACTION_ANSWERED = "white_check_mark";
+const REACTION_ATTENTION = "warning";
 
 type Event = {
   id: number;
@@ -44,8 +54,9 @@ type Event = {
   botAvatarUrl: string;
   installation: ChannelInstallation;
 };
-type SlackUser = {
+export type SlackUser = {
   id?: string;
+  team_id?: string;
   name?: string;
   real_name?: string;
   is_bot?: boolean;
@@ -82,8 +93,11 @@ const defaults = (): SlackChannelWorkerDependencies => ({
 
 export async function processNextSubscriptionEvent(deps = defaults()): Promise<boolean> {
   let claimed: Event | undefined;
+  // Set inside the transaction, applied after it commits: a rolled-back claim must not leave a
+  // mark for a run that never started.
+  let reaction: string | undefined;
   try {
-    return await deps.db.transaction(async (tx) => {
+    const progressed = await deps.db.transaction(async (tx) => {
       const event = subscriptionRows<Event>(
         await tx.execute(sql`
       SELECT event.id, event.subscription_id AS "subscriptionId", subscription.workspace_id AS "workspaceId",
@@ -92,8 +106,10 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
           OR conversation.closed_at IS NOT NULL
           -- Turning Slack off or retiring the workflow closes its open threads too. Without this
           -- the reply would start a run that has no way to answer, and the person waiting in Slack
-          -- would get the generic "needs attention" notice instead of a closed thread.
-          OR workflow.id IS NULL OR workflow.slack_channel_enabled IS FALSE) AS closed,
+          -- would get the generic "needs attention" notice instead of a closed thread. A Task
+          -- opened from a Slack direct message has no workflow, so there is nothing to retire.
+          OR (task.workflow_id IS NOT NULL
+            AND (workflow.id IS NULL OR workflow.slack_channel_enabled IS FALSE))) AS closed,
         run.status AS "runStatus",
         COALESCE(workflow.slack_bot_display_name, '') AS "botDisplayName",
         COALESCE(workflow.slack_bot_avatar_url, '') AS "botAvatarUrl",
@@ -131,16 +147,21 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
       claimed = event;
       const deliveryId = `subscription_reply_${event.id}`;
       if (event.status === "delivering") {
-        const sent = subscriptionRows(
+        const [settled] = subscriptionRows<{ status: string }>(
           await tx.execute(
-            sql`SELECT id FROM goat.channel_deliveries WHERE id = ${deliveryId} AND status IN ('sent', 'canceled')`,
+            sql`SELECT status FROM goat.channel_deliveries WHERE id = ${deliveryId} AND status IN ('sent', 'canceled')`,
           ),
-        ).length;
-        if (sent)
+        );
+        if (settled) {
           await tx.execute(
             sql`UPDATE goat.subscription_events SET status = 'done' WHERE id = ${event.id}`,
           );
-        return Boolean(sent);
+          reaction =
+            settled.status === "sent" && runEndedCleanly(event)
+              ? REACTION_ANSWERED
+              : REACTION_ATTENTION;
+        }
+        return Boolean(settled);
       }
       if (event.status === "running") {
         if (!event.runStatus || !["completed", "failed", "interrupted"].includes(event.runStatus))
@@ -153,6 +174,9 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
           await tx.execute(
             sql`UPDATE goat.subscription_events SET status = 'done' WHERE id = ${event.id} AND status = 'running'`,
           );
+          // The run succeeded but never called the Slack tool, so this thread is getting no reply
+          // at all. From the asker's side that is the silence the mark exists to break, not an answer.
+          reaction = REACTION_ATTENTION;
           return true;
         }
         await queueReply(tx.execute.bind(tx), event, deliveryId, UNANSWERED_REPLY);
@@ -163,7 +187,7 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
         await ignoreEvent(tx.execute.bind(tx), event.id);
         return true;
       }
-      await deps.validateChannel(token, event.payload.channelId);
+      await validateDeliverableChannel(deps, token, event.payload.channelId);
       const user = await deps.request<{ user?: SlackUser }>({
         method: "users.info",
         token,
@@ -222,8 +246,11 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
       await tx.execute(
         sql`UPDATE goat.subscription_events SET status = 'running', run_id = ${result.runId} WHERE id = ${event.id}`,
       );
+      reaction = REACTION_WORKING;
       return true;
     });
+    if (claimed && reaction) await reactToSlackMessage(deps, claimed, reaction);
+    return progressed;
   } catch (error) {
     if (claimed) {
       await deps.db.execute(
@@ -234,6 +261,85 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
     throw error;
   }
 }
+// The check mark only means "this message got its reply". Anything else - a failed or interrupted
+// run, a closed thread, a run that never answered, a reply Slack never took - leaves work for a
+// person and gets the attention mark instead.
+function runEndedCleanly(event: Event) {
+  return Boolean(event.runId) && event.runStatus !== "failed" && event.runStatus !== "interrupted";
+}
+
+// Marking a Slack message is the same job whichever worker asks for it, so this takes the message
+// and the install rather than a subscription event. `clearWorking` says whether a working mark was
+// ever put there to clear.
+export async function markSlackMessage(input: {
+  credential: typeof channelBotCredential;
+  request: typeof slackApiRequest;
+  installation: ChannelInstallation;
+  channelId: string;
+  messageTs: string;
+  emoji: string;
+  clearWorking: boolean;
+}) {
+  if (!slackBotCanReact(input.installation.scopes)) return;
+  // An ack never gets to break the work it annotates, so a failed reaction is logged and dropped
+  // rather than retried.
+  const attempt = (method: string, name: string) =>
+    input
+      .credential(input.installation)
+      .then(({ token }) =>
+        input.request({
+          method,
+          token,
+          form: {
+            channel: input.channelId,
+            timestamp: input.messageTs,
+            name,
+          },
+          signal: AbortSignal.timeout(5_000),
+        }),
+      )
+      .catch((error) =>
+        logger.info("Slack thread reaction skipped", {
+          slack_method: method,
+          reaction: name,
+          error_message: error instanceof Error ? error.message : "Unknown error",
+        }),
+      );
+  // Slack has no replace. Add before removing so a swap that only half succeeds leaves the message
+  // over-marked rather than unmarked, and only clear a working mark a Run actually put there.
+  await attempt("reactions.add", input.emoji);
+  if (input.emoji !== REACTION_WORKING && input.clearWorking)
+    await attempt("reactions.remove", REACTION_WORKING);
+}
+
+async function reactToSlackMessage(
+  deps: SlackChannelWorkerDependencies,
+  event: Event,
+  emoji: string,
+) {
+  await markSlackMessage({
+    credential: deps.credential,
+    request: deps.request,
+    installation: event.installation,
+    channelId: event.payload.channelId,
+    messageTs: event.payload.messageTs,
+    emoji,
+    clearWorking: Boolean(event.runId),
+  });
+}
+
+// Slack only delivers an `im` event for the bot's own direct message conversation, and chat:write
+// covers posting back into it. There is no membership or visibility question to answer, and the
+// public-channel validator rejects DM conversations by design.
+async function validateDeliverableChannel(
+  deps: SlackChannelWorkerDependencies,
+  token: string,
+  channelId: string,
+) {
+  if (/^D[A-Z0-9]+$/u.test(channelId)) return;
+  await deps.validateChannel(token, channelId);
+}
+
 async function readSlackThread(input: {
   token: string;
   channelId: string;
@@ -300,7 +406,7 @@ export function slackFollowUpPrompt(input: {
   return `Slack thread follow-up\n\nSender: ${sender}\n\nContinue this same workflow using its saved context and artifacts. The full Slack thread so far is included as context below. Do not create another task or a root Slack message.\n\nBefore writing your final task answer, call ${SLACK_BOT_TOOL_NAME} with your final Slack reply as text and \"slack-follow-up-${input.eventId}\" as messageKey. Omit channel so the tool posts to the originating thread. Reply the way a founder replies in their own team channel: lead with the answer, short sentences, plain words, no preamble. The assistant turn itself is not sent to Slack.\n\n--- Full Slack thread ---\n${messages.join("\n\n")}\n--- End Slack thread ---\n\n--- New follow-up message begins ---\nFrom: ${sender}\n${quoteSlackText(input.text)}\n--- New follow-up message ends ---`;
 }
 
-function slackUserName(user: SlackUser, fallbackId: string) {
+export function slackUserName(user: SlackUser, fallbackId: string) {
   return (
     compactSlackProfileField(user.profile?.display_name_normalized) ||
     compactSlackProfileField(user.profile?.display_name) ||
@@ -316,7 +422,7 @@ function compactSlackProfileField(value: string | undefined) {
   return value?.replace(/\s+/g, " ").trim() || "";
 }
 
-function quoteSlackText(text: string) {
+export function quoteSlackText(text: string) {
   return text
     .trim()
     .split("\n")
@@ -397,7 +503,7 @@ export async function processNextChannelDelivery(deps = defaults()): Promise<boo
   try {
     const { token, botUserId } = await deps.credential(delivery.installation);
     const canCustomizeIdentity = slackBotCanCustomizeIdentity(delivery.installation.scopes);
-    await deps.validateChannel(token, delivery.channelId);
+    await validateDeliverableChannel(deps, token, delivery.channelId);
     let messageTs: string | null = null;
     if (delivery.status === "pending") {
       postAttempted = true;
@@ -521,6 +627,13 @@ export function startSlackChannelWorker(onRunQueued: () => void) {
       await deps.db.execute(
         sql`UPDATE goat.session_subscriptions SET status = 'closed' WHERE status = 'waiting' AND expires_at <= now()`,
       );
+      const directMessage = await processNextSlackDirectMessage().catch((error) => {
+        logger.warn("Slack direct message deferred", {
+          error_message: error instanceof Error ? error.message : "Unknown error",
+        });
+        return false;
+      });
+      if (directMessage) onRunQueued();
       const event = await processNextSubscriptionEvent(deps).catch((error) => {
         logger.warn("Slack reply deferred", {
           error_message: error instanceof Error ? error.message : "Unknown error",
@@ -529,7 +642,7 @@ export function startSlackChannelWorker(onRunQueued: () => void) {
       });
       if (event) onRunQueued();
       const delivery = await processNextChannelDelivery(deps);
-      return event || delivery;
+      return directMessage || event || delivery;
     },
     onError: (error) =>
       logger.error("Slack Channel worker failed", {

@@ -12,6 +12,7 @@ import type {
   FathomProviderState,
   GranolaProviderState,
   JamieEventsProviderState,
+  PostHogEventsProviderState,
   StripeProviderState,
 } from "@opencompany/agent/integration-state";
 import type { ConvexProviderState } from "@opencompany/agent/integrations/convex-mcp";
@@ -53,11 +54,10 @@ import {
   type SkillInstallationListItem,
   type Task,
   type TaskApplicationService,
-  type TaskSchedule,
-  type TaskScheduleApplicationService,
   type WikiCommandApplicationService,
   type WikiPage,
   type WikiTimelineEntry,
+  WORKFLOW_AVATAR_MAX_BYTES,
   type Workflow,
   type WorkflowApplicationService,
   type WorkflowMemory,
@@ -108,6 +108,8 @@ import type { GitHubUserIngressService } from "./github-user-ingress";
 import type { GoogleIngressService } from "./google-ingress";
 import type { HubspotIngressService } from "./hubspot-ingress";
 import type { IdentityService } from "./identity";
+import type { ImessageIngressService } from "./imessage-ingress";
+import type { ImessageSettingsService } from "./imessage-settings";
 import type { IntegrationAccountService } from "./integration-accounts";
 import type { JamieIngressService } from "./jamie-ingress";
 import type { LinearIngressService } from "./linear-ingress";
@@ -126,6 +128,7 @@ import type { SlackIngressService } from "./slack-ingress";
 import type { StripeIngressService } from "./stripe-ingress";
 import type { UserSettingsService } from "./user-settings";
 import type { WikiControlService, WikiControlView } from "./wiki-control";
+import type { WorkflowAvatarService } from "./workflow-avatars";
 import type { CapabilityApprovalView, WorkspaceCapabilityService } from "./workspace-capabilities";
 import type { WorkspaceControlService } from "./workspace-control";
 import type { XAccountIngressService } from "./x-account-ingress";
@@ -161,7 +164,6 @@ export type CreateApiAppInput = {
   chat: ChatApplicationService;
   tasks: TaskApplicationService;
   workflows: WorkflowApplicationService;
-  schedules: TaskScheduleApplicationService;
   knowledge: KnowledgeApplicationService;
   // Executes the `wiki` agent tool command contract for internal callers
   // (the runner over HTTP, the API-hosted MCP tool in-process).
@@ -187,6 +189,7 @@ export type CreateApiAppInput = {
   pluginImports: PluginImportApplicationService;
   customMcp?: CustomMcpApplicationService;
   brainAssets: BrainAssetService;
+  workflowAvatars: WorkflowAvatarService;
   chatResources?: ChatResourceService;
   messagePresentations?: MessagePresentationService;
   chatTitles?: ChatTitleService;
@@ -217,6 +220,7 @@ export type CreateApiAppInput = {
   sessionPullRequests: (actor: Actor) => Promise<SessionPullRequestDto[]>;
   integrationAccounts: IntegrationAccountService;
   slackBotSettings: SlackBotSettingsService;
+  imessageSettings?: ImessageSettingsService;
   mcp?: McpService;
   gmailMcp?: GmailMcpService;
   googleAdminMcp?: GoogleAdminMcpService;
@@ -247,6 +251,7 @@ export type CreateApiAppInput = {
   mcpOAuthIngress?: McpOAuthIngressService;
   xAccountIngress?: XAccountIngressService;
   slackBotIngress?: SlackBotIngressService;
+  imessageIngress?: ImessageIngressService;
   stripeIngress?: StripeIngressService;
   billingReconcile?: BillingReconcileService;
   notifier?: RunEventNotifier;
@@ -550,90 +555,15 @@ export function createApiApp(input: CreateApiAppInput) {
       );
       return c.json({ data: workflowMemoryDto(memory), meta }, 200);
     },
-    listTaskSchedules: async (c) => {
+    uploadWorkflowSlackAvatar: async (c) => {
       const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "read", 300);
-      const query = c.req.valid("query");
-      const page = await input.schedules.listTaskSchedules(actor, {
-        ...(query.cursor ? { cursor: query.cursor } : {}),
-        ...(query.limit ? { limit: query.limit } : {}),
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.workflowAvatars.upload({
+        actor,
+        workflowId: c.req.valid("param").workflowId,
+        file: c.req.valid("form").file,
       });
-      return c.json(
-        { data: page.schedules.map(taskScheduleDto), nextCursor: page.nextCursor, meta },
-        200,
-      );
-    },
-    createTaskSchedule: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const body = c.req.valid("json");
-      const result = await input.schedules.createTaskSchedule(actor, {
-        idempotencyKey: c.req.valid("header")["idempotency-key"],
-        ...(body.name !== undefined ? { name: body.name } : {}),
-        ...(body.sourceDescription !== undefined
-          ? { sourceDescription: body.sourceDescription }
-          : {}),
-        cron: body.cron,
-        ...(body.timezone !== undefined ? { timezone: body.timezone } : {}),
-        prompt: body.prompt,
-      });
-      return c.json(
-        {
-          data: {
-            schedule: taskScheduleDto(result.schedule),
-            transactionId: result.transactionId,
-            replayed: result.idempotentReplay,
-          },
-          meta,
-        },
-        201,
-      );
-    },
-    getTaskSchedule: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "read", 300);
-      const schedule = await input.schedules.getTaskSchedule(
-        actor,
-        c.req.valid("param").scheduleId,
-      );
-      return c.json({ data: taskScheduleDto(schedule), meta }, 200);
-    },
-    updateTaskSchedule: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const body = c.req.valid("json");
-      const scheduleId = c.req.valid("param").scheduleId;
-      const result =
-        "enabled" in body
-          ? await input.schedules.setTaskScheduleEnabled(actor, scheduleId, body)
-          : await input.schedules.updateTaskSchedule(actor, scheduleId, body);
-      return c.json(
-        {
-          data: { schedule: taskScheduleDto(result.schedule), transactionId: result.transactionId },
-          meta,
-        },
-        200,
-      );
-    },
-    archiveTaskSchedule: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const result = await input.schedules.archiveTaskSchedule(
-        actor,
-        c.req.valid("param").scheduleId,
-        c.req.valid("json").expectedVersion,
-      );
-      return c.json({ data: result, meta }, 200);
-    },
-    runTaskScheduleNow: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "message", 30);
-      const result = await input.schedules.runTaskScheduleNow(
-        actor,
-        c.req.valid("param").scheduleId,
-        c.req.valid("header")["idempotency-key"],
-      );
-      return c.json({ data: taskCreationDto(result), meta }, 202);
+      return c.json({ data: result, meta }, 201);
     },
     getBrainSnapshot: async (c) => {
       const actor = actorFrom(c);
@@ -2151,6 +2081,12 @@ export function createApiApp(input: CreateApiAppInput) {
       });
       return chatResourceResponse(asset) as never;
     },
+    downloadPublicWorkflowAvatar: async (c) => {
+      const params = c.req.valid("param");
+      await enforcePublicRateLimit(rateLimiter, params.workflowId, "public-avatar-bytes", 600);
+      const asset = await input.workflowAvatars.download(params);
+      return chatResourceResponse(asset) as never;
+    },
     getEngineRuntimeStatus: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);
@@ -2421,15 +2357,6 @@ export function createApiApp(input: CreateApiAppInput) {
           );
         }
         await input.workflows.listWorkflows(actor, { limit: 1 });
-      } else if (params.readModel === "task-schedules-v1") {
-        if (query.conversationId || query.brainId) {
-          throw new ApiError(
-            400,
-            "invalid_request",
-            "conversationId is not valid for this read model.",
-          );
-        }
-        await input.schedules.listTaskSchedules(actor, { limit: 1 });
       } else if (params.readModel === "integration-accounts-v1") {
         if (query.conversationId || query.brainId) {
           throw new ApiError(
@@ -2498,6 +2425,24 @@ export function createApiApp(input: CreateApiAppInput) {
       await enforceRateLimit(rateLimiter, actor, "read", 300);
       const status = await input.userSettings.getMcpSetup(actor);
       return c.json({ data: mcpSetupDto(status), meta }, 200);
+    },
+    getImessageSettings: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      if (!input.imessageSettings) throw new ApiError(404, "not_found", "iMessage is not enabled.");
+      return c.json({ data: await input.imessageSettings.get(actor), meta }, 200);
+    },
+    startImessageLink: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 30);
+      if (!input.imessageSettings) throw new ApiError(404, "not_found", "iMessage is not enabled.");
+      return c.json({ data: await input.imessageSettings.startLink(actor), meta }, 200);
+    },
+    unlinkImessage: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 30);
+      if (!input.imessageSettings) throw new ApiError(404, "not_found", "iMessage is not enabled.");
+      return c.json({ data: await input.imessageSettings.unlink(actor), meta }, 200);
     },
     updateMcpSetup: async (c) => {
       const actor = actorFrom(c);
@@ -2588,6 +2533,20 @@ export function createApiApp(input: CreateApiAppInput) {
         c.req.valid("json").apiKey,
       );
       return c.json({ data: { state: granolaStateDto(state) }, meta }, 200);
+    },
+    connectPostHogEventsAccount: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const body = c.req.valid("json");
+      const state = await input.integrationAccounts.connectPostHogEvents(actor, body);
+      return c.json({ data: { state: posthogEventsStateDto(state) }, meta }, 200);
+    },
+    listPostHogEventDefinitions: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 120);
+      const { integrationId } = c.req.valid("param");
+      const data = await input.integrationAccounts.listPostHogEvents(actor, integrationId);
+      return c.json({ data, meta }, 200);
     },
     createJamieEventsEndpoint: async (c) => {
       const actor = actorFrom(c);
@@ -3039,6 +2998,17 @@ export function createApiApp(input: CreateApiAppInput) {
         }),
       );
       router.use(
+        "/v1/workflows/:workflowId/slack-avatar",
+        bodyLimit({
+          maxSize: WORKFLOW_AVATAR_MAX_BYTES + MULTIPART_ENVELOPE_BYTES,
+          onError: (c) =>
+            apiErrorResponse(
+              c,
+              new ApiError(413, "invalid_request", "Avatars are limited to 1 MB."),
+            ),
+        }),
+      );
+      router.use(
         "/v1/brains/:brainId/assets",
         bodyLimit({
           maxSize: 20 * 1024 * 1024 + MULTIPART_ENVELOPE_BYTES,
@@ -3349,6 +3319,11 @@ export function createApiApp(input: CreateApiAppInput) {
     app.get("/integrations/slack-bot/callback", (c) => ingress.callback(c.req.raw));
     app.use("/webhooks/slack-bot/events", ingressBodyLimit(1024 * 1024));
     app.post("/webhooks/slack-bot/events", (c) => ingress.webhook(c.req.raw));
+  }
+  if (input.imessageIngress) {
+    const ingress = input.imessageIngress;
+    app.use("/webhooks/imessage/events", ingressBodyLimit(256 * 1024));
+    app.post("/webhooks/imessage/events", (c) => ingress.webhook(c.req.raw));
   }
   if (input.stripeIngress) {
     app.use("/webhooks/stripe", ingressBodyLimit(1024 * 1024));
@@ -3791,16 +3766,6 @@ function workflowMemoryDto(memory: WorkflowMemory) {
   return { ...memory, updatedAt: memory.updatedAt?.toISOString() ?? null };
 }
 
-function taskScheduleDto(schedule: TaskSchedule) {
-  return {
-    ...schedule,
-    lastRunAt: schedule.lastRunAt?.toISOString() ?? null,
-    nextRunAt: schedule.nextRunAt.toISOString(),
-    createdAt: schedule.createdAt.toISOString(),
-    updatedAt: schedule.updatedAt.toISOString(),
-  };
-}
-
 function brainFolderDto(folder: BrainFolder) {
   return {
     ...folder,
@@ -4044,6 +4009,19 @@ function granolaStateDto(state: GranolaProviderState) {
     integrationId: state.integrationId,
     accountEmail: state.accountEmail,
     accountName: state.accountName,
+    statusReason: state.statusReason,
+  };
+}
+
+function posthogEventsStateDto(state: PostHogEventsProviderState) {
+  return {
+    provider: state.provider,
+    connected: state.connected,
+    status: integrationAccountStatusDto(state.status),
+    integrationId: state.integrationId,
+    projectId: state.projectId,
+    region: state.region,
+    connectionLabel: state.connectionLabel,
     statusReason: state.statusReason,
   };
 }

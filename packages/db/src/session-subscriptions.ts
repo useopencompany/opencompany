@@ -87,3 +87,32 @@ export async function completeChannelDelivery(
     ON CONFLICT DO NOTHING
   `);
 }
+
+export type SlackDirectMessage = {
+  teamId: string;
+  eventId: string;
+  channelId: string;
+  messageTs: string;
+  slackUserId: string;
+  text: string;
+};
+
+// A direct message has no subscription to attach to yet: it is the request to open one. Ingress
+// persists it as-is and the runner resolves the sender and creates the Task.
+export async function enqueueSlackDirectMessage(
+  execute: SubscriptionExecute,
+  message: SlackDirectMessage,
+) {
+  return subscriptionRows(
+    await execute(sql`
+    INSERT INTO goat.slack_direct_messages (team_id, event_id, channel_id, message_ts, slack_user_id, text)
+    SELECT ${message.teamId}, ${message.eventId}, ${message.channelId}, ${message.messageTs},
+      ${message.slackUserId}, ${message.text}
+    WHERE EXISTS (
+      SELECT 1 FROM goat.integrations
+      WHERE provider = 'slack_bot' AND external_id = ${message.teamId} AND status = 'connected'
+    )
+    ON CONFLICT (team_id, event_id) DO NOTHING RETURNING id
+  `),
+  ).length;
+}

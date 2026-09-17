@@ -7,29 +7,16 @@ import {
   getAgentModelDefinition,
   isClaudeCodeModelId,
   isCodexModelId,
+  OPENCOMPANY_CHAT_DEFAULT_MODEL_ID,
+  OPENCOMPANY_CHAT_MODEL_IDS,
   resolveAvailableAgentModelId,
 } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { ChatEngine } from "@opencompany/core";
 
-const MODEL_IDS = [
-  "anthropic/claude-sonnet-5",
-  "anthropic/claude-opus-4.8",
-  "openai/gpt-5.6-sol",
-  "openai/gpt-5.6-terra",
-  "openai/gpt-5.5",
-  "alibaba/qwen3.8-max",
-  "deepseek/deepseek-v4-pro",
-  "deepseek/deepseek-v4-flash",
-  "xai/grok-4.6",
-  "moonshotai/kimi-k3",
-  "moonshotai/kimi-k2.6",
-  "zai/glm-5.2",
-] as const satisfies readonly AgentModelId[];
+const MODEL_ID_SET = new Set<string>(OPENCOMPANY_CHAT_MODEL_IDS);
 
-const MODEL_ID_SET = new Set<string>(MODEL_IDS);
-
-export const MODELS = MODEL_IDS.map(requireAgentModelDefinition);
+export const MODELS = OPENCOMPANY_CHAT_MODEL_IDS.map(requireAgentModelDefinition);
 
 export const CODEX_MODELS = CODEX_AGENT_MODEL_IDS.map(requireAgentModelDefinition);
 
@@ -37,7 +24,7 @@ export const CLAUDE_CODE_MODELS = CLAUDE_CODE_AGENT_MODEL_IDS.map(requireAgentMo
 
 export type ModelOption = (typeof MODELS)[number];
 
-export const DEFAULT_MODEL: AgentModelId = "moonshotai/kimi-k3";
+export const DEFAULT_MODEL = OPENCOMPANY_CHAT_DEFAULT_MODEL_ID;
 
 export function normalizeModel(value: unknown): AgentModelId {
   if (typeof value === "string") {

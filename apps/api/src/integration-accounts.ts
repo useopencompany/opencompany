@@ -10,6 +10,7 @@ import type {
   FathomProviderState,
   GranolaProviderState,
   JamieEventsProviderState,
+  PostHogEventsProviderState,
   StripeProviderState,
 } from "@opencompany/agent/integration-state";
 import { personalAccountsFromRows } from "@opencompany/agent/integration-state";
@@ -57,6 +58,16 @@ import {
   saveJamieWebhookKey,
 } from "@opencompany/agent/integrations/jamie-events";
 import {
+  connectPostHogEventsIntegration,
+  getPostHogEventsIntegrationState,
+  isValidPostHogApiKey,
+  isValidPostHogProjectId,
+  listPostHogEventDefinitions,
+  type PostHogEventsCredentialPayload,
+  type PostHogRegion,
+  validatePostHogEventsConnection,
+} from "@opencompany/agent/integrations/posthog-events";
+import {
   connectRenderMcpIntegration,
   getRenderIntegrationState,
   isValidRenderApiKey,
@@ -77,6 +88,11 @@ import {
   disconnectPersonalIntegration,
   loadIntegrationCredential,
 } from "@opencompany/db/integrations";
+import {
+  POSTHOG_EVENTS_CREDENTIAL_KIND,
+  POSTHOG_EVENTS_EXTERNAL_ID,
+  POSTHOG_PROVIDER,
+} from "@opencompany/db/posthog-events";
 import { brainSources, integrations } from "@opencompany/db/product-schema";
 import { createLogger } from "@opencompany/observability";
 import type { IntegrationAccountDto } from "@opencompany/protocol";
@@ -109,6 +125,14 @@ export type IntegrationAccountService = {
   disconnectAttio(actor: Actor, integrationId: string): Promise<void>;
   connectFathom(actor: Actor, apiKey: string): Promise<FathomProviderState>;
   connectGranola(actor: Actor, apiKey: string): Promise<GranolaProviderState>;
+  connectPostHogEvents(
+    actor: Actor,
+    input: { apiKey: string; projectId: string; region: PostHogRegion },
+  ): Promise<PostHogEventsProviderState>;
+  listPostHogEvents(
+    actor: Actor,
+    integrationId: string,
+  ): Promise<{ events: Array<{ id: string; name: string }>; partial: boolean }>;
   createJamieEventsEndpoint(actor: Actor): Promise<JamieEventsProviderState>;
   connectJamieEvents(actor: Actor, webhookKey: string): Promise<JamieEventsProviderState>;
   connectConvex(actor: Actor, apiKey: string): Promise<ConvexProviderState>;
@@ -362,6 +386,79 @@ export function createIntegrationAccountService(input: {
       }
     },
 
+    async connectPostHogEvents(actor, connection) {
+      const apiKey = connection.apiKey.trim();
+      const projectId = connection.projectId.trim();
+      if (!isValidPostHogApiKey(apiKey)) {
+        throw new ApiError(
+          400,
+          "invalid_request",
+          "PostHog personal API keys start with phx_. Check the key and try again.",
+        );
+      }
+      if (!isValidPostHogProjectId(projectId)) {
+        throw new ApiError(400, "invalid_request", "Enter a valid numeric PostHog project ID.");
+      }
+      try {
+        const validation = await validatePostHogEventsConnection({
+          apiKey,
+          projectId,
+          region: connection.region,
+        });
+        if (!validation.ok) throw new ApiError(400, "invalid_request", validation.error);
+        await connectPostHogEventsIntegration({
+          userWorkosId: actor.userId,
+          apiKey,
+          projectId,
+          region: connection.region,
+          db,
+        });
+        return await getPostHogEventsIntegrationState(actor.userId, db);
+      } catch (error) {
+        throw commandFailure(
+          error,
+          "Could not connect PostHog. Check the region, project ID, and key permissions.",
+          "posthog_events_connect",
+        );
+      }
+    },
+
+    async listPostHogEvents(actor, integrationId) {
+      const integration = await requireOwnPersonalIntegration(db, actor, integrationId);
+      if (
+        integration.provider !== POSTHOG_PROVIDER ||
+        integration.externalId !== POSTHOG_EVENTS_EXTERNAL_ID
+      ) {
+        throw new ApiError(404, "not_found", "PostHog event connection not found.");
+      }
+      const credential = await loadIntegrationCredential({
+        userWorkosId: actor.userId,
+        integrationId,
+        provider: POSTHOG_PROVIDER,
+        kind: POSTHOG_EVENTS_CREDENTIAL_KIND,
+        db,
+      });
+      const payload = credential?.payload as PostHogEventsCredentialPayload | undefined;
+      if (
+        !payload ||
+        !isValidPostHogApiKey(payload.apiKey) ||
+        !isValidPostHogProjectId(payload.projectId) ||
+        (payload.region !== "us" && payload.region !== "eu")
+      ) {
+        throw new ApiError(401, "unauthorized", "Reconnect PostHog to load events.");
+      }
+      const result = await listPostHogEventDefinitions({ credential: payload });
+      if (!result.ok) {
+        throw new ApiError(
+          result.reason === "unauthorized" ? 401 : 503,
+          result.reason === "unauthorized" ? "unauthorized" : "unavailable",
+          result.error,
+          result.reason === "unavailable",
+        );
+      }
+      return { events: result.events, partial: result.partial };
+    },
+
     // Jamie has no webhook-management API, so the endpoint has to exist before the user can point
     // Jamie at it. Creating one is idempotent: a second call returns the URL already in Jamie.
     async createJamieEventsEndpoint(actor) {
@@ -538,7 +635,11 @@ export function createIntegrationAccountService(input: {
 
 async function requireOwnPersonalIntegration(db: DbLike, actor: Actor, integrationId: string) {
   const [row] = await db
-    .select({ id: integrations.id, provider: integrations.provider })
+    .select({
+      id: integrations.id,
+      provider: integrations.provider,
+      externalId: integrations.externalId,
+    })
     .from(integrations)
     .where(
       and(

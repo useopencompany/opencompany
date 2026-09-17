@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "posthog",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Explore PostHog dashboards, insights, schemas, and product analytics, with permission-gated insight creation.",
   "author": {
     "name": "opencompany",
@@ -10,7 +10,7 @@
   "homepage": "https://posthog.com/docs/model-context-protocol",
   "repository": "https://github.com/useopencompany/plugins/tree/main/posthog",
   "license": "MIT",
-  "keywords": ["posthog", "product-analytics", "dashboards", "insights"],
+  "keywords": ["posthog", "product-analytics", "dashboards", "insights", "events"],
   "extensions": {
     "so.opencompany.capabilities": {
       "read": {
@@ -37,6 +37,23 @@
         "defaultMode": "ask",
         "tools": ["insight-create"]
       }
-    }
+    },
+    "so.opencompany.events": [
+      {
+        "id": "event.captured",
+        "label": "Event captured",
+        "description": "Starts a workflow when PostHog ingests a selected analytics event.",
+        "delivery": "poll",
+        "filters": [
+          {
+            "id": "event_name",
+            "label": "Event",
+            "kind": "integration_resource",
+            "resourceType": "event",
+            "required": true
+          }
+        ]
+      }
+    ]
   }
 }

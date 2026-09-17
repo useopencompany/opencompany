@@ -33,6 +33,7 @@ import { startGranolaPollWorker } from "./granola-poll-worker";
 import { startHubspotFlushWorker } from "./hubspot-flush-worker";
 import { startLinearFlushWorker } from "./linear-flush-worker";
 import { settleExpiredBrokerTokens } from "./llm-broker-tokens";
+import { startPostHogPollWorker } from "./posthog-poll-worker";
 import { drainRunnerTasks, type RunnerDrainTask, settlesWithin } from "./runner-shutdown";
 import { startSandboxBillingWorker } from "./sandbox-billing-worker";
 import { startSandboxReconciler } from "./sandbox-reconciler";
@@ -103,6 +104,7 @@ const attioFlushWorker = env.taskWorkerEnabled ? startAttioFlushWorker() : null;
 const gmailPollWorker = env.taskWorkerEnabled ? startGmailPollWorker(env) : null;
 const gmailFlushWorker = env.taskWorkerEnabled ? startGmailFlushWorker(env) : null;
 const granolaPollWorker = env.taskWorkerEnabled ? startGranolaPollWorker() : null;
+const posthogPollWorker = env.taskWorkerEnabled ? startPostHogPollWorker() : null;
 const fathomPollWorker = env.taskWorkerEnabled ? startFathomPollWorker() : null;
 const googleDriveSyncWorker = env.taskWorkerEnabled ? startGoogleDriveSyncWorker(env) : null;
 const chatAttachmentCleanupWorker = env.taskWorkerEnabled
@@ -223,6 +225,7 @@ async function shutdownRunner(signal: "SIGINT" | "SIGTERM") {
     runnerDrainTask("gmail_poll", gmailPollWorker),
     runnerDrainTask("gmail_flush", gmailFlushWorker),
     runnerDrainTask("granola_poll", granolaPollWorker),
+    runnerDrainTask("posthog_poll", posthogPollWorker),
     runnerDrainTask("fathom_poll", fathomPollWorker),
     runnerDrainTask("slack_channel", slackChannelWorker),
     runnerDrainTask("google_drive_sync", googleDriveSyncWorker),

@@ -184,6 +184,10 @@
       "types": "./src/granola.ts",
       "default": "./src/granola.ts"
     },
+    "./posthog-events": {
+      "types": "./src/posthog-events.ts",
+      "default": "./src/posthog-events.ts"
+    },
     "./fathom": {
       "types": "./src/fathom.ts",
       "default": "./src/fathom.ts"
@@ -203,6 +207,10 @@
     "./linear": {
       "types": "./src/linear.ts",
       "default": "./src/linear.ts"
+    },
+    "./imessage": {
+      "types": "./src/imessage.ts",
+      "default": "./src/imessage.ts"
     },
     "./slack-bot": {
       "types": "./src/slack-bot.ts",

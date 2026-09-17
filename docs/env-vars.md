@@ -168,6 +168,19 @@ cannot upload receipts, initiate or cancel payments, exchange currency, or retur
 data. Store production values in Infisical `prod` `/runner`. This evaluation has no public Settings
 flow and is intentionally omitted from the customer integration index.
 
+## iMessage personal assistant
+
+`MESSAGES_API_KEY`, `MESSAGES_WEBHOOK_SECRET`, and `MESSAGES_LINE_HANDLE` configure the
+[messages.dev](https://www.messages.dev) line behind the iMessage personal assistant
+([design and operations](./imessage-channel.md)). All three live in Infisical `prod` `/api`; the
+key and line handle also live in `prod` `/runner`, which performs the sends. Locally they belong in
+`dev` `/web` and `dev` `/runner`. The webhook secret is minted when the line's webhook is created in
+the messages.dev dashboard for `${OPENCOMPANY_API_ORIGIN}/webhooks/imessage/events` with the
+`message.received` event. The feature is off for every member until they turn on the iMessage beta
+switch in Preferences, so a missing value only surfaces as "not available on this deployment" on
+the Channels → iMessage page; release preflight still requires the variables so the channel cannot
+silently disappear from a release.
+
 ## Local generated values
 
 `bun run setup` writes branch-specific `DATABASE_URL`, the local API listener/origin and browser

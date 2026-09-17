@@ -23,10 +23,7 @@ import {
   CODEX_QUESTION_TOOL_NAME,
   CODEX_SUBAGENT_TOOL_NAME,
   CODEX_WEB_SEARCH_TOOL_NAME,
-  DELETE_TASK_SCHEDULE_TOOL_NAME,
-  EDIT_TASK_SCHEDULE_TOOL_NAME,
   LEGACY_SLACK_BOT_TOOL_NAME,
-  SCHEDULE_TASK_TOOL_NAME,
   SLACK_BOT_TOOL_NAME,
   START_TASK_TOOL_NAME,
   START_TASK_TOOL_PART_TYPE,
@@ -42,6 +39,12 @@ import {
   WEB_SEARCH_TOOL_NAME,
 } from "@/lib/chat-ui";
 import { codingToolPresentation } from "@/lib/coding-tool-presentation";
+
+// Recurring Tasks were removed, but their tool calls are still in saved transcripts. These names
+// are spelled out because the constants no longer exist; they only ever match historical parts.
+const RETIRED_SCHEDULE_TASK_TOOL_NAME = "schedule_task";
+const RETIRED_EDIT_TASK_SCHEDULE_TOOL_NAME = "edit_task_schedule";
+const RETIRED_DELETE_TASK_SCHEDULE_TOOL_NAME = "delete_task_schedule";
 
 export type AssistantRenderItem =
   | { type: "text"; key: string; text: string; citations: BrainCitation[] }
@@ -451,9 +454,9 @@ export function toolLabel(name: string) {
   if (name === CODEX_SUBAGENT_TOOL_NAME || name === SUBAGENT_TOOL_NAME) return "Subagent";
   if (name === START_TASK_TOOL_NAME) return "Task";
   if (name === START_WORKFLOW_TOOL_NAME) return "Workflow";
-  if (name === SCHEDULE_TASK_TOOL_NAME) return "Recurring task";
-  if (name === EDIT_TASK_SCHEDULE_TOOL_NAME) return "Edit routine";
-  if (name === DELETE_TASK_SCHEDULE_TOOL_NAME) return "Delete routine";
+  if (name === RETIRED_SCHEDULE_TASK_TOOL_NAME) return "Recurring task";
+  if (name === RETIRED_EDIT_TASK_SCHEDULE_TOOL_NAME) return "Edit routine";
+  if (name === RETIRED_DELETE_TASK_SCHEDULE_TOOL_NAME) return "Delete routine";
   if (name === SLACK_BOT_TOOL_NAME || name === LEGACY_SLACK_BOT_TOOL_NAME) return "Slack bot";
   if (name === "read_workflow_memory") return "Workflow memory";
   if (name === "update_workflow_memory") return "Update workflow memory";
@@ -510,10 +513,13 @@ export function toolDetail(
     return startTaskToolDetail(part);
   }
 
-  if (name === SCHEDULE_TASK_TOOL_NAME) {
+  if (name === RETIRED_SCHEDULE_TASK_TOOL_NAME) {
     return scheduleTaskToolDetail(part);
   }
-  if (name === EDIT_TASK_SCHEDULE_TOOL_NAME || name === DELETE_TASK_SCHEDULE_TOOL_NAME) {
+  if (
+    name === RETIRED_EDIT_TASK_SCHEDULE_TOOL_NAME ||
+    name === RETIRED_DELETE_TASK_SCHEDULE_TOOL_NAME
+  ) {
     return taskScheduleMutationToolDetail(part);
   }
   if (name === SLACK_BOT_TOOL_NAME || name === LEGACY_SLACK_BOT_TOOL_NAME) {

@@ -14,6 +14,7 @@ import {
   clearAllOptimisticChatSummaries,
   removeOptimisticChatSummary,
 } from "@/lib/optimistic-chat-summaries";
+import { AWAITING_INPUT_LABEL } from "./ChatStateIndicator";
 import { Sidebar } from "./Sidebar";
 import { SIDEBAR_NESTED_ROW_PADDING_CLASSNAME } from "./SidebarProjects";
 
@@ -1703,6 +1704,18 @@ describe("Sidebar", () => {
     );
   });
 
+  function rowOf(title: string) {
+    const row = screen.getByRole("link", { name: new RegExp(title) }).parentElement;
+    if (!(row instanceof HTMLElement)) throw new Error(`No row for "${title}".`);
+    return row;
+  }
+
+  function statusSlotOf(title: string) {
+    const slot = rowOf(title).firstElementChild?.firstElementChild;
+    if (!(slot instanceof HTMLElement)) throw new Error(`No status slot for "${title}".`);
+    return slot;
+  }
+
   describe("Pull request badge", () => {
     function chatWithPullRequest(state: "draft" | "open" | "blocked" | "merged" | "closed") {
       recentChatsMock.value = [archivableChat("conversation_pr", "Rework onboarding copy")];
@@ -1819,12 +1832,7 @@ describe("Sidebar", () => {
       expect(badge.parentElement?.closest("a")).toBeNull();
     });
 
-    function leadingColumnOf(title: string) {
-      const row = screen.getByRole("link", { name: new RegExp(title) }).parentElement;
-      return row?.firstElementChild ?? null;
-    }
-
-    it("reserves the badge's column on rows without a pull request, so titles line up", () => {
+    it("reserves one compact marker slot on a plain chat when another row has a pull request", () => {
       recentChatsMock.value = [
         archivableChat("conversation_pr", "Rework onboarding copy"),
         archivableChat("conversation_plain", "YC customer meetings"),
@@ -1838,16 +1846,120 @@ describe("Sidebar", () => {
           state: "open",
         },
       ];
-      const { rerender } = render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
-      expect(leadingColumnOf("YC customer meetings")?.querySelector("span")).toHaveClass(
-        "size-[18px]",
-      );
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
-      // Nothing to align against: the reader pays no width for an always-empty column.
-      sessionPullRequestsMock.value = [];
-      rerender(<Sidebar collapsed onToggleCollapsed={() => {}} />);
+      const plainLink = screen.getByRole("link", { name: "YC customer meetings" });
+      expect(plainLink).toHaveClass("pl-1.5");
+      expect(statusSlotOf("YC customer meetings")).toHaveClass("size-[18px]");
+      expect(rowOf("Rework onboarding copy").firstElementChild).toHaveClass("pl-2");
+      expect(screen.getByRole("link", { name: "Rework onboarding copy" })).toHaveClass("pl-1.5");
+    });
+  });
+
+  describe("Session status marker", () => {
+    it("puts a plain title, live spinner, unread dot, and settled pull request on one edge", () => {
+      recentChatsMock.value = [
+        { ...archivableChat("conversation_working", "Linear triage"), state: "working" },
+        { ...archivableChat("conversation_unread", "Review launch plan"), state: "done_unseen" },
+        archivableChat("conversation_pr", "Rework onboarding copy"),
+        archivableChat("conversation_settled", "YC customer meetings"),
+      ];
+      sessionPullRequestsMock.value = [
+        {
+          conversationId: "conversation_pr",
+          repository: "acme/web",
+          number: 42,
+          url: "https://github.com/acme/web/pull/42",
+          state: "open",
+        },
+      ];
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+      for (const title of [
+        "Linear triage",
+        "Review launch plan",
+        "Rework onboarding copy",
+        "YC customer meetings",
+      ]) {
+        expect(statusSlotOf(title)).toHaveClass("size-[18px]");
+        expect(screen.getByRole("link", { name: title })).toHaveClass("pl-1.5");
+      }
+      expect(
+        within(rowOf("Linear triage")).getByTestId("sidebar-chat-working"),
+      ).toBeInTheDocument();
+      expect(
+        within(rowOf("Review launch plan")).getByTestId("sidebar-chat-unseen"),
+      ).toBeInTheDocument();
+      expect(
+        within(rowOf("Rework onboarding copy")).getByTestId("sidebar-pull-request-badge"),
+      ).toBeInTheDocument();
+    });
+
+    it("shows only the spinner while a session with a pull request is running", () => {
+      recentChatsMock.value = [
+        { ...archivableChat("conversation_working", "Linear triage"), state: "working" },
+      ];
+      sessionPullRequestsMock.value = [
+        {
+          conversationId: "conversation_working",
+          repository: "acme/web",
+          number: 42,
+          url: "https://github.com/acme/web/pull/42",
+          state: "open",
+        },
+      ];
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+      const row = rowOf("Linear triage");
+      expect(within(row).getByTestId("sidebar-chat-working")).toBeInTheDocument();
+      expect(within(row).queryByTestId("sidebar-pull-request-badge")).not.toBeInTheDocument();
+    });
+
+    it("shows an unread dot before revealing a completed session's pull request", () => {
+      recentChatsMock.value = [
+        { ...archivableChat("conversation_unread", "Review launch plan"), state: "done_unseen" },
+      ];
+      sessionPullRequestsMock.value = [
+        {
+          conversationId: "conversation_unread",
+          repository: "acme/web",
+          number: 42,
+          url: "https://github.com/acme/web/pull/42",
+          state: "open",
+        },
+      ];
+      const { rerender } = render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+      let row = rowOf("Review launch plan");
+      expect(within(row).getByTestId("sidebar-chat-unseen")).toBeInTheDocument();
+      expect(within(row).queryByTestId("sidebar-pull-request-badge")).not.toBeInTheDocument();
+
+      recentChatsMock.value = [
+        { ...archivableChat("conversation_unread", "Review launch plan"), state: "done_seen" },
+      ];
       rerender(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
-      expect(leadingColumnOf("YC customer meetings")?.tagName).toBe("A");
+
+      row = rowOf("Review launch plan");
+      expect(within(row).queryByTestId("sidebar-chat-unseen")).not.toBeInTheDocument();
+      expect(within(row).getByTestId("sidebar-pull-request-badge")).toBeInTheDocument();
+    });
+
+    // The marker sits beside the row's link, not inside it, so "Waiting for you" no longer lands
+    // in the link's own name. A reader moving link by link has to hear it some other way.
+    it("describes a parked session's link with the run-state slot", () => {
+      recentChatsMock.value = [
+        { ...archivableChat("conversation_parked", "Rework onboarding copy"), awaitingInput: true },
+        archivableChat("conversation_settled", "YC customer meetings"),
+      ];
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+      expect(
+        screen.getByRole("link", { name: /Rework onboarding copy/ }),
+      ).toHaveAccessibleDescription(AWAITING_INPUT_LABEL);
+      // Nothing to say about a settled session, so the link claims no description at all.
+      expect(screen.getByRole("link", { name: /YC customer meetings/ })).not.toHaveAttribute(
+        "aria-describedby",
+      );
     });
   });
 
@@ -1914,19 +2026,21 @@ describe("Sidebar", () => {
       render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
       const projects = await findLoadedProjects();
+      // The row's leading status column carries the indent; the link beside it only ever carries
+      // the gap between the two.
       for (const name of ["chat_filed title", /task_filed name/]) {
-        expect(within(projects).getByRole("link", { name })).toHaveClass(
-          SIDEBAR_NESTED_ROW_PADDING_CLASSNAME,
-        );
+        const row = within(projects).getByRole("link", { name }).parentElement;
+        expect(row?.firstElementChild).toHaveClass(SIDEBAR_NESTED_ROW_PADDING_CLASSNAME);
       }
       expect(within(projects).getByText("No chats")).toHaveClass(
         SIDEBAR_NESTED_ROW_PADDING_CLASSNAME,
       );
 
       const recents = screen.getByRole("navigation", { name: "Recents" });
-      expect(within(recents).getByRole("link", { name: "chat_loose title" })).not.toHaveClass(
-        SIDEBAR_NESTED_ROW_PADDING_CLASSNAME,
-      );
+      const looseRow = within(recents).getByRole("link", {
+        name: "chat_loose title",
+      }).parentElement;
+      expect(looseRow?.firstElementChild).not.toHaveClass(SIDEBAR_NESTED_ROW_PADDING_CLASSNAME);
     });
 
     it("files a chat dropped on a project and keeps the row out of Recents", async () => {

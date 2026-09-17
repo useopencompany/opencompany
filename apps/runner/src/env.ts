@@ -32,6 +32,10 @@ export type RunnerEnv = {
   previewBaseDomain?: string | undefined;
   previewProtocol?: "http" | "https" | undefined;
   exaApiKey: string | undefined;
+  // messages.dev line for the iMessage personal assistant. Both are needed to send; absent means
+  // the channel is not configured on this deployment.
+  messagesApiKey?: string | undefined;
+  messagesLineHandle?: string | undefined;
   browserEnabled: boolean;
   // Google OAuth client, shared by the Gmail, Google Calendar, and Google Drive integrations. The runner
   // needs it to refresh per-account access tokens against Google's token endpoint.
@@ -96,6 +100,8 @@ export function loadEnv(): RunnerEnv {
     previewBaseDomain: optionalPreviewBaseDomainEnv(),
     previewProtocol: optionalPreviewProtocolEnv(),
     exaApiKey: optionalEnv("EXA_API_KEY"),
+    messagesApiKey: optionalEnv("MESSAGES_API_KEY"),
+    messagesLineHandle: optionalEnv("MESSAGES_LINE_HANDLE"),
     browserEnabled: optionalBooleanEnv("RUNNER_OPENCOMPANY_BROWSER_ENABLED", false),
     googleOAuthClientId: optionalEnv("GOOGLE_OAUTH_CLIENT_ID"),
     googleOAuthClientSecret: optionalEnv("GOOGLE_OAUTH_CLIENT_SECRET"),

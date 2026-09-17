@@ -7,6 +7,18 @@ describe("GitHub installation gap detection", () => {
     vi.unstubAllGlobals();
   });
 
+  it("calls browser fetch with the global receiver", async () => {
+    const fetcher = vi.fn(function (this: unknown) {
+      expect(this).toBe(globalThis);
+      return Promise.resolve(
+        Response.json({ checkedAt: "2026-09-16T12:00:00.000Z", installations: [], target: null }),
+      );
+    });
+    vi.stubGlobal("fetch", fetcher);
+    await fetchGitHubRepositoryAccess({ bypassCache: true });
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
   it("extracts a structured GitHub plugin repository only from a failed call", () => {
     expect(
       githubInstallGapCandidate({

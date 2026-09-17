@@ -29,7 +29,6 @@ import {
 } from "react";
 import { taskRowToView, useAppData } from "@/components/AppDataProvider";
 import { EmptyState, formatRelativeTime } from "@/components/Routes";
-import { Routines } from "@/components/Routines";
 import type { TaskView } from "@/components/Surface";
 import { useHydrated } from "@/components/useHydrated";
 import { formatUsdMicros } from "@/lib/cost-format";
@@ -108,7 +107,7 @@ export function TasksBoardRoute({
   /** Workflow slug to pre-select in the source filter, so a workflow can link to its own runs. */
   initialWorkflowId?: string | null;
 }) {
-  const { schedules, taskRows, tasksReady, workspace } = useAppData();
+  const { taskRows, tasksReady } = useAppData();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(initialWorkflowId);
   const [timeRange, setTimeRangeState] = useState<TaskTimeRange>(initialTimeRange);
@@ -197,7 +196,7 @@ export function TasksBoardRoute({
                 Tasks
               </h1>
               <p className="text-[13px] leading-5 text-ink-subtle">
-                Background runs from workflows, schedules, and chat.
+                Background runs from workflows and chat.
               </p>
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-2 sm:shrink-0 sm:justify-end">
@@ -291,10 +290,6 @@ export function TasksBoardRoute({
               ))}
             </div>
           )}
-
-          {schedules.length > 0 ? (
-            <Routines schedules={schedules} workspaceId={workspace.id} />
-          ) : null}
         </div>
       </div>
 
@@ -320,7 +315,7 @@ export function TasksBoardSkeleton() {
               Tasks
             </h1>
             <p className="text-[13px] leading-5 text-ink-subtle">
-              Background runs from workflows, schedules, and chat.
+              Background runs from workflows and chat.
             </p>
           </header>
 
@@ -647,7 +642,7 @@ function TaskBoardSheet({
   workflowNames: Record<string, string>;
   onClose: () => void;
 }) {
-  const { schedules, workspace } = useAppData();
+  const { workspace } = useAppData();
   const hydrated = useHydrated();
   const [isArchiving, startArchiveTransition] = useTransition();
   const activityCollection = useMemo(
@@ -658,9 +653,6 @@ function TaskBoardSheet({
     (query) => (activityCollection ? query.from({ activity: activityCollection }) : undefined),
     [activityCollection],
   );
-  const schedule = task.scheduleId
-    ? (schedules.find((candidate) => candidate.id === task.scheduleId) ?? null)
-    : null;
   const settled = isSettledTaskStatus(task.status);
   const archivable = settled && Boolean(task.sessionId);
   const { summary, error: summaryError } = useTaskSummary(task.id, settled);
@@ -717,23 +709,13 @@ function TaskBoardSheet({
               {task.prompt}
             </p>
 
-            {task.scheduleId ? (
+            {task.scheduledFor ? (
               <section className="mt-4 flex flex-col gap-2">
                 <DetailLabel>Schedule</DetailLabel>
                 <div className="rounded-lg border border-border bg-canvas px-3 py-2.5">
-                  <div className="text-[12.5px] font-medium leading-5 text-ink">
-                    {schedule?.name ?? "Scheduled routine"}
+                  <div className="text-[12.5px] leading-5 text-ink-subtle">
+                    Scheduled for {formatStartedAt(task.scheduledFor)}
                   </div>
-                  {schedule ? (
-                    <div className="mt-0.5 font-mono text-[10.5px] leading-4 text-ink-subtle">
-                      {schedule.cron} · {schedule.timezone}
-                    </div>
-                  ) : null}
-                  {task.scheduledFor ? (
-                    <div className="mt-1 text-[11.5px] leading-4 text-ink-subtle">
-                      Scheduled for {formatStartedAt(task.scheduledFor)}
-                    </div>
-                  ) : null}
                 </div>
               </section>
             ) : null}

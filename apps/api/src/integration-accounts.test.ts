@@ -8,6 +8,11 @@ import {
   validateGranolaApiKey,
 } from "@opencompany/agent/integrations/granola";
 import {
+  connectPostHogEventsIntegration,
+  getPostHogEventsIntegrationState,
+  validatePostHogEventsConnection,
+} from "@opencompany/agent/integrations/posthog-events";
+import {
   connectRenderMcpIntegration,
   getRenderIntegrationState,
   validateRenderApiKey,
@@ -47,6 +52,22 @@ vi.mock("@opencompany/agent/integrations/granola", async (importOriginal) => ({
     integrationId: "gint_granola",
     accountEmail: "sam@example.com",
     accountName: "Sam",
+    statusReason: null,
+  })),
+}));
+
+vi.mock("@opencompany/agent/integrations/posthog-events", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  validatePostHogEventsConnection: vi.fn(),
+  connectPostHogEventsIntegration: vi.fn(async () => ({ integrationId: "gint_posthog_events" })),
+  getPostHogEventsIntegrationState: vi.fn(async () => ({
+    provider: "posthog" as const,
+    connected: true,
+    status: "connected" as const,
+    integrationId: "gint_posthog_events",
+    projectId: "12345",
+    region: "eu" as const,
+    connectionLabel: "Project 12345 · EU",
     statusReason: null,
   })),
 }));
@@ -548,6 +569,49 @@ describe("integration account service", () => {
       status: 400,
       message: "Granola rejected this API key. Check it and try again.",
     });
+  });
+
+  it("validates and connects a region-bound PostHog event project", async () => {
+    vi.mocked(validatePostHogEventsConnection).mockResolvedValueOnce({ ok: true });
+    const service = createIntegrationAccountService({ db: fakeDb() });
+    await expect(
+      service.connectPostHogEvents(member, {
+        apiKey: "  phx_abcdefghijklmnop  ",
+        projectId: "12345",
+        region: "eu",
+      }),
+    ).resolves.toMatchObject({
+      connected: true,
+      integrationId: "gint_posthog_events",
+      projectId: "12345",
+      region: "eu",
+    });
+    expect(validatePostHogEventsConnection).toHaveBeenCalledWith({
+      apiKey: "phx_abcdefghijklmnop",
+      projectId: "12345",
+      region: "eu",
+    });
+    expect(connectPostHogEventsIntegration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userWorkosId: "user_1",
+        apiKey: "phx_abcdefghijklmnop",
+        projectId: "12345",
+        region: "eu",
+      }),
+    );
+    expect(getPostHogEventsIntegrationState).toHaveBeenCalled();
+  });
+
+  it("rejects malformed PostHog keys before calling the provider", async () => {
+    const service = createIntegrationAccountService({ db: fakeDb() });
+    await expect(
+      service.connectPostHogEvents(member, {
+        apiKey: "not-a-key",
+        projectId: "12345",
+        region: "us",
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(validatePostHogEventsConnection).not.toHaveBeenCalled();
   });
 
   it("connects Render with a validated key and refreshes plugin discovery", async () => {

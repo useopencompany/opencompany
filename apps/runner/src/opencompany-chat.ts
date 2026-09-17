@@ -1016,7 +1016,7 @@ function replayMessagesThroughCurrent(
   );
 }
 
-async function productModelMessagesFromReplay(
+export async function productModelMessagesFromReplay(
   replayMessages: readonly StoredChatMessage[],
   currentUserMessageId: string,
   options?: {
@@ -1051,7 +1051,7 @@ async function productModelMessagesFromReplay(
   );
 }
 
-async function loadProductChatStoredMessages(input: {
+export async function loadProductChatStoredMessages(input: {
   chatSessionId: string;
   currentUserMessageId: string;
   includeCurrentAssistantMessage: boolean;
@@ -1098,7 +1098,7 @@ function isUnansweredAssistantMessage(message: StoredChatMessage) {
   );
 }
 
-async function loadProductChatContextCompaction(
+export async function loadProductChatContextCompaction(
   chatSessionId: string,
 ): Promise<ProductChatContextCompactionState | null> {
   const [row] = await getDb()
@@ -1118,7 +1118,7 @@ async function loadProductChatContextCompaction(
   return row ?? null;
 }
 
-async function persistProductChatContextCompaction(input: {
+export async function persistProductChatContextCompaction(input: {
   state: ProductChatContextCompactionState;
   chatSessionId: string;
   codexChatSessionId: string;
@@ -1459,9 +1459,6 @@ async function resolveProductChatRuntime(input: {
     model,
     ...(runBrainCli ? { runBrainCli } : {}),
     ...(brainCapture ? { saveToBrain: brainCapture } : {}),
-    ...(hostTools?.scheduleTask ? { scheduleTask: hostTools.scheduleTask } : {}),
-    ...(hostTools?.editTaskSchedule ? { editTaskSchedule: hostTools.editTaskSchedule } : {}),
-    ...(hostTools?.deleteTaskSchedule ? { deleteTaskSchedule: hostTools.deleteTaskSchedule } : {}),
     ...(hostTools?.workspaceSkills ? { workspaceSkills: hostTools.workspaceSkills } : {}),
     ...(hostTools?.createWorkspaceSkill
       ? { createWorkspaceSkill: hostTools.createWorkspaceSkill }
@@ -1510,7 +1507,6 @@ async function resolveProductChatRuntime(input: {
     webSearchEnabled: Boolean(exaApiKey),
     browserToolsEnabled: Boolean(hostTools?.browserTools),
     automationToolsEnabled: Boolean(hostTools?.bootstrap.automationToolsEnabled),
-    scheduleToolsEnabled: Boolean(hostTools?.bootstrap.automationToolsEnabled),
     wikiToolEnabled: Boolean(hostTools?.runWiki),
     artifactToolEnabled: Boolean(hostTools?.writeArtifact),
     subagentsEnabled: Boolean(subagentRunner),
@@ -1524,7 +1520,6 @@ async function resolveProductChatRuntime(input: {
     ...(hostTools
       ? {
           userContext: hostTools.bootstrap.userContext,
-          recurringSchedules: hostTools.bootstrap.recurringSchedules,
           skillsAvailable: hostTools.bootstrap.skills.length > 0,
           workflows: hostTools.bootstrap.workflows,
         }
@@ -1579,7 +1574,7 @@ async function resolveProductChatRuntime(input: {
   };
 }
 
-function createProductAbortWatcher(input: {
+export function createProductAbortWatcher(input: {
   signalController: AbortController;
   projector: Pick<ProductChatProjector, "checkAbort">;
   shouldAbort?: () => Error | null;
@@ -1663,7 +1658,7 @@ function providerMetadataFrom(part: Record<string, unknown>) {
 // Only text and reasoning are finalized. Tool parts deliberately keep `input-streaming` so
 // isReplaySafeProductChatInfrastructureFailure can still tell a partial tool input apart from one
 // that crossed the execute boundary.
-function finalizeStreamingParts(parts: readonly ProductChatUiPart[]) {
+export function finalizeStreamingParts(parts: readonly ProductChatUiPart[]) {
   return parts.map((part) =>
     (part.type === "text" || part.type === "reasoning") && part.state === "streaming"
       ? { ...part, state: "done" }
@@ -1671,7 +1666,9 @@ function finalizeStreamingParts(parts: readonly ProductChatUiPart[]) {
   );
 }
 
-function withCompletedResponseFallback(projection: ProductChatProjection): ProductChatProjection {
+export function withCompletedResponseFallback(
+  projection: ProductChatProjection,
+): ProductChatProjection {
   if (
     projection.parts.some(
       (part) => part.type === "text" && typeof part.text === "string" && part.text.trim(),
@@ -1702,7 +1699,7 @@ function partAt(parts: readonly ProductChatUiPart[], index: number) {
   return part;
 }
 
-function recognizedAbortError(value: unknown): value is Error {
+export function recognizedAbortError(value: unknown): value is Error {
   return (
     value instanceof CodexChatHandoffError ||
     value instanceof ProductChatInterruptedError ||
@@ -1731,7 +1728,7 @@ function readStringAllowEmpty(value: unknown) {
   return typeof value === "string" ? value : null;
 }
 
-function errorMessage(error: unknown) {
+export function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
@@ -1757,7 +1754,7 @@ export function isReplaySafeProductChatInfrastructureFailure(
   );
 }
 
-function productChatInfrastructureFailureDiagnostic(error: APICallError) {
+export function productChatInfrastructureFailureDiagnostic(error: APICallError) {
   const status = error.statusCode === undefined ? "unknown" : String(error.statusCode);
   const cause =
     error.cause instanceof Error
@@ -1768,7 +1765,7 @@ function productChatInfrastructureFailureDiagnostic(error: APICallError) {
   return `[run_turn] ${error.name} (${status}): ${error.message}; cause: ${cause}`;
 }
 
-function projectionText(projection: ProductChatProjection) {
+export function projectionText(projection: ProductChatProjection) {
   return projection.parts
     .flatMap((part) => (part.type === "text" && typeof part.text === "string" ? [part.text] : []))
     .join("")

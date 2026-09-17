@@ -8,6 +8,7 @@ import { runClaudeCodeChatTurn } from "./claude-code-chat";
 import { runCodexChatTurn } from "./codex-chat";
 import type { RunnerEnv } from "./env";
 import { runProductChatTurn } from "./opencompany-chat";
+import { runPersonalAgentTurn } from "./personal-agent/turn";
 import type { TaskTurnContext } from "./task-turn";
 
 export type CodingEngineTurnInput = {
@@ -27,7 +28,12 @@ export type CodingEngineTurnRunner = (
 ) => Promise<CodingEngineTurnOutcome>;
 
 export const CODING_ENGINE_REGISTRY: Readonly<Record<CodexChatEngine, CodingEngineTurnRunner>> = {
-  opencompany: (input) => runProductChatTurn(input),
+  // The harness column is `chat` for every session the main product creates; only the iMessage
+  // personal assistant's runtime carries `personal_agent`.
+  opencompany: (input) =>
+    input.session.harness === "personal_agent"
+      ? runPersonalAgentTurn(input)
+      : runProductChatTurn(input),
   claude_code: (input) => runClaudeCodeChatTurn(input),
   codex: (input) => runCodexChatTurn(input),
 };

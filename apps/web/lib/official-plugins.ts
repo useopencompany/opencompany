@@ -382,6 +382,8 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectionProvider: "posthog",
     connectHref: "/api/integrations/posthog/start?returnTo=/plugins/posthog",
     accountDescription: "The PostHog account opencompany uses when you run analytics tools.",
+    eventAccountHref: "/plugins/posthog#events",
+    eventAccountLabel: "Connect PostHog events",
   },
   convex: {
     name: "convex",

@@ -21,7 +21,7 @@ const CHAT_SYSTEM_BASE_LINES = [
 ];
 
 const CHAT_AUTOMATION_SYSTEM_LINES = [
-  "You run in the main app as a chat interface. The rest of the app is organized around tasks: durable work items tracked in Tasks and executed by more specialized agents. You cannot create a task yourself. Work reaches Tasks through the user's workflows and recurring schedules, so either answer here or start the workflow the user asked for.",
+  "You run in the main app as a chat interface. The rest of the app is organized around tasks: durable work items tracked in Tasks and executed by more specialized agents. You cannot create a task yourself. Work reaches Tasks through the user's workflows, so either answer here or start the workflow the user asked for.",
 ];
 
 export const CHAT_SYSTEM = promptBlock("system", [
@@ -52,12 +52,6 @@ const CHAT_ARTIFACT_BEHAVIOR_LINES = [
 
 const CHAT_NO_TASK_DELEGATION_LINE =
   "You cannot start a one-off task. When a request needs deep research, monitoring, longer-running execution, or an execution environment you do not have in chat, do the part you can here and say plainly what you cannot do. Apart from a workflow you actually started or a recurring schedule you actually saved, never claim work is running in the background and never promise to follow up later.";
-
-const CHAT_SCHEDULE_BEHAVIOR_LINES = [
-  "Create a recurring task schedule when the user asks for work to repeat on a cadence, schedule, cron, routine, every day/week/month, or other recurring basis. Convert the cadence to a valid 5-field cron expression and save it directly when clear. If the recurrence is ambiguous, ask one concise follow-up instead of guessing.",
-  "Edit or delete an existing recurring task schedule when the user asks to change, pause by removal, remove, cancel, stop, or delete a routine. Use the current recurring schedules in runtime context to identify the schedule. If the target schedule is unclear, ask one concise follow-up.",
-  "Recurring schedules generate separate tracked Tasks each time they fire.",
-];
 
 const CHAT_BASE_BEHAVIOR_LINES = [
   "Handle the request directly when you can give a useful answer, make a small edit, brainstorm, explain, decide, draft, or ask a short clarifying question without needing extra execution context.",
@@ -168,20 +162,11 @@ export function createProductChatSystemPrompt(
     wikiToolEnabled?: boolean;
     wikiToolReadOnly?: boolean;
     automationToolsEnabled?: boolean;
-    scheduleToolsEnabled?: boolean;
     activeBrain?: {
       name: string;
       workspaceName: string;
       readOnly?: boolean;
     } | null;
-    recurringSchedules?: readonly {
-      id: string;
-      name: string;
-      cron: string;
-      timezone: string;
-      enabled: boolean;
-      nextRunAt: string;
-    }[];
     connectedIntegrations?: readonly {
       id: string;
       label: string;
@@ -203,7 +188,6 @@ export function createProductChatSystemPrompt(
   } = {},
 ) {
   const automationToolsEnabled = input.automationToolsEnabled ?? true;
-  const scheduleToolsEnabled = input.scheduleToolsEnabled ?? automationToolsEnabled;
   const connectedIntegrations = input.connectedIntegrations ?? [];
   const actionSources =
     input.actionSources ??
@@ -224,7 +208,6 @@ export function createProductChatSystemPrompt(
     promptBlock("runtime_context", [
       `Current date: ${formatPromptDate(input.currentDate)}.`,
       ...(input.activeBrain ? formatActiveBrainContext(input.activeBrain) : []),
-      ...(scheduleToolsEnabled ? formatRecurringScheduleContext(input.recurringSchedules) : []),
     ]),
     promptBlock("user_context", formatUserContext(input.userContext)),
     ...(actionSources.length > 0
@@ -276,7 +259,6 @@ export function createProductChatSystemPrompt(
       ...formatBaseBehaviorLines({
         wikiToolEnabled,
         wikiToolReadOnly,
-        scheduleToolsEnabled,
         workflowsAvailable: workflows.length > 0,
       }),
       ...(input.webFetchEnabled ? [...CHAT_WEB_FETCH_BEHAVIOR_LINES, CHAT_WEB_FETCH_FALLBACK] : []),
@@ -342,16 +324,11 @@ function formatActiveBrainContext(activeBrain: {
 function formatBaseBehaviorLines(input: {
   wikiToolEnabled?: boolean | undefined;
   wikiToolReadOnly?: boolean | undefined;
-  scheduleToolsEnabled?: boolean | undefined;
   workflowsAvailable?: boolean | undefined;
 }) {
   const wikiToolEnabled = input.wikiToolEnabled ?? true;
   const wikiToolReadOnly = wikiToolEnabled && (input.wikiToolReadOnly ?? false);
-  const scheduleToolsEnabled = input.scheduleToolsEnabled ?? true;
-  const lines = [
-    ...CHAT_BASE_BEHAVIOR_LINES,
-    ...(scheduleToolsEnabled ? CHAT_SCHEDULE_BEHAVIOR_LINES : []),
-  ].filter((line) => {
+  const lines = [...CHAT_BASE_BEHAVIOR_LINES].filter((line) => {
     if (
       !wikiToolEnabled &&
       [
@@ -401,36 +378,6 @@ function formatPromptCatalogValue(value: string) {
   return JSON.stringify(value.trim().replace(/\s+/g, " "))
     .replaceAll("<", "\\u003c")
     .replaceAll(">", "\\u003e");
-}
-
-function formatRecurringScheduleContext(
-  schedules:
-    | readonly {
-        id: string;
-        name: string;
-        cron: string;
-        timezone: string;
-        enabled: boolean;
-        nextRunAt: string;
-      }[]
-    | undefined,
-) {
-  if (!schedules?.length) return ["Current recurring schedules: none."];
-  return [
-    "Current recurring schedules:",
-    ...schedules
-      .slice(0, 20)
-      .map((schedule) =>
-        [
-          `- id=${schedule.id}`,
-          `name=${JSON.stringify(schedule.name)}`,
-          `cron=${JSON.stringify(schedule.cron)}`,
-          `timezone=${JSON.stringify(schedule.timezone)}`,
-          `enabled=${schedule.enabled ? "true" : "false"}`,
-          `nextRunAt=${JSON.stringify(schedule.nextRunAt)}`,
-        ].join(" "),
-      ),
-  ];
 }
 
 function formatUserContext(userContext: ProductChatUserContext | undefined) {

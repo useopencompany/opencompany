@@ -425,24 +425,6 @@ export const WorkflowSchema = z
   .strict()
   .openapi("Workflow");
 
-export const TaskScheduleSchema = z
-  .object({
-    id: ResourceIdSchema,
-    name: z.string().min(1).max(80),
-    sourceDescription: z.string().max(1_024),
-    cron: z.string().min(1).max(128),
-    timezone: z.string().min(1).max(128),
-    prompt: z.string().min(1).max(10_000),
-    enabled: z.boolean(),
-    lastRunAt: TimestampSchema.nullable(),
-    nextRunAt: TimestampSchema,
-    version: z.number().int().min(1),
-    createdAt: TimestampSchema,
-    updatedAt: TimestampSchema,
-  })
-  .strict()
-  .openapi("TaskSchedule");
-
 export const WorkflowScheduleReadModelSchema = z
   .object({
     id: ResourceIdSchema,
@@ -477,7 +459,6 @@ export const TaskReadModelNameSchema = z.literal("tasks-v1");
 export const TaskActivityReadModelNameSchema = z.literal("task-activities-v1");
 export const WorkflowReadModelNameSchema = z.literal("workflows-v1");
 export const WorkflowScheduleReadModelNameSchema = z.literal("workflow-schedules-v1");
-export const TaskScheduleReadModelNameSchema = z.literal("task-schedules-v1");
 export const BrainFolderReadModelNameSchema = z.literal("brain-folders-v1");
 export const BrainDocumentReadModelNameSchema = z.literal("brain-documents-v1");
 export const BrainTimelineReadModelNameSchema = z.literal("brain-timeline-v1");
@@ -494,7 +475,6 @@ export const ReadModelSchema = z.enum([
   TaskActivityReadModelNameSchema.value,
   WorkflowReadModelNameSchema.value,
   WorkflowScheduleReadModelNameSchema.value,
-  TaskScheduleReadModelNameSchema.value,
   BrainFolderReadModelNameSchema.value,
   BrainDocumentReadModelNameSchema.value,
   BrainTimelineReadModelNameSchema.value,
@@ -718,7 +698,6 @@ export const TaskActivityReadModelSchema = z
 export const WorkflowReadModelSchema = WorkflowSchema.omit({ slackChannel: true }).openapi(
   "WorkflowReadModelV1",
 );
-export const TaskScheduleReadModelSchema = TaskScheduleSchema.openapi("TaskScheduleReadModelV1");
 
 export const BrainTimelineEntrySchema = z
   .object({
@@ -2994,96 +2973,6 @@ export const InvokeWorkflowBodySchema = z
   .strict()
   .openapi("InvokeWorkflowBody");
 
-export const TaskSchedulePageSchema = z
-  .object({
-    data: z.array(TaskScheduleSchema),
-    nextCursor: z.string().nullable(),
-    meta: ProtocolMetadataSchema,
-  })
-  .strict()
-  .openapi("TaskSchedulePage");
-
-export const TaskScheduleEnvelopeSchema = z
-  .object({ data: TaskScheduleSchema, meta: ProtocolMetadataSchema })
-  .strict()
-  .openapi("TaskScheduleEnvelope");
-
-export const CreateTaskScheduleBodySchema = z
-  .object({
-    name: z.string().max(80).optional(),
-    sourceDescription: z.string().max(1_024).optional(),
-    cron: z.string().min(1).max(128),
-    timezone: z.string().min(1).max(128).optional(),
-    prompt: z.string().min(1).max(10_000),
-  })
-  .strict()
-  .openapi("CreateTaskScheduleBody");
-
-export const UpdateTaskScheduleBodySchema = z
-  .object({
-    expectedVersion: z.number().int().min(1),
-    name: z.string().min(1).max(80),
-    sourceDescription: z.string().max(1_024).optional(),
-    cron: z.string().min(1).max(128),
-    timezone: z.string().min(1).max(128).optional(),
-    prompt: z.string().min(1).max(10_000),
-  })
-  .strict()
-  .openapi("UpdateTaskScheduleBody");
-
-export const SetTaskScheduleEnabledBodySchema = z
-  .object({
-    expectedVersion: z.number().int().min(1),
-    enabled: z.boolean(),
-  })
-  .strict()
-  .openapi("SetTaskScheduleEnabledBody");
-
-export const UpdateTaskScheduleCommandSchema = z
-  .union([UpdateTaskScheduleBodySchema, SetTaskScheduleEnabledBodySchema])
-  .openapi("UpdateTaskScheduleCommand");
-
-export const TaskScheduleMutationEnvelopeSchema = z
-  .object({
-    data: z
-      .object({
-        schedule: TaskScheduleSchema,
-        transactionId: z.string().regex(/^[0-9]+$/u),
-        replayed: z.boolean(),
-      })
-      .strict(),
-    meta: ProtocolMetadataSchema,
-  })
-  .strict()
-  .openapi("TaskScheduleMutationEnvelope");
-
-export const TaskScheduleUpdateEnvelopeSchema = z
-  .object({
-    data: z
-      .object({
-        schedule: TaskScheduleSchema,
-        transactionId: z.string().regex(/^[0-9]+$/u),
-      })
-      .strict(),
-    meta: ProtocolMetadataSchema,
-  })
-  .strict()
-  .openapi("TaskScheduleUpdateEnvelope");
-
-export const TaskScheduleArchiveEnvelopeSchema = z
-  .object({
-    data: z
-      .object({
-        scheduleId: ResourceIdSchema,
-        version: z.number().int().min(1),
-        transactionId: z.string().regex(/^[0-9]+$/u),
-      })
-      .strict(),
-    meta: ProtocolMetadataSchema,
-  })
-  .strict()
-  .openapi("TaskScheduleArchiveEnvelope");
-
 export const LegacyTaskSchema = TaskSchema.omit({ conversationId: true }).openapi("LegacyTask");
 
 export const LegacyTaskHistoryMessageSchema = z
@@ -3370,6 +3259,30 @@ export const AttachmentUploadEnvelopeSchema = z
   })
   .strict()
   .openapi("AttachmentUploadEnvelope");
+
+export const WorkflowSlackAvatarUploadBodySchema = z
+  .object({
+    file: z
+      .file()
+      .max(1024 * 1024)
+      .openapi({ type: "string", format: "binary" }),
+  })
+  .strict()
+  .openapi("WorkflowSlackAvatarUploadBody");
+
+export const WorkflowSlackAvatarUploadEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        // Absolute, unauthenticated URL. The caller saves it onto the workflow through the normal
+        // update command; uploading alone does not change the workflow.
+        avatarUrl: z.string().url().max(2_048),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("WorkflowSlackAvatarUploadEnvelope");
 
 export const CreateMessageBodySchema = z
   .object({
@@ -4016,6 +3929,7 @@ export const IdentityUserSchema = z
     sidebarProjectsEnabled: z.boolean(),
     subagentsEnabled: z.boolean(),
     pastSessionAccessEnabled: z.boolean(),
+    imessageEnabled: z.boolean(),
     /** @deprecated Wiki is always enabled. */
     wikiEnabled: z.literal(true),
     taskViewMode: TaskViewModeSchema,
@@ -4085,6 +3999,7 @@ export const UserPreferencesSchema = z
     sidebarProjectsEnabled: z.boolean(),
     subagentsEnabled: z.boolean(),
     pastSessionAccessEnabled: z.boolean(),
+    imessageEnabled: z.boolean(),
   })
   .strict()
   .openapi("UserPreferences");
@@ -4104,6 +4019,7 @@ export const UpdateUserPreferencesBodySchema = z
     sidebarProjectsEnabled: z.boolean().optional(),
     subagentsEnabled: z.boolean().optional(),
     pastSessionAccessEnabled: z.boolean().optional(),
+    imessageEnabled: z.boolean().optional(),
   })
   .strict()
   .refine((body: Record<string, unknown>) => Object.keys(body).length > 0, {
@@ -4260,6 +4176,7 @@ export const PersonalIntegrationProviderSchema = z.enum([
   "github_user",
   "slack",
   "hubspot",
+  "posthog",
   "granola",
   "fathom",
   "attio",
@@ -4323,6 +4240,32 @@ export const SlackBotWorkspaceSettingsEnvelopeSchema = z
   .object({ data: SlackBotWorkspaceSettingsSchema, meta: ProtocolMetadataSchema })
   .strict()
   .openapi("SlackBotWorkspaceSettingsEnvelope");
+
+// Settings → Channels → iMessage. `binding` is null until the member asks for a link code.
+export const ImessageSettingsSchema = z
+  .object({
+    configured: z.boolean(),
+    lineHandle: z.string().max(64).nullable(),
+    binding: z
+      .object({
+        status: z.enum(["pending", "linked"]),
+        linkCode: z.string().max(12).nullable(),
+        linkCodeExpiresAt: TimestampSchema.nullable(),
+        handle: z.string().max(64).nullable(),
+        conversationId: z.string().max(128).nullable(),
+        linkedAt: TimestampSchema.nullable(),
+      })
+      .strict()
+      .nullable(),
+  })
+  .strict()
+  .openapi("ImessageSettings");
+export type ImessageSettingsDto = z.infer<typeof ImessageSettingsSchema>;
+
+export const ImessageSettingsEnvelopeSchema = z
+  .object({ data: ImessageSettingsSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("ImessageSettingsEnvelope");
 
 export const SlackBotDestinationSchema = z
   .object({
@@ -4454,6 +4397,15 @@ export const IntegrationApiKeyBodySchema = z
   .strict()
   .openapi("IntegrationApiKeyBody");
 
+export const PostHogEventsConnectBodySchema = z
+  .object({
+    apiKey: z.string().min(1).max(4_000),
+    projectId: z.string().regex(/^[1-9][0-9]{0,19}$/),
+    region: z.enum(["us", "eu"]),
+  })
+  .strict()
+  .openapi("PostHogEventsConnectBody");
+
 export const ConvexAccountStateSchema = z
   .object({
     provider: z.literal("convex"),
@@ -4559,6 +4511,43 @@ export const GranolaAccountStateEnvelopeSchema = z
   })
   .strict()
   .openapi("GranolaAccountStateEnvelope");
+
+export const PostHogEventsAccountStateSchema = z
+  .object({
+    provider: z.literal("posthog"),
+    connected: z.boolean(),
+    status: IntegrationAccountStatusSchema,
+    integrationId: IntegrationAccountIdSchema.nullable(),
+    projectId: z.string().nullable(),
+    region: z.enum(["us", "eu"]).nullable(),
+    connectionLabel: z.string().nullable(),
+    statusReason: z.string().nullable(),
+  })
+  .strict()
+  .openapi("PostHogEventsAccountState");
+
+export const PostHogEventsAccountStateEnvelopeSchema = z
+  .object({
+    data: z.object({ state: PostHogEventsAccountStateSchema }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("PostHogEventsAccountStateEnvelope");
+
+export const PostHogEventDefinitionListEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        events: z
+          .array(z.object({ id: z.string().max(512), name: z.string().max(512) }).strict())
+          .max(500),
+        partial: z.boolean(),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("PostHogEventDefinitionListEnvelope");
 
 // Jamie's event connection is a webhook the user creates in Jamie against opencompany's fixed
 // endpoint; only the digest of the key Jamie mints is stored. The URL is what the setup UI asks the
@@ -4881,8 +4870,6 @@ export type WorkflowSlackChannel = z.infer<typeof WorkflowSlackChannelSchema>;
 export type WorkflowMemoryDto = z.infer<typeof WorkflowMemorySchema>;
 export type WorkflowReadModel = z.infer<typeof WorkflowReadModelSchema>;
 export type WorkflowScheduleReadModel = z.infer<typeof WorkflowScheduleReadModelSchema>;
-export type TaskScheduleDto = z.infer<typeof TaskScheduleSchema>;
-export type TaskScheduleReadModel = z.infer<typeof TaskScheduleReadModelSchema>;
 export type IntegrationAccountReadModel = z.infer<typeof IntegrationAccountReadModelSchema>;
 export type BrainSnapshotDto = z.infer<typeof BrainSnapshotSchema>;
 export type BrainOverviewDto = z.infer<typeof BrainOverviewSchema>;
@@ -4999,9 +4986,6 @@ export type CreateWorkflowBody = z.infer<typeof CreateWorkflowBodySchema>;
 export type UpdateWorkflowBody = z.infer<typeof UpdateWorkflowBodySchema>;
 export type ArchiveVersionBody = z.infer<typeof ArchiveVersionBodySchema>;
 export type InvokeWorkflowBody = z.infer<typeof InvokeWorkflowBodySchema>;
-export type CreateTaskScheduleBody = z.infer<typeof CreateTaskScheduleBodySchema>;
-export type UpdateTaskScheduleBody = z.infer<typeof UpdateTaskScheduleBodySchema>;
-export type SetTaskScheduleEnabledBody = z.infer<typeof SetTaskScheduleEnabledBodySchema>;
 export type ConversationReadModel = z.infer<typeof ConversationReadModelSchema>;
 export type ConversationReadModelV1 = z.infer<typeof ConversationReadModelV1Schema>;
 export type MessageReadModel = z.infer<typeof MessageReadModelSchema>;
@@ -5013,6 +4997,9 @@ export type EngineSessionReadModel = z.infer<typeof EngineSessionReadModelSchema
 export type EngineRuntimeStatus = z.infer<typeof EngineRuntimeStatusSchema>;
 export type EngineRuntimeAccess = z.infer<typeof EngineRuntimeAccessEnvelopeSchema>["data"];
 export type AttachmentUploadEnvelope = z.infer<typeof AttachmentUploadEnvelopeSchema>;
+export type WorkflowSlackAvatarUploadEnvelope = z.infer<
+  typeof WorkflowSlackAvatarUploadEnvelopeSchema
+>;
 export type CreateMessageBody = z.infer<typeof CreateMessageBodySchema>;
 export type CreateTaskBody = z.infer<typeof CreateTaskBodySchema>;
 export type CreateTaskCommentBody = z.infer<typeof CreateTaskCommentBodySchema>;

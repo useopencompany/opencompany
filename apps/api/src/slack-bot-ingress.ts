@@ -9,7 +9,10 @@ import {
 } from "@opencompany/agent/integrations/slack-bot";
 import { verifySlackEventSignature } from "@opencompany/agent/integrations/slack-signature";
 import { connectSlackBotIntegration } from "@opencompany/db/integrations";
-import { enqueueSlackThreadReply } from "@opencompany/db/session-subscriptions";
+import {
+  enqueueSlackDirectMessage,
+  enqueueSlackThreadReply,
+} from "@opencompany/db/session-subscriptions";
 import { markSlackBotIntegrationStatusForTeam } from "@opencompany/db/slack-bot";
 import { createLogger } from "@opencompany/observability";
 import type { ApiIdentityVerifier } from "./auth";
@@ -215,17 +218,25 @@ async function handleEventCallback(
   const messageTs = typeof event.ts === "string" ? event.ts : "";
   const slackUserId = typeof event.user === "string" ? event.user : "";
   const text = typeof event.text === "string" ? event.text.trim() : "";
-  if (
-    !eventId ||
-    !channelId.startsWith("C") ||
-    event.channel_type !== "channel" ||
-    !threadTs ||
-    threadTs === messageTs ||
-    !messageTs ||
-    !slackUserId ||
-    !text ||
-    text.length > 12000
-  ) {
+  // A public channel is only ever joined mid-thread; a direct message with the bot has no other
+  // participants, so its first message is what opens the session and its replies continue it.
+  const directMessage = channelId.startsWith("D") && event.channel_type === "im";
+  const channelReply = channelId.startsWith("C") && event.channel_type === "channel";
+  if (!eventId || !messageTs || !slackUserId || !text || text.length > 12000) {
+    return { ok: true, ignored: true };
+  }
+  if (directMessage && (!threadTs || threadTs === messageTs)) {
+    const accepted = await enqueueSlackDirectMessage((query) => input.db.execute(query), {
+      teamId,
+      eventId,
+      channelId,
+      messageTs,
+      slackUserId,
+      text,
+    });
+    return { ok: true, accepted };
+  }
+  if ((!directMessage && !channelReply) || !threadTs || threadTs === messageTs) {
     return { ok: true, ignored: true };
   }
   const accepted = await enqueueSlackThreadReply((query) => input.db.execute(query), {

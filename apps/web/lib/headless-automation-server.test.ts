@@ -1,10 +1,6 @@
 import { headers } from "next/headers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  getHeadlessWorkflow,
-  listHeadlessTaskSchedules,
-  listHeadlessWorkflows,
-} from "./headless-automation-server";
+import { getHeadlessWorkflow, listHeadlessWorkflows } from "./headless-automation-server";
 
 vi.mock("server-only", () => ({}));
 
@@ -26,21 +22,6 @@ const workflow = {
   createdAt: "2026-08-11T09:00:00.000Z",
   updatedAt: "2026-08-11T09:00:00.000Z",
 };
-const schedule = {
-  id: "schedule_1",
-  name: "Daily research",
-  sourceDescription: "Every morning",
-  cron: "0 9 * * *",
-  timezone: "UTC",
-  prompt: "Research changes.",
-  enabled: true,
-  lastRunAt: null,
-  nextRunAt: "2026-08-12T09:00:00.000Z",
-  version: 1,
-  createdAt: "2026-08-11T09:00:00.000Z",
-  updatedAt: "2026-08-11T09:00:00.000Z",
-};
-
 describe("server automation reads", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -89,20 +70,6 @@ describe("server automation reads", () => {
     );
 
     await expect(getHeadlessWorkflow("missing-workflow")).resolves.toBeNull();
-  });
-
-  it("loads the initial recurring Task snapshot through the typed API", async () => {
-    let upstream: Request | null = null;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
-        upstream = input instanceof Request ? input : new Request(input, init);
-        return Response.json({ data: [schedule], nextCursor: null, meta });
-      }),
-    );
-
-    await expect(listHeadlessTaskSchedules()).resolves.toEqual([schedule]);
-    expect(new URL((upstream as unknown as Request).url).pathname).toBe("/v1/schedules");
   });
 
   it("surfaces canonical API failures with their request id", async () => {

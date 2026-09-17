@@ -13,21 +13,6 @@ const appDataMock = vi.hoisted(() => ({
   workspace: { id: "workspace_1" },
   taskRows: [] as TaskRow[],
   tasksReady: true,
-  schedules: [
-    {
-      id: "schedule_1",
-      name: "Monday briefing",
-      sourceDescription: "Weekly briefing",
-      cron: "0 9 * * 1",
-      timezone: "Europe/Berlin",
-      prompt: "Prepare the weekly briefing",
-      enabled: true,
-      lastRunAt: null,
-      nextRunAt: "2026-08-03T07:00:00.000Z",
-      createdAt: "2026-07-01T09:00:00.000Z",
-      updatedAt: "2026-07-01T09:00:00.000Z",
-    },
-  ],
 }));
 
 const archiveTaskMock = vi.hoisted(() => vi.fn(async () => ({ ok: true as const, error: null })));
@@ -149,17 +134,6 @@ describe("TasksBoardRoute", () => {
       },
       error: null,
     };
-  });
-
-  it("keeps the workspace's routines and their controls on the Tasks page", () => {
-    render(<TasksBoardRoute workflowNames={{}} />);
-
-    const routines = screen.getByRole("heading", { name: "Routines" }).closest("section");
-    expect(routines).not.toBeNull();
-    expect(within(routines!).getByText("Monday briefing")).toBeInTheDocument();
-    expect(
-      within(routines!).getByRole("button", { name: "Pause Monday briefing" }),
-    ).toBeInTheDocument();
   });
 
   it("buckets all non-archived task sources into the four board columns", () => {

@@ -36,6 +36,62 @@ import {
 } from "@/lib/optimistic-chat-summaries";
 import { Surface, type TaskView } from "./Surface";
 
+// Surface exercises submission/routing through the composer's text contract. The real
+// rich editor, selection mapping, clipboard, and undo are covered by its own tests.
+vi.mock("@/components/chat/ReferenceComposerInput", () => ({
+  ReferenceComposerInput: (
+    props: import("react").ComponentProps<
+      typeof import("@/components/chat/ReferenceComposerInput").ReferenceComposerInput
+    >,
+  ) => (
+    <>
+      <textarea
+        ref={(element) => {
+          if (element)
+            Object.defineProperty(element, "element", { configurable: true, value: element });
+          if (typeof props.ref === "function") props.ref(element as never);
+          else if (props.ref) props.ref.current = element as never;
+        }}
+        id={props.id}
+        value={props.value}
+        placeholder={props.placeholder}
+        maxLength={10_000}
+        disabled={props.disabled}
+        readOnly={props.readOnly}
+        onChange={props.onChange}
+        onBlur={props.onBlur}
+        onSelect={(event) =>
+          props.onSelectionChange(event.currentTarget.value, event.currentTarget.selectionStart)
+        }
+        onKeyDown={props.onKeyDown as never}
+        onPaste={props.onPaste as never}
+      />
+      <div data-testid="composer-mention-overlay">
+        {props.highlights.map((range) => (
+          <span
+            key={range.start}
+            {...(range.mention
+              ? { "data-opencompany-chat-mention": range.mention.kind }
+              : { "data-opencompany-chat-directive": "background" })}
+          >
+            {props.value.slice(range.start, range.end)}
+          </span>
+        ))}
+      </div>
+    </>
+  ),
+}));
+const referenceCatalogMock = vi.hoisted(() => ({
+  items: [] as import("@/lib/context-reference-catalog").ContextReferenceOption[],
+}));
+vi.mock("@/components/useContextReferenceCatalog", () => ({
+  useContextReferenceCatalog: () => ({
+    items: referenceCatalogMock.items,
+    loading: false,
+    error: null,
+  }),
+}));
+
 const chatMock = vi.hoisted(() => ({
   status: "ready" as "ready" | "submitted" | "streaming" | "error",
   sendMessage: vi.fn(),
@@ -441,6 +497,7 @@ function installDictationBrowserMocks() {
 
 describe("Surface chat streaming UI", () => {
   beforeEach(() => {
+    referenceCatalogMock.items = [];
     window.localStorage.clear();
     window.sessionStorage.clear();
     pathnameMock.value = "/";
@@ -1029,7 +1086,6 @@ describe("Surface chat streaming UI", () => {
     );
     const directiveChip = overlay?.querySelector('[data-opencompany-chat-directive="background"]');
     expect(directiveChip).toHaveTextContent("&");
-    expect(textarea).toHaveClass("text-transparent");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() => expect(headlessChatMocks.startBackground).toHaveBeenCalledTimes(1));
@@ -1305,6 +1361,16 @@ describe("Surface chat streaming UI", () => {
               id: "ship-feature",
               name: "Ship feature",
               description: "Use this to ship features.",
+              steps: [
+                {
+                  id: "build",
+                  title: "Build",
+                  model: "codex",
+                  runtimeModel: CODEX_CHAT_DEFAULT_MODEL_ID,
+                  reasoningEffort: "high",
+                  instructions: "Build the requested feature.",
+                },
+              ],
             },
           ],
         });
@@ -1346,6 +1412,9 @@ describe("Surface chat streaming UI", () => {
     expect(screen.getByTestId("workflow-task-hint")).toHaveTextContent(
       "Sending runs workflow Ship feature as a background task.",
     );
+    expect(
+      screen.getByRole("button", { name: "Runs in an isolated cloud sandbox" }),
+    ).toBeInTheDocument();
     const submit = screen.getByRole("button", { name: "Start task" });
     expect(submit).toBeEnabled();
 
@@ -2367,14 +2436,12 @@ describe("Surface chat streaming UI", () => {
     await waitFor(() => expect(screen.getByTestId("local-chat-state")).toHaveTextContent("none"));
   });
 
-  it("renders composer input as native textarea text", async () => {
+  it("keeps unselected mention-looking text as ordinary composer text", async () => {
     const user = userEvent.setup();
     render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
     const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "@codex inspect this long prompt");
-    expect(textarea).toHaveClass("text-ink");
-    expect(textarea).not.toHaveClass("text-transparent");
     expect(textarea.parentElement?.querySelector('[aria-hidden="true"]')).toBeNull();
   });
 
@@ -3586,7 +3653,6 @@ describe("Surface chat streaming UI", () => {
     );
     expect(overlay?.querySelectorAll('[data-opencompany-chat-mention="engine"]')).toHaveLength(1);
     expect(overlay).toHaveTextContent("@codex");
-    expect(textarea).toHaveClass("text-transparent");
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Codex");
     expect(screen.getByRole("button", { name: "Codex model: GPT 6 Astra" })).toBeInTheDocument();
 
@@ -3657,7 +3723,6 @@ describe("Surface chat streaming UI", () => {
     );
     expect(overlay?.querySelectorAll('[data-opencompany-chat-mention="engine"]')).toHaveLength(1);
     expect(overlay).toHaveTextContent("@claude");
-    expect(textarea).toHaveClass("text-transparent");
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Claude Code");
     expect(
       screen.getByRole("button", { name: "Claude model: Claude Sonnet 5" }),
@@ -3748,7 +3813,6 @@ describe("Surface chat streaming UI", () => {
     );
     expect(overlay?.querySelectorAll('[data-opencompany-chat-mention="workflow"]')).toHaveLength(1);
     expect(overlay).toHaveTextContent("#morning-test");
-    expect(textarea).toHaveClass("text-transparent");
     await user.type(textarea, "run today's checks with /");
     await user.click(await screen.findByRole("option", { name: /smooth-shadow-ring/i }));
     await user.type(textarea, "{Enter}");
@@ -3819,7 +3883,7 @@ describe("Surface chat streaming UI", () => {
         : screen.getByRole("textbox");
       await user.type(textarea, "#");
       await user.click(await screen.findByRole("option", { name: /Ship feature/i }));
-      expect(screen.getByRole("button", { name: "Runtime: Codex" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Runtime: Codex (sandbox)" })).toBeEnabled();
       expect(screen.getByRole("button", { name: /Codex model:/ })).toHaveTextContent("GPT 5.6 Sol");
       fireEvent.drop(window, {
         dataTransfer: {
@@ -3828,8 +3892,9 @@ describe("Surface chat streaming UI", () => {
         },
       });
       await waitFor(() => expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledTimes(1));
-      await user.click(screen.getByRole("button", { name: "Runtime: Codex" }));
-      await user.click(screen.getByRole("button", { name: /GPT 5.5.*Coding and sharp analysis/ }));
+      await user.click(screen.getByRole("button", { name: "Runtime: Codex (sandbox)" }));
+      await user.click(screen.getByRole("button", { name: "Models" }));
+      await user.click(screen.getByRole("option", { name: /GPT 5.5.*OpenAI/ }));
       expect(screen.getByText("This run only")).toBeInTheDocument();
       await user.type(textarea, "fix this");
       await user.click(screen.getByRole("button", { name: "Start task" }));
@@ -4068,7 +4133,7 @@ describe("Surface chat streaming UI", () => {
     const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "@");
 
-    expect(screen.queryByRole("listbox", { name: "Mention menu" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /codex/i })).not.toBeInTheDocument();
   });
 
   it("does not send steering metadata for manually typed @codex", async () => {
@@ -4133,8 +4198,6 @@ describe("Surface chat streaming UI", () => {
       '[data-testid="composer-mention-overlay"]',
     );
     expect(overlay?.querySelectorAll('[data-opencompany-chat-mention="skill"]')).toHaveLength(2);
-    expect(overlay).toHaveTextContent("/coding-work then /writing-work");
-    expect(textarea).toHaveClass("text-transparent");
 
     fireEvent.change(textarea, { target: { value: "/coding-work then continue" } });
     expect(textarea).toHaveValue("/coding-work then continue");
@@ -4151,6 +4214,30 @@ describe("Surface chat streaming UI", () => {
       metadata: {
         mentions: [{ kind: "skill", id: "coding-work", name: "coding-work" }],
       },
+    });
+  });
+
+  it("sends cosmetic plugin references as readable links without invocation metadata", async () => {
+    referenceCatalogMock.items = [
+      {
+        kind: "plugin",
+        label: "Slack",
+        plugin: "slack",
+        href: "/plugins/slack",
+        description: "Plugin",
+      },
+    ];
+    const user = userEvent.setup();
+    render(
+      <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} userWorkosId="user_1" />,
+    );
+    const input = screen.getByPlaceholderText("Ask a question or describe a task...");
+    await user.type(input, "Summarize @sla");
+    await user.click(await screen.findByRole("option", { name: /Slack/ }));
+    expect(input).toHaveValue("Summarize [Slack](/plugins/slack) ");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    expect(chatMock.sendMessage).toHaveBeenCalledWith({
+      text: "Summarize [Slack](/plugins/slack)",
     });
   });
 
@@ -4519,7 +4606,6 @@ describe("Surface chat streaming UI", () => {
     expect(
       overlay?.querySelector('[data-opencompany-chat-directive="background"]'),
     ).toHaveTextContent("&");
-    expect(quickComposerInput).toHaveClass("text-transparent");
 
     await user.keyboard("{Enter}");
 
