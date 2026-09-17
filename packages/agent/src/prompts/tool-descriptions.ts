@@ -7,6 +7,7 @@ import {
   MAX_BROWSER_CALLS_PER_TURN,
   MAX_WEB_FETCH_CALLS_PER_TURN,
   MAX_WEB_SEARCH_CALLS_PER_TURN,
+  MAX_WORKFLOW_STARTS_PER_TURN,
 } from "../chat-limits";
 
 export const BRAIN_TOOL_DESCRIPTION =
@@ -36,8 +37,7 @@ export const SAVE_TO_BRAIN_TITLE_DESCRIPTION =
 export const SAVE_TO_BRAIN_INTENT_DESCRIPTION =
   "Optional one-line note on what the user wants this for, e.g. 'reference for the pricing page rework'. Helps the background curation agent file it.";
 
-export const START_WORKFLOW_TOOL_DESCRIPTION =
-  "Start one active workspace workflow as a tracked background task. Use only when the user's latest message explicitly asks to run, start, fire, or execute an existing workflow, or clearly confirms your immediately preceding question to start one; never call this merely because a workflow seems relevant or helpful. Match the request against the workflow catalog in <workflow_source>. If the target is ambiguous, ask which workflow they mean instead of guessing.";
+export const START_WORKFLOW_TOOL_DESCRIPTION = `Start one active workspace workflow as a tracked background task. Use only when the user's latest message explicitly asks to run, start, fire, or execute an existing workflow, or clearly confirms your immediately preceding question to start one; never call this merely because a workflow seems relevant or helpful. Match the request against the workflow catalog in <workflow_source>. If the target is ambiguous, ask which workflow they mean instead of guessing. Call it once per workflow when the user asks for several; up to ${MAX_WORKFLOW_STARTS_PER_TURN} distinct workflows can start per turn, and calling it again for one already started this turn replays that same task.`;
 
 export const START_WORKFLOW_ID_DESCRIPTION =
   "The exact active workflow id from <workflow_source> that the user explicitly asked to run.";
