@@ -71,9 +71,9 @@ or ambiguous sends are recorded and surfaced through the tool result in the app,
    Confirm unsupported registered numbers cannot start runs. Local fixture screenshots and
    mocked provider tests do not replace this live check.
 
-As implemented, no live Kapso project configuration was available to the development task.
-Provider delivery and hosted configuration have not been validated. Keep the PR in draft until
-that verification is complete. The US portion of the original request remains unresolved.
+The production test requires the deployed API, runner and web app. Configuration checks and
+fixture screenshots do not establish end-to-end delivery: complete the German-number test above
+after deployment before opening the beta to other members. US availability remains unresolved.
 
 Rollback: disable the beta and webhook before reverting application code. Keep the additive
 schema and recorded receipts/attempts to prevent replay; dropping these tables would discard
