@@ -12,9 +12,12 @@ import {
   firstWikiPageRef,
   isValidWikiKind,
   isWikiDescendantPath,
+  queryWiki,
   resolveWikiSince,
   WIKI_READ_COMMANDS,
   type WikiKind,
+  WikiQueryError,
+  type WikiQueryEvaluator,
   type WikiToolCommand,
   type WikiToolContext,
   type WikiToolInput,
@@ -227,7 +230,10 @@ export type ExecuteWikiCommandInput = {
 };
 
 export class WikiCommandApplicationService {
-  constructor(private readonly repository: WikiCommandRepository) {}
+  constructor(
+    private readonly repository: WikiCommandRepository,
+    private readonly queryEvaluator?: WikiQueryEvaluator,
+  ) {}
 
   async execute(input: ExecuteWikiCommandInput): Promise<WikiToolOutput> {
     const { actor, command, idempotencyKey } = input;
@@ -238,7 +244,7 @@ export class WikiCommandApplicationService {
       const result = await this.dispatch(actor, scope, command, idempotencyKey.trim());
       return { ok: true, result, wikiContext };
     } catch (error) {
-      if (error instanceof WikiCommandError) {
+      if (error instanceof WikiCommandError || error instanceof WikiQueryError) {
         return { ok: false, error: error.message, wikiContext };
       }
       throw error;
@@ -408,6 +414,24 @@ export class WikiCommandApplicationService {
           ...(toolInput.limit !== undefined ? { limit: toolInput.limit } : {}),
         });
         return { matches, ...(matches.length === 0 ? { hint: "No lines matched." } : {}) };
+      }
+      case "query": {
+        if (!this.queryEvaluator) throw new WikiCommandError("Wiki query is unavailable.");
+        const question = toolInput.query?.trim();
+        if (!question || question.length > 8_000)
+          throw new WikiCommandError("query requires a detailed question of 1–8,000 characters.");
+        if (
+          toolInput.limit !== undefined &&
+          (!Number.isInteger(toolInput.limit) || toolInput.limit < 1 || toolInput.limit > 10)
+        )
+          throw new WikiCommandError("query limit must be an integer from 1 to 10.");
+        return queryWiki({
+          question,
+          ...(toolInput.limit !== undefined ? { limit: toolInput.limit } : {}),
+          tree: await this.repository.getTree(scope),
+          read: async (refs) => (await this.repository.resolvePages({ ...scope, refs })).pages,
+          evaluate: this.queryEvaluator,
+        });
       }
       case "search": {
         const text = toolInput.query?.trim();

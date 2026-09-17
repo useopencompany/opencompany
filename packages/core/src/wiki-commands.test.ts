@@ -100,6 +100,39 @@ function commandCalls(calls: Array<{ method: string; input: unknown }>) {
 }
 
 describe("WikiCommandApplicationService", () => {
+  it("authorizes query before reading or calling the model and preserves wiki scope", async () => {
+    const evaluate = vi.fn(async ({ candidates }: { candidates: unknown[] }) => ({
+      probabilities: candidates.map(() => 0.9),
+      inputTokens: 1,
+      costUsd: 0,
+    }));
+    const { repository, calls } = fakeRepository();
+    const service = new WikiCommandApplicationService(repository, evaluate);
+    await expect(
+      run(service, actor([]), { command: "query", query: "question" }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    expect(evaluate).not.toHaveBeenCalled();
+    expect(commandCalls(calls)).toEqual([]);
+    const output = await run(service, readActor, { command: "query", query: "question" });
+    expect(output.ok).toBe(true);
+    expect(commandCalls(calls)).toEqual([
+      { method: "getTree", input: { workspaceId: "ws_1", wikiId: DEFAULT_WIKI.wikiId } },
+    ]);
+  });
+
+  it("validates query questions and result limits before fetching the tree", async () => {
+    const { repository, calls } = fakeRepository();
+    const service = new WikiCommandApplicationService(repository, vi.fn());
+    for (const command of [
+      { command: "query" as const },
+      { command: "query" as const, query: "x".repeat(8001) },
+      { command: "query" as const, query: "question", limit: 11 },
+    ]) {
+      expect((await run(service, readActor, command)).ok).toBe(false);
+    }
+    expect(commandCalls(calls)).toEqual([]);
+  });
+
   it("requires WIKI_READ_PERMISSION for read commands", async () => {
     const { repository } = fakeRepository();
     const service = new WikiCommandApplicationService(repository);

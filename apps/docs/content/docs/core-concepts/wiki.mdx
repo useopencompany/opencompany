@@ -38,6 +38,12 @@ Summarize the unresolved questions and tell me which ones need new evidence.
 Agents can browse the tree, search pages, read content, and write updates. You can edit the same
 pages directly in Wiki. Use the page's **Timeline** to read recorded activity where available.
 
+For a detailed question, agents can use `wiki` with `command: "query"` and the question in
+`query`. This experimental retrieval command explores folders and wiki links with Jev, then returns
+up to ten relevant pages as `matches`. The agent should read those pages before answering. It can
+return fewer pages or none when evidence is weak; a coverage-limit indicator means the exploration
+was incomplete. External source links are returned for the agent to open with its connected tools.
+
 ## Organize and link pages
 
 Use full paths in Wiki links, such as `[[engineering/releases/september]]`. The editor offers page

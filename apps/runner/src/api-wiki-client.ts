@@ -27,7 +27,9 @@ export async function executeApiWikiCommand(input: {
   const origin = input.origin.replace(/\/+$/u, "");
   if (!origin) throw new Error("The canonical API origin is not configured.");
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), input.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const timeoutMs =
+    input.timeoutMs ?? (input.toolInput.command === "query" ? 30_000 : DEFAULT_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const abortFromCaller = () => controller.abort();
   input.signal?.addEventListener("abort", abortFromCaller, { once: true });
   try {

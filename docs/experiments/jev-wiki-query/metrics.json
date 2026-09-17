@@ -1,0 +1,2208 @@
+{
+  "summary": {
+    "date": "2026-09-17",
+    "model": "typesafe-ai/jev",
+    "pages": 216,
+    "folders": 22,
+    "characters": 793066,
+    "questions": 12,
+    "repetitions": 3,
+    "runs": 36,
+    "medianSeconds": 1.9965000000000002,
+    "p95Seconds": 5.212,
+    "meanCostUsd": 0.0013432883333333334,
+    "benchmarkCostUsd": 0.04835837999999999,
+    "totalExperimentCostUsd": 0.052750571999999996,
+    "budgetUsd": 5,
+    "referencePagesFound": 10,
+    "referencePagesTotal": 11,
+    "sentenceSearchFound": 1,
+    "keywordSearchFound": 10,
+    "negativeRunsCorrect": 6,
+    "negativeRunsTotal": 6,
+    "limitedRuns": 21,
+    "medianPagesRead": 7.0
+  },
+  "runs": [
+    {
+      "id": "q01",
+      "repeat": 0,
+      "category": "CI bottleneck",
+      "anchorRecall": 1,
+      "matches": [
+        {
+          "page": "Page 009",
+          "relevance": 0.97
+        }
+      ],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 1133,
+        "calls": 4,
+        "pagesRead": 2,
+        "inputTokens": 12685,
+        "costUsd": 0.00053277,
+        "truncated": true
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 279
+        },
+        {
+          "stage": "navigate",
+          "candidates": 31,
+          "durationMs": 230
+        },
+        {
+          "stage": "verify",
+          "candidates": 1,
+          "durationMs": 369
+        },
+        {
+          "stage": "verify",
+          "candidates": 1,
+          "durationMs": 248
+        }
+      ]
+    },
+    {
+      "id": "q02",
+      "repeat": 0,
+      "category": "Durable reports",
+      "anchorRecall": 0.5,
+      "matches": [
+        {
+          "page": "Page 004",
+          "relevance": 0.95
+        },
+        {
+          "page": "Page 016",
+          "relevance": 0.93
+        },
+        {
+          "page": "Page 018",
+          "relevance": 0.93
+        }
+      ],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 1592,
+        "calls": 5,
+        "pagesRead": 12,
+        "inputTokens": 23809,
+        "costUsd": 0.0009999779999999999,
+        "truncated": true
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 303
+        },
+        {
+          "stage": "navigate",
+          "candidates": 27,
+          "durationMs": 333
+        },
+        {
+          "stage": "verify",
+          "candidates": 4,
+          "durationMs": 355
+        },
+        {
+          "stage": "verify",
+          "candidates": 3,
+          "durationMs": 255
+        },
+        {
+          "stage": "verify",
+          "candidates": 5,
+          "durationMs": 338
+        }
+      ]
+    },
+    {
+      "id": "q03",
+      "repeat": 0,
+      "category": "User input interruption",
+      "anchorRecall": 1,
+      "matches": [
+        {
+          "page": "Page 002",
+          "relevance": 0.94
+        },
+        {
+          "page": "Page 014",
+          "relevance": 0.93
+        }
+      ],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 3044,
+        "calls": 9,
+        "pagesRead": 13,
+        "inputTokens": 40965,
+        "costUsd": 0.0017205299999999998,
+        "truncated": true
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 233
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 383
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 230
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 293
+        },
+        {
+          "stage": "navigate",
+          "candidates": 21,
+          "durationMs": 375
+        },
+        {
+          "stage": "navigate",
+          "candidates": 2,
+          "durationMs": 233
+        },
+        {
+          "stage": "verify",
+          "candidates": 7,
+          "durationMs": 796
+        },
+        {
+          "stage": "verify",
+          "candidates": 2,
+          "durationMs": 233
+        },
+        {
+          "stage": "verify",
+          "candidates": 4,
+          "durationMs": 262
+        }
+      ]
+    },
+    {
+      "id": "q04",
+      "repeat": 0,
+      "category": "Sync migration",
+      "anchorRecall": 1,
+      "matches": [
+        {
+          "page": "Page 010",
+          "relevance": 0.96
+        }
+      ],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 1145,
+        "calls": 4,
+        "pagesRead": 4,
+        "inputTokens": 13504,
+        "costUsd": 0.0005671680000000001,
+        "truncated": false
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 311
+        },
+        {
+          "stage": "navigate",
+          "candidates": 27,
+          "durationMs": 251
+        },
+        {
+          "stage": "verify",
+          "candidates": 1,
+          "durationMs": 252
+        },
+        {
+          "stage": "verify",
+          "candidates": 3,
+          "durationMs": 328
+        }
+      ]
+    },
+    {
+      "id": "q05",
+      "repeat": 0,
+      "category": "Pricing comparison",
+      "anchorRecall": 1,
+      "matches": [
+        {
+          "page": "Page 011",
+          "relevance": 0.96
+        },
+        {
+          "page": "Page 015",
+          "relevance": 0.87
+        },
+        {
+          "page": "Page 013",
+          "relevance": 0.77
+        },
+        {
+          "page": "Page 017",
+          "relevance": 0.77
+        }
+      ],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 4734,
+        "calls": 13,
+        "pagesRead": 26,
+        "inputTokens": 69802,
+        "costUsd": 0.002931684,
+        "truncated": true
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 218
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 324
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 359
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 535
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 370
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 615
+        },
+        {
+          "stage": "navigate",
+          "candidates": 16,
+          "durationMs": 342
+        },
+        {
+          "stage": "navigate",
+          "candidates": 20,
+          "durationMs": 241
+        },
+        {
+          "stage": "navigate",
+          "candidates": 2,
+          "durationMs": 215
+        },
+        {
+          "stage": "verify",
+          "candidates": 8,
+          "durationMs": 484
+        },
+        {
+          "stage": "verify",
+          "candidates": 7,
+          "durationMs": 333
+        },
+        {
+          "stage": "verify",
+          "candidates": 7,
+          "durationMs": 370
+        },
+        {
+          "stage": "verify",
+          "candidates": 4,
+          "durationMs": 320
+        }
+      ]
+    },
+    {
+      "id": "q06",
+      "repeat": 0,
+      "category": "Video retention",
+      "anchorRecall": 1,
+      "matches": [
+        {
+          "page": "Page 006",
+          "relevance": 0.96
+        }
+      ],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 2749,
+        "calls": 8,
+        "pagesRead": 7,
+        "inputTokens": 28983,
+        "costUsd": 0.001217286,
+        "truncated": false
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 399
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 347
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 354
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 337
+        },
+        {
+          "stage": "navigate",
+          "candidates": 13,
+          "durationMs": 267
+        },
+        {
+          "stage": "navigate",
+          "candidates": 3,
+          "durationMs": 204
+        },
+        {
+          "stage": "verify",
+          "candidates": 4,
+          "durationMs": 344
+        },
+        {
+          "stage": "verify",
+          "candidates": 3,
+          "durationMs": 494
+        }
+      ]
+    },
+    {
+      "id": "q07",
+      "repeat": 0,
+      "category": "Back navigation",
+      "anchorRecall": 1,
+      "matches": [
+        {
+          "page": "Page 005",
+          "relevance": 0.97
+        }
+      ],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 2732,
+        "calls": 8,
+        "pagesRead": 8,
+        "inputTokens": 33238,
+        "costUsd": 0.0013959959999999998,
+        "truncated": true
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 271
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 379
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 369
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 303
+        },
+        {
+          "stage": "navigate",
+          "candidates": 16,
+          "durationMs": 253
+        },
+        {
+          "stage": "verify",
+          "candidates": 3,
+          "durationMs": 328
+        },
+        {
+          "stage": "verify",
+          "candidates": 1,
+          "durationMs": 261
+        },
+        {
+          "stage": "verify",
+          "candidates": 4,
+          "durationMs": 566
+        }
+      ]
+    },
+    {
+      "id": "q08",
+      "repeat": 0,
+      "category": "Feature retirement",
+      "anchorRecall": 1,
+      "matches": [
+        {
+          "page": "Page 003",
+          "relevance": 0.97
+        },
+        {
+          "page": "Page 016",
+          "relevance": 0.88
+        },
+        {
+          "page": "Page 018",
+          "relevance": 0.88
+        },
+        {
+          "page": "Page 004",
+          "relevance": 0.83
+        }
+      ],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 1723,
+        "calls": 5,
+        "pagesRead": 11,
+        "inputTokens": 22745,
+        "costUsd": 0.0009552899999999999,
+        "truncated": true
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 412
+        },
+        {
+          "stage": "navigate",
+          "candidates": 27,
+          "durationMs": 294
+        },
+        {
+          "stage": "verify",
+          "candidates": 2,
+          "durationMs": 355
+        },
+        {
+          "stage": "verify",
+          "candidates": 3,
+          "durationMs": 335
+        },
+        {
+          "stage": "verify",
+          "candidates": 6,
+          "durationMs": 323
+        }
+      ]
+    },
+    {
+      "id": "q09",
+      "repeat": 0,
+      "category": "Local inference",
+      "anchorRecall": 1,
+      "matches": [
+        {
+          "page": "Page 020",
+          "relevance": 0.95
+        }
+      ],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 2112,
+        "calls": 6,
+        "pagesRead": 2,
+        "inputTokens": 24446,
+        "costUsd": 0.001026732,
+        "truncated": false
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 403
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 343
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 491
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 349
+        },
+        {
+          "stage": "navigate",
+          "candidates": 16,
+          "durationMs": 280
+        },
+        {
+          "stage": "verify",
+          "candidates": 2,
+          "durationMs": 246
+        }
+      ]
+    },
+    {
+      "id": "q10",
+      "repeat": 0,
+      "category": "Agent evaluations",
+      "anchorRecall": 1,
+      "matches": [
+        {
+          "page": "Page 007",
+          "relevance": 0.93
+        },
+        {
+          "page": "Page 019",
+          "relevance": 0.8
+        }
+      ],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 4711,
+        "calls": 13,
+        "pagesRead": 37,
+        "inputTokens": 91428,
+        "costUsd": 0.003839976,
+        "truncated": true
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 223
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 296
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 345
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 361
+        },
+        {
+          "stage": "navigate",
+          "candidates": 29,
+          "durationMs": 332
+        },
+        {
+          "stage": "navigate",
+          "candidates": 22,
+          "durationMs": 395
+        },
+        {
+          "stage": "navigate",
+          "candidates": 2,
+          "durationMs": 237
+        },
+        {
+          "stage": "verify",
+          "candidates": 8,
+          "durationMs": 483
+        },
+        {
+          "stage": "verify",
+          "candidates": 8,
+          "durationMs": 459
+        },
+        {
+          "stage": "verify",
+          "candidates": 3,
+          "durationMs": 345
+        },
+        {
+          "stage": "verify",
+          "candidates": 7,
+          "durationMs": 458
+        },
+        {
+          "stage": "verify",
+          "candidates": 8,
+          "durationMs": 370
+        },
+        {
+          "stage": "verify",
+          "candidates": 3,
+          "durationMs": 392
+        }
+      ]
+    },
+    {
+      "id": "q11",
+      "repeat": 0,
+      "category": "No answer A",
+      "anchorRecall": null,
+      "matches": [],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 1696,
+        "calls": 5,
+        "pagesRead": 0,
+        "inputTokens": 22587,
+        "costUsd": 0.000948654,
+        "truncated": false
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 274
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 359
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 282
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 416
+        },
+        {
+          "stage": "navigate",
+          "candidates": 21,
+          "durationMs": 365
+        }
+      ]
+    },
+    {
+      "id": "q12",
+      "repeat": 0,
+      "category": "No answer B",
+      "anchorRecall": null,
+      "matches": [],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 534,
+        "calls": 2,
+        "pagesRead": 0,
+        "inputTokens": 3022,
+        "costUsd": 0.000126924,
+        "truncated": false
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 288
+        },
+        {
+          "stage": "navigate",
+          "candidates": 8,
+          "durationMs": 245
+        }
+      ]
+    },
+    {
+      "id": "q01",
+      "repeat": 1,
+      "category": "CI bottleneck",
+      "anchorRecall": 1,
+      "matches": [
+        {
+          "page": "Page 009",
+          "relevance": 0.96
+        }
+      ],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 1123,
+        "calls": 4,
+        "pagesRead": 2,
+        "inputTokens": 12685,
+        "costUsd": 0.00053277,
+        "truncated": true
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 233
+        },
+        {
+          "stage": "navigate",
+          "candidates": 31,
+          "durationMs": 262
+        },
+        {
+          "stage": "verify",
+          "candidates": 1,
+          "durationMs": 344
+        },
+        {
+          "stage": "verify",
+          "candidates": 1,
+          "durationMs": 283
+        }
+      ]
+    },
+    {
+      "id": "q02",
+      "repeat": 1,
+      "category": "Durable reports",
+      "anchorRecall": 0.5,
+      "matches": [
+        {
+          "page": "Page 004",
+          "relevance": 0.95
+        },
+        {
+          "page": "Page 016",
+          "relevance": 0.93
+        },
+        {
+          "page": "Page 018",
+          "relevance": 0.93
+        }
+      ],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 2072,
+        "calls": 6,
+        "pagesRead": 13,
+        "inputTokens": 25536,
+        "costUsd": 0.001072512,
+        "truncated": true
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 239
+        },
+        {
+          "stage": "navigate",
+          "candidates": 27,
+          "durationMs": 326
+        },
+        {
+          "stage": "navigate",
+          "candidates": 3,
+          "durationMs": 236
+        },
+        {
+          "stage": "verify",
+          "candidates": 5,
+          "durationMs": 667
+        },
+        {
+          "stage": "verify",
+          "candidates": 3,
+          "durationMs": 279
+        },
+        {
+          "stage": "verify",
+          "candidates": 5,
+          "durationMs": 323
+        }
+      ]
+    },
+    {
+      "id": "q03",
+      "repeat": 1,
+      "category": "User input interruption",
+      "anchorRecall": 1,
+      "matches": [
+        {
+          "page": "Page 002",
+          "relevance": 0.94
+        },
+        {
+          "page": "Page 014",
+          "relevance": 0.93
+        }
+      ],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 3280,
+        "calls": 9,
+        "pagesRead": 12,
+        "inputTokens": 40543,
+        "costUsd": 0.0017028059999999999,
+        "truncated": true
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 296
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 375
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 308
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 582
+        },
+        {
+          "stage": "navigate",
+          "candidates": 21,
+          "durationMs": 361
+        },
+        {
+          "stage": "navigate",
+          "candidates": 2,
+          "durationMs": 304
+        },
+        {
+          "stage": "verify",
+          "candidates": 6,
+          "durationMs": 381
+        },
+        {
+          "stage": "verify",
+          "candidates": 2,
+          "durationMs": 254
+        },
+        {
+          "stage": "verify",
+          "candidates": 4,
+          "durationMs": 415
+        }
+      ]
+    },
+    {
+      "id": "q04",
+      "repeat": 1,
+      "category": "Sync migration",
+      "anchorRecall": 1,
+      "matches": [
+        {
+          "page": "Page 010",
+          "relevance": 0.97
+        }
+      ],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 1239,
+        "calls": 4,
+        "pagesRead": 4,
+        "inputTokens": 13504,
+        "costUsd": 0.0005671680000000001,
+        "truncated": false
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 248
+        },
+        {
+          "stage": "navigate",
+          "candidates": 27,
+          "durationMs": 313
+        },
+        {
+          "stage": "verify",
+          "candidates": 1,
+          "durationMs": 288
+        },
+        {
+          "stage": "verify",
+          "candidates": 3,
+          "durationMs": 388
+        }
+      ]
+    },
+    {
+      "id": "q05",
+      "repeat": 1,
+      "category": "Pricing comparison",
+      "anchorRecall": 1,
+      "matches": [
+        {
+          "page": "Page 011",
+          "relevance": 0.96
+        },
+        {
+          "page": "Page 017",
+          "relevance": 0.77
+        },
+        {
+          "page": "Page 012",
+          "relevance": 0.74
+        },
+        {
+          "page": "Page 001",
+          "relevance": 0.72
+        }
+      ],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 5212,
+        "calls": 16,
+        "pagesRead": 39,
+        "inputTokens": 81123,
+        "costUsd": 0.003407166,
+        "truncated": true
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 275
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 304
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 367
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 343
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 252
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 517
+        },
+        {
+          "stage": "navigate",
+          "candidates": 16,
+          "durationMs": 204
+        },
+        {
+          "stage": "navigate",
+          "candidates": 20,
+          "durationMs": 241
+        },
+        {
+          "stage": "navigate",
+          "candidates": 2,
+          "durationMs": 254
+        },
+        {
+          "stage": "verify",
+          "candidates": 8,
+          "durationMs": 538
+        },
+        {
+          "stage": "verify",
+          "candidates": 3,
+          "durationMs": 253
+        },
+        {
+          "stage": "verify",
+          "candidates": 8,
+          "durationMs": 420
+        },
+        {
+          "stage": "verify",
+          "candidates": 1,
+          "durationMs": 310
+        },
+        {
+          "stage": "verify",
+          "candidates": 8,
+          "durationMs": 316
+        },
+        {
+          "stage": "verify",
+          "candidates": 8,
+          "durationMs": 308
+        },
+        {
+          "stage": "verify",
+          "candidates": 3,
+          "durationMs": 302
+        }
+      ]
+    },
+    {
+      "id": "q06",
+      "repeat": 1,
+      "category": "Video retention",
+      "anchorRecall": 1,
+      "matches": [
+        {
+          "page": "Page 006",
+          "relevance": 0.96
+        }
+      ],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 2548,
+        "calls": 8,
+        "pagesRead": 6,
+        "inputTokens": 27510,
+        "costUsd": 0.0011554199999999999,
+        "truncated": false
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 293
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 421
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 344
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 371
+        },
+        {
+          "stage": "navigate",
+          "candidates": 13,
+          "durationMs": 254
+        },
+        {
+          "stage": "navigate",
+          "candidates": 3,
+          "durationMs": 301
+        },
+        {
+          "stage": "verify",
+          "candidates": 2,
+          "durationMs": 235
+        },
+        {
+          "stage": "verify",
+          "candidates": 4,
+          "durationMs": 328
+        }
+      ]
+    },
+    {
+      "id": "q07",
+      "repeat": 1,
+      "category": "Back navigation",
+      "anchorRecall": 1,
+      "matches": [
+        {
+          "page": "Page 005",
+          "relevance": 0.96
+        }
+      ],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 2498,
+        "calls": 8,
+        "pagesRead": 7,
+        "inputTokens": 32650,
+        "costUsd": 0.0013712999999999998,
+        "truncated": true
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 299
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 267
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 383
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 376
+        },
+        {
+          "stage": "navigate",
+          "candidates": 16,
+          "durationMs": 300
+        },
+        {
+          "stage": "verify",
+          "candidates": 2,
+          "durationMs": 318
+        },
+        {
+          "stage": "verify",
+          "candidates": 1,
+          "durationMs": 274
+        },
+        {
+          "stage": "verify",
+          "candidates": 4,
+          "durationMs": 278
+        }
+      ]
+    },
+    {
+      "id": "q08",
+      "repeat": 1,
+      "category": "Feature retirement",
+      "anchorRecall": 1,
+      "matches": [
+        {
+          "page": "Page 003",
+          "relevance": 0.97
+        },
+        {
+          "page": "Page 018",
+          "relevance": 0.87
+        },
+        {
+          "page": "Page 016",
+          "relevance": 0.86
+        },
+        {
+          "page": "Page 004",
+          "relevance": 0.83
+        }
+      ],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 1797,
+        "calls": 5,
+        "pagesRead": 11,
+        "inputTokens": 22745,
+        "costUsd": 0.0009552899999999999,
+        "truncated": true
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 212
+        },
+        {
+          "stage": "navigate",
+          "candidates": 27,
+          "durationMs": 332
+        },
+        {
+          "stage": "verify",
+          "candidates": 2,
+          "durationMs": 336
+        },
+        {
+          "stage": "verify",
+          "candidates": 3,
+          "durationMs": 557
+        },
+        {
+          "stage": "verify",
+          "candidates": 6,
+          "durationMs": 355
+        }
+      ]
+    },
+    {
+      "id": "q09",
+      "repeat": 1,
+      "category": "Local inference",
+      "anchorRecall": 1,
+      "matches": [
+        {
+          "page": "Page 020",
+          "relevance": 0.95
+        }
+      ],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 1790,
+        "calls": 6,
+        "pagesRead": 2,
+        "inputTokens": 24446,
+        "costUsd": 0.001026732,
+        "truncated": false
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 257
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 329
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 245
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 369
+        },
+        {
+          "stage": "navigate",
+          "candidates": 16,
+          "durationMs": 312
+        },
+        {
+          "stage": "verify",
+          "candidates": 2,
+          "durationMs": 278
+        }
+      ]
+    },
+    {
+      "id": "q10",
+      "repeat": 1,
+      "category": "Agent evaluations",
+      "anchorRecall": 1,
+      "matches": [
+        {
+          "page": "Page 007",
+          "relevance": 0.96
+        },
+        {
+          "page": "Page 019",
+          "relevance": 0.82
+        },
+        {
+          "page": "Page 021",
+          "relevance": 0.8
+        },
+        {
+          "page": "Page 008",
+          "relevance": 0.77
+        }
+      ],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 4505,
+        "calls": 12,
+        "pagesRead": 30,
+        "inputTokens": 72953,
+        "costUsd": 0.0030640259999999996,
+        "truncated": true
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 350
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 389
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 341
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 351
+        },
+        {
+          "stage": "navigate",
+          "candidates": 29,
+          "durationMs": 286
+        },
+        {
+          "stage": "navigate",
+          "candidates": 22,
+          "durationMs": 280
+        },
+        {
+          "stage": "navigate",
+          "candidates": 2,
+          "durationMs": 251
+        },
+        {
+          "stage": "verify",
+          "candidates": 8,
+          "durationMs": 543
+        },
+        {
+          "stage": "verify",
+          "candidates": 5,
+          "durationMs": 595
+        },
+        {
+          "stage": "verify",
+          "candidates": 6,
+          "durationMs": 457
+        },
+        {
+          "stage": "verify",
+          "candidates": 8,
+          "durationMs": 446
+        },
+        {
+          "stage": "verify",
+          "candidates": 3,
+          "durationMs": 206
+        }
+      ]
+    },
+    {
+      "id": "q11",
+      "repeat": 1,
+      "category": "No answer A",
+      "anchorRecall": null,
+      "matches": [],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 1622,
+        "calls": 5,
+        "pagesRead": 0,
+        "inputTokens": 22587,
+        "costUsd": 0.000948654,
+        "truncated": false
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 259
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 441
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 273
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 321
+        },
+        {
+          "stage": "navigate",
+          "candidates": 21,
+          "durationMs": 326
+        }
+      ]
+    },
+    {
+      "id": "q12",
+      "repeat": 1,
+      "category": "No answer B",
+      "anchorRecall": null,
+      "matches": [],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 530,
+        "calls": 2,
+        "pagesRead": 0,
+        "inputTokens": 3699,
+        "costUsd": 0.000155358,
+        "truncated": false
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 261
+        },
+        {
+          "stage": "navigate",
+          "candidates": 12,
+          "durationMs": 269
+        }
+      ]
+    },
+    {
+      "id": "q01",
+      "repeat": 2,
+      "category": "CI bottleneck",
+      "anchorRecall": 1,
+      "matches": [
+        {
+          "page": "Page 009",
+          "relevance": 0.97
+        }
+      ],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 2131,
+        "calls": 7,
+        "pagesRead": 2,
+        "inputTokens": 28459,
+        "costUsd": 0.001195278,
+        "truncated": true
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 226
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 461
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 328
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 308
+        },
+        {
+          "stage": "navigate",
+          "candidates": 20,
+          "durationMs": 315
+        },
+        {
+          "stage": "verify",
+          "candidates": 1,
+          "durationMs": 286
+        },
+        {
+          "stage": "verify",
+          "candidates": 1,
+          "durationMs": 206
+        }
+      ]
+    },
+    {
+      "id": "q02",
+      "repeat": 2,
+      "category": "Durable reports",
+      "anchorRecall": 0.5,
+      "matches": [
+        {
+          "page": "Page 004",
+          "relevance": 0.95
+        },
+        {
+          "page": "Page 016",
+          "relevance": 0.92
+        },
+        {
+          "page": "Page 018",
+          "relevance": 0.92
+        }
+      ],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 1739,
+        "calls": 6,
+        "pagesRead": 13,
+        "inputTokens": 25536,
+        "costUsd": 0.001072512,
+        "truncated": true
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 248
+        },
+        {
+          "stage": "navigate",
+          "candidates": 27,
+          "durationMs": 368
+        },
+        {
+          "stage": "navigate",
+          "candidates": 3,
+          "durationMs": 268
+        },
+        {
+          "stage": "verify",
+          "candidates": 5,
+          "durationMs": 320
+        },
+        {
+          "stage": "verify",
+          "candidates": 3,
+          "durationMs": 221
+        },
+        {
+          "stage": "verify",
+          "candidates": 5,
+          "durationMs": 309
+        }
+      ]
+    },
+    {
+      "id": "q03",
+      "repeat": 2,
+      "category": "User input interruption",
+      "anchorRecall": 1,
+      "matches": [
+        {
+          "page": "Page 002",
+          "relevance": 0.95
+        },
+        {
+          "page": "Page 014",
+          "relevance": 0.93
+        }
+      ],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 2778,
+        "calls": 8,
+        "pagesRead": 13,
+        "inputTokens": 40349,
+        "costUsd": 0.001694658,
+        "truncated": true
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 245
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 390
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 576
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 294
+        },
+        {
+          "stage": "navigate",
+          "candidates": 21,
+          "durationMs": 253
+        },
+        {
+          "stage": "verify",
+          "candidates": 7,
+          "durationMs": 395
+        },
+        {
+          "stage": "verify",
+          "candidates": 2,
+          "durationMs": 272
+        },
+        {
+          "stage": "verify",
+          "candidates": 4,
+          "durationMs": 346
+        }
+      ]
+    },
+    {
+      "id": "q04",
+      "repeat": 2,
+      "category": "Sync migration",
+      "anchorRecall": 1,
+      "matches": [
+        {
+          "page": "Page 010",
+          "relevance": 0.96
+        }
+      ],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 1554,
+        "calls": 5,
+        "pagesRead": 7,
+        "inputTokens": 17561,
+        "costUsd": 0.0007375620000000001,
+        "truncated": false
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 273
+        },
+        {
+          "stage": "navigate",
+          "candidates": 27,
+          "durationMs": 306
+        },
+        {
+          "stage": "verify",
+          "candidates": 1,
+          "durationMs": 237
+        },
+        {
+          "stage": "verify",
+          "candidates": 3,
+          "durationMs": 341
+        },
+        {
+          "stage": "verify",
+          "candidates": 3,
+          "durationMs": 395
+        }
+      ]
+    },
+    {
+      "id": "q05",
+      "repeat": 2,
+      "category": "Pricing comparison",
+      "anchorRecall": 1,
+      "matches": [
+        {
+          "page": "Page 011",
+          "relevance": 0.95
+        },
+        {
+          "page": "Page 017",
+          "relevance": 0.86
+        },
+        {
+          "page": "Page 015",
+          "relevance": 0.84
+        }
+      ],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 4150,
+        "calls": 13,
+        "pagesRead": 24,
+        "inputTokens": 68618,
+        "costUsd": 0.002881956,
+        "truncated": true
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 204
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 306
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 289
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 324
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 332
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 309
+        },
+        {
+          "stage": "navigate",
+          "candidates": 16,
+          "durationMs": 239
+        },
+        {
+          "stage": "navigate",
+          "candidates": 20,
+          "durationMs": 465
+        },
+        {
+          "stage": "navigate",
+          "candidates": 2,
+          "durationMs": 305
+        },
+        {
+          "stage": "verify",
+          "candidates": 8,
+          "durationMs": 476
+        },
+        {
+          "stage": "verify",
+          "candidates": 4,
+          "durationMs": 258
+        },
+        {
+          "stage": "verify",
+          "candidates": 8,
+          "durationMs": 409
+        },
+        {
+          "stage": "verify",
+          "candidates": 4,
+          "durationMs": 229
+        }
+      ]
+    },
+    {
+      "id": "q06",
+      "repeat": 2,
+      "category": "Video retention",
+      "anchorRecall": 1,
+      "matches": [
+        {
+          "page": "Page 006",
+          "relevance": 0.96
+        }
+      ],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 8266,
+        "calls": 8,
+        "pagesRead": 8,
+        "inputTokens": 29822,
+        "costUsd": 0.0012525239999999999,
+        "truncated": false
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 381
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 331
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 345
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 420
+        },
+        {
+          "stage": "navigate",
+          "candidates": 13,
+          "durationMs": 243
+        },
+        {
+          "stage": "navigate",
+          "candidates": 3,
+          "durationMs": 245
+        },
+        {
+          "stage": "verify",
+          "candidates": 5,
+          "durationMs": 347
+        },
+        {
+          "stage": "verify",
+          "candidates": 3,
+          "durationMs": 5952
+        }
+      ]
+    },
+    {
+      "id": "q07",
+      "repeat": 2,
+      "category": "Back navigation",
+      "anchorRecall": 1,
+      "matches": [
+        {
+          "page": "Page 005",
+          "relevance": 0.96
+        }
+      ],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 2464,
+        "calls": 8,
+        "pagesRead": 7,
+        "inputTokens": 32650,
+        "costUsd": 0.0013712999999999998,
+        "truncated": true
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 270
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 387
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 330
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 271
+        },
+        {
+          "stage": "navigate",
+          "candidates": 16,
+          "durationMs": 376
+        },
+        {
+          "stage": "verify",
+          "candidates": 2,
+          "durationMs": 330
+        },
+        {
+          "stage": "verify",
+          "candidates": 1,
+          "durationMs": 260
+        },
+        {
+          "stage": "verify",
+          "candidates": 4,
+          "durationMs": 237
+        }
+      ]
+    },
+    {
+      "id": "q08",
+      "repeat": 2,
+      "category": "Feature retirement",
+      "anchorRecall": 1,
+      "matches": [
+        {
+          "page": "Page 003",
+          "relevance": 0.97
+        },
+        {
+          "page": "Page 016",
+          "relevance": 0.86
+        },
+        {
+          "page": "Page 018",
+          "relevance": 0.86
+        },
+        {
+          "page": "Page 004",
+          "relevance": 0.84
+        }
+      ],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 1808,
+        "calls": 5,
+        "pagesRead": 11,
+        "inputTokens": 22745,
+        "costUsd": 0.0009552899999999999,
+        "truncated": true
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 289
+        },
+        {
+          "stage": "navigate",
+          "candidates": 27,
+          "durationMs": 346
+        },
+        {
+          "stage": "verify",
+          "candidates": 2,
+          "durationMs": 360
+        },
+        {
+          "stage": "verify",
+          "candidates": 3,
+          "durationMs": 254
+        },
+        {
+          "stage": "verify",
+          "candidates": 6,
+          "durationMs": 556
+        }
+      ]
+    },
+    {
+      "id": "q09",
+      "repeat": 2,
+      "category": "Local inference",
+      "anchorRecall": 1,
+      "matches": [
+        {
+          "page": "Page 020",
+          "relevance": 0.95
+        }
+      ],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 1921,
+        "calls": 6,
+        "pagesRead": 2,
+        "inputTokens": 24446,
+        "costUsd": 0.001026732,
+        "truncated": false
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 267
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 364
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 325
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 345
+        },
+        {
+          "stage": "navigate",
+          "candidates": 16,
+          "durationMs": 315
+        },
+        {
+          "stage": "verify",
+          "candidates": 2,
+          "durationMs": 303
+        }
+      ]
+    },
+    {
+      "id": "q10",
+      "repeat": 2,
+      "category": "Agent evaluations",
+      "anchorRecall": 1,
+      "matches": [
+        {
+          "page": "Page 007",
+          "relevance": 0.95
+        },
+        {
+          "page": "Page 019",
+          "relevance": 0.81
+        },
+        {
+          "page": "Page 008",
+          "relevance": 0.74
+        },
+        {
+          "page": "Page 021",
+          "relevance": 0.74
+        }
+      ],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 3992,
+        "calls": 10,
+        "pagesRead": 25,
+        "inputTokens": 68400,
+        "costUsd": 0.0028728,
+        "truncated": true
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 282
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 324
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 332
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 526
+        },
+        {
+          "stage": "navigate",
+          "candidates": 25,
+          "durationMs": 296
+        },
+        {
+          "stage": "navigate",
+          "candidates": 20,
+          "durationMs": 316
+        },
+        {
+          "stage": "verify",
+          "candidates": 8,
+          "durationMs": 444
+        },
+        {
+          "stage": "verify",
+          "candidates": 8,
+          "durationMs": 530
+        },
+        {
+          "stage": "verify",
+          "candidates": 6,
+          "durationMs": 689
+        },
+        {
+          "stage": "verify",
+          "candidates": 3,
+          "durationMs": 244
+        }
+      ]
+    },
+    {
+      "id": "q11",
+      "repeat": 2,
+      "category": "No answer A",
+      "anchorRecall": null,
+      "matches": [],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 1444,
+        "calls": 5,
+        "pagesRead": 0,
+        "inputTokens": 22587,
+        "costUsd": 0.000948654,
+        "truncated": false
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 252
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 262
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 320
+        },
+        {
+          "stage": "navigate",
+          "candidates": 32,
+          "durationMs": 312
+        },
+        {
+          "stage": "navigate",
+          "candidates": 21,
+          "durationMs": 297
+        }
+      ]
+    },
+    {
+      "id": "q12",
+      "repeat": 2,
+      "category": "No answer B",
+      "anchorRecall": null,
+      "matches": [],
+      "stats": {
+        "model": "typesafe-ai/jev",
+        "durationMs": 502,
+        "calls": 2,
+        "pagesRead": 0,
+        "inputTokens": 3022,
+        "costUsd": 0.000126924,
+        "truncated": false
+      },
+      "trace": [
+        {
+          "stage": "navigate",
+          "candidates": 10,
+          "durationMs": 242
+        },
+        {
+          "stage": "navigate",
+          "candidates": 8,
+          "durationMs": 260
+        }
+      ]
+    }
+  ]
+}

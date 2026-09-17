@@ -20,6 +20,7 @@ import {
 } from "@opencompany/agent/plugin-gateway";
 import { createPluginImportResolver } from "@opencompany/agent/plugin-import";
 import { createSkillImportResolver } from "@opencompany/agent/skill-import";
+import { createWikiQueryEvaluator } from "@opencompany/agent/wiki-query-evaluator";
 import { createWorkspaceSkillArtifact } from "@opencompany/agent-runtime";
 import { captureProductServerEvent } from "@opencompany/analytics/product/server";
 import { createBillingApplicationService } from "@opencompany/billing/application-service";
@@ -143,6 +144,7 @@ const knowledgeRepository = new PostgresKnowledgeRepository(database.db);
 const knowledge = new KnowledgeApplicationService(knowledgeRepository);
 const wikiCommands = new WikiCommandApplicationService(
   new PostgresWikiCommandRepository(database.db),
+  createWikiQueryEvaluator(process.env.VERCEL_AI_GATEWAY_API_KEY ?? ""),
 );
 const wikiControl = createWikiControlService({ db: database.db });
 const brainSources = new BrainSourceApplicationService(database.db);
