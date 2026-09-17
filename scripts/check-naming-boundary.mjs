@@ -35,7 +35,9 @@ const protectedCompatibilityTokens = [
   // 1185 = 1180 + the harness check on goat.codex_chat_sessions and the four constraint and index
   // names on goat.imessage_bindings.
   ["physical and stored quoted goat_* identifiers", /["'`]goat_[a-z0-9_]*["'`]/gu, 1185],
-  ["quoted sandbox runtime roots", /["'`]opencompany-goat[a-z0-9_./${}:*-]*["'`]/gu, 26],
+  // 27 = 26 + the browser storage key for the composer's remembered reasoning effort, which is
+  // namespaced beside the existing remembered model selection key.
+  ["quoted sandbox runtime roots", /["'`]opencompany-goat[a-z0-9_./${}:*-]*["'`]/gu, 27],
   ["chat source-provider values", /["']goat-chat["']/gu, 28],
   ["import source-provider values", /["']goat-import["']/gu, 13],
 ];
