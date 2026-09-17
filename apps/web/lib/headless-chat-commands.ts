@@ -4,6 +4,7 @@ import {
   createApiClient,
   type EngineRuntimeAccess,
   type EngineRuntimeStatus,
+  type RunDto,
   type UpdateConversationBody,
 } from "@opencompany/protocol";
 import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-chat-api";
@@ -62,6 +63,46 @@ export async function cancelHeadlessChatRun(
   return (await response.json()).data;
 }
 
+export async function getHeadlessChatRun(
+  runId: string,
+  options: { baseUrl?: string; fetch?: typeof globalThis.fetch } = {},
+): Promise<RunDto> {
+  const response = await clientFor(options).v1.runs[":runId"].$get({ param: { runId } });
+  if (!response.ok) throw await responseError(response);
+  return (await response.json()).data;
+}
+
+// A running cancellation is acknowledged before the worker reaches an interrupt boundary. Electric
+// remains the normal live projection, but Stop must still converge when that separate stream fails.
+export async function waitForHeadlessChatRunSettlement(
+  runId: string,
+  options: {
+    baseUrl?: string;
+    fetch?: typeof globalThis.fetch;
+    signal?: AbortSignal;
+    initialDelayMs?: number;
+    maxDelayMs?: number;
+  } = {},
+): Promise<RunDto> {
+  let delayMs = options.initialDelayMs ?? 250;
+  const maxDelayMs = options.maxDelayMs ?? 2_000;
+  while (true) {
+    options.signal?.throwIfAborted();
+    try {
+      const run = await getHeadlessChatRun(runId, options);
+      if (run.status === "completed" || run.status === "failed" || run.status === "canceled") {
+        return run;
+      }
+    } catch (error) {
+      options.signal?.throwIfAborted();
+      // Cancellation was accepted. A transient read failure must not resume the stopped stream.
+      if (error instanceof DOMException && error.name === "AbortError") throw error;
+    }
+    await abortableDelay(delayMs, options.signal);
+    delayMs = Math.min(maxDelayMs, Math.max(delayMs + 1, delayMs * 2));
+  }
+}
+
 export async function steerHeadlessChatRun(
   runId: string,
   options: { baseUrl?: string; fetch?: typeof globalThis.fetch } = {},
@@ -102,6 +143,21 @@ function clientFor(options: { baseUrl?: string; fetch?: typeof globalThis.fetch 
       baseUrl,
       ...(options.fetch ? { fetch: options.fetch } : {}),
     }),
+  });
+}
+
+function abortableDelay(delayMs: number, signal?: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    signal?.throwIfAborted();
+    const onAbort = () => {
+      clearTimeout(timeout);
+      reject(signal?.reason);
+    };
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, delayMs);
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
 

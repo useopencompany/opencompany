@@ -214,7 +214,8 @@ const headlessChatMocks = vi.hoisted(() => ({
 }));
 
 const headlessChatCommandMocks = vi.hoisted(() => ({
-  cancel: vi.fn(async () => ({})),
+  cancel: vi.fn(async (runId: string) => ({ runId, status: "canceled", replayed: false })),
+  waitForSettlement: vi.fn(async (runId: string) => ({ id: runId, status: "canceled" })),
   steer: vi.fn(async () => ({ runId: "run_queued", targetRunId: "run_active" })),
   getRuntimeStatus: vi.fn(async () => null),
   resolveQuestions: vi.fn(async () => ({})),
@@ -245,6 +246,7 @@ vi.mock("@/lib/headless-chat-commands", () => ({
   getEngineRuntimeStatus: headlessChatCommandMocks.getRuntimeStatus,
   resolveEngineQuestions: headlessChatCommandMocks.resolveQuestions,
   updateHeadlessChatConversation: headlessChatCommandMocks.updateConversation,
+  waitForHeadlessChatRunSettlement: headlessChatCommandMocks.waitForSettlement,
 }));
 
 // Server action module; importing it for real drags authkit into jsdom.
@@ -527,6 +529,7 @@ describe("Surface chat streaming UI", () => {
     vi.spyOn(window.history, "replaceState").mockImplementation(historyMock.replaceState);
     vi.spyOn(HeadlessChatTransport.prototype, "setEventHandlers");
     headlessChatCommandMocks.cancel.mockClear();
+    headlessChatCommandMocks.waitForSettlement.mockClear();
     headlessChatCommandMocks.steer.mockClear();
     headlessChatCommandMocks.getRuntimeStatus.mockClear();
     headlessChatCommandMocks.resolveQuestions.mockClear();
@@ -688,7 +691,7 @@ describe("Surface chat streaming UI", () => {
     const user = userEvent.setup();
     const transportCancel = vi
       .spyOn(HeadlessChatTransport.prototype, "cancel")
-      .mockResolvedValue(false);
+      .mockResolvedValue(null);
 
     render(
       <Surface
@@ -751,6 +754,62 @@ describe("Surface chat streaming UI", () => {
 
     expect(screen.getByLabelText("Claude Code status: Working")).toHaveTextContent("Working");
     expect(screen.getByRole("button", { name: "Interrupt Claude Code" })).toBeInTheDocument();
+  });
+
+  it("shows Stop immediately and confirms settlement even when Electric stays stale", async () => {
+    const user = userEvent.setup();
+    let confirmSettlement: ((value: { id: string; status: "canceled" }) => void) | undefined;
+    headlessChatCommandMocks.cancel.mockResolvedValueOnce({
+      runId: "run_codex_stale",
+      status: "running",
+      replayed: false,
+    });
+    headlessChatCommandMocks.waitForSettlement.mockReturnValueOnce(
+      new Promise((resolve) => {
+        confirmSettlement = resolve;
+      }),
+    );
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "conversation_codex_stale",
+          title: "Stale cancellation projection",
+          model: DEFAULT_MODEL,
+          engine: "codex",
+          runtime: {
+            status: "running",
+            activeRunId: "run_codex_stale",
+            hasError: false,
+            updatedAt: currentTimestamp(),
+          },
+          activityState: "working",
+          hasUnseen: false,
+          messages: [],
+        }}
+        codexConnected
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Interrupt Codex" }));
+
+    expect(screen.getByRole("button", { name: "Stopping Codex" })).toBeDisabled();
+    expect(screen.getByLabelText("Codex status: Stopping")).toHaveTextContent("Stopping");
+    expect(screen.getByText("Stopping response…")).toBeInTheDocument();
+    expect(headlessChatCommandMocks.waitForSettlement).toHaveBeenCalledWith(
+      "run_codex_stale",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+
+    act(() => confirmSettlement?.({ id: "run_codex_stale", status: "canceled" }));
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Codex status: Stopped")).toHaveTextContent("Stopped"),
+    );
+    expect(screen.queryByText("Stopping response…")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Interrupt Codex" })).not.toBeInTheDocument();
   });
 
   it("queues a coding message without replacing the running turn as the Interrupt target", async () => {
@@ -849,7 +908,7 @@ describe("Surface chat streaming UI", () => {
     const user = userEvent.setup();
     const transportCancel = vi
       .spyOn(HeadlessChatTransport.prototype, "cancel")
-      .mockResolvedValue(true);
+      .mockResolvedValue({ runId: "run_claude_syncing", status: "canceled", replayed: false });
 
     render(
       <Surface
