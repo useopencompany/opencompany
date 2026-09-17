@@ -141,7 +141,7 @@ body {
   height: 100%;
   background: var(--color-canvas);
   color: var(--color-ink);
-  overscroll-behavior: none;
+  overscroll-behavior-y: none;
 }
 
 /* Keeps a container scrollable while hiding its scrollbar, for quiet list surfaces
